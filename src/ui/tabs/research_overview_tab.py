@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 
 import matplotlib.dates as mdates
@@ -25,8 +24,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.analytics.returns import align_prices, compute_returns
-from src.analytics.risk_metrics import compute_weights, max_drawdown, portfolio_returns, realized_vol
+from src.analytics.risk_metrics import max_drawdown, realized_vol
+from src.application.research_service import (
+    ResearchAnalysisRequest,
+    ResearchAnalysisResult,
+    ResearchService,
+)
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
 from src.services.app_context import AppDataContext
@@ -45,19 +48,6 @@ from src.ui.widgets.worker import Worker
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class ResearchAnalysisResult:
-    scope_type: ResearchScopeType
-    snapshot: PortfolioSnapshot | None
-    perf: pd.Series
-    benchmark_returns: pd.Series
-    benchmark_symbol: str
-    weights: pd.Series
-    primary_price: pd.Series
-    warnings: list[str]
-
-
 class ResearchOverviewTab(QWidget):
     snapshot_updated = Signal(object)
     open_risk_requested = Signal()
@@ -71,7 +61,7 @@ class ResearchOverviewTab(QWidget):
     ) -> None:
         super().__init__()
         self.app_context = app_context
-        self.provider = provider
+        self.research_service = ResearchService(provider)
         self.base_currency = base_currency
         self.thread_pool = QThreadPool()
         self._apply_request_id = 0
@@ -448,120 +438,15 @@ class ResearchOverviewTab(QWidget):
         synthetic_positions: list[SyntheticPosition],
         benchmark_symbol: str,
     ):
-        warnings: list[str] = []
-        snapshot, snapshot_warnings = self.provider.build_snapshot_for_scope(
-            scope,
-            primary_symbol=symbol,
-            synthetic_positions=synthetic_positions,
-        )
-        warnings.extend(snapshot_warnings)
-        if snapshot is None:
-            result = ResearchAnalysisResult(
-                scope,
-                None,
-                pd.Series(dtype=float),
-                pd.Series(dtype=float),
-                benchmark_symbol,
-                pd.Series(dtype=float),
-                pd.Series(dtype=float),
-                warnings,
+        result = self.research_service.analyze(
+            ResearchAnalysisRequest(
+                scope_type=scope,
+                primary_symbol=symbol,
+                synthetic_positions=synthetic_positions,
+                benchmark_symbol=benchmark_symbol,
             )
-            return request_id, result
-
-        prices, missing = self.provider.load_prices(snapshot, lookback_days=252)
-        primary_price = pd.Series(dtype=float)
-        if scope == ResearchScopeType.SINGLE_TICKER:
-            primary_price = prices.get(symbol, pd.Series(dtype=float))
-        if missing:
-            warnings.append(f"Missing history for: {', '.join(missing)}")
-        if not prices:
-            warnings.append("No valid history found for selected scope")
-            result = ResearchAnalysisResult(
-                scope,
-                snapshot,
-                pd.Series(dtype=float),
-                pd.Series(dtype=float),
-                benchmark_symbol,
-                pd.Series(dtype=float),
-                primary_price,
-                warnings,
-            )
-            return request_id, result
-
-        returns_df = compute_returns(align_prices(prices))
-        if returns_df.empty:
-            warnings.append("No overlapping history across selected symbols")
-            result = ResearchAnalysisResult(
-                scope,
-                snapshot,
-                pd.Series(dtype=float),
-                pd.Series(dtype=float),
-                benchmark_symbol,
-                pd.Series(dtype=float),
-                primary_price,
-                warnings,
-            )
-            return request_id, result
-
-        values = {
-            p.symbol: float(p.base_market_value)
-            for p in snapshot.positions
-            if p.base_market_value is not None and p.symbol in returns_df.columns
-        }
-        weights = compute_weights(pd.Series(values))
-        if weights.empty:
-            warnings.append("Weights are invalid for selected scope")
-            result = ResearchAnalysisResult(
-                scope,
-                snapshot,
-                pd.Series(dtype=float),
-                pd.Series(dtype=float),
-                benchmark_symbol,
-                weights,
-                primary_price,
-                warnings,
-            )
-            return request_id, result
-
-        perf = portfolio_returns(returns_df.reindex(columns=weights.index.tolist()), weights)
-        if perf.empty:
-            warnings.append("No performance series could be computed")
-            result = ResearchAnalysisResult(
-                scope,
-                snapshot,
-                perf,
-                pd.Series(dtype=float),
-                benchmark_symbol,
-                weights,
-                primary_price,
-                warnings,
-            )
-            return request_id, result
-
-        benchmark_returns = self._load_benchmark_returns(benchmark_symbol, warnings)
-        result = ResearchAnalysisResult(
-            scope,
-            snapshot,
-            perf,
-            benchmark_returns,
-            benchmark_symbol,
-            weights,
-            primary_price,
-            warnings,
         )
         return request_id, result
-
-    def _load_benchmark_returns(self, benchmark_symbol: str, warnings: list[str]) -> pd.Series:
-        symbol = str(benchmark_symbol or "").strip().upper() or "SPY"
-        bench_series = self.provider.load_symbol_history(symbol, 252)
-        if bench_series is None or bench_series.empty:
-            warnings.append(f"Benchmark history unavailable for {symbol}")
-            return pd.Series(dtype=float)
-        bench_returns = compute_returns(align_prices({symbol: bench_series}))[symbol]
-        if bench_returns.empty:
-            warnings.append(f"Benchmark returns unavailable for {symbol}")
-            return pd.Series(dtype=float)
-        return bench_returns
 
     def _on_scope_applied(self, payload) -> None:
         request_id, result = payload
