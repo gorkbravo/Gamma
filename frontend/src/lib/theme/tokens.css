@@ -1,0 +1,45 @@
+:root {
+  color-scheme: dark;
+  font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace;
+  --bg-0: #040608;
+  --bg-1: #06090d;
+  --bg-2: #0a1016;
+  --bg-3: #101923;
+  --panel-border: #16202b;
+  --panel-strong: #213242;
+  --text-0: #f4f7fb;
+  --text-1: #c4d0dc;
+  --text-2: #8ea1b5;
+  --accent: #6aa8ff;
+  --accent-2: #e8b260;
+  --positive: #48bf72;
+  --negative: #ff6760;
+  --warning: #d29a52;
+  --shadow: rgba(0, 0, 0, 0.28);
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top right, rgba(106, 168, 255, 0.14), transparent 24rem),
+    radial-gradient(circle at bottom left, rgba(232, 178, 96, 0.12), transparent 22rem),
+    linear-gradient(180deg, #05080b 0%, #040608 100%);
+  color: var(--text-0);
+}
+
+body {
+  font-size: 14px;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+* {
+  box-sizing: border-box;
+}
