@@ -1,0 +1,101 @@
+QWidget {
+    background-color: #0d1117;
+    color: #e6edf3;
+    font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas";
+    font-size: 9pt;
+}
+
+QTabWidget::pane {
+    border: 0;
+}
+
+QGroupBox {
+    border: 1px solid #1f2631;
+    margin-top: 10px;
+    padding: 8px;
+    border-radius: 1px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+    color: #9da7b3;
+    font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas";
+    font-size: 8pt;
+    font-weight: 400;
+}
+
+QPushButton {
+    background-color: #161b22;
+    border: 1px solid #2d333b;
+    padding: 4px 10px;
+    border-radius: 1px;
+}
+
+QPushButton:hover {
+    border-color: #58a6ff;
+}
+
+QPushButton:disabled {
+    color: #6e7681;
+    border-color: #232a33;
+}
+
+QTableView,
+QTableWidget,
+QHeaderView::section {
+    font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas";
+    font-size: 8pt;
+}
+
+QLabel#kpiTitle {
+    color: #9da7b3;
+    font-size: 8pt;
+    font-weight: 600;
+}
+
+QLabel#chartSectionLabel {
+    font-size: 8pt;
+}
+
+QLabel#kpiValue {
+    font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas";
+    font-size: 18pt;
+    font-weight: 500;
+    color: #e6edf3;
+}
+
+QPlainTextEdit#diagnosticsLog,
+QPlainTextEdit#ibErrorLog {
+    font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas";
+    font-size: 8pt;
+}
+
+QFrame#landingCard {
+    border: 1px solid #2d333b;
+    background-color: #111924;
+    min-width: 460px;
+    max-width: 460px;
+}
+
+QLabel#landingTitle {
+    font-size: 14pt;
+    font-weight: 600;
+    color: #e6edf3;
+}
+
+QLabel#landingSubtitle {
+    color: #9da7b3;
+    font-size: 8.5pt;
+}
+
+QLabel#landingStatus {
+    color: #9da7b3;
+    font-size: 8.5pt;
+}
+
+QPushButton#landingConnectButton {
+    min-width: 140px;
+    font-weight: 600;
+}
