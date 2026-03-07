@@ -7,17 +7,17 @@ from matplotlib import font_manager as fm
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-FIGURE_BG = "#0d1117"
-AXES_BG = "#161b22"
-GRID_COLOR = "#1d3557"
+FIGURE_BG = "#06090d"
+AXES_BG = "#0a1016"
+GRID_COLOR = "#1c3245"
 TEXT_COLOR = "#e6edf3"
-MUTED_TEXT = "#8ecbff"
-COLOR_PRIMARY = "#58a6ff"
-COLOR_POSITIVE = "#3fb950"
-COLOR_NEGATIVE = "#f85149"
-COLOR_BENCHMARK = "#ffb454"
-COLOR_WARNING = "#d29922"
-COLOR_RISK = "#ff7b72"
+MUTED_TEXT = "#9ab8d3"
+COLOR_PRIMARY = "#6aa8ff"
+COLOR_POSITIVE = "#48bf72"
+COLOR_NEGATIVE = "#ff6760"
+COLOR_BENCHMARK = "#e8b260"
+COLOR_WARNING = "#d29a52"
+COLOR_RISK = "#f08072"
 
 
 @lru_cache(maxsize=1)

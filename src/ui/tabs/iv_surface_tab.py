@@ -144,6 +144,12 @@ class IVSurfaceTab(QWidget):
     def _set_status(self, text: str) -> None:
         self.status_label.setText(f"Status: {text}")
 
+    def shell_status_text(self) -> str:
+        return self.status_label.text()
+
+    def shell_active_symbol(self) -> str:
+        return self.symbol_input.text().strip().upper() or "SPY"
+
     def _start(self) -> None:
         symbol = self.symbol_input.text().strip().upper() or "SPY"
         if not self.client.mock and not self.client.is_connected():

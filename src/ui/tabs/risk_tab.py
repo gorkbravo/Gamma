@@ -12,6 +12,7 @@ from ib_insync import Contract
 from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -36,7 +38,7 @@ from src.analytics.risk_metrics import (
     realized_vol,
     risk_contributions,
 )
-from src.analytics.var import historical_var_cvar, parametric_var
+from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, parametric_var
 from src.models.app_mode import AppMode
 from src.models.portfolio import PortfolioSnapshot, RiskResults
 from src.services.app_context import AppDataContext
@@ -68,6 +70,9 @@ class RiskComputeRequest:
     alpha: float
     lookback_days: int
     horizon_days: int
+    mc_horizon_days: int
+    mc_simulation_model: str
+    mc_num_simulations: int
     beta_window: int
     benchmark_symbol: str
     base_currency: str
@@ -84,6 +89,10 @@ class BenchmarkMetricsResult:
 
 
 class RiskTab(QWidget):
+    _MC_NUM_SIMULATIONS = 2000
+    _MC_RANDOM_SEED = 42
+    _CHART_MIN_HEIGHT = 280
+    _CHART_MAX_HEIGHT = 320
     _DEFAULT_LABELS = {
         "hist_var_label": "Historical VaR (1D, covered): N/A",
         "hist_cvar_label": "Hist CVaR (covered): N/A",
@@ -103,6 +112,11 @@ class RiskTab(QWidget):
         "hhi_label": "HHI: N/A",
         "top5_label": "Top-5 Weight: N/A",
         "effective_bets_label": "Effective Bets: N/A",
+        "mc_summary_label": "Monte Carlo: N/A",
+        "mc_var_label": "Monte Carlo VaR (covered): N/A",
+        "mc_cvar_label": "Monte Carlo CVaR (covered): N/A",
+        "mc_var_est_label": "Est Total Monte Carlo VaR: N/A",
+        "mc_cvar_est_label": "Est Total Monte Carlo CVaR: N/A",
     }
 
     def __init__(
@@ -135,6 +149,12 @@ class RiskTab(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        root_layout = QVBoxLayout()
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+
+        content = QWidget()
         layout = QVBoxLayout()
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
@@ -149,7 +169,7 @@ class RiskTab(QWidget):
         self.lookback_combo.addItems(["126", "252", "504"])
         self.lookback_combo.setCurrentText(str(self.default_lookback))
         self.horizon_combo = QComboBox()
-        self.horizon_combo.addItems(["1", "10"])
+        self.horizon_combo.addItems(["1", "10", "21"])
         self.horizon_combo.setCurrentText("1")
         self.benchmark_input = QLineEdit("SPY")
         self.benchmark_input.setMaximumWidth(90)
@@ -284,25 +304,92 @@ class RiskTab(QWidget):
         hist_layout.addWidget(hist_label)
         self.hist_canvas = MplCanvas(width=5, height=3)
         self.hist_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.hist_canvas.setMinimumHeight(170)
-        self.hist_canvas.setMaximumHeight(190)
+        self.hist_canvas.setMinimumHeight(self._CHART_MIN_HEIGHT)
+        self.hist_canvas.setMaximumHeight(self._CHART_MAX_HEIGHT)
         hist_layout.addWidget(self.hist_canvas)
 
-        cum_layout = QVBoxLayout()
-        cum_label = QLabel("Drawdown Curve")
-        cum_label.setObjectName("chartSectionLabel")
-        cum_layout.addWidget(cum_label)
+        drawdown_layout = QVBoxLayout()
+        drawdown_label = QLabel("Drawdown Curve")
+        drawdown_label.setObjectName("chartSectionLabel")
+        drawdown_layout.addWidget(drawdown_label)
         self.cum_canvas = MplCanvas(width=5, height=3)
         self.cum_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.cum_canvas.setMinimumHeight(170)
-        self.cum_canvas.setMaximumHeight(190)
-        cum_layout.addWidget(self.cum_canvas)
+        self.cum_canvas.setMinimumHeight(self._CHART_MIN_HEIGHT)
+        self.cum_canvas.setMaximumHeight(self._CHART_MAX_HEIGHT)
+        drawdown_layout.addWidget(self.cum_canvas)
 
         charts_layout.addLayout(hist_layout, 0, 0)
-        charts_layout.addLayout(cum_layout, 0, 1)
+        charts_layout.addLayout(drawdown_layout, 0, 1)
         charts_box.setLayout(charts_layout)
         charts_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         layout.addWidget(charts_box)
+
+        mc_box = QGroupBox("Monte Carlo VaR")
+        mc_layout = QVBoxLayout()
+        mc_controls = QHBoxLayout()
+        mc_controls.setContentsMargins(0, 0, 0, 0)
+        mc_controls.setSpacing(6)
+        self.mc_horizon_combo = QComboBox()
+        self.mc_horizon_combo.addItems(["1", "5", "10", "21", "63"])
+        self.mc_horizon_combo.setCurrentText("10")
+        self.mc_model_combo = QComboBox()
+        self.mc_model_combo.addItems(["Gaussian", "Bootstrap"])
+        self.mc_model_combo.setCurrentText("Gaussian")
+        self.mc_simulations_combo = QComboBox()
+        self.mc_simulations_combo.addItems(["1000", "2000", "5000"])
+        self.mc_simulations_combo.setCurrentText(str(self._MC_NUM_SIMULATIONS))
+        mc_controls.addWidget(QLabel("Horizon (days)"))
+        mc_controls.addWidget(self.mc_horizon_combo)
+        mc_controls.addWidget(QLabel("Model"))
+        mc_controls.addWidget(self.mc_model_combo)
+        mc_controls.addWidget(QLabel("Simulations"))
+        mc_controls.addWidget(self.mc_simulations_combo)
+        mc_controls.addStretch()
+        mc_layout.addLayout(mc_controls)
+
+        mc_metrics_layout = QGridLayout()
+        mc_metrics_layout.setContentsMargins(0, 0, 0, 0)
+        mc_metrics_layout.setHorizontalSpacing(10)
+        mc_metrics_layout.setVerticalSpacing(3)
+        self.mc_summary_label = QLabel("Monte Carlo: N/A")
+        self.mc_var_label = QLabel("Monte Carlo VaR (covered): N/A")
+        self.mc_cvar_label = QLabel("Monte Carlo CVaR (covered): N/A")
+        self.mc_var_est_label = QLabel("Est Total Monte Carlo VaR: N/A")
+        self.mc_cvar_est_label = QLabel("Est Total Monte Carlo CVaR: N/A")
+        mc_metrics_layout.addWidget(self.mc_summary_label, 0, 0, 1, 2)
+        mc_metrics_layout.addWidget(self.mc_var_label, 1, 0)
+        mc_metrics_layout.addWidget(self.mc_cvar_label, 1, 1)
+        mc_metrics_layout.addWidget(self.mc_var_est_label, 2, 0)
+        mc_metrics_layout.addWidget(self.mc_cvar_est_label, 2, 1)
+        mc_layout.addLayout(mc_metrics_layout)
+
+        mc_charts_layout = QGridLayout()
+        mc_hist_layout = QVBoxLayout()
+        mc_hist_label = QLabel("Monte Carlo Terminal Return Histogram")
+        mc_hist_label.setObjectName("chartSectionLabel")
+        mc_hist_layout.addWidget(mc_hist_label)
+        self.mc_hist_canvas = MplCanvas(width=5, height=3)
+        self.mc_hist_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.mc_hist_canvas.setMinimumHeight(self._CHART_MIN_HEIGHT)
+        self.mc_hist_canvas.setMaximumHeight(self._CHART_MAX_HEIGHT)
+        mc_hist_layout.addWidget(self.mc_hist_canvas)
+
+        mc_fan_layout = QVBoxLayout()
+        mc_fan_label = QLabel("Monte Carlo Fan Chart")
+        mc_fan_label.setObjectName("chartSectionLabel")
+        mc_fan_layout.addWidget(mc_fan_label)
+        self.mc_fan_canvas = MplCanvas(width=5, height=3)
+        self.mc_fan_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.mc_fan_canvas.setMinimumHeight(self._CHART_MIN_HEIGHT)
+        self.mc_fan_canvas.setMaximumHeight(self._CHART_MAX_HEIGHT)
+        mc_fan_layout.addWidget(self.mc_fan_canvas)
+
+        mc_charts_layout.addLayout(mc_hist_layout, 0, 0)
+        mc_charts_layout.addLayout(mc_fan_layout, 0, 1)
+        mc_layout.addLayout(mc_charts_layout)
+        mc_box.setLayout(mc_layout)
+        mc_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        layout.addWidget(mc_box)
 
         self.messages_box = QGroupBox("Messages")
         messages_layout = QVBoxLayout()
@@ -327,7 +414,11 @@ class RiskTab(QWidget):
 
         layout.addStretch(1)
 
-        self.setLayout(layout)
+        content.setLayout(layout)
+        self.scroll.setWidget(content)
+        root_layout.addWidget(self.scroll)
+
+        self.setLayout(root_layout)
         self._fit_contrib_table_height()
 
     def set_portfolio_snapshot(self, snapshot: PortfolioSnapshot | None) -> None:
@@ -376,6 +467,9 @@ class RiskTab(QWidget):
             alpha=self._alpha(),
             lookback_days=int(self.lookback_combo.currentText()),
             horizon_days=int(self.horizon_combo.currentText()),
+            mc_horizon_days=int(self.mc_horizon_combo.currentText()),
+            mc_simulation_model=self.mc_model_combo.currentText(),
+            mc_num_simulations=int(self.mc_simulations_combo.currentText()),
             beta_window=int(self.beta_window_combo.currentText()),
             benchmark_symbol=(self.benchmark_input.text().strip().upper() or "SPY"),
             base_currency=self.base_currency,
@@ -388,6 +482,7 @@ class RiskTab(QWidget):
         alpha = request.alpha
         lookback_days = request.lookback_days
         horizon_days = request.horizon_days
+        mc_horizon_days = request.mc_horizon_days
         beta_window = request.beta_window
 
         warnings: List[str] = []
@@ -478,13 +573,51 @@ class RiskTab(QWidget):
         if total_portfolio_value is not None and total_portfolio_value > 0:
             risk_coverage_ratio = covered_portfolio_value / float(total_portfolio_value)
         scale_to_total = None
-        if (
-            hist_var is not None or hist_cvar is not None or param_var is not None
-        ) and covered_portfolio_value and total_portfolio_value and covered_portfolio_value > 0:
+        if covered_portfolio_value and total_portfolio_value and covered_portfolio_value > 0:
             scale_to_total = float(total_portfolio_value) / float(covered_portfolio_value)
         hist_var_total_estimate = hist_var * scale_to_total if hist_var is not None and scale_to_total else None
         hist_cvar_total_estimate = hist_cvar * scale_to_total if hist_cvar is not None and scale_to_total else None
         param_var_total_estimate = param_var * scale_to_total if param_var is not None and scale_to_total else None
+
+        monte_carlo_warning = RiskTab._monte_carlo_eligibility_warning(
+            snapshot=snapshot,
+            weights=weights_aligned,
+            total_portfolio_value=total_portfolio_value,
+        )
+        monte_carlo_result = None
+        if monte_carlo_warning is not None:
+            warnings.append(monte_carlo_warning)
+        elif not risk_returns_df.empty and not weights_aligned.empty:
+            monte_carlo_result = monte_carlo_var_cvar(
+                asset_returns=risk_returns_df,
+                weights=weights_aligned,
+                alpha=alpha,
+                horizon_days=mc_horizon_days,
+                model_name=request.mc_simulation_model,
+                num_simulations=request.mc_num_simulations,
+                random_seed=RiskTab._MC_RANDOM_SEED,
+            )
+            if monte_carlo_result is None:
+                warnings.append(
+                    f"Monte Carlo VaR unavailable for {request.mc_simulation_model}: invalid aligned returns or weights."
+                )
+
+        monte_carlo_var = (
+            monte_carlo_result.var_return * covered_portfolio_value
+            if monte_carlo_result is not None and monte_carlo_result.var_return is not None
+            else None
+        )
+        monte_carlo_cvar = (
+            monte_carlo_result.cvar_return * covered_portfolio_value
+            if monte_carlo_result is not None and monte_carlo_result.cvar_return is not None
+            else None
+        )
+        monte_carlo_var_total_estimate = (
+            monte_carlo_var * scale_to_total if monte_carlo_var is not None and scale_to_total else None
+        )
+        monte_carlo_cvar_total_estimate = (
+            monte_carlo_cvar * scale_to_total if monte_carlo_cvar is not None and scale_to_total else None
+        )
         if risk_coverage_ratio is not None and risk_coverage_ratio < 0.999:
             warnings.append(
                 "Risk coverage is "
@@ -529,6 +662,20 @@ class RiskTab(QWidget):
             historical_var_total_estimate=hist_var_total_estimate,
             historical_cvar_total_estimate=hist_cvar_total_estimate,
             parametric_var_total_estimate=param_var_total_estimate,
+            monte_carlo_model=request.mc_simulation_model,
+            monte_carlo_horizon_days=mc_horizon_days,
+            monte_carlo_num_simulations=request.mc_num_simulations,
+            monte_carlo_var=monte_carlo_var,
+            monte_carlo_cvar=monte_carlo_cvar,
+            monte_carlo_var_total_estimate=monte_carlo_var_total_estimate,
+            monte_carlo_cvar_total_estimate=monte_carlo_cvar_total_estimate,
+            monte_carlo_terminal_returns=(
+                monte_carlo_result.terminal_returns if monte_carlo_result is not None else None
+            ),
+            monte_carlo_fan_percentiles=(
+                monte_carlo_result.fan_percentiles if monte_carlo_result is not None else None
+            ),
+            monte_carlo_sample_paths=monte_carlo_result.sample_paths if monte_carlo_result is not None else None,
             aligned_obs_count=int(len(port_ret)) if not port_ret.empty else 0,
             benchmark_overlap_count=benchmark.overlap_count,
             concentration_hhi=concentration_hhi,
@@ -561,6 +708,68 @@ class RiskTab(QWidget):
                 warnings.append("Risk contributions unavailable: non-positive portfolio variance")
 
         return request.request_id, results, port_ret, returns_df, contrib, weights, mctr, component_var
+
+    @staticmethod
+    def _monte_carlo_eligibility_warning(
+        snapshot: PortfolioSnapshot,
+        weights: pd.Series,
+        total_portfolio_value: float | None,
+    ) -> str | None:
+        if weights.empty:
+            return "Monte Carlo VaR unavailable: no covered weights or return history to simulate."
+
+        tolerance = 1e-9
+        negative_weight_symbols = [
+            symbol
+            for symbol, value in weights.items()
+            if not str(symbol).startswith("CASH") and float(value) < -tolerance
+        ]
+        if negative_weight_symbols:
+            return (
+                "Monte Carlo VaR unavailable: negative covered weights detected "
+                f"({', '.join(sorted(negative_weight_symbols))}); v1 supports long-only, unlevered portfolios only."
+            )
+
+        if total_portfolio_value is None or float(total_portfolio_value) <= 0:
+            return "Monte Carlo VaR unavailable: portfolio value must be positive for long-only, unlevered simulation."
+
+        flagged_symbols: List[str] = []
+        gross_risky_exposure = 0.0
+        for pos in snapshot.positions:
+            is_cash = pos.sec_type == "CASH" or pos.symbol.startswith("CASH")
+            base_value = pos.base_market_value
+            market_value = pos.market_value
+            quantity = float(pos.quantity or 0.0)
+            explicit_weight = float(pos.weight or 0.0) if pos.weight is not None else None
+            exposure = None
+            if base_value is not None:
+                exposure = float(base_value)
+            elif market_value is not None:
+                exposure = float(market_value)
+
+            if not is_cash and (
+                (exposure is not None and exposure < -tolerance)
+                or quantity < -tolerance
+                or (explicit_weight is not None and explicit_weight < -tolerance)
+            ):
+                flagged_symbols.append(pos.symbol)
+            if not is_cash and exposure is not None:
+                gross_risky_exposure += max(float(exposure), 0.0)
+
+        if flagged_symbols:
+            return (
+                "Monte Carlo VaR unavailable: short or negative positions detected "
+                f"({', '.join(sorted(set(flagged_symbols)))}); v1 supports long-only, unlevered portfolios only."
+            )
+
+        gross_ratio = gross_risky_exposure / float(total_portfolio_value) if total_portfolio_value else None
+        if gross_ratio is not None and gross_ratio > 1.02:
+            return (
+                "Monte Carlo VaR unavailable: risky gross exposure exceeds portfolio value "
+                f"({gross_ratio:.2f}x), which indicates leverage-like or offsetting positions."
+            )
+
+        return None
 
     def _load_prices(
         self, snapshot: PortfolioSnapshot, lookback_days: int, progress_cb=None
@@ -740,6 +949,8 @@ class RiskTab(QWidget):
         self._update_excluded_assets(results.excluded_assets)
         self._plot_histogram(port_ret, results)
         self._plot_drawdown(port_ret)
+        self._plot_monte_carlo_histogram(results)
+        self._plot_monte_carlo_fan(results)
         self._show_warnings(results)
 
     def _update_metrics(self, results: RiskResults) -> None:
@@ -756,6 +967,41 @@ class RiskTab(QWidget):
         )
         self.param_var_est_label.setText(
             self._fmt_currency("Est Total Param VaR (\u221At)", results.parametric_var_total_estimate)
+        )
+        summary = "Monte Carlo: N/A"
+        if results.monte_carlo_model and results.monte_carlo_horizon_days and results.monte_carlo_num_simulations:
+            summary = (
+                f"Monte Carlo: {results.monte_carlo_model}, "
+                f"{results.monte_carlo_horizon_days}D, "
+                f"{results.monte_carlo_num_simulations:,} sims"
+            )
+        self.mc_summary_label.setText(summary)
+        mc_label_suffix = (
+            f"{results.monte_carlo_horizon_days or 'N/A'}D, covered, {results.monte_carlo_model or 'N/A'}"
+        )
+        self.mc_var_label.setText(
+            self._fmt_currency(f"Monte Carlo VaR ({mc_label_suffix})", results.monte_carlo_var)
+        )
+        self.mc_cvar_label.setText(
+            self._fmt_currency(f"Monte Carlo CVaR ({mc_label_suffix})", results.monte_carlo_cvar)
+        )
+        self.mc_var_est_label.setText(
+            self._fmt_currency(
+                (
+                    "Est Total Monte Carlo VaR "
+                    f"({results.monte_carlo_horizon_days or 'N/A'}D, {results.monte_carlo_model or 'N/A'})"
+                ),
+                results.monte_carlo_var_total_estimate,
+            )
+        )
+        self.mc_cvar_est_label.setText(
+            self._fmt_currency(
+                (
+                    "Est Total Monte Carlo CVaR "
+                    f"({results.monte_carlo_horizon_days or 'N/A'}D, {results.monte_carlo_model or 'N/A'})"
+                ),
+                results.monte_carlo_cvar_total_estimate,
+            )
         )
         self.daily_vol_label.setText(self._fmt_pct("Daily Vol", results.daily_vol))
         self.annual_vol_label.setText(self._fmt_pct("Annual Vol", results.annual_vol))
@@ -868,6 +1114,79 @@ class RiskTab(QWidget):
         self.cum_canvas.figure.tight_layout(pad=1.0)
         self.cum_canvas.draw_idle()
 
+    def _plot_monte_carlo_histogram(self, results: RiskResults) -> None:
+        ax = self.mc_hist_canvas.axes
+        ax.clear()
+        style_axes(ax)
+        terminal_returns = results.monte_carlo_terminal_returns
+        if terminal_returns is None or terminal_returns.empty:
+            self._show_plot_message(self.mc_hist_canvas, "Monte Carlo unavailable")
+            return
+
+        values = terminal_returns.dropna().to_numpy(dtype=float)
+        ax.hist(values, bins=35, color=COLOR_PRIMARY, alpha=0.7, edgecolor="#0b0d0f")
+        denom = results.covered_portfolio_value if results.covered_portfolio_value is not None else results.portfolio_value
+        if denom and results.monte_carlo_var:
+            ax.axvline(-results.monte_carlo_var / denom, color=COLOR_RISK, linestyle="--", linewidth=1.4, label="MC VaR")
+        if denom and results.monte_carlo_cvar:
+            ax.axvline(
+                -results.monte_carlo_cvar / denom,
+                color=COLOR_NEGATIVE,
+                linestyle=":",
+                linewidth=1.4,
+                label="MC CVaR",
+            )
+        ax.set_title(
+            f"{results.monte_carlo_model or 'Monte Carlo'} Terminal Returns ({results.monte_carlo_horizon_days or 'N/A'}D)"
+        )
+        ax.set_xlabel("Terminal return")
+        ax.set_ylabel("Frequency")
+        if ax.get_legend_handles_labels()[0]:
+            legend = ax.legend(frameon=False, loc="upper left")
+            for text in legend.get_texts():
+                text.set_color(TEXT_COLOR)
+        self.mc_hist_canvas.figure.tight_layout(pad=1.0)
+        self.mc_hist_canvas.draw_idle()
+
+    def _plot_monte_carlo_fan(self, results: RiskResults) -> None:
+        ax = self.mc_fan_canvas.axes
+        ax.clear()
+        style_axes(ax)
+        fan_df = results.monte_carlo_fan_percentiles
+        if fan_df is None or fan_df.empty:
+            self._show_plot_message(self.mc_fan_canvas, "Monte Carlo unavailable")
+            return
+
+        sample_paths = results.monte_carlo_sample_paths
+        if sample_paths is not None and not sample_paths.empty:
+            for column in sample_paths.columns:
+                ax.plot(
+                    sample_paths.index,
+                    sample_paths[column],
+                    color=COLOR_PRIMARY,
+                    alpha=0.12,
+                    linewidth=0.8,
+                )
+
+        x_values = fan_df.index.to_numpy(dtype=float)
+        if {"p05", "p95"}.issubset(fan_df.columns):
+            ax.fill_between(x_values, fan_df["p05"], fan_df["p95"], color=COLOR_PRIMARY, alpha=0.12, linewidth=0.0)
+        if {"p25", "p75"}.issubset(fan_df.columns):
+            ax.fill_between(x_values, fan_df["p25"], fan_df["p75"], color=COLOR_PRIMARY, alpha=0.22, linewidth=0.0)
+        median_column = "p50" if "p50" in fan_df.columns else fan_df.columns[len(fan_df.columns) // 2]
+        ax.plot(x_values, fan_df[median_column], color=TEXT_COLOR, linewidth=1.4, label="Median")
+        ax.axhline(1.0, color=MUTED_TEXT, linewidth=0.8, linestyle="--", alpha=0.7)
+        ax.set_title(
+            f"{results.monte_carlo_model or 'Monte Carlo'} Fan Chart ({results.monte_carlo_horizon_days or 'N/A'}D)"
+        )
+        ax.set_xlabel("Day")
+        ax.set_ylabel("Growth of 1.0")
+        legend = ax.legend(frameon=False, loc="upper left")
+        for text in legend.get_texts():
+            text.set_color(TEXT_COLOR)
+        self.mc_fan_canvas.figure.tight_layout(pad=1.0)
+        self.mc_fan_canvas.draw_idle()
+
     def _show_plot_message(self, canvas: MplCanvas, message: str) -> None:
         ax = canvas.axes
         ax.clear()
@@ -892,6 +1211,9 @@ class RiskTab(QWidget):
         self.confidence_combo.setEnabled(enabled)
         self.lookback_combo.setEnabled(enabled)
         self.horizon_combo.setEnabled(enabled)
+        self.mc_horizon_combo.setEnabled(enabled)
+        self.mc_model_combo.setEnabled(enabled)
+        self.mc_simulations_combo.setEnabled(enabled)
         self.benchmark_input.setEnabled(enabled)
         self.beta_window_combo.setEnabled(enabled)
 
@@ -1050,5 +1372,15 @@ class RiskTab(QWidget):
         self.details_toggle_btn.setChecked(False)
         self.details_toggle_btn.setArrowType(Qt.RightArrow)
         self.hist_canvas.show_message("Compute risk to view results")
-        self.cum_canvas.show_message("Compute risk to view results")
+        self.cum_canvas.show_message("Compute risk to view drawdown")
+        self.mc_hist_canvas.show_message("Compute risk to view Monte Carlo distribution")
+        self.mc_fan_canvas.show_message("Compute risk to view Monte Carlo paths")
         self._refresh_details_ui()
+
+    def shell_status_text(self) -> str:
+        return self.status_label.text()
+
+    def shell_active_symbol(self) -> str:
+        if self.app_context is not None and self.app_context.primary_symbol:
+            return self.app_context.primary_symbol
+        return self.benchmark_input.text().strip().upper() or "Portfolio"

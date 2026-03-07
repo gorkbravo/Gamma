@@ -101,17 +101,30 @@ class ResearchOverviewTab(QWidget):
         content = QWidget()
         layout = QVBoxLayout()
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         layout.addWidget(self._build_scope_section())
-        layout.addWidget(self._build_kpi_section())
-        layout.addWidget(self._build_analytics_section())
 
-        lower_row = QHBoxLayout()
-        lower_row.setSpacing(10)
-        lower_row.addWidget(self._build_structure_section(), 3)
-        lower_row.addWidget(self._build_context_section(), 2)
-        layout.addLayout(lower_row)
+        workspace_row = QHBoxLayout()
+        workspace_row.setSpacing(10)
+
+        left_pane = QVBoxLayout()
+        left_pane.setSpacing(8)
+        left_pane.addWidget(self._build_kpi_section())
+        left_pane.addWidget(self._build_analytics_section())
+        left_pane.addWidget(self._build_structure_section(), 1)
+
+        right_pane = QVBoxLayout()
+        right_pane.setSpacing(8)
+        context_box = self._build_context_section()
+        context_box.setMinimumWidth(300)
+        context_box.setMaximumWidth(360)
+        right_pane.addWidget(context_box)
+        right_pane.addStretch(1)
+
+        workspace_row.addLayout(left_pane, 5)
+        workspace_row.addLayout(right_pane, 2)
+        layout.addLayout(workspace_row, 1)
         layout.addStretch(1)
 
         content.setLayout(layout)
@@ -120,7 +133,7 @@ class ResearchOverviewTab(QWidget):
         self.setLayout(root)
 
     def _build_scope_section(self) -> QGroupBox:
-        box = QGroupBox("Research Scope")
+        box = QGroupBox("Research Command Deck")
         layout = QVBoxLayout()
         layout.setSpacing(8)
 
@@ -211,7 +224,7 @@ class ResearchOverviewTab(QWidget):
         return box
 
     def _build_analytics_section(self) -> QGroupBox:
-        box = QGroupBox("Analytics")
+        box = QGroupBox("Analysis Grid")
         layout = QVBoxLayout()
 
         controls = QHBoxLayout()
@@ -262,7 +275,7 @@ class ResearchOverviewTab(QWidget):
         return box
 
     def _build_structure_section(self) -> QGroupBox:
-        box = QGroupBox("Portfolio Structure")
+        box = QGroupBox("Market Structure Overview")
         layout = QVBoxLayout()
 
         stats = QGridLayout()
@@ -286,7 +299,7 @@ class ResearchOverviewTab(QWidget):
         return box
 
     def _build_context_section(self) -> QGroupBox:
-        box = QGroupBox("Research Context")
+        box = QGroupBox("Context Rail")
         layout = QVBoxLayout()
 
         meta = QGridLayout()
@@ -310,8 +323,9 @@ class ResearchOverviewTab(QWidget):
         layout.addLayout(actions)
 
         self.message_area = QPlainTextEdit()
+        self.message_area.setObjectName("contextMessageLog")
         self.message_area.setReadOnly(True)
-        self.message_area.setMinimumHeight(180)
+        self.message_area.setMinimumHeight(220)
         layout.addWidget(self.message_area)
 
         box.setLayout(layout)
@@ -925,6 +939,17 @@ class ResearchOverviewTab(QWidget):
         self.open_risk_btn.setEnabled(False)
         self.open_iv_btn.setEnabled(False)
         self.status_label.setText("Status: Idle")
+
+    def shell_status_text(self) -> str:
+        return self.status_label.text()
+
+    def shell_active_symbol(self) -> str:
+        symbol = (self.app_context.primary_symbol or "").strip().upper()
+        if symbol:
+            return symbol
+        if self.scope_combo.currentText() == "Single Ticker":
+            return self.single_symbol_input.text().strip().upper() or "--"
+        return "Synthetic Basket"
 
     @staticmethod
     def _style_ticks(ax) -> None:

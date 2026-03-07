@@ -92,6 +92,9 @@ def test_compute_worker_aligns_covariance_to_weight_order():
         alpha=0.95,
         lookback_days=252,
         horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=2000,
         beta_window=63,
         benchmark_symbol="SPY",
         base_currency="USD",
@@ -131,6 +134,9 @@ def test_compute_worker_excludes_missing_base_value_without_crashing_and_reports
         alpha=0.95,
         lookback_days=252,
         horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=2000,
         beta_window=63,
         benchmark_symbol="SPY",
         base_currency="USD",
@@ -145,6 +151,9 @@ def test_compute_worker_excludes_missing_base_value_without_crashing_and_reports
     assert results.historical_var is not None
     assert results.historical_var_total_estimate is not None
     assert abs(results.historical_var_total_estimate - (results.historical_var / 0.8)) < 1e-9
+    assert results.monte_carlo_var is not None
+    assert results.monte_carlo_var_total_estimate is not None
+    assert abs(results.monte_carlo_var_total_estimate - (results.monte_carlo_var / 0.8)) < 1e-9
 
 
 def test_convert_benchmark_to_base_does_not_backfill_fx_history():
@@ -192,3 +201,116 @@ def test_overview_convert_series_to_base_does_not_backfill_fx_history():
     assert warnings == []
     assert converted is not None
     assert list(converted.index) == list(fx_idx)
+
+
+def test_compute_worker_populates_monte_carlo_for_valid_long_only_portfolio():
+    idx = pd.date_range("2026-01-02", periods=8, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 102, 101, 103, 104, 105, 107], index=idx),
+        "B": pd.Series([50, 50.5, 51, 50.8, 51.5, 52.2, 52.8, 53.1], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=60.0),
+            PositionItem("B", "STK", "USD", 1, None, None, None, None, base_market_value=40.0),
+        ],
+        net_liq=100.0,
+    )
+    request = RiskComputeRequest(
+        request_id=3,
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=10,
+        mc_horizon_days=21,
+        mc_simulation_model="Bootstrap",
+        mc_num_simulations=1000,
+        beta_window=63,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+    )
+    tab = _make_tab(prices)
+
+    _, results, *_ = RiskTab._compute_worker(tab, request)
+
+    assert results.monte_carlo_model == "Bootstrap"
+    assert results.monte_carlo_horizon_days == 21
+    assert results.monte_carlo_num_simulations == 1000
+    assert results.monte_carlo_var is not None
+    assert results.monte_carlo_cvar is not None
+    assert results.monte_carlo_terminal_returns is not None
+    assert results.monte_carlo_fan_percentiles is not None
+    assert results.monte_carlo_sample_paths is not None
+    assert results.monte_carlo_fan_percentiles.shape[0] == 22
+    assert results.monte_carlo_sample_paths.shape[0] == 22
+
+
+def test_compute_worker_skips_monte_carlo_for_negative_weight_portfolio():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    prices = {
+        "A": pd.Series([100, 99, 101, 102, 100, 103], index=idx),
+        "B": pd.Series([50, 51, 50.5, 50.8, 51.2, 51.5], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=120.0),
+            PositionItem("B", "STK", "USD", -1, None, None, None, None, base_market_value=-20.0),
+        ],
+        net_liq=100.0,
+    )
+    request = RiskComputeRequest(
+        request_id=4,
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=10,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=2000,
+        beta_window=63,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+    )
+    tab = _make_tab(prices)
+
+    _, results, *_ = RiskTab._compute_worker(tab, request)
+
+    assert results.monte_carlo_var is None
+    assert results.monte_carlo_cvar is None
+    assert results.monte_carlo_fan_percentiles is None
+    assert any("Monte Carlo VaR unavailable" in warning for warning in results.warnings)
+
+
+def test_compute_worker_allows_offsetting_cash_balances_in_live_like_snapshot():
+    idx = pd.date_range("2026-01-02", periods=7, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 102, 103, 102, 104, 105], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("CASH_USD", "CASH", "USD", 10, None, 1.0, 10.0, 0.0, base_market_value=10.0, weight=0.1),
+            PositionItem("CASH_EUR", "CASH", "EUR", -10, None, 1.0, -10.0, 0.0, base_market_value=-10.0, weight=-0.1),
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=100.0, weight=1.0),
+        ],
+        net_liq=100.0,
+    )
+    request = RiskComputeRequest(
+        request_id=5,
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=63,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+    )
+    tab = _make_tab(prices)
+
+    _, results, *_ = RiskTab._compute_worker(tab, request)
+
+    assert results.monte_carlo_var is not None
+    assert results.monte_carlo_fan_percentiles is not None
+    assert not any("risky gross exposure exceeds" in warning for warning in results.warnings)

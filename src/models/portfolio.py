@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
+import pandas as pd
+
 
 @dataclass
 class PositionItem:
@@ -55,6 +57,16 @@ class RiskResults:
     historical_var_total_estimate: float | None = None
     historical_cvar_total_estimate: float | None = None
     parametric_var_total_estimate: float | None = None
+    monte_carlo_model: str | None = None
+    monte_carlo_horizon_days: int | None = None
+    monte_carlo_num_simulations: int | None = None
+    monte_carlo_var: float | None = None
+    monte_carlo_cvar: float | None = None
+    monte_carlo_var_total_estimate: float | None = None
+    monte_carlo_cvar_total_estimate: float | None = None
+    monte_carlo_terminal_returns: pd.Series | None = None
+    monte_carlo_fan_percentiles: pd.DataFrame | None = None
+    monte_carlo_sample_paths: pd.DataFrame | None = None
     aligned_obs_count: int | None = None
     benchmark_overlap_count: int | None = None
     concentration_hhi: float | None = None
