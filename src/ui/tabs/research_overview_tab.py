@@ -30,6 +30,7 @@ from src.application.research_service import (
     ResearchAnalysisResult,
     ResearchService,
 )
+from src.application.workspace_service import can_forward_research_to_iv
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
 from src.services.app_context import AppDataContext
@@ -521,9 +522,9 @@ class ResearchOverviewTab(QWidget):
         )
         self.benchmark_status_label.setText(f"Benchmark: {benchmark_status}")
         self.observation_label.setText(f"Observations: {int(len(result.perf))}")
-        enabled = result.snapshot is not None and not result.perf.empty
-        self.open_risk_btn.setEnabled(enabled)
-        self.open_iv_btn.setEnabled(enabled)
+        has_result = result.snapshot is not None and not result.perf.empty
+        self.open_risk_btn.setEnabled(has_result)
+        self.open_iv_btn.setEnabled(has_result and can_forward_research_to_iv(result.scope_type))
 
     def _update_analytics_view(self, *_args) -> None:
         result = self._latest_result
@@ -765,6 +766,9 @@ class ResearchOverviewTab(QWidget):
     def _emit_open_iv_surface(self) -> None:
         if self._latest_result.snapshot is None:
             self._add_message("Run a research analysis first")
+            return
+        if not can_forward_research_to_iv(self._latest_result.scope_type):
+            self._add_message("IV surface forwarding is only available for single-ticker research")
             return
         self.open_iv_surface_requested.emit()
 

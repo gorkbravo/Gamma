@@ -135,6 +135,26 @@ class PortfolioHistoryResponseModel(BaseModel):
         return cls(source="local_history_store", points=points)
 
 
+class PortfolioPerformanceRequestModel(BaseModel):
+    snapshot: PortfolioSnapshotModel
+    benchmark_symbol: str = "SPY"
+    lookback_days: int = 504
+
+
+class PortfolioPerformanceResponseModel(BaseModel):
+    benchmark_symbol: str
+    benchmark_source: str
+    performance_points: list[TimeSeriesPoint]
+    benchmark_points: list[TimeSeriesPoint]
+    portfolio_base_value: float | None = None
+    missing_symbols: list[str] = Field(default_factory=list)
+    day_pnl: float | None = None
+    day_pnl_pct: float | None = None
+    day_pnl_source: str | None = None
+    message: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 def series_to_points(series: pd.Series) -> list[TimeSeriesPoint]:
     if series is None or series.empty:
         return []

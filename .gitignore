@@ -18,3 +18,8 @@ build/
 *.egg-info/
 frontend/node_modules/
 frontend/dist/
+frontend/src-tauri/.pyinstaller/
+frontend/src-tauri/resources/backend/
+frontend/src-tauri/target/
+frontend/src-tauri/target-check/
+/package-lock.json

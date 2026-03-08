@@ -18,6 +18,7 @@ from src.analytics.risk_metrics import (
 )
 from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, parametric_var
 from src.models.portfolio import PortfolioSnapshot, RiskResults
+from src.services.data_providers import AppDataProvider
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
@@ -78,7 +79,12 @@ class RiskService:
         self.mock_service = mock_service
         self.risk_free_service = risk_free_service
 
-    def compute(self, request: RiskComputeRequest, progress_cb=None) -> RiskComputationPayload:
+    def compute(
+        self,
+        request: RiskComputeRequest,
+        progress_cb=None,
+        data_provider: AppDataProvider | None = None,
+    ) -> RiskComputationPayload:
         snapshot = request.snapshot
         warnings: List[str] = []
         excluded_assets: Dict[str, str] = {}
@@ -92,7 +98,7 @@ class RiskService:
         if request.horizon_days > 1:
             warnings.append("Historical VaR/CVaR shown for 1d; parametric scaled by sqrt(time).")
 
-        prices, missing = self._load_prices(snapshot, request.lookback_days, progress_cb)
+        prices, missing = self._load_prices(snapshot, request.lookback_days, progress_cb, data_provider=data_provider)
         if missing:
             warnings.append(f"Missing history for: {', '.join(missing)}")
             for symbol in missing:
@@ -366,7 +372,10 @@ class RiskService:
         snapshot: PortfolioSnapshot,
         lookback_days: int,
         progress_cb=None,
+        data_provider: AppDataProvider | None = None,
     ) -> Tuple[Dict[str, pd.Series], List[str]]:
+        if data_provider is not None:
+            return data_provider.load_prices(snapshot, lookback_days, progress_cb)
         prices: Dict[str, pd.Series] = {}
         missing: List[str] = []
         positions = [position for position in snapshot.positions if not position.symbol.startswith("CASH")]

@@ -29,6 +29,10 @@ class SystemStatusResponseModel(BaseModel):
     cached_symbols: list[str] = Field(default_factory=list)
 
 
+class MarketDataModeRequestModel(BaseModel):
+    market_data_mode: str
+
+
 class DiagnosticsResponseModel(BaseModel):
     generated_at: datetime
     mock_mode: bool
@@ -40,3 +44,14 @@ class DiagnosticsResponseModel(BaseModel):
     local_history_path: str
     recent_errors: list[str] = Field(default_factory=list)
     cached_symbols: list[str] = Field(default_factory=list)
+    research_scope_type: str = "none"
+    research_primary_symbol: str | None = None
+    research_synthetic_count: int = 0
+    iv_running: bool = False
+    iv_status_text: str = "Idle"
+    iv_active_symbol: str | None = None
+
+
+class ActionResponseModel(BaseModel):
+    success: bool = True
+    lines: list[str] = Field(default_factory=list)

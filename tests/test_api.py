@@ -23,6 +23,8 @@ def test_health_and_system_status_endpoints(tmp_path):
     try:
         health = client.get("/health")
         status = client.get("/system/status")
+        mode_change = client.post("/system/market-data-mode", json={"market_data_mode": "live"})
+        connection_toggle = client.post("/system/connection/toggle", json={})
         assert health.status_code == 200
         assert health.json()["status"] == "ok"
         assert status.status_code == 200
@@ -31,6 +33,10 @@ def test_health_and_system_status_endpoints(tmp_path):
         assert payload["mock_mode"] is True
         assert payload["connection"]["connected"] is True
         assert payload["base_currency"] == runtime.base_currency
+        assert mode_change.status_code == 200
+        assert mode_change.json()["market_data_mode"] == "live"
+        assert connection_toggle.status_code == 200
+        assert connection_toggle.json()["connection"]["status_text"] == "Status: Mock"
     finally:
         runtime.shutdown()
 
@@ -43,11 +49,28 @@ def test_portfolio_snapshot_and_history_endpoints(tmp_path):
         snapshot_payload = snapshot_response.json()
         assert len(snapshot_payload["positions"]) >= 1
 
+        performance_response = client.post(
+            "/portfolio/performance",
+            json={
+                "snapshot": snapshot_payload,
+                "benchmark_symbol": "SPY",
+                "lookback_days": 252,
+            },
+        )
+        assert performance_response.status_code == 200
+        performance_payload = performance_response.json()
+        assert performance_payload["benchmark_symbol"] == "SPY"
+        assert "performance_points" in performance_payload
+
         history_response = client.get("/portfolio/history")
         assert history_response.status_code == 200
         history_payload = history_response.json()
         assert history_payload["source"] == "local_history_store"
         assert len(history_payload["points"]) >= 1
+
+        clear_response = client.post("/portfolio/history/clear")
+        assert clear_response.status_code == 200
+        assert clear_response.json()["success"] is True
     finally:
         runtime.shutdown()
 
@@ -97,6 +120,8 @@ def test_risk_compute_endpoint(tmp_path):
         assert payload["metrics"]["historical_var"] is not None
         assert payload["metrics"]["portfolio_value"] > 0
         assert len(payload["contributions"]) >= 1
+        assert "monte_carlo" in payload
+        assert "fan_percentiles" in payload["monte_carlo"]
     finally:
         runtime.shutdown()
 
@@ -105,17 +130,35 @@ def test_iv_surface_and_diagnostics_endpoints(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
         iv_response = client.get("/iv/surface", params={"symbol": "SPY"})
+        iv_session_start = client.post("/iv/session/start", json={"symbol": "SPY", "market_data_mode": "delayed"})
+        iv_session_status = client.get("/iv/session")
+        iv_session_stop = client.post("/iv/session/stop")
         diagnostics_response = client.get("/diagnostics")
+        diagnostics_run = client.post("/diagnostics/run")
+        subscribe_response = client.post("/system/account-subscribe")
         assert iv_response.status_code == 200
         iv_payload = iv_response.json()
         assert iv_payload["snapshot_available"] is True
         assert iv_payload["points"] > 0
         assert len(iv_payload["expiries"]) > 0
 
+        assert iv_session_start.status_code == 200
+        assert iv_session_start.json()["active_symbol"] == "SPY"
+        assert iv_session_status.status_code == 200
+        assert "surface" in iv_session_status.json()
+        assert iv_session_stop.status_code == 200
+        assert iv_session_stop.json()["running"] is False
+
         assert diagnostics_response.status_code == 200
         diagnostics_payload = diagnostics_response.json()
         assert diagnostics_payload["mock_mode"] is True
         assert "history_cache" in diagnostics_payload
         assert diagnostics_payload["local_history_path"]
+        assert diagnostics_payload["research_scope_type"] == ResearchScopeType.NONE.value
+
+        assert diagnostics_run.status_code == 200
+        assert diagnostics_run.json()["success"] is True
+        assert subscribe_response.status_code == 200
+        assert subscribe_response.json()["success"] is True
     finally:
         runtime.shutdown()

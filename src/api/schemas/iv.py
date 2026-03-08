@@ -44,3 +44,17 @@ class IVSurfaceResponseModel(BaseModel):
             warnings=list(result.warnings),
             messages=list(result.messages),
         )
+
+
+class IVSessionRequestModel(BaseModel):
+    symbol: str = "SPY"
+    market_data_mode: str | None = None
+
+
+class IVSessionStatusResponseModel(BaseModel):
+    running: bool
+    status_text: str
+    active_symbol: str | None = None
+    market_data_mode: str
+    surface: IVSurfaceResponseModel
+    messages: list[str] = Field(default_factory=list)

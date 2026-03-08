@@ -8,8 +8,69 @@ This file tracks the ongoing strangler migration from PySide6/Qt to Tauri + Fast
 - Restore point: `pre-ai-migration-2026-03-07`
 - PySide desktop app remains in place and runnable.
 - Mock mode is preserved.
-- FastAPI backend now exists and is covered by tests.
+- Application service layer now exists in `src/application/`.
+- FastAPI backend now exists in `src/api/`.
 - Browser frontend bootstrap now exists in `frontend/`.
+- Phase 7 is complete for local development.
+- Phase 8 now has a working Windows-first packaging path.
+- Phase 9 cutover is still gated; PySide remains the fallback client.
+
+## Audit Snapshot
+
+Last audited: 2026-03-08
+
+Verified in the current audit:
+- `.\.venv\Scripts\python.exe -m pytest` -> `44 passed`
+- `npm run test` in `frontend/` -> `8 passed`
+- `npm run build` in `frontend/` -> success
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml` -> success (validated with `CARGO_TARGET_DIR=C:\Temp\stratalab-tauri-check` to avoid Windows file-lock contention in the default target directory)
+- `npm run tauri:dev` -> startup smoke run now succeeds in mock mode after moving the Cargo target dir out of `frontend\src-tauri\target`; the shell also now falls back from port `8000` when that port is already occupied
+- `npm run backend:smoke` in `frontend/` -> success; packaged `stratalab-backend.exe` reached `/health`
+- `npm run tauri:build` in `frontend/` -> success; NSIS installer emitted under the temp `CARGO_TARGET_DIR` bundle path
+
+Resolved during this audit:
+- Completed the remaining Phase 1 extraction by moving active-snapshot selection, IV symbol-follow rules, and market-data mode propagation into shared application modules.
+- Removed the duplicated fallback risk engine from `src/ui/tabs/risk_tab.py`; Qt now calls `src/application/risk_service.py` exclusively for non-visual risk computation.
+- Removed obsolete backend helper wrappers from `src/ui/tabs/overview_tab.py` and moved warning categorization into `src/application/portfolio_service.py`.
+- Added browser diagnostics and operator controls: diagnostics panel, connection toggle action, and market-data mode switching backed by shared FastAPI/runtime state.
+- Exposed Monte Carlo distribution/fan payloads through the risk API so browser risk charts can reuse the shared Python analytics output directly.
+- Upgraded the browser research and risk views from chart placeholders into app-native chart decks, including drawdown, rolling vol/beta, return distributions, contribution ranking, and Monte Carlo fan/distribution visuals.
+- Added browser context forwarding from research into risk and IV so the web flow now carries snapshot/symbol context across tabs instead of forcing re-entry.
+- Added a shared `/portfolio/performance` API route and upgraded the browser portfolio workflow to consume shared benchmark/performance diagnostics rather than relying only on raw local history.
+- Expanded the browser portfolio, research, risk, and IV views into fuller command decks with richer table controls, structure/context summaries, operator-visible diagnostics, and shared-service-backed exploration state.
+- Added browser operator actions for diagnostics, force subscribe, and local-history reset backed by shared FastAPI/runtime endpoints instead of frontend-only controls.
+- Added IV session endpoints (`/iv/session`, `/iv/session/start`, `/iv/session/stop`) so the browser/Tauri path can use Python-owned IV session state rather than only shallow one-shot loads.
+- Added a frontend test harness with Vitest and targeted tests for store orchestration, async loading, context forwarding, and critical view-model behavior.
+- Scaffolded an in-repo Tauri shell under `frontend/src-tauri/` that launches the repo-local Python backend, waits for `/health`, shows a startup splash, creates the main window only after readiness, and kills the backend on shell exit.
+- Added Tauri/local-desktop documentation and broadened FastAPI CORS handling for Tauri origins.
+- Added a dedicated desktop backend entrypoint in `src/api/desktop_entry.py` so dev and packaged desktop flows share the same startup path.
+- Added Windows-first backend packaging via PyInstaller and wired `frontend/scripts/build-backend.mjs` into `npm run tauri:build`.
+- Updated the Tauri production path to launch the bundled backend executable from resources instead of assuming a repo checkout or `.venv`.
+- Added packaged-startup diagnostics written to app-data logs plus a backend failure report for splash-screen error reporting.
+- Added automated desktop packaging validation via `tests/test_desktop_backend_smoke.py` and `npm run backend:smoke`.
+- `frontend/src/views/PortfolioView.svelte` now recomputes summary cards, positions, and chart state when API data arrives.
+- `frontend/src/views/ResearchView.svelte` now recomputes chart state when results or chart mode change.
+- `frontend/src/views/RiskView.svelte` now tracks the active snapshot and chart state reactively.
+- `frontend/src/views/IvView.svelte` now recomputes expiry rows and the selected slice when surface data changes.
+
+Still outstanding after audit:
+- Broader installed-app workflow QA is still advisable before cutover; this audit validated backend packaging, shell build/bundle generation, and startup wiring in mock mode rather than every desktop workflow.
+- The default desktop path has not been switched away from PySide, and the PySide fallback remains intentionally intact.
+
+Completed:
+- Phase 2 API schemas are implemented.
+- Phase 3 FastAPI routes are implemented and covered by `tests/test_api.py`.
+- Phase 4 browser baseline is now usable, builds successfully, and has had the major reactive-state audit issue corrected.
+- Phase 5 chart migration is complete with interactive browser-native charts now covering the core migrated workflows.
+
+Work in progress:
+- The research workflow is routed through `src/application/research_service.py`.
+- Portfolio, risk, and IV services now own the primary non-UI orchestration path used by both FastAPI and the Qt adapters.
+- Final cutover hardening remains open.
+
+Not done yet:
+- Default desktop cutover from PySide to Tauri
+- Broader installed-workflow validation beyond packaging/startup smoke
 
 ## Principles
 
@@ -25,18 +86,36 @@ Objective:
 - Move non-visual logic out of Qt tabs so workflows are callable without Qt widgets.
 
 Status:
-- In progress.
+- Complete.
 
 Completed:
 - Added `src/application/`.
+- Added `src/application/runtime.py` to assemble the Python runtime for the API path.
 - Extracted research orchestration into `src/application/research_service.py`.
-- Added service shells for portfolio, risk, and IV.
-- Added runtime bootstrap in `src/application/runtime.py`.
+- Added working service layers for:
+  - `src/application/portfolio_service.py`
+  - `src/application/risk_service.py`
+  - `src/application/iv_service.py`
+- Added shared workflow helpers for:
+  - `src/application/workspace_service.py`
+  - `src/application/system_service.py`
+- Added/updated service-level extraction coverage in:
+  - `tests/test_research_service.py`
+  - `tests/test_risk_tab_logic.py`
+  - `tests/test_app_mode_logic.py`
+  - `tests/test_api.py`
 
-Still coupled to Qt:
-- `src/ui/tabs/overview_tab.py`
-- `src/ui/tabs/risk_tab.py`
-- `src/ui/tabs/iv_surface_tab.py`
+Qt ownership after extraction:
+- `src/ui/tabs/overview_tab.py`, `src/ui/tabs/risk_tab.py`, and `src/ui/tabs/iv_surface_tab.py` are now thin adapters for widget state, event wiring, and rendering.
+- Shared application code now owns the remaining non-visual workflow decisions that were still trapped in those tabs.
+
+Current reality:
+- `src/ui/main_window.py` now builds from `src/application/runtime.py` instead of reassembling the runtime graph itself.
+- `src/ui/tabs/overview_tab.py` now delegates snapshot retrieval, performance/history orchestration, and diagnostics plumbing to `src/application/portfolio_service.py`.
+- `src/ui/tabs/risk_tab.py` now delegates the risk compute path exclusively to `src/application/risk_service.py` and uses shared snapshot-selection helpers instead of Qt-owned workflow logic.
+- `src/ui/tabs/iv_surface_tab.py` now delegates engine/session lifecycle to `src/application/iv_service.py` and uses shared workspace helpers for research symbol follow behavior.
+- `src/ui/main_window.py` now delegates runtime market-data mode propagation to `src/application/runtime.py`.
+- The API and the desktop app now share the same primary application-service path for portfolio, risk, research, and IV workflows.
 
 ## Phase 2: Define API Contracts
 
@@ -57,10 +136,14 @@ Coverage:
 - Health and system status
 - Connection state
 - Portfolio snapshot and history
+- Positions
 - Research request/result
 - Risk request/result
 - IV surface payload
 - Diagnostics payload
+
+Validation:
+- API schema coverage is exercised through `tests/test_api.py`.
 
 ## Phase 3: Add FastAPI
 
@@ -81,15 +164,25 @@ Files:
 Implemented endpoints:
 - `GET /health`
 - `GET /system/status`
+- `POST /system/connection/toggle`
+- `POST /system/market-data-mode`
 - `GET /portfolio/snapshot`
 - `GET /portfolio/history`
+- `POST /portfolio/performance`
+- `POST /portfolio/history/clear`
 - `POST /research/analyze`
 - `POST /risk/compute`
 - `GET /iv/surface`
+- `GET /iv/session`
+- `POST /iv/session/start`
+- `POST /iv/session/stop`
 - `GET /diagnostics`
+- `POST /diagnostics/run`
+- `POST /system/account-subscribe`
 
 Validation:
 - `tests/test_api.py`
+- Current audit run: passing
 
 ## Phase 4: Bootstrap Browser Frontend First
 
@@ -115,15 +208,24 @@ Current frontend scope:
 - Terminal/dark shell
 - Top status rail
 - Tab navigation
-- Portfolio placeholder view wired to FastAPI
-- Research placeholder view wired to FastAPI
-- Risk placeholder view wired to FastAPI
-- IV placeholder view wired to FastAPI
+- Portfolio baseline with better summary cards, local-history context, positions table, and a real migrated chart region
+- Research baseline with single-ticker and synthetic-portfolio inputs, summary cards, warnings, and a chart-ready output area
+- Risk baseline with configurable benchmark/confidence/lookback/horizon controls plus warnings and excluded-asset visibility
+- IV baseline with symbol input, requested market-data mode, surface status, 2D heatmap, and expiry-slice preview
 
-Not done yet:
-- Interactive chart migration
-- Full functional parity
-- Tauri shell
+Validation:
+- `npm run build` passes
+- Current audit confirmed the migrated views now refresh correctly from asynchronous store updates after the reactive-state fix.
+
+Known gaps:
+- Frontend remains intentionally incremental and does not yet match the richer Qt analytics surface
+- Risk view still defaults to polling-style request/response rather than richer live session behavior
+- IV frontend now has session controls and richer exploration, but it still remains a 2D browser explorer rather than the full 3D Qt surface workstation
+- Qt still has stronger desktop ergonomics and a richer operator workflow than the browser/Tauri path
+- Frontend validation now has dedicated tests, but coverage is still focused on critical store/view-model behavior rather than full component interaction
+
+Phase 4 exit note:
+- Bootstrap and usable-baseline work are complete for this stage, but this still does not imply parity.
 
 ## Phase 5: Chart-First Migration
 
@@ -131,12 +233,20 @@ Objective:
 - Replace static/matplotlib-heavy charts with app-native interactive charts.
 
 Status:
-- Not started.
+- Complete.
 
 Target stack:
 - TradingView Lightweight Charts for portfolio/research time series
 - D3 for custom 2D risk visuals
 - Plotly.js or 2D heatmap/slice views for IV
+
+Current progress:
+- Added TradingView Lightweight Charts to the frontend.
+- Migrated the portfolio history/performance workflow into an interactive browser chart backed by `GET /portfolio/history`.
+- Upgraded the research browser view into a multi-mode chart deck with performance, price, drawdown, rolling vol, and rolling beta views driven by shared API data.
+- Upgraded the risk browser view into a richer chart deck with time series, return distribution, contribution ranking, Monte Carlo distribution, and Monte Carlo fan visuals.
+- Extended the risk API schema so the browser can render Monte Carlo fan/distribution visuals from shared backend outputs instead of reimplementing analytics client-side.
+- IV remains on a custom 2D heatmap/slice presentation, which satisfies the interim Phase 5 target for IV.
 
 ## Phase 6: Functional Parity
 
@@ -144,7 +254,7 @@ Objective:
 - Make the web frontend genuinely usable.
 
 Status:
-- Not started.
+- Implemented with remaining polish gaps.
 
 Target features:
 - Positions table parity
@@ -154,19 +264,45 @@ Target features:
 - Connection state and market-data switching
 - Context forwarding from research to risk and IV
 
+Recent progress:
+- Browser diagnostics panel is now implemented.
+- Browser connection state and market-data switching controls are now implemented.
+- Browser research context can now jump directly into risk compute or IV loading with forwarded snapshot/symbol context.
+- Browser portfolio workflow now includes shared-service performance/benchmark diagnostics, richer positions controls, and broader book diagnostics.
+- Browser research workflow now includes a stronger synthetic-builder path, structure preview, and richer chart modes.
+- Browser risk workflow now surfaces the broader shared Python metric set, coverage diagnostics, concentration, and exclusions.
+- Browser IV workflow now includes backend session controls plus term-structure and skew-style exploration on top of the shared Python payload.
+- Frontend regression coverage now exists for async store loading, state synchronization, and research context forwarding.
+
+Current gap summary:
+- Qt remains the richer client for advanced desktop ergonomics and the 3D IV surface presentation
+- The browser frontend is now a credible core-workflow replacement for portfolio, research, risk, diagnostics, and IV exploration in mock/local API use
+- Remaining parity gaps are now mostly advanced desktop ergonomics, saved-workspace workflows, and some deeper IV/research affordances rather than missing core screens
+
 ## Phase 7: Add Tauri Shell
 
 Objective:
 - Wrap the working web frontend in a desktop shell.
 
 Status:
-- Not started.
+- Complete for local development.
 
 Target responsibilities:
 - Launch Python backend
 - Wait for `/health`
 - Load frontend
 - Clean shutdown
+- Show a startup/error splash while backend readiness is pending
+
+Implementation notes:
+- Tauri shell now lives in `frontend/src-tauri/`.
+- Local development launches the repo-local `.venv` Python via `python -m src.api.desktop_entry`.
+- Backend readiness is gated on `GET /health`.
+- The main window is created only after backend readiness; a splash window stays visible during startup and on startup failure.
+- Backend child-process shutdown is wired to shell exit.
+- `npm run tauri:dev` now routes Cargo build artifacts to a temp directory automatically so the Windows local-dev path avoids the file-lock contention seen in the default in-repo target directory.
+- The shell now prefers localhost port `8000` for the backend but falls back to another free port when needed and injects the selected API base into the frontend at window startup.
+- Current local-dev assumption: repo checkout and `.venv` are present on disk.
 
 ## Phase 8: Packaging
 
@@ -174,11 +310,23 @@ Objective:
 - Ship a one-click desktop install.
 
 Status:
-- Not started.
+- Implemented for Windows-first packaging; broader installer QA still open.
 
-Priority:
-- Package Python backend first
-- Bundle with Tauri second
+Implemented:
+- Added `src/api/desktop_entry.py` as the shared desktop backend entrypoint.
+- Added PyInstaller-based backend packaging through `frontend/scripts/build-backend.mjs`.
+- `npm run tauri:build` now packages the Python backend before invoking the Tauri build.
+- Tauri bundled mode now resolves `resources/backend/stratalab-backend/stratalab-backend.exe` and no longer depends on a repo-local `.venv` at runtime.
+- Packaged desktop runtime paths now use Tauri app-data directories for cache, local history, and backend startup logs.
+- Backend startup failures now surface a failure report plus stdout/stderr log paths to the splash window.
+- Windows NSIS installer generation is enabled and validated.
+- Automated validation now exists for the desktop backend startup path:
+  - `tests/test_desktop_backend_smoke.py`
+  - `npm run backend:smoke`
+
+Remaining packaging work:
+- Expand installed-app QA beyond backend/startup smoke into broader manual desktop workflow coverage.
+- Decide whether to slim the packaged backend footprint further; the current PyInstaller bundle is pragmatic and working, but it still carries PySide-era Python dependencies because those remain installed and supported.
 
 ## Phase 9: Cutover
 
@@ -186,10 +334,14 @@ Objective:
 - Make the Tauri app primary only when it is stable enough.
 
 Status:
-- Not started.
+- Readiness in progress; cutover not approved.
 
 Rule:
 - Keep PySide fallback until parity and stability are credible.
+
+Current cutover gate:
+- Packaging is now working, but the default desktop path has not been switched away from PySide.
+- The broader go/no-go decision still depends on more manual workflow validation of the bundled desktop app.
 
 ## Validation Commands
 
@@ -222,9 +374,39 @@ $env:VITE_API_BASE="http://127.0.0.1:8000"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
+Run frontend tests:
+
+```powershell
+cd frontend
+npm run test
+```
+
 Frontend build check:
 
 ```powershell
 cd frontend
 npm run build
+```
+
+Run the local Tauri shell:
+
+```powershell
+cd frontend
+npm install
+$env:MOCK_DATA="true"
+npm run tauri:dev
+```
+
+Run packaged-backend smoke:
+
+```powershell
+cd frontend
+npm run backend:smoke
+```
+
+Build the Windows installer:
+
+```powershell
+cd frontend
+npm run tauri:build
 ```

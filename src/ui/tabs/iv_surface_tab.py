@@ -19,11 +19,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.models.app_mode import AppMode
+from src.application.iv_service import IVService
+from src.application.system_service import market_data_mode_label, normalize_market_data_mode
+from src.application.workspace_service import (
+    resolve_followed_symbol,
+    should_auto_follow_research_symbol,
+    should_enable_research_symbol_auto_follow,
+)
 from src.services.app_context import AppDataContext
 from src.services.ibkr_client import IBKRClient
-from src.services.iv_surface_engine import IVSurfaceEngine
-from src.services.data_providers import should_auto_follow_research_symbol
 from src.ui.widgets.mpl_theme import AXES_BG, COLOR_WARNING, FIGURE_BG, GRID_COLOR, TEXT_COLOR
 
 
@@ -34,14 +38,15 @@ class IVSurfaceTab(QWidget):
     def __init__(
         self,
         client: IBKRClient,
+        iv_service: IVService,
         market_data_mode: str = "delayed",
         app_context: AppDataContext | None = None,
     ) -> None:
         super().__init__()
         self.client = client
+        self.iv_service = iv_service
         self.app_context = app_context
-        self.market_data_mode = self._normalize_market_data_mode(market_data_mode)
-        self.engine = IVSurfaceEngine(client=client, market_data_mode=self.market_data_mode)
+        self.market_data_mode = normalize_market_data_mode(market_data_mode)
         self._locked = False
         self._build_ui()
 
@@ -54,13 +59,6 @@ class IVSurfaceTab(QWidget):
             self.app_context.research_scope_changed.connect(self._on_context_scope_changed)
             self._sync_auto_follow_default()
 
-    @staticmethod
-    def _normalize_market_data_mode(value: str | None) -> str:
-        mode = str(value or "").strip().lower()
-        if mode in {"delayed", "live", "auto"}:
-            return mode
-        return "delayed"
-
     def _build_ui(self) -> None:
         root = QVBoxLayout()
         root.setContentsMargins(8, 8, 8, 8)
@@ -70,7 +68,7 @@ class IVSurfaceTab(QWidget):
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(6)
         self.status_label = QLabel("Status: Idle")
-        data_mode = "Mock" if self.client.mock else ("Delayed" if self.market_data_mode == "delayed" else "Live")
+        data_mode = market_data_mode_label(self.market_data_mode, self.client.mock)
         self.data_mode_label = QLabel(f"Data Mode: {data_mode}")
         self.symbol_input = QLineEdit("SPY")
         self.symbol_input.setMaximumWidth(120)
@@ -122,24 +120,12 @@ class IVSurfaceTab(QWidget):
         self._draw_placeholder("Press Start to build IV surface")
 
     def set_market_data_mode(self, value: str) -> None:
-        mode = self._normalize_market_data_mode(value)
+        mode = normalize_market_data_mode(value)
         if mode == self.market_data_mode:
             return
-        was_running = self.engine.is_running()
-        symbol = self.symbol_input.text().strip().upper() or "SPY"
-        self.timer.stop()
-        self.engine.stop()
         self.market_data_mode = mode
-        self.engine = IVSurfaceEngine(client=self.client, market_data_mode=self.market_data_mode)
-        data_mode = "Mock" if self.client.mock else ("Delayed" if self.market_data_mode == "delayed" else "Live")
-        self.data_mode_label.setText(f"Data Mode: {data_mode}")
-        if was_running:
-            if self.engine.start(symbol):
-                self._set_status(f"Starting ({symbol})")
-                self.timer.start()
-            else:
-                self._set_status("Error")
-                self._append_message("Unable to restart IV surface after data-mode change.")
+        self.iv_service.set_market_data_mode(mode)
+        self.data_mode_label.setText(f"Data Mode: {market_data_mode_label(self.market_data_mode, self.client.mock)}")
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(f"Status: {text}")
@@ -152,20 +138,16 @@ class IVSurfaceTab(QWidget):
 
     def _start(self) -> None:
         symbol = self.symbol_input.text().strip().upper() or "SPY"
-        if not self.client.mock and not self.client.is_connected():
-            self._set_status("Error: Not connected")
-            self._append_message("Connect to IBKR first, then start the surface.")
-            return
-        if self.engine.start(symbol):
-            self._set_status(f"Starting ({symbol})")
+        result = self.iv_service.start_stream_session(symbol)
+        self._set_status(result.status)
+        for message in result.messages:
+            self._append_message(message)
+        if result.success:
             self.timer.start()
-        else:
-            self._set_status("Error")
-            self._append_message("Unable to start IV surface engine.")
 
     def _stop(self) -> None:
         self.timer.stop()
-        self.engine.stop()
+        self.iv_service.stop_stream()
         self._set_status("Stopped")
         self._draw_placeholder("Stopped")
 
@@ -198,13 +180,13 @@ class IVSurfaceTab(QWidget):
         self.canvas.draw_idle()
 
     def _refresh_plot(self) -> None:
-        for message in self.engine.drain_messages():
+        for message in self.iv_service.drain_messages():
             self._append_message(message)
-        self._set_status(self.engine.status_text())
+        self._set_status(self.iv_service.status_text())
 
         if self._locked:
             return
-        snap = self.engine.snapshot()
+        snap = self.iv_service.latest_snapshot()
         if snap is None:
             return
 
@@ -249,10 +231,9 @@ class IVSurfaceTab(QWidget):
     def _sync_auto_follow_default(self) -> None:
         if self.app_context is None:
             return
-        should_enable = should_auto_follow_research_symbol(
+        should_enable = should_enable_research_symbol_auto_follow(
             self.app_context.app_mode,
             self.app_context.research_scope_type,
-            True,
         )
         if should_enable and not self.auto_follow_check.isChecked():
             self.auto_follow_check.setChecked(True)
@@ -267,29 +248,29 @@ class IVSurfaceTab(QWidget):
             self.app_context.research_scope_type,
             self.auto_follow_check.isChecked(),
         )
-        if not follow:
-            return
-        symbol = (self.app_context.primary_symbol or "").strip().upper()
-        if not symbol:
-            return
-        current = self.symbol_input.text().strip().upper()
-        if current == symbol:
+        symbol = resolve_followed_symbol(
+            self.app_context.primary_symbol,
+            self.symbol_input.text(),
+            follow,
+        )
+        if symbol is None:
             return
         self.symbol_input.setText(symbol)
-        if restart_running and self.engine.is_running():
+        if restart_running and self.iv_service.is_running():
             self.timer.stop()
-            self.engine.stop()
-            if self.engine.start(symbol):
-                self._set_status(f"Starting ({symbol})")
+            result = self.iv_service.start_stream_session(symbol)
+            self._set_status(result.status)
+            for message in result.messages:
+                self._append_message(message)
+            if result.success:
                 self.timer.start()
             else:
-                self._set_status("Error")
                 self._append_message("Unable to restart IV surface after symbol auto-follow update.")
 
     def closeEvent(self, event) -> None:
         try:
             self.timer.stop()
-            self.engine.stop()
+            self.iv_service.stop_stream()
         except Exception:
             logger.exception("IV surface tab shutdown failed")
         event.accept()

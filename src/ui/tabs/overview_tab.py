@@ -8,7 +8,6 @@ from typing import Optional
 
 import matplotlib.dates as mdates
 import pandas as pd
-from ib_insync import Contract
 from PySide6.QtCore import QThreadPool, QTimer, Signal
 from PySide6.QtGui import QColor, QTextCursor
 from PySide6.QtWidgets import (
@@ -29,9 +28,13 @@ from PySide6.QtWidgets import (
     QWidget,
     QPlainTextEdit,
 )
-
-from src.analytics.returns import align_prices, compute_returns
-from src.analytics.risk_metrics import compute_weights, portfolio_returns
+from src.application.system_service import normalize_market_data_mode
+from src.application.portfolio_service import (
+    PortfolioDiagnosticsRequest,
+    PortfolioPerformanceRequest,
+    PortfolioService,
+    PortfolioSnapshotRequest,
+)
 from src.models.portfolio import PortfolioSnapshot
 from src.services.ibkr_client import IBKRClient
 from src.services.fx import FXService
@@ -65,6 +68,7 @@ class OverviewTab(QWidget):
         market_data: MarketDataService,
         fx_service: FXService,
         history_store: PortfolioHistoryStore,
+        portfolio_service: PortfolioService,
         base_currency: str,
         market_data_mode: str = "delayed",
         auto_refresh_seconds: int = 0,
@@ -72,11 +76,9 @@ class OverviewTab(QWidget):
     ) -> None:
         super().__init__()
         self.client = client
-        self.market_data = market_data
-        self.fx_service = fx_service
-        self.history_store = history_store
+        self.portfolio_service = portfolio_service
         self.base_currency = base_currency
-        self.market_data_mode = self._normalize_market_data_mode(market_data_mode)
+        self.market_data_mode = normalize_market_data_mode(market_data_mode)
         self.thread_pool = QThreadPool()
         self.auto_refresh_seconds = auto_refresh_seconds
         self.quote_timeout_seconds = quote_timeout_seconds
@@ -351,13 +353,6 @@ class OverviewTab(QWidget):
         self._set_status("Mock")
         self._set_connection_action("Mock Mode", False)
 
-    @staticmethod
-    def _normalize_market_data_mode(value: str | None) -> str:
-        mode = str(value or "").strip().lower()
-        if mode in {"delayed", "live", "auto"}:
-            return mode
-        return "delayed"
-
     def _on_market_data_mode_combo_changed(self, text: str) -> None:
         mode = "live" if str(text).strip().lower() == "live" else "delayed"
         if mode == self.market_data_mode:
@@ -412,12 +407,12 @@ class OverviewTab(QWidget):
         self.last_refresh.setText("Last Update: Updating...")
         quote_mode = self.quote_mode_combo.currentText()
         worker = Worker(
-            self.client.fetch_snapshot,
-            self.base_currency,
-            self.fx_service,
-            self.market_data,
-            quote_mode,
-            self.quote_timeout_seconds,
+            self.portfolio_service.fetch_snapshot,
+            PortfolioSnapshotRequest(
+                base_currency=self.base_currency,
+                quote_mode=quote_mode,
+                quote_timeout_seconds=self.quote_timeout_seconds,
+            ),
         )
         worker.signals.finished.connect(self._on_snapshot)
         worker.signals.error.connect(self._on_error)
@@ -443,14 +438,6 @@ class OverviewTab(QWidget):
             self.cash_label.setText("N/A")
         self._set_day_pnl(snapshot.day_pnl, snapshot.day_pnl_pct, snapshot.day_pnl_source)
         self._last_positions_count = len(snapshot.positions)
-
-        self.history_store.append_snapshot(
-            snapshot.timestamp,
-            snapshot.net_liquidation,
-            snapshot.total_market_value,
-            snapshot.total_cash,
-            snapshot.base_currency,
-        )
 
         self._populate_table(snapshot)
         self._plot_weights(snapshot)
@@ -558,115 +545,26 @@ class OverviewTab(QWidget):
         self.thread_pool.start(worker)
 
     def _performance_worker(self, snapshot: PortfolioSnapshot, task_id: int):
-        warnings: list[str] = []
-        prices, missing = self._load_prices(snapshot, self._perf_lookback_days)
-        day_pnl, day_pnl_pct, day_pnl_source, pnl_warning = self._estimate_day_pnl_from_history(snapshot, prices)
-        if pnl_warning:
-            warnings.append(pnl_warning)
-        errors = self.market_data.drain_errors()
-        if errors:
-            warnings.extend(errors)
-        if missing:
-            warnings.append(f"Missing history for: {', '.join(missing)}")
-
-        price_df = align_prices(prices)
-        returns_df = compute_returns(price_df)
-        if returns_df.empty:
-            hist_perf = self._load_performance_from_store()
-            if hist_perf is None:
-                return (
-                    task_id,
-                    warnings,
-                    "No performance data",
-                    None,
-                    None,
-                    None,
-                    None,
-                    missing,
-                    "none",
-                    day_pnl,
-                    day_pnl_pct,
-                    day_pnl_source,
-                )
-            perf_returns, cum, perf_base_value = hist_perf
-            benchmark, benchmark_source, benchmark_warnings = self._build_benchmark(
-                snapshot, self._perf_lookback_days, cum.index
+        result = self.portfolio_service.compute_performance(
+            PortfolioPerformanceRequest(
+                snapshot=snapshot,
+                benchmark_symbol=self._benchmark_symbol(),
+                lookback_days=self._perf_lookback_days,
             )
-            warnings.extend(benchmark_warnings)
-            warnings.append("Using stored portfolio history (local snapshots)")
-            return (
-                task_id,
-                warnings,
-                None,
-                perf_returns,
-                cum,
-                benchmark,
-                perf_base_value,
-                missing,
-                benchmark_source,
-                day_pnl,
-                day_pnl_pct,
-                day_pnl_source,
-            )
-
-        returns_df = self._ensure_cash_returns(snapshot, returns_df)
-        weights = self._weights_for_symbols(snapshot, returns_df.columns.tolist())
-        if weights.empty:
-            warnings.append("No weights for performance")
-            return (
-                task_id,
-                warnings,
-                "No weights for performance",
-                None,
-                None,
-                None,
-                None,
-                missing,
-                "none",
-                day_pnl,
-                day_pnl_pct,
-                day_pnl_source,
-            )
-
-        perf_returns = portfolio_returns(returns_df, weights)
-        if perf_returns.empty:
-            warnings.append("No performance data")
-            return (
-                task_id,
-                warnings,
-                "No performance data",
-                None,
-                None,
-                None,
-                None,
-                missing,
-                "none",
-                day_pnl,
-                day_pnl_pct,
-                day_pnl_source,
-            )
-
-        cum = (1 + perf_returns).cumprod()
-        if not cum.empty:
-            cum = cum / cum.iloc[0]
-        benchmark, benchmark_source, benchmark_warnings = self._build_benchmark(
-            snapshot, self._perf_lookback_days, cum.index
         )
-        warnings.extend(benchmark_warnings)
-        perf_base_value = self._portfolio_base_value(snapshot)
         return (
             task_id,
-            warnings,
-            None,
-            perf_returns,
-            cum,
-            benchmark,
-            perf_base_value,
-            missing,
-            benchmark_source,
-            day_pnl,
-            day_pnl_pct,
-            day_pnl_source,
+            result.warnings,
+            result.message,
+            result.portfolio_returns,
+            result.portfolio_cumulative,
+            result.benchmark_cumulative,
+            result.portfolio_base_value,
+            result.missing_symbols,
+            result.benchmark_source,
+            result.day_pnl,
+            result.day_pnl_pct,
+            result.day_pnl_source,
         )
 
     def _on_performance_loaded(self, payload) -> None:
@@ -760,13 +658,6 @@ class OverviewTab(QWidget):
         cutoff = series.index.max() - pd.Timedelta(days=days)
         return series[series.index >= cutoff]
 
-    def _portfolio_base_value(self, snapshot: PortfolioSnapshot) -> float | None:
-        if snapshot.net_liquidation is not None:
-            return snapshot.net_liquidation
-        if snapshot.total_market_value is None and snapshot.total_cash is None:
-            return None
-        return float((snapshot.total_market_value or 0.0) + (snapshot.total_cash or 0.0))
-
     def _set_day_pnl(self, day_pnl: float | None, day_pnl_pct: float | None, source: str | None) -> None:
         self._last_day_pnl_source = source or "none"
         if day_pnl is None:
@@ -800,187 +691,6 @@ class OverviewTab(QWidget):
         if self._latest_snapshot is not None:
             self._start_performance_load(self._latest_snapshot)
 
-    def _build_benchmark(
-        self,
-        snapshot: PortfolioSnapshot,
-        lookback_days: int,
-        target_index: pd.Index,
-    ) -> tuple[pd.Series, str, list[str]]:
-        warnings: list[str] = []
-        if target_index.empty:
-            return pd.Series(dtype=float), "none", warnings
-
-        symbol = self._benchmark_symbol()
-        self._last_benchmark_symbol = symbol
-        if self.client.mock:
-            series = self.client.mock_service.load_history(symbol)
-        else:
-            contract = Contract(symbol=symbol, secType="STK", exchange="SMART", currency="USD")
-            series = self.market_data.fetch_history(contract, lookback_days)
-        if series is None or series.empty:
-            warnings.append(f"No benchmark data for {symbol}; using Cash (0%) benchmark")
-            return pd.Series(1.0, index=target_index), "cash_0", warnings
-
-        converted = self._convert_series_to_base(
-            series.astype(float),
-            quote_ccy="USD",
-            base_ccy=snapshot.base_currency,
-            lookback_days=lookback_days,
-            warnings=warnings,
-        )
-        if converted is None or converted.empty:
-            warnings.append(f"Benchmark conversion failed for {symbol}; using Cash (0%) benchmark")
-            return pd.Series(1.0, index=target_index), "cash_0", warnings
-
-        bench_returns = converted.pct_change().dropna()
-        if bench_returns.empty:
-            warnings.append(f"No benchmark returns for {symbol}; using Cash (0%) benchmark")
-            return pd.Series(1.0, index=target_index), "cash_0", warnings
-
-        bench_cum = (1 + bench_returns).cumprod()
-        bench_cum = bench_cum.reindex(target_index).ffill()
-        bench_cum = bench_cum.dropna()
-        if bench_cum.empty:
-            warnings.append(f"No benchmark overlap for {symbol}; using Cash (0%) benchmark")
-            return pd.Series(1.0, index=target_index), "cash_0", warnings
-        bench_cum = bench_cum / float(bench_cum.iloc[0])
-        bench_cum = bench_cum.reindex(target_index).ffill().fillna(1.0)
-        return bench_cum, f"history_{symbol}", warnings
-
-    def _convert_series_to_base(
-        self,
-        series: pd.Series,
-        quote_ccy: str,
-        base_ccy: str,
-        lookback_days: int,
-        warnings: list[str],
-    ) -> pd.Series | None:
-        quote = str(quote_ccy or "").upper()
-        base = str(base_ccy or "").upper()
-        if quote == base:
-            return series
-        fx_series = self.market_data.fetch_fx_history(base, quote, lookback_days)
-        if fx_series is not None and not fx_series.empty:
-            aligned = fx_series.reindex(series.index).ffill()
-            aligned = aligned.dropna()
-            if not aligned.empty:
-                common_index = series.index.intersection(aligned.index)
-                if not common_index.empty:
-                    return series.reindex(common_index) * aligned.reindex(common_index)
-        rate = self.fx_service.get_rate(base, quote)
-        if rate is None:
-            warnings.append(f"FX unavailable for benchmark conversion {quote}->{base}")
-            return None
-        warnings.append(f"Benchmark FX conversion {quote}->{base} uses latest spot rate")
-        return series * float(rate)
-
-    def _estimate_day_pnl_from_history(
-        self,
-        snapshot: PortfolioSnapshot,
-        prices: dict[str, pd.Series],
-    ) -> tuple[float | None, float | None, str | None, str | None]:
-        if snapshot.day_pnl is not None:
-            return snapshot.day_pnl, snapshot.day_pnl_pct, snapshot.day_pnl_source or "account_summary", None
-
-        fx_by_currency: dict[str, float | None] = {}
-        total_pnl = 0.0
-        missing_symbols: list[str] = []
-        for pos in snapshot.positions:
-            if pos.symbol.startswith("CASH") or pos.sec_type == "CASH":
-                continue
-            series = prices.get(pos.symbol)
-            if series is None:
-                missing_symbols.append(pos.symbol)
-                continue
-            clean = series.dropna()
-            if len(clean) < 2:
-                missing_symbols.append(pos.symbol)
-                continue
-            latest = float(clean.iloc[-1])
-            previous = float(clean.iloc[-2])
-            ccy = str(pos.currency or "").upper()
-            if ccy == snapshot.base_currency.upper():
-                fx_rate = 1.0
-            elif pos.fx_rate is not None:
-                fx_rate = float(pos.fx_rate)
-            elif ccy in fx_by_currency:
-                fx_rate = fx_by_currency[ccy]
-            else:
-                fx_rate = self.fx_service.get_rate(snapshot.base_currency, ccy)
-                fx_by_currency[ccy] = fx_rate
-            if fx_rate is None:
-                missing_symbols.append(pos.symbol)
-                continue
-            total_pnl += float(pos.quantity) * (latest - previous) * float(fx_rate)
-
-        if missing_symbols:
-            symbols = ", ".join(sorted(set(missing_symbols)))
-            warning = f"Day P&L unavailable: missing daily bars/FX for {symbols}"
-            return None, None, "historical_eod", warning
-
-        previous_value = None
-        if snapshot.net_liquidation is not None:
-            previous_value = snapshot.net_liquidation - total_pnl
-        elif snapshot.total_market_value is not None or snapshot.total_cash is not None:
-            current_value = float((snapshot.total_market_value or 0.0) + (snapshot.total_cash or 0.0))
-            previous_value = current_value - total_pnl
-        pct = None
-        if previous_value and previous_value != 0:
-            pct = float(total_pnl / previous_value)
-        warning = "Day P&L estimated from latest two daily bars (EOD approximation)"
-        return float(total_pnl), pct, "historical_eod", warning
-
-    def _load_performance_from_store(self) -> tuple[pd.Series, pd.Series, float] | None:
-        series_df = self.history_store.load_series()
-        if series_df.empty or "portfolio_value" not in series_df.columns:
-            return None
-        values = pd.to_numeric(series_df["portfolio_value"], errors="coerce").dropna()
-        if len(values) < 2:
-            return None
-        returns = values.pct_change().dropna()
-        if returns.empty:
-            return None
-        cum = values / float(values.iloc[0])
-        return returns, cum, float(values.iloc[0])
-
-    def _load_prices(
-        self, snapshot: PortfolioSnapshot, lookback_days: int
-    ) -> tuple[dict[str, pd.Series], list[str]]:
-        if self.client.mock:
-            prices: dict[str, pd.Series] = {}
-            missing: list[str] = []
-            for pos in snapshot.positions:
-                if pos.symbol.startswith("CASH"):
-                    continue
-                series = self.client.mock_service.load_history(pos.symbol)
-                if series is None:
-                    missing.append(pos.symbol)
-                else:
-                    prices[pos.symbol] = series
-            return prices, missing
-
-        contracts = self.client.get_contracts()
-        return self.market_data.fetch_histories(contracts, lookback_days)
-
-    def _ensure_cash_returns(self, snapshot: PortfolioSnapshot, returns_df: pd.DataFrame) -> pd.DataFrame:
-        cash_symbols = [
-            pos.symbol for pos in snapshot.positions if pos.symbol.startswith("CASH") and pos.base_market_value is not None
-        ]
-        if cash_symbols:
-            returns_df = returns_df.copy()
-            for symbol in cash_symbols:
-                if symbol not in returns_df.columns:
-                    returns_df[symbol] = 0.0
-        return returns_df
-
-    def _weights_for_symbols(self, snapshot: PortfolioSnapshot, symbols: list[str]) -> pd.Series:
-        values: dict[str, float] = {}
-        for pos in snapshot.positions:
-            if pos.symbol in symbols and pos.base_market_value is not None:
-                values[pos.symbol] = float(pos.base_market_value)
-        series = pd.Series(values)
-        return compute_weights(series)
-
     def _show_warnings(self, snapshot: PortfolioSnapshot) -> None:
         self.message_area.clear()
         categories: Counter[str] = Counter()
@@ -1005,25 +715,13 @@ class OverviewTab(QWidget):
             self.diagnostics_log.appendPlainText(line)
         self.diagnostics_log.moveCursor(QTextCursor.End)
 
-    @staticmethod
-    def _warning_category(warning: str) -> str:
-        text = warning.lower()
-        if "10089" in text or "10167" in text or "10168" in text or "354" in text:
-            return "entitlement"
-        if "entitlement" in text or "market data subscription" in text:
-            return "entitlement"
-        if "timeout" in text or "timed out" in text:
-            return "timeout"
-        if "fx" in text:
-            return "fx"
-        if "contract" in text or "qualif" in text or "[positions]" in text:
-            return "contract_resolution"
-        return "other"
+    def _warning_category(self, warning: str) -> str:
+        return self.portfolio_service.categorize_warning(warning)
 
     def _run_diagnostics(self) -> None:
         self._append_diagnostics(["[UI] Diagnostics requested"])
         self._add_message("Diagnostics requested")
-        worker = Worker(self.client.run_diagnostics)
+        worker = Worker(self.portfolio_service.run_diagnostics)
         worker.signals.finished.connect(self._on_diagnostics)
         worker.signals.error.connect(self._on_error)
         self.thread_pool.start(worker)
@@ -1039,7 +737,7 @@ class OverviewTab(QWidget):
     def _force_account_subscribe(self) -> None:
         self._append_diagnostics(["[UI] Force account subscribe requested"])
         self._add_message("Force account subscribe requested")
-        worker = Worker(self.client.force_account_subscribe)
+        worker = Worker(self.portfolio_service.force_account_subscribe)
         worker.signals.finished.connect(self._on_force_subscribe)
         worker.signals.error.connect(self._on_error)
         self.thread_pool.start(worker)
@@ -1052,46 +750,24 @@ class OverviewTab(QWidget):
         self._refresh_error_view()
 
     def _refresh_error_view(self) -> None:
-        lines = self.client.format_error_records(50)
+        lines = self.portfolio_service.formatted_errors(50)
         if not lines:
             self.ib_error_log.setPlainText("No IB errors recorded")
         else:
             self.ib_error_log.setPlainText("\n".join(lines))
 
     def _build_diagnostics_report(self) -> str:
-        now = format_ts(now_utc())
-        connection = "connected" if self.client.is_connected() else "disconnected"
-        cache_stats = self.market_data.history_cache_stats()
-        records = self.client.get_error_records(200)
-        code_counts = Counter(int(r.code) for r in records)
-        top_codes = ", ".join(f"{code}:{count}" for code, count in code_counts.most_common(5)) or "none"
-        warning_summary = ", ".join(
-            f"{name}={count}" for name, count in sorted(self._last_warning_categories.items())
-        ) or "none"
-        missing = ", ".join(self._last_missing_history) if self._last_missing_history else "none"
-        duration_text = (
-            f"{self._last_refresh_duration_ms:.0f} ms"
-            if self._last_refresh_duration_ms is not None
-            else "N/A"
-        )
-        return "\n".join(
-            [
-                "=== StrataLab Diagnostics Report ===",
-                f"Generated: {now}",
-                f"Mode: {'Mock' if self.client.mock else 'Live'}",
-                f"Connection: {connection}",
-                f"Last refresh duration: {duration_text}",
-                f"Positions count: {self._last_positions_count}",
-                f"Last warnings: {self._last_warning_count}",
-                f"Warning categories: {warning_summary}",
-                f"Missing historical tickers: {missing}",
-                f"Benchmark symbol/source: {self._last_benchmark_symbol} / {self._last_benchmark_source}",
-                f"Day P&L source: {self._last_day_pnl_source}",
-                "History cache stats: "
-                f"hits={int(cache_stats['hits'])}, misses={int(cache_stats['misses'])}, "
-                f"hit_rate={cache_stats['hit_rate'] * 100:.1f}%",
-                f"Top IB error codes: {top_codes}",
-            ]
+        return self.portfolio_service.build_diagnostics_report(
+            PortfolioDiagnosticsRequest(
+                last_refresh_duration_ms=self._last_refresh_duration_ms,
+                warning_categories=dict(self._last_warning_categories),
+                warning_count=self._last_warning_count,
+                positions_count=self._last_positions_count,
+                missing_history=list(self._last_missing_history),
+                benchmark_symbol=self._last_benchmark_symbol,
+                benchmark_source=self._last_benchmark_source,
+                day_pnl_source=self._last_day_pnl_source,
+            )
         )
 
     def _copy_diagnostics(self) -> None:
@@ -1103,7 +779,7 @@ class OverviewTab(QWidget):
             self._add_message("Diagnostics copied to clipboard")
 
     def _clear_history(self) -> None:
-        self.history_store.clear()
+        self.portfolio_service.clear_history()
         self._append_diagnostics(["[UI] Portfolio history cleared"])
         self._add_message("Local portfolio history cleared")
         if self._latest_snapshot is not None:

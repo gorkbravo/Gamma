@@ -24,4 +24,10 @@ def analyze_research(
             lookback_days=payload.lookback_days,
         )
     )
+    runtime.app_context.set_research_scope(
+        payload.scope_type,
+        primary_symbol=payload.primary_symbol,
+        synthetic_positions=[position.to_domain() for position in payload.synthetic_positions],
+    )
+    runtime.app_context.set_research_snapshot(result.snapshot)
     return ResearchAnalyzeResponseModel.from_service_result(result)

@@ -6,6 +6,7 @@ from typing import Dict, List, Protocol, Tuple
 import pandas as pd
 from ib_insync import Contract
 
+from src.application.workspace_service import should_auto_follow_research_symbol
 from src.models.app_mode import AppMode, ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.services.app_context import AppDataContext
@@ -193,11 +194,3 @@ def select_data_provider(
     if context.app_mode == AppMode.RESEARCH:
         return research_provider
     return portfolio_provider
-
-
-def should_auto_follow_research_symbol(
-    app_mode: AppMode,
-    scope_type: ResearchScopeType,
-    auto_follow_toggle: bool,
-) -> bool:
-    return bool(auto_follow_toggle and app_mode == AppMode.RESEARCH and scope_type == ResearchScopeType.SINGLE_TICKER)

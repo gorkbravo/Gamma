@@ -66,6 +66,16 @@ class RiskContributionModel(BaseModel):
     component_var: float | None = None
 
 
+class IndexedValuePoint(BaseModel):
+    index: int
+    value: float
+
+
+class MonteCarloChartsModel(BaseModel):
+    terminal_returns: list[float] = Field(default_factory=list)
+    fan_percentiles: dict[str, list[IndexedValuePoint]] = Field(default_factory=dict)
+
+
 class ExcludedAssetModel(BaseModel):
     symbol: str
     reason: str
@@ -75,6 +85,7 @@ class RiskComputeResponseModel(BaseModel):
     metrics: RiskMetricsModel
     portfolio_return_points: list[TimeSeriesPoint]
     contributions: list[RiskContributionModel]
+    monte_carlo: MonteCarloChartsModel = Field(default_factory=MonteCarloChartsModel)
     excluded_assets: list[ExcludedAssetModel]
     warnings: list[str] = Field(default_factory=list)
 
@@ -101,6 +112,10 @@ class RiskComputeResponseModel(BaseModel):
             metrics=RiskMetricsModel.from_domain(results),
             portfolio_return_points=series_to_points(payload.portfolio_returns),
             contributions=contribution_rows,
+            monte_carlo=MonteCarloChartsModel(
+                terminal_returns=_series_to_float_list(results.monte_carlo_terminal_returns),
+                fan_percentiles=_fan_percentiles_to_payload(results.monte_carlo_fan_percentiles),
+            ),
             excluded_assets=[
                 ExcludedAssetModel(symbol=symbol, reason=reason)
                 for symbol, reason in sorted(results.excluded_assets.items())
@@ -119,3 +134,23 @@ def _to_float(value) -> float | None:
     if np.isnan(numeric):
         return None
     return numeric
+
+
+def _series_to_float_list(series) -> list[float]:
+    if series is None or series.empty:
+        return []
+    clean = series.dropna()
+    return [float(value) for value in clean.tolist()]
+
+
+def _fan_percentiles_to_payload(frame) -> dict[str, list[IndexedValuePoint]]:
+    if frame is None or frame.empty:
+        return {}
+    payload: dict[str, list[IndexedValuePoint]] = {}
+    for column in frame.columns:
+        series = frame[column].dropna()
+        payload[str(column)] = [
+            IndexedValuePoint(index=int(index), value=float(value))
+            for index, value in series.items()
+        ]
+    return payload

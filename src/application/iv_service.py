@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
+from src.application.system_service import normalize_market_data_mode
 from src.services.ibkr_client import IBKRClient
 from src.services.iv_surface_engine import IVSurfaceEngine, IVSurfaceSnapshot
 
@@ -24,21 +25,96 @@ class IVSurfaceResult:
     messages: list[str] = field(default_factory=list)
 
 
+@dataclass
+class IVStreamResult:
+    success: bool
+    symbol: str
+    status: str
+    messages: list[str] = field(default_factory=list)
+
+
 class IVService:
     def __init__(self, client: IBKRClient, market_data_mode: str = "delayed") -> None:
         self.client = client
-        self.market_data_mode = self.normalize_market_data_mode(market_data_mode)
+        self.market_data_mode = normalize_market_data_mode(market_data_mode)
+        self._engine: IVSurfaceEngine | None = None
+        self._active_symbol = "SPY"
 
     @staticmethod
     def normalize_market_data_mode(value: str | None) -> str:
-        mode = str(value or "").strip().lower()
-        if mode in {"delayed", "live", "auto"}:
-            return mode
-        return "delayed"
+        return normalize_market_data_mode(value)
+
+    def set_market_data_mode(self, value: str | None) -> None:
+        normalized = self.normalize_market_data_mode(value)
+        if normalized == self.market_data_mode:
+            return
+        was_running = self.is_running()
+        active_symbol = self.active_symbol()
+        self.stop_stream()
+        self.market_data_mode = normalized
+        if was_running:
+            self.start_stream(active_symbol or "SPY")
 
     def create_engine(self, market_data_mode: str | None = None) -> IVSurfaceEngine:
-        mode = self.normalize_market_data_mode(market_data_mode or self.market_data_mode)
+        mode = normalize_market_data_mode(market_data_mode or self.market_data_mode)
         return IVSurfaceEngine(client=self.client, market_data_mode=mode)
+
+    def start_stream(self, symbol: str = "SPY") -> bool:
+        self.stop_stream()
+        self._active_symbol = str(symbol or "").strip().upper() or "SPY"
+        self._engine = self.create_engine()
+        return self._engine.start(self._active_symbol)
+
+    def start_stream_session(self, symbol: str = "SPY") -> IVStreamResult:
+        normalized_symbol = str(symbol or "").strip().upper() or "SPY"
+        if not self.client.mock and not self.client.is_connected():
+            return IVStreamResult(
+                success=False,
+                symbol=normalized_symbol,
+                status="Error: Not connected",
+                messages=["Connect to IBKR first, then start the surface."],
+            )
+        if self.start_stream(normalized_symbol):
+            return IVStreamResult(
+                success=True,
+                symbol=normalized_symbol,
+                status=f"Starting ({normalized_symbol})",
+            )
+        return IVStreamResult(
+            success=False,
+            symbol=normalized_symbol,
+            status="Error",
+            messages=["Unable to start IV surface engine."],
+        )
+
+    def stop_stream(self) -> None:
+        if self._engine is not None:
+            self._engine.stop()
+            self._engine = None
+
+    def is_running(self) -> bool:
+        return self._engine.is_running() if self._engine is not None else False
+
+    def status_text(self) -> str:
+        if self._engine is None:
+            return "Idle"
+        return self._engine.status_text()
+
+    def drain_messages(self) -> list[str]:
+        if self._engine is None:
+            return []
+        return self._engine.drain_messages()
+
+    def latest_snapshot(self) -> IVSurfaceSnapshot | None:
+        if self._engine is None:
+            return None
+        return self._engine.snapshot()
+
+    def active_symbol(self) -> str | None:
+        snapshot = self.latest_snapshot()
+        if snapshot is not None:
+            return snapshot.symbol
+        return self._active_symbol
 
     def get_surface(self, request: IVSurfaceRequest) -> IVSurfaceResult:
         symbol = str(request.symbol or "").strip().upper() or "SPY"

@@ -16,20 +16,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.application.runtime import build_runtime
+from src.application.system_service import market_data_mode_label
 from src.models.app_mode import AppMode
-from src.services.app_context import AppDataContext
-from src.services.cache import CacheService
 from src.services.data_providers import (
-    PortfolioDataProvider,
-    ResearchDataProvider,
     select_data_provider,
 )
-from src.services.fx import FXService
-from src.services.ibkr_client import IBKRClient
-from src.services.market_data import MarketDataService
-from src.services.mock_data import MockDataService
-from src.services.portfolio_history_store import PortfolioHistoryStore
-from src.services.risk_free_rate import RiskFreeRateService
 from src.ui.landing_page import LandingPage
 from src.ui.tabs.iv_surface_tab import IVSurfaceTab
 from src.ui.tabs.overview_tab import OverviewTab
@@ -44,75 +36,46 @@ class MainWindow(QMainWindow):
         self._market_data_mode = "delayed"
         self._last_connection_status = "Status: Disconnected"
 
-        base_currency = os.getenv("BASE_CURRENCY", "EUR")
-        auto_refresh = int(os.getenv("AUTO_REFRESH_SECONDS", "60") or 0)
-        lookback = int(os.getenv("HIST_LOOKBACK_DAYS_DEFAULT", "252") or 252)
-        quote_timeout = float(os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2") or 2.0)
-        market_data_mode = self._normalize_market_data_mode(os.getenv("IB_MARKET_DATA_MODE", "delayed"))
-        self._market_data_mode = market_data_mode
-
-        mock_env = os.getenv("MOCK_DATA")
-        mock_mode = True if mock_env is None else mock_env.lower() == "true"
-        host = os.getenv("IB_HOST", "127.0.0.1")
-        port = int(os.getenv("IB_PORT", "7497"))
-        client_id = int(os.getenv("IB_CLIENT_ID", "1"))
-        account = (os.getenv("IB_ACCOUNT", "") or "").strip() or None
-
-        self.app_context = AppDataContext()
-        self.mock_service = MockDataService()
-        self.client = IBKRClient(host, port, client_id, account, mock_mode, self.mock_service)
-        self.client.set_market_data_mode(market_data_mode)
-        self.cache = CacheService(ttl_hours=24)
-        self.market_data = MarketDataService(
-            self.client.ib,
-            self.cache,
-            ib_runner=self.client.ib_runner,
-            market_data_mode=market_data_mode,
-        )
-        self.fx_service = FXService(
-            self.client.ib, cache=self.cache, market_data=self.market_data, ib_runner=self.client.ib_runner
-        )
-        self.portfolio_history = PortfolioHistoryStore(mock=mock_mode)
-        self.risk_free_service = RiskFreeRateService(cache=self.cache)
-
-        self.portfolio_provider = PortfolioDataProvider(self.client, self.market_data, self.mock_service)
-        self.research_provider = ResearchDataProvider(
-            self.client,
-            self.market_data,
-            self.mock_service,
-            self.app_context,
-            base_currency,
-        )
+        self.runtime = build_runtime()
+        self._market_data_mode = self.runtime.market_data_mode
+        self.app_context = self.runtime.app_context
+        self.client = self.runtime.client
+        self.market_data = self.runtime.market_data
+        self.portfolio_provider = self.runtime.portfolio_provider
+        self.research_provider = self.runtime.research_provider
 
         self.tabs = QTabWidget()
         self.overview_tab = OverviewTab(
             client=self.client,
             market_data=self.market_data,
-            fx_service=self.fx_service,
-            history_store=self.portfolio_history,
-            base_currency=base_currency,
-            market_data_mode=market_data_mode,
-            auto_refresh_seconds=auto_refresh,
-            quote_timeout_seconds=quote_timeout,
+            fx_service=self.runtime.fx_service,
+            history_store=self.runtime.portfolio_history,
+            portfolio_service=self.runtime.portfolio_service,
+            base_currency=self.runtime.base_currency,
+            market_data_mode=self.runtime.market_data_mode,
+            auto_refresh_seconds=self.runtime.auto_refresh_seconds,
+            quote_timeout_seconds=self.runtime.quote_timeout_seconds,
         )
         self.research_overview_tab = ResearchOverviewTab(
             app_context=self.app_context,
             provider=self.research_provider,
-            base_currency=base_currency,
+            base_currency=self.runtime.base_currency,
         )
         self.risk_tab = RiskTab(
             client=self.client,
             market_data=self.market_data,
-            mock_service=self.mock_service,
-            risk_free_service=self.risk_free_service,
-            base_currency=base_currency,
-            default_lookback=lookback,
+            mock_service=self.runtime.mock_service,
+            risk_free_service=self.runtime.risk_free_service,
+            risk_service=self.runtime.risk_service,
+            base_currency=self.runtime.base_currency,
+            default_lookback=self.runtime.default_lookback_days,
             app_context=self.app_context,
             data_provider=self.portfolio_provider,
         )
         self.iv_surface_tab = IVSurfaceTab(
             client=self.client,
-            market_data_mode=market_data_mode,
+            iv_service=self.runtime.iv_service,
+            market_data_mode=self.runtime.market_data_mode,
             app_context=self.app_context,
         )
 
@@ -132,7 +95,7 @@ class MainWindow(QMainWindow):
         self._shell_timer.timeout.connect(self._sync_shell_state)
         self._shell_timer.start()
 
-        if mock_mode:
+        if self.runtime.mock_mode:
             self.overview_tab.set_mock_mode_ui()
         else:
             self._on_connection_state_changed(
@@ -254,18 +217,9 @@ class MainWindow(QMainWindow):
         )
         self._sync_shell_state()
 
-    @staticmethod
-    def _normalize_market_data_mode(value: str | None) -> str:
-        mode = str(value or "").strip().lower()
-        if mode in {"delayed", "live", "auto"}:
-            return mode
-        return "delayed"
-
     def _on_market_data_mode_changed(self, mode: str) -> None:
-        normalized = self._normalize_market_data_mode(mode)
+        normalized = self.runtime.set_market_data_mode(mode)
         self._market_data_mode = normalized
-        self.market_data.set_market_data_mode(normalized)
-        self.client.set_market_data_mode(normalized)
         self.iv_surface_tab.set_market_data_mode(normalized)
         self.market_mode_label.setText(f"Market Data: {'Live' if normalized == 'live' else 'Delayed'}")
         self._append_shell_message(
@@ -310,7 +264,9 @@ class MainWindow(QMainWindow):
         self._sync_shell_state()
 
     def _sync_shell_state(self) -> None:
-        self.market_mode_label.setText(f"Market Data: {'Live' if self._market_data_mode == 'live' else 'Delayed'}")
+        self.market_mode_label.setText(
+            f"Market Data: {market_data_mode_label(self._market_data_mode, self.runtime.mock_mode)}"
+        )
         current = self.tabs.currentWidget()
         active_symbol = "--"
         status_text = self._last_connection_status
@@ -349,16 +305,11 @@ class MainWindow(QMainWindow):
             pass
         try:
             self.iv_surface_tab.timer.stop()
-            self.iv_surface_tab.engine.stop()
+            self.runtime.iv_service.stop_stream()
         except Exception:
             pass
         try:
-            if not self.client.mock and self.client.is_connected():
-                self.client.disconnect()
-        except Exception:
-            pass
-        try:
-            self.client.shutdown()
+            self.runtime.shutdown()
         except Exception:
             pass
         event.accept()

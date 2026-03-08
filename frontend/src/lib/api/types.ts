@@ -19,6 +19,25 @@ export interface SystemStatus {
   cached_symbols: string[];
 }
 
+export interface DiagnosticsResponse {
+  generated_at: string;
+  mock_mode: boolean;
+  base_currency: string;
+  market_data_mode: string;
+  connection: ConnectionState;
+  history_cache: Record<string, number>;
+  local_history_entries: number;
+  local_history_path: string;
+  recent_errors: string[];
+  cached_symbols: string[];
+  research_scope_type: string;
+  research_primary_symbol: string | null;
+  research_synthetic_count: number;
+  iv_running: boolean;
+  iv_status_text: string;
+  iv_active_symbol: string | null;
+}
+
 export interface TimeSeriesPoint {
   timestamp: string;
   value: number;
@@ -64,6 +83,20 @@ export interface PortfolioHistoryPoint {
 export interface PortfolioHistoryResponse {
   source: string;
   points: PortfolioHistoryPoint[];
+}
+
+export interface PortfolioPerformanceResponse {
+  benchmark_symbol: string;
+  benchmark_source: string;
+  performance_points: TimeSeriesPoint[];
+  benchmark_points: TimeSeriesPoint[];
+  portfolio_base_value: number | null;
+  missing_symbols: string[];
+  day_pnl: number | null;
+  day_pnl_pct: number | null;
+  day_pnl_source: string | null;
+  message: string | null;
+  warnings: string[];
 }
 
 export interface ResearchWeightPoint {
@@ -135,6 +168,16 @@ export interface RiskContribution {
   component_var: number | null;
 }
 
+export interface IndexedValuePoint {
+  index: number;
+  value: number;
+}
+
+export interface RiskMonteCarloCharts {
+  terminal_returns: number[];
+  fan_percentiles: Record<string, IndexedValuePoint[]>;
+}
+
 export interface ExcludedAsset {
   symbol: string;
   reason: string;
@@ -144,6 +187,7 @@ export interface RiskResult {
   metrics: RiskMetrics;
   portfolio_return_points: TimeSeriesPoint[];
   contributions: RiskContribution[];
+  monte_carlo: RiskMonteCarloCharts;
   excluded_assets: ExcludedAsset[];
   warnings: string[];
 }
@@ -159,5 +203,19 @@ export interface IvSurface {
   delayed: boolean | null;
   points: number;
   warnings: string[];
+  messages: string[];
+}
+
+export interface ActionResponse {
+  success: boolean;
+  lines: string[];
+}
+
+export interface IvSessionStatus {
+  running: boolean;
+  status_text: string;
+  active_symbol: string | null;
+  market_data_mode: string;
+  surface: IvSurface;
   messages: string[];
 }

@@ -11,6 +11,7 @@ from src.application.iv_service import IVService
 from src.application.portfolio_service import PortfolioService
 from src.application.research_service import ResearchService
 from src.application.risk_service import RiskService
+from src.application.system_service import normalize_market_data_mode
 from src.services.app_context import AppDataContext
 from src.services.cache import CacheService
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
@@ -46,6 +47,14 @@ class ApplicationRuntime:
     risk_service: RiskService
     iv_service: IVService
 
+    def set_market_data_mode(self, value: str | None) -> str:
+        normalized = normalize_market_data_mode(value)
+        self.market_data_mode = normalized
+        self.market_data.set_market_data_mode(normalized)
+        self.client.set_market_data_mode(normalized)
+        self.iv_service.set_market_data_mode(normalized)
+        return normalized
+
     def shutdown(self) -> None:
         try:
             self.client.shutdown()
@@ -67,7 +76,7 @@ def build_runtime(
     auto_refresh = int(os.getenv("AUTO_REFRESH_SECONDS", "60") or 0)
     lookback = int(os.getenv("HIST_LOOKBACK_DAYS_DEFAULT", "252") or 252)
     quote_timeout = float(os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2") or 2.0)
-    market_data_mode = _normalize_market_data_mode(os.getenv("IB_MARKET_DATA_MODE", "delayed"))
+    market_data_mode = normalize_market_data_mode(os.getenv("IB_MARKET_DATA_MODE", "delayed"))
 
     if mock_mode is None:
         mock_env = os.getenv("MOCK_DATA")
@@ -111,7 +120,14 @@ def build_runtime(
         base_currency,
     )
 
-    portfolio_service = PortfolioService(client, market_data, fx_service, portfolio_history)
+    portfolio_service = PortfolioService(
+        client,
+        market_data,
+        fx_service,
+        portfolio_history,
+        data_provider=portfolio_provider,
+        mock_service=mock_service,
+    )
     research_service = ResearchService(research_provider)
     risk_service = RiskService(client, market_data, mock_service, risk_free_service)
     iv_service = IVService(client, market_data_mode)
@@ -150,10 +166,3 @@ def reset_runtime() -> None:
         runtime = get_runtime()
         runtime.shutdown()
     get_runtime.cache_clear()
-
-
-def _normalize_market_data_mode(value: str | None) -> str:
-    mode = str(value or "").strip().lower()
-    if mode in {"delayed", "live", "auto"}:
-        return mode
-    return "delayed"

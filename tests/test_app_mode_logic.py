@@ -9,6 +9,7 @@ import pandas as pd
 from src.models.app_mode import AppMode, ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
 from src.services.app_context import AppDataContext
+from src.application.workspace_service import can_forward_research_to_iv, resolve_active_snapshot, resolve_followed_symbol
 from src.services.data_providers import (
     PortfolioDataProvider,
     ResearchDataProvider,
@@ -16,7 +17,6 @@ from src.services.data_providers import (
     should_auto_follow_research_symbol,
 )
 from src.ui.tabs.research_overview_tab import ResearchOverviewTab
-from src.ui.tabs.risk_tab import RiskTab
 
 
 @dataclass
@@ -97,6 +97,12 @@ def test_iv_auto_follow_decision_logic():
     assert not should_auto_follow_research_symbol(AppMode.PORTFOLIO, ResearchScopeType.SINGLE_TICKER, True)
 
 
+def test_research_to_iv_forwarding_requires_single_ticker_scope():
+    assert can_forward_research_to_iv(ResearchScopeType.SINGLE_TICKER)
+    assert not can_forward_research_to_iv(ResearchScopeType.SYNTHETIC_PORTFOLIO)
+    assert not can_forward_research_to_iv(ResearchScopeType.NONE)
+
+
 def test_research_provider_build_snapshot_by_scope():
     ctx = AppDataContext()
     _, research_provider = _make_providers(ctx)
@@ -132,8 +138,7 @@ def test_research_provider_symbol_cache_respects_requested_lookback():
     assert market.calls == [126, 252]
 
 
-def test_risk_tab_keeps_portfolio_snapshot_across_research_mode_switch():
-    ctx = AppDataContext()
+def test_active_snapshot_keeps_portfolio_snapshot_across_research_mode_switch():
     portfolio_snapshot = PortfolioSnapshot(
         timestamp=datetime(2026, 3, 1),
         base_currency="USD",
@@ -148,17 +153,16 @@ def test_risk_tab_keeps_portfolio_snapshot_across_research_mode_switch():
         positions=[],
         net_liquidation=200.0,
     )
-    tab = SimpleNamespace(app_context=ctx, portfolio_snapshot=None)
+    assert resolve_active_snapshot(AppMode.PORTFOLIO, portfolio_snapshot, None) is portfolio_snapshot
+    assert resolve_active_snapshot(AppMode.RESEARCH, portfolio_snapshot, research_snapshot) is research_snapshot
+    assert resolve_active_snapshot(AppMode.PORTFOLIO, portfolio_snapshot, research_snapshot) is portfolio_snapshot
 
-    RiskTab.set_portfolio_snapshot(tab, portfolio_snapshot)
-    assert RiskTab._active_snapshot(tab) is portfolio_snapshot
 
-    ctx.set_app_mode(AppMode.RESEARCH)
-    ctx.set_research_snapshot(research_snapshot)
-    assert RiskTab._active_snapshot(tab) is research_snapshot
-
-    ctx.set_app_mode(AppMode.PORTFOLIO)
-    assert RiskTab._active_snapshot(tab) is portfolio_snapshot
+def test_resolve_followed_symbol_respects_toggle_and_current_value():
+    assert resolve_followed_symbol("AAPL", "SPY", True) == "AAPL"
+    assert resolve_followed_symbol("AAPL", "AAPL", True) is None
+    assert resolve_followed_symbol("AAPL", "SPY", False) is None
+    assert resolve_followed_symbol("", "SPY", True) is None
 
 
 def test_research_overview_effective_positions_uses_weight_concentration():

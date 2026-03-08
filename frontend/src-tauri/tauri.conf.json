@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "StrataLab",
+  "version": "0.1.0",
+  "identifier": "com.stratalab.shell",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --port 5173",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "splashscreen",
+        "title": "Starting StrataLab",
+        "url": "tauri-splash.html",
+        "width": 540,
+        "height": 320,
+        "resizable": false,
+        "decorations": false,
+        "center": true
+      },
+      {
+        "label": "main",
+        "title": "StrataLab",
+        "url": "index.html",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 1200,
+        "minHeight": 760,
+        "center": true,
+        "create": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "resources": ["resources/**/*"]
+  }
+}

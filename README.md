@@ -1,6 +1,20 @@
 # StrataLab
 
-Desktop GUI quant workstation built with Python 3.11+, PySide6, and `ib_insync`. It connects to Interactive Brokers (IBKR) for live portfolio and options data, supports an offline mock mode, and provides portfolio, research, risk, and implied-volatility workflows in one desktop app.
+Hybrid quant workstation in the middle of a strangler migration from PySide6/Qt to Tauri + FastAPI + Svelte. The Python runtime still owns IBKR integration, analytics, mock mode, and shared application services. Today the repo supports three client paths:
+
+- PySide desktop app, which remains the default/fallback desktop client
+- Browser frontend served separately against the local FastAPI backend
+- Tauri desktop shell that launches the Python backend and hosts the browser UI
+
+Phase 9 cutover is not complete yet, so Tauri is buildable and packageable but not yet the primary desktop path.
+
+## Current State
+- Shared application service layer lives in `src/application/`
+- FastAPI backend lives in `src/api/`
+- Browser frontend lives in `frontend/`
+- Tauri shell lives in `frontend/src-tauri/`
+- Windows packaging works through PyInstaller + Tauri NSIS bundling
+- PySide remains intentionally available while broader installed-app QA and final cutover hardening remain open
 
 ## Features
 - Landing page with workspace selection and IBKR connect control
@@ -36,7 +50,8 @@ Desktop GUI quant workstation built with Python 3.11+, PySide6, and `ib_insync`.
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .
+pip install -e .[dev]
+# runtime-only alternative: pip install -e .
 # or: pip install -r requirements.txt
 ```
 
@@ -78,12 +93,60 @@ All `ib_insync` calls are serialized on a dedicated IB thread so the Qt UI remai
 python -m src.main
 ```
 
+## Browser frontend
+```powershell
+cd frontend
+npm install
+$env:VITE_API_BASE="http://127.0.0.1:8000"
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+## Tauri shell (local dev)
+```powershell
+cd frontend
+npm install
+$env:MOCK_DATA="true"
+npm run tauri:dev
+```
+
+The Tauri shell launches the repo-local Python backend itself, waits for its local `/health` endpoint, and only then creates the main window. Current limitations:
+- `npm run tauri:dev` now sets `CARGO_TARGET_DIR` to a temp directory automatically to avoid Windows file-lock failures in `frontend/src-tauri/target`
+- The shell prefers port `8000` but will fall back to another free localhost port if needed; set `STRATALAB_API_PORT` to force a specific port
+- The local-dev shell still expects the repository checkout plus `.venv` to be present locally
+- The browser-only frontend flow remains supported and unchanged
+
+## Tauri packaging (Windows)
+```powershell
+cd frontend
+npm install
+npm run backend:smoke
+npm run tauri:build
+```
+
+The production build now packages the Python backend with PyInstaller before invoking Tauri bundling, so the installed desktop app launches a bundled `stratalab-backend.exe` instead of relying on a repo-local `.venv`.
+
+- `npm run backend:smoke` validates the generated backend executable by waiting for `/health`
+- `npm run tauri:build` produces an NSIS installer; with the default wrapper this lands under `%TEMP%\stratalab-tauri-build\release\bundle\nsis\`
+- Override `CARGO_TARGET_DIR` before running `npm run tauri:build` if you want the installer in a stable custom output directory
+- Packaged runtime state lives under `%APPDATA%\com.stratalab.shell\runtime\`
+- Backend startup diagnostics are written to `%APPDATA%\com.stratalab.shell\runtime\logs\backend-failure.txt`, `backend-stdout.log`, and `backend-stderr.log`
+- PySide remains available as a fallback client while Tauri cutover stays gated on broader workflow QA
+
 ## Mock mode
 Set `MOCK_DATA=true` in `.env` to use local sample data without IBKR.
 
 ## Tests
 ```bash
 .venv\Scripts\python.exe -m pytest
+cd frontend && npm run test
+cd frontend && npm run build
+cd frontend && npm run backend:smoke
+```
+
+## Additional validation
+```bash
+cargo check --manifest-path frontend\src-tauri\Cargo.toml
+cd frontend && npm run tauri:build
 ```
 
 ## Known limitations
@@ -103,6 +166,8 @@ Set `MOCK_DATA=true` in `.env` to use local sample data without IBKR.
 ## Repo layout
 ```
 src/
+  application/
+  api/
   main.py
   ui/
     main_window.py
@@ -140,5 +205,6 @@ src/
     time.py
 tests/
 docs/
+frontend/
 sample_data/
 ```
