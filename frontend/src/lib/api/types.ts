@@ -1,3 +1,5 @@
+export type WorkspaceMode = "portfolio" | "research";
+
 export type TabId = "portfolio" | "research" | "risk" | "iv";
 
 export interface ConnectionState {

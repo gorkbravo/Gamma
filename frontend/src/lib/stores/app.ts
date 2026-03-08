@@ -94,10 +94,13 @@ function appendDiagnosticsLog(lines: string[], heading?: string) {
 export async function refreshSystemStatus() {
   setLoading("status", true);
   try {
-    systemStatus.set(await getJson<SystemStatus>("/system/status"));
+    const nextStatus = await getJson<SystemStatus>("/system/status");
+    systemStatus.set(nextStatus);
     lastError.set("");
+    return nextStatus;
   } catch (error) {
     setError(error);
+    return null;
   } finally {
     setLoading("status", false);
   }
@@ -129,8 +132,10 @@ export async function toggleConnection() {
           }
     );
     lastError.set("");
+    return nextStatus;
   } catch (error) {
     setError(error);
+    return null;
   } finally {
     setLoading("status", false);
   }

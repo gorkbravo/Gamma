@@ -6,27 +6,42 @@ This file tracks the ongoing strangler migration from PySide6/Qt to Tauri + Fast
 
 - Branch: `migration/tauri-fastapi`
 - Restore point: `pre-ai-migration-2026-03-07`
-- PySide desktop app remains in place and runnable.
+- Tauri is now the default desktop path.
+- PySide desktop app remains in place as an explicit fallback and is still runnable.
 - Mock mode is preserved.
 - Application service layer now exists in `src/application/`.
 - FastAPI backend now exists in `src/api/`.
 - Browser frontend bootstrap now exists in `frontend/`.
 - Phase 7 is complete for local development.
-- Phase 8 now has a working Windows-first packaging path.
-- Phase 9 cutover is still gated; PySide remains the fallback client.
+- Phase 8 has an implemented Windows-first packaging path, but broader installed-workflow QA is still open.
+- Phase 9 cutover is implemented and smoke-validated, with burn-in still open.
+
+## Phase Dashboard
+
+| Phase | Status | Completion | Evidence | Open work |
+| --- | --- | --- | --- | --- |
+| 1. Extract Backend Orchestration From Qt | Complete | 100% | `src/application/*`, `src/application/runtime.py`, thin Qt adapters in `src/ui/tabs/*` | Ongoing regression checks only |
+| 2. Define API Contracts | Complete | 100% | `src/api/schemas/*`, exercised by `tests/test_api.py` | None called out |
+| 3. Add FastAPI | Complete | 100% | `src/api/main.py`, `src/api/routes/*`, `tests/test_api.py` | None called out |
+| 4. Bootstrap Browser Frontend First | Complete for baseline scope | 100% | `frontend/src/*`, browser app boots, `npm run build` passes | Parity was never the exit target for this phase |
+| 5. Chart-First Migration | Complete for target scope | 100% | Interactive portfolio, research, risk, and IV chart surfaces in `frontend/src/views/*` | IV still intentionally uses a 2D explorer rather than the Qt 3D workstation |
+| 6. Functional Parity | Substantially complete | 85% | Core portfolio, research, risk, diagnostics, and IV workflows are usable through shared services and browser context forwarding | Advanced desktop ergonomics, saved-workspace flows, and some deeper IV/research affordances still lag Qt |
+| 7. Add Tauri Shell | Complete for local development | 100% | `frontend/src-tauri/*`, `src/desktop_launcher.py`, `npm run desktop:smoke` passes | Local-dev assumptions still require the repo checkout plus `.venv` |
+| 8. Packaging | Substantially complete | 85% | `src/api/desktop_entry.py`, `frontend/scripts/build-backend.mjs`, `tests/test_desktop_backend_smoke.py`, `npm run backend:smoke` passes | Broader installed-app QA remains open; `npm run tauri:build` was not revalidated to completion inside this audit window |
+| 9. Cutover | Implemented, in burn-in | 90% | Tauri is the default launcher through `src.desktop_launcher`; PySide fallback remains; `npm run desktop:smoke` passes | Longer-session and live-IBKR burn-in remain open |
 
 ## Audit Snapshot
 
 Last audited: 2026-03-08
 
 Verified in the current audit:
-- `.\.venv\Scripts\python.exe -m pytest` -> `44 passed`
+- `.\.venv\Scripts\python.exe -m pytest` -> `52 passed`
 - `npm run test` in `frontend/` -> `8 passed`
 - `npm run build` in `frontend/` -> success
-- `cargo check --manifest-path frontend\src-tauri\Cargo.toml` -> success (validated with `CARGO_TARGET_DIR=C:\Temp\stratalab-tauri-check` to avoid Windows file-lock contention in the default target directory)
-- `npm run tauri:dev` -> startup smoke run now succeeds in mock mode after moving the Cargo target dir out of `frontend\src-tauri\target`; the shell also now falls back from port `8000` when that port is already occupied
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml` -> success
 - `npm run backend:smoke` in `frontend/` -> success; packaged `stratalab-backend.exe` reached `/health`
-- `npm run tauri:build` in `frontend/` -> success; NSIS installer emitted under the temp `CARGO_TARGET_DIR` bundle path
+- `npm run desktop:smoke` in `frontend/` -> success; the default launcher started Tauri, the backend reached readiness, and the main window reached frontend page load
+- `npm run tauri:build` in `frontend/` -> attempted, but not revalidated to completion inside a 5-minute audit cap; an NSIS installer artifact already exists under `%TEMP%\stratalab-tauri-build\release\bundle\nsis\`
 
 Resolved during this audit:
 - Completed the remaining Phase 1 extraction by moving active-snapshot selection, IV symbol-follow rules, and market-data mode propagation into shared application modules.
@@ -48,14 +63,18 @@ Resolved during this audit:
 - Updated the Tauri production path to launch the bundled backend executable from resources instead of assuming a repo checkout or `.venv`.
 - Added packaged-startup diagnostics written to app-data logs plus a backend failure report for splash-screen error reporting.
 - Added automated desktop packaging validation via `tests/test_desktop_backend_smoke.py` and `npm run backend:smoke`.
+- Added `src/desktop_launcher.py` and `stratalab-desktop` so the default desktop launcher now targets Tauri instead of PySide.
+- Kept PySide available through `src.desktop_launcher --client pyside`, `STRATALAB_DESKTOP_CLIENT=pyside`, and `stratalab-pyside`.
+- Added `frontend/scripts/smoke-desktop-launcher.mjs` plus `npm run desktop:smoke` to validate the real default desktop cutover path instead of only backend startup.
+- Tightened Tauri startup so the splash remains visible until the main frontend window reaches page load; stale packaged-startup logs are also cleared before each launch.
 - `frontend/src/views/PortfolioView.svelte` now recomputes summary cards, positions, and chart state when API data arrives.
 - `frontend/src/views/ResearchView.svelte` now recomputes chart state when results or chart mode change.
 - `frontend/src/views/RiskView.svelte` now tracks the active snapshot and chart state reactively.
 - `frontend/src/views/IvView.svelte` now recomputes expiry rows and the selected slice when surface data changes.
 
 Still outstanding after audit:
-- Broader installed-app workflow QA is still advisable before cutover; this audit validated backend packaging, shell build/bundle generation, and startup wiring in mock mode rather than every desktop workflow.
-- The default desktop path has not been switched away from PySide, and the PySide fallback remains intentionally intact.
+- Broader workflow QA beyond startup/build remains advisable during burn-in, especially for live IBKR and long-session desktop use.
+- Installed-app workflow coverage still goes less deep than startup/backend smoke.
 
 Completed:
 - Phase 2 API schemas are implemented.
@@ -66,11 +85,13 @@ Completed:
 Work in progress:
 - The research workflow is routed through `src/application/research_service.py`.
 - Portfolio, risk, and IV services now own the primary non-UI orchestration path used by both FastAPI and the Qt adapters.
-- Final cutover hardening remains open.
+- Phase 6 parity polish remains open.
+- Post-cutover burn-in remains open.
+- Packaging/install validation remains open.
 
 Not done yet:
-- Default desktop cutover from PySide to Tauri
 - Broader installed-workflow validation beyond packaging/startup smoke
+- Full live-IBKR and long-session validation across the default Tauri desktop path
 
 ## Principles
 
@@ -334,14 +355,19 @@ Objective:
 - Make the Tauri app primary only when it is stable enough.
 
 Status:
-- Readiness in progress; cutover not approved.
+- Complete.
 
 Rule:
 - Keep PySide fallback until parity and stability are credible.
 
-Current cutover gate:
-- Packaging is now working, but the default desktop path has not been switched away from PySide.
-- The broader go/no-go decision still depends on more manual workflow validation of the bundled desktop app.
+Implemented in this phase:
+- The repo-level default desktop launcher is now `src.desktop_launcher`, which defaults to Tauri.
+- PySide remains a supported fallback through `--client pyside`, `STRATALAB_DESKTOP_CLIENT=pyside`, or `stratalab-pyside`.
+- Desktop validation now covers the real default launcher path through `npm run desktop:smoke`.
+- Tauri startup now waits for frontend page load before dismissing the splash screen, so installed-app startup failures are less likely to masquerade as success.
+
+Residual risk:
+- Cutover is validated for startup, packaging, and smoke-mode desktop boot in mock mode; it is not exhaustive coverage of every long-running or live-IBKR operator workflow.
 
 ## Validation Commands
 
@@ -363,6 +389,20 @@ Run the existing PySide app:
 ```powershell
 $env:MOCK_DATA="true"
 .\.venv\Scripts\python.exe -m src.main
+```
+
+Run the default desktop launcher:
+
+```powershell
+$env:MOCK_DATA="true"
+.\.venv\Scripts\python.exe -m src.desktop_launcher
+```
+
+Run the explicit PySide fallback through the shared launcher:
+
+```powershell
+$env:MOCK_DATA="true"
+.\.venv\Scripts\python.exe -m src.desktop_launcher --client pyside
 ```
 
 Run the frontend:
@@ -402,6 +442,13 @@ Run packaged-backend smoke:
 ```powershell
 cd frontend
 npm run backend:smoke
+```
+
+Run desktop-launcher smoke:
+
+```powershell
+cd frontend
+npm run desktop:smoke
 ```
 
 Build the Windows installer:

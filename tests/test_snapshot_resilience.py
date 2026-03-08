@@ -31,6 +31,23 @@ def test_fetch_snapshot_returns_partial_snapshot_when_totals_fail():
     assert any(w.startswith("Snapshot totals failed: AssertionError") for w in snapshot.warnings)
 
 
+def test_fetch_snapshot_returns_warning_when_ibkr_disconnected():
+    client = _mock_client()
+    client.mock = False
+
+    class DisconnectedIB:
+        @staticmethod
+        def isConnected() -> bool:
+            return False
+
+    client.ib = DisconnectedIB()
+    snapshot = client._fetch_snapshot_impl("USD", FXService(None), market_data=None)
+
+    assert snapshot.positions == []
+    assert snapshot.account_summary == {}
+    assert "IBKR not connected" in snapshot.warnings
+
+
 def test_worker_error_includes_type_and_traceback():
     messages: list[str] = []
     worker = Worker(lambda: (_ for _ in ()).throw(AssertionError()))

@@ -3,17 +3,16 @@
   import DistributionChart, { type DistributionMarker } from "../components/DistributionChart.svelte";
   import FanChart from "../components/FanChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
-  import type { PortfolioSnapshot, RiskResult } from "../lib/api/types";
+  import type { PortfolioSnapshot, RiskResult, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions } from "../lib/stores/app";
 
+  export let mode: WorkspaceMode = "portfolio";
   export let snapshot: PortfolioSnapshot | null = null;
   export let researchSnapshot: PortfolioSnapshot | null = null;
-  export let preferredSnapshotSource: "portfolio" | "research" = "portfolio";
   export let result: RiskResult | null = null;
   export let loading = false;
   export let onCompute: (options: RiskComputeOptions) => void;
 
-  let snapshotSource: "portfolio" | "research" = "portfolio";
   let benchmarkSymbol = "SPY";
   let confidence = 0.95;
   let lookbackDays = 252;
@@ -25,7 +24,6 @@
   let chartMode: "cumulative" | "drawdown" = "drawdown";
 
   let activeSnapshot: PortfolioSnapshot | null = snapshot;
-  let appliedSnapshotPreference: "portfolio" | "research" | null = null;
   let chartSeries: ChartSeries[] = [];
   let realizedReturns: number[] = [];
   let realizedMarkers: DistributionMarker[] = [];
@@ -33,21 +31,9 @@
   let contributionItems: RankBarItem[] = [];
 
   $: activeSnapshot =
-    snapshotSource === "research" && researchSnapshot
+    mode === "research"
       ? researchSnapshot
       : snapshot;
-
-  $: if (preferredSnapshotSource !== appliedSnapshotPreference) {
-    if (preferredSnapshotSource === "research") {
-      if (researchSnapshot) {
-        snapshotSource = "research";
-        appliedSnapshotPreference = preferredSnapshotSource;
-      }
-    } else {
-      snapshotSource = "portfolio";
-      appliedSnapshotPreference = preferredSnapshotSource;
-    }
-  }
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -193,13 +179,15 @@
   <div class="layout">
     <article class="panel controls">
       <div class="field-grid">
-        <label>
-          <span>Snapshot</span>
-          <select bind:value={snapshotSource}>
-            <option value="portfolio">Portfolio Snapshot</option>
-            <option value="research" disabled={!researchSnapshot}>Research Snapshot</option>
-          </select>
-        </label>
+        <article class="mode-card">
+          <span>Snapshot Source</span>
+          <strong>{mode === "portfolio" ? "Portfolio Snapshot" : "Research Snapshot"}</strong>
+          <small>
+            {mode === "portfolio"
+              ? "Risk uses the live portfolio snapshot in portfolio view."
+              : "Risk uses the active research snapshot in research view."}
+          </small>
+        </article>
         <label>
           <span>Benchmark</span>
           <input bind:value={benchmarkSymbol} placeholder="SPY" />
@@ -297,7 +285,7 @@
     <article class="panel">
       <h3>Coverage Diagnostics</h3>
       <div class="list">
-        <div class="row"><span>Snapshot Source</span><strong>{snapshotSource}</strong></div>
+        <div class="row"><span>Snapshot Source</span><strong>{mode === "portfolio" ? "portfolio" : "research"}</strong></div>
         <div class="row"><span>Snapshot Positions</span><strong>{activeSnapshot?.positions.length ?? 0}</strong></div>
         <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
         <div class="row"><span>Covered Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
@@ -490,6 +478,15 @@
   label {
     display: grid;
     gap: 0.45rem;
+  }
+
+  .mode-card {
+    display: grid;
+    gap: 0.45rem;
+    border: 1px solid rgba(19, 32, 44, 0.75);
+    background: rgba(8, 12, 18, 0.9);
+    padding: 0.75rem 0.85rem;
+    align-content: start;
   }
 
   input,

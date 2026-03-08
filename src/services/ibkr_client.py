@@ -671,7 +671,13 @@ class IBKRClient:
     ) -> PortfolioSnapshot:
         self._ensure_event_loop()
         if not self.ib.isConnected():
-            raise RuntimeError("IBKR not connected")
+            return PortfolioSnapshot(
+                timestamp=now_utc(),
+                base_currency=base_currency,
+                account_summary={},
+                positions=[],
+                warnings=["IBKR not connected"],
+            )
         subscription_warnings = self._ensure_account_subscription()
         try:
             account_summary = self._snapshot_account_summary()

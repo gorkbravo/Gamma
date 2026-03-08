@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -15,6 +16,7 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewWindowBuilder};
 const API_HOST: &str = "127.0.0.1";
 const DEFAULT_API_PORT: u16 = 8000;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
+const FRONTEND_LOAD_TIMEOUT: Duration = Duration::from_secs(20);
 const BUNDLED_BACKEND_NAME: &str = "stratalab-backend";
 const LOG_TAIL_BYTES: usize = 2048;
 
@@ -47,14 +49,38 @@ struct BackendLaunch {
     stderr_log: PathBuf,
 }
 
-#[derive(Default)]
-struct BackendState {
+struct DesktopState {
     child: Mutex<Option<Child>>,
+    frontend_loaded: AtomicBool,
+    api_base: Mutex<Option<String>>,
+}
+
+impl Default for DesktopState {
+    fn default() -> Self {
+        Self {
+            child: Mutex::new(None),
+            frontend_loaded: AtomicBool::new(false),
+            api_base: Mutex::new(None),
+        }
+    }
 }
 
 fn main() {
     let app = tauri::Builder::default()
-        .manage(BackendState::default())
+        .manage(DesktopState::default())
+        .on_page_load(|window, _payload| {
+            if window.label() != "main" {
+                return;
+            }
+            let app = window.app_handle();
+            let state = app.state::<DesktopState>();
+            state.frontend_loaded.store(true, Ordering::SeqCst);
+            let _ = reveal_main_window(&app);
+            let _ = write_smoke_marker(&app, window.label());
+            if env::var("STRATALAB_DESKTOP_SMOKE_FILE").is_ok() {
+                app.exit(0);
+            }
+        })
         .setup(|app| {
             let app_handle = app.handle().clone();
             thread::spawn(move || {
@@ -80,6 +106,14 @@ fn bootstrap_backend(app: &AppHandle) -> Result<(), String> {
     let api_base = format!("http://{API_HOST}:{api_port}");
     let health_url = format!("{api_base}/health");
     let launch = resolve_backend_launch(app)?;
+    {
+        let state = app.state::<DesktopState>();
+        state.frontend_loaded.store(false, Ordering::SeqCst);
+        *state
+            .api_base
+            .lock()
+            .map_err(|_| "Desktop state lock poisoned".to_string())? = Some(api_base.clone());
+    }
 
     update_splash(
         app,
@@ -101,17 +135,21 @@ fn bootstrap_backend(app: &AppHandle) -> Result<(), String> {
     wait_for_health(&mut child, &health_url, &launch)?;
 
     {
-        let state = app.state::<BackendState>();
+        let state = app.state::<DesktopState>();
         *state
             .child
             .lock()
             .map_err(|_| "Backend state lock poisoned".to_string())? = Some(child);
     }
 
+    update_splash(
+        app,
+        "Loading frontend",
+        "Backend is ready. Waiting for the desktop UI to finish loading.",
+    );
     create_main_window(app, &api_base)?;
-    if let Some(splash) = app.get_webview_window("splashscreen") {
-        let _ = splash.close();
-    }
+    wait_for_frontend_load(app)?;
+    reveal_main_window(app)?;
     Ok(())
 }
 
@@ -120,27 +158,51 @@ fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, String> {
     let cache_dir = runtime_root.join("cache");
     let history_dir = runtime_root.join("data");
     let log_dir = runtime_root.join("logs");
-    fs::create_dir_all(&cache_dir)
-        .map_err(|error| format!("Failed to create cache directory {}: {error}", cache_dir.display()))?;
+    fs::create_dir_all(&cache_dir).map_err(|error| {
+        format!(
+            "Failed to create cache directory {}: {error}",
+            cache_dir.display()
+        )
+    })?;
     fs::create_dir_all(&history_dir).map_err(|error| {
         format!(
             "Failed to create history directory {}: {error}",
             history_dir.display()
         )
     })?;
-    fs::create_dir_all(&log_dir)
-        .map_err(|error| format!("Failed to create log directory {}: {error}", log_dir.display()))?;
+    fs::create_dir_all(&log_dir).map_err(|error| {
+        format!(
+            "Failed to create log directory {}: {error}",
+            log_dir.display()
+        )
+    })?;
 
     let failure_report = log_dir.join("backend-failure.txt");
     let stdout_log = log_dir.join("backend-stdout.log");
     let stderr_log = log_dir.join("backend-stderr.log");
+    clear_startup_artifacts([
+        failure_report.as_path(),
+        stdout_log.as_path(),
+        stderr_log.as_path(),
+    ])?;
 
     if let Some(executable) = bundled_backend_executable(app)? {
         let working_dir = executable
             .parent()
-            .ok_or_else(|| format!("Bundled backend path has no parent: {}", executable.display()))?
+            .ok_or_else(|| {
+                format!(
+                    "Bundled backend path has no parent: {}",
+                    executable.display()
+                )
+            })?
             .to_path_buf();
         let sample_data_dir = working_dir.join("sample_data");
+        if !sample_data_dir.exists() {
+            return Err(format!(
+                "Bundled backend sample data directory is missing at {}",
+                sample_data_dir.display()
+            ));
+        }
         return Ok(BackendLaunch {
             mode: BackendMode::Bundled,
             executable,
@@ -160,12 +222,19 @@ fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, String> {
         "Unable to locate the StrataLab repository root. Set STRATALAB_REPO_ROOT if you are running from a non-standard location.".to_string()
     })?;
     let executable = python_path(&repo_root)?;
+    let sample_data_dir = repo_root.join("sample_data");
+    if !sample_data_dir.exists() {
+        return Err(format!(
+            "Repository sample data directory is missing at {}",
+            sample_data_dir.display()
+        ));
+    }
     Ok(BackendLaunch {
         mode: BackendMode::Development,
         executable,
         args: vec!["-m".into(), "src.api.desktop_entry".into()],
         working_dir: repo_root.clone(),
-        sample_data_dir: repo_root.join("sample_data"),
+        sample_data_dir,
         cache_dir,
         history_dir,
         log_dir,
@@ -181,8 +250,12 @@ fn app_data_root(app: &AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map_err(|error| format!("Failed to resolve the StrataLab app-data directory: {error}"))?
         .join("runtime");
-    fs::create_dir_all(&root)
-        .map_err(|error| format!("Failed to create app-data directory {}: {error}", root.display()))?;
+    fs::create_dir_all(&root).map_err(|error| {
+        format!(
+            "Failed to create app-data directory {}: {error}",
+            root.display()
+        )
+    })?;
     Ok(root)
 }
 
@@ -200,6 +273,22 @@ fn bundled_backend_executable(app: &AppHandle) -> Result<Option<PathBuf>, String
     } else {
         Ok(None)
     }
+}
+
+fn clear_startup_artifacts<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Result<(), String> {
+    for path in paths {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Failed to clear stale startup artifact {}: {error}",
+                    path.display()
+                ))
+            }
+        }
+    }
+    Ok(())
 }
 
 fn executable_name(base_name: &str) -> String {
@@ -220,9 +309,20 @@ fn spawn_backend(launch: &BackendLaunch, api_port: u16) -> Result<Child, String>
         .env("SAMPLE_DATA_DIR", &launch.sample_data_dir)
         .env("STRATALAB_LOG_DIR", &launch.log_dir)
         .env("STRATALAB_BACKEND_FAILURE_REPORT", &launch.failure_report)
-        .env("STRATALAB_APP_DATA_DIR", launch.cache_dir.parent().unwrap_or(&launch.cache_dir));
+        .env(
+            "STRATALAB_APP_DATA_DIR",
+            launch.cache_dir.parent().unwrap_or(&launch.cache_dir),
+        );
 
-    for key in ["MOCK_DATA", "LOG_LEVEL", "IB_MARKET_DATA_MODE", "IB_HOST", "IB_PORT", "IB_CLIENT_ID", "IB_ACCOUNT"] {
+    for key in [
+        "MOCK_DATA",
+        "LOG_LEVEL",
+        "IB_MARKET_DATA_MODE",
+        "IB_HOST",
+        "IB_PORT",
+        "IB_CLIENT_ID",
+        "IB_ACCOUNT",
+    ] {
         if let Ok(value) = env::var(key) {
             command.env(key, value);
         }
@@ -247,7 +347,9 @@ fn spawn_backend(launch: &BackendLaunch, api_port: u16) -> Result<Child, String>
                 launch.stderr_log.display()
             )
         })?;
-        command.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
+        command
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
     }
 
     command.spawn().map_err(|error| {
@@ -259,7 +361,11 @@ fn spawn_backend(launch: &BackendLaunch, api_port: u16) -> Result<Child, String>
     })
 }
 
-fn wait_for_health(child: &mut Child, health_url: &str, launch: &BackendLaunch) -> Result<(), String> {
+fn wait_for_health(
+    child: &mut Child,
+    health_url: &str,
+    launch: &BackendLaunch,
+) -> Result<(), String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -327,8 +433,8 @@ fn create_main_window(app: &AppHandle, api_base: &str) -> Result<(), String> {
     if app.get_webview_window("main").is_some() {
         return Ok(());
     }
-    let api_base_json = serde_json::to_string(api_base)
-        .unwrap_or_else(|_| "\"http://127.0.0.1:8000\"".to_string());
+    let api_base_json =
+        serde_json::to_string(api_base).unwrap_or_else(|_| "\"http://127.0.0.1:8000\"".to_string());
     let init_script = format!("window.__STRATALAB_API_BASE__ = {api_base_json};");
     let window_config = app
         .config()
@@ -340,18 +446,84 @@ fn create_main_window(app: &AppHandle, api_base: &str) -> Result<(), String> {
         .ok_or_else(|| "Main window config is missing".to_string())?;
     let window = WebviewWindowBuilder::from_config(app, &window_config)
         .map_err(|error| format!("Failed to create main window builder: {error}"))?
+        .visible(false)
         .initialization_script(&init_script)
         .build()
         .map_err(|error| format!("Failed to create main window: {error}"))?;
+    let _ = window.hide();
+    Ok(())
+}
+
+fn wait_for_frontend_load(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<DesktopState>();
+    let deadline = Instant::now() + FRONTEND_LOAD_TIMEOUT;
+    while Instant::now() < deadline {
+        if state.frontend_loaded.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.close();
+    }
+    Err("Timed out waiting for the desktop frontend to finish loading.".to_string())
+}
+
+fn reveal_main_window(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window was not available to show.".to_string())?;
     window
         .show()
         .map_err(|error| format!("Failed to show main window: {error}"))?;
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    if let Some(splash) = app.get_webview_window("splashscreen") {
+        let _ = splash.close();
+    }
     Ok(())
+}
+
+fn write_smoke_marker(app: &AppHandle, window_label: &str) -> Result<(), String> {
+    let marker = match env::var("STRATALAB_DESKTOP_SMOKE_FILE") {
+        Ok(value) if !value.trim().is_empty() => PathBuf::from(value),
+        _ => return Ok(()),
+    };
+    if let Some(parent) = marker.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "Failed to create desktop smoke marker directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let api_base = app
+        .state::<DesktopState>()
+        .api_base
+        .lock()
+        .map_err(|_| "Desktop state lock poisoned".to_string())?
+        .clone()
+        .unwrap_or_else(|| format!("http://{API_HOST}:{DEFAULT_API_PORT}"));
+    let payload = serde_json::json!({
+        "status": "ok",
+        "client": "tauri",
+        "window": window_label,
+        "apiBase": api_base,
+    });
+    let body = serde_json::to_vec(&payload)
+        .map_err(|error| format!("Failed to encode desktop smoke marker: {error}"))?;
+    fs::write(&marker, body).map_err(|error| {
+        format!(
+            "Failed to write desktop smoke marker {}: {error}",
+            marker.display()
+        )
+    })
 }
 
 fn update_splash(app: &AppHandle, headline: &str, detail: &str) {
     if let Some(window) = app.get_webview_window("splashscreen") {
-        let headline_json = serde_json::to_string(headline).unwrap_or_else(|_| "\"Status\"".to_string());
+        let headline_json =
+            serde_json::to_string(headline).unwrap_or_else(|_| "\"Status\"".to_string());
         let detail_json = serde_json::to_string(detail).unwrap_or_else(|_| "\"\"".to_string());
         let script = format!(
             "window.__STRATALAB_SET_STATUS__ && window.__STRATALAB_SET_STATUS__({headline_json}, {detail_json});"
@@ -378,7 +550,9 @@ fn find_repo_root() -> Option<PathBuf> {
         .join("..");
     candidates.push(manifest_root);
 
-    candidates.into_iter().find(|candidate| is_repo_root(candidate))
+    candidates
+        .into_iter()
+        .find(|candidate| is_repo_root(candidate))
 }
 
 fn is_repo_root(candidate: &Path) -> bool {
@@ -425,7 +599,7 @@ fn python_path(repo_root: &Path) -> Result<PathBuf, String> {
 }
 
 fn kill_backend(app: &AppHandle) {
-    let state = app.state::<BackendState>();
+    let state = app.state::<DesktopState>();
     let mut guard = match state.child.lock() {
         Ok(guard) => guard,
         Err(_) => return,
@@ -436,7 +610,7 @@ fn kill_backend(app: &AppHandle) {
     }
 }
 
-impl Drop for BackendState {
+impl Drop for DesktopState {
     fn drop(&mut self) {
         if let Ok(mut child) = self.child.lock() {
             if let Some(process) = child.as_mut() {

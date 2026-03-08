@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import DiagnosticsPanel from "./components/DiagnosticsPanel.svelte";
+  import LandingPage from "./components/LandingPage.svelte";
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar from "./components/TabBar.svelte";
@@ -32,25 +33,24 @@
     researchResult,
     riskResult,
     runDiagnosticsAction,
+    runResearch,
     setMarketDataMode,
     startIvSession,
     stopIvSession,
-    toggleConnection,
-    runResearch,
-    systemStatus
+    systemStatus,
+    toggleConnection
   } from "./lib/stores/app";
-  import type { TabId } from "./lib/api/types";
+  import type { TabId, WorkspaceMode } from "./lib/api/types";
 
   let pollHandle: ReturnType<typeof setInterval> | undefined;
   let ivPollHandle: ReturnType<typeof setInterval> | undefined;
   let diagnosticsOpen = false;
-  let riskSnapshotPreference: "portfolio" | "research" = "portfolio";
+  let workspaceMode: WorkspaceMode | null = null;
   let ivRequestedSymbol = "SPY";
   let ivPollingActive = false;
 
   onMount(() => {
-    void refreshSystemStatus();
-    void loadPortfolioSnapshot();
+    void bootstrapApp();
     pollHandle = setInterval(() => {
       void refreshSystemStatus();
     }, 5000);
@@ -62,8 +62,15 @@
     };
   });
 
+  async function bootstrapApp() {
+    const status = await refreshSystemStatus();
+    if (status?.mock_mode || status?.connection.connected) {
+      await loadPortfolioSnapshot();
+    }
+  }
+
   $: {
-    const shouldPollIv = $activeTab === "iv";
+    const shouldPollIv = workspaceMode != null && $activeTab === "iv";
     if (shouldPollIv && !ivPollingActive) {
       ivPollingActive = true;
       void loadIvSession();
@@ -74,14 +81,35 @@
     }
   }
 
-  function selectTab(tab: TabId) {
-    if (tab === "risk") {
-      riskSnapshotPreference = "portfolio";
+  async function enterWorkspace(mode: WorkspaceMode) {
+    workspaceMode = mode;
+    activeTab.set(mode === "portfolio" ? "portfolio" : "research");
+    if (mode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
+      await loadPortfolioSnapshot();
     }
-    if (tab === "iv") {
-      void loadIvSession();
+  }
+
+  function returnToLanding() {
+    workspaceMode = null;
+    diagnosticsOpen = false;
+    activeTab.set("portfolio");
+  }
+
+  async function selectTab(tab: TabId) {
+    if (!workspaceMode) {
+      return;
     }
-    activeTab.set(tab);
+    const primaryTab = workspaceMode === "portfolio" ? "portfolio" : "research";
+    const nextTab = tab === "risk" || tab === "iv" ? tab : primaryTab;
+
+    activeTab.set(nextTab);
+
+    if (nextTab === "iv") {
+      const autoLoaded = await loadResearchIvContext();
+      if (!autoLoaded) {
+        await loadIvSession();
+      }
+    }
   }
 
   async function openRiskFromResearch() {
@@ -89,28 +117,41 @@
     if (!request) {
       return;
     }
-    riskSnapshotPreference = "research";
     activeTab.set("risk");
     await computeRisk(request);
   }
 
   async function openIvFromResearch() {
+    activeTab.set("iv");
+    const autoLoaded = await loadResearchIvContext();
+    if (!autoLoaded) {
+      await loadIvSession();
+    }
+  }
+
+  async function loadResearchIvContext() {
+    if (workspaceMode !== "research") {
+      return false;
+    }
     const request = buildIvRequestFromResearch($researchResult, $systemStatus?.market_data_mode);
     if (!request) {
-      return;
+      return false;
     }
     ivRequestedSymbol = request.symbol;
-    activeTab.set("iv");
     await loadIvSurface(request);
     await loadIvSession();
+    return true;
   }
 
   async function handleConnectionToggle() {
-    await toggleConnection();
+    const nextStatus = await toggleConnection();
+    if (nextStatus?.connection.connected) {
+      await loadPortfolioSnapshot();
+    }
     if (diagnosticsOpen) {
       await loadDiagnostics();
     }
-    if ($activeTab === "iv") {
+    if (workspaceMode != null && $activeTab === "iv") {
       await loadIvSession();
     }
   }
@@ -120,7 +161,7 @@
     if (diagnosticsOpen) {
       await loadDiagnostics();
     }
-    if ($activeTab === "iv") {
+    if (workspaceMode != null && $activeTab === "iv") {
       await loadIvSession();
     }
   }
@@ -164,69 +205,91 @@
   }
 </script>
 
-<Shell>
-  <StatusRail
-    status={$systemStatus}
-    activeTab={$activeTab}
-    lastError={$lastError}
-    busy={$loading.status}
-    diagnosticsOpen={diagnosticsOpen}
-    onToggleConnection={handleConnectionToggle}
-    onMarketDataModeChange={handleMarketDataModeChange}
-    onToggleDiagnostics={toggleDiagnostics}
-  />
-  {#if diagnosticsOpen}
-    <DiagnosticsPanel
-      diagnostics={$diagnostics}
-      loading={$loading.diagnostics}
-      actionLoading={$loading.diagnosticsAction || $loading.portfolioAction}
-      log={$diagnosticsLog}
-      onRefresh={loadDiagnostics}
-      onRunDiagnostics={handleRunDiagnostics}
-      onForceSubscribe={handleForceSubscribe}
-      onClearHistory={handleClearHistory}
-    />
-  {/if}
-  <TabBar activeTab={$activeTab} onSelect={selectTab} />
-
-  {#if $activeTab === "portfolio"}
-    <PortfolioView
-      snapshot={$portfolioSnapshot}
-      history={$portfolioHistory}
-      performance={$portfolioPerformance}
-      loading={$loading.portfolio}
-      onRefresh={loadPortfolioSnapshot}
-      onReloadPerformance={loadPortfolioPerformance}
-    />
-  {:else if $activeTab === "research"}
-    <ResearchView
-      result={$researchResult}
-      loading={$loading.research}
-      onRun={runResearch}
-      onOpenRisk={openRiskFromResearch}
-      onOpenIv={openIvFromResearch}
-    />
-  {:else if $activeTab === "risk"}
-    <RiskView
-      snapshot={$portfolioSnapshot}
-      researchSnapshot={$researchResult?.snapshot ?? null}
-      preferredSnapshotSource={riskSnapshotPreference}
-      result={$riskResult}
-      loading={$loading.risk}
-      onCompute={computeRisk}
+<Shell
+  subtitle={workspaceMode == null
+    ? "Select a workspace mode before entering the analytics shell."
+    : workspaceMode === "portfolio"
+      ? "Portfolio view keeps the live account snapshot as the primary context."
+      : "Research view forwards your active research context into downstream analytics."}
+>
+  {#if workspaceMode == null}
+    <LandingPage
+      status={$systemStatus}
+      busy={$loading.status}
+      onConnect={handleConnectionToggle}
+      onEnterPortfolio={() => enterWorkspace("portfolio")}
+      onEnterResearch={() => enterWorkspace("research")}
     />
   {:else}
-    <IvView
+    <StatusRail
       status={$systemStatus}
-      requestedSymbol={ivRequestedSymbol}
-      result={$ivSurface}
-      session={$ivSession}
-      loading={$loading.iv}
-      sessionLoading={$loading.ivSession}
-      onLoad={loadIvSurface}
-      onStartSession={startIvSession}
-      onStopSession={stopIvSession}
-      onRefreshSession={loadIvSession}
+      activeTab={$activeTab}
+      workspaceMode={workspaceMode}
+      lastError={$lastError}
+      busy={$loading.status}
+      diagnosticsOpen={diagnosticsOpen}
+      onToggleConnection={handleConnectionToggle}
+      onMarketDataModeChange={handleMarketDataModeChange}
+      onToggleDiagnostics={toggleDiagnostics}
     />
+    {#if diagnosticsOpen}
+      <DiagnosticsPanel
+        diagnostics={$diagnostics}
+        loading={$loading.diagnostics}
+        actionLoading={$loading.diagnosticsAction || $loading.portfolioAction}
+        log={$diagnosticsLog}
+        onRefresh={loadDiagnostics}
+        onRunDiagnostics={handleRunDiagnostics}
+        onForceSubscribe={handleForceSubscribe}
+        onClearHistory={handleClearHistory}
+      />
+    {/if}
+    <TabBar
+      activeTab={$activeTab}
+      mode={workspaceMode}
+      onSelect={selectTab}
+      onSwitchWorkspace={returnToLanding}
+    />
+
+    {#if $activeTab === "portfolio"}
+      <PortfolioView
+        snapshot={$portfolioSnapshot}
+        history={$portfolioHistory}
+        performance={$portfolioPerformance}
+        loading={$loading.portfolio}
+        onRefresh={loadPortfolioSnapshot}
+        onReloadPerformance={loadPortfolioPerformance}
+      />
+    {:else if $activeTab === "research"}
+      <ResearchView
+        result={$researchResult}
+        loading={$loading.research}
+        onRun={runResearch}
+        onOpenRisk={openRiskFromResearch}
+        onOpenIv={openIvFromResearch}
+      />
+    {:else if $activeTab === "risk"}
+      <RiskView
+        mode={workspaceMode}
+        snapshot={$portfolioSnapshot}
+        researchSnapshot={$researchResult?.snapshot ?? null}
+        result={$riskResult}
+        loading={$loading.risk}
+        onCompute={computeRisk}
+      />
+    {:else}
+      <IvView
+        status={$systemStatus}
+        requestedSymbol={ivRequestedSymbol}
+        result={$ivSurface}
+        session={$ivSession}
+        loading={$loading.iv}
+        sessionLoading={$loading.ivSession}
+        onLoad={loadIvSurface}
+        onStartSession={startIvSession}
+        onStopSession={stopIvSession}
+        onRefreshSession={loadIvSession}
+      />
+    {/if}
   {/if}
 </Shell>

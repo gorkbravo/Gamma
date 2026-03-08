@@ -2,19 +2,46 @@
 
 Hybrid quant workstation in the middle of a strangler migration from PySide6/Qt to Tauri + FastAPI + Svelte. The Python runtime still owns IBKR integration, analytics, mock mode, and shared application services. Today the repo supports three client paths:
 
-- PySide desktop app, which remains the default/fallback desktop client
+- Tauri desktop app, which is now the primary/default desktop client
 - Browser frontend served separately against the local FastAPI backend
-- Tauri desktop shell that launches the Python backend and hosts the browser UI
-
-Phase 9 cutover is not complete yet, so Tauri is buildable and packageable but not yet the primary desktop path.
+- PySide desktop app, kept as an explicit fallback during post-cutover burn-in
 
 ## Current State
 - Shared application service layer lives in `src/application/`
 - FastAPI backend lives in `src/api/`
 - Browser frontend lives in `frontend/`
 - Tauri shell lives in `frontend/src-tauri/`
-- Windows packaging works through PyInstaller + Tauri NSIS bundling
-- PySide remains intentionally available while broader installed-app QA and final cutover hardening remain open
+- Windows packaging path is implemented through PyInstaller + Tauri NSIS bundling
+- Tauri is the default desktop launcher path in-repo and in packaged builds
+- PySide remains intentionally available through an explicit launcher switch
+
+## Migration Audit
+Audit date: `2026-03-08`
+
+Current verification:
+- `.\.venv\Scripts\python.exe -m pytest` -> `52 passed`
+- `npm run test` in `frontend/` -> `8 passed`
+- `npm run build` in `frontend/` -> success
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml` -> success
+- `npm run backend:smoke` in `frontend/` -> success
+- `npm run desktop:smoke` in `frontend/` -> success
+- `npm run tauri:build` -> not revalidated to completion in this audit; an NSIS installer artifact already exists under `%TEMP%\stratalab-tauri-build\release\bundle\nsis\`
+
+Phase status:
+- Phase 1 `Extract Backend Orchestration From Qt`: complete
+- Phase 2 `Define API Contracts`: complete
+- Phase 3 `Add FastAPI`: complete
+- Phase 4 `Bootstrap Browser Frontend First`: complete for baseline scope
+- Phase 5 `Chart-First Migration`: complete for target scope
+- Phase 6 `Functional Parity`: substantially complete; core workflows are usable but advanced desktop ergonomics and some deeper research/IV affordances still lag Qt
+- Phase 7 `Add Tauri Shell`: complete for local development
+- Phase 8 `Packaging`: substantially complete; packaged-backend smoke is green, but broader installed-workflow QA remains open
+- Phase 9 `Cutover`: implemented; Tauri is the default launcher and PySide remains the fallback during burn-in
+
+Primary remaining work:
+- Broader live-IBKR workflow QA
+- Longer-session desktop burn-in
+- Installed-app validation beyond startup/backend smoke
 
 ## Features
 - Landing page with workspace selection and IBKR connect control
@@ -88,9 +115,44 @@ If the app shows `Connected` but account values or positions are empty:
 ### IB threading model
 All `ib_insync` calls are serialized on a dedicated IB thread so the Qt UI remains responsive and IB event processing stays on one loop/thread.
 
-## Run
-```bash
-python -m src.main
+## Desktop app (default)
+First-time frontend setup for the Tauri desktop path:
+
+```powershell
+cd frontend
+npm install
+cd ..
+```
+
+Default desktop launcher:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.desktop_launcher
+```
+
+If you installed the package in editable mode, the same launcher is also available as:
+
+```powershell
+stratalab-desktop
+```
+
+The launcher defaults to Tauri. Use the explicit PySide fallback only when needed:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.desktop_launcher --client pyside
+```
+
+Or via environment switch:
+
+```powershell
+$env:STRATALAB_DESKTOP_CLIENT="pyside"
+.\.venv\Scripts\python.exe -m src.desktop_launcher
+```
+
+The legacy Qt entrypoint still exists as a direct fallback:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main
 ```
 
 ## Browser frontend
@@ -109,7 +171,7 @@ $env:MOCK_DATA="true"
 npm run tauri:dev
 ```
 
-The Tauri shell launches the repo-local Python backend itself, waits for its local `/health` endpoint, and only then creates the main window. Current limitations:
+The Tauri shell launches the repo-local Python backend itself, waits for its local `/health` endpoint, keeps the splash visible until the frontend page has loaded, and only then shows the main window. Current limitations:
 - `npm run tauri:dev` now sets `CARGO_TARGET_DIR` to a temp directory automatically to avoid Windows file-lock failures in `frontend/src-tauri/target`
 - The shell prefers port `8000` but will fall back to another free localhost port if needed; set `STRATALAB_API_PORT` to force a specific port
 - The local-dev shell still expects the repository checkout plus `.venv` to be present locally
@@ -126,11 +188,12 @@ npm run tauri:build
 The production build now packages the Python backend with PyInstaller before invoking Tauri bundling, so the installed desktop app launches a bundled `stratalab-backend.exe` instead of relying on a repo-local `.venv`.
 
 - `npm run backend:smoke` validates the generated backend executable by waiting for `/health`
+- `npm run desktop:smoke` validates the default desktop launcher path by starting Tauri, waiting for the backend, and confirming the main frontend window reaches page load
 - `npm run tauri:build` produces an NSIS installer; with the default wrapper this lands under `%TEMP%\stratalab-tauri-build\release\bundle\nsis\`
 - Override `CARGO_TARGET_DIR` before running `npm run tauri:build` if you want the installer in a stable custom output directory
 - Packaged runtime state lives under `%APPDATA%\com.stratalab.shell\runtime\`
 - Backend startup diagnostics are written to `%APPDATA%\com.stratalab.shell\runtime\logs\backend-failure.txt`, `backend-stdout.log`, and `backend-stderr.log`
-- PySide remains available as a fallback client while Tauri cutover stays gated on broader workflow QA
+- PySide remains available as an explicit fallback client through `src.desktop_launcher --client pyside`
 
 ## Mock mode
 Set `MOCK_DATA=true` in `.env` to use local sample data without IBKR.
@@ -141,6 +204,7 @@ Set `MOCK_DATA=true` in `.env` to use local sample data without IBKR.
 cd frontend && npm run test
 cd frontend && npm run build
 cd frontend && npm run backend:smoke
+cd frontend && npm run desktop:smoke
 ```
 
 ## Additional validation

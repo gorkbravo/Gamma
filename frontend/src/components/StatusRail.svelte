@@ -1,8 +1,9 @@
 <script lang="ts">
-  import type { SystemStatus, TabId } from "../lib/api/types";
+  import type { SystemStatus, TabId, WorkspaceMode } from "../lib/api/types";
 
   export let status: SystemStatus | null = null;
   export let activeTab: TabId = "portfolio";
+  export let workspaceMode: WorkspaceMode = "portfolio";
   export let lastError = "";
   export let busy = false;
   export let diagnosticsOpen = false;
@@ -11,10 +12,22 @@
   export let onToggleDiagnostics: () => void;
 
   let selectedMarketDataMode = status?.market_data_mode ?? "delayed";
+  let workspaceLabel = "Portfolio View";
+  let activeTabLabel = "Portfolio";
 
   $: if (status?.market_data_mode) {
     selectedMarketDataMode = status.market_data_mode;
   }
+
+  $: workspaceLabel = workspaceMode === "portfolio" ? "Portfolio View" : "Research View";
+  $: activeTabLabel =
+    activeTab === "portfolio"
+      ? "Portfolio"
+      : activeTab === "research"
+        ? "Research"
+        : activeTab === "risk"
+          ? "Risk"
+          : "IV";
 </script>
 
 <section class="rail">
@@ -40,8 +53,9 @@
     </select>
   </div>
   <div class="card">
-    <span class="label">Workspace</span>
-    <strong>{activeTab}</strong>
+    <span class="label">View</span>
+    <strong>{workspaceLabel}</strong>
+    <small>{activeTabLabel} tab</small>
   </div>
   <div class="card">
     <span class="label">Cache</span>
