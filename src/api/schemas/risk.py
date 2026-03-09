@@ -18,6 +18,7 @@ class RiskComputeRequestModel(BaseModel):
     mc_num_simulations: int = 2000
     beta_window: int = 126
     benchmark_symbol: str = "SPY"
+    include_monte_carlo: bool = True
 
 
 class RiskMetricsModel(BaseModel):
@@ -74,6 +75,7 @@ class IndexedValuePoint(BaseModel):
 class MonteCarloChartsModel(BaseModel):
     terminal_returns: list[float] = Field(default_factory=list)
     fan_percentiles: dict[str, list[IndexedValuePoint]] = Field(default_factory=dict)
+    sample_paths: dict[str, list[IndexedValuePoint]] = Field(default_factory=dict)
 
 
 class ExcludedAssetModel(BaseModel):
@@ -84,6 +86,7 @@ class ExcludedAssetModel(BaseModel):
 class RiskComputeResponseModel(BaseModel):
     metrics: RiskMetricsModel
     portfolio_return_points: list[TimeSeriesPoint]
+    benchmark_return_points: list[TimeSeriesPoint] = Field(default_factory=list)
     contributions: list[RiskContributionModel]
     monte_carlo: MonteCarloChartsModel = Field(default_factory=MonteCarloChartsModel)
     excluded_assets: list[ExcludedAssetModel]
@@ -111,10 +114,12 @@ class RiskComputeResponseModel(BaseModel):
         return cls(
             metrics=RiskMetricsModel.from_domain(results),
             portfolio_return_points=series_to_points(payload.portfolio_returns),
+            benchmark_return_points=series_to_points(payload.benchmark_returns),
             contributions=contribution_rows,
             monte_carlo=MonteCarloChartsModel(
                 terminal_returns=_series_to_float_list(results.monte_carlo_terminal_returns),
                 fan_percentiles=_fan_percentiles_to_payload(results.monte_carlo_fan_percentiles),
+                sample_paths=_fan_percentiles_to_payload(results.monte_carlo_sample_paths),
             ),
             excluded_assets=[
                 ExcludedAssetModel(symbol=symbol, reason=reason)

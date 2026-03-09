@@ -178,6 +178,7 @@ export interface IndexedValuePoint {
 export interface RiskMonteCarloCharts {
   terminal_returns: number[];
   fan_percentiles: Record<string, IndexedValuePoint[]>;
+  sample_paths: Record<string, IndexedValuePoint[]>;
 }
 
 export interface ExcludedAsset {
@@ -188,6 +189,7 @@ export interface ExcludedAsset {
 export interface RiskResult {
   metrics: RiskMetrics;
   portfolio_return_points: TimeSeriesPoint[];
+  benchmark_return_points: TimeSeriesPoint[];
   contributions: RiskContribution[];
   monte_carlo: RiskMonteCarloCharts;
   excluded_assets: ExcludedAsset[];

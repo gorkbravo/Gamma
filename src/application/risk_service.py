@@ -37,6 +37,7 @@ class RiskComputeRequest:
     beta_window: int
     benchmark_symbol: str
     base_currency: str
+    include_monte_carlo: bool = True
     recommended_min_obs: int = 60
 
 
@@ -46,6 +47,7 @@ class BenchmarkMetricsResult:
     correlation: float | None = None
     alpha_annual: float | None = None
     overlap_count: int | None = None
+    returns: pd.Series | None = None
     warnings: List[str] | None = None
 
     def __post_init__(self) -> None:
@@ -57,6 +59,7 @@ class BenchmarkMetricsResult:
 class RiskComputationPayload:
     results: RiskResults
     portfolio_returns: pd.Series
+    benchmark_returns: pd.Series
     returns_df: pd.DataFrame
     contributions: pd.Series
     weights: pd.Series
@@ -178,28 +181,30 @@ class RiskService:
         hist_cvar_total_estimate = hist_cvar * scale_to_total if hist_cvar is not None and scale_to_total else None
         param_var_total_estimate = param_var * scale_to_total if param_var is not None and scale_to_total else None
 
-        monte_carlo_warning = self._monte_carlo_eligibility_warning(
-            snapshot=snapshot,
-            weights=weights_aligned,
-            total_portfolio_value=total_portfolio_value,
-        )
+        monte_carlo_warning = None
         monte_carlo_result = None
-        if monte_carlo_warning is not None:
-            warnings.append(monte_carlo_warning)
-        elif not risk_returns_df.empty and not weights_aligned.empty:
-            monte_carlo_result = monte_carlo_var_cvar(
-                asset_returns=risk_returns_df,
+        if request.include_monte_carlo:
+            monte_carlo_warning = self._monte_carlo_eligibility_warning(
+                snapshot=snapshot,
                 weights=weights_aligned,
-                alpha=request.alpha,
-                horizon_days=request.mc_horizon_days,
-                model_name=request.mc_simulation_model,
-                num_simulations=request.mc_num_simulations,
-                random_seed=self._MC_RANDOM_SEED,
+                total_portfolio_value=total_portfolio_value,
             )
-            if monte_carlo_result is None:
-                warnings.append(
-                    f"Monte Carlo VaR unavailable for {request.mc_simulation_model}: invalid aligned returns or weights."
+            if monte_carlo_warning is not None:
+                warnings.append(monte_carlo_warning)
+            elif not risk_returns_df.empty and not weights_aligned.empty:
+                monte_carlo_result = monte_carlo_var_cvar(
+                    asset_returns=risk_returns_df,
+                    weights=weights_aligned,
+                    alpha=request.alpha,
+                    horizon_days=request.mc_horizon_days,
+                    model_name=request.mc_simulation_model,
+                    num_simulations=request.mc_num_simulations,
+                    random_seed=self._MC_RANDOM_SEED,
                 )
+                if monte_carlo_result is None:
+                    warnings.append(
+                        f"Monte Carlo VaR unavailable for {request.mc_simulation_model}: invalid aligned returns or weights."
+                    )
 
         monte_carlo_var = (
             monte_carlo_result.var_return * covered_portfolio_value
@@ -309,6 +314,7 @@ class RiskService:
         return RiskComputationPayload(
             results=results,
             portfolio_returns=port_ret,
+            benchmark_returns=benchmark.returns if benchmark.returns is not None else pd.Series(dtype=float),
             returns_df=returns_df,
             contributions=contributions,
             weights=weights,
@@ -436,6 +442,7 @@ class RiskService:
         result.warnings.extend(benchmark_warnings)
         if benchmark_returns is None or benchmark_returns.empty or port_ret.empty:
             return result
+        result.returns = benchmark_returns
         aligned = pd.concat([port_ret.rename("portfolio"), benchmark_returns.rename("benchmark")], axis=1, join="inner").dropna()
         result.overlap_count = int(len(aligned))
         if len(aligned) < beta_window:

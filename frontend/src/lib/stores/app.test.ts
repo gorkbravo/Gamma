@@ -155,10 +155,12 @@ describe("app store orchestration", () => {
         effective_bets: 1
       },
       portfolio_return_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }],
+      benchmark_return_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.005 }],
       contributions: [],
       monte_carlo: {
         terminal_returns: [],
-        fan_percentiles: {}
+        fan_percentiles: {},
+        sample_paths: {}
       },
       excluded_assets: [],
       warnings: []

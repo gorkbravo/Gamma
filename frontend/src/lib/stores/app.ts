@@ -36,6 +36,7 @@ export interface RiskComputeOptions {
   mcNumSimulations: number;
   betaWindow: number;
   benchmarkSymbol: string;
+  includeMonteCarlo?: boolean;
   snapshot?: PortfolioSnapshot | null;
 }
 
@@ -275,7 +276,8 @@ export async function computeRisk(options: RiskComputeOptions) {
         mc_simulation_model: options.mcSimulationModel,
         mc_num_simulations: options.mcNumSimulations,
         beta_window: options.betaWindow,
-        benchmark_symbol: options.benchmarkSymbol
+        benchmark_symbol: options.benchmarkSymbol,
+        include_monte_carlo: options.includeMonteCarlo ?? true
       })
     );
     lastError.set("");

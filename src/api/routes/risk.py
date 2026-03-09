@@ -27,6 +27,7 @@ def compute_risk(
             beta_window=payload.beta_window,
             benchmark_symbol=payload.benchmark_symbol,
             base_currency=payload.snapshot.base_currency,
+            include_monte_carlo=payload.include_monte_carlo,
         )
     )
     return RiskComputeResponseModel.from_service_payload(result)
