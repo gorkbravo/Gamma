@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="./stratalab-mark.svg" />
     <title>StrataLab Startup</title>
     <style>
       :root {
@@ -27,6 +28,24 @@
         background: rgba(5, 10, 14, 0.92);
         box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
         padding: 1.5rem;
+      }
+
+      .mark-frame {
+        width: 4.75rem;
+        height: 4.75rem;
+        display: grid;
+        place-items: center;
+        margin-bottom: 1rem;
+        border: 1px solid rgba(90, 128, 162, 0.24);
+        background:
+          radial-gradient(circle at 50% 24%, rgba(106, 168, 255, 0.16), transparent 58%),
+          linear-gradient(180deg, rgba(10, 16, 23, 0.96), rgba(6, 9, 13, 0.96));
+      }
+
+      .mark {
+        width: 3.1rem;
+        height: auto;
+        display: block;
       }
 
       p {
@@ -76,6 +95,9 @@
   </head>
   <body>
     <main>
+      <div class="mark-frame" aria-hidden="true">
+        <img class="mark" src="./stratalab-mark.svg" alt="" />
+      </div>
       <p class="eyebrow">StrataLab Desktop Shell</p>
       <h1 id="headline">Starting Python backend</h1>
       <p id="detail">Waiting for the local FastAPI service to become healthy before the main window is created.</p>

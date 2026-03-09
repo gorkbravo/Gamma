@@ -1,21 +1,25 @@
 :root {
   color-scheme: dark;
   font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace;
-  --bg-0: #040608;
-  --bg-1: #06090d;
-  --bg-2: #0a1016;
-  --bg-3: #101923;
-  --panel-border: #16202b;
-  --panel-strong: #213242;
+  --bg-0: #05080c;
+  --bg-1: #081019;
+  --bg-2: #0c141d;
+  --bg-3: #101a25;
+  --surface-0: rgba(11, 17, 24, 0.95);
+  --surface-1: rgba(9, 14, 20, 0.97);
+  --surface-2: #121c27;
+  --panel-border: #1a2734;
+  --panel-strong: #294050;
+  --divider: rgba(46, 60, 74, 0.58);
   --text-0: #f4f7fb;
-  --text-1: #c4d0dc;
-  --text-2: #8ea1b5;
-  --accent: #6aa8ff;
-  --accent-2: #e8b260;
-  --positive: #48bf72;
-  --negative: #ff6760;
-  --warning: #d29a52;
-  --shadow: rgba(0, 0, 0, 0.28);
+  --text-1: #c7d2dc;
+  --text-2: #8c9dad;
+  --accent: #7aa6c8;
+  --accent-2: #c49a5a;
+  --positive: #4bb474;
+  --negative: #c66b61;
+  --warning: #c49a5a;
+  --shadow: rgba(0, 0, 0, 0.2);
 }
 
 html,
@@ -24,14 +28,14 @@ body,
   margin: 0;
   min-height: 100%;
   background:
-    radial-gradient(circle at top right, rgba(106, 168, 255, 0.14), transparent 24rem),
-    radial-gradient(circle at bottom left, rgba(232, 178, 96, 0.12), transparent 22rem),
-    linear-gradient(180deg, #05080b 0%, #040608 100%);
+    radial-gradient(circle at top right, rgba(122, 166, 200, 0.08), transparent 24rem),
+    linear-gradient(180deg, #06090d 0%, #05070a 100%);
   color: var(--text-0);
 }
 
 body {
-  font-size: 14px;
+  font-size: 13.5px;
+  letter-spacing: 0.01em;
 }
 
 button,

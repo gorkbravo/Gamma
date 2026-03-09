@@ -180,7 +180,7 @@ export async function loadPortfolioSnapshot() {
         postJson<PortfolioPerformanceResponse>("/portfolio/performance", {
           snapshot: snapshotResult.value,
           benchmark_symbol: "SPY",
-          lookback_days: 504
+          lookback_days: 252
         })
       ]);
       const performance = performanceResult[0];
@@ -227,7 +227,7 @@ export async function loadPortfolioPerformance(options?: {
       await postJson<PortfolioPerformanceResponse>("/portfolio/performance", {
         snapshot,
         benchmark_symbol: options?.benchmarkSymbol ?? "SPY",
-        lookback_days: options?.lookbackDays ?? 504
+        lookback_days: options?.lookbackDays ?? 252
       })
     );
     lastError.set("");

@@ -59,22 +59,22 @@
       height: measuredHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#8ea1b5"
+        textColor: "#8c9dad"
       },
       grid: {
-        vertLines: { color: "rgba(19, 32, 44, 0.35)" },
-        horzLines: { color: "rgba(19, 32, 44, 0.35)" }
+        vertLines: { color: "rgba(42, 56, 70, 0.26)" },
+        horzLines: { color: "rgba(42, 56, 70, 0.26)" }
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "rgba(106, 168, 255, 0.35)" },
-        horzLine: { color: "rgba(106, 168, 255, 0.25)" }
+        vertLine: { color: "rgba(122, 166, 200, 0.3)" },
+        horzLine: { color: "rgba(122, 166, 200, 0.2)" }
       },
       rightPriceScale: {
-        borderColor: "rgba(30, 46, 60, 0.7)"
+        borderColor: "rgba(46, 60, 74, 0.58)"
       },
       timeScale: {
-        borderColor: "rgba(30, 46, 60, 0.7)",
+        borderColor: "rgba(46, 60, 74, 0.58)",
         timeVisible: true,
         secondsVisible: false
       },
@@ -106,8 +106,8 @@
             })
           : chart.addSeries(AreaSeries, {
               lineColor: item.color,
-              topColor: `${item.color}55`,
-              bottomColor: `${item.color}08`,
+              topColor: `${item.color}33`,
+              bottomColor: `${item.color}03`,
               lineWidth: 2,
               lastValueVisible: false,
               priceLineVisible: false
@@ -203,10 +203,8 @@
     position: relative;
     width: 100%;
     min-height: 16rem;
-    border: 1px solid rgba(22, 32, 43, 0.85);
-    background:
-      linear-gradient(180deg, rgba(9, 14, 20, 0.98), rgba(5, 8, 11, 0.98)),
-      radial-gradient(circle at top, rgba(106, 168, 255, 0.08), transparent 55%);
+    border: 1px solid var(--divider);
+    background: rgba(7, 11, 16, 0.88);
     overflow: hidden;
   }
 
@@ -221,7 +219,7 @@
     display: grid;
     place-items: center;
     color: var(--text-2);
-    background: linear-gradient(180deg, rgba(4, 6, 8, 0.3), rgba(4, 6, 8, 0.55));
+    background: linear-gradient(180deg, rgba(5, 8, 11, 0.28), rgba(5, 8, 11, 0.5));
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.78rem;

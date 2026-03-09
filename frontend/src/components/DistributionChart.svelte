@@ -109,10 +109,8 @@
 
 <style>
   .shell {
-    border: 1px solid rgba(22, 32, 43, 0.85);
-    background:
-      linear-gradient(180deg, rgba(9, 14, 20, 0.98), rgba(5, 8, 11, 0.98)),
-      radial-gradient(circle at top, rgba(232, 178, 96, 0.08), transparent 58%);
+    border: 1px solid var(--divider);
+    background: rgba(7, 11, 16, 0.88);
     position: relative;
     overflow: hidden;
   }
@@ -124,12 +122,12 @@
   }
 
   .axis {
-    stroke: rgba(30, 46, 60, 0.85);
+    stroke: rgba(46, 60, 74, 0.6);
     stroke-width: 1;
   }
 
   .bar {
-    fill: rgba(106, 168, 255, 0.78);
+    fill: rgba(122, 166, 200, 0.76);
   }
 
   .marker {

@@ -202,32 +202,15 @@
     </article>
 
     <article class="panel">
-      <h3>Warnings</h3>
-      {#if result?.warnings?.length}
-        {#each result.warnings as warning}
-          <p class="warning">{warning}</p>
-        {/each}
-      {:else}
-        <p class="muted">No warnings.</p>
-      {/if}
+      <h3>Surface Context</h3>
+      <div class="slice">
+        <div class="slice-row"><span>Selected Expiry</span><strong>{slice?.expiry ?? "N/A"}</strong></div>
+        <div class="slice-row"><span>Expiries</span><strong>{result?.expiries.length ?? 0}</strong></div>
+        <div class="slice-row"><span>Strikes</span><strong>{result?.strikes.length ?? 0}</strong></div>
+        <div class="slice-row"><span>Surface Points</span><strong>{result?.points ?? 0}</strong></div>
+      </div>
     </article>
   </div>
-
-  <article class="panel">
-    <h3>Backend Messages</h3>
-    {#if session?.messages?.length || result?.messages?.length}
-      <div class="message-list">
-        {#each session?.messages ?? [] as message}
-          <p class="message">{message}</p>
-        {/each}
-        {#each result.messages as message}
-          <p class="message">{message}</p>
-        {/each}
-      </div>
-    {:else}
-      <p class="muted">No backend messages.</p>
-    {/if}
-  </article>
 </section>
 
 <style>
@@ -270,9 +253,8 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: rgba(6, 9, 13, 0.96);
+    background: var(--surface-0);
     padding: 1rem;
-    box-shadow: 0 16px 28px var(--shadow);
   }
 
   h2,
@@ -298,8 +280,8 @@
   input,
   select,
   button {
-    background: #060a0e;
-    border: 1px solid #1e2e3c;
+    background: #0b1219;
+    border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.75rem 0.85rem;
     font: inherit;
@@ -322,14 +304,14 @@
   }
 
   .cell {
-    border: 1px solid rgba(19, 32, 44, 0.75);
+    border: 1px solid rgba(46, 60, 74, 0.52);
     padding: 0.55rem 0.4rem;
     text-align: center;
     min-height: 2.6rem;
   }
 
   .header {
-    background: rgba(16, 25, 35, 0.96);
+    background: rgba(14, 21, 29, 0.92);
     color: var(--text-2);
   }
 
@@ -355,7 +337,7 @@
   .slice-row,
   .row {
     align-items: center;
-    border-bottom: 1px solid rgba(19, 32, 44, 0.75);
+    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
     padding-bottom: 0.55rem;
   }
 
@@ -363,26 +345,12 @@
     flex: 1;
     min-width: 6rem;
     height: 0.55rem;
-    background: rgba(19, 32, 44, 0.8);
+    background: rgba(26, 38, 50, 0.86);
   }
 
   .fill {
     height: 100%;
-    background: linear-gradient(90deg, rgba(106, 168, 255, 0.42), rgba(106, 168, 255, 0.92));
-  }
-
-  .warning {
-    color: var(--warning);
-  }
-
-  .message,
-  .message-list {
-    color: var(--text-1);
-  }
-
-  .message-list {
-    display: grid;
-    gap: 0.5rem;
+    background: linear-gradient(90deg, rgba(122, 166, 200, 0.4), rgba(122, 166, 200, 0.88));
   }
 
   @media (max-width: 1140px) {

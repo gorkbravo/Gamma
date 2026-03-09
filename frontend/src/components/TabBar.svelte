@@ -4,7 +4,6 @@
   export let activeTab: TabId = "portfolio";
   export let mode: WorkspaceMode = "portfolio";
   export let onSelect: (tab: TabId) => void;
-  export let onSwitchWorkspace: () => void;
   let tabs: Array<{ id: TabId; label: string }> = [];
 
   $: tabs = [
@@ -22,61 +21,47 @@
       </button>
     {/each}
   </div>
-  <button class="switcher" on:click={onSwitchWorkspace}>Switch View</button>
 </nav>
 
 <style>
   .tabs {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.45rem;
+    gap: 0.75rem;
+    padding: 0.55rem 0.75rem;
     border: 1px solid var(--panel-border);
-    background: rgba(7, 11, 15, 0.88);
-    margin-bottom: 1rem;
+    background: var(--surface-1);
   }
 
   .tab-list {
     display: flex;
-    gap: 0.4rem;
+    gap: 0.45rem;
     flex-wrap: wrap;
   }
 
   button {
-    border: 1px solid var(--panel-border);
-    background: #070b0f;
+    border: 1px solid transparent;
+    background: transparent;
     color: var(--text-1);
-    padding: 0.7rem 1rem;
+    padding: 0.62rem 0.9rem;
     cursor: pointer;
-    min-width: 7rem;
+    min-width: 6.5rem;
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
   }
 
   button:hover {
-    border-color: #56748e;
+    border-color: rgba(122, 166, 200, 0.32);
     color: var(--text-0);
   }
 
   .selected {
-    background: var(--bg-3);
-    border-color: #355672;
+    background: rgba(122, 166, 200, 0.08);
+    border-color: rgba(122, 166, 200, 0.36);
     color: var(--text-0);
   }
-
-  .switcher {
-    min-width: auto;
-    white-space: nowrap;
-  }
-
   @media (max-width: 900px) {
     .tabs {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .switcher {
-      width: 100%;
+      padding-inline: 0.65rem;
     }
   }
 </style>

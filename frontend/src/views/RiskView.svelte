@@ -295,16 +295,14 @@
     </article>
 
     <article class="panel">
-      <h3>Warnings</h3>
-      {#if result?.warnings?.length}
-        <div class="list">
-          {#each result.warnings as warning}
-            <p class="warning">{warning}</p>
-          {/each}
-        </div>
-      {:else}
-        <p class="muted">No warnings.</p>
-      {/if}
+      <h3>Risk Regime</h3>
+      <div class="list">
+        <div class="row"><span>Confidence</span><strong>{pct(confidence)}</strong></div>
+        <div class="row"><span>Lookback</span><strong>{lookbackDays}D</strong></div>
+        <div class="row"><span>Horizon</span><strong>{horizonDays}D</strong></div>
+        <div class="row"><span>MC Model</span><strong>{mcSimulationModel}</strong></div>
+        <div class="row"><span>MC Sims</span><strong>{fmt(mcNumSimulations, 0)}</strong></div>
+      </div>
     </article>
 
     <article class="panel">
@@ -453,9 +451,8 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: rgba(6, 9, 13, 0.96);
+    background: var(--surface-0);
     padding: 1rem;
-    box-shadow: 0 16px 28px var(--shadow);
   }
 
   h2,
@@ -483,8 +480,8 @@
   .mode-card {
     display: grid;
     gap: 0.45rem;
-    border: 1px solid rgba(19, 32, 44, 0.75);
-    background: rgba(8, 12, 18, 0.9);
+    border: 1px solid var(--divider);
+    background: rgba(8, 13, 18, 0.72);
     padding: 0.75rem 0.85rem;
     align-content: start;
   }
@@ -492,8 +489,8 @@
   input,
   select,
   button {
-    background: #060a0e;
-    border: 1px solid #1e2e3c;
+    background: #0b1219;
+    border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.75rem 0.85rem;
     font: inherit;
@@ -533,18 +530,14 @@
 
   th,
   td {
-    border-bottom: 1px solid rgba(19, 32, 44, 0.75);
+    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
     padding: 0.6rem 0.45rem;
     text-align: left;
   }
 
-  .warning {
-    color: var(--warning);
-  }
-
   .row {
     align-items: flex-start;
-    border-bottom: 1px solid rgba(19, 32, 44, 0.75);
+    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
     padding-bottom: 0.55rem;
   }
 

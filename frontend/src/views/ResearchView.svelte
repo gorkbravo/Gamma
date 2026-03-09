@@ -451,7 +451,7 @@
   </div>
 
   <div class="detail-grid second-row">
-    <article class="panel">
+    <article class="panel span-2">
       <h3>Builder Preview</h3>
       {#if scopeType === "synthetic_portfolio"}
         <div class="table-wrap">
@@ -475,19 +475,6 @@
         </div>
       {:else}
         <p class="muted">Single-ticker research forwards the selected symbol directly into risk and IV.</p>
-      {/if}
-    </article>
-
-    <article class="panel span-2">
-      <h3>Warnings</h3>
-      {#if result?.warnings?.length}
-        <div class="list">
-          {#each result.warnings as warning}
-            <p class="warning">{warning}</p>
-          {/each}
-        </div>
-      {:else}
-        <p class="muted">No warnings.</p>
       {/if}
     </article>
   </div>
@@ -524,7 +511,7 @@
   }
 
   .second-row {
-    grid-template-columns: minmax(18rem, 0.9fr) minmax(0, 2fr);
+    grid-template-columns: 1fr;
   }
 
   .field-grid {
@@ -536,15 +523,14 @@
   }
 
   .summary-grid article {
-    border: 1px solid rgba(19, 32, 44, 0.7);
-    background: rgba(5, 8, 11, 0.85);
+    border: 1px solid var(--divider);
+    background: rgba(8, 13, 18, 0.68);
     padding: 0.85rem;
   }
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: rgba(6, 9, 13, 0.96);
-    box-shadow: 0 16px 28px var(--shadow);
+    background: var(--surface-0);
     padding: 1rem;
   }
 
@@ -575,8 +561,8 @@
   select,
   textarea,
   button {
-    background: #060a0e;
-    border: 1px solid #1e2e3c;
+    background: #0b1219;
+    border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.75rem 0.85rem;
     font: inherit;
@@ -601,7 +587,7 @@
 
   .row {
     align-items: center;
-    border-bottom: 1px solid rgba(19, 32, 44, 0.7);
+    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
     padding-bottom: 0.55rem;
   }
 
@@ -621,7 +607,7 @@
   th,
   td {
     padding: 0.6rem 0.45rem;
-    border-bottom: 1px solid rgba(19, 32, 44, 0.7);
+    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
     text-align: left;
   }
 
