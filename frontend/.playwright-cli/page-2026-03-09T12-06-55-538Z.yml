@@ -1,0 +1,4 @@
+- main [ref=e2]:
+  - paragraph [ref=e4]: StrataLab Desktop Shell
+  - heading "Starting Python backend" [level=1] [ref=e5]
+  - paragraph [ref=e6]: Waiting for the local FastAPI service to become healthy before the main window is created.

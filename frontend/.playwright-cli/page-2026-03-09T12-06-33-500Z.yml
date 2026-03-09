@@ -1,0 +1,38 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e8]:
+      - heading "StrataLab" [level=1] [ref=e9]
+      - generic [ref=e10]: Quant Research Desk
+  - main [ref=e12]:
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - paragraph [ref=e15]: Desktop Quant Workstation
+        - heading "Choose how you want to work" [level=2] [ref=e16]
+        - paragraph [ref=e17]: Start with the live IBKR connection or move directly into the workspace mode that matches the task. Portfolio mode uses the live account snapshot. Research mode uses the synthetic or single-name context you define there.
+      - generic [ref=e18]:
+        - article [ref=e19]:
+          - generic [ref=e20]: Connection
+          - heading "Connect to IBKR" [level=3] [ref=e21]
+          - paragraph [ref=e22]: Toggle the backend session before opening either workspace.
+          - generic [ref=e23]:
+            - strong [ref=e24]: Disconnected
+            - generic [ref=e25]: "Status: Disconnected"
+          - button "Connect to IBKR" [ref=e26] [cursor=pointer]
+        - article [ref=e27]:
+          - generic [ref=e28]: Workspace
+          - heading "Portfolio View" [level=3] [ref=e29]
+          - paragraph [ref=e30]: Open the live portfolio workspace where downstream analytics use the portfolio snapshot directly.
+          - list [ref=e31]:
+            - listitem [ref=e32]: "First tab: portfolio monitor"
+            - listitem [ref=e33]: Risk uses the portfolio snapshot
+            - listitem [ref=e34]: IV stays manually ticker-driven
+          - button "Enter Portfolio View" [ref=e35] [cursor=pointer]
+        - article [ref=e36]:
+          - generic [ref=e37]: Workspace
+          - heading "Research View" [level=3] [ref=e38]
+          - paragraph [ref=e39]: Open the research workspace where downstream analytics inherit the active synthetic or single-name context.
+          - list [ref=e40]:
+            - listitem [ref=e41]: "First tab: research command deck"
+            - listitem [ref=e42]: Risk uses the research snapshot
+            - listitem [ref=e43]: IV auto-loads the researched ticker when applicable
+          - button "Enter Research View" [ref=e44] [cursor=pointer]
