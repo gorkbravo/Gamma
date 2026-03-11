@@ -1,6 +1,8 @@
 # StrataLab Migration Plan
 
-This file tracks the ongoing strangler migration from PySide6/Qt to Tauri + FastAPI + Svelte.
+This file is the detailed migration log and audit record for the ongoing strangler migration from PySide6/Qt to Tauri + FastAPI + Svelte.
+
+`README.md` is intentionally kept shorter and operational. This document holds the fuller phase history, audit evidence, and open-risk tracking.
 
 ## Current Status
 
@@ -15,6 +17,11 @@ This file tracks the ongoing strangler migration from PySide6/Qt to Tauri + Fast
 - Phase 7 is complete for local development.
 - Phase 8 has an implemented Windows-first packaging path, but broader installed-workflow QA is still open.
 - Phase 9 cutover is implemented and smoke-validated, with burn-in still open.
+
+## Documentation Notes
+
+- The old standalone risk-tab audit document was retired on 2026-03-09 because it had drifted from the current frontend-plus-shared-services implementation.
+- Risk behavior now spans shared Python services plus the browser/Tauri view layer, so detailed risk changes should be tracked here or in code-adjacent docs with current ownership and scope.
 
 ## Phase Dashboard
 
