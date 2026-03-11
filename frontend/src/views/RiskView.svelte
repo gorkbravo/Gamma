@@ -788,7 +788,7 @@
     padding-top: 0.15rem;
   }
 
-  .subsection + .subsection {
+  .method-side > .subsection + .subsection {
     border-top: 1px solid rgba(46, 60, 74, 0.45);
     padding-top: 0.95rem;
   }
