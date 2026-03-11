@@ -285,9 +285,17 @@
   }
 </script>
 
-<Shell>
-  <svelte:fragment slot="status">
-    {#if workspaceMode != null}
+{#if workspaceMode == null}
+  <LandingPage
+    status={$systemStatus}
+    busy={$loading.status}
+    onConnect={handleConnectionToggle}
+    onEnterPortfolio={() => enterWorkspace("portfolio")}
+    onEnterResearch={() => enterWorkspace("research")}
+  />
+{:else}
+  <Shell>
+    <svelte:fragment slot="status">
       <StatusRail
         status={$systemStatus}
         workspaceMode={workspaceMode}
@@ -297,18 +305,8 @@
         onRefresh={handleRefreshWorkspace}
         onChangeView={handleChangeView}
       />
-    {/if}
-  </svelte:fragment>
+    </svelte:fragment>
 
-  {#if workspaceMode == null}
-    <LandingPage
-      status={$systemStatus}
-      busy={$loading.status}
-      onConnect={handleConnectionToggle}
-      onEnterPortfolio={() => enterWorkspace("portfolio")}
-      onEnterResearch={() => enterWorkspace("research")}
-    />
-  {:else}
     <section class="workspace-shell">
       <TabBar
         activeTab={$activeTab}
@@ -369,8 +367,8 @@
         {/if}
       </section>
     </section>
-  {/if}
-</Shell>
+  </Shell>
+{/if}
 
 <style>
   .workspace-shell {

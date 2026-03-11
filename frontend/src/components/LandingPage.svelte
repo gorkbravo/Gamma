@@ -18,112 +18,82 @@
     }
     return "Disconnected";
   };
+
+  const connectionActionLabel = (status: SystemStatus | null) => {
+    if (status?.connection.connected) {
+      return "Disconnect from IBKR";
+    }
+    return "Connect to IBKR";
+  };
 </script>
 
 <section class="landing">
-  <div class="intro">
-    <p class="eyebrow">Desktop Quant Workstation</p>
-    <h2>Choose how you want to work</h2>
-    <p class="copy">
-      Start with the live IBKR connection or move directly into the workspace mode that matches the task. Portfolio
-      mode uses the live account snapshot. Research mode uses the synthetic or single-name context you define there.
-    </p>
-  </div>
+  <article class="card">
+    <p class="eyebrow">Welcome</p>
+    <h2>Welcome to StrataLab</h2>
+    <p class="copy">Connect to IBKR or open the workspace you want to use.</p>
 
-  <div class="grid">
-    <article class="panel">
-      <span class="label">Connection</span>
-      <h3>Connect to IBKR</h3>
-      <p>Toggle the backend session before opening either workspace.</p>
-      <div class="meta">
-        <strong>{connectedLabel(status)}</strong>
-        <small>{status?.connection.status_text ?? "Waiting for backend status"}</small>
-      </div>
-      <button on:click={onConnect} disabled={busy || !status?.connection.action_enabled}>
-        {busy ? "Working..." : status?.connection.action_text ?? "Connect"}
+    <div class="meta">
+      <strong>{connectedLabel(status)}</strong>
+      <small>{status?.connection.status_text ?? "Waiting for backend status"}</small>
+    </div>
+
+    <div class="actions">
+      <button
+        class="primary apex"
+        on:click={onConnect}
+        disabled={busy || !status?.connection.action_enabled}
+      >
+        {busy ? "Working..." : connectionActionLabel(status)}
       </button>
-    </article>
-
-    <article class="panel">
-      <span class="label">Workspace</span>
-      <h3>Portfolio View</h3>
-      <p>Open the live portfolio workspace where downstream analytics use the portfolio snapshot directly.</p>
-      <ul>
-        <li>First tab: portfolio monitor</li>
-        <li>Risk uses the portfolio snapshot</li>
-        <li>IV stays manually ticker-driven</li>
-      </ul>
-      <button class="primary" on:click={onEnterPortfolio}>Enter Portfolio View</button>
-    </article>
-
-    <article class="panel">
-      <span class="label">Workspace</span>
-      <h3>Research View</h3>
-      <p>Open the research workspace where downstream analytics inherit the active synthetic or single-name context.</p>
-      <ul>
-        <li>First tab: research command deck</li>
-        <li>Risk uses the research snapshot</li>
-        <li>IV auto-loads the researched ticker when applicable</li>
-      </ul>
-      <button class="primary" on:click={onEnterResearch}>Enter Research View</button>
-    </article>
-  </div>
+      <button class="secondary" on:click={onEnterPortfolio}>Portfolio View</button>
+      <button class="secondary" on:click={onEnterResearch}>Research View</button>
+    </div>
+  </article>
 </section>
 
 <style>
-  .landing,
-  .grid {
+  .landing {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+  }
+
+  .card {
+    width: min(28rem, calc(100vw - 2rem));
     display: grid;
     gap: 1rem;
-  }
-
-  .intro {
-    max-width: 54rem;
-    border: 1px solid var(--panel-border);
+    padding: 1.5rem;
+    border: 1px solid rgba(90, 128, 162, 0.24);
     background:
-      radial-gradient(circle at top right, rgba(106, 168, 255, 0.14), transparent 42%),
-      linear-gradient(180deg, rgba(8, 12, 16, 0.96), rgba(6, 9, 13, 0.94));
-    padding: 1.2rem;
-    box-shadow: 0 16px 28px var(--shadow);
-  }
-
-  .grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-items: stretch;
+      radial-gradient(circle at top, rgba(106, 168, 255, 0.16), transparent 48%),
+      rgba(5, 10, 14, 0.92);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
   }
 
   .eyebrow,
-  .label,
   .copy,
-  p,
-  li,
   small {
     color: var(--text-2);
   }
 
-  .eyebrow,
-  .label {
+  .eyebrow {
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.16em;
     font-size: 0.72rem;
-  }
-
-  .panel {
-    display: grid;
-    gap: 0.95rem;
-    border: 1px solid var(--panel-border);
-    background:
-      linear-gradient(180deg, rgba(10, 15, 21, 0.98), rgba(5, 8, 11, 0.94)),
-      rgba(6, 9, 13, 0.96);
-    padding: 1.2rem;
-    box-shadow: 0 16px 28px var(--shadow);
+    color: #87b7ff;
   }
 
   h2,
-  h3,
-  p,
-  ul {
+  p {
     margin: 0;
+  }
+
+  h2 {
+    margin-top: -0.35rem;
+    font-size: 1.45rem;
+    line-height: 1.15;
   }
 
   .meta {
@@ -133,21 +103,45 @@
 
   strong {
     color: var(--text-0);
+    font-size: 0.95rem;
   }
 
-  ul {
-    padding-left: 1rem;
+  small {
+    line-height: 1.45;
+  }
+
+  .actions {
     display: grid;
-    gap: 0.45rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    justify-items: center;
   }
 
   button {
-    background: #060a0e;
-    border: 1px solid #1e2e3c;
+    width: 100%;
+    min-height: 3rem;
+    background: #0b1219;
+    border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.85rem 0.95rem;
     font: inherit;
     cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+  }
+
+  button:hover:enabled {
+    border-color: rgba(122, 166, 200, 0.55);
+    transform: translateY(-1px);
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+
+  .apex {
+    grid-column: 1 / -1;
+    max-width: 15rem;
   }
 
   .primary {
@@ -155,9 +149,27 @@
     background: rgba(106, 168, 255, 0.14);
   }
 
-  @media (max-width: 1080px) {
-    .grid {
+  .secondary {
+    max-width: 12.5rem;
+  }
+
+  @media (max-width: 640px) {
+    .landing {
+      place-items: center;
+    }
+
+    .card {
+      width: min(28rem, 100%);
+      padding: 1.2rem;
+    }
+
+    .actions {
       grid-template-columns: 1fr;
+    }
+
+    .apex,
+    .secondary {
+      max-width: none;
     }
   }
 </style>
