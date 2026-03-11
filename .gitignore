@@ -22,4 +22,6 @@ frontend/src-tauri/.pyinstaller/
 frontend/src-tauri/resources/backend/
 frontend/src-tauri/target/
 frontend/src-tauri/target-check/
+frontend/.playwright-cli/
+output/playwright/
 /package-lock.json
