@@ -3,11 +3,13 @@
 This file is the detailed migration log and audit record for the ongoing strangler migration from PySide6/Qt to Tauri + FastAPI + Svelte.
 
 `README.md` is intentionally kept shorter and operational. This document holds the fuller phase history, audit evidence, and open-risk tracking.
+As of March 12, 2026, the migration itself is largely complete. This document now serves primarily as the historical phase log plus burn-in/install-validation record. For pre-roadmap execution work, use `docs/roadmap_readiness_checklist.md` and `docs/p1_refactor_handoff.md`.
 
 ## Current Status
 
 - Branch: `migration/tauri-fastapi`
 - Restore point: `pre-ai-migration-2026-03-07`
+- The migration is largely complete; the remaining work is burn-in, packaging/install validation, and pre-roadmap hardening rather than broad client migration
 - Tauri is now the default desktop path.
 - PySide desktop app remains in place as an explicit fallback and is still runnable.
 - Mock mode is preserved.
@@ -39,16 +41,17 @@ This file is the detailed migration log and audit record for the ongoing strangl
 
 ## Audit Snapshot
 
-Last audited: 2026-03-08
+Last audited: 2026-03-12
 
 Verified in the current audit:
-- `.\.venv\Scripts\python.exe -m pytest` -> `52 passed`
-- `npm run test` in `frontend/` -> `8 passed`
+- `.\.venv\Scripts\python.exe -m pytest` -> `67 passed`
+- `npm run test` in `frontend/` -> `15 passed`
 - `npm run build` in `frontend/` -> success
 - `cargo check --manifest-path frontend\src-tauri\Cargo.toml` -> success
 - `npm run backend:smoke` in `frontend/` -> success; packaged `gamma-backend.exe` reached `/health`
 - `npm run desktop:smoke` in `frontend/` -> success; the default launcher started Tauri, the backend reached readiness, and the main window reached frontend page load
-- `npm run tauri:build` in `frontend/` -> attempted, but not revalidated to completion inside a 5-minute audit cap; an NSIS installer artifact already exists under `%TEMP%\gamma-tauri-build\release\bundle\nsis\`
+- Live browser/TWS audit -> connected to the configured live IBKR session, populated account values and positions, and exercised portfolio, research, risk, and IV workflows
+- `npm run tauri:build` in `frontend/` -> attempted, reached the NSIS stage, but did not complete inside a 5-minute audit cap; no final bundle artifact was verified before timeout
 
 Resolved during this audit:
 - Completed the remaining Phase 1 extraction by moving active-snapshot selection, IV symbol-follow rules, and market-data mode propagation into shared application modules.

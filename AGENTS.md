@@ -21,3 +21,4 @@ Treat [`roadmap.md`](./roadmap.md) as the primary planning document for future G
 
 For repo setup and runtime details, see [`README.md`](./README.md).
 For migration history and audit context, see [`migration.md`](./migration.md).
+For pre-roadmap readiness and handoff execution, see [`docs/roadmap_readiness_checklist.md`](./docs/roadmap_readiness_checklist.md) and [`docs/p1_refactor_handoff.md`](./docs/p1_refactor_handoff.md).

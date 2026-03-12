@@ -5,6 +5,7 @@ For future product expansion work, start with [`roadmap.md`](./roadmap.md). It d
 Gamma is a hybrid quant workstation built around a Python analytics/runtime layer with FastAPI, a Svelte frontend, and a Tauri desktop shell. Tauri is now the primary desktop path. PySide remains available as an explicit fallback during burn-in.
 
 For the detailed migration log, phase history, and audit notes, see [`migration.md`](./migration.md).
+For pre-roadmap readiness work, handoff context, and operator follow-up, use [`docs/roadmap_readiness_checklist.md`](./docs/roadmap_readiness_checklist.md) and [`docs/p1_refactor_handoff.md`](./docs/p1_refactor_handoff.md).
 
 ## Repo At A Glance
 
@@ -17,6 +18,7 @@ For the detailed migration log, phase history, and audit notes, see [`migration.
 
 ## Current State
 
+- The migration itself is largely complete; remaining work is burn-in, packaging/install QA, and pre-roadmap hardening
 - Tauri is the default desktop launcher path
 - Core portfolio, research, risk, diagnostics, and IV workflows are usable through the web/Tauri stack
 - Packaging is implemented for Windows-first distribution
