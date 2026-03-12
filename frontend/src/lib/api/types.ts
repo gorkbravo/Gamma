@@ -201,6 +201,8 @@ export interface RiskMetrics {
 
 export interface RiskContribution {
   symbol: string;
+  instrument_id: string | null;
+  display_symbol: string | null;
   weight: number | null;
   daily_vol: number | null;
   variance_contribution_pct: number | null;
@@ -221,6 +223,8 @@ export interface RiskMonteCarloCharts {
 
 export interface ExcludedAsset {
   symbol: string;
+  instrument_id: string | null;
+  display_symbol: string | null;
   reason: string;
 }
 

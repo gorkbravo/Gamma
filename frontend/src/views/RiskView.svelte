@@ -257,7 +257,7 @@
     .filter((item) => Math.abs(item.variance_contribution_pct ?? 0) > 1e-4)
     .slice(0, 6)
     .map((item) => ({
-      label: item.symbol,
+      label: item.display_symbol ?? item.symbol,
       value: item.variance_contribution_pct ?? 0,
       tone: (item.variance_contribution_pct ?? 0) < 0 ? "negative" : "positive",
       meta: `${pct(item.weight)} wt | ${fmt(item.component_var)} Comp VaR`
@@ -502,7 +502,7 @@
               {#if result?.contributions?.length}
                 {#each result.contributions as contribution}
                   <tr>
-                    <td>{contribution.symbol}</td>
+                    <td>{contribution.display_symbol ?? contribution.symbol}</td>
                     <td>{pct(contribution.weight)}</td>
                     <td>{pct(contribution.daily_vol)}</td>
                     <td>{pct(contribution.variance_contribution_pct)}</td>
@@ -650,7 +650,7 @@
             {/each}
             {#each excludedAssets as asset}
               <div class="note-row">
-                <span class="note-tag">{asset.symbol}</span>
+                <span class="note-tag">{asset.display_symbol ?? asset.symbol}</span>
                 <p>{asset.reason}</p>
               </div>
             {/each}

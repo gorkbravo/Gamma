@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
-from typing import Dict, List
-
-import pandas as pd
+from typing import List
 from PySide6.QtCore import QObject, Signal
 
 from src.application.research_validation import validate_research_scope
@@ -29,8 +26,6 @@ class AppDataContext(QObject):
         self.research_scope_type = ResearchScopeType.NONE
         self.primary_symbol = ""
         self.synthetic_positions: List[SyntheticPosition] = []
-        self.cached_timeseries: Dict[str, tuple[pd.Series, int]] = {}
-        self._cache_lock = threading.Lock()
         self.research_snapshot: PortfolioSnapshot | None = None
 
     def set_app_mode(self, mode: AppMode) -> None:
@@ -50,39 +45,10 @@ class AppDataContext(QObject):
         self.synthetic_positions = list(synthetic_positions or [])
         self.research_scope_changed.emit()
 
-    def set_cached_timeseries(self, symbol: str, series: pd.Series, lookback_days: int) -> None:
-        key = str(symbol or "").strip().upper()
-        if not key:
-            return
-        lookback = max(int(lookback_days or 0), 0)
-        with self._cache_lock:
-            existing = self.cached_timeseries.get(key)
-            if existing is not None:
-                existing_series, existing_lookback = existing
-                if existing_lookback > lookback and len(existing_series) >= len(series):
-                    return
-            self.cached_timeseries[key] = (series, lookback)
-
-    def get_cached_timeseries(self, symbol: str, min_lookback_days: int = 0) -> pd.Series | None:
-        key = str(symbol or "").strip().upper()
-        if not key:
-            return None
-        required = max(int(min_lookback_days or 0), 0)
-        with self._cache_lock:
-            cached = self.cached_timeseries.get(key)
-        if cached is None:
-            return None
-        series, lookback = cached
-        if lookback < required:
-            return None
-        return series
-
     def clear_research_state(self) -> None:
         self.research_scope_type = ResearchScopeType.NONE
         self.primary_symbol = ""
         self.synthetic_positions = []
-        with self._cache_lock:
-            self.cached_timeseries = {}
         self.research_snapshot = None
         self.research_scope_changed.emit()
         self.research_snapshot_changed.emit(None)

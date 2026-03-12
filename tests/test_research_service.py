@@ -8,6 +8,7 @@ import pytest
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
 from src.application.research_validation import ResearchValidationError
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
+from src.models.instruments import build_instrument_id
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 
 
@@ -42,8 +43,34 @@ def _make_snapshot() -> PortfolioSnapshot:
         base_currency="USD",
         account_summary={},
         positions=[
-            PositionItem("SPY", "STK", "USD", 1.0, None, None, 60.0, None, weight=0.6, base_market_value=60.0),
-            PositionItem("QQQ", "STK", "USD", 1.0, None, None, 40.0, None, weight=0.4, base_market_value=40.0),
+            PositionItem(
+                "SPY",
+                "STK",
+                "USD",
+                1.0,
+                None,
+                None,
+                60.0,
+                None,
+                weight=0.6,
+                base_market_value=60.0,
+                instrument_id="SPY",
+                display_symbol="SPY",
+            ),
+            PositionItem(
+                "QQQ",
+                "STK",
+                "USD",
+                1.0,
+                None,
+                None,
+                40.0,
+                None,
+                weight=0.4,
+                base_market_value=40.0,
+                instrument_id="QQQ",
+                display_symbol="QQQ",
+            ),
         ],
         total_market_value=100.0,
         total_cash=0.0,
@@ -99,7 +126,7 @@ def test_research_service_computes_perf_and_benchmark_returns_for_scope():
     assert not result.perf.empty
     assert not result.weights.empty
     assert result.weights.index.tolist() == ["SPY", "QQQ"]
-    assert result.primary_price.equals(prices["SPY"])
+    assert result.primary_price.equals(prices[snapshot.positions[0].resolved_instrument_id()])
     assert not result.benchmark_returns.empty
     assert result.benchmark_symbol == "IWM"
     assert result.primary_symbol == "SPY"
@@ -179,3 +206,110 @@ def test_research_service_rejects_non_positive_synthetic_weights():
         )
 
     assert "Synthetic weight must be positive for SPY" in exc_info.value.errors
+
+
+def test_research_service_keeps_distinct_instruments_with_same_display_symbol_separate():
+    idx = pd.date_range("2026-01-02", periods=5, freq="B")
+    spy_us_id = build_instrument_id(
+        provider="research",
+        provider_id="spy-us",
+        symbol="SPY",
+        sec_type="STK",
+        exchange="SMART",
+        currency="USD",
+    )
+    spy_eu_id = build_instrument_id(
+        provider="research",
+        provider_id="spy-eu",
+        symbol="SPY",
+        sec_type="STK",
+        exchange="AEB",
+        currency="EUR",
+    )
+    snapshot = PortfolioSnapshot(
+        timestamp=datetime(2026, 3, 1),
+        base_currency="USD",
+        account_summary={},
+        positions=[
+            PositionItem(
+                "SPY",
+                "STK",
+                "USD",
+                1.0,
+                None,
+                None,
+                55.0,
+                None,
+                weight=0.55,
+                base_market_value=55.0,
+                instrument_id=spy_us_id,
+                display_symbol="SPY",
+                exchange="SMART",
+                provider="research",
+                provider_id="spy-us",
+            ),
+            PositionItem(
+                "SPY",
+                "STK",
+                "EUR",
+                1.0,
+                None,
+                None,
+                45.0,
+                None,
+                weight=0.45,
+                base_market_value=45.0,
+                instrument_id=spy_eu_id,
+                display_symbol="SPY",
+                exchange="AEB",
+                provider="research",
+                provider_id="spy-eu",
+            ),
+        ],
+        total_market_value=100.0,
+        total_cash=0.0,
+        net_liquidation=100.0,
+    )
+    service = ResearchService(
+        _StubResearchProvider(
+            snapshot=snapshot,
+            prices={
+                spy_us_id: pd.Series([100.0, 101.0, 102.0, 101.5, 103.0], index=idx),
+                spy_eu_id: pd.Series([80.0, 80.5, 81.0, 82.0, 82.5], index=idx),
+            },
+            benchmark_history=pd.Series([300.0, 301.0, 302.0, 304.0, 305.0], index=idx),
+        )
+    )
+
+    result = service.analyze(
+        ResearchAnalysisRequest(
+            scope_type=ResearchScopeType.SYNTHETIC_PORTFOLIO,
+            synthetic_positions=[
+                SyntheticPosition(
+                    symbol="SPY",
+                    weight=0.55,
+                    instrument_id=spy_us_id,
+                    provider="research",
+                    provider_id="spy-us",
+                    exchange="SMART",
+                    currency="USD",
+                ),
+                SyntheticPosition(
+                    symbol="SPY",
+                    weight=0.45,
+                    instrument_id=spy_eu_id,
+                    provider="research",
+                    provider_id="spy-eu",
+                    exchange="AEB",
+                    currency="EUR",
+                ),
+            ],
+            benchmark_symbol="SPY",
+        )
+    )
+
+    assert result.weights.index.tolist() == [spy_us_id, spy_eu_id]
+    assert result.weights.iloc[0] == pytest.approx(0.55)
+    assert result.weights.iloc[1] == pytest.approx(0.45)
+    assert result.available_symbols == ["SPY", "SPY"]
+    assert set(result.constituent_total_returns.index) == {spy_us_id, spy_eu_id}

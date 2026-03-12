@@ -359,7 +359,7 @@
     ? (result?.coverage ?? emptyCoverage)
     : deriveCoverageFromResearchResult(result);
   $: weightBars = (result?.weights ?? []).map((weight) => ({
-    label: weight.symbol,
+    label: weight.display_symbol ?? weight.symbol,
     value: weight.weight,
     tone: "positive"
   }));
@@ -606,9 +606,9 @@
           </div>
 
           <div class="stack">
-            <div class="row"><span>Best Constituent</span><strong>{bestConstituent ? `${bestConstituent.symbol} | ${pct(bestConstituent.total_return)}` : "N/A"}</strong></div>
-            <div class="row"><span>Worst Constituent</span><strong>{worstConstituent ? `${worstConstituent.symbol} | ${pct(worstConstituent.total_return)}` : "N/A"}</strong></div>
-            <div class="row"><span>Weighted Leader</span><strong>{weightedLeader ? `${weightedLeader.symbol} | ${pct(weightedLeader.weighted_return)}` : "N/A"}</strong></div>
+            <div class="row"><span>Best Constituent</span><strong>{bestConstituent ? `${bestConstituent.display_symbol ?? bestConstituent.symbol} | ${pct(bestConstituent.total_return)}` : "N/A"}</strong></div>
+            <div class="row"><span>Worst Constituent</span><strong>{worstConstituent ? `${worstConstituent.display_symbol ?? worstConstituent.symbol} | ${pct(worstConstituent.total_return)}` : "N/A"}</strong></div>
+            <div class="row"><span>Weighted Leader</span><strong>{weightedLeader ? `${weightedLeader.display_symbol ?? weightedLeader.symbol} | ${pct(weightedLeader.weighted_return)}` : "N/A"}</strong></div>
             <div class="row"><span>Benchmark Overlap</span><strong>{coverageMetrics.benchmark_overlap_count}</strong></div>
           </div>
 
@@ -648,7 +648,7 @@
               {#if constituentRows.length}
                 {#each constituentRows as constituent}
                   <tr>
-                    <td>{constituent.symbol}</td>
+                    <td>{constituent.display_symbol ?? constituent.symbol}</td>
                     <td>{pct(constituent.weight)}</td>
                     <td>{pct(constituent.total_return)}</td>
                     <td>{pct(constituent.annual_vol)}</td>

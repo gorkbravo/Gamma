@@ -8,8 +8,9 @@ from typing import Mapping
 import pandas as pd
 from ib_insync import Contract
 
+from src.application.instrument_identity import identity_for_position
 from src.models.portfolio import PortfolioSnapshot
-from src.services.data_providers import PortfolioDataProvider
+from src.services.data_providers import PortfolioDataProvider, contract_for_position
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
@@ -337,13 +338,14 @@ class PortfolioService:
         for position in snapshot.positions:
             if position.symbol.startswith("CASH") or position.sec_type == "CASH":
                 continue
-            series = prices.get(position.symbol)
+            identity = identity_for_position(position)
+            series = prices.get(identity.instrument_id)
             if series is None:
-                missing_symbols.append(position.symbol)
+                missing_symbols.append(identity.display_symbol)
                 continue
             clean = series.dropna()
             if len(clean) < 2:
-                missing_symbols.append(position.symbol)
+                missing_symbols.append(identity.display_symbol)
                 continue
             latest = float(clean.iloc[-1])
             previous = float(clean.iloc[-2])
@@ -358,7 +360,7 @@ class PortfolioService:
                 fx_rate = self.fx_service.get_rate(snapshot.base_currency, currency)
                 fx_by_currency[currency] = fx_rate
             if fx_rate is None:
-                missing_symbols.append(position.symbol)
+                missing_symbols.append(identity.display_symbol)
                 continue
             total_pnl += float(position.quantity) * (latest - previous) * float(fx_rate)
 
@@ -411,20 +413,30 @@ class PortfolioService:
             for position in snapshot.positions:
                 if position.symbol.startswith("CASH"):
                     continue
+                identity = identity_for_position(position)
                 series = self.mock_service.load_history(position.symbol)
                 if series is None:
-                    missing.append(position.symbol)
+                    missing.append(identity.display_symbol)
                 else:
-                    prices[position.symbol] = series.astype(float)
+                    prices[identity.instrument_id] = series.astype(float)
             return prices, missing
 
-        contracts = self.client.get_contracts()
-        return self.market_data.fetch_histories(contracts, lookback_days)
+        contracts: list[Contract] = []
+        keys: list[str] = []
+        labels: list[str] = []
+        for position in snapshot.positions:
+            if position.symbol.startswith("CASH"):
+                continue
+            identity = identity_for_position(position)
+            contracts.append(contract_for_position(position))
+            keys.append(identity.instrument_id)
+            labels.append(identity.display_symbol)
+        return self.market_data.fetch_histories(contracts, lookback_days, keys=keys, labels=labels)
 
     @staticmethod
     def ensure_cash_returns(snapshot: PortfolioSnapshot, returns_df: pd.DataFrame) -> pd.DataFrame:
         cash_symbols = [
-            position.symbol
+            position.resolved_instrument_id()
             for position in snapshot.positions
             if position.symbol.startswith("CASH") and position.base_market_value is not None
         ]
@@ -439,8 +451,9 @@ class PortfolioService:
     def weights_for_symbols(snapshot: PortfolioSnapshot, symbols: list[str]) -> pd.Series:
         values: dict[str, float] = {}
         for position in snapshot.positions:
-            if position.symbol in symbols and position.base_market_value is not None:
-                values[position.symbol] = float(position.base_market_value)
+            instrument_id = position.resolved_instrument_id()
+            if instrument_id in symbols and position.base_market_value is not None:
+                values[instrument_id] = float(position.base_market_value)
         return PortfolioService._compute_weights(pd.Series(values))
 
     @staticmethod

@@ -16,6 +16,7 @@ from src.services.data_providers import (
     select_data_provider,
     should_auto_follow_research_symbol,
 )
+from src.services.research_cache import ResearchHistoryCache
 from src.ui.tabs.research_overview_tab import ResearchOverviewTab
 
 
@@ -48,7 +49,14 @@ def _make_providers(ctx: AppDataContext):
     market = _StubMarketData()
     mock = _StubMockService()
     portfolio_provider = PortfolioDataProvider(client, market, mock)  # type: ignore[arg-type]
-    research_provider = ResearchDataProvider(client, market, mock, ctx, "USD")  # type: ignore[arg-type]
+    research_provider = ResearchDataProvider(
+        client,
+        market,
+        mock,
+        ctx,
+        "USD",
+        ResearchHistoryCache(),
+    )  # type: ignore[arg-type]
     return portfolio_provider, research_provider
 
 
@@ -129,13 +137,36 @@ def test_research_provider_symbol_cache_respects_requested_lookback():
     client = _StubClient(mock=False)
     market = _HistoryMarketData()
     mock = _StubMockService()
-    provider = ResearchDataProvider(client, market, mock, ctx, "USD")  # type: ignore[arg-type]
+    provider = ResearchDataProvider(
+        client,
+        market,
+        mock,
+        ctx,
+        "USD",
+        ResearchHistoryCache(),
+    )  # type: ignore[arg-type]
 
     provider.load_symbol_history("SPY", 126)
     provider.load_symbol_history("SPY", 252)
     provider.load_symbol_history("SPY", 126)
 
     assert market.calls == [126, 252]
+
+
+def test_research_history_cache_survives_workspace_scope_reset():
+    ctx = AppDataContext()
+    client = _StubClient(mock=False)
+    market = _HistoryMarketData()
+    mock = _StubMockService()
+    cache = ResearchHistoryCache()
+    provider = ResearchDataProvider(client, market, mock, ctx, "USD", cache)  # type: ignore[arg-type]
+
+    provider.load_symbol_history("SPY", 126)
+    ctx.clear_research_state()
+    provider.load_symbol_history("SPY", 126)
+
+    assert market.calls == [126]
+    assert cache.symbols() == ["SPY"]
 
 
 def test_active_snapshot_keeps_portfolio_snapshot_across_research_mode_switch():

@@ -227,19 +227,22 @@ class MarketDataService:
         contracts: List[Contract],
         lookback_days: int,
         progress_cb=None,
+        keys: List[str] | None = None,
+        labels: List[str] | None = None,
     ) -> Tuple[Dict[str, pd.Series], List[str]]:
         prices: Dict[str, pd.Series] = {}
         missing: List[str] = []
         total = len(contracts)
         for idx, contract in enumerate(contracts, start=1):
             series = self.fetch_history(contract, lookback_days)
-            symbol = contract.symbol
+            key = keys[idx - 1] if keys is not None and idx - 1 < len(keys) else contract.symbol
+            label = labels[idx - 1] if labels is not None and idx - 1 < len(labels) else contract.symbol
             if series is None:
-                missing.append(symbol)
+                missing.append(label)
             else:
-                prices[symbol] = series
+                prices[key] = series.astype(float)
             if progress_cb:
-                progress_cb(idx, total, symbol)
+                progress_cb(idx, total, label)
         return prices, missing
 
     def fetch_fx_rate(self, base: str, quote: str, timeout_seconds: float | None = None) -> Optional[float]:

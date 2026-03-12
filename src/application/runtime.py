@@ -20,6 +20,7 @@ from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.services.portfolio_history_store import PortfolioHistoryStore
+from src.services.research_cache import ResearchHistoryCache
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.logging_config import setup_logging
 
@@ -33,6 +34,7 @@ class ApplicationRuntime:
     market_data_mode: str
     mock_mode: bool
     app_context: AppDataContext
+    research_cache: ResearchHistoryCache
     mock_service: MockDataService
     client: IBKRClient
     cache: CacheService
@@ -92,6 +94,7 @@ def build_runtime(
     resolved_sample_data_dir = Path(sample_data_dir or os.getenv("SAMPLE_DATA_DIR", "sample_data"))
 
     app_context = AppDataContext()
+    research_cache = ResearchHistoryCache()
     mock_service = MockDataService(base_path=resolved_sample_data_dir)
     client = IBKRClient(host, port, client_id, account, bool(mock_mode), mock_service)
     client.set_market_data_mode(market_data_mode)
@@ -118,6 +121,7 @@ def build_runtime(
         mock_service,
         app_context,
         base_currency,
+        research_cache,
     )
 
     portfolio_service = PortfolioService(
@@ -140,6 +144,7 @@ def build_runtime(
         market_data_mode=market_data_mode,
         mock_mode=bool(mock_mode),
         app_context=app_context,
+        research_cache=research_cache,
         mock_service=mock_service,
         client=client,
         cache=cache,

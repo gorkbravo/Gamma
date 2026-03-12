@@ -67,6 +67,11 @@ class _PriceProvider:
 
 
 def _make_snapshot(positions, net_liq=100.0):
+    for position in positions:
+        if position.instrument_id is None:
+            position.instrument_id = position.symbol
+        if position.display_symbol is None:
+            position.display_symbol = position.symbol
     return PortfolioSnapshot(
         timestamp=datetime(2026, 2, 22),
         base_currency="USD",

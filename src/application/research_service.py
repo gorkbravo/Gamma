@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.analytics.returns import align_prices, compute_returns
 from src.analytics.risk_metrics import compute_weights, max_drawdown, portfolio_returns, realized_vol
+from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.research_validation import ensure_valid_research_scope
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
@@ -67,10 +68,13 @@ class ResearchService:
                 warnings=warnings,
             )
 
+        identity_map = snapshot_identity_map(snapshot)
         prices, missing = self.provider.load_prices(snapshot, lookback_days=request.lookback_days)
         primary_price = pd.Series(dtype=float)
         if request.scope_type == ResearchScopeType.SINGLE_TICKER:
-            primary_price = prices.get(primary_symbol, pd.Series(dtype=float))
+            primary_identity = find_identity_by_symbol(snapshot, primary_symbol)
+            if primary_identity is not None:
+                primary_price = prices.get(primary_identity.instrument_id, pd.Series(dtype=float))
         if missing:
             warnings.append(f"Missing history for: {', '.join(missing)}")
         if not prices:
@@ -99,9 +103,9 @@ class ResearchService:
             )
 
         values = {
-            position.symbol: float(position.base_market_value)
+            position.resolved_instrument_id(): float(position.base_market_value)
             for position in snapshot.positions
-            if position.base_market_value is not None and position.symbol in returns_df.columns
+            if position.base_market_value is not None and position.resolved_instrument_id() in returns_df.columns
         }
         weights = compute_weights(pd.Series(values))
         if weights.empty:
@@ -113,7 +117,7 @@ class ResearchService:
                 primary_symbol=primary_symbol or None,
                 weights=weights,
                 primary_price=primary_price,
-                available_symbols=list(returns_df.columns),
+                available_symbols=self._labels_for_ids(list(returns_df.columns), identity_map),
                 missing_symbols=missing,
                 warnings=warnings,
             )
@@ -129,7 +133,7 @@ class ResearchService:
                 weights=weights,
                 primary_price=primary_price,
                 perf=perf,
-                available_symbols=weights.index.tolist(),
+                available_symbols=self._labels_for_ids(weights.index.tolist(), identity_map),
                 missing_symbols=missing,
                 warnings=warnings,
             )
@@ -151,7 +155,7 @@ class ResearchService:
             primary_symbol=primary_symbol or None,
             weights=weights,
             primary_price=primary_price,
-            available_symbols=weights.index.tolist(),
+            available_symbols=self._labels_for_ids(weights.index.tolist(), identity_map),
             missing_symbols=missing,
             benchmark_overlap_count=benchmark_overlap_count,
             constituent_total_returns=constituent_total_returns,
@@ -215,3 +219,15 @@ class ResearchService:
             return pd.Series(dtype=float)
         cumulative = (1.0 + returns_df).prod() - 1.0
         return cumulative.astype(float)
+
+    @staticmethod
+    def _labels_for_ids(
+        instrument_ids: list[str],
+        identity_map: dict[str, object],
+    ) -> list[str]:
+        labels: list[str] = []
+        for instrument_id in instrument_ids:
+            identity = identity_map.get(instrument_id)
+            label = getattr(identity, "display_symbol", None) or getattr(identity, "symbol", None) or str(instrument_id)
+            labels.append(str(label))
+        return labels

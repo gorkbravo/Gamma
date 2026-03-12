@@ -149,7 +149,7 @@
   function buildAllocationSlices(nextSnapshot: PortfolioSnapshot | null) {
     const positions = (nextSnapshot?.positions ?? [])
       .map((position) => ({
-        label: position.symbol,
+        label: position.display_symbol ?? position.symbol,
         secType: position.sec_type,
         value: Math.abs(position.base_market_value ?? 0),
         unrealizedPnl: position.unrealized_pnl
@@ -433,7 +433,7 @@
               {#if sortedPositions.length}
                 {#each sortedPositions as position}
                   <tr>
-                    <td>{position.symbol}</td>
+                    <td>{position.display_symbol ?? position.symbol}</td>
                     <td>{position.sec_type}</td>
                     <td>{position.currency}</td>
                     <td>{fmt(position.quantity, 3)}</td>

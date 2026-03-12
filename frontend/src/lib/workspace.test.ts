@@ -49,7 +49,13 @@ function makeResearchResult(scope: string): ResearchResult {
               unrealized_pnl: 10,
               weight: 1,
               base_market_value: 110,
-              fx_rate: 1
+              fx_rate: 1,
+              instrument_id: "mock:AAPL",
+              display_symbol: "AAPL",
+              exchange: "SMART",
+              primary_exchange: "NASDAQ",
+              provider: "mock",
+              provider_id: "AAPL"
             }
           ]
         : [
@@ -64,7 +70,13 @@ function makeResearchResult(scope: string): ResearchResult {
               unrealized_pnl: 10,
               weight: 0.35,
               base_market_value: 35,
-              fx_rate: 1
+              fx_rate: 1,
+              instrument_id: "mock:XLV",
+              display_symbol: "XLV",
+              exchange: "SMART",
+              primary_exchange: "ARCA",
+              provider: "mock",
+              provider_id: "XLV"
             },
             {
               symbol: "XLP",
@@ -77,7 +89,13 @@ function makeResearchResult(scope: string): ResearchResult {
               unrealized_pnl: 10,
               weight: 0.35,
               base_market_value: 35,
-              fx_rate: 1
+              fx_rate: 1,
+              instrument_id: "mock:XLP",
+              display_symbol: "XLP",
+              exchange: "SMART",
+              primary_exchange: "ARCA",
+              provider: "mock",
+              provider_id: "XLP"
             },
             {
               symbol: "XLU",
@@ -90,7 +108,13 @@ function makeResearchResult(scope: string): ResearchResult {
               unrealized_pnl: 10,
               weight: 0.3,
               base_market_value: 30,
-              fx_rate: 1
+              fx_rate: 1,
+              instrument_id: "mock:XLU",
+              display_symbol: "XLU",
+              exchange: "SMART",
+              primary_exchange: "ARCA",
+              provider: "mock",
+              provider_id: "XLU"
             }
           ],
       total_market_value: 100,
@@ -105,11 +129,11 @@ function makeResearchResult(scope: string): ResearchResult {
     benchmark_points: [],
     primary_price_points: scope === "single_ticker" ? [] : [],
     weights: scope === "single_ticker"
-      ? [{ symbol: "AAPL", weight: 1 }]
+      ? [{ symbol: "AAPL", weight: 1, instrument_id: "mock:AAPL", display_symbol: "AAPL" }]
       : [
-          { symbol: "XLV", weight: 0.35 },
-          { symbol: "XLP", weight: 0.35 },
-          { symbol: "XLU", weight: 0.3 }
+          { symbol: "XLV", weight: 0.35, instrument_id: "mock:XLV", display_symbol: "XLV" },
+          { symbol: "XLP", weight: 0.35, instrument_id: "mock:XLP", display_symbol: "XLP" },
+          { symbol: "XLU", weight: 0.3, instrument_id: "mock:XLU", display_symbol: "XLU" }
         ],
     summary: {
       total_return: null,
@@ -137,6 +161,8 @@ function makeResearchResult(scope: string): ResearchResult {
           {
             symbol: "AAPL",
             weight: 1,
+            instrument_id: "mock:AAPL",
+            display_symbol: "AAPL",
             total_return: 0.1,
             annual_vol: 0.2,
             max_drawdown: -0.05,
@@ -147,6 +173,8 @@ function makeResearchResult(scope: string): ResearchResult {
           {
             symbol: "XLV",
             weight: 0.35,
+            instrument_id: "mock:XLV",
+            display_symbol: "XLV",
             total_return: 0.1,
             annual_vol: 0.2,
             max_drawdown: -0.05,
@@ -155,6 +183,8 @@ function makeResearchResult(scope: string): ResearchResult {
           {
             symbol: "XLP",
             weight: 0.35,
+            instrument_id: "mock:XLP",
+            display_symbol: "XLP",
             total_return: 0.1,
             annual_vol: 0.2,
             max_drawdown: -0.05,
@@ -163,6 +193,8 @@ function makeResearchResult(scope: string): ResearchResult {
           {
             symbol: "XLU",
             weight: 0.3,
+            instrument_id: "mock:XLU",
+            display_symbol: "XLU",
             total_return: 0.1,
             annual_vol: 0.2,
             max_drawdown: -0.05,

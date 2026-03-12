@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from src.analytics.risk_metrics import max_drawdown, realized_vol
 from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, series_to_points
+from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.research_service import ResearchAnalysisResult
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 
@@ -127,13 +128,8 @@ class ResearchAnalyzeResponseModel(BaseModel):
             benchmark_points=series_to_points(result.benchmark_returns),
             primary_price_points=series_to_points(result.primary_price),
             weights=[
-                WeightPointModel(
-                    symbol=str(symbol),
-                    weight=float(weight),
-                    instrument_id=_position_meta(result.snapshot, str(symbol)).get("instrument_id"),
-                    display_symbol=_position_meta(result.snapshot, str(symbol)).get("display_symbol"),
-                )
-                for symbol, weight in result.weights.items()
+                _weight_point_model(result.snapshot, str(instrument_id), float(weight))
+                for instrument_id, weight in result.weights.items()
             ],
             summary=ResearchSummaryModel(
                 total_return=total_return,
@@ -201,14 +197,14 @@ def _constituents_from_result(result: ResearchAnalysisResult) -> list[ResearchCo
     if result.weights.empty:
         return []
     rows: list[ResearchConstituentModel] = []
-    for symbol, weight in result.weights.sort_values(ascending=False).items():
-        position_meta = _position_meta(result.snapshot, str(symbol))
-        total_return = _series_value(result.constituent_total_returns, symbol)
-        annual_vol = _series_value(result.constituent_annual_vol, symbol)
-        max_dd = _series_value(result.constituent_max_drawdown, symbol)
+    for instrument_id, weight in result.weights.sort_values(ascending=False).items():
+        position_meta = _position_meta(result.snapshot, str(instrument_id))
+        total_return = _series_value(result.constituent_total_returns, instrument_id)
+        annual_vol = _series_value(result.constituent_annual_vol, instrument_id)
+        max_dd = _series_value(result.constituent_max_drawdown, instrument_id)
         rows.append(
             ResearchConstituentModel(
-                symbol=str(symbol),
+                symbol=position_meta.get("symbol") or str(instrument_id),
                 weight=float(weight),
                 instrument_id=position_meta.get("instrument_id"),
                 display_symbol=position_meta.get("display_symbol"),
@@ -228,13 +224,32 @@ def _series_value(series, symbol: str) -> float | None:
     return None if value is None else float(value)
 
 
-def _position_meta(snapshot, symbol: str) -> dict[str, str | None]:
+def _weight_point_model(snapshot, instrument_id: str, weight: float) -> WeightPointModel:
+    position_meta = _position_meta(snapshot, instrument_id)
+    return WeightPointModel(
+        symbol=position_meta.get("symbol") or instrument_id,
+        weight=weight,
+        instrument_id=position_meta.get("instrument_id"),
+        display_symbol=position_meta.get("display_symbol"),
+    )
+
+
+def _position_meta(snapshot, instrument_id: str) -> dict[str, str | None]:
+    identity_map = snapshot_identity_map(snapshot)
+    identity = identity_map.get(instrument_id)
+    if identity is not None:
+        return {
+            "instrument_id": identity.instrument_id,
+            "symbol": identity.symbol,
+            "display_symbol": identity.display_symbol,
+        }
+    fallback = find_identity_by_symbol(snapshot, instrument_id)
+    if fallback is not None:
+        return {
+            "instrument_id": fallback.instrument_id,
+            "symbol": fallback.symbol,
+            "display_symbol": fallback.display_symbol,
+        }
     if snapshot is None:
-        return {"instrument_id": None, "display_symbol": None}
-    for position in snapshot.positions:
-        if position.symbol == symbol:
-            return {
-                "instrument_id": position.resolved_instrument_id(),
-                "display_symbol": position.resolved_display_symbol(),
-            }
-    return {"instrument_id": None, "display_symbol": None}
+        return {"instrument_id": None, "symbol": None, "display_symbol": None}
+    return {"instrument_id": None, "symbol": None, "display_symbol": None}

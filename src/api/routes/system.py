@@ -57,7 +57,7 @@ def _system_status_response(runtime) -> SystemStatusResponseModel:
         base_currency=runtime.base_currency,
         market_data_mode=runtime.market_data_mode,
         connection=_connection_state(runtime),
-        cached_symbols=sorted(runtime.app_context.cached_timeseries.keys()),
+        cached_symbols=runtime.research_cache.symbols(),
     )
 
 
@@ -75,7 +75,7 @@ def diagnostics(request: Request) -> DiagnosticsResponseModel:
         local_history_entries=int(len(history_df)),
         local_history_path=str(runtime.portfolio_history.path),
         recent_errors=runtime.portfolio_service.formatted_errors(50),
-        cached_symbols=sorted(runtime.app_context.cached_timeseries.keys()),
+        cached_symbols=runtime.research_cache.symbols(),
         iv_running=runtime.iv_service.is_running(),
         iv_status_text=runtime.iv_service.status_text(),
         iv_active_symbol=runtime.iv_service.active_symbol(),

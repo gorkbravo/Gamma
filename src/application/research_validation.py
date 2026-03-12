@@ -49,17 +49,13 @@ def validate_research_scope(
         if not items:
             errors.append("Synthetic portfolio requires at least one symbol")
 
-        seen_symbols: set[str] = set()
+        seen_instruments: set[str] = set()
         total_weight = 0.0
         for item in items:
             symbol = normalize_symbol(item.symbol)
             if not symbol:
                 errors.append("Synthetic portfolio contains an empty symbol")
                 continue
-
-            if symbol in seen_symbols:
-                errors.append(f"Duplicate symbol in synthetic portfolio: {symbol}")
-            seen_symbols.add(symbol)
 
             try:
                 weight = float(item.weight)
@@ -73,13 +69,19 @@ def validate_research_scope(
                 errors.append(f"Synthetic weight must be positive for {symbol}")
                 continue
 
+            resolved_instrument_id = item.resolved_instrument_id(symbol=symbol)
+            if resolved_instrument_id in seen_instruments:
+                errors.append(f"Duplicate symbol in synthetic portfolio: {symbol}")
+                continue
+            seen_instruments.add(resolved_instrument_id)
+
             total_weight += weight
             normalized_positions.append(
                 replace(
                     item,
                     symbol=symbol,
                     weight=weight,
-                    instrument_id=item.resolved_instrument_id(symbol=symbol),
+                    instrument_id=resolved_instrument_id,
                     display_symbol=item.resolved_display_symbol(symbol=symbol),
                     sec_type=item.sec_type or "STK",
                 )

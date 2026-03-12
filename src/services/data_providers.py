@@ -14,7 +14,24 @@ from src.services.app_context import AppDataContext
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
+from src.services.research_cache import ResearchHistoryCache
 from src.utils.time import now_utc
+
+
+def contract_for_position(position: PositionItem) -> Contract:
+    contract = Contract(
+        symbol=position.symbol,
+        secType=position.sec_type or "STK",
+        exchange=position.exchange or "SMART",
+        currency=position.currency or "USD",
+    )
+    provider_id = str(position.provider_id or "").strip()
+    if provider_id.isdigit():
+        contract.conId = int(provider_id)
+    primary_exchange = str(position.primary_exchange or "").strip()
+    if primary_exchange:
+        contract.primaryExchange = primary_exchange
+    return contract
 
 
 class AppDataProvider(Protocol):
@@ -46,14 +63,30 @@ class PortfolioDataProvider:
                 if pos.symbol.startswith("CASH"):
                     continue
                 series = self.mock_service.load_history(pos.symbol)
+                instrument_id = pos.resolved_instrument_id()
+                display_symbol = pos.resolved_display_symbol()
                 if series is None:
-                    missing.append(pos.symbol)
+                    missing.append(display_symbol)
                 else:
-                    prices[pos.symbol] = series
+                    prices[instrument_id] = series.astype(float)
             return prices, missing
 
-        contracts = self.client.get_contracts()
-        return self.market_data.fetch_histories(contracts, lookback_days, progress_cb)
+        contracts: List[Contract] = []
+        keys: List[str] = []
+        labels: List[str] = []
+        for pos in snapshot.positions:
+            if pos.symbol.startswith("CASH"):
+                continue
+            contracts.append(contract_for_position(pos))
+            keys.append(pos.resolved_instrument_id())
+            labels.append(pos.resolved_display_symbol())
+        return self.market_data.fetch_histories(
+            contracts,
+            lookback_days,
+            progress_cb=progress_cb,
+            keys=keys,
+            labels=labels,
+        )
 
 
 @dataclass
@@ -61,14 +94,15 @@ class ResearchDataProvider:
     client: IBKRClient
     market_data: MarketDataService
     mock_service: MockDataService
-    context: AppDataContext
+    context: AppDataContext | None
     base_currency: str
+    history_cache: ResearchHistoryCache
 
     def load_symbol_history(self, symbol: str, lookback_days: int) -> pd.Series | None:
         ticker = str(symbol or "").strip().upper()
         if not ticker:
             return None
-        cached = self.context.get_cached_timeseries(ticker, lookback_days)
+        cached = self.history_cache.get(ticker, lookback_days)
         if cached is not None and not cached.empty:
             return cached
         if self.client.mock:
@@ -77,7 +111,7 @@ class ResearchDataProvider:
             contract = Contract(symbol=ticker, secType="STK", exchange="SMART", currency="USD")
             series = self.market_data.fetch_history(contract, lookback_days)
         if series is not None and not series.empty:
-            self.context.set_cached_timeseries(ticker, series, lookback_days)
+            self.history_cache.set(ticker, series, lookback_days)
         return series
 
     def load_prices(
@@ -88,19 +122,24 @@ class ResearchDataProvider:
     ) -> Tuple[Dict[str, pd.Series], List[str]]:
         prices: Dict[str, pd.Series] = {}
         missing: List[str] = []
-        symbols = [pos.symbol for pos in snapshot.positions if not pos.symbol.startswith("CASH")]
-        total = len(symbols)
-        for idx, symbol in enumerate(symbols, start=1):
+        positions = [pos for pos in snapshot.positions if not pos.symbol.startswith("CASH")]
+        total = len(positions)
+        for idx, position in enumerate(positions, start=1):
+            symbol = position.resolved_symbol()
+            instrument_id = position.resolved_instrument_id()
+            display_symbol = position.resolved_display_symbol()
             series = self.load_symbol_history(symbol, lookback_days)
             if series is None or series.empty:
-                missing.append(symbol)
+                missing.append(display_symbol)
             else:
-                prices[symbol] = series.astype(float)
+                prices[instrument_id] = series.astype(float)
             if progress_cb:
-                progress_cb(idx, total, symbol)
+                progress_cb(idx, total, display_symbol)
         return prices, missing
 
     def build_snapshot(self) -> tuple[PortfolioSnapshot | None, List[str]]:
+        if self.context is None:
+            return None, ["Research scope is not configured"]
         return self.build_snapshot_for_scope(
             self.context.research_scope_type,
             primary_symbol=self.context.primary_symbol,
