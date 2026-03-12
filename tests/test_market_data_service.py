@@ -71,3 +71,47 @@ def test_throttle_queue_survives_callback_failure():
 
     assert callback_error_seen.wait(1.0)
     assert second_task_done.wait(1.0)
+
+
+def test_fx_contract_spec_uses_canonical_pair_orientation():
+    usd_per_eur = MarketDataService._fx_contract_spec("USD", "EUR")
+    eur_per_usd = MarketDataService._fx_contract_spec("EUR", "USD")
+
+    assert usd_per_eur is not None
+    usd_contract, usd_invert = usd_per_eur
+    assert usd_contract.symbol == "EUR"
+    assert usd_contract.currency == "USD"
+    assert usd_invert is False
+
+    assert eur_per_usd is not None
+    eur_contract, eur_invert = eur_per_usd
+    assert eur_contract.symbol == "EUR"
+    assert eur_contract.currency == "USD"
+    assert eur_invert is True
+
+
+def test_fetch_fx_history_preserves_or_inverts_series_based_on_target_direction(tmp_path):
+    cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
+    service = MarketDataService(
+        ib=_ConnectedIB(),
+        cache=cache,
+        min_interval_seconds=0.0,
+        history_request_timeout_seconds=0.2,
+    )
+    idx = pd.date_range("2026-01-02", periods=3, freq="B")
+    requested: list[tuple[str, str]] = []
+
+    def fake_fetch_history(contract, lookback_days):
+        requested.append((contract.symbol, contract.currency))
+        return pd.Series([1.2, 1.25, 1.3], index=idx)
+
+    service.fetch_history = fake_fetch_history  # type: ignore[method-assign]
+
+    usd_per_eur = service.fetch_fx_history("USD", "EUR", 30)
+    eur_per_usd = service.fetch_fx_history("EUR", "USD", 30)
+
+    assert requested == [("EUR", "USD"), ("EUR", "USD")]
+    assert usd_per_eur is not None
+    assert eur_per_usd is not None
+    assert float(usd_per_eur.iloc[0]) == 1.2
+    assert float(eur_per_usd.iloc[0]) == 1 / 1.2
