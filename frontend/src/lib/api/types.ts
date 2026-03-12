@@ -115,9 +115,34 @@ export interface ResearchSummary {
   correlation: number | null;
 }
 
+export interface ResearchStructure {
+  total_weight: number | null;
+  top_weight: number | null;
+  top5_weight: number | null;
+  concentration_hhi: number | null;
+  effective_positions: number | null;
+  aligned_symbol_count: number;
+}
+
+export interface ResearchCoverage {
+  available_symbols: string[];
+  missing_symbols: string[];
+  benchmark_overlap_count: number;
+}
+
+export interface ResearchConstituent {
+  symbol: string;
+  weight: number;
+  total_return: number | null;
+  annual_vol: number | null;
+  max_drawdown: number | null;
+  weighted_return: number | null;
+}
+
 export interface ResearchResult {
   scope_type: string;
   benchmark_symbol: string;
+  primary_symbol: string | null;
   observations_count: number;
   snapshot: PortfolioSnapshot | null;
   performance_points: TimeSeriesPoint[];
@@ -125,6 +150,9 @@ export interface ResearchResult {
   primary_price_points: TimeSeriesPoint[];
   weights: ResearchWeightPoint[];
   summary: ResearchSummary;
+  structure: ResearchStructure;
+  coverage: ResearchCoverage;
+  constituents: ResearchConstituent[];
   warnings: string[];
 }
 

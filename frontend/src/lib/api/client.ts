@@ -1,5 +1,5 @@
 const runtimeBase =
-  typeof window !== "undefined" ? window.__STRATALAB_API_BASE__ : undefined;
+  typeof window !== "undefined" ? window.__GAMMA_API_BASE__ : undefined;
 const rawBase = runtimeBase ?? import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 export const API_BASE = rawBase.replace(/\/+$/, "");

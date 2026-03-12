@@ -24,6 +24,7 @@ import {
   portfolioSnapshot,
   researchResult,
   riskResult,
+  runResearch,
   setMarketDataMode,
   systemStatus
 } from "./app";
@@ -105,6 +106,7 @@ describe("app store orchestration", () => {
     const research: ResearchResult = {
       scope_type: "single_ticker",
       benchmark_symbol: "SPY",
+      primary_symbol: "AAPL",
       observations_count: 10,
       snapshot,
       performance_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }],
@@ -119,6 +121,29 @@ describe("app store orchestration", () => {
         beta: 1,
         correlation: 0.9
       },
+      structure: {
+        total_weight: 1,
+        top_weight: 1,
+        top5_weight: 1,
+        concentration_hhi: 1,
+        effective_positions: 1,
+        aligned_symbol_count: 1
+      },
+      coverage: {
+        available_symbols: ["AAPL"],
+        missing_symbols: [],
+        benchmark_overlap_count: 10
+      },
+      constituents: [
+        {
+          symbol: "AAPL",
+          weight: 1,
+          total_return: 0.1,
+          annual_vol: 0.2,
+          max_drawdown: -0.05,
+          weighted_return: 0.1
+        }
+      ],
       warnings: []
     };
     const risk: RiskResult = {
@@ -186,6 +211,167 @@ describe("app store orchestration", () => {
     expect(get(riskResult)?.metrics.historical_var).toBe(5);
   });
 
+  it("replaces the active research context and clears stale risk results on rerun", async () => {
+    const singleTicker = makeResearchResult("single_ticker", makeSnapshot());
+    const syntheticSnapshot = {
+      ...makeSnapshot(),
+      positions: [
+        {
+          ...makeSnapshot().positions[0],
+          symbol: "XLV",
+          quantity: 0.35,
+          weight: 0.35,
+          base_market_value: 35,
+          market_value: 35
+        },
+        {
+          ...makeSnapshot().positions[0],
+          symbol: "XLP",
+          quantity: 0.35,
+          weight: 0.35,
+          base_market_value: 35,
+          market_value: 35
+        },
+        {
+          ...makeSnapshot().positions[0],
+          symbol: "XLU",
+          quantity: 0.3,
+          weight: 0.3,
+          base_market_value: 30,
+          market_value: 30
+        }
+      ],
+      total_market_value: 100,
+      net_liquidation: 100
+    };
+    const synthetic = makeResearchResult("synthetic_portfolio", syntheticSnapshot);
+
+    riskResult.set({
+      metrics: {
+        alpha: 0.95,
+        lookback_days: 252,
+        horizon_days: 1,
+        portfolio_value: 100,
+        historical_var: 5,
+        historical_cvar: 6,
+        parametric_var: 4,
+        daily_vol: 0.01,
+        annual_vol: 0.2,
+        max_drawdown: -0.1,
+        beta: 1,
+        correlation: 0.8,
+        alpha_annual: 0.05,
+        covered_portfolio_value: 100,
+        risk_coverage_ratio: 1,
+        historical_var_total_estimate: 5,
+        historical_cvar_total_estimate: 6,
+        parametric_var_total_estimate: 4,
+        monte_carlo_model: "Gaussian",
+        monte_carlo_horizon_days: 10,
+        monte_carlo_num_simulations: 1000,
+        monte_carlo_var: 7,
+        monte_carlo_cvar: 8,
+        monte_carlo_var_total_estimate: 7,
+        monte_carlo_cvar_total_estimate: 8,
+        aligned_obs_count: 10,
+        benchmark_overlap_count: 10,
+        concentration_hhi: 1,
+        top5_weight: 1,
+        effective_bets: 1
+      },
+      portfolio_return_points: [],
+      benchmark_return_points: [],
+      contributions: [],
+      monte_carlo: {
+        terminal_returns: [],
+        fan_percentiles: {},
+        sample_paths: {}
+      },
+      excluded_assets: [],
+      warnings: []
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(ok(singleTicker))
+        .mockResolvedValueOnce(ok(synthetic))
+    );
+
+    await runResearch({
+      scopeType: "single_ticker",
+      primarySymbol: "AAPL",
+      benchmarkSymbol: "SPY",
+      lookbackDays: 252
+    });
+
+    expect(get(researchResult)?.scope_type).toBe("single_ticker");
+    expect(get(researchResult)?.snapshot?.positions.map((position) => position.symbol)).toEqual(["AAPL"]);
+    expect(get(riskResult)).toBeNull();
+
+    riskResult.set({
+      metrics: {
+        alpha: 0.95,
+        lookback_days: 252,
+        horizon_days: 1,
+        portfolio_value: 100,
+        historical_var: 5,
+        historical_cvar: 6,
+        parametric_var: 4,
+        daily_vol: 0.01,
+        annual_vol: 0.2,
+        max_drawdown: -0.1,
+        beta: 1,
+        correlation: 0.8,
+        alpha_annual: 0.05,
+        covered_portfolio_value: 100,
+        risk_coverage_ratio: 1,
+        historical_var_total_estimate: 5,
+        historical_cvar_total_estimate: 6,
+        parametric_var_total_estimate: 4,
+        monte_carlo_model: "Gaussian",
+        monte_carlo_horizon_days: 10,
+        monte_carlo_num_simulations: 1000,
+        monte_carlo_var: 7,
+        monte_carlo_cvar: 8,
+        monte_carlo_var_total_estimate: 7,
+        monte_carlo_cvar_total_estimate: 8,
+        aligned_obs_count: 10,
+        benchmark_overlap_count: 10,
+        concentration_hhi: 1,
+        top5_weight: 1,
+        effective_bets: 1
+      },
+      portfolio_return_points: [],
+      benchmark_return_points: [],
+      contributions: [],
+      monte_carlo: {
+        terminal_returns: [],
+        fan_percentiles: {},
+        sample_paths: {}
+      },
+      excluded_assets: [],
+      warnings: []
+    });
+
+    await runResearch({
+      scopeType: "synthetic_portfolio",
+      syntheticPositions: [
+        { symbol: "XLV", weight: 0.35 },
+        { symbol: "XLP", weight: 0.35 },
+        { symbol: "XLU", weight: 0.3 }
+      ],
+      benchmarkSymbol: "SPY",
+      lookbackDays: 252
+    });
+
+    expect(get(researchResult)?.scope_type).toBe("synthetic_portfolio");
+    expect(get(researchResult)?.primary_symbol).toBeNull();
+    expect(get(researchResult)?.snapshot?.positions.map((position) => position.symbol)).toEqual(["XLV", "XLP", "XLU"]);
+    expect(get(riskResult)).toBeNull();
+  });
+
   it("synchronizes diagnostics when market data mode changes", async () => {
     const initialDiagnostics: DiagnosticsResponse = {
       generated_at: "2026-03-01T00:00:00Z",
@@ -213,7 +399,7 @@ describe("app store orchestration", () => {
     };
     const nextStatus: SystemStatus = {
       healthy: true,
-      app_name: "StrataLab API",
+      app_name: "Gamma API",
       backend: "fastapi",
       mock_mode: true,
       base_currency: "USD",
@@ -286,6 +472,53 @@ function makeSnapshot(): PortfolioSnapshot {
     day_pnl: 1,
     day_pnl_pct: 0.01,
     day_pnl_source: "account_summary",
+    warnings: []
+  };
+}
+
+function makeResearchResult(scopeType: "single_ticker" | "synthetic_portfolio", snapshot: PortfolioSnapshot): ResearchResult {
+  return {
+    scope_type: scopeType,
+    benchmark_symbol: "SPY",
+    primary_symbol: scopeType === "single_ticker" ? snapshot.positions[0]?.symbol ?? null : null,
+    observations_count: 10,
+    snapshot,
+    performance_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }],
+    benchmark_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.02 }],
+    primary_price_points: scopeType === "single_ticker" ? [{ timestamp: "2026-03-01T00:00:00Z", value: 100 }] : [],
+    weights: snapshot.positions.map((position) => ({
+      symbol: position.symbol,
+      weight: position.weight ?? 0
+    })),
+    summary: {
+      total_return: 0.1,
+      annual_return: 0.1,
+      annual_vol: 0.2,
+      max_drawdown: -0.05,
+      beta: 1,
+      correlation: 0.9
+    },
+    structure: {
+      total_weight: 1,
+      top_weight: scopeType === "single_ticker" ? 1 : 0.35,
+      top5_weight: 1,
+      concentration_hhi: scopeType === "single_ticker" ? 1 : 0.335,
+      effective_positions: scopeType === "single_ticker" ? 1 : 2.99,
+      aligned_symbol_count: snapshot.positions.length
+    },
+    coverage: {
+      available_symbols: snapshot.positions.map((position) => position.symbol),
+      missing_symbols: [],
+      benchmark_overlap_count: 10
+    },
+    constituents: snapshot.positions.map((position) => ({
+      symbol: position.symbol,
+      weight: position.weight ?? 0,
+      total_return: 0.1,
+      annual_vol: 0.2,
+      max_drawdown: -0.05,
+      weighted_return: 0.1 * (position.weight ?? 0)
+    })),
     warnings: []
   };
 }

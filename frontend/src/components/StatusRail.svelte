@@ -20,80 +20,60 @@
 </script>
 
 <section class="rail">
-  <div class="cluster connection">
-    <div>
-      <span class="label">Connection</span>
-      <strong class:positive={status?.connection.connected}>{status?.connection.status_text ?? "Status: Loading"}</strong>
-      <small>{status?.connection.active_account ?? "No active account"}</small>
-    </div>
-    <button class="ghost" on:click={onToggleConnection} disabled={busy || !status?.connection.action_enabled}>
-      {busy ? "Working..." : status?.connection.action_text ?? "Connect"}
-    </button>
-  </div>
-
-  <div class="cluster compact">
-    <span class="label">Mode</span>
-    <strong>{status?.mock_mode ? "Mock" : "Live"}</strong>
-  </div>
-
-  <label class="cluster compact field">
-    <span class="label">Market Data</span>
-    <select
-      bind:value={selectedMarketDataMode}
-      disabled={busy}
-      on:change={() => onMarketDataModeChange(selectedMarketDataMode)}
-    >
-      <option value="delayed">Delayed</option>
-      <option value="live">Live</option>
-      <option value="auto">Auto</option>
-    </select>
-  </label>
-
-  <div class="cluster compact">
-    <span class="label">Workspace</span>
-    <strong>{workspaceLabel}</strong>
-  </div>
-
   <div class="actions">
     <button class="ghost" on:click={onChangeView}>Change View</button>
     <button class="accent" on:click={onRefresh} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
+    <details class="settings-menu">
+      <summary class="ghost settings-toggle">Settings</summary>
+      <div class="settings-popover">
+        <div class="settings-section">
+          <div class="settings-head">
+            <span class="label">Connection</span>
+            <strong class:positive={status?.connection.connected}>{status?.connection.status_text ?? "Status: Loading"}</strong>
+          </div>
+          <small>{status?.connection.active_account ?? "No active account"}</small>
+          <button class="ghost wide" on:click={onToggleConnection} disabled={busy || !status?.connection.action_enabled}>
+            {busy ? "Working..." : status?.connection.action_text ?? "Connect"}
+          </button>
+        </div>
+
+        <div class="settings-section">
+          <div class="row">
+            <span class="label">Workspace</span>
+            <strong>{workspaceLabel}</strong>
+          </div>
+          <div class="row">
+            <span class="label">Mode</span>
+            <strong>{status?.mock_mode ? "Mock" : "Live"}</strong>
+          </div>
+        </div>
+
+        <div class="settings-section field">
+          <span class="label">Market Data</span>
+          <select
+            bind:value={selectedMarketDataMode}
+            disabled={busy}
+            on:change={() => onMarketDataModeChange(selectedMarketDataMode)}
+          >
+            <option value="delayed">Delayed</option>
+            <option value="live">Live</option>
+            <option value="auto">Auto</option>
+          </select>
+        </div>
+      </div>
+    </details>
   </div>
 </section>
 
 <style>
   .rail {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     justify-content: flex-end;
     align-items: center;
-    gap: 0.9rem;
+    gap: 0.55rem;
     min-width: 0;
     width: 100%;
-  }
-
-  .cluster,
-  .actions {
-    display: grid;
-    gap: 0.14rem;
-    padding: 0;
-    min-height: auto;
-  }
-
-  .cluster.compact {
-    min-width: max-content;
-  }
-
-  .connection {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    min-width: max-content;
-  }
-
-  .field {
-    align-items: stretch;
-    gap: 0.22rem;
-    min-width: 8.9rem;
   }
 
   .label {
@@ -106,15 +86,15 @@
 
   strong {
     color: var(--text-0);
-    font-size: 0.86rem;
+    font-size: 0.82rem;
     font-weight: 600;
   }
 
   small {
     display: block;
-    margin-top: 0.18rem;
+    margin-top: 0.12rem;
     color: var(--text-2);
-    font-size: 0.7rem;
+    font-size: 0.68rem;
   }
 
   .positive {
@@ -122,11 +102,12 @@
   }
 
   select,
-  button {
+  button,
+  .settings-toggle {
     background: #0b1219;
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
-    padding: 0.52rem 0.68rem;
+    padding: 0.46rem 0.66rem;
     font: inherit;
     cursor: pointer;
   }
@@ -135,29 +116,14 @@
     display: flex;
     align-items: stretch;
     gap: 0.45rem;
-    padding-inline: 0;
-    min-width: max-content;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
-  .actions button {
-    min-width: 7.75rem;
-  }
-
-  @media (max-width: 960px) {
-    .rail {
-      flex-wrap: wrap;
-      justify-content: stretch;
-    }
-
-    .cluster,
-    .actions {
-      width: 100%;
-    }
-
-    .connection {
-      display: grid;
-      align-items: stretch;
-    }
+  .actions button,
+  .settings-toggle {
+    min-width: 7rem;
   }
 
   .ghost {
@@ -167,5 +133,90 @@
   .accent {
     border-color: rgba(122, 166, 200, 0.5);
     color: var(--accent);
+  }
+
+  .settings-menu {
+    position: relative;
+  }
+
+  .settings-menu[open] .settings-toggle {
+    border-color: rgba(122, 166, 200, 0.5);
+    color: var(--accent);
+  }
+
+  .settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    list-style: none;
+    user-select: none;
+    text-align: center;
+  }
+
+  .settings-toggle::-webkit-details-marker {
+    display: none;
+  }
+
+  .settings-popover {
+    position: absolute;
+    top: calc(100% + 0.45rem);
+    right: 0;
+    z-index: 20;
+    width: min(21rem, calc(100vw - 2rem));
+    display: grid;
+    gap: 0.8rem;
+    padding: 0.9rem;
+    border: 1px solid var(--panel-strong);
+    background: rgba(8, 13, 18, 0.98);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
+  }
+
+  .settings-section {
+    display: grid;
+    gap: 0.38rem;
+  }
+
+  .settings-section + .settings-section {
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    padding-top: 0.75rem;
+  }
+
+  .settings-head,
+  .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.8rem;
+  }
+
+  .field {
+    gap: 0.3rem;
+  }
+
+  .wide {
+    width: 100%;
+  }
+
+  @media (max-width: 960px) {
+    .rail,
+    .actions {
+      justify-content: stretch;
+    }
+
+    .actions {
+      width: 100%;
+    }
+
+    .actions button,
+    .settings-menu,
+    .settings-toggle {
+      width: 100%;
+    }
+
+    .settings-popover {
+      left: 0;
+      right: auto;
+      width: 100%;
+    }
   }
 </style>

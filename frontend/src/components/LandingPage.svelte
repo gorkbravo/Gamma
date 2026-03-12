@@ -30,7 +30,7 @@
 <section class="landing">
   <article class="card">
     <p class="eyebrow">Welcome</p>
-    <h2>Welcome to StrataLab</h2>
+    <h2>Welcome to Gamma</h2>
     <p class="copy">Connect to IBKR or open the workspace you want to use.</p>
 
     <div class="meta">

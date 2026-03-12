@@ -1,12 +1,12 @@
 <script lang="ts">
-  export let title = "StrataLab";
+  export let title = "Gamma";
 </script>
 
 <div class="shell">
   <header class="topbar">
     <div class="brand">
       <div class="mark-frame" aria-hidden="true">
-        <img class="mark" src="/stratalab-mark.svg" alt="" />
+        <img class="mark" src="/gamma-mark.svg" alt="" />
       </div>
       <div class="copy">
         <div class="title-row">
@@ -29,15 +29,15 @@
   .shell {
     width: min(1600px, calc(100vw - 1.5rem));
     margin: 0 auto;
-    padding: 0.75rem 0 1.25rem;
+    padding: 0.5rem 0 1.1rem;
   }
 
   .topbar {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 0.9rem;
-    padding: 0.8rem 1rem;
+    gap: 0.75rem;
+    padding: 0.65rem 0.9rem;
     border: 1px solid var(--panel-border);
     background: var(--surface-1);
   }
@@ -55,16 +55,16 @@
 
   .mark {
     display: block;
-    width: 2.35rem;
+    width: 1.95rem;
     height: auto;
   }
 
   .mark-frame {
     display: grid;
     place-items: center;
-    min-width: 3.3rem;
-    min-height: 3.3rem;
-    padding: 0.45rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.35rem;
     border: 1px solid rgba(122, 166, 200, 0.26);
     background:
       radial-gradient(circle at 50% 28%, rgba(106, 168, 255, 0.16), transparent 62%),
@@ -80,7 +80,7 @@
     color: var(--accent-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.68rem;
+    font-size: 0.62rem;
     white-space: nowrap;
   }
 
@@ -89,7 +89,7 @@
   }
 
   h1 {
-    font-size: 1rem;
+    font-size: 0.95rem;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -101,12 +101,12 @@
     align-items: center;
     min-width: 0;
     min-height: 100%;
-    padding-left: 0.9rem;
+    padding-left: 0.75rem;
     border-left: 1px solid var(--divider);
   }
 
   .content {
-    margin-top: 0.9rem;
+    margin-top: 0.8rem;
   }
 
   @media (max-width: 960px) {

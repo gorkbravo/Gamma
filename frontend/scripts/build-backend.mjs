@@ -11,7 +11,7 @@ const pyInstallerRoot = path.join(frontendDir, "src-tauri", ".pyinstaller");
 const distPath = path.join(frontendDir, "src-tauri", "resources", "backend");
 const workPath = path.join(pyInstallerRoot, "build");
 const specPath = pyInstallerRoot;
-const appName = "stratalab-backend";
+const appName = "gamma-backend";
 const python = resolvePython();
 const dataSeparator = process.platform === "win32" ? ";" : ":";
 
@@ -78,14 +78,14 @@ function ensurePyInstaller() {
     process.platform === "win32"
       ? `${python} -m pip install pyinstaller`
       : `${python} -m pip install pyinstaller`;
-  console.error("PyInstaller is required to package the StrataLab backend.");
+  console.error("PyInstaller is required to package the Gamma backend.");
   console.error(`Install it with: ${installHint}`);
   process.exit(result.status ?? 1);
 }
 
 function resolvePython() {
-  if (process.env.STRATALAB_PYTHON) {
-    return process.env.STRATALAB_PYTHON;
+  if (process.env.GAMMA_PYTHON) {
+    return process.env.GAMMA_PYTHON;
   }
 
   const candidates = [

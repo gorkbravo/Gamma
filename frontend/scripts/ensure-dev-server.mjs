@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
-const DEV_SERVER_URL = process.env.STRATALAB_DEV_SERVER_URL ?? "http://127.0.0.1:5173";
+const DEV_SERVER_URL = process.env.GAMMA_DEV_SERVER_URL ?? "http://127.0.0.1:5173";
 const VITE_CLIENT_URL = `${DEV_SERVER_URL.replace(/\/+$/, "")}/@vite/client`;
 
 await main();

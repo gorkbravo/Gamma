@@ -13,7 +13,7 @@ if (args.length === 0) {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendDir = path.resolve(scriptDir, "..");
 const env = { ...process.env };
-if (args[0] === "build" && env.STRATALAB_SKIP_BACKEND_PACKAGE !== "true") {
+if (args[0] === "build" && env.GAMMA_SKIP_BACKEND_PACKAGE !== "true") {
   const packageBackend = spawnSync(process.execPath, [path.join(scriptDir, "build-backend.mjs")], {
     cwd: frontendDir,
     env,
@@ -25,7 +25,7 @@ if (args[0] === "build" && env.STRATALAB_SKIP_BACKEND_PACKAGE !== "true") {
 }
 if (!env.CARGO_TARGET_DIR) {
   const targetSuffix = args[0] === "build" ? "build" : "dev";
-  env.CARGO_TARGET_DIR = path.join(os.tmpdir(), `stratalab-tauri-${targetSuffix}`);
+  env.CARGO_TARGET_DIR = path.join(os.tmpdir(), `gamma-tauri-${targetSuffix}`);
 }
 
 const child =

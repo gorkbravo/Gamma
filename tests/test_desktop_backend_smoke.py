@@ -24,12 +24,12 @@ def test_desktop_backend_entry_serves_health(tmp_path):
     env.update(
         {
             "MOCK_DATA": "true",
-            "STRATALAB_API_PORT": str(port),
+            "GAMMA_API_PORT": str(port),
             "CACHE_DIR": str(tmp_path / "cache"),
             "PORTFOLIO_HISTORY_DIR": str(tmp_path / "data"),
             "SAMPLE_DATA_DIR": str((repo_root / "sample_data").resolve()),
-            "STRATALAB_LOG_DIR": str(log_dir),
-            "STRATALAB_BACKEND_FAILURE_REPORT": str(log_dir / "backend-failure.txt"),
+            "GAMMA_LOG_DIR": str(log_dir),
+            "GAMMA_BACKEND_FAILURE_REPORT": str(log_dir / "backend-failure.txt"),
         }
     )
     process = subprocess.Popen(

@@ -38,9 +38,34 @@ class ResearchSummaryModel(BaseModel):
     correlation: float | None = None
 
 
+class ResearchStructureModel(BaseModel):
+    total_weight: float | None = None
+    top_weight: float | None = None
+    top5_weight: float | None = None
+    concentration_hhi: float | None = None
+    effective_positions: float | None = None
+    aligned_symbol_count: int = 0
+
+
+class ResearchCoverageModel(BaseModel):
+    available_symbols: list[str] = Field(default_factory=list)
+    missing_symbols: list[str] = Field(default_factory=list)
+    benchmark_overlap_count: int = 0
+
+
+class ResearchConstituentModel(BaseModel):
+    symbol: str
+    weight: float
+    total_return: float | None = None
+    annual_vol: float | None = None
+    max_drawdown: float | None = None
+    weighted_return: float | None = None
+
+
 class ResearchAnalyzeResponseModel(BaseModel):
     scope_type: ResearchScopeType
     benchmark_symbol: str
+    primary_symbol: str | None = None
     observations_count: int
     snapshot: PortfolioSnapshotModel | None = None
     performance_points: list[TimeSeriesPoint]
@@ -48,6 +73,9 @@ class ResearchAnalyzeResponseModel(BaseModel):
     primary_price_points: list[TimeSeriesPoint]
     weights: list[WeightPointModel]
     summary: ResearchSummaryModel
+    structure: ResearchStructureModel
+    coverage: ResearchCoverageModel
+    constituents: list[ResearchConstituentModel]
     warnings: list[str] = Field(default_factory=list)
 
     @classmethod
@@ -69,6 +97,7 @@ class ResearchAnalyzeResponseModel(BaseModel):
         return cls(
             scope_type=result.scope_type,
             benchmark_symbol=result.benchmark_symbol,
+            primary_symbol=result.primary_symbol,
             observations_count=int(len(result.perf)),
             snapshot=PortfolioSnapshotModel.from_domain(result.snapshot) if result.snapshot is not None else None,
             performance_points=series_to_points(result.perf),
@@ -83,6 +112,13 @@ class ResearchAnalyzeResponseModel(BaseModel):
                 beta=beta,
                 correlation=correlation,
             ),
+            structure=_structure_from_weights(result.weights),
+            coverage=ResearchCoverageModel(
+                available_symbols=list(result.available_symbols),
+                missing_symbols=list(result.missing_symbols),
+                benchmark_overlap_count=result.benchmark_overlap_count,
+            ),
+            constituents=_constituents_from_result(result),
             warnings=list(result.warnings),
         )
 
@@ -109,3 +145,50 @@ def _beta_corr(perf, benchmark_returns):
         return None, corr
     cov = float(aligned["portfolio"].cov(aligned["benchmark"]))
     return cov / benchmark_var, corr
+
+
+def _structure_from_weights(weights) -> ResearchStructureModel:
+    if weights.empty:
+        return ResearchStructureModel()
+    absolute_weights = weights.abs().astype(float)
+    total_weight = float(absolute_weights.sum())
+    if total_weight <= 0:
+        return ResearchStructureModel(total_weight=total_weight, aligned_symbol_count=int(len(weights)))
+    normalized = absolute_weights / total_weight
+    hhi = float((normalized**2).sum())
+    return ResearchStructureModel(
+        total_weight=total_weight,
+        top_weight=float(normalized.max()),
+        top5_weight=float(normalized.sort_values(ascending=False).head(5).sum()),
+        concentration_hhi=hhi,
+        effective_positions=float(1.0 / hhi) if hhi > 0 else None,
+        aligned_symbol_count=int(len(weights)),
+    )
+
+
+def _constituents_from_result(result: ResearchAnalysisResult) -> list[ResearchConstituentModel]:
+    if result.weights.empty:
+        return []
+    rows: list[ResearchConstituentModel] = []
+    for symbol, weight in result.weights.sort_values(ascending=False).items():
+        total_return = _series_value(result.constituent_total_returns, symbol)
+        annual_vol = _series_value(result.constituent_annual_vol, symbol)
+        max_dd = _series_value(result.constituent_max_drawdown, symbol)
+        rows.append(
+            ResearchConstituentModel(
+                symbol=str(symbol),
+                weight=float(weight),
+                total_return=total_return,
+                annual_vol=annual_vol,
+                max_drawdown=max_dd,
+                weighted_return=float(weight) * total_return if total_return is not None else None,
+            )
+        )
+    return rows
+
+
+def _series_value(series, symbol: str) -> float | None:
+    if series is None or getattr(series, "empty", True):
+        return None
+    value = series.get(symbol)
+    return None if value is None else float(value)

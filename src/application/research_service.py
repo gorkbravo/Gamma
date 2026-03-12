@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from src.analytics.returns import align_prices, compute_returns
-from src.analytics.risk_metrics import compute_weights, portfolio_returns
+from src.analytics.risk_metrics import compute_weights, max_drawdown, portfolio_returns, realized_vol
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
 from src.services.data_providers import ResearchDataProvider
@@ -27,8 +27,15 @@ class ResearchAnalysisResult:
     perf: pd.Series
     benchmark_returns: pd.Series
     benchmark_symbol: str
+    primary_symbol: str | None
     weights: pd.Series
     primary_price: pd.Series
+    available_symbols: list[str]
+    missing_symbols: list[str]
+    benchmark_overlap_count: int
+    constituent_total_returns: pd.Series
+    constituent_annual_vol: pd.Series
+    constituent_max_drawdown: pd.Series
     warnings: list[str]
 
 
@@ -50,6 +57,7 @@ class ResearchService:
             return self._empty_result(
                 scope_type=request.scope_type,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 warnings=warnings,
             )
 
@@ -65,7 +73,9 @@ class ResearchService:
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 primary_price=primary_price,
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
@@ -76,7 +86,9 @@ class ResearchService:
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 primary_price=primary_price,
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
@@ -92,8 +104,11 @@ class ResearchService:
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 weights=weights,
                 primary_price=primary_price,
+                available_symbols=list(returns_df.columns),
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
@@ -104,21 +119,38 @@ class ResearchService:
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 weights=weights,
                 primary_price=primary_price,
                 perf=perf,
+                available_symbols=weights.index.tolist(),
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
         benchmark_returns = self.load_benchmark_returns(benchmark_symbol, request.lookback_days, warnings)
+        aligned_returns = returns_df.reindex(columns=weights.index.tolist())
+        constituent_total_returns = self._constituent_total_returns(aligned_returns)
+        constituent_annual_vol = aligned_returns.apply(lambda series: realized_vol(series.dropna())[1])
+        constituent_max_drawdown = aligned_returns.apply(lambda series: max_drawdown(series.dropna()))
+        benchmark_overlap_count = int(
+            len(perf.to_frame("portfolio").join(benchmark_returns.to_frame("benchmark"), how="inner").dropna())
+        )
         return ResearchAnalysisResult(
             scope_type=request.scope_type,
             snapshot=snapshot,
             perf=perf,
             benchmark_returns=benchmark_returns,
             benchmark_symbol=benchmark_symbol,
+            primary_symbol=primary_symbol or None,
             weights=weights,
             primary_price=primary_price,
+            available_symbols=weights.index.tolist(),
+            missing_symbols=missing,
+            benchmark_overlap_count=benchmark_overlap_count,
+            constituent_total_returns=constituent_total_returns,
+            constituent_annual_vol=constituent_annual_vol,
+            constituent_max_drawdown=constituent_max_drawdown,
             warnings=warnings,
         )
 
@@ -146,9 +178,12 @@ class ResearchService:
         benchmark_symbol: str,
         warnings: list[str],
         snapshot: PortfolioSnapshot | None = None,
+        primary_symbol: str | None = None,
         weights: pd.Series | None = None,
         primary_price: pd.Series | None = None,
         perf: pd.Series | None = None,
+        available_symbols: list[str] | None = None,
+        missing_symbols: list[str] | None = None,
     ) -> ResearchAnalysisResult:
         return ResearchAnalysisResult(
             scope_type=scope_type,
@@ -156,7 +191,21 @@ class ResearchService:
             perf=perf if perf is not None else pd.Series(dtype=float),
             benchmark_returns=pd.Series(dtype=float),
             benchmark_symbol=benchmark_symbol,
+            primary_symbol=primary_symbol,
             weights=weights if weights is not None else pd.Series(dtype=float),
             primary_price=primary_price if primary_price is not None else pd.Series(dtype=float),
+            available_symbols=list(available_symbols or []),
+            missing_symbols=list(missing_symbols or []),
+            benchmark_overlap_count=0,
+            constituent_total_returns=pd.Series(dtype=float),
+            constituent_annual_vol=pd.Series(dtype=float),
+            constituent_max_drawdown=pd.Series(dtype=float),
             warnings=warnings,
         )
+
+    @staticmethod
+    def _constituent_total_returns(returns_df: pd.DataFrame) -> pd.Series:
+        if returns_df.empty:
+            return pd.Series(dtype=float)
+        cumulative = (1.0 + returns_df).prod() - 1.0
+        return cumulative.astype(float)

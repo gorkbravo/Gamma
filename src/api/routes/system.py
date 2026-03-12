@@ -51,7 +51,7 @@ def set_market_data_mode(
 def _system_status_response(runtime) -> SystemStatusResponseModel:
     return SystemStatusResponseModel(
         healthy=True,
-        app_name="StrataLab API",
+        app_name="Gamma API",
         backend="fastapi",
         mock_mode=runtime.mock_mode,
         base_currency=runtime.base_currency,

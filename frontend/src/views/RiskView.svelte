@@ -691,8 +691,8 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: var(--surface-0);
-    padding: 1rem;
+    background: linear-gradient(180deg, rgba(9, 14, 20, 0.97), rgba(6, 10, 15, 0.95));
+    padding: 1.05rem;
   }
 
   .method-panel,
@@ -737,6 +737,8 @@
 
   .kpi-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0;
+    padding-block: 0.2rem;
   }
 
   .mc-kpi-grid {
@@ -744,9 +746,9 @@
   }
 
   .metric {
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.62);
-    padding: 0.72rem 0.78rem;
+    padding: 0.2rem 1rem;
+    border-left: 1px solid rgba(46, 60, 74, 0.52);
+    background: none;
     min-width: 0;
   }
 
@@ -755,6 +757,11 @@
     margin: 0.18rem 0 0.24rem;
     font-size: 1rem;
     line-height: 1.2;
+  }
+
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .method-grid {
@@ -854,7 +861,7 @@
 
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
   }
 
   table {
@@ -944,16 +951,28 @@
 
     .kpi-grid,
     .mc-kpi-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
   @media (max-width: 980px) {
     .support-column,
-    .kpi-grid,
-    .mc-kpi-grid,
     .core-fields {
       grid-template-columns: 1fr;
+    }
+
+    .kpi-grid,
+    .mc-kpi-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .metric {
+      padding: 0.7rem 0;
+      border-left: 0;
+    }
+
+    .metric:first-child {
+      padding-top: 0;
     }
 
     .panel-header,

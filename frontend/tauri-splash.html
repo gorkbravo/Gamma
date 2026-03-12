@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/svg+xml" href="./stratalab-mark.svg" />
-    <title>StrataLab Startup</title>
+    <link rel="icon" type="image/svg+xml" href="./gamma-mark.svg" />
+    <title>Gamma Startup</title>
     <style>
       :root {
         color-scheme: dark;
@@ -96,15 +96,15 @@
   <body>
     <main>
       <div class="mark-frame" aria-hidden="true">
-        <img class="mark" src="./stratalab-mark.svg" alt="" />
+        <img class="mark" src="./gamma-mark.svg" alt="" />
       </div>
-      <p class="eyebrow">StrataLab Desktop Shell</p>
+      <p class="eyebrow">Gamma Desktop Shell</p>
       <h1 id="headline">Starting Python backend</h1>
       <p id="detail">Waiting for the local FastAPI service to become healthy before the main window is created.</p>
       <div class="bar"><div class="fill"></div></div>
     </main>
     <script>
-      window.__STRATALAB_SET_STATUS__ = (headline, detail) => {
+      window.__GAMMA_SET_STATUS__ = (headline, detail) => {
         const headlineNode = document.getElementById("headline");
         const detailNode = document.getElementById("detail");
         if (headlineNode) headlineNode.textContent = headline;

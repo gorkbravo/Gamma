@@ -21,7 +21,7 @@ def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
             runtime_instance.shutdown()
 
     app = FastAPI(
-        title="StrataLab API",
+        title="Gamma API",
         version="0.1.0",
         lifespan=lifespan,
     )

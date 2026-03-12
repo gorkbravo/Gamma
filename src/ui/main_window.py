@@ -32,7 +32,7 @@ from src.ui.tabs.risk_tab import RiskTab
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("StrataLab")
+        self.setWindowTitle("Gamma")
         self._market_data_mode = "delayed"
         self._last_connection_status = "Status: Disconnected"
 
@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
 
         title_row = QHBoxLayout()
         title_row.setSpacing(10)
-        self.brand_label = QLabel("StrataLab")
+        self.brand_label = QLabel("Gamma")
         self.brand_label.setObjectName("shellBrand")
         self.connection_label = QLabel("Status: Disconnected")
         self.connection_label.setObjectName("shellStatus")

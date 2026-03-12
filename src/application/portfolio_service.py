@@ -218,7 +218,7 @@ class PortfolioService:
         duration_text = f"{request.last_refresh_duration_ms:.0f} ms" if request.last_refresh_duration_ms is not None else "N/A"
         return "\n".join(
             [
-                "=== StrataLab Diagnostics Report ===",
+                "=== Gamma Diagnostics Report ===",
                 f"Generated: {format_ts(now_utc())}",
                 f"Mode: {'Mock' if self.client.mock else 'Live'}",
                 f"Connection: {connection}",

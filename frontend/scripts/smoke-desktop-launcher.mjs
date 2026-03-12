@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(frontendDir, "..");
-const markerRoot = mkdtempSync(path.join(os.tmpdir(), "stratalab-desktop-smoke-"));
+const markerRoot = mkdtempSync(path.join(os.tmpdir(), "gamma-desktop-smoke-"));
 const smokeFile = path.join(markerRoot, "desktop-smoke.json");
 const python = resolvePython();
 
@@ -19,7 +19,7 @@ async function main() {
     env: {
       ...process.env,
       MOCK_DATA: "true",
-      STRATALAB_DESKTOP_SMOKE_FILE: smokeFile
+      GAMMA_DESKTOP_SMOKE_FILE: smokeFile
     },
     stdio: "inherit"
   });
@@ -80,8 +80,8 @@ function sleep(ms) {
 }
 
 function resolvePython() {
-  if (process.env.STRATALAB_PYTHON) {
-    return process.env.STRATALAB_PYTHON;
+  if (process.env.GAMMA_PYTHON) {
+    return process.env.GAMMA_PYTHON;
   }
 
   const candidates = [

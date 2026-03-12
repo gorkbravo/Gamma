@@ -1,8 +1,8 @@
-# StrataLab
+# Gamma
 
 For future product expansion work, start with [`roadmap.md`](./roadmap.md). It defines what to build next, the intended sequencing, and the architectural constraints that should guide new features.
 
-StrataLab is a hybrid quant workstation built around a Python analytics/runtime layer with FastAPI, a Svelte frontend, and a Tauri desktop shell. Tauri is now the primary desktop path. PySide remains available as an explicit fallback during burn-in.
+Gamma is a hybrid quant workstation built around a Python analytics/runtime layer with FastAPI, a Svelte frontend, and a Tauri desktop shell. Tauri is now the primary desktop path. PySide remains available as an explicit fallback during burn-in.
 
 For the detailed migration log, phase history, and audit notes, see [`migration.md`](./migration.md).
 
@@ -132,7 +132,7 @@ npm run backend:smoke
 npm run tauri:build
 ```
 
-The installer output lands under `%TEMP%\stratalab-tauri-build\release\bundle\nsis\` unless `CARGO_TARGET_DIR` is overridden.
+The installer output lands under `%TEMP%\gamma-tauri-build\release\bundle\nsis\` unless `CARGO_TARGET_DIR` is overridden.
 
 ## Known Limitations
 

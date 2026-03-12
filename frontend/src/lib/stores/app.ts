@@ -27,6 +27,15 @@ export interface ResearchRunOptions {
   lookbackDays: number;
 }
 
+export interface ResearchDraftState {
+  scopeType: "single_ticker" | "synthetic_portfolio";
+  primarySymbol: string;
+  benchmarkSymbol: string;
+  lookbackDays: number;
+  syntheticText: string;
+  selectedPreset: string;
+}
+
 export interface RiskComputeOptions {
   alpha: number;
   lookbackDays: number;
@@ -54,6 +63,14 @@ export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
 export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
 export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
+export const researchDraft = writable<ResearchDraftState>({
+  scopeType: "single_ticker",
+  primarySymbol: "AAPL",
+  benchmarkSymbol: "SPY",
+  lookbackDays: 252,
+  syntheticText: "SPY 0.60\nQQQ 0.40",
+  selectedPreset: "index-core"
+});
 export const riskResult = writable<RiskResult | null>(null);
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
@@ -72,6 +89,10 @@ export const loading = writable<Record<string, boolean>>({
 
 function setLoading(key: string, value: boolean) {
   loading.update((current) => ({ ...current, [key]: value }));
+}
+
+export function setResearchDraft(nextDraft: ResearchDraftState) {
+  researchDraft.set(nextDraft);
 }
 
 function setError(error: unknown) {
@@ -249,7 +270,10 @@ export async function runResearch(options: ResearchRunOptions) {
       benchmark_symbol: options.benchmarkSymbol,
       lookback_days: options.lookbackDays
     };
-    researchResult.set(await postJson<ResearchResult>("/research/analyze", payload));
+    const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload);
+    researchResult.set(nextResearchResult);
+    // Downstream analysis must be recomputed from the latest executed research scope.
+    riskResult.set(null);
     lastError.set("");
   } catch (error) {
     setError(error);

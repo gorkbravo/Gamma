@@ -27,17 +27,17 @@ def repo_root() -> Path:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Launch the StrataLab desktop client.")
+    parser = argparse.ArgumentParser(description="Launch the Gamma desktop client.")
     parser.add_argument(
         "--client",
         choices=SUPPORTED_DESKTOP_CLIENTS,
-        help="Desktop client to launch. Defaults to STRATALAB_DESKTOP_CLIENT or Tauri.",
+        help="Desktop client to launch. Defaults to GAMMA_DESKTOP_CLIENT or Tauri.",
     )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
 def resolve_client(args: argparse.Namespace, environ: Mapping[str, str]) -> str:
-    configured = (args.client or environ.get("STRATALAB_DESKTOP_CLIENT") or DEFAULT_DESKTOP_CLIENT).strip().lower()
+    configured = (args.client or environ.get("GAMMA_DESKTOP_CLIENT") or DEFAULT_DESKTOP_CLIENT).strip().lower()
     if configured not in SUPPORTED_DESKTOP_CLIENTS:
         supported = ", ".join(SUPPORTED_DESKTOP_CLIENTS)
         raise SystemExit(f"Unsupported desktop client '{configured}'. Supported clients: {supported}.")
@@ -52,7 +52,7 @@ def resolve_launch_spec(client: str, environ: Mapping[str, str]) -> LaunchSpec:
 
 
 def resolve_tauri_command(root: Path, environ: Mapping[str, str]) -> list[str]:
-    npm = environ.get("STRATALAB_NPM") or shutil.which("npm.cmd") or shutil.which("npm")
+    npm = environ.get("GAMMA_NPM") or shutil.which("npm.cmd") or shutil.which("npm")
     if not npm:
         raise SystemExit("Unable to find npm for the default Tauri desktop launcher. Install Node.js or use --client pyside.")
     frontend_dir = root / "frontend"

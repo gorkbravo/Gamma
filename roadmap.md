@@ -1,12 +1,12 @@
-# StrataLab Roadmap
+# Gamma Roadmap
 
 ## Purpose
 
-This roadmap defines the planned expansion of **StrataLab** from a portfolio/risk-oriented research app into a broader **read-only research environment** for markets, valuation, on-chain analytics, prediction markets, and AI-assisted idea generation.
+This roadmap defines the planned expansion of **Gamma** from a portfolio/risk-oriented research app into a broader **read-only research environment** for markets, valuation, on-chain analytics, prediction markets, and AI-assisted idea generation.
 
 The core principle behind this roadmap is simple:
 
-**StrataLab is not a trading bot and not an execution platform.**  
+**Gamma is not a trading bot and not an execution platform.**  
 It is a place to **aggregate data, structure research, test hypotheses, explore market behavior, and generate ideas**.
 
 Because of that, every new tab should satisfy at least one of these goals:
@@ -16,14 +16,14 @@ Because of that, every new tab should satisfy at least one of these goals:
 3. Improve the ability to **generate, structure, and refine hypotheses**
 4. Improve the ability to **compare scenarios without execution risk**
 
-The roadmap is organized into phases so that development follows the highest **research value / implementation complexity** path first. The order is designed to avoid turning StrataLab into a bloated dashboard with weak data foundations. The idea is to first build tabs where the data is relatively accessible and the research surface is rich, then later move into heavier normalization problems such as company fundamentals and valuation.
+The roadmap is organized into phases so that development follows the highest **research value / implementation complexity** path first. The order is designed to avoid turning Gamma into a bloated dashboard with weak data foundations. The idea is to first build tabs where the data is relatively accessible and the research surface is rich, then later move into heavier normalization problems such as company fundamentals and valuation.
 
 ---
 
 ## Guiding Product Principles
 
 ### 1. Read-only by design
-StrataLab should remain focused on research, data aggregation, analytics, and experimentation. Even when the app studies strategies, wallet behavior, or arbitrage structures, it should not become an execution layer.
+Gamma should remain focused on research, data aggregation, analytics, and experimentation. Even when the app studies strategies, wallet behavior, or arbitrage structures, it should not become an execution layer.
 
 ### 2. Data-first architecture
 Tabs should not be built as isolated UI experiments. Each tab should be backed by a clear data model, a reliable ingestion path, a cache/storage layer, and reusable analytics functions.
@@ -39,7 +39,7 @@ Each tab should go beyond showing raw data. The goal is not just to visualize in
 Whenever possible, the heavy logic should live outside the UI. Tabs should consume normalized datasets and computed analytics, rather than each widget doing its own independent calculations.
 
 ### 5. Provenance and transparency
-As StrataLab expands, especially into fundamentals and AI-assisted outputs, every displayed metric should ideally be traceable to:
+As Gamma expands, especially into fundamentals and AI-assisted outputs, every displayed metric should ideally be traceable to:
 - source/provider,
 - endpoint,
 - timestamp,
@@ -51,13 +51,13 @@ As StrataLab expands, especially into fundamentals and AI-assisted outputs, ever
 
 ### Why this phase comes first
 
-Prediction markets are one of the highest-upside additions to StrataLab because they combine:
+Prediction markets are one of the highest-upside additions to Gamma because they combine:
 - relatively accessible public data,
 - rich behavioral and microstructure dynamics,
 - strong fit with research-oriented workflows,
 - differentiated analytical surface compared to standard equity dashboards.
 
-This tab would make StrataLab feel unique very quickly. It also aligns with the user's interest in market structure, informed flow, wallet behavior, and event-driven repricing.
+This tab would make Gamma feel unique very quickly. It also aligns with the user's interest in market structure, informed flow, wallet behavior, and event-driven repricing.
 
 ### Goal of the tab
 
@@ -172,14 +172,14 @@ Longer term, external news/context could be linked, but that is optional and sho
 
 ### Deliverable of the phase
 
-At the end of Phase 1, StrataLab should be able to:
+At the end of Phase 1, Gamma should be able to:
 - browse and filter prediction markets,
 - inspect a market deeply,
 - analyze probability dynamics,
 - review wallet behavior,
 - begin basic historical research on calibration and microstructure.
 
-This phase gives StrataLab a highly distinctive research edge with relatively manageable implementation complexity.
+This phase gives Gamma a highly distinctive research edge with relatively manageable implementation complexity.
 
 ---
 
@@ -279,7 +279,7 @@ A comparison layer allowing users to compare:
 - wallet behavior across assets,
 - on-chain activity vs price dynamics.
 
-This should support the broader StrataLab identity as an experimentation environment.
+This should support the broader Gamma identity as an experimentation environment.
 
 #### 7. Optional derivatives / advanced market overlays
 This is a later extension, not a V1 requirement. Potential additions:
@@ -315,7 +315,7 @@ A practical approach would be to begin with CoinGecko for broad market data, the
 
 ### Deliverable of the phase
 
-At the end of Phase 2, StrataLab should be able to:
+At the end of Phase 2, Gamma should be able to:
 - research tokens and sectors,
 - explore narrative baskets,
 - study wallet flows,
@@ -330,7 +330,7 @@ This phase broadens the app into a more general market-research platform while s
 
 ### Why this phase comes here
 
-The AI component becomes most useful **after** StrataLab already has meaningful data surfaces. If added too early, it risks becoming a generic chatbot with little grounding. If added after the app has prediction-market and crypto data infrastructure, it can act as a true research assistant rather than a novelty feature.
+The AI component becomes most useful **after** Gamma already has meaningful data surfaces. If added too early, it risks becoming a generic chatbot with little grounding. If added after the app has prediction-market and crypto data infrastructure, it can act as a true research assistant rather than a novelty feature.
 
 This phase is not really "just another tab." It is better thought of as a **cross-tab research layer**. That said, it may still have its own dedicated area, depending on UI design.
 
@@ -387,7 +387,7 @@ The assistant should be able to explain:
 - possible interpretations of a pattern,
 - what caveats should be considered.
 
-This would make StrataLab more usable during exploratory sessions.
+This would make Gamma more usable during exploratory sessions.
 
 #### 5. Structured outputs
 Instead of always returning free-form prose, the assistant should be able to return research cards with fields such as:
@@ -418,7 +418,7 @@ This should build on top of the structured outputs and saved research context.
 
 ### Data requirements
 
-The AI layer primarily needs access to **internal StrataLab state**, including:
+The AI layer primarily needs access to **internal Gamma state**, including:
 - current context,
 - selected entity,
 - available metrics,
@@ -432,7 +432,7 @@ It does not need to own a unique market dataset; it needs deep integration with 
 
 Potential sources / infrastructure include:
 - **OpenAI API** for the model layer
-- function/tool calling to access internal StrataLab tools
+- function/tool calling to access internal Gamma tools
 - structured-output schemas for predictable research responses
 
 Internally, the AI should call functions such as:
@@ -445,7 +445,7 @@ Internally, the AI should call functions such as:
 
 ### Deliverable of the phase
 
-At the end of Phase 3, StrataLab should have an AI-assisted research workflow that can:
+At the end of Phase 3, Gamma should have an AI-assisted research workflow that can:
 - understand current context,
 - suggest hypotheses,
 - propose tests,
@@ -468,7 +468,7 @@ The Fundamentals tab is highly valuable, but it is the most likely to become blo
 - derived metric ambiguity,
 - valuation-model complexity.
 
-This makes it better suited for a later phase, once StrataLab's architecture is mature enough to handle provenance, caching, and reusable analytics cleanly.
+This makes it better suited for a later phase, once Gamma's architecture is mature enough to handle provenance, caching, and reusable analytics cleanly.
 
 ### Goal of the tab
 
@@ -593,14 +593,14 @@ A practical implementation path would likely use a normalized provider first for
 
 ### Deliverable of the phase
 
-At the end of Phase 4, StrataLab should be able to:
+At the end of Phase 4, Gamma should be able to:
 - display company financial history clearly,
 - compute major operating and valuation metrics,
 - allow scenario-based DCF research,
 - support sensitivity analysis,
 - help the user reason about market-implied expectations.
 
-This phase makes StrataLab meaningfully useful for traditional equity research, but it should only be implemented once the data architecture is strong enough to support it properly.
+This phase makes Gamma meaningfully useful for traditional equity research, but it should only be implemented once the data architecture is strong enough to support it properly.
 
 ---
 
@@ -612,7 +612,7 @@ These are not separate tabs, but they are essential to make the roadmap work.
 Every external source should be accessed through a dedicated adapter module rather than directly in the UI.
 
 ### 2. Normalized internal schemas
-StrataLab should standardize internal entities such as:
+Gamma should standardize internal entities such as:
 - prediction markets,
 - market trades,
 - wallets,
@@ -671,7 +671,7 @@ Add company financial analysis and valuation once the architecture is mature eno
 
 ## End State Vision
 
-If the roadmap is executed well, StrataLab evolves from a portfolio/risk app into a **multi-domain research platform** where the user can:
+If the roadmap is executed well, Gamma evolves from a portfolio/risk app into a **multi-domain research platform** where the user can:
 
 - inspect markets,
 - study behavior,

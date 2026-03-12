@@ -1,4 +1,4 @@
-# StrataLab Migration Plan
+# Gamma Migration Plan
 
 This file is the detailed migration log and audit record for the ongoing strangler migration from PySide6/Qt to Tauri + FastAPI + Svelte.
 
@@ -46,9 +46,9 @@ Verified in the current audit:
 - `npm run test` in `frontend/` -> `8 passed`
 - `npm run build` in `frontend/` -> success
 - `cargo check --manifest-path frontend\src-tauri\Cargo.toml` -> success
-- `npm run backend:smoke` in `frontend/` -> success; packaged `stratalab-backend.exe` reached `/health`
+- `npm run backend:smoke` in `frontend/` -> success; packaged `gamma-backend.exe` reached `/health`
 - `npm run desktop:smoke` in `frontend/` -> success; the default launcher started Tauri, the backend reached readiness, and the main window reached frontend page load
-- `npm run tauri:build` in `frontend/` -> attempted, but not revalidated to completion inside a 5-minute audit cap; an NSIS installer artifact already exists under `%TEMP%\stratalab-tauri-build\release\bundle\nsis\`
+- `npm run tauri:build` in `frontend/` -> attempted, but not revalidated to completion inside a 5-minute audit cap; an NSIS installer artifact already exists under `%TEMP%\gamma-tauri-build\release\bundle\nsis\`
 
 Resolved during this audit:
 - Completed the remaining Phase 1 extraction by moving active-snapshot selection, IV symbol-follow rules, and market-data mode propagation into shared application modules.
@@ -70,8 +70,8 @@ Resolved during this audit:
 - Updated the Tauri production path to launch the bundled backend executable from resources instead of assuming a repo checkout or `.venv`.
 - Added packaged-startup diagnostics written to app-data logs plus a backend failure report for splash-screen error reporting.
 - Added automated desktop packaging validation via `tests/test_desktop_backend_smoke.py` and `npm run backend:smoke`.
-- Added `src/desktop_launcher.py` and `stratalab-desktop` so the default desktop launcher now targets Tauri instead of PySide.
-- Kept PySide available through `src.desktop_launcher --client pyside`, `STRATALAB_DESKTOP_CLIENT=pyside`, and `stratalab-pyside`.
+- Added `src/desktop_launcher.py` and `gamma-desktop` so the default desktop launcher now targets Tauri instead of PySide.
+- Kept PySide available through `src.desktop_launcher --client pyside`, `GAMMA_DESKTOP_CLIENT=pyside`, and `gamma-pyside`.
 - Added `frontend/scripts/smoke-desktop-launcher.mjs` plus `npm run desktop:smoke` to validate the real default desktop cutover path instead of only backend startup.
 - Tightened Tauri startup so the splash remains visible until the main frontend window reaches page load; stale packaged-startup logs are also cleared before each launch.
 - `frontend/src/views/PortfolioView.svelte` now recomputes summary cards, positions, and chart state when API data arrives.
@@ -344,7 +344,7 @@ Implemented:
 - Added `src/api/desktop_entry.py` as the shared desktop backend entrypoint.
 - Added PyInstaller-based backend packaging through `frontend/scripts/build-backend.mjs`.
 - `npm run tauri:build` now packages the Python backend before invoking the Tauri build.
-- Tauri bundled mode now resolves `resources/backend/stratalab-backend/stratalab-backend.exe` and no longer depends on a repo-local `.venv` at runtime.
+- Tauri bundled mode now resolves `resources/backend/gamma-backend/gamma-backend.exe` and no longer depends on a repo-local `.venv` at runtime.
 - Packaged desktop runtime paths now use Tauri app-data directories for cache, local history, and backend startup logs.
 - Backend startup failures now surface a failure report plus stdout/stderr log paths to the splash window.
 - Windows NSIS installer generation is enabled and validated.
@@ -369,7 +369,7 @@ Rule:
 
 Implemented in this phase:
 - The repo-level default desktop launcher is now `src.desktop_launcher`, which defaults to Tauri.
-- PySide remains a supported fallback through `--client pyside`, `STRATALAB_DESKTOP_CLIENT=pyside`, or `stratalab-pyside`.
+- PySide remains a supported fallback through `--client pyside`, `GAMMA_DESKTOP_CLIENT=pyside`, or `gamma-pyside`.
 - Desktop validation now covers the real default launcher path through `npm run desktop:smoke`.
 - Tauri startup now waits for frontend page load before dismissing the splash screen, so installed-app startup failures are less likely to masquerade as success.
 

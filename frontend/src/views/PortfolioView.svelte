@@ -600,8 +600,8 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: var(--surface-0);
-    padding: 1rem;
+    background: linear-gradient(180deg, rgba(9, 14, 20, 0.97), rgba(6, 10, 15, 0.95));
+    padding: 1.05rem;
   }
 
   .performance-panel,
@@ -628,12 +628,15 @@
 
   .kpi-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+    padding-block: 0.15rem;
   }
 
   .metric {
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.68);
-    padding: 0.72rem 0.78rem;
+    min-width: 0;
+    padding: 0.2rem 1rem;
+    border-left: 1px solid rgba(46, 60, 74, 0.52);
+    background: none;
   }
 
   .metric strong {
@@ -641,6 +644,11 @@
     margin: 0.22rem 0 0.26rem;
     font-size: 1.02rem;
     line-height: 1.2;
+  }
+
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .eyebrow,
@@ -707,8 +715,8 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.6);
+    border: 1px solid rgba(46, 60, 74, 0.52);
+    background: rgba(8, 13, 18, 0.38);
     padding: 0.6rem 0.72rem;
   }
 
@@ -783,22 +791,22 @@
   }
 
   .pill-list span {
-    border: 1px solid rgba(122, 166, 200, 0.18);
-    background: rgba(122, 166, 200, 0.08);
+    border: 1px solid rgba(122, 166, 200, 0.14);
+    background: rgba(122, 166, 200, 0.05);
     color: var(--text-1);
     padding: 0.34rem 0.46rem;
   }
 
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
   }
 
   .message-list {
     max-height: 14rem;
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.6);
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    background: none;
   }
 
   .message-row {
@@ -865,8 +873,7 @@
   }
 
   @media (max-width: 980px) {
-    .workspace-grid,
-    .kpi-grid {
+    .workspace-grid {
       grid-template-columns: 1fr;
     }
 
@@ -876,6 +883,20 @@
   }
 
   @media (max-width: 1080px) {
+    .kpi-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .metric {
+      padding: 0.7rem 0;
+      border-left: 0;
+    }
+
+    .metric:first-child,
+    .metric:nth-child(2) {
+      padding-top: 0;
+    }
+
     .chart-controls,
     .table-controls,
     .support-column {
