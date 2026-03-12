@@ -98,7 +98,10 @@ def test_research_analyze_endpoint(tmp_path):
         assert payload["coverage"]["available_symbols"] == ["AAPL"]
         assert payload["coverage"]["benchmark_overlap_count"] > 0
         assert payload["constituents"][0]["symbol"] == "AAPL"
+        assert payload["constituents"][0]["instrument_id"] is not None
+        assert payload["weights"][0]["display_symbol"] == "AAPL"
         assert payload["snapshot"]["positions"][0]["symbol"] == "AAPL"
+        assert payload["snapshot"]["positions"][0]["instrument_id"] is not None
     finally:
         runtime.shutdown()
 
@@ -119,8 +122,8 @@ def test_research_context_replaces_scope_after_mode_switch(tmp_path):
 
         diagnostics_after_single = client.get("/diagnostics")
         assert diagnostics_after_single.status_code == 200
-        assert diagnostics_after_single.json()["research_scope_type"] == ResearchScopeType.SINGLE_TICKER.value
-        assert diagnostics_after_single.json()["research_primary_symbol"] == "AAPL"
+        assert diagnostics_after_single.json()["research_scope_type"] == ResearchScopeType.NONE.value
+        assert diagnostics_after_single.json()["research_primary_symbol"] is None
         assert diagnostics_after_single.json()["research_synthetic_count"] == 0
 
         synthetic_response = client.post(
@@ -145,9 +148,40 @@ def test_research_context_replaces_scope_after_mode_switch(tmp_path):
 
         diagnostics_after_synthetic = client.get("/diagnostics")
         assert diagnostics_after_synthetic.status_code == 200
-        assert diagnostics_after_synthetic.json()["research_scope_type"] == ResearchScopeType.SYNTHETIC_PORTFOLIO.value
+        assert diagnostics_after_synthetic.json()["research_scope_type"] == ResearchScopeType.NONE.value
         assert diagnostics_after_synthetic.json()["research_primary_symbol"] is None
-        assert diagnostics_after_synthetic.json()["research_synthetic_count"] == 3
+        assert diagnostics_after_synthetic.json()["research_synthetic_count"] == 0
+    finally:
+        runtime.shutdown()
+
+
+def test_research_analyze_rejects_invalid_synthetic_payloads(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        duplicate_response = client.post(
+            "/research/analyze",
+            json={
+                "scope_type": ResearchScopeType.SYNTHETIC_PORTFOLIO.value,
+                "synthetic_positions": [
+                    {"symbol": "AAPL", "weight": 0.5},
+                    {"symbol": "AAPL", "weight": 0.5},
+                ],
+            },
+        )
+        assert duplicate_response.status_code == 422
+        assert "Duplicate symbol in synthetic portfolio: AAPL" in duplicate_response.json()["detail"]
+
+        negative_response = client.post(
+            "/research/analyze",
+            json={
+                "scope_type": ResearchScopeType.SYNTHETIC_PORTFOLIO.value,
+                "synthetic_positions": [
+                    {"symbol": "AAPL", "weight": -1},
+                ],
+            },
+        )
+        assert negative_response.status_code == 422
+        assert "Synthetic weight must be positive for AAPL" in negative_response.json()["detail"]
     finally:
         runtime.shutdown()
 

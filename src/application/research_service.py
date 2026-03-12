@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.analytics.returns import align_prices, compute_returns
 from src.analytics.risk_metrics import compute_weights, max_drawdown, portfolio_returns, realized_vol
+from src.application.research_validation import ensure_valid_research_scope
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
 from src.services.data_providers import ResearchDataProvider
@@ -45,12 +46,17 @@ class ResearchService:
 
     def analyze(self, request: ResearchAnalysisRequest) -> ResearchAnalysisResult:
         warnings: list[str] = []
-        primary_symbol = str(request.primary_symbol or "").strip().upper()
+        validated_scope = ensure_valid_research_scope(
+            request.scope_type,
+            request.primary_symbol,
+            request.synthetic_positions,
+        )
+        primary_symbol = validated_scope.primary_symbol
         benchmark_symbol = str(request.benchmark_symbol or "").strip().upper() or "SPY"
         snapshot, snapshot_warnings = self.provider.build_snapshot_for_scope(
             request.scope_type,
             primary_symbol=primary_symbol,
-            synthetic_positions=request.synthetic_positions,
+            synthetic_positions=validated_scope.synthetic_positions,
         )
         warnings.extend(snapshot_warnings)
         if snapshot is None:

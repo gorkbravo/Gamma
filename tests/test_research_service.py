@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
-from src.models.app_mode import ResearchScopeType
+from src.application.research_validation import ResearchValidationError
+from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 
 
@@ -50,12 +52,12 @@ def _make_snapshot() -> PortfolioSnapshot:
 
 
 def test_research_service_returns_empty_result_when_snapshot_cannot_be_built():
-    service = ResearchService(_StubResearchProvider(snapshot=None, snapshot_warnings=["Ticker is required"]))
+    service = ResearchService(_StubResearchProvider(snapshot=None, snapshot_warnings=["History unavailable"]))
 
     result = service.analyze(
         ResearchAnalysisRequest(
             scope_type=ResearchScopeType.SINGLE_TICKER,
-            primary_symbol="",
+            primary_symbol="SPY",
             benchmark_symbol="SPY",
         )
     )
@@ -66,7 +68,7 @@ def test_research_service_returns_empty_result_when_snapshot_cannot_be_built():
     assert result.available_symbols == []
     assert result.missing_symbols == []
     assert result.benchmark_overlap_count == 0
-    assert result.warnings == ["Ticker is required"]
+    assert result.warnings == ["History unavailable"]
 
 
 def test_research_service_computes_perf_and_benchmark_returns_for_scope():
@@ -130,6 +132,10 @@ def test_research_service_preserves_synthetic_scope_weights_and_snapshot():
         ResearchAnalysisRequest(
             scope_type=ResearchScopeType.SYNTHETIC_PORTFOLIO,
             primary_symbol="",
+            synthetic_positions=[
+                SyntheticPosition(symbol="SPY", weight=0.6),
+                SyntheticPosition(symbol="QQQ", weight=0.4),
+            ],
             benchmark_symbol="SPY",
         )
     )
@@ -142,3 +148,34 @@ def test_research_service_preserves_synthetic_scope_weights_and_snapshot():
     assert result.weights["QQQ"] == 0.4
     assert result.available_symbols == ["SPY", "QQQ"]
     assert result.benchmark_overlap_count == 4
+
+
+def test_research_service_rejects_duplicate_synthetic_symbols():
+    service = ResearchService(_StubResearchProvider(snapshot=_make_snapshot()))
+
+    with pytest.raises(ResearchValidationError) as exc_info:
+        service.analyze(
+            ResearchAnalysisRequest(
+                scope_type=ResearchScopeType.SYNTHETIC_PORTFOLIO,
+                synthetic_positions=[
+                    SyntheticPosition(symbol="SPY", weight=0.6),
+                    SyntheticPosition(symbol="SPY", weight=0.4),
+                ],
+            )
+        )
+
+    assert "Duplicate symbol in synthetic portfolio: SPY" in exc_info.value.errors
+
+
+def test_research_service_rejects_non_positive_synthetic_weights():
+    service = ResearchService(_StubResearchProvider(snapshot=_make_snapshot()))
+
+    with pytest.raises(ResearchValidationError) as exc_info:
+        service.analyze(
+            ResearchAnalysisRequest(
+                scope_type=ResearchScopeType.SYNTHETIC_PORTFOLIO,
+                synthetic_positions=[SyntheticPosition(symbol="SPY", weight=0.0)],
+            )
+        )
+
+    assert "Synthetic weight must be positive for SPY" in exc_info.value.errors

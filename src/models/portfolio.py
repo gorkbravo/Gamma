@@ -6,6 +6,8 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from src.models.instruments import build_instrument_id, normalize_symbol
+
 
 @dataclass
 class PositionItem:
@@ -20,6 +22,32 @@ class PositionItem:
     weight: float | None = None
     base_market_value: float | None = None
     fx_rate: float | None = None
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+    exchange: str | None = None
+    primary_exchange: str | None = None
+    provider: str | None = None
+    provider_id: str | None = None
+
+    def resolved_symbol(self) -> str:
+        return normalize_symbol(self.symbol)
+
+    def resolved_display_symbol(self) -> str:
+        return normalize_symbol(self.display_symbol or self.symbol)
+
+    def resolved_instrument_id(self) -> str:
+        return str(
+            self.instrument_id
+            or build_instrument_id(
+                provider=self.provider or "portfolio",
+                provider_id=self.provider_id,
+                symbol=self.symbol,
+                sec_type=self.sec_type,
+                exchange=self.exchange,
+                primary_exchange=self.primary_exchange,
+                currency=self.currency,
+            )
+        )
 
 
 @dataclass

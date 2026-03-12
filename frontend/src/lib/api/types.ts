@@ -57,6 +57,12 @@ export interface Position {
   weight: number | null;
   base_market_value: number | null;
   fx_rate: number | null;
+  instrument_id: string | null;
+  display_symbol: string | null;
+  exchange: string | null;
+  primary_exchange: string | null;
+  provider: string | null;
+  provider_id: string | null;
 }
 
 export interface PortfolioSnapshot {
@@ -104,6 +110,8 @@ export interface PortfolioPerformanceResponse {
 export interface ResearchWeightPoint {
   symbol: string;
   weight: number;
+  instrument_id: string | null;
+  display_symbol: string | null;
 }
 
 export interface ResearchSummary {
@@ -133,6 +141,8 @@ export interface ResearchCoverage {
 export interface ResearchConstituent {
   symbol: string;
   weight: number;
+  instrument_id: string | null;
+  display_symbol: string | null;
   total_return: number | null;
   annual_vol: number | null;
   max_drawdown: number | null;

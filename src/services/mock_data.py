@@ -6,6 +6,7 @@ from typing import Dict, List
 
 import pandas as pd
 
+from src.models.instruments import build_instrument_id
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.utils.time import now_utc
 
@@ -31,6 +32,16 @@ class MockDataService:
                 market_price=195.0,
                 market_value=9750.0,
                 unrealized_pnl=2250.0,
+                instrument_id=build_instrument_id(
+                    provider="mock",
+                    symbol="AAPL",
+                    sec_type="STK",
+                    exchange="SMART",
+                    currency="USD",
+                ),
+                display_symbol="AAPL",
+                exchange="SMART",
+                provider="mock",
             ),
             PositionItem(
                 symbol="MSFT",
@@ -41,6 +52,16 @@ class MockDataService:
                 market_price=320.0,
                 market_value=9600.0,
                 unrealized_pnl=1200.0,
+                instrument_id=build_instrument_id(
+                    provider="mock",
+                    symbol="MSFT",
+                    sec_type="STK",
+                    exchange="SMART",
+                    currency="USD",
+                ),
+                display_symbol="MSFT",
+                exchange="SMART",
+                provider="mock",
             ),
             PositionItem(
                 symbol="SAP",
@@ -51,6 +72,16 @@ class MockDataService:
                 market_price=150.0,
                 market_value=6000.0,
                 unrealized_pnl=1200.0,
+                instrument_id=build_instrument_id(
+                    provider="mock",
+                    symbol="SAP",
+                    sec_type="STK",
+                    exchange="SMART",
+                    currency="EUR",
+                ),
+                display_symbol="SAP",
+                exchange="SMART",
+                provider="mock",
             ),
         ]
         return PortfolioSnapshot(

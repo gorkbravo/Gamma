@@ -8,6 +8,7 @@ from ib_insync import Contract
 
 from src.application.workspace_service import should_auto_follow_research_symbol
 from src.models.app_mode import AppMode, ResearchScopeType, SyntheticPosition
+from src.models.instruments import build_instrument_id, normalize_symbol
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.services.app_context import AppDataContext
 from src.services.ibkr_client import IBKRClient
@@ -129,6 +130,16 @@ class ResearchDataProvider:
                 unrealized_pnl=None,
                 weight=1.0,
                 base_market_value=100.0,
+                instrument_id=build_instrument_id(
+                    provider="research",
+                    symbol=symbol,
+                    sec_type="STK",
+                    exchange="SMART",
+                    currency="USD",
+                ),
+                display_symbol=symbol,
+                exchange="SMART",
+                provider="research",
             )
             snapshot = PortfolioSnapshot(
                 timestamp=now_utc(),
@@ -154,13 +165,13 @@ class ResearchDataProvider:
             items: List[PositionItem] = []
             total_value = 100.0
             for pos in positions:
-                symbol = str(pos.symbol or "").strip().upper()
+                symbol = normalize_symbol(pos.symbol)
                 norm_weight = float(pos.weight) / total_weight
                 items.append(
                     PositionItem(
                         symbol=symbol,
-                        sec_type="STK",
-                        currency="USD",
+                        sec_type=pos.sec_type or "STK",
+                        currency=pos.currency or "USD",
                         quantity=norm_weight,
                         avg_cost=None,
                         market_price=None,
@@ -168,6 +179,12 @@ class ResearchDataProvider:
                         unrealized_pnl=None,
                         weight=norm_weight,
                         base_market_value=total_value * norm_weight,
+                        instrument_id=pos.resolved_instrument_id(symbol=symbol),
+                        display_symbol=pos.resolved_display_symbol(symbol=symbol),
+                        exchange=pos.exchange,
+                        primary_exchange=pos.primary_exchange,
+                        provider=pos.provider or "research",
+                        provider_id=pos.provider_id,
                     )
                 )
             snapshot = PortfolioSnapshot(

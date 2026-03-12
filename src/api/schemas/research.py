@@ -11,9 +11,28 @@ from src.models.app_mode import ResearchScopeType, SyntheticPosition
 class SyntheticPositionModel(BaseModel):
     symbol: str
     weight: float
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+    sec_type: str | None = None
+    currency: str | None = None
+    exchange: str | None = None
+    primary_exchange: str | None = None
+    provider: str | None = None
+    provider_id: str | None = None
 
     def to_domain(self) -> SyntheticPosition:
-        return SyntheticPosition(symbol=self.symbol, weight=self.weight)
+        return SyntheticPosition(
+            symbol=self.symbol,
+            weight=self.weight,
+            instrument_id=self.instrument_id,
+            display_symbol=self.display_symbol,
+            sec_type=self.sec_type,
+            currency=self.currency,
+            exchange=self.exchange,
+            primary_exchange=self.primary_exchange,
+            provider=self.provider,
+            provider_id=self.provider_id,
+        )
 
 
 class ResearchAnalyzeRequestModel(BaseModel):
@@ -27,6 +46,8 @@ class ResearchAnalyzeRequestModel(BaseModel):
 class WeightPointModel(BaseModel):
     symbol: str
     weight: float
+    instrument_id: str | None = None
+    display_symbol: str | None = None
 
 
 class ResearchSummaryModel(BaseModel):
@@ -56,6 +77,8 @@ class ResearchCoverageModel(BaseModel):
 class ResearchConstituentModel(BaseModel):
     symbol: str
     weight: float
+    instrument_id: str | None = None
+    display_symbol: str | None = None
     total_return: float | None = None
     annual_vol: float | None = None
     max_drawdown: float | None = None
@@ -103,7 +126,15 @@ class ResearchAnalyzeResponseModel(BaseModel):
             performance_points=series_to_points(result.perf),
             benchmark_points=series_to_points(result.benchmark_returns),
             primary_price_points=series_to_points(result.primary_price),
-            weights=[WeightPointModel(symbol=str(symbol), weight=float(weight)) for symbol, weight in result.weights.items()],
+            weights=[
+                WeightPointModel(
+                    symbol=str(symbol),
+                    weight=float(weight),
+                    instrument_id=_position_meta(result.snapshot, str(symbol)).get("instrument_id"),
+                    display_symbol=_position_meta(result.snapshot, str(symbol)).get("display_symbol"),
+                )
+                for symbol, weight in result.weights.items()
+            ],
             summary=ResearchSummaryModel(
                 total_return=total_return,
                 annual_return=annual_return,
@@ -171,6 +202,7 @@ def _constituents_from_result(result: ResearchAnalysisResult) -> list[ResearchCo
         return []
     rows: list[ResearchConstituentModel] = []
     for symbol, weight in result.weights.sort_values(ascending=False).items():
+        position_meta = _position_meta(result.snapshot, str(symbol))
         total_return = _series_value(result.constituent_total_returns, symbol)
         annual_vol = _series_value(result.constituent_annual_vol, symbol)
         max_dd = _series_value(result.constituent_max_drawdown, symbol)
@@ -178,6 +210,8 @@ def _constituents_from_result(result: ResearchAnalysisResult) -> list[ResearchCo
             ResearchConstituentModel(
                 symbol=str(symbol),
                 weight=float(weight),
+                instrument_id=position_meta.get("instrument_id"),
+                display_symbol=position_meta.get("display_symbol"),
                 total_return=total_return,
                 annual_vol=annual_vol,
                 max_drawdown=max_dd,
@@ -192,3 +226,15 @@ def _series_value(series, symbol: str) -> float | None:
         return None
     value = series.get(symbol)
     return None if value is None else float(value)
+
+
+def _position_meta(snapshot, symbol: str) -> dict[str, str | None]:
+    if snapshot is None:
+        return {"instrument_id": None, "display_symbol": None}
+    for position in snapshot.positions:
+        if position.symbol == symbol:
+            return {
+                "instrument_id": position.resolved_instrument_id(),
+                "display_symbol": position.resolved_display_symbol(),
+            }
+    return {"instrument_id": None, "display_symbol": None}

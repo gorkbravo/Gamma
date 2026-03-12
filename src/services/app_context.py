@@ -7,6 +7,7 @@ from typing import Dict, List
 import pandas as pd
 from PySide6.QtCore import QObject, Signal
 
+from src.application.research_validation import validate_research_scope
 from src.models.app_mode import AppMode, ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
 
@@ -96,27 +97,5 @@ class AppDataContext(QObject):
         primary_symbol: str,
         synthetic_positions: List[SyntheticPosition],
     ) -> ResearchScopeValidation:
-        errors: List[str] = []
-        if scope_type == ResearchScopeType.SINGLE_TICKER:
-            if not str(primary_symbol or "").strip():
-                errors.append("Ticker is required for single-ticker research scope")
-        elif scope_type == ResearchScopeType.SYNTHETIC_PORTFOLIO:
-            if not synthetic_positions:
-                errors.append("Synthetic portfolio requires at least one symbol")
-            seen: set[str] = set()
-            total_weight = 0.0
-            for item in synthetic_positions:
-                symbol = str(item.symbol or "").strip().upper()
-                if not symbol:
-                    errors.append("Synthetic portfolio contains an empty symbol")
-                    continue
-                if symbol in seen:
-                    errors.append(f"Duplicate symbol in synthetic portfolio: {symbol}")
-                seen.add(symbol)
-                weight = float(item.weight)
-                if weight <= 0:
-                    errors.append(f"Synthetic weight must be positive for {symbol}")
-                total_weight += weight
-            if synthetic_positions and abs(total_weight) < 1e-12:
-                errors.append("Synthetic portfolio weights sum to zero")
-        return ResearchScopeValidation(valid=not errors, errors=errors)
+        validation = validate_research_scope(scope_type, primary_symbol, synthetic_positions)
+        return ResearchScopeValidation(valid=validation.valid, errors=validation.errors)

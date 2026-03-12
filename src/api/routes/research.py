@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from src.api.schemas.research import ResearchAnalyzeRequestModel, ResearchAnalyzeResponseModel
 from src.application.research_service import ResearchAnalysisRequest
+from src.application.research_validation import ResearchValidationError
 
 
 router = APIRouter(tags=["research"])
@@ -15,19 +16,16 @@ def analyze_research(
     request: Request,
 ) -> ResearchAnalyzeResponseModel:
     runtime = request.app.state.runtime
-    result = runtime.research_service.analyze(
-        ResearchAnalysisRequest(
-            scope_type=payload.scope_type,
-            primary_symbol=payload.primary_symbol,
-            synthetic_positions=[position.to_domain() for position in payload.synthetic_positions],
-            benchmark_symbol=payload.benchmark_symbol,
-            lookback_days=payload.lookback_days,
+    try:
+        result = runtime.research_service.analyze(
+            ResearchAnalysisRequest(
+                scope_type=payload.scope_type,
+                primary_symbol=payload.primary_symbol,
+                synthetic_positions=[position.to_domain() for position in payload.synthetic_positions],
+                benchmark_symbol=payload.benchmark_symbol,
+                lookback_days=payload.lookback_days,
+            )
         )
-    )
-    runtime.app_context.set_research_scope(
-        payload.scope_type,
-        primary_symbol=payload.primary_symbol,
-        synthetic_positions=[position.to_domain() for position in payload.synthetic_positions],
-    )
-    runtime.app_context.set_research_snapshot(result.snapshot)
+    except ResearchValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
     return ResearchAnalyzeResponseModel.from_service_result(result)
