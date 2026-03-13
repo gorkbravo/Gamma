@@ -37,6 +37,8 @@ class RiskMetricsModel(BaseModel):
     correlation: float | None = None
     alpha_annual: float | None = None
     covered_portfolio_value: float | None = None
+    covered_risk_basis_value: float | None = None
+    risk_basis_value: float | None = None
     risk_coverage_ratio: float | None = None
     historical_var_total_estimate: float | None = None
     historical_cvar_total_estimate: float | None = None

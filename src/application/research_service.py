@@ -172,7 +172,7 @@ class ResearchService:
     ) -> pd.Series:
         warning_list = warnings if warnings is not None else []
         symbol = str(benchmark_symbol or "").strip().upper() or "SPY"
-        bench_series = self.provider.load_symbol_history(symbol, lookback_days)
+        bench_series = self.provider.load_benchmark_history(symbol, lookback_days)
         if bench_series is None or bench_series.empty:
             warning_list.append(f"Benchmark history unavailable for {symbol}")
             return pd.Series(dtype=float)

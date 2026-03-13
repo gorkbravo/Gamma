@@ -99,6 +99,13 @@ function setError(error: unknown) {
   lastError.set(error instanceof Error ? error.message : String(error));
 }
 
+function hasRenderableIvSurface(surface: IvSurface | null | undefined) {
+  if (!surface) {
+    return false;
+  }
+  return Boolean(surface.snapshot_available || surface.points > 0 || surface.expiries.length > 0 || surface.strikes.length > 0);
+}
+
 function appendDiagnosticsLog(lines: string[], heading?: string) {
   if (!lines.length && !heading) {
     return;
@@ -367,7 +374,12 @@ export async function loadIvSession() {
   try {
     const session = await getJson<IvSessionStatus>("/iv/session");
     ivSession.set(session);
-    ivSurface.set(session.surface);
+    ivSurface.update((current) => {
+      if (session.running || hasRenderableIvSurface(session.surface)) {
+        return session.surface;
+      }
+      return current;
+    });
     lastError.set("");
   } catch (error) {
     setError(error);

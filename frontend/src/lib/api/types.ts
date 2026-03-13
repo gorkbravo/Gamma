@@ -181,6 +181,8 @@ export interface RiskMetrics {
   correlation: number | null;
   alpha_annual: number | null;
   covered_portfolio_value: number | null;
+  covered_risk_basis_value: number | null;
+  risk_basis_value: number | null;
   risk_coverage_ratio: number | null;
   historical_var_total_estimate: number | null;
   historical_cvar_total_estimate: number | null;

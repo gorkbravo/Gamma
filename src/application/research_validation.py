@@ -69,11 +69,11 @@ def validate_research_scope(
                 errors.append(f"Synthetic weight must be positive for {symbol}")
                 continue
 
-            resolved_instrument_id = item.resolved_instrument_id(symbol=symbol)
-            if resolved_instrument_id in seen_instruments:
+            identity_key = _synthetic_identity_key(item, symbol)
+            if identity_key in seen_instruments:
                 errors.append(f"Duplicate symbol in synthetic portfolio: {symbol}")
                 continue
-            seen_instruments.add(resolved_instrument_id)
+            seen_instruments.add(identity_key)
 
             total_weight += weight
             normalized_positions.append(
@@ -81,9 +81,7 @@ def validate_research_scope(
                     item,
                     symbol=symbol,
                     weight=weight,
-                    instrument_id=resolved_instrument_id,
                     display_symbol=item.resolved_display_symbol(symbol=symbol),
-                    sec_type=item.sec_type or "STK",
                 )
             )
 
@@ -115,3 +113,19 @@ def ensure_valid_research_scope(
     if not validation.valid:
         raise ResearchValidationError(validation.errors)
     return validation
+
+
+def _synthetic_identity_key(item: SyntheticPosition, symbol: str) -> str:
+    explicit_instrument_id = str(item.instrument_id or "").strip()
+    if explicit_instrument_id:
+        return explicit_instrument_id
+    if (
+        str(item.provider_id or "").strip()
+        or str(item.provider or "").strip()
+        or str(item.exchange or "").strip()
+        or str(item.primary_exchange or "").strip()
+        or str(item.currency or "").strip()
+        or str(item.sec_type or "").strip()
+    ):
+        return item.resolved_instrument_id(symbol=symbol)
+    return symbol

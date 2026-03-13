@@ -21,6 +21,8 @@ def _build_test_client(tmp_path):
 def test_health_and_system_status_endpoints(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
+        assert runtime.app_context is None
+        assert runtime.research_provider.context is None
         health = client.get("/health")
         status = client.get("/system/status")
         mode_change = client.post("/system/market-data-mode", json={"market_data_mode": "live"})

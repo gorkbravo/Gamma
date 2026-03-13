@@ -170,6 +170,8 @@ def test_compute_excludes_missing_base_value_without_crashing_and_reports_covera
     results = _compute_payload(prices, snapshot).results
 
     assert results.excluded_assets.get("B") == "Missing base market value"
+    assert results.covered_risk_basis_value == 80.0
+    assert results.risk_basis_value == 100.0
     assert results.risk_coverage_ratio is not None
     assert abs(results.risk_coverage_ratio - 0.8) < 1e-12
     assert results.historical_var is not None
@@ -178,6 +180,50 @@ def test_compute_excludes_missing_base_value_without_crashing_and_reports_covera
     assert results.monte_carlo_var is not None
     assert results.monte_carlo_var_total_estimate is not None
     assert abs(results.monte_carlo_var_total_estimate - (results.monte_carlo_var / 0.8)) < 1e-9
+
+
+def test_compute_caps_coverage_ratio_on_margined_live_like_book():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 100, 102, 103, 104], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=120.0),
+            PositionItem("CASH_USD", "CASH", "USD", -20, None, 1.0, -20.0, 0.0, base_market_value=-20.0),
+        ],
+        net_liq=100.0,
+    )
+
+    results = _compute_payload(prices, snapshot).results
+
+    assert results.covered_portfolio_value == 100.0
+    assert results.covered_risk_basis_value == 120.0
+    assert results.risk_basis_value == 120.0
+    assert results.risk_coverage_ratio == 1.0
+    assert results.historical_var_total_estimate == results.historical_var
+
+
+def test_compute_treats_fully_covered_cash_heavy_book_as_fully_covered():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 100, 102, 103, 104], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("CASH_USD", "CASH", "USD", 80, None, 1.0, 80.0, 0.0, base_market_value=80.0),
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=20.0),
+        ],
+        net_liq=100.0,
+    )
+
+    results = _compute_payload(prices, snapshot).results
+
+    assert results.covered_portfolio_value == 100.0
+    assert results.covered_risk_basis_value == 20.0
+    assert results.risk_basis_value == 20.0
+    assert results.risk_coverage_ratio == 1.0
+    assert results.historical_var_total_estimate == results.historical_var
 
 
 def test_convert_benchmark_to_base_does_not_backfill_fx_history():

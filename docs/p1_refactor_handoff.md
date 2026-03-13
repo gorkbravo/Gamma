@@ -28,31 +28,53 @@ Read this together with:
 
 ## Current Goal
 
-Do not start roadmap feature work yet.
-
-The immediate goal is to finish pre-roadmap readiness so Gamma can support new research domains cleanly without re-entangling the codebase.
+The immediate goal is to start roadmap work from a now-verified pre-roadmap baseline, while preserving the architectural boundaries that made that transition safe.
 
 That means:
 
 1. keep Gamma read-only and research-focused,
-2. finish the runtime/provider separation work,
+2. preserve the runtime/provider separation work,
 3. make cross-domain data adapters possible,
-4. fix the highest-signal live regressions,
+4. keep high-signal live regressions contained,
 5. avoid spending time on low-priority UI expansion.
+
+## Follow-Up Status (March 12, 2026)
+
+The pre-roadmap hardening pass moved materially forward after the original audit snapshot:
+
+- backend runtime now omits desktop-only `AppDataContext` state unless the explicit desktop runtime is requested
+- research instrument defaults are configurable and benchmark defaults are now separated from research-instrument defaults
+- risk coverage semantics were corrected to use modeled risk basis rather than raw net liquidation, with test coverage for margined/live-style books
+- provenance expectations for new roadmap entities are now defined in `C:\Users\User\Desktop\StrataLab\docs\provenance_expectations.md`
+- `cd frontend && npm run tauri:build` now completes and produces an NSIS installer artifact
+
+March 13, 2026 audit follow-up:
+
+- installed-workflow smoke validation of the generated NSIS bundle now passed through a silent temp install
+- launched installed `gamma-shell.exe` successfully and verified bundled backend health on `http://127.0.0.1:8000/health`
+- direct live runtime probing against the configured TWS path succeeded for:
+  - portfolio snapshot
+  - portfolio performance
+  - research analysis
+  - risk computation
+- risk-basis coverage semantics were tightened further so fully covered cash-heavy books no longer look artificially under-covered
+
+What still remains open before the checklist is fully clean:
+
+1. IV one-shot live behavior remains documented maintenance work, not a roadmap blocker
 
 ## Roadmap Start Decision
 
-The default recommendation is still to finish pre-roadmap hardening first.
+Gamma is now ready to start roadmap work from this branch.
 
-However, IV readiness by itself is not the thing that should block roadmap progress.
+IV readiness by itself is not the thing that should block roadmap progress.
 
 If live options-market-data subscriptions are not available yet, treat IV live usability as a deferred validation problem rather than a roadmap gate.
 
-The real pre-roadmap blockers are:
+Remaining follow-up work is burn-in quality assurance, not a roadmap-start blocker:
 
-1. provider/runtime abstractions still being too IBKR/equities-specific,
-2. risk coverage semantics still needing a trustworthy reusable basis,
-3. packaged desktop validation still not having a completed end-to-end installer proof.
+1. IV one-shot live behavior should stay documented maintenance work
+2. broader longer-session live QA is still useful but can run in parallel with roadmap work
 
 ## What Was Already Done
 
@@ -95,7 +117,7 @@ Substantially implemented, additive compatibility preserved.
 
 ### Backend state isolation
 
-Partially implemented.
+Implemented to the level required for roadmap-readiness work.
 
 - Removed backend-global research scope/snapshot mutation from the FastAPI path
 - Diagnostics no longer reflect hidden per-request research scope
@@ -103,11 +125,11 @@ Partially implemented.
   - `src/services/research_cache.py`
 - `AppDataContext` is now much closer to a desktop-only workspace object
 
-Important limitation:
+Current limitation:
 
-- runtime construction is still centered around the current IBKR/equities Gamma shape,
-- the backend is safer than before, but not yet provider-agnostic,
-- this is still the main unfinished foundation slice.
+- the broader app is still IBKR-first overall,
+- but the backend/runtime boundary no longer depends on desktop-only state,
+- and research/benchmark instrument defaults are now configurable rather than hardwired in the research path.
 
 ## March 12, 2026 Audit Snapshot
 
@@ -206,29 +228,29 @@ Observed:
 
 ## Current Findings That Matter For Pre-Roadmap Work
 
-### Finding 1: provider layer is not roadmap-ready
-
-This is the most important architectural gap.
+### Finding 1: provider/runtime generalization was the main architectural gap
 
 The roadmap requires provider adapters and normalized entities that can support prediction markets, crypto, fundamentals, and AI context.
 
-The current research/provider path is still hardwired to IBKR-style US equities:
+The follow-up refactor addressed the highest-signal blocker in the current research/provider path:
 
 - `src/services/data_providers.py`
 - `src/application/runtime.py`
 
-Examples:
+What is now true:
 
-- research history requests default to `STK / SMART / USD`
-- single-name research snapshots synthesize the same assumptions
-- runtime assembly is still fundamentally an IBKR/equities app graph
+- backend runtime no longer builds desktop-only `AppDataContext` state by default
+- desktop runtime attaches workspace state explicitly
+- research defaults are configurable through runtime/env settings
+- benchmark defaults are now separate from research-instrument defaults
+- same-symbol instruments can keep distinct identities and cache keys
 
-Implication:
+Remaining implication:
 
-- prediction markets and crypto cannot plug into the current abstractions cleanly,
-- starting roadmap Phase 1 or Phase 2 now would create parallel stacks or force another rewrite.
+- provider adapters for new roadmap domains still need to be built,
+- but the pre-roadmap blocker is no longer the old `STK / SMART / USD` hardwiring in the research/runtime path.
 
-### Finding 2: risk coverage math is misleading on live books
+### Finding 2: risk coverage semantics were misleading on live books, and are now corrected
 
 Live audit reproduced a concrete issue in the current risk service:
 
@@ -236,7 +258,7 @@ Live audit reproduced a concrete issue in the current risk service:
 - `covered_portfolio_value = 67722.18`
 - `risk_coverage_ratio = 1.1535`
 
-That is a real output from the current code path.
+That was a real output from the earlier code path.
 
 The current implementation compares:
 
@@ -246,15 +268,16 @@ against:
 
 - summed included `base_market_value`
 
-This can produce coverage above 100% on margined/live books and makes the "coverage" semantics wrong.
+The follow-up refactor changed the model to compare covered risky exposure against an explicit risk basis rather than raw net liquidation, and added test coverage for margined/live-style books.
 
 Files:
 
 - `src/application/risk_service.py`
 
-Implication:
+Current implication:
 
-- the current risk outputs are not a trustworthy base for future reusable analytics without fixing the exposure basis.
+- the risk outputs are now a materially safer base for future reusable analytics,
+- and UI copy now reflects risk-basis coverage rather than implying completeness against raw portfolio value.
 
 ### Finding 3: IV web flow has a live regression
 
@@ -297,48 +320,27 @@ Only touch IV if:
 - a regression blocks basic current use, or
 - a refactor incidentally breaks it and a small compatibility fix is needed.
 
-### Do not start roadmap tabs yet
+### Do not expand IV beyond maintenance
 
-Do not begin prediction markets, crypto, fundamentals, or AI copilot implementation from this branch until the provider/runtime groundwork and risk semantics are in place.
+Prediction markets, crypto, fundamentals, and AI copilot work can now start from this branch.
+
+The remaining constraint is that IV should stay on maintenance-only status unless the work directly touches shared market-data/session behavior.
 
 ## Recommended Next Slice
 
-The next agent should work on pre-roadmap readiness, not feature expansion.
+The next agent should start roadmap implementation from the cleaned readiness baseline, not reopen already-closed foundation questions unless a concrete regression appears.
 
 ### Priority 1
 
-Finish provider/runtime separation.
+Start roadmap work from the now-verified baseline.
 
 Target outcome:
 
-- keep `AppDataContext` desktop-only,
-- keep FastAPI runtime focused on long-lived services and explicit caches,
-- introduce or prepare a provider adapter boundary that is not tied to `STK / SMART / USD`,
-- make research and analytics consume normalized entities instead of broker-specific assumptions.
-
-Concrete direction:
-
-- audit `src/application/runtime.py`
-- audit `src/services/data_providers.py`
-- identify the minimum normalized contracts/entities needed to support non-IBKR research sources later
-- keep changes additive and compatible
+- preserve the read-only research boundary,
+- keep new domains behind provider adapters and normalized schemas,
+- avoid re-entangling desktop session state with backend services.
 
 ### Priority 2
-
-Fix risk exposure/coverage semantics.
-
-Target outcome:
-
-- `risk_coverage_ratio` cannot exceed 100% under normal semantics, or
-- the metric is renamed and the model is made explicit if it is not a completeness ratio
-
-Concrete direction:
-
-- review denominator/basis in `src/application/risk_service.py`
-- verify live and mock behavior
-- add tests for margined/live-style books where net liq and gross included exposure differ
-
-### Priority 3
 
 Do the minimum IV compatibility fix if touched.
 
@@ -352,7 +354,7 @@ Concrete direction:
 - align IV `auto` mode semantics with the rest of the market-data stack if that path is touched
 - do not redesign the IV feature
 
-### Priority 4
+### Priority 3
 
 Expand tests around roadmap-readiness constraints.
 
@@ -414,24 +416,19 @@ What is already true:
 - automated checks were green during the March 12, 2026 audit
 - live IBKR validation succeeded against the configured TWS path
 
-What still blocks roadmap work:
-- provider/runtime abstractions are still too IBKR/equities-specific
-- research data loading still assumes `STK / SMART / USD`
-- risk coverage semantics are wrong or at least misleading on live books
-- IV has known live issues, but IV is not a current priority and is not a blocker by itself
+What no longer blocks roadmap work:
+- installed-workflow validation of the generated NSIS bundle is complete
+- IV still has known live issues, but IV is not a current priority and is not a blocker by itself
 
 Important constraint:
-- Do not start roadmap feature implementation yet
 - Do not delete or disable IV
 - Do not spend major time expanding IV
 - Keep Gamma read-only and aligned with the roadmap
 
 Your task:
-1. Finish the provider/runtime separation needed for pre-roadmap readiness.
-2. Make the data/provider layer more adapter-friendly without doing a big-bang rewrite.
-3. Fix or clarify risk coverage semantics with tests.
-4. If your changes touch IV behavior, only do the minimum fix needed so one-shot loads and market-data-mode behavior are predictable.
-5. Run relevant tests before finishing.
+1. Start roadmap-aligned implementation from the current provider/runtime/risk baseline.
+2. If your changes touch IV behavior, only do the minimum fix needed so one-shot loads and market-data-mode behavior are predictable.
+3. Run relevant tests before finishing.
 
 Suggested starting files:
 - C:\Users\User\Desktop\StrataLab\src\application\runtime.py

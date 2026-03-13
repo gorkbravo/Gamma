@@ -43,7 +43,7 @@ class SyntheticPosition:
                 provider=self.provider or "synthetic",
                 provider_id=self.provider_id,
                 symbol=symbol or self.symbol,
-                sec_type=self.sec_type or "STK",
+                sec_type=self.sec_type,
                 exchange=self.exchange,
                 primary_exchange=self.primary_exchange,
                 currency=self.currency,

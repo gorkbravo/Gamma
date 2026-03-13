@@ -16,6 +16,8 @@ class ResearchScopeValidation:
 
 
 class AppDataContext(QObject):
+    """Desktop workspace state container for Qt views and signals."""
+
     app_mode_changed = Signal(str)
     research_scope_changed = Signal()
     research_snapshot_changed = Signal(object)

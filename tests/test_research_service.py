@@ -36,6 +36,9 @@ class _StubResearchProvider:
     def load_symbol_history(self, symbol, lookback_days):
         return self._benchmark_history
 
+    def load_benchmark_history(self, symbol, lookback_days):
+        return self._benchmark_history
+
 
 def _make_snapshot() -> PortfolioSnapshot:
     return PortfolioSnapshot(

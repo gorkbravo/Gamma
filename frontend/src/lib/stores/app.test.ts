@@ -162,6 +162,8 @@ describe("app store orchestration", () => {
         correlation: 0.8,
         alpha_annual: 0.05,
         covered_portfolio_value: 100,
+        covered_risk_basis_value: 100,
+        risk_basis_value: 100,
         risk_coverage_ratio: 1,
         historical_var_total_estimate: 5,
         historical_cvar_total_estimate: 6,
@@ -262,6 +264,8 @@ describe("app store orchestration", () => {
         correlation: 0.8,
         alpha_annual: 0.05,
         covered_portfolio_value: 100,
+        covered_risk_basis_value: 100,
+        risk_basis_value: 100,
         risk_coverage_ratio: 1,
         historical_var_total_estimate: 5,
         historical_cvar_total_estimate: 6,
@@ -326,6 +330,8 @@ describe("app store orchestration", () => {
         correlation: 0.8,
         alpha_annual: 0.05,
         covered_portfolio_value: 100,
+        covered_risk_basis_value: 100,
+        risk_basis_value: 100,
         risk_coverage_ratio: 1,
         historical_var_total_estimate: 5,
         historical_cvar_total_estimate: 6,
@@ -443,6 +449,49 @@ describe("app store orchestration", () => {
 
     expect(get(ivSession)?.running).toBe(true);
     expect(get(ivSurface)?.symbol).toBe("SPY");
+  });
+
+  it("preserves one-shot IV data when idle session polling returns an empty surface", async () => {
+    ivSurface.set({
+      symbol: "AAPL",
+      timestamp: "2026-03-01T00:00:00Z",
+      snapshot_available: true,
+      spot: 210,
+      expiries: ["20260320"],
+      strikes: [205, 210, 215],
+      iv_grid: [[0.28, 0.27, 0.29]],
+      delayed: true,
+      points: 3,
+      warnings: [],
+      messages: []
+    });
+    const session: IvSessionStatus = {
+      running: false,
+      status_text: "Idle",
+      active_symbol: null,
+      market_data_mode: "delayed",
+      messages: [],
+      surface: {
+        symbol: "AAPL",
+        timestamp: "2026-03-01T00:00:00Z",
+        snapshot_available: false,
+        spot: null,
+        expiries: [],
+        strikes: [],
+        iv_grid: [],
+        delayed: true,
+        points: 0,
+        warnings: [],
+        messages: []
+      }
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(session)));
+
+    await loadIvSession();
+
+    expect(get(ivSession)?.running).toBe(false);
+    expect(get(ivSurface)?.symbol).toBe("AAPL");
+    expect(get(ivSurface)?.points).toBe(3);
   });
 });
 

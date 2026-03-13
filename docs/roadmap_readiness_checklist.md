@@ -15,42 +15,40 @@ Read it together with:
 
 ## Current Decision
 
-As of March 12, 2026:
+As of March 13, 2026:
 
 - the migration is largely complete,
 - IV live usability is not a blocker by itself if proper options-market-data subscriptions are not available yet,
-- the real pre-roadmap blockers are provider/runtime generalization, trustworthy reusable risk semantics, and release-path validation.
-
-This means Gamma can move toward roadmap work only if the remaining hard blockers below are either:
-
-1. resolved, or
-2. explicitly accepted as deferred by the operator.
+- provider/runtime generalization and risk semantics have now been hardened to roadmap-readiness level,
+- packaged desktop build and installed-workflow validation have both been completed,
+- Gamma is ready to begin roadmap work from this branch, with only accepted deferrals remaining.
 
 ## Hard Blockers
 
-- [ ] Provider/runtime assumptions are no longer hardwired to `STK / SMART / USD`
+- [x] Provider/runtime assumptions are no longer hardwired to `STK / SMART / USD`
   Evidence to collect:
   - `src/application/runtime.py` and `src/services/data_providers.py` can describe or load instruments without assuming IBKR equities defaults for every new domain
   - new data domains can plug into a provider adapter boundary without parallel app graphs
 
-- [ ] Risk coverage semantics are trustworthy and test-backed
+- [x] Risk coverage semantics are trustworthy and test-backed
   Evidence to collect:
   - `risk_coverage_ratio` is either a real completeness ratio or renamed to match what it actually means
   - live-style books with cash, leverage, or margin cannot produce misleading headline coverage numbers without an explicit warning/model explanation
   - tests cover the chosen semantics
 
-- [ ] Full packaged desktop build completes and produces a verifiable installer artifact
+- [x] Full packaged desktop build completes and produces a verifiable installer artifact
   Evidence to collect:
   - `npm run tauri:build` completes end-to-end
   - final installer output exists under the expected bundle path
   - installed workflow is smoke-checked, not just backend startup
 
-- [ ] Provenance expectations are defined for new roadmap entities
+- [x] Provenance expectations are defined for new roadmap entities
   Evidence to collect:
   - source/provider
   - retrieval timestamp
   - endpoint/module origin
   - transformation note for derived metrics
+  - baseline documented in `docs/provenance_expectations.md`
 
 ## Accepted Non-Blockers
 
@@ -62,7 +60,8 @@ This means Gamma can move toward roadmap work only if the remaining hard blocker
 ## Baseline Validation
 
 - [x] `.\.venv\Scripts\python.exe -m pytest`
-  March 12, 2026 result: `67 passed`
+  March 12, 2026 follow-up result: `68 passed`
+  March 13, 2026 current result: `69 passed`
 
 - [x] `cd frontend && npm run test`
   March 12, 2026 result: `15 passed`
@@ -75,8 +74,14 @@ This means Gamma can move toward roadmap work only if the remaining hard blocker
 
 - [x] `cd frontend && npm run desktop:smoke`
 
-- [ ] `cd frontend && npm run tauri:build`
-  March 12, 2026 result: timed out after roughly 5 minutes while NSIS was active; no final bundle artifact was present before timeout.
+- [x] `cd frontend && npm run tauri:build`
+  March 12, 2026 follow-up result: passed and produced `C:\Users\User\AppData\Local\Temp\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe`
+
+- [x] Installed NSIS workflow launches successfully
+  March 13, 2026 result:
+  - silent install succeeded into `C:\Users\User\AppData\Local\Temp\gamma-install-test`
+  - installed `gamma-shell.exe` launched successfully
+  - bundled backend answered `GET /health` with `200 OK`
 
 ## Live Runtime Sanity
 
@@ -96,10 +101,10 @@ This means Gamma can move toward roadmap work only if the remaining hard blocker
 
 ## Recommended Agent Order
 
-1. Finish provider/runtime separation for pre-roadmap work.
-2. Fix or clarify risk coverage semantics with tests.
-3. Revalidate the packaged desktop build to completion.
-4. Only then start roadmap implementation work from a clean, explicit baseline.
+1. Start roadmap implementation from this explicit baseline.
+2. Keep IV on maintenance-only status unless shared market-data behavior is being touched.
+3. Preserve the provider-adapter, normalized-schema, cache, and provenance boundaries defined in `roadmap.md`.
+4. Treat longer-session live QA as burn-in follow-up, not as a roadmap-start gate.
 
 ## Evidence Log Template
 
@@ -121,3 +126,68 @@ Open blockers:
 Accepted deferrals:
 - ...
 ```
+
+## Evidence Log
+
+Date:
+March 12, 2026
+
+Branch:
+`codex/p1-foundation-refactor`
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest`
+- `.\.venv\Scripts\python.exe -m pytest tests\test_app_mode_logic.py tests\test_risk_tab_logic.py tests\test_api.py`
+- `cd frontend && npm run test`
+- `cd frontend && npm run build`
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml`
+- `cd frontend && npm run backend:smoke`
+- `cd frontend && npm run desktop:smoke`
+- `cd frontend && npm run tauri:build`
+
+Verified:
+- backend runtime no longer constructs desktop-only `AppDataContext` state by default
+- desktop runtime still attaches `AppDataContext` explicitly for Qt flows
+- research-provider defaults are configurable and benchmark defaults are now separate from research-instrument defaults
+- risk coverage is modeled against explicit risk basis rather than raw net liquidation, with test coverage for missing-value and margined-book cases
+- provenance baseline is documented in `docs/provenance_expectations.md`
+- NSIS bundle build completed and installer artifact exists at `C:\Users\User\AppData\Local\Temp\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe`
+
+Open blockers:
+- none
+
+Accepted deferrals:
+- IV one-shot live reliability remains maintenance-only and is not a roadmap-start blocker
+- longer-session live QA is still advisable, but it is not a blocker for roadmap start
+
+Date:
+March 13, 2026
+
+Branch:
+`codex/p1-foundation-refactor`
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest`
+- `cd frontend && npm run backend:smoke`
+- `cd frontend && npm run test`
+- `cd frontend && npm run build`
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml`
+- `cd frontend && npm run desktop:smoke`
+- `cd frontend && npm run tauri:build`
+- `C:\Users\User\AppData\Local\Temp\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe /S /D=C:\Users\User\AppData\Local\Temp\gamma-install-test`
+- `cmd /c start "" "C:\Users\User\AppData\Local\Temp\gamma-install-test\gamma-shell.exe"`
+- `Invoke-WebRequest http://127.0.0.1:8000/health`
+- live runtime probe against configured TWS using `build_runtime(mock_mode=False)`
+
+Verified:
+- installed NSIS bundle can be silently installed and launched
+- installed shell starts the bundled backend successfully
+- live IBKR portfolio snapshot, portfolio performance, research analysis, and risk computation all executed against the configured TWS path
+- cash-heavy live books now treat fully covered risky exposure as fully covered, avoiding misleading risk-basis scaling
+
+Open blockers:
+- none
+
+Accepted deferrals:
+- IV one-shot live reliability remains maintenance-only and is not a roadmap-start blocker
+- longer-session live QA remains advisable but is not a roadmap-start blocker

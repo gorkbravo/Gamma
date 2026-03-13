@@ -18,8 +18,9 @@ from src.analytics.risk_metrics import (
 )
 from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, parametric_var
 from src.application.instrument_identity import identity_for_position
+from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot, RiskResults
-from src.services.data_providers import AppDataProvider, contract_for_position
+from src.services.data_providers import AppDataProvider, contract_for_instrument, contract_for_position
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
@@ -78,11 +79,18 @@ class RiskService:
         market_data: MarketDataService,
         mock_service: MockDataService,
         risk_free_service: RiskFreeRateService | None,
+        benchmark_defaults: InstrumentDefaults | None = None,
     ) -> None:
         self.client = client
         self.market_data = market_data
         self.mock_service = mock_service
         self.risk_free_service = risk_free_service
+        self.benchmark_defaults = benchmark_defaults or InstrumentDefaults(
+            provider="benchmark",
+            sec_type="STK",
+            exchange="SMART",
+            currency="USD",
+        )
 
     def compute(
         self,
@@ -136,17 +144,34 @@ class RiskService:
             risk_returns_df = risk_returns_df.reindex(columns=weights_aligned.index.tolist())
 
         covered_portfolio_value = 0.0
+        covered_risk_basis_value = 0.0
         if not weights_aligned.empty:
             covered_instrument_ids = set(weights_aligned.index)
+            covered_positions = [
+                position
+                for position in snapshot.positions
+                if position.resolved_instrument_id() in covered_instrument_ids and position.base_market_value is not None
+            ]
             covered_portfolio_value = float(
-                sum(
-                    float(position.base_market_value or 0.0)
-                    for position in snapshot.positions
-                    if position.resolved_instrument_id() in covered_instrument_ids and position.base_market_value is not None
-                )
+                sum(float(position.base_market_value or 0.0) for position in covered_positions)
+            )
+            covered_risk_basis_value = float(
+                sum(abs(float(position.base_market_value or 0.0)) for position in covered_positions if not self._is_cash(position))
             )
         elif total_portfolio_value == 0:
             covered_portfolio_value = 0.0
+            covered_risk_basis_value = 0.0
+
+        known_risk_basis_value = float(
+            sum(
+                abs(float(position.base_market_value or 0.0))
+                for position in snapshot.positions
+                if position.base_market_value is not None and not self._is_cash(position)
+            )
+        )
+        risk_basis_value = known_risk_basis_value
+        if self._has_unknown_risky_values(snapshot):
+            risk_basis_value = max(float(total_portfolio_value or 0.0), known_risk_basis_value)
 
         port_ret = portfolio_returns(risk_returns_df, weights_aligned)
         if len(port_ret) < 2 and not returns_df.empty:
@@ -178,11 +203,11 @@ class RiskService:
         param_var = param_var_r * covered_portfolio_value if param_var_r is not None else None
 
         risk_coverage_ratio = None
-        if total_portfolio_value is not None and total_portfolio_value > 0:
-            risk_coverage_ratio = covered_portfolio_value / float(total_portfolio_value)
+        if risk_basis_value > 0:
+            risk_coverage_ratio = covered_risk_basis_value / float(risk_basis_value)
         scale_to_total = None
-        if covered_portfolio_value and total_portfolio_value and covered_portfolio_value > 0:
-            scale_to_total = float(total_portfolio_value) / float(covered_portfolio_value)
+        if covered_risk_basis_value > 0 and risk_basis_value > 0:
+            scale_to_total = float(risk_basis_value) / float(covered_risk_basis_value)
         hist_var_total_estimate = hist_var * scale_to_total if hist_var is not None and scale_to_total else None
         hist_cvar_total_estimate = hist_cvar * scale_to_total if hist_cvar is not None and scale_to_total else None
         param_var_total_estimate = param_var * scale_to_total if param_var is not None and scale_to_total else None
@@ -231,8 +256,8 @@ class RiskService:
         if risk_coverage_ratio is not None and risk_coverage_ratio < 0.999:
             warnings.append(
                 "Risk coverage is "
-                f"{risk_coverage_ratio * 100:.1f}% of portfolio value; covered risk is exact for included assets and "
-                "total VaR figures are coverage-scaled estimates."
+                f"{risk_coverage_ratio * 100:.1f}% of the modeled risk basis; covered risk is exact for included assets "
+                "and total VaR figures are risk-basis-scaled estimates."
             )
         if risk_coverage_ratio is not None and risk_coverage_ratio < 0.95:
             warnings.append("Risk coverage below 95%; headline risk estimates may be materially incomplete.")
@@ -268,6 +293,8 @@ class RiskService:
             correlation=benchmark.correlation,
             alpha_annual=benchmark.alpha_annual,
             covered_portfolio_value=covered_portfolio_value,
+            covered_risk_basis_value=covered_risk_basis_value,
+            risk_basis_value=risk_basis_value,
             risk_coverage_ratio=risk_coverage_ratio,
             historical_var_total_estimate=hist_var_total_estimate,
             historical_cvar_total_estimate=hist_cvar_total_estimate,
@@ -507,7 +534,9 @@ class RiskService:
         if self.client.mock:
             series = self.mock_service.load_history(symbol)
         else:
-            contract = Contract(symbol=symbol, secType="STK", exchange="SMART", currency="USD")
+            contract = contract_for_instrument(
+                InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
+            )
             series = self.market_data.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             warnings.append(f"Benchmark history unavailable for {symbol}")
@@ -557,3 +586,11 @@ class RiskService:
         top5 = float(normalized.sort_values(ascending=False).head(5).sum())
         effective_bets = float(1.0 / hhi) if hhi > 0 else None
         return hhi, top5, effective_bets
+
+    @staticmethod
+    def _is_cash(position) -> bool:
+        return position.sec_type == "CASH" or position.symbol.startswith("CASH")
+
+    @classmethod
+    def _has_unknown_risky_values(cls, snapshot: PortfolioSnapshot) -> bool:
+        return any(position.base_market_value is None and not cls._is_cash(position) for position in snapshot.positions)

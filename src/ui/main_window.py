@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.application.runtime import build_runtime
+from src.application.runtime import build_desktop_runtime
 from src.application.system_service import market_data_mode_label
 from src.models.app_mode import AppMode
 from src.services.data_providers import (
-    select_data_provider,
+    select_data_provider_for_mode,
 )
 from src.ui.landing_page import LandingPage
 from src.ui.tabs.iv_surface_tab import IVSurfaceTab
@@ -36,9 +36,11 @@ class MainWindow(QMainWindow):
         self._market_data_mode = "delayed"
         self._last_connection_status = "Status: Disconnected"
 
-        self.runtime = build_runtime()
+        self.runtime = build_desktop_runtime()
         self._market_data_mode = self.runtime.market_data_mode
         self.app_context = self.runtime.app_context
+        if self.app_context is None:
+            raise RuntimeError("Desktop runtime must include AppDataContext.")
         self.client = self.runtime.client
         self.market_data = self.runtime.market_data
         self.portfolio_provider = self.runtime.portfolio_provider
@@ -198,7 +200,7 @@ class MainWindow(QMainWindow):
 
     def _select_mode(self, mode: AppMode) -> None:
         self.app_context.set_app_mode(mode)
-        provider = select_data_provider(self.app_context, self.portfolio_provider, self.research_provider)
+        provider = select_data_provider_for_mode(mode, self.portfolio_provider, self.research_provider)
         self.risk_tab.set_data_provider(provider)
         self.tabs.clear()
         if mode == AppMode.RESEARCH:

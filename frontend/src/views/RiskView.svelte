@@ -329,7 +329,7 @@
           <article class="metric">
             <span>Horizon</span>
             <strong>{result?.metrics.monte_carlo_horizon_days ?? mcHorizonDays}D</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} covered base</small>
+            <small>{pct(result?.metrics.risk_coverage_ratio)} risk-basis coverage</small>
           </article>
         </div>
 
@@ -388,7 +388,7 @@
           <article class="metric">
             <span>Hist VaR</span>
             <strong>{fmt(result?.metrics.historical_var)}</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} coverage</small>
+            <small>{pct(result?.metrics.risk_coverage_ratio)} risk-basis coverage</small>
           </article>
           <article class="metric">
             <span>Hist CVaR</span>
@@ -434,7 +434,8 @@
               </div>
               <div class="stack">
                 <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
-                <div class="row"><span>Covered Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+                <div class="row"><span>Modeled Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+                <div class="row"><span>Risk Basis</span><strong>{fmt(result?.metrics.risk_basis_value)}</strong></div>
                 <div class="row"><span>Coverage Ratio</span><strong>{pct(result?.metrics.risk_coverage_ratio)}</strong></div>
                 <div class="row"><span>Aligned Obs</span><strong>{result?.metrics.aligned_obs_count ?? 0}</strong></div>
                 <div class="row"><span>Max Drawdown</span><strong class:negative={(result?.metrics.max_drawdown ?? 0) < 0}>{pct(result?.metrics.max_drawdown)}</strong></div>
@@ -612,7 +613,8 @@
         <div class="stack">
           <div class="row"><span>Snapshot Lines</span><strong>{activeSnapshot?.positions.length ?? 0}</strong></div>
           <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
-          <div class="row"><span>Covered Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+          <div class="row"><span>Modeled Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+          <div class="row"><span>Risk Basis</span><strong>{fmt(result?.metrics.risk_basis_value)}</strong></div>
           <div class="row"><span>Coverage Ratio</span><strong>{pct(result?.metrics.risk_coverage_ratio)}</strong></div>
           <div class="row"><span>HHI / Top-5</span><strong>{fmt(result?.metrics.concentration_hhi, 3)} / {pct(result?.metrics.top5_weight)}</strong></div>
           <div class="row"><span>Effective Bets</span><strong>{fmt(result?.metrics.effective_bets, 2)}</strong></div>

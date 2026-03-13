@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from src.application.runtime import build_desktop_runtime, build_runtime
 from src.models.app_mode import AppMode, ResearchScopeType, SyntheticPosition
+from src.models.instruments import InstrumentDefaults
 from src.models.portfolio import PortfolioSnapshot
 from src.services.app_context import AppDataContext
 from src.application.workspace_service import can_forward_research_to_iv, resolve_active_snapshot, resolve_followed_symbol
@@ -14,6 +16,7 @@ from src.services.data_providers import (
     PortfolioDataProvider,
     ResearchDataProvider,
     select_data_provider,
+    select_data_provider_for_mode,
     should_auto_follow_research_symbol,
 )
 from src.services.research_cache import ResearchHistoryCache
@@ -44,6 +47,25 @@ class _HistoryMarketData:
         return pd.Series([100.0, 101.0, 102.0, 103.0], index=idx)
 
 
+class _ContractHistoryMarketData:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str, str, str]] = []
+
+    def fetch_history(self, contract, lookback_days):
+        self.calls.append(
+            (
+                str(contract.symbol),
+                str(contract.secType),
+                str(contract.exchange),
+                str(contract.currency),
+                str(getattr(contract, "primaryExchange", "") or ""),
+            )
+        )
+        idx = pd.date_range("2026-01-02", periods=4, freq="B")
+        base = 100.0 if str(contract.exchange) == "SMART" else 200.0
+        return pd.Series([base, base + 1.0, base + 2.0, base + 3.0], index=idx)
+
+
 def _make_providers(ctx: AppDataContext):
     client = _StubClient()
     market = _StubMarketData()
@@ -66,10 +88,12 @@ def test_mode_switch_changes_provider_selection():
 
     selected = select_data_provider(ctx, portfolio_provider, research_provider)
     assert selected is portfolio_provider
+    assert select_data_provider_for_mode(AppMode.PORTFOLIO, portfolio_provider, research_provider) is portfolio_provider
 
     ctx.set_app_mode(AppMode.RESEARCH)
     selected = select_data_provider(ctx, portfolio_provider, research_provider)
     assert selected is research_provider
+    assert select_data_provider_for_mode(AppMode.RESEARCH, portfolio_provider, research_provider) is research_provider
 
     ctx.set_app_mode(AppMode.PORTFOLIO)
     selected = select_data_provider(ctx, portfolio_provider, research_provider)
@@ -151,6 +175,154 @@ def test_research_provider_symbol_cache_respects_requested_lookback():
     provider.load_symbol_history("SPY", 126)
 
     assert market.calls == [126, 252]
+
+
+def test_research_provider_uses_configurable_instrument_defaults():
+    ctx = AppDataContext()
+    client = _StubClient(mock=False)
+    market = _ContractHistoryMarketData()
+    mock = _StubMockService()
+    provider = ResearchDataProvider(
+        client,
+        market,
+        mock,
+        ctx,
+        "USD",
+        ResearchHistoryCache(),
+        instrument_defaults=InstrumentDefaults(
+            provider="research",
+            sec_type="CRYPTO",
+            exchange="PAXOS",
+            currency="USD",
+        ),
+    )  # type: ignore[arg-type]
+
+    snapshot, warnings = provider.build_snapshot_for_scope(ResearchScopeType.SINGLE_TICKER, primary_symbol="BTC")
+    assert warnings == []
+    assert snapshot is not None
+    assert snapshot.positions[0].sec_type == "CRYPTO"
+    assert snapshot.positions[0].exchange == "PAXOS"
+    provider.load_symbol_history("BTC", 126)
+
+    assert market.calls == [("BTC", "CRYPTO", "PAXOS", "USD", "")]
+
+
+def test_research_provider_uses_separate_benchmark_defaults():
+    ctx = AppDataContext()
+    client = _StubClient(mock=False)
+    market = _ContractHistoryMarketData()
+    mock = _StubMockService()
+    provider = ResearchDataProvider(
+        client,
+        market,
+        mock,
+        ctx,
+        "USD",
+        ResearchHistoryCache(),
+        instrument_defaults=InstrumentDefaults(
+            provider="research",
+            sec_type="CRYPTO",
+            exchange="PAXOS",
+            currency="USD",
+        ),
+        benchmark_defaults=InstrumentDefaults(
+            provider="benchmark",
+            sec_type="IND",
+            exchange="CBOE",
+            currency="USD",
+        ),
+    )  # type: ignore[arg-type]
+
+    provider.load_symbol_history("BTC", 126)
+    provider.load_benchmark_history("VIX", 126)
+
+    assert market.calls == [
+        ("BTC", "CRYPTO", "PAXOS", "USD", ""),
+        ("VIX", "IND", "CBOE", "USD", ""),
+    ]
+
+
+def test_research_provider_keeps_distinct_same_symbol_histories_separate():
+    ctx = AppDataContext()
+    client = _StubClient(mock=False)
+    market = _ContractHistoryMarketData()
+    mock = _StubMockService()
+    provider = ResearchDataProvider(
+        client,
+        market,
+        mock,
+        ctx,
+        "USD",
+        ResearchHistoryCache(),
+    )  # type: ignore[arg-type]
+
+    snapshot, warnings = provider.build_snapshot_for_scope(
+        ResearchScopeType.SYNTHETIC_PORTFOLIO,
+        synthetic_positions=[
+            SyntheticPosition(
+                symbol="SPY",
+                weight=0.6,
+                provider="research",
+                provider_id="spy-us",
+                exchange="SMART",
+                currency="USD",
+            ),
+            SyntheticPosition(
+                symbol="SPY",
+                weight=0.4,
+                provider="research",
+                provider_id="spy-eu",
+                exchange="AEB",
+                currency="EUR",
+            ),
+        ],
+    )
+
+    assert warnings == []
+    assert snapshot is not None
+
+    prices, missing = provider.load_prices(snapshot, 126)
+
+    assert missing == []
+    assert len(prices) == 2
+    assert set(prices) == {position.resolved_instrument_id() for position in snapshot.positions}
+    assert market.calls == [
+        ("SPY", "STK", "SMART", "USD", ""),
+        ("SPY", "STK", "AEB", "EUR", ""),
+    ]
+    assert not prices[snapshot.positions[0].resolved_instrument_id()].equals(
+        prices[snapshot.positions[1].resolved_instrument_id()]
+    )
+
+
+def test_backend_runtime_omits_desktop_session_state(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        assert runtime.desktop is None
+        assert runtime.app_context is None
+        assert runtime.research_provider.context is None
+    finally:
+        runtime.shutdown()
+
+
+def test_desktop_runtime_attaches_desktop_session_state(tmp_path):
+    runtime = build_desktop_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        assert runtime.desktop is not None
+        assert runtime.app_context is not None
+        assert runtime.research_provider.context is runtime.app_context
+    finally:
+        runtime.shutdown()
 
 
 def test_research_history_cache_survives_workspace_scope_reset():

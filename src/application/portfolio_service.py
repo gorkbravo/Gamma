@@ -6,11 +6,11 @@ from datetime import datetime
 from typing import Mapping
 
 import pandas as pd
-from ib_insync import Contract
 
 from src.application.instrument_identity import identity_for_position
+from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot
-from src.services.data_providers import PortfolioDataProvider, contract_for_position
+from src.services.data_providers import PortfolioDataProvider, contract_for_instrument, contract_for_position
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
@@ -69,6 +69,7 @@ class PortfolioService:
         history_store: PortfolioHistoryStore,
         data_provider: PortfolioDataProvider | None = None,
         mock_service: MockDataService | None = None,
+        benchmark_defaults: InstrumentDefaults | None = None,
     ) -> None:
         self.client = client
         self.market_data = market_data
@@ -76,6 +77,12 @@ class PortfolioService:
         self.history_store = history_store
         self.data_provider = data_provider
         self.mock_service = mock_service
+        self.benchmark_defaults = benchmark_defaults or InstrumentDefaults(
+            provider="benchmark",
+            sec_type="STK",
+            exchange="SMART",
+            currency="USD",
+        )
 
     def fetch_snapshot(self, request: PortfolioSnapshotRequest) -> PortfolioSnapshot:
         snapshot = self.client.fetch_snapshot(
@@ -267,7 +274,9 @@ class PortfolioService:
         if self.client.mock and self.mock_service is not None:
             series = self.mock_service.load_history(symbol)
         else:
-            contract = Contract(symbol=symbol, secType="STK", exchange="SMART", currency="USD")
+            contract = contract_for_instrument(
+                InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
+            )
             series = self.market_data.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             warnings.append(f"No benchmark data for {symbol}; using Cash (0%) benchmark")
