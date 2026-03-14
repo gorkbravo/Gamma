@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This roadmap defines the planned expansion of **Gamma** from a portfolio/risk-oriented research app into a broader **read-only research environment** for markets, valuation, on-chain analytics, prediction markets, and AI-assisted idea generation.
+This roadmap defines the planned expansion of **Gamma** from a portfolio/risk-oriented research app into a broader **read-only research environment** for prediction markets, macro and cross-asset expectations, valuation, on-chain analytics, and AI-assisted idea generation.
 
 The core principle behind this roadmap is simple:
 
@@ -55,19 +55,27 @@ Prediction markets are one of the highest-upside additions to Gamma because they
 - relatively accessible public data,
 - rich behavioral and microstructure dynamics,
 - strong fit with research-oriented workflows,
-- differentiated analytical surface compared to standard equity dashboards.
+- differentiated analytical surface compared to standard equity dashboards,
+- a natural bridge between venue-level pricing and cross-market expectations work.
 
 This tab would make Gamma feel unique very quickly. It also aligns with the user's interest in market structure, informed flow, wallet behavior, and event-driven repricing.
 
+It should also be treated as a **multi-venue system by design**, not as a single-provider feature. Supporting both Polymarket and Kalshi creates a much stronger research surface because the user can compare:
+- one prediction market against another prediction market on the same theme,
+- venue-specific repricing behavior,
+- venue-specific liquidity and microstructure,
+- prediction markets against the broader Macro tab later on.
+
 ### Goal of the tab
 
-The Prediction Markets tab should allow the user to explore prediction markets as probabilistic systems, behavioral systems, and market microstructure systems.
+The Prediction Markets tab should allow the user to explore prediction markets as probabilistic systems, behavioral systems, and market microstructure systems across one or more venues.
 
 It should help answer questions such as:
 - Which markets are active and interesting right now?
 - How have implied probabilities evolved over time?
 - Are some wallets consistently early to information?
 - Are related contracts priced inconsistently?
+- Do Polymarket and Kalshi price the same event similarly?
 - How does liquidity affect repricing behavior?
 - Are market probabilities well-calibrated historically?
 
@@ -86,6 +94,8 @@ A high-level market discovery panel showing active and historical contracts with
 
 This screener should make it easy to find markets worth deeper study.
 
+The screener should be multi-venue from the start even if only one venue is deep on Day 1.
+
 #### 2. Market detail view
 A dedicated detail page/panel for a selected market containing:
 - market title and description,
@@ -98,6 +108,12 @@ A dedicated detail page/panel for a selected market containing:
 - concentration metrics.
 
 This becomes the main workspace for studying a specific contract.
+
+The detail view should also clearly identify:
+- venue,
+- venue-native contract identifiers,
+- normalized internal market identifiers,
+- linked related contracts on the same or different venues.
 
 #### 3. Probability history and event dynamics
 A time-series module showing:
@@ -119,14 +135,22 @@ A wallet-centric research component that allows:
 
 This is one of the most differentiated parts of the tab. It directly supports the study of potentially informed or unusually skilled participants.
 
-#### 5. Cross-market consistency engine
+Wallet-centric analytics may be richer on some venues than others, so the tab should be designed to support venue-specific depth without requiring identical features everywhere.
+
+#### 5. Cross-contract and cross-venue consistency engine
 A module for comparing related markets that should obey rough probabilistic consistency. For example:
 - overlapping event outcomes,
 - conditional event structures,
 - mutually exclusive contracts,
-- related geopolitical or electoral contracts.
+- related geopolitical or electoral contracts,
+- Polymarket vs Kalshi contracts expressing the same event.
 
 This can surface market dislocations or possible research opportunities.
+
+This engine should distinguish between:
+- **cross-contract consistency** within one venue,
+- **cross-venue consistency** across venues,
+- later **cross-market consistency** against rates, commodities, credit, or other Macro-tab datasets.
 
 #### 6. Calibration and historical outcomes
 A backtesting/research area for studying whether market probabilities have historically been well-calibrated. This could include:
@@ -152,7 +176,10 @@ Even if a full notebook system is not implemented in Phase 1, the tab should be 
 ### Data requirements
 
 The tab would need:
+- venue metadata,
 - market metadata,
+- venue-native contract identifiers,
+- normalized market / event identifiers,
 - market status,
 - category/tag data,
 - implied probability history,
@@ -160,6 +187,7 @@ The tab would need:
 - trade history,
 - wallet participation data,
 - holder/concentration data,
+- linked-contract mapping data,
 - final resolution/outcome data.
 
 ### Data sources / APIs
@@ -167,6 +195,13 @@ The tab would need:
 Potential sources include:
 - **Polymarket Gamma API** for market discovery and metadata
 - **Polymarket Data API** for trades, activity, holders, positions, and related data
+- **Kalshi API** for market discovery, event metadata, and market data
+
+A practical implementation path would be:
+- build a venue-agnostic internal schema first,
+- launch deep support with **Polymarket** first,
+- add **Kalshi** next as the second venue,
+- then layer on contract matching, cross-venue divergence analysis, and lead/lag comparisons.
 
 Longer term, external news/context could be linked, but that is optional and should not be required for the initial release.
 
@@ -175,25 +210,336 @@ Longer term, external news/context could be linked, but that is optional and sho
 At the end of Phase 1, Gamma should be able to:
 - browse and filter prediction markets,
 - inspect a market deeply,
+- support a multi-venue prediction-market model,
 - analyze probability dynamics,
 - review wallet behavior,
+- compare related contracts across venues,
 - begin basic historical research on calibration and microstructure.
 
 This phase gives Gamma a highly distinctive research edge with relatively manageable implementation complexity.
 
 ---
 
-## Phase 2 - Crypto Tab
+## Phase 2 - Macro Tab
 
 ### Why this phase comes next
 
-Crypto is a natural extension because:
+Macro is the strongest follow-on to prediction markets because it extends Gamma into **cross-asset expectations research** rather than into another isolated asset-class dashboard.
+
+It fits the roadmap especially well because:
+- the data is relatively accessible compared to company fundamentals,
+- the research surface is rich without requiring execution infrastructure,
+- it creates direct synergy with prediction markets through expectation and coherence analysis,
+- it can absorb rates, inflation, commodities, and credit views without creating too many top-level tabs.
+
+Just as importantly, a Macro tab lets Gamma avoid premature tab sprawl. Instead of adding separate top-level tabs for rates, commodities, and cross-asset macro monitoring, Gamma can treat them as **internal research modes** inside one broader workspace.
+
+### Goal of the tab
+
+The Macro tab should provide a structured environment for:
+- regime awareness,
+- macro snapshot monitoring,
+- cross-asset expectations analysis,
+- rates and policy interpretation,
+- selective commodities and inflation research,
+- dislocation spotting across related markets.
+
+It should help answer questions such as:
+- What macro regime are markets currently pricing?
+- What changed materially across rates, inflation, credit, FX, and commodities?
+- Do prediction markets and traditional markets tell the same story?
+- Which market moved first on a given theme?
+- Where are the largest cross-market inconsistencies worth researching?
+
+### Product structure
+
+The Macro tab should be designed as a **multi-mode workspace** rather than a single static page. That makes it possible to compress several related research surfaces into one tab without turning it into an incoherent dashboard.
+
+The initial modes should be:
+- **Snapshot** for fast situational awareness,
+- **Cross-Asset** for coherence and divergence analysis,
+- **Rates & Policy** for deeper term-structure and policy-expectation work.
+
+A later extension could add:
+- **Commodities** for futures-curve and inflation-sensitive market analysis,
+- **Credit / Stress** for spread and financial-condition monitoring.
+
+The UI should support collapsible, expandable, and reorderable cards so the user can move between a dense monitoring view and a deeper analytical view without fragmenting the product into too many tabs.
+
+### Functionality
+
+#### 1. Snapshot mode
+A high-level macro overview should present a compact but research-oriented view of:
+- growth indicators,
+- inflation indicators,
+- policy-rate context,
+- curve shape,
+- real yields and breakevens,
+- dollar / FX proxies,
+- credit-spread proxies,
+- major commodities such as oil, gas, copper, and gold,
+- relevant linked prediction markets.
+
+This mode should answer the question: **what matters right now?**
+
+#### 2. Cross-asset expectations mode
+This should be the signature module of the tab. It should compare how different markets express views on:
+- growth,
+- inflation,
+- policy,
+- recession risk,
+- geopolitics,
+- risk appetite.
+
+Examples include:
+- recession contracts vs curve slope and credit spreads,
+- inflation contracts vs breakevens and energy prices,
+- geopolitical contracts vs oil, gold, and dollar strength,
+- policy contracts vs front-end rates and implied meeting paths.
+
+This mode should answer the question: **do these markets agree?**
+
+#### 3. Rates & policy mode
+A dedicated internal mode should allow the user to inspect:
+- front-end rate pricing,
+- curve structure,
+- term premium proxies if available,
+- real yields,
+- breakevens,
+- meeting-by-meeting policy expectations,
+- recent repricing episodes.
+
+This is likely the most practical Macro sub-mode to mature early because it has the strongest synergy with prediction markets and relatively manageable data complexity.
+
+#### 4. Optional commodities mode
+A later internal mode can focus on selected futures-sensitive markets, especially where cross-market interpretation is strong:
+- energy,
+- inflation-sensitive commodities,
+- precious metals,
+- selected industrial metals.
+
+The emphasis should be on:
+- spot vs term structure,
+- contango / backwardation state,
+- roll structure,
+- macro-event sensitivity,
+- linkage to inflation and geopolitical narratives.
+
+This mode should only expand once the core Macro tab has a solid cross-asset framework. It should not launch as a generic commodity quotes page.
+
+#### 5. Coherence and divergence engine
+The Macro tab should include a reusable engine that scores or ranks:
+- consistency across markets,
+- unusually large divergences,
+- recent repricing clusters,
+- lead/lag relationships,
+- research candidates worth deeper investigation.
+
+This is the most important analytical layer. It is what prevents the Macro tab from becoming a collection of disconnected charts.
+
+#### 6. Event and regime interpretation
+The tab should support event-aware analysis such as:
+- major macro releases,
+- central-bank meetings,
+- geopolitical events,
+- pre/post repricing windows,
+- historical comparisons across regimes.
+
+This should help the user study how different markets absorb new information rather than merely watch current levels.
+
+#### 7. Research notebook hooks
+As with prediction markets, the Macro tab should eventually support saving:
+- watched themes,
+- selected charts,
+- flagged divergences,
+- hypotheses,
+- linked contracts and assets,
+- follow-up tasks.
+
+Even if a full notebook system is not yet implemented, the tab should be designed with this persistence model in mind.
+
+### Data requirements
+
+The tab would need:
+- macro time series,
+- policy-rate and meeting-context data,
+- yield-curve points,
+- real-yield and breakeven series or proxies,
+- major FX and dollar proxies,
+- credit-spread proxies,
+- selected commodity spot and futures-curve data,
+- event calendars and timestamps,
+- linked prediction-market metadata and probability history,
+- transformation metadata for derived regime and coherence signals.
+
+### Data sources / APIs
+
+Potential sources include:
+- **FRED API** for major macro series and rate-related public datasets
+- **Treasury / central-bank public data** for policy and yield-curve context where available
+- **Stooq / Nasdaq Data Link / other market-data providers** for selected cross-asset market series
+- existing and future internal Gamma market-data adapters for rates, commodity proxies, and linked market histories
+- prediction-market providers already planned in Phase 1 for contract linkage
+
+A practical implementation path would likely begin with public macro and rates series plus a narrow set of liquid market proxies, then expand into deeper commodity-curve and cross-asset coverage once the internal schema and caching layer are stable.
+
+### Deliverable of the phase
+
+At the end of Phase 2, Gamma should be able to:
+- present a useful macro snapshot,
+- compare cross-asset expectations,
+- analyze rates and policy pricing,
+- link prediction markets to macro market context,
+- surface coherence breaks and divergence candidates for research.
+
+This phase would make Gamma much more effective as a cross-market research environment while still staying within a manageable data and normalization scope.
+
+---
+
+## Phase 3 - AI Copilot Layer
+
+### Why this phase comes here
+
+The AI component becomes most useful **after** Gamma already has meaningful data surfaces. If added too early, it risks becoming a generic chatbot with little grounding. If added after the app has prediction-market and macro data infrastructure, it can act as a true research assistant rather than a novelty feature.
+
+This phase is not really "just another tab." It is better thought of as a **cross-tab research layer**. That said, it may still have its own dedicated area, depending on UI design.
+
+### Goal of the feature
+
+The AI Copilot should help the user:
+- generate ideas,
+- frame hypotheses,
+- design tests,
+- interpret patterns,
+- summarize current context,
+- structure research workflows.
+
+Its purpose is not to replace judgment. Its purpose is to reduce the friction of:
+- going from raw data to a research question,
+- going from observation to test design,
+- going from analysis to organized next steps.
+
+### Functionality
+
+#### 1. Context-aware chat / assistant
+The assistant should be aware of:
+- the current tab,
+- currently selected asset/market/company,
+- visible charts or metrics,
+- available internal analytics,
+- currently loaded datasets.
+
+This is what makes it useful. It should not operate in isolation from the app state.
+
+#### 2. Hypothesis generation
+The assistant should be able to generate structured research hypotheses based on the current context. For example:
+- possible informed-wallet dynamics,
+- relationships between liquidity and repricing,
+- cross-asset expectation divergences,
+- rates / inflation inconsistencies,
+- divergence between narrative strength and price action.
+
+The goal is to help the user think of what to test next.
+
+#### 3. Research design support
+The assistant should be able to convert an idea into a testable plan:
+- what data is needed,
+- what metric should be computed,
+- what confounders matter,
+- what result would support or weaken the hypothesis.
+
+This is one of the highest-value use cases.
+
+#### 4. Explanation and interpretation
+The assistant should be able to explain:
+- why a chart might matter,
+- what a metric means,
+- what changed recently,
+- possible interpretations of a pattern,
+- what caveats should be considered.
+
+This would make Gamma more usable during exploratory sessions.
+
+#### 5. Structured outputs
+Instead of always returning free-form prose, the assistant should be able to return research cards with fields such as:
+- hypothesis,
+- rationale,
+- required data,
+- proposed test,
+- confounders,
+- next steps.
+
+This makes the AI layer much more practical and much less "chat for the sake of chat."
+
+#### 6. Cross-tab synthesis
+Once multiple tabs exist, the assistant should be able to connect them conceptually. For example:
+- compare prediction-market sentiment with macro market pricing,
+- explain whether a contract looks coherent with rates, commodities, or credit,
+- suggest related markets to monitor,
+- explain how a company's valuation assumptions compare to market-implied expectations,
+- identify analogous structures across datasets.
+
+#### 7. Research memo drafting
+A later extension could allow the assistant to produce:
+- short notes,
+- structured summaries,
+- internal research memos,
+- saved idea logs.
+
+This should build on top of the structured outputs and saved research context.
+
+### Data requirements
+
+The AI layer primarily needs access to **internal Gamma state**, including:
+- current context,
+- selected entity,
+- available metrics,
+- normalized datasets,
+- precomputed analytics,
+- saved screens or notes.
+
+It does not need to own a unique market dataset; it needs deep integration with the app's internal data layer.
+
+### APIs / model layer
+
+Potential sources / infrastructure include:
+- **OpenAI API** for the model layer
+- function/tool calling to access internal Gamma tools
+- structured-output schemas for predictable research responses
+
+Internally, the AI should call functions such as:
+- fetching current context,
+- listing loaded datasets,
+- retrieving price/probability history,
+- retrieving wallet activity,
+- retrieving macro and rates context,
+- retrieving token/company data,
+- triggering internal analytics.
+
+### Deliverable of the phase
+
+At the end of Phase 3, Gamma should have an AI-assisted research workflow that can:
+- understand current context,
+- suggest hypotheses,
+- propose tests,
+- explain results,
+- generate structured research outputs.
+
+This phase does not replace the data tabs. It multiplies the value of every other phase.
+
+---
+
+## Phase 4 - Crypto Tab
+
+### Why this phase comes here
+
+Crypto remains a natural extension because:
 - public data access is broad,
 - on-chain activity is transparent,
-- it complements prediction-market and behavioral research,
+- it complements behavioral and flow-oriented research,
 - it opens up a large analytical surface without requiring execution infrastructure.
 
-However, "crypto" is broad, so the key to Phase 2 is restraint. The tab should not attempt to become a full crypto terminal immediately.
+However, "crypto" is broad, so the key to Phase 4 is restraint. It should come after prediction markets and macro because those phases establish a clearer cross-market research identity first. The tab should not attempt to become a full crypto terminal immediately.
 
 ### Goal of the tab
 
@@ -315,7 +661,7 @@ A practical approach would be to begin with CoinGecko for broad market data, the
 
 ### Deliverable of the phase
 
-At the end of Phase 2, Gamma should be able to:
+At the end of Phase 4, Gamma should be able to:
 - research tokens and sectors,
 - explore narrative baskets,
 - study wallet flows,
@@ -326,137 +672,7 @@ This phase broadens the app into a more general market-research platform while s
 
 ---
 
-## Phase 3 - AI Copilot Layer
-
-### Why this phase comes here
-
-The AI component becomes most useful **after** Gamma already has meaningful data surfaces. If added too early, it risks becoming a generic chatbot with little grounding. If added after the app has prediction-market and crypto data infrastructure, it can act as a true research assistant rather than a novelty feature.
-
-This phase is not really "just another tab." It is better thought of as a **cross-tab research layer**. That said, it may still have its own dedicated area, depending on UI design.
-
-### Goal of the feature
-
-The AI Copilot should help the user:
-- generate ideas,
-- frame hypotheses,
-- design tests,
-- interpret patterns,
-- summarize current context,
-- structure research workflows.
-
-Its purpose is not to replace judgment. Its purpose is to reduce the friction of:
-- going from raw data to a research question,
-- going from observation to test design,
-- going from analysis to organized next steps.
-
-### Functionality
-
-#### 1. Context-aware chat / assistant
-The assistant should be aware of:
-- the current tab,
-- currently selected asset/market/company,
-- visible charts or metrics,
-- available internal analytics,
-- currently loaded datasets.
-
-This is what makes it useful. It should not operate in isolation from the app state.
-
-#### 2. Hypothesis generation
-The assistant should be able to generate structured research hypotheses based on the current context. For example:
-- possible informed-wallet dynamics,
-- relationships between liquidity and repricing,
-- token flow anomalies,
-- divergence between narrative strength and price action.
-
-The goal is to help the user think of what to test next.
-
-#### 3. Research design support
-The assistant should be able to convert an idea into a testable plan:
-- what data is needed,
-- what metric should be computed,
-- what confounders matter,
-- what result would support or weaken the hypothesis.
-
-This is one of the highest-value use cases.
-
-#### 4. Explanation and interpretation
-The assistant should be able to explain:
-- why a chart might matter,
-- what a metric means,
-- what changed recently,
-- possible interpretations of a pattern,
-- what caveats should be considered.
-
-This would make Gamma more usable during exploratory sessions.
-
-#### 5. Structured outputs
-Instead of always returning free-form prose, the assistant should be able to return research cards with fields such as:
-- hypothesis,
-- rationale,
-- required data,
-- proposed test,
-- confounders,
-- next steps.
-
-This makes the AI layer much more practical and much less "chat for the sake of chat."
-
-#### 6. Cross-tab synthesis
-Once multiple tabs exist, the assistant should be able to connect them conceptually. For example:
-- compare prediction-market sentiment with crypto narrative activity,
-- suggest related markets to monitor,
-- explain how a company's valuation assumptions compare to market-implied expectations,
-- identify analogous structures across datasets.
-
-#### 7. Research memo drafting
-A later extension could allow the assistant to produce:
-- short notes,
-- structured summaries,
-- internal research memos,
-- saved idea logs.
-
-This should build on top of the structured outputs and saved research context.
-
-### Data requirements
-
-The AI layer primarily needs access to **internal Gamma state**, including:
-- current context,
-- selected entity,
-- available metrics,
-- normalized datasets,
-- precomputed analytics,
-- saved screens or notes.
-
-It does not need to own a unique market dataset; it needs deep integration with the app's internal data layer.
-
-### APIs / model layer
-
-Potential sources / infrastructure include:
-- **OpenAI API** for the model layer
-- function/tool calling to access internal Gamma tools
-- structured-output schemas for predictable research responses
-
-Internally, the AI should call functions such as:
-- fetching current context,
-- listing loaded datasets,
-- retrieving price/probability history,
-- retrieving wallet activity,
-- retrieving token/company data,
-- triggering internal analytics.
-
-### Deliverable of the phase
-
-At the end of Phase 3, Gamma should have an AI-assisted research workflow that can:
-- understand current context,
-- suggest hypotheses,
-- propose tests,
-- explain results,
-- generate structured research outputs.
-
-This phase does not replace the data tabs. It multiplies the value of every other phase.
-
----
-
-## Phase 4 - Fundamentals Tab
+## Phase 5 - Fundamentals Tab
 
 ### Why this phase comes later
 
@@ -593,7 +809,7 @@ A practical implementation path would likely use a normalized provider first for
 
 ### Deliverable of the phase
 
-At the end of Phase 4, Gamma should be able to:
+At the end of Phase 5, Gamma should be able to:
 - display company financial history clearly,
 - compute major operating and valuation metrics,
 - allow scenario-based DCF research,
@@ -616,6 +832,9 @@ Gamma should standardize internal entities such as:
 - prediction markets,
 - market trades,
 - wallets,
+- macro series,
+- rates curves,
+- commodity curves,
 - crypto tokens,
 - pools,
 - company financials,
@@ -636,6 +855,9 @@ This improves reproducibility and reduces repeated API calls.
 ### 4. Analytics engine separation
 Analytics should be modular and reusable:
 - market calibration,
+- cross-market coherence scoring,
+- curve and spread analytics,
+- regime and event analysis,
 - wallet concentration,
 - flow metrics,
 - DCF calculations,
@@ -658,13 +880,16 @@ This becomes increasingly important as fundamentals and AI-assisted outputs are 
 ### Phase 1 - Prediction Markets
 Build the most differentiated and accessible research tab first.
 
-### Phase 2 - Crypto
-Expand into a broader public-data market research environment with token, wallet, and on-chain analytics.
+### Phase 2 - Macro
+Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
 
 ### Phase 3 - AI Copilot
 Add a context-aware research assistant that sits on top of the data architecture already built.
 
-### Phase 4 - Fundamentals
+### Phase 4 - Crypto
+Expand into a broader public-data market research environment with token, wallet, and on-chain analytics.
+
+### Phase 5 - Fundamentals
 Add company financial analysis and valuation once the architecture is mature enough to handle normalization and provenance correctly.
 
 ---
@@ -674,8 +899,10 @@ Add company financial analysis and valuation once the architecture is mature eno
 If the roadmap is executed well, Gamma evolves from a portfolio/risk app into a **multi-domain research platform** where the user can:
 
 - inspect markets,
+- inspect macro regimes,
 - study behavior,
 - analyze flows,
+- compare cross-asset expectations,
 - compare scenarios,
 - test valuation assumptions,
 - generate ideas,
