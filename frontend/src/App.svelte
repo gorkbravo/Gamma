@@ -33,6 +33,7 @@
     riskResult,
     runDiagnosticsAction,
     runResearch,
+    setBaseCurrency,
     setMarketDataMode,
     startIvSession,
     stopIvSession,
@@ -222,6 +223,17 @@
     }
   }
 
+  async function handleBaseCurrencyChange(currency: string) {
+    const response = await setBaseCurrency(currency);
+    if (!response) {
+      return;
+    }
+    await loadDiagnostics();
+    if (workspaceMode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
+      await loadPortfolioSnapshot();
+    }
+  }
+
   async function handleRefreshWorkspace() {
     await Promise.allSettled([refreshSystemStatus(), loadDiagnostics()]);
 
@@ -301,6 +313,7 @@
         workspaceMode={workspaceMode}
         busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.ivSession}
         onToggleConnection={handleConnectionToggle}
+        onBaseCurrencyChange={handleBaseCurrencyChange}
         onMarketDataModeChange={handleMarketDataModeChange}
         onRefresh={handleRefreshWorkspace}
         onChangeView={handleChangeView}

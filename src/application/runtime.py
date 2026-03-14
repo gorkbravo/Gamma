@@ -72,6 +72,26 @@ class ApplicationRuntime:
         self.iv_service.set_market_data_mode(normalized)
         return normalized
 
+    def set_base_currency(self, value: str | None) -> tuple[str, list[str]]:
+        normalized = self._normalize_base_currency(value)
+        notes: list[str] = []
+        if normalized == self.base_currency:
+            return normalized, [f"Base currency already set to {normalized}."]
+        self.base_currency = normalized
+        self.research_provider.base_currency = normalized
+        self.portfolio_history.clear()
+        notes.append(f"Base currency set to {normalized}.")
+        notes.append("Local portfolio history was cleared because stored snapshots are base-currency specific.")
+        notes.append("Re-run research and risk views to refresh any previously loaded analytics.")
+        return normalized, notes
+
+    @staticmethod
+    def _normalize_base_currency(value: str | None) -> str:
+        normalized = str(value or "").strip().upper()
+        if len(normalized) != 3 or not normalized.isalpha():
+            raise ValueError("Base currency must be a 3-letter ISO currency code.")
+        return normalized
+
     def shutdown(self) -> None:
         try:
             self.client.shutdown()

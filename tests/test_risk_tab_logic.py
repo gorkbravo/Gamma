@@ -5,8 +5,9 @@ from datetime import datetime
 import pandas as pd
 
 from src.analytics.var import parametric_var
-from src.application.portfolio_service import PortfolioService
+from src.application.portfolio_service import PortfolioPerformanceRequest, PortfolioService
 from src.application.risk_service import RiskComputeRequest, RiskService
+from src.models.instruments import InstrumentDefaults
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 
 
@@ -30,8 +31,11 @@ class _StubMarketData:
 
 
 class _StubMockService:
+    def __init__(self, histories=None) -> None:
+        self._histories = dict(histories or {})
+
     def load_history(self, symbol):
-        return None
+        return self._histories.get(symbol)
 
 
 class _StubFXService:
@@ -83,22 +87,25 @@ def _make_snapshot(positions, net_liq=100.0):
     )
 
 
-def _make_risk_service(market_data=None):
+def _make_risk_service(market_data=None, mock_service=None, benchmark_defaults=None):
     return RiskService(
         client=_StubClient(),
         market_data=market_data or _StubMarketData(),
-        mock_service=_StubMockService(),
+        mock_service=mock_service or _StubMockService(),
         risk_free_service=None,
+        benchmark_defaults=benchmark_defaults,
     )
 
 
-def _make_portfolio_service(market_data=None, fx_service=None):
+def _make_portfolio_service(market_data=None, fx_service=None, data_provider=None, mock_service=None, benchmark_defaults=None):
     return PortfolioService(
         client=_StubClient(),
         market_data=market_data or _StubMarketData(),
         fx_service=fx_service or _StubFXService(),
         history_store=_StubHistoryStore(),
-        mock_service=_StubMockService(),
+        data_provider=data_provider,
+        mock_service=mock_service or _StubMockService(),
+        benchmark_defaults=benchmark_defaults,
     )
 
 
@@ -153,6 +160,45 @@ def test_compute_aligns_covariance_to_weight_order():
     assert set(contrib.index) == {"A", "B"}
 
 
+def test_portfolio_service_compute_performance_normalizes_mixed_currency_histories():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    prices = {
+        "USD_ASSET": pd.Series([100.0, 101.0, 102.0, 103.0, 104.0, 105.0], index=idx),
+        "EUR_ASSET": pd.Series([100.0, 100.0, 100.0, 100.0, 100.0, 100.0], index=idx),
+    }
+    fx_history = pd.Series([1.0, 1.1, 1.2, 1.3, 1.4, 1.5], index=idx)
+    benchmark_history = pd.Series([300.0, 301.0, 302.0, 303.0, 304.0, 305.0], index=idx)
+    snapshot = _make_snapshot(
+        [
+            PositionItem("USD_ASSET", "STK", "USD", 1, None, None, None, None, base_market_value=50.0),
+            PositionItem("EUR_ASSET", "STK", "EUR", 1, None, None, None, None, base_market_value=50.0),
+        ],
+        net_liq=100.0,
+    )
+    service = _make_portfolio_service(
+        market_data=_StubMarketData(fx_history=fx_history),
+        fx_service=_StubFXService(rate=1.5),
+        data_provider=_PriceProvider(prices),
+        mock_service=_StubMockService({"SPY": benchmark_history}),
+    )
+
+    result = service.compute_performance(
+        PortfolioPerformanceRequest(
+            snapshot=snapshot,
+            benchmark_symbol="SPY",
+            lookback_days=252,
+        )
+    )
+
+    eur_returns = (prices["EUR_ASSET"] * fx_history).pct_change().dropna()
+    usd_returns = prices["USD_ASSET"].pct_change().dropna()
+    expected = (usd_returns * 0.5) + (eur_returns * 0.5)
+
+    pd.testing.assert_index_equal(result.portfolio_returns.index, expected.index)
+    pd.testing.assert_series_equal(result.portfolio_returns, expected, check_names=False)
+    assert not any("spot rate" in warning.lower() for warning in result.warnings)
+
+
 def test_compute_excludes_missing_base_value_without_crashing_and_reports_coverage():
     idx = pd.date_range("2026-01-02", periods=6, freq="B")
     prices = {
@@ -180,6 +226,78 @@ def test_compute_excludes_missing_base_value_without_crashing_and_reports_covera
     assert results.monte_carlo_var is not None
     assert results.monte_carlo_var_total_estimate is not None
     assert abs(results.monte_carlo_var_total_estimate - (results.monte_carlo_var / 0.8)) < 1e-9
+
+
+def test_compute_uses_base_currency_normalized_returns_for_mixed_currency_book():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    prices = {
+        "USD_ASSET": pd.Series([100.0, 100.0, 100.0, 100.0, 100.0, 100.0], index=idx),
+        "EUR_ASSET": pd.Series([100.0, 100.0, 100.0, 100.0, 100.0, 100.0], index=idx),
+    }
+    fx_history = pd.Series([1.0, 1.1, 1.2, 1.3, 1.4, 1.5], index=idx)
+    benchmark_history = pd.Series([300.0, 301.0, 302.0, 303.0, 304.0, 305.0], index=idx)
+    snapshot = _make_snapshot(
+        [
+            PositionItem("USD_ASSET", "STK", "USD", 1, None, None, None, None, base_market_value=50.0),
+            PositionItem("EUR_ASSET", "STK", "EUR", 1, None, None, None, None, base_market_value=50.0),
+        ],
+        net_liq=100.0,
+    )
+    service = _make_risk_service(
+        market_data=_StubMarketData(fx_history=fx_history),
+        mock_service=_StubMockService({"SPY": benchmark_history}),
+    )
+    request = RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=3,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        recommended_min_obs=3,
+    )
+
+    payload = service.compute(request, data_provider=_PriceProvider(prices))
+
+    expected_eur_returns = (prices["EUR_ASSET"] * fx_history).pct_change().dropna()
+    pd.testing.assert_series_equal(payload.returns_df["EUR_ASSET"], expected_eur_returns, check_names=False)
+    assert payload.results.daily_vol is not None
+    assert payload.results.daily_vol > 0
+    assert payload.portfolio_returns.abs().sum() > 0
+
+
+def test_portfolio_service_warns_when_position_history_uses_spot_fx_fallback():
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    prices = {
+        "EUR_ASSET": pd.Series([100.0, 101.0, 102.0, 103.0], index=idx),
+    }
+    benchmark_history = pd.Series([300.0, 301.0, 302.0, 303.0], index=idx)
+    snapshot = _make_snapshot(
+        [
+            PositionItem("EUR_ASSET", "STK", "EUR", 1, None, None, None, None, base_market_value=100.0),
+        ],
+        net_liq=100.0,
+    )
+    service = _make_portfolio_service(
+        market_data=_StubMarketData(fx_history=None, fx_rate=1.2),
+        fx_service=_StubFXService(rate=1.2),
+        data_provider=_PriceProvider(prices),
+        mock_service=_StubMockService({"SPY": benchmark_history}),
+    )
+
+    result = service.compute_performance(
+        PortfolioPerformanceRequest(
+            snapshot=snapshot,
+            benchmark_symbol="SPY",
+            lookback_days=252,
+        )
+    )
+
+    assert any("spot rate" in warning.lower() for warning in result.warnings)
 
 
 def test_compute_caps_coverage_ratio_on_margined_live_like_book():
@@ -250,6 +368,59 @@ def test_convert_benchmark_to_base_spot_fallback_warns():
     assert converted is not None
     assert len(warnings) == 1
     assert "spot" in warnings[0].lower()
+
+
+def test_portfolio_benchmark_conversion_uses_resolved_non_usd_currency():
+    idx = pd.date_range("2026-01-02", periods=5, freq="B")
+    snapshot = _make_snapshot([], net_liq=100.0)
+    benchmark_history = pd.Series([200.0, 202.0, 204.0, 203.0, 205.0], index=idx)
+    fx_history = pd.Series([1.0, 1.1, 1.2, 1.3, 1.4], index=idx)
+    service = _make_portfolio_service(
+        market_data=_StubMarketData(fx_history=fx_history),
+        fx_service=_StubFXService(rate=None),
+        mock_service=_StubMockService({"VGK": benchmark_history}),
+        benchmark_defaults=InstrumentDefaults(
+            provider="benchmark",
+            sec_type="STK",
+            exchange="SMART",
+            currency="EUR",
+        ),
+    )
+
+    cumulative, source, warnings = service.build_benchmark(snapshot, "VGK", 252, idx[1:])
+
+    expected = (benchmark_history * fx_history).pct_change().dropna()
+    expected = (1.0 + expected).cumprod()
+    expected = expected / float(expected.iloc[0])
+    expected = expected.reindex(idx[1:]).ffill().fillna(1.0)
+
+    assert source == "history_VGK"
+    assert warnings == []
+    pd.testing.assert_series_equal(cumulative, expected, check_names=False)
+
+
+def test_risk_benchmark_conversion_uses_resolved_non_usd_currency():
+    idx = pd.date_range("2026-01-02", periods=5, freq="B")
+    benchmark_history = pd.Series([200.0, 202.0, 204.0, 203.0, 205.0], index=idx)
+    fx_history = pd.Series([1.0, 1.1, 1.2, 1.3, 1.4], index=idx)
+    service = _make_risk_service(
+        market_data=_StubMarketData(fx_history=fx_history),
+        mock_service=_StubMockService({"VGK": benchmark_history}),
+        benchmark_defaults=InstrumentDefaults(
+            provider="benchmark",
+            sec_type="STK",
+            exchange="SMART",
+            currency="EUR",
+        ),
+    )
+
+    returns, warnings = service._load_benchmark_returns(252, "USD", "VGK")
+
+    expected = (benchmark_history * fx_history).pct_change().dropna()
+
+    assert warnings == []
+    assert returns is not None
+    pd.testing.assert_series_equal(returns, expected, check_names=False)
 
 
 def test_portfolio_service_convert_series_to_base_does_not_backfill_fx_history():

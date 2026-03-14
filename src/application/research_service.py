@@ -10,7 +10,7 @@ from src.application.instrument_identity import find_identity_by_symbol, snapsho
 from src.application.research_validation import ensure_valid_research_scope
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
-from src.services.data_providers import ResearchDataProvider
+from src.services.data_providers import ResearchDataProvider, normalize_snapshot_price_histories
 
 
 @dataclass(frozen=True)
@@ -69,14 +69,22 @@ class ResearchService:
             )
 
         identity_map = snapshot_identity_map(snapshot)
-        prices, missing = self.provider.load_prices(snapshot, lookback_days=request.lookback_days)
+        raw_prices, missing = self.provider.load_prices(snapshot, lookback_days=request.lookback_days)
+        if missing:
+            warnings.append(f"Missing history for: {', '.join(missing)}")
+        normalized_prices = normalize_snapshot_price_histories(
+            snapshot,
+            raw_prices,
+            request.lookback_days,
+            self.provider.market_data,
+        )
+        warnings.extend(normalized_prices.warnings)
+        prices = normalized_prices.prices
         primary_price = pd.Series(dtype=float)
         if request.scope_type == ResearchScopeType.SINGLE_TICKER:
             primary_identity = find_identity_by_symbol(snapshot, primary_symbol)
             if primary_identity is not None:
                 primary_price = prices.get(primary_identity.instrument_id, pd.Series(dtype=float))
-        if missing:
-            warnings.append(f"Missing history for: {', '.join(missing)}")
         if not prices:
             warnings.append("No valid history found for selected scope")
             return self._empty_result(
@@ -138,7 +146,12 @@ class ResearchService:
                 warnings=warnings,
             )
 
-        benchmark_returns = self.load_benchmark_returns(benchmark_symbol, request.lookback_days, warnings)
+        benchmark_returns = self.load_benchmark_returns(
+            benchmark_symbol,
+            request.lookback_days,
+            snapshot.base_currency,
+            warnings,
+        )
         aligned_returns = returns_df.reindex(columns=weights.index.tolist())
         constituent_total_returns = self._constituent_total_returns(aligned_returns)
         constituent_annual_vol = aligned_returns.apply(lambda series: realized_vol(series.dropna())[1])
@@ -168,11 +181,17 @@ class ResearchService:
         self,
         benchmark_symbol: str,
         lookback_days: int,
+        base_currency: str,
         warnings: list[str] | None = None,
     ) -> pd.Series:
         warning_list = warnings if warnings is not None else []
         symbol = str(benchmark_symbol or "").strip().upper() or "SPY"
-        bench_series = self.provider.load_benchmark_history(symbol, lookback_days)
+        bench_series = self.provider.load_benchmark_history(
+            symbol,
+            lookback_days,
+            base_currency=base_currency,
+            warnings=warning_list,
+        )
         if bench_series is None or bench_series.empty:
             warning_list.append(f"Benchmark history unavailable for {symbol}")
             return pd.Series(dtype=float)

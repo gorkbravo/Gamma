@@ -21,6 +21,10 @@ export interface SystemStatus {
   cached_symbols: string[];
 }
 
+export interface BaseCurrencyResponse extends SystemStatus {
+  lines: string[];
+}
+
 export interface DiagnosticsResponse {
   generated_at: string;
   mock_mode: boolean;

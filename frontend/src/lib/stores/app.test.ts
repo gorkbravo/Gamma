@@ -25,6 +25,7 @@ import {
   researchResult,
   riskResult,
   runResearch,
+  setBaseCurrency,
   setMarketDataMode,
   systemStatus
 } from "./app";
@@ -420,6 +421,130 @@ describe("app store orchestration", () => {
 
     expect(get(systemStatus)?.market_data_mode).toBe("live");
     expect(get(diagnostics)?.market_data_mode).toBe("live");
+  });
+
+  it("resets currency-specific state when base currency changes", async () => {
+    const snapshot = makeSnapshot();
+    const status: SystemStatus = {
+      healthy: true,
+      app_name: "Gamma API",
+      backend: "fastapi",
+      mock_mode: true,
+      base_currency: "EUR",
+      market_data_mode: "delayed",
+      connection: {
+        connected: true,
+        status_text: "Status: Mock",
+        action_text: "Mock Mode",
+        action_enabled: false,
+        active_account: "DU123"
+      },
+      cached_symbols: ["AAPL"]
+    };
+    diagnostics.set({
+      generated_at: "2026-03-01T00:00:00Z",
+      mock_mode: true,
+      base_currency: "USD",
+      market_data_mode: "delayed",
+      connection: status.connection,
+      history_cache: { hits: 1, misses: 0, hit_rate: 1 },
+      local_history_entries: 5,
+      local_history_path: "data/mock.csv",
+      recent_errors: [],
+      cached_symbols: ["AAPL"],
+      research_scope_type: "none",
+      research_primary_symbol: null,
+      research_synthetic_count: 0,
+      iv_running: false,
+      iv_status_text: "Idle",
+      iv_active_symbol: null
+    });
+    portfolioSnapshot.set(snapshot);
+    portfolioPerformance.set({
+      benchmark_symbol: "SPY",
+      benchmark_source: "history_SPY",
+      performance_points: [],
+      benchmark_points: [],
+      portfolio_base_value: 110,
+      missing_symbols: [],
+      day_pnl: 1,
+      day_pnl_pct: 0.01,
+      day_pnl_source: "account_summary",
+      message: null,
+      warnings: []
+    });
+    researchResult.set(makeResearchResult("single_ticker", snapshot));
+    riskResult.set({
+      metrics: {
+        alpha: 0.95,
+        lookback_days: 252,
+        horizon_days: 1,
+        portfolio_value: 100,
+        historical_var: 5,
+        historical_cvar: 6,
+        parametric_var: 4,
+        daily_vol: 0.01,
+        annual_vol: 0.2,
+        max_drawdown: -0.1,
+        beta: 1,
+        correlation: 0.8,
+        alpha_annual: 0.05,
+        covered_portfolio_value: 100,
+        covered_risk_basis_value: 100,
+        risk_basis_value: 100,
+        risk_coverage_ratio: 1,
+        historical_var_total_estimate: 5,
+        historical_cvar_total_estimate: 6,
+        parametric_var_total_estimate: 4,
+        monte_carlo_model: "Gaussian",
+        monte_carlo_horizon_days: 10,
+        monte_carlo_num_simulations: 1000,
+        monte_carlo_var: 7,
+        monte_carlo_cvar: 8,
+        monte_carlo_var_total_estimate: 7,
+        monte_carlo_cvar_total_estimate: 8,
+        aligned_obs_count: 10,
+        benchmark_overlap_count: 10,
+        concentration_hhi: 1,
+        top5_weight: 1,
+        effective_bets: 1
+      },
+      portfolio_return_points: [],
+      benchmark_return_points: [],
+      contributions: [],
+      monte_carlo: {
+        terminal_returns: [],
+        fan_percentiles: {},
+        sample_paths: {}
+      },
+      excluded_assets: [],
+      warnings: []
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        ok({
+          ...status,
+          lines: [
+            "Base currency set to EUR.",
+            "Local portfolio history was cleared because stored snapshots are base-currency specific."
+          ]
+        })
+      )
+    );
+
+    await setBaseCurrency("EUR");
+
+    expect(get(systemStatus)?.base_currency).toBe("EUR");
+    expect(get(diagnostics)?.base_currency).toBe("EUR");
+    expect(get(diagnostics)?.local_history_entries).toBe(0);
+    expect(get(portfolioSnapshot)).toBeNull();
+    expect(get(portfolioHistory)?.points).toEqual([]);
+    expect(get(portfolioPerformance)).toBeNull();
+    expect(get(researchResult)).toBeNull();
+    expect(get(riskResult)).toBeNull();
+    expect(get(lastError)).toBe("");
   });
 
   it("loads IV session state and mirrors the latest surface", async () => {

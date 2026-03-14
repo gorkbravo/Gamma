@@ -23,7 +23,11 @@ For pre-roadmap readiness work, handoff context, and operator follow-up, use [`d
 - Core portfolio, research, risk, diagnostics, and IV workflows are usable through the web/Tauri stack
 - Packaging is implemented for Windows-first distribution
 - PySide is still supported as a fallback client
-- Broader live-IBKR and longer-session QA are still open
+- March 14, 2026 audit follow-up: mixed-currency historical analytics now normalize non-base-currency histories into the snapshot base currency across portfolio, research, and risk
+- March 14, 2026 audit follow-up: desktop compile validation is standardized on `cd frontend && npm run desktop:check`, which isolates Tauri compile checks from stale local target state
+- March 14, 2026 full audit: `pytest`, frontend tests, frontend build, `desktop:check`, direct `cargo check`, `backend:smoke`, `desktop:smoke`, and `tauri:build` all passed from this workspace
+- March 14, 2026 full audit: browser-level mock smoke validated portfolio rendering and risk computation through the web stack
+- Live IBKR was not revalidated in the latest audit session because the runtime reported `IBKR not connected`; broader live-IBKR and longer-session QA remain open
 
 ## Core Workflows
 
@@ -98,6 +102,12 @@ $env:MOCK_DATA="true"
 npm run tauri:dev
 ```
 
+## Settings
+
+- The in-app Settings menu can switch the active base currency without changing Gamma's read-only scope.
+- Changing base currency clears the local portfolio-history store because stored snapshots are base-currency specific.
+- Portfolio, research, and risk analytics recompute against the selected base currency, and emit explicit warnings when historical FX is unavailable and spot FX fallback is used.
+
 ## Validation
 
 Backend tests:
@@ -112,17 +122,36 @@ Frontend checks:
 cd frontend
 npm run test
 npm run build
+npm run desktop:check
 npm run backend:smoke
 npm run desktop:smoke
 ```
 
-Additional desktop validation:
+March 14, 2026 full-audit results:
+
+- `npm run test`: `16 passed`
+- `npm run build`: passed
+- `npm run desktop:check`: passed
+- `npm run backend:smoke`: passed
+- `npm run desktop:smoke`: passed
+
+Supported desktop compile validation:
 
 ```powershell
-cargo check --manifest-path frontend\src-tauri\Cargo.toml
+cd frontend
+npm run desktop:check
+```
+
+`npm run desktop:check` sets `CARGO_TARGET_DIR` to `%TEMP%\gamma-tauri-check` unless you override it, so stale checked-out `frontend\src-tauri\target\` state does not affect the result. Plain `cargo check --manifest-path frontend\src-tauri\Cargo.toml` also works from this repo because `.cargo\config.toml` routes the default Cargo target directory to the repo-root `target\` tree instead of the stale checked-out Tauri target directories, but `npm run desktop:check` is the supported reproducible operator path.
+
+Additional desktop packaging validation:
+
+```powershell
 cd frontend
 npm run tauri:build
 ```
+
+March 14, 2026 full-audit packaging result: passed and rebuilt `C:\Users\User\AppData\Local\Temp\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe`
 
 ## Packaging
 
@@ -140,6 +169,7 @@ The installer output lands under `%TEMP%\gamma-tauri-build\release\bundle\nsis\`
 
 - IB Gateway is not supported yet
 - Some live/delayed market-data scenarios still depend on IBKR entitlements and symbol availability
+- Historical analytics fall back to spot FX with explicit warnings when historical FX series are unavailable for non-base-currency instruments
 - Risk analytics are linear and history-based rather than full nonlinear scenario modeling
 - Browser/Tauri workflows are usable, but some advanced desktop ergonomics still lag the old PySide client
 

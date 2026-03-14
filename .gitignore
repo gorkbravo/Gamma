@@ -15,6 +15,7 @@ data/
 
 dist/
 build/
+target/
 *.egg-info/
 frontend/node_modules/
 frontend/.vite/
@@ -24,5 +25,6 @@ frontend/src-tauri/resources/backend/
 frontend/src-tauri/target/
 frontend/src-tauri/target-check/
 frontend/.playwright-cli/
+/.playwright-cli/
 output/playwright/
 /package-lock.json

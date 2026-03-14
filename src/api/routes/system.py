@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi import HTTPException
 
 from src.api.schemas.system import (
     ActionResponseModel,
+    BaseCurrencyRequestModel,
+    BaseCurrencyResponseModel,
     ConnectionStateModel,
     DiagnosticsResponseModel,
     HealthResponseModel,
@@ -46,6 +49,19 @@ def set_market_data_mode(
     runtime = request.app.state.runtime
     runtime.set_market_data_mode(payload.market_data_mode)
     return _system_status_response(runtime)
+
+
+@router.post("/system/base-currency", response_model=BaseCurrencyResponseModel)
+def set_base_currency(
+    payload: BaseCurrencyRequestModel,
+    request: Request,
+) -> BaseCurrencyResponseModel:
+    runtime = request.app.state.runtime
+    try:
+        _, lines = runtime.set_base_currency(payload.base_currency)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return BaseCurrencyResponseModel(**_system_status_response(runtime).model_dump(), lines=lines)
 
 
 def _system_status_response(runtime) -> SystemStatusResponseModel:

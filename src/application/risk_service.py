@@ -20,7 +20,13 @@ from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, paramet
 from src.application.instrument_identity import identity_for_position
 from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot, RiskResults
-from src.services.data_providers import AppDataProvider, contract_for_instrument, contract_for_position
+from src.services.data_providers import (
+    AppDataProvider,
+    contract_for_instrument,
+    contract_for_position,
+    convert_history_to_base_currency,
+    normalize_snapshot_price_histories,
+)
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
@@ -111,15 +117,26 @@ class RiskService:
         if request.horizon_days > 1:
             warnings.append("Historical VaR/CVaR shown for 1d; parametric scaled by sqrt(time).")
 
-        prices, missing = self._load_prices(snapshot, request.lookback_days, progress_cb, data_provider=data_provider)
+        raw_prices, missing = self._load_prices(snapshot, request.lookback_days, progress_cb, data_provider=data_provider)
         if missing:
             warnings.append(f"Missing history for: {', '.join(missing)}")
+        normalized_prices = normalize_snapshot_price_histories(
+            snapshot,
+            raw_prices,
+            request.lookback_days,
+            self.market_data,
+        )
+        prices = normalized_prices.prices
+        warnings.extend(normalized_prices.warnings)
+        excluded_assets.update(normalized_prices.excluded_assets)
         for position in snapshot.positions:
             if position.symbol.startswith("CASH"):
                 continue
             identity = identity_for_position(position)
-            if identity.instrument_id not in prices:
-                excluded_assets[identity.instrument_id] = "No historical bars"
+            if identity.instrument_id not in raw_prices:
+                excluded_assets.setdefault(identity.instrument_id, "No historical bars")
+            elif identity.instrument_id not in prices:
+                excluded_assets.setdefault(identity.instrument_id, "No base-currency history")
         warnings.extend(self.market_data.drain_errors())
 
         price_df = align_prices(prices)
@@ -531,17 +548,23 @@ class RiskService:
         symbol: str,
     ) -> tuple[pd.Series | None, List[str]]:
         warnings: List[str] = []
+        benchmark_instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
         if self.client.mock:
             series = self.mock_service.load_history(symbol)
         else:
-            contract = contract_for_instrument(
-                InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
-            )
+            contract = contract_for_instrument(benchmark_instrument)
             series = self.market_data.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             warnings.append(f"Benchmark history unavailable for {symbol}")
             return None, warnings
-        converted, fx_warnings = self._convert_benchmark_to_base(series.astype(float), "USD", base_currency, lookback_days)
+        converted, fx_warnings = self._convert_benchmark_to_base(
+            series.astype(float),
+            benchmark_instrument.currency,
+            base_currency,
+            lookback_days,
+            label=symbol,
+            context="Benchmark",
+        )
         warnings.extend(fx_warnings)
         if converted is None or converted.empty:
             warnings.append(f"Benchmark FX conversion failed for {symbol} into {base_currency}")
@@ -554,24 +577,20 @@ class RiskService:
         quote_ccy: str,
         base_ccy: str,
         lookback_days: int,
+        *,
+        label: str = "series",
+        context: str = "Series",
     ) -> tuple[pd.Series | None, List[str]]:
-        warnings: List[str] = []
-        quote = str(quote_ccy or "").upper()
-        base = str(base_ccy or "").upper()
-        if quote == base:
-            return series, warnings
-        fx_series = self.market_data.fetch_fx_history(base, quote, lookback_days)
-        if fx_series is not None and not fx_series.empty:
-            aligned = fx_series.reindex(series.index).ffill().dropna()
-            if not aligned.empty:
-                common_index = series.index.intersection(aligned.index)
-                if not common_index.empty:
-                    return series.reindex(common_index) * aligned.reindex(common_index), warnings
-        fx_rate = self.market_data.fetch_fx_rate(base, quote)
-        if fx_rate is None:
-            return None, warnings
-        warnings.append(f"Benchmark FX conversion used spot {quote}->{base} rate fallback")
-        return series * float(fx_rate), warnings
+        result = convert_history_to_base_currency(
+            series,
+            quote_ccy,
+            base_ccy,
+            lookback_days,
+            self.market_data,
+            label=label,
+            context=context,
+        )
+        return result.series, result.warnings
 
     @staticmethod
     def _concentration_metrics(weights: pd.Series) -> Tuple[float | None, float | None, float | None]:

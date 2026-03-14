@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "desktop:check": "node ./scripts/check-tauri.mjs",
     "desktop:smoke": "node ./scripts/smoke-desktop-launcher.mjs",
     "backend:package": "node ./scripts/build-backend.mjs",
     "backend:smoke": "node ./scripts/smoke-packaged-backend.mjs",

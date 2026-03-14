@@ -13,9 +13,9 @@ It is no longer just an identity-rekey note. It now serves as the pre-roadmap re
 
 Read this together with:
 
-- `C:\Users\User\Desktop\StrataLab\roadmap.md`
-- `C:\Users\User\Desktop\StrataLab\migration.md`
-- `C:\Users\User\Desktop\StrataLab\README.md`
+- `C:\Users\User\Desktop\Gamma\roadmap.md`
+- `C:\Users\User\Desktop\Gamma\migration.md`
+- `C:\Users\User\Desktop\Gamma\README.md`
 
 ## Repo State
 
@@ -28,7 +28,7 @@ Read this together with:
 
 ## Current Goal
 
-The immediate goal is to start roadmap work from a now-verified pre-roadmap baseline, while preserving the architectural boundaries that made that transition safe.
+The immediate goal is to restore a truly roadmap-ready baseline after the March 14, 2026 follow-up audit found remaining correctness and reproducibility gaps.
 
 That means:
 
@@ -45,7 +45,7 @@ The pre-roadmap hardening pass moved materially forward after the original audit
 - backend runtime now omits desktop-only `AppDataContext` state unless the explicit desktop runtime is requested
 - research instrument defaults are configurable and benchmark defaults are now separated from research-instrument defaults
 - risk coverage semantics were corrected to use modeled risk basis rather than raw net liquidation, with test coverage for margined/live-style books
-- provenance expectations for new roadmap entities are now defined in `C:\Users\User\Desktop\StrataLab\docs\provenance_expectations.md`
+- provenance expectations for new roadmap entities are now defined in `C:\Users\User\Desktop\Gamma\docs\provenance_expectations.md`
 - `cd frontend && npm run tauri:build` now completes and produces an NSIS installer artifact
 
 March 13, 2026 audit follow-up:
@@ -59,22 +59,45 @@ March 13, 2026 audit follow-up:
   - risk computation
 - risk-basis coverage semantics were tightened further so fully covered cash-heavy books no longer look artificially under-covered
 
-What still remains open before the checklist is fully clean:
+March 14, 2026 audit follow-up:
 
-1. IV one-shot live behavior remains documented maintenance work, not a roadmap blocker
+- backend tests still passed (`69 passed`)
+- frontend tests still passed (`15 passed`)
+- `npm run build`, `npm run backend:smoke`, and `npm run desktop:smoke` still passed
+- stale ignored rename-era output under `frontend\src-tauri\target\` and `frontend\src-tauri\target-check\` was identified as the reason direct `cargo check --manifest-path frontend\src-tauri\Cargo.toml` had failed
+- desktop compile validation is now standardized on `cd frontend && npm run desktop:check`, which isolates `CARGO_TARGET_DIR` to `%TEMP%\gamma-tauri-check`
+- direct plain `cargo check --manifest-path frontend\src-tauri\Cargo.toml` also passes again in this workspace because `.cargo\config.toml` routes plain Cargo output to the repo-root `target\` tree
+- mixed-currency portfolio, research, and risk analytics now normalize non-base-currency histories into the snapshot base currency before return computation
+- portfolio and risk benchmark conversion now use the resolved benchmark quote currency instead of assuming USD
+- spot-FX fallback now emits explicit warnings when historical FX series are unavailable
+- post-fix validation passed with `75` backend tests, `15` frontend tests, and a successful frontend production build
+
+March 14, 2026 full audit follow-up:
+
+- backend tests passed again (`75 passed`)
+- frontend tests passed again (`16 passed`)
+- `npm run desktop:check`, direct `cargo check`, `npm run backend:smoke`, `npm run desktop:smoke`, and `npm run tauri:build` all passed from this workspace
+- browser-level mock smoke validated portfolio rendering and risk computation through the web UI
+- current-session live runtime revalidation did not complete because `build_runtime(mock_mode=False)` reported `IBKR not connected`
 
 ## Roadmap Start Decision
 
-Gamma is now ready to start roadmap work from this branch.
+Gamma can start roadmap expansion from this working tree.
 
 IV readiness by itself is not the thing that should block roadmap progress.
 
 If live options-market-data subscriptions are not available yet, treat IV live usability as a deferred validation problem rather than a roadmap gate.
 
-Remaining follow-up work is burn-in quality assurance, not a roadmap-start blocker:
+Remaining follow-up work now separates into blockers and non-blockers.
+
+Blockers:
+
+1. none
+
+Accepted non-blockers:
 
 1. IV one-shot live behavior should stay documented maintenance work
-2. broader longer-session live QA is still useful but can run in parallel with roadmap work
+2. broader live-IBKR and longer-session live QA are still useful but can run in parallel
 
 ## What Was Already Done
 
@@ -276,10 +299,51 @@ Files:
 
 Current implication:
 
-- the risk outputs are now a materially safer base for future reusable analytics,
-- and UI copy now reflects risk-basis coverage rather than implying completeness against raw portfolio value.
+- the risk outputs are materially safer than before for single-currency and covered-book semantics,
+- but that does not by itself make the historical analytics pipeline safe for mixed-currency books.
 
-### Finding 3: IV web flow has a live regression
+### Finding 3: mixed-currency historical analytics are now base-currency-correct
+
+This blocker was closed in the March 14, 2026 follow-up fix.
+
+What changed:
+
+- added a shared historical-series normalization helper at the provider boundary in `src/services/data_providers.py`
+- portfolio, research, and risk now convert non-base-currency position histories into the snapshot base currency before computing returns
+- portfolio and risk benchmark conversion now use the benchmark instrument's resolved quote currency rather than assuming USD
+- spot-FX fallback now emits explicit warnings when historical FX is unavailable
+
+Coverage added:
+
+- mixed-currency portfolio performance
+- mixed-currency research analysis
+- mixed-currency risk computation
+- non-USD benchmark conversion using resolved benchmark currency
+
+### Finding 4: repo rename fallout affected desktop validation and is now normalized
+
+The folder rename from `StrataLab` to `Gamma` left stale local build state behind.
+
+Observed in the March 14, 2026 audit:
+
+- direct `cargo check --manifest-path frontend\src-tauri\Cargo.toml` failed because the local `frontend\src-tauri\target\...` build output still referenced generated permissions under `C:\Users\User\Desktop\StrataLab\...`
+- wrapped scripts such as `npm run desktop:smoke` still passed because `frontend/scripts/run-tauri.mjs` overrides `CARGO_TARGET_DIR` into `%TEMP%`
+- docs and handoff notes still contained `StrataLab` absolute paths before this update
+
+Fix now in place:
+
+- `frontend\package.json` now exposes `cd frontend && npm run desktop:check` as the supported compile-validation path
+- `frontend\scripts\check-tauri.mjs` isolates `CARGO_TARGET_DIR` to `%TEMP%\gamma-tauri-check` unless overridden
+- `.cargo\config.toml` routes plain Cargo output to the repo-root `target\` tree instead of the stale checked-out Tauri target directories
+- direct plain `cargo check --manifest-path frontend\src-tauri\Cargo.toml` now passes again from the current `Gamma` checkout
+
+Implication:
+
+- another agent should use `cd frontend && npm run desktop:check` for reproducible desktop validation after any future workspace move
+- if plain cargo output ever drifts after a rename or path move, treat `frontend\src-tauri\target\` and `target-check\` as disposable ignored build output and rely on `cd frontend && npm run desktop:check` before treating it as a product regression
+- this is primarily a reproducibility and operator-trust issue, not a product-logic issue
+
+### Finding 5: IV web flow has a live regression
 
 IV is not a current roadmap priority, but the regression should be documented clearly so another agent does not waste time rediscovering it.
 
@@ -322,7 +386,7 @@ Only touch IV if:
 
 ### Do not expand IV beyond maintenance
 
-Prediction markets, crypto, fundamentals, and AI copilot work can now start from this branch.
+Prediction markets, crypto, fundamentals, and AI copilot work should wait until the blockers above are addressed.
 
 The remaining constraint is that IV should stay on maintenance-only status unless the work directly touches shared market-data/session behavior.
 
@@ -332,13 +396,12 @@ The next agent should start roadmap implementation from the cleaned readiness ba
 
 ### Priority 1
 
-Start roadmap work from the now-verified baseline.
+Keep the clean-target desktop validation path as the supported operator workflow.
 
 Target outcome:
 
-- preserve the read-only research boundary,
-- keep new domains behind provider adapters and normalized schemas,
-- avoid re-entangling desktop session state with backend services.
+- `cd frontend && npm run desktop:check` remains the documented compile-validation command
+- stale `StrataLab` path references stay out of operator-facing docs except as explicit historical audit context
 
 ### Priority 2
 
@@ -384,8 +447,8 @@ Add tests for:
 ## Current Working Tree Notes
 
 - The working tree is dirty; do not assume the doc matches committed state only
-- There is still an untracked root `.playwright-cli/` directory with inspection artifacts; do not commit it accidentally
-- There are active in-flight changes around runtime/context separation; inspect diffs before editing
+- Root `.playwright-cli/` artifacts are generated local inspection output and should remain ignored
+- `frontend\src-tauri\target\` and `frontend\src-tauri\target-check\` are disposable ignored local build directories; if a future workspace move poisons plain `cargo check`, use `cd frontend && npm run desktop:check` or clear those directories before treating it as a product regression
 
 ## Handoff Prompt
 
@@ -395,10 +458,10 @@ Use this prompt for the next agent:
 You are continuing Gamma pre-roadmap foundation work on branch `codex/p1-foundation-refactor`.
 
 Start by reading:
-- C:\Users\User\Desktop\StrataLab\roadmap.md
-- C:\Users\User\Desktop\StrataLab\migration.md
-- C:\Users\User\Desktop\StrataLab\README.md
-- C:\Users\User\Desktop\StrataLab\docs\p1_refactor_handoff.md
+- C:\Users\User\Desktop\Gamma\roadmap.md
+- C:\Users\User\Desktop\Gamma\migration.md
+- C:\Users\User\Desktop\Gamma\README.md
+- C:\Users\User\Desktop\Gamma\docs\p1_refactor_handoff.md
 
 Current git state:
 - `main` baseline checkpoint: b72bd9f (`Checkpoint current UI and desktop changes`)
@@ -415,9 +478,15 @@ What is already true:
 - backend/runtime safety is better than before
 - automated checks were green during the March 12, 2026 audit
 - live IBKR validation succeeded against the configured TWS path
+- desktop compile validation is now standardized on `cd frontend && npm run desktop:check`
+- plain `cargo check --manifest-path frontend\src-tauri\Cargo.toml` also works again because `.cargo\config.toml` routes it to the repo-root `target\` tree
 
-What no longer blocks roadmap work:
+What is not blocking roadmap work:
+- desktop compile validation no longer depends on stale rename-era target artifacts in this workspace
 - installed-workflow validation of the generated NSIS bundle is complete
+- mixed-currency portfolio, research, and risk analytics now normalize into the snapshot base currency before return computation
+
+What is no longer blocking roadmap work by itself:
 - IV still has known live issues, but IV is not a current priority and is not a blocker by itself
 
 Important constraint:
@@ -425,19 +494,24 @@ Important constraint:
 - Do not spend major time expanding IV
 - Keep Gamma read-only and aligned with the roadmap
 
+Validation note:
+- use `cd frontend && npm run desktop:check` for reproducible desktop compile validation
+- treat `frontend\src-tauri\target\` and `frontend\src-tauri\target-check\` as disposable ignored local build output
+
 Your task:
-1. Start roadmap-aligned implementation from the current provider/runtime/risk baseline.
+1. Preserve the shared mixed-currency normalization path across portfolio, research, risk, and benchmarks if you touch historical analytics.
 2. If your changes touch IV behavior, only do the minimum fix needed so one-shot loads and market-data-mode behavior are predictable.
 3. Run relevant tests before finishing.
 
 Suggested starting files:
-- C:\Users\User\Desktop\StrataLab\src\application\runtime.py
-- C:\Users\User\Desktop\StrataLab\src\services\data_providers.py
-- C:\Users\User\Desktop\StrataLab\src\application\risk_service.py
-- C:\Users\User\Desktop\StrataLab\src\services\app_context.py
-- C:\Users\User\Desktop\StrataLab\src\api\routes\system.py
-- C:\Users\User\Desktop\StrataLab\frontend\src\lib\stores\app.ts
-- C:\Users\User\Desktop\StrataLab\tests\test_api.py
+- C:\Users\User\Desktop\Gamma\src\application\portfolio_service.py
+- C:\Users\User\Desktop\Gamma\src\application\research_service.py
+- C:\Users\User\Desktop\Gamma\src\application\risk_service.py
+- C:\Users\User\Desktop\Gamma\src\services\data_providers.py
+- C:\Users\User\Desktop\Gamma\frontend\scripts\run-tauri.mjs
+- C:\Users\User\Desktop\Gamma\tests\test_api.py
+- C:\Users\User\Desktop\Gamma\tests\test_risk_tab_logic.py
+- C:\Users\User\Desktop\Gamma\tests\test_research_service.py
 
 Be incremental. Prefer additive model changes, compatibility shims, and test-backed refactors.
 ```

@@ -10,7 +10,13 @@ import pandas as pd
 from src.application.instrument_identity import identity_for_position
 from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot
-from src.services.data_providers import PortfolioDataProvider, contract_for_instrument, contract_for_position
+from src.services.data_providers import (
+    PortfolioDataProvider,
+    contract_for_instrument,
+    contract_for_position,
+    convert_history_to_base_currency,
+    normalize_snapshot_price_histories,
+)
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
@@ -123,10 +129,19 @@ class PortfolioService:
     def compute_performance(self, request: PortfolioPerformanceRequest) -> PortfolioPerformanceResult:
         snapshot = request.snapshot
         warnings: list[str] = []
-        prices, missing = self._load_prices(snapshot, request.lookback_days)
-        day_pnl, day_pnl_pct, day_pnl_source, pnl_warning = self.estimate_day_pnl_from_history(snapshot, prices)
+        raw_prices, missing = self._load_prices(snapshot, request.lookback_days)
+        day_pnl, day_pnl_pct, day_pnl_source, pnl_warning = self.estimate_day_pnl_from_history(snapshot, raw_prices)
         if pnl_warning:
             warnings.append(pnl_warning)
+        normalized_prices = normalize_snapshot_price_histories(
+            snapshot,
+            raw_prices,
+            request.lookback_days,
+            self.market_data,
+            fx_service=self.fx_service,
+        )
+        prices = normalized_prices.prices
+        warnings.extend(normalized_prices.warnings)
         warnings.extend(self.market_data.drain_errors())
         if missing:
             warnings.append(f"Missing history for: {', '.join(missing)}")
@@ -271,12 +286,11 @@ class PortfolioService:
             return pd.Series(dtype=float), "none", warnings
 
         symbol = str(benchmark_symbol or "").strip().upper() or "SPY"
+        benchmark_instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
         if self.client.mock and self.mock_service is not None:
             series = self.mock_service.load_history(symbol)
         else:
-            contract = contract_for_instrument(
-                InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
-            )
+            contract = contract_for_instrument(benchmark_instrument)
             series = self.market_data.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             warnings.append(f"No benchmark data for {symbol}; using Cash (0%) benchmark")
@@ -284,10 +298,12 @@ class PortfolioService:
 
         converted = self.convert_series_to_base(
             series.astype(float),
-            quote_ccy="USD",
+            quote_ccy=benchmark_instrument.currency,
             base_ccy=snapshot.base_currency,
             lookback_days=lookback_days,
             warnings=warnings,
+            label=symbol,
+            context="Benchmark",
         )
         if converted is None or converted.empty:
             warnings.append(f"Benchmark conversion failed for {symbol}; using Cash (0%) benchmark")
@@ -314,24 +330,22 @@ class PortfolioService:
         base_ccy: str,
         lookback_days: int,
         warnings: list[str],
+        *,
+        label: str = "series",
+        context: str = "Series",
     ) -> pd.Series | None:
-        quote = str(quote_ccy or "").upper()
-        base = str(base_ccy or "").upper()
-        if quote == base:
-            return series
-        fx_series = self.market_data.fetch_fx_history(base, quote, lookback_days)
-        if fx_series is not None and not fx_series.empty:
-            aligned = fx_series.reindex(series.index).ffill().dropna()
-            if not aligned.empty:
-                common_index = series.index.intersection(aligned.index)
-                if not common_index.empty:
-                    return series.reindex(common_index) * aligned.reindex(common_index)
-        rate = self.fx_service.get_rate(base, quote)
-        if rate is None:
-            warnings.append(f"FX unavailable for benchmark conversion {quote}->{base}")
-            return None
-        warnings.append(f"Benchmark FX conversion {quote}->{base} uses latest spot rate")
-        return series * float(rate)
+        result = convert_history_to_base_currency(
+            series,
+            quote_ccy,
+            base_ccy,
+            lookback_days,
+            self.market_data,
+            fx_service=self.fx_service,
+            label=label,
+            context=context,
+        )
+        warnings.extend(result.warnings)
+        return result.series
 
     def estimate_day_pnl_from_history(
         self,

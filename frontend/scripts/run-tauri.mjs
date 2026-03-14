@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { ensureCargoTargetDir } from "./tauri-target-dir.mjs";
 
 const [, , ...args] = process.argv;
 
@@ -24,8 +25,7 @@ if (args[0] === "build" && env.GAMMA_SKIP_BACKEND_PACKAGE !== "true") {
   }
 }
 if (!env.CARGO_TARGET_DIR) {
-  const targetSuffix = args[0] === "build" ? "build" : "dev";
-  env.CARGO_TARGET_DIR = path.join(os.tmpdir(), `gamma-tauri-${targetSuffix}`);
+  ensureCargoTargetDir(env, args[0] === "build" ? "build" : "dev");
 }
 
 const child =

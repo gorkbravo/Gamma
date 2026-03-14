@@ -37,6 +37,12 @@ def test_health_and_system_status_endpoints(tmp_path):
         assert payload["base_currency"] == runtime.base_currency
         assert mode_change.status_code == 200
         assert mode_change.json()["market_data_mode"] == "live"
+        next_currency = "EUR" if runtime.base_currency != "EUR" else "USD"
+        base_currency_change = client.post("/system/base-currency", json={"base_currency": next_currency})
+        assert base_currency_change.status_code == 200
+        base_currency_payload = base_currency_change.json()
+        assert base_currency_payload["base_currency"] == next_currency
+        assert any("Local portfolio history was cleared" in line for line in base_currency_payload["lines"])
         assert connection_toggle.status_code == 200
         assert connection_toggle.json()["connection"]["status_text"] == "Status: Mock"
     finally:

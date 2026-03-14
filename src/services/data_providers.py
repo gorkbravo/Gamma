@@ -16,6 +16,7 @@ from src.models.instruments import (
 )
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.services.ibkr_client import IBKRClient
+from src.services.fx import FXService
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.services.research_cache import ResearchHistoryCache
@@ -69,6 +70,129 @@ class ResearchScopeContext(Protocol):
     research_scope_type: ResearchScopeType
     primary_symbol: str
     synthetic_positions: List[SyntheticPosition]
+
+
+@dataclass
+class BaseCurrencyHistoryResult:
+    series: pd.Series | None
+    warnings: List[str] = field(default_factory=list)
+    failure_reason: str | None = None
+
+
+@dataclass
+class NormalizedSnapshotPrices:
+    prices: Dict[str, pd.Series] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    excluded_assets: Dict[str, str] = field(default_factory=dict)
+
+
+def convert_history_to_base_currency(
+    series: pd.Series,
+    quote_currency: str | None,
+    base_currency: str | None,
+    lookback_days: int,
+    market_data: MarketDataService,
+    *,
+    fx_service: FXService | None = None,
+    spot_rate_override: float | None = None,
+    label: str,
+    context: str,
+) -> BaseCurrencyHistoryResult:
+    clean_series = pd.to_numeric(series, errors="coerce").dropna()
+    if clean_series.empty:
+        return BaseCurrencyHistoryResult(
+            series=pd.Series(dtype=float),
+            failure_reason=f"{context} history is empty after cleaning",
+        )
+
+    quote = str(quote_currency or "").strip().upper()
+    base = str(base_currency or "").strip().upper()
+    if not quote or not base or quote == base:
+        return BaseCurrencyHistoryResult(series=clean_series.astype(float))
+
+    fx_series = market_data.fetch_fx_history(base, quote, lookback_days)
+    if fx_series is not None and not fx_series.empty:
+        clean_fx = pd.to_numeric(fx_series, errors="coerce").dropna()
+        common_index = clean_series.index.intersection(clean_fx.index)
+        if common_index.empty:
+            reason = f"No overlapping FX history for {quote}->{base}"
+            return BaseCurrencyHistoryResult(
+                series=pd.Series(dtype=float),
+                warnings=[f"{context} {label} {reason}"],
+                failure_reason=reason,
+            )
+        converted = clean_series.reindex(common_index).astype(float) * clean_fx.reindex(common_index).astype(float)
+        converted = converted.dropna()
+        if converted.empty:
+            reason = f"No base-currency history for {quote}->{base}"
+            return BaseCurrencyHistoryResult(
+                series=pd.Series(dtype=float),
+                warnings=[f"{context} {label} {reason}"],
+                failure_reason=reason,
+            )
+        return BaseCurrencyHistoryResult(series=converted.astype(float))
+
+    fx_rate = market_data.fetch_fx_rate(base, quote)
+    if fx_rate is None and spot_rate_override is not None:
+        fx_rate = float(spot_rate_override)
+    if fx_rate is None and fx_service is not None:
+        fx_rate = fx_service.get_rate(base, quote)
+    if fx_rate is None:
+        reason = f"FX unavailable for {quote}->{base}"
+        return BaseCurrencyHistoryResult(
+            series=None,
+            warnings=[f"{context} {label} {reason} conversion"],
+            failure_reason=reason,
+        )
+    return BaseCurrencyHistoryResult(
+        series=clean_series.astype(float) * float(fx_rate),
+        warnings=[f"{context} {label} FX conversion {quote}->{base} uses spot rate fallback"],
+    )
+
+
+def normalize_snapshot_price_histories(
+    snapshot: PortfolioSnapshot,
+    prices: Dict[str, pd.Series],
+    lookback_days: int,
+    market_data: MarketDataService,
+    *,
+    fx_service: FXService | None = None,
+) -> NormalizedSnapshotPrices:
+    normalized = NormalizedSnapshotPrices()
+    positions_by_id = {position.resolved_instrument_id(): position for position in snapshot.positions}
+    for instrument_id, series in prices.items():
+        position = positions_by_id.get(instrument_id)
+        if position is None:
+            normalized.prices[instrument_id] = pd.to_numeric(series, errors="coerce").dropna().astype(float)
+            continue
+        result = convert_history_to_base_currency(
+            series,
+            position.currency,
+            snapshot.base_currency,
+            lookback_days,
+            market_data,
+            fx_service=fx_service,
+            spot_rate_override=_position_spot_fx_rate(position),
+            label=position.resolved_display_symbol(),
+            context="Position",
+        )
+        normalized.warnings.extend(result.warnings)
+        if result.series is None or result.series.empty:
+            normalized.excluded_assets[instrument_id] = result.failure_reason or "Base-currency history unavailable"
+            continue
+        normalized.prices[instrument_id] = result.series.astype(float)
+    return normalized
+
+
+def _position_spot_fx_rate(position: PositionItem) -> float | None:
+    if position.fx_rate is not None:
+        return float(position.fx_rate)
+    if position.market_value is None or position.base_market_value is None:
+        return None
+    market_value = float(position.market_value)
+    if market_value == 0:
+        return None
+    return float(position.base_market_value) / market_value
 
 
 @dataclass
@@ -144,12 +268,34 @@ class ResearchDataProvider:
     def load_symbol_history(self, symbol: str, lookback_days: int) -> pd.Series | None:
         return self.load_instrument_history(InstrumentReference(symbol=symbol), lookback_days)
 
-    def load_benchmark_history(self, symbol: str, lookback_days: int) -> pd.Series | None:
-        return self.load_instrument_history(
-            InstrumentReference(symbol=symbol),
+    def load_benchmark_history(
+        self,
+        symbol: str,
+        lookback_days: int,
+        *,
+        base_currency: str | None = None,
+        warnings: list[str] | None = None,
+    ) -> pd.Series | None:
+        instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
+        series = self.load_instrument_history(
+            instrument,
             lookback_days,
             defaults=self.benchmark_defaults,
         )
+        if series is None or series.empty or base_currency is None:
+            return series
+        result = convert_history_to_base_currency(
+            series.astype(float),
+            instrument.currency,
+            base_currency,
+            lookback_days,
+            self.market_data,
+            label=instrument.normalized_display_symbol(),
+            context="Benchmark",
+        )
+        if warnings is not None:
+            warnings.extend(result.warnings)
+        return result.series
 
     def load_instrument_history(
         self,

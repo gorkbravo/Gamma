@@ -2,6 +2,7 @@ import { get, writable } from "svelte/store";
 import { getJson, postJson } from "../api/client";
 import type {
   ActionResponse,
+  BaseCurrencyResponse,
   DiagnosticsResponse,
   IvSessionStatus,
   IvSurface,
@@ -188,6 +189,45 @@ export async function setMarketDataMode(mode: string) {
     lastError.set("");
   } catch (error) {
     setError(error);
+  } finally {
+    setLoading("status", false);
+  }
+}
+
+export async function setBaseCurrency(currency: string) {
+  setLoading("status", true);
+  try {
+    const previousCurrency = get(systemStatus)?.base_currency ?? null;
+    const response = await postJson<BaseCurrencyResponse>("/system/base-currency", {
+      base_currency: currency
+    });
+    systemStatus.set(response);
+    const currencyChanged = previousCurrency !== response.base_currency;
+    diagnostics.update((current) =>
+      current == null
+        ? current
+        : {
+            ...current,
+            base_currency: response.base_currency,
+            local_history_entries: currencyChanged ? 0 : current.local_history_entries
+          }
+    );
+    if (currencyChanged) {
+      portfolioSnapshot.set(null);
+      portfolioHistory.set({
+        source: "local_history_store",
+        points: []
+      });
+      portfolioPerformance.set(null);
+      researchResult.set(null);
+      riskResult.set(null);
+    }
+    appendDiagnosticsLog(response.lines, "[Settings]");
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
   } finally {
     setLoading("status", false);
   }

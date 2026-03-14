@@ -5,12 +5,19 @@
   export let workspaceMode: WorkspaceMode = "portfolio";
   export let busy = false;
   export let onToggleConnection: () => void;
+  export let onBaseCurrencyChange: (currency: string) => void;
   export let onMarketDataModeChange: (mode: string) => void;
   export let onRefresh: () => void;
   export let onChangeView: () => void;
 
+  const baseCurrencyOptions = ["USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD"];
+  let selectedBaseCurrency = status?.base_currency ?? "USD";
   let selectedMarketDataMode = status?.market_data_mode ?? "delayed";
   let workspaceLabel = "Portfolio View";
+
+  $: if (status?.base_currency) {
+    selectedBaseCurrency = status.base_currency;
+  }
 
   $: if (status?.market_data_mode) {
     selectedMarketDataMode = status.market_data_mode;
@@ -46,6 +53,21 @@
             <span class="label">Mode</span>
             <strong>{status?.mock_mode ? "Mock" : "Live"}</strong>
           </div>
+        </div>
+
+        <div class="settings-section field">
+          <span class="label">Base Currency</span>
+          <select
+            bind:value={selectedBaseCurrency}
+            disabled={busy}
+            on:change={() => onBaseCurrencyChange(selectedBaseCurrency)}
+          >
+            {#each baseCurrencyOptions as option}
+              <option value={option}>{option}</option>
+            {/each}
+          </select>
+          <small>Changing base currency clears local portfolio history and recomputes analytics in the selected currency.</small>
+          <small>When historical FX is unavailable, portfolio, research, and risk will show explicit spot-FX fallback warnings.</small>
         </div>
 
         <div class="settings-section field">

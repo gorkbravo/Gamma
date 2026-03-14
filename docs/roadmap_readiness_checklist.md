@@ -8,20 +8,21 @@ Use this document when the question is not "what should Gamma build next?" but "
 
 Read it together with:
 
-- `C:\Users\User\Desktop\StrataLab\roadmap.md`
-- `C:\Users\User\Desktop\StrataLab\README.md`
-- `C:\Users\User\Desktop\StrataLab\migration.md`
-- `C:\Users\User\Desktop\StrataLab\docs\p1_refactor_handoff.md`
+- `C:\Users\User\Desktop\Gamma\roadmap.md`
+- `C:\Users\User\Desktop\Gamma\README.md`
+- `C:\Users\User\Desktop\Gamma\migration.md`
+- `C:\Users\User\Desktop\Gamma\docs\p1_refactor_handoff.md`
 
 ## Current Decision
 
-As of March 13, 2026:
+As of March 14, 2026:
 
 - the migration is largely complete,
 - IV live usability is not a blocker by itself if proper options-market-data subscriptions are not available yet,
-- provider/runtime generalization and risk semantics have now been hardened to roadmap-readiness level,
+- provider/runtime generalization and risk coverage semantics have improved materially,
 - packaged desktop build and installed-workflow validation have both been completed,
-- Gamma is ready to begin roadmap work from this branch, with only accepted deferrals remaining.
+- desktop compile validation is now reproducible from this workspace through a clean-target command and an isolated plain-Cargo target directory,
+- Gamma is ready to begin roadmap expansion from this working tree, with only the accepted non-blockers below still open.
 
 ## Hard Blockers
 
@@ -29,6 +30,15 @@ As of March 13, 2026:
   Evidence to collect:
   - `src/application/runtime.py` and `src/services/data_providers.py` can describe or load instruments without assuming IBKR equities defaults for every new domain
   - new data domains can plug into a provider adapter boundary without parallel app graphs
+
+- [x] Historical analytics are base-currency-correct for mixed-currency books
+  Evidence to collect:
+  - portfolio performance converts non-base-currency position histories before combining them with `base_market_value` weights
+  - research analytics convert non-base-currency constituent histories before combining them with normalized weights
+  - risk analytics include FX effects for non-base-currency instruments instead of applying base-currency exposures to local-currency return series
+  - benchmark conversion uses the resolved benchmark quote currency rather than assuming USD
+  - spot-FX fallback emits warnings when historical FX is unavailable
+  - tests cover at least one mixed-currency portfolio/research/risk path end-to-end
 
 - [x] Risk coverage semantics are trustworthy and test-backed
   Evidence to collect:
@@ -41,6 +51,13 @@ As of March 13, 2026:
   - `npm run tauri:build` completes end-to-end
   - final installer output exists under the expected bundle path
   - installed workflow is smoke-checked, not just backend startup
+
+- [x] Desktop validation commands are reproducible after the repo rename from `StrataLab` to `Gamma`
+  Evidence to collect:
+  - supported compile validation uses `cd frontend && npm run desktop:check`, which isolates `CARGO_TARGET_DIR` into `%TEMP%\gamma-tauri-check`
+  - direct `cargo check --manifest-path frontend\src-tauri\Cargo.toml` also works in the current workspace because `.cargo\config.toml` routes plain Cargo output to the repo-root `target\` tree
+  - operator-facing docs no longer reference `C:\Users\User\Desktop\StrataLab\...` outside explicit historical audit context
+  - stale rename fallout in generated local directories is isolated as disposable ignored build output rather than part of the supported validation contract
 
 - [x] Provenance expectations are defined for new roadmap entities
   Evidence to collect:
@@ -62,20 +79,31 @@ As of March 13, 2026:
 - [x] `.\.venv\Scripts\python.exe -m pytest`
   March 12, 2026 follow-up result: `68 passed`
   March 13, 2026 current result: `69 passed`
+  March 14, 2026 mixed-currency follow-up result: `75 passed`
 
 - [x] `cd frontend && npm run test`
   March 12, 2026 result: `15 passed`
+  March 14, 2026 full-audit result: `16 passed`
 
 - [x] `cd frontend && npm run build`
+  March 14, 2026 full-audit result: passed
+
+- [x] `cd frontend && npm run desktop:check`
+  March 14, 2026 result: passed and isolated desktop compile validation to `%TEMP%\gamma-tauri-check`
 
 - [x] `cargo check --manifest-path frontend\src-tauri\Cargo.toml`
+  March 14, 2026 historical audit result: failed in the local checked-out `frontend\src-tauri\target\` tree because stale generated permissions still referenced `C:\Users\User\Desktop\StrataLab\...`
+  March 14, 2026 post-fix result: passed after `.cargo\config.toml` redirected plain Cargo output to the repo-root `target\` tree
 
 - [x] `cd frontend && npm run backend:smoke`
+  March 14, 2026 result: passed and rebuilt the packaged backend under `frontend\src-tauri\resources\backend\gamma-backend\`
 
 - [x] `cd frontend && npm run desktop:smoke`
+  March 14, 2026 result: passed through the wrapped Tauri dev launcher
 
 - [x] `cd frontend && npm run tauri:build`
   March 12, 2026 follow-up result: passed and produced `C:\Users\User\AppData\Local\Temp\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe`
+  March 14, 2026 full-audit result: passed and rebuilt `C:\Users\User\AppData\Local\Temp\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe`
 
 - [x] Installed NSIS workflow launches successfully
   March 13, 2026 result:
@@ -91,6 +119,11 @@ As of March 13, 2026:
 - [x] Research workspace runs on live-delayed data
 - [x] Research handoff into Risk works
 - [x] IV session mode can eventually produce a live-delayed surface
+- [ ] March 14, 2026 full-audit live IBKR revalidation
+  Current audit note:
+  - `build_runtime(mock_mode=False)` reported `IBKR not connected`
+  - live portfolio snapshot returned zero positions with `Net liquidation unavailable` and `Cash balance unavailable`
+  - this audit therefore revalidated mock/web/desktop behavior only, and relies on the earlier March 13 live evidence for roadmap readiness
 
 - [ ] One-shot `/iv/surface` loads are reliable enough for live use
   Current audit note:
@@ -101,10 +134,10 @@ As of March 13, 2026:
 
 ## Recommended Agent Order
 
-1. Start roadmap implementation from this explicit baseline.
+1. Use `cd frontend && npm run desktop:check` as the reproducible desktop compile-validation path, and treat `frontend\src-tauri\target\` plus `target-check\` as disposable local build output.
 2. Keep IV on maintenance-only status unless shared market-data behavior is being touched.
 3. Preserve the provider-adapter, normalized-schema, cache, and provenance boundaries defined in `roadmap.md`.
-4. Treat longer-session live QA as burn-in follow-up, not as a roadmap-start gate.
+4. Keep mixed-currency analytics on the shared normalization path rather than reintroducing ad hoc local-currency return handling.
 
 ## Evidence Log Template
 
@@ -187,6 +220,125 @@ Verified:
 
 Open blockers:
 - none
+
+Accepted deferrals:
+- IV one-shot live reliability remains maintenance-only and is not a roadmap-start blocker
+- longer-session live QA remains advisable but is not a roadmap-start blocker
+
+Date:
+March 14, 2026
+
+Branch:
+`codex/p1-foundation-refactor`
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest`
+- `cd frontend && npm run test`
+- `cd frontend && npm run build`
+- `cd frontend && npm run desktop:check`
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml`
+- `cd frontend && npm run backend:smoke`
+- `cd frontend && npm run desktop:smoke`
+- `cd frontend && npm run tauri:build`
+- Playwright browser smoke against the mock web stack (`portfolio` render + `risk` compute)
+- live runtime probe via `build_runtime(mock_mode=False)`
+
+Verified:
+- backend tests passed (`75 passed`)
+- frontend tests passed (`16 passed`)
+- frontend production build, packaged backend smoke, wrapped desktop smoke, direct Cargo compile check, clean-target desktop compile check, and full Tauri packaging all passed
+- mock web workflow smoke loaded portfolio data and computed risk successfully through the browser UI
+- warning surfaces remained explicit in the UI for FX spot fallback and missing benchmark history
+
+Open blockers:
+- none
+
+Accepted deferrals:
+- this audit did not revalidate live IBKR because the runtime reported `IBKR not connected`; roadmap readiness still relies on the earlier March 13 live evidence plus the current automated and mock-workflow audit
+- IV one-shot live reliability remains maintenance-only and is not a roadmap-start blocker
+
+Date:
+March 14, 2026
+
+Branch:
+`codex/p1-foundation-refactor`
+
+Commit:
+`75d07d5`
+
+Commands run:
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml`
+- `cd frontend && npm run desktop:check`
+- `cd frontend && npm run desktop:smoke`
+- `cd frontend && npm run build`
+
+Verified:
+- stale ignored Tauri build output under `frontend\src-tauri\target\` and `frontend\src-tauri\target-check\` was the root cause of the rename-era `StrataLab` path failure
+- `frontend\src-tauri\target\` and `target-check\` are disposable local generated artifacts and are not part of the supported validation contract
+- `.cargo\config.toml` now routes plain Cargo output to the repo-root `target\` tree so direct `cargo check` no longer reuses the stale checked-out Tauri target directories
+- supported desktop compile validation now uses `cd frontend && npm run desktop:check`, which isolates `CARGO_TARGET_DIR` to `%TEMP%\gamma-tauri-check`
+- direct plain `cargo check --manifest-path frontend\src-tauri\Cargo.toml` also passes again in the current workspace through the repo-root Cargo target directory
+- operator-facing documentation now points at the supported clean-target command and only mentions `StrataLab` as historical audit context
+
+Open blockers:
+- none
+
+Accepted deferrals:
+- IV one-shot live reliability remains maintenance-only and is not a roadmap-start blocker
+- longer-session live QA remains advisable but is not a roadmap-start blocker
+
+Date:
+March 14, 2026
+
+Branch:
+`codex/p1-foundation-refactor`
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest`
+- `cd frontend && npm run test`
+- `cd frontend && npm run build`
+- `cargo check --manifest-path frontend\src-tauri\Cargo.toml`
+- `$env:CARGO_TARGET_DIR=[System.IO.Path]::GetFullPath((Join-Path $env:TEMP 'gamma-tauri-check-audit')); cargo check --manifest-path frontend\src-tauri\Cargo.toml`
+- `cd frontend && npm run backend:smoke`
+- `cd frontend && npm run desktop:smoke`
+
+Verified:
+- backend tests still pass (`69 passed`)
+- frontend tests still pass (`15 passed`)
+- frontend production build still passes
+- packaged backend smoke still passes
+- wrapped desktop smoke still passes
+- direct `cargo check` is no longer reproducible from the checked-out local target tree after the repo rename
+- operator docs and handoff notes still contained stale `StrataLab` absolute paths before this documentation update
+- portfolio, research, and risk still compute mixed-currency historical analytics from raw local-currency price histories rather than base-currency-normalized return series
+- benchmark conversion in portfolio and risk still assumes a USD-quoted benchmark even when benchmark defaults are configurable
+
+Open blockers:
+- direct desktop compile validation still depends on cleaning or isolating stale local Tauri build artifacts after the repo rename
+
+Accepted deferrals:
+- IV one-shot live reliability remains maintenance-only and is not a roadmap-start blocker
+- longer-session live QA remains advisable but is not a roadmap-start blocker
+
+Date:
+March 14, 2026
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest`
+- `cd frontend && npm run test`
+- `cd frontend && npm run build`
+
+Verified:
+- mixed-currency portfolio, research, and risk analytics now normalize non-base-currency histories into the snapshot base currency before return computation
+- benchmark conversion in portfolio and risk now uses the resolved benchmark quote currency instead of assuming USD
+- spot-FX fallback emits explicit warnings when historical FX is unavailable
+- backend tests now cover mixed-currency portfolio performance, research analysis, risk computation, and non-USD benchmark conversion
+- backend tests passed (`75 passed`)
+- frontend tests still passed (`15 passed`)
+- frontend production build still passed
+
+Open blockers:
+- direct desktop compile validation still depends on cleaning or isolating stale local Tauri build artifacts after the repo rename
 
 Accepted deferrals:
 - IV one-shot live reliability remains maintenance-only and is not a roadmap-start blocker

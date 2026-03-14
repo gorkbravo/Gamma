@@ -12,6 +12,18 @@ from src.models.instruments import build_instrument_id
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 
 
+class _StubMarketData:
+    def __init__(self, fx_history: pd.Series | None = None, fx_rate: float | None = None) -> None:
+        self._fx_history = fx_history
+        self._fx_rate = fx_rate
+
+    def fetch_fx_history(self, base, quote, lookback_days):
+        return self._fx_history
+
+    def fetch_fx_rate(self, base, quote):
+        return self._fx_rate
+
+
 class _StubResearchProvider:
     def __init__(
         self,
@@ -20,12 +32,14 @@ class _StubResearchProvider:
         prices: dict[str, pd.Series] | None = None,
         missing: list[str] | None = None,
         benchmark_history: pd.Series | None = None,
+        market_data: _StubMarketData | None = None,
     ) -> None:
         self._snapshot = snapshot
         self._snapshot_warnings = snapshot_warnings or []
         self._prices = prices or {}
         self._missing = missing or []
         self._benchmark_history = benchmark_history
+        self.market_data = market_data or _StubMarketData()
 
     def build_snapshot_for_scope(self, scope, primary_symbol="", synthetic_positions=None):
         return self._snapshot, list(self._snapshot_warnings)
@@ -36,7 +50,7 @@ class _StubResearchProvider:
     def load_symbol_history(self, symbol, lookback_days):
         return self._benchmark_history
 
-    def load_benchmark_history(self, symbol, lookback_days):
+    def load_benchmark_history(self, symbol, lookback_days, *, base_currency=None, warnings=None):
         return self._benchmark_history
 
 
@@ -178,6 +192,81 @@ def test_research_service_preserves_synthetic_scope_weights_and_snapshot():
     assert result.weights["QQQ"] == 0.4
     assert result.available_symbols == ["SPY", "QQQ"]
     assert result.benchmark_overlap_count == 4
+
+
+def test_research_service_normalizes_mixed_currency_constituent_histories():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    snapshot = PortfolioSnapshot(
+        timestamp=datetime(2026, 3, 1),
+        base_currency="USD",
+        account_summary={},
+        positions=[
+            PositionItem(
+                "USD_ASSET",
+                "STK",
+                "USD",
+                1.0,
+                None,
+                None,
+                50.0,
+                None,
+                weight=0.5,
+                base_market_value=50.0,
+                instrument_id="USD_ASSET",
+                display_symbol="USD_ASSET",
+            ),
+            PositionItem(
+                "EUR_ASSET",
+                "STK",
+                "EUR",
+                1.0,
+                None,
+                None,
+                50.0,
+                None,
+                weight=0.5,
+                base_market_value=50.0,
+                instrument_id="EUR_ASSET",
+                display_symbol="EUR_ASSET",
+            ),
+        ],
+        total_market_value=100.0,
+        total_cash=0.0,
+        net_liquidation=100.0,
+    )
+    prices = {
+        "USD_ASSET": pd.Series([100.0, 100.0, 100.0, 100.0, 100.0, 100.0], index=idx),
+        "EUR_ASSET": pd.Series([100.0, 100.0, 100.0, 100.0, 100.0, 100.0], index=idx),
+    }
+    benchmark_history = pd.Series([300.0, 301.0, 302.0, 303.0, 304.0, 305.0], index=idx)
+    fx_history = pd.Series([1.0, 1.1, 1.2, 1.3, 1.4, 1.5], index=idx)
+    service = ResearchService(
+        _StubResearchProvider(
+            snapshot=snapshot,
+            prices=prices,
+            benchmark_history=benchmark_history,
+            market_data=_StubMarketData(fx_history=fx_history),
+        )
+    )
+
+    result = service.analyze(
+        ResearchAnalysisRequest(
+            scope_type=ResearchScopeType.SYNTHETIC_PORTFOLIO,
+            synthetic_positions=[
+                SyntheticPosition(symbol="USD_ASSET", weight=0.5),
+                SyntheticPosition(symbol="EUR_ASSET", weight=0.5, currency="EUR"),
+            ],
+            benchmark_symbol="SPY",
+            lookback_days=252,
+        )
+    )
+
+    expected_eur_returns = (prices["EUR_ASSET"] * fx_history).pct_change().dropna()
+    expected = expected_eur_returns * 0.5
+
+    pd.testing.assert_series_equal(result.perf, expected, check_names=False)
+    assert result.constituent_total_returns["EUR_ASSET"] == pytest.approx(float((1.0 + expected_eur_returns).prod() - 1.0))
+    assert not any("spot rate" in warning.lower() for warning in result.warnings)
 
 
 def test_research_service_rejects_duplicate_synthetic_symbols():
