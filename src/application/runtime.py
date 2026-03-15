@@ -10,11 +10,13 @@ from dotenv import load_dotenv
 
 from src.application.iv_service import IVService
 from src.application.portfolio_service import PortfolioService
+from src.application.prediction_market_service import PredictionMarketService
 from src.application.research_service import ResearchService
 from src.application.risk_service import RiskService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
+from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
@@ -54,6 +56,7 @@ class ApplicationRuntime:
     research_provider: ResearchDataProvider
     portfolio_service: PortfolioService
     research_service: ResearchService
+    prediction_market_service: PredictionMarketService
     risk_service: RiskService
     iv_service: IVService
     desktop: DesktopRuntimeState | None = None
@@ -183,6 +186,12 @@ def build_runtime(
         benchmark_defaults=benchmark_defaults,
     )
     research_service = ResearchService(research_provider)
+    prediction_market_service = PredictionMarketService(
+        adapters={
+            "polymarket": PolymarketAdapter(cache),
+            "kalshi": KalshiAdapter(cache),
+        }
+    )
     risk_service = RiskService(
         client,
         market_data,
@@ -212,6 +221,7 @@ def build_runtime(
         research_provider=research_provider,
         portfolio_service=portfolio_service,
         research_service=research_service,
+        prediction_market_service=prediction_market_service,
         risk_service=risk_service,
         iv_service=iv_service,
         desktop=desktop,

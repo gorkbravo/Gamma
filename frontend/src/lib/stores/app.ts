@@ -6,9 +6,15 @@ import type {
   DiagnosticsResponse,
   IvSessionStatus,
   IvSurface,
+  PredictionCalibrationSummary,
+  PredictionMarket,
+  PredictionMarketListResponse,
+  PredictionProbabilityHistoryResponse,
+  PredictionWalletSummary,
   PortfolioHistoryResponse,
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
+  RelatedPredictionMarketListResponse,
   ResearchResult,
   RiskResult,
   SystemStatus,
@@ -56,6 +62,23 @@ export interface IvLoadOptions {
   waitSeconds?: number;
 }
 
+export interface PredictionMarketScreenerOptions {
+  query?: string;
+  venues?: string[];
+  status?: "open" | "closed" | "all";
+  forceRefresh?: boolean;
+  category?: string;
+  minVolume?: number;
+  minLiquidity?: number;
+  minOpenInterest?: number;
+  minProbability?: number;
+  maxProbability?: number;
+  maxDaysToResolution?: number;
+  minRepricingAbs?: number;
+  sortBy?: "research_rank" | "volume_desc" | "liquidity_desc" | "open_interest_desc" | "repricing_desc" | "resolution_soon";
+  limit?: number;
+}
+
 export const activeTab = writable<TabId>("portfolio");
 export const systemStatus = writable<SystemStatus | null>(null);
 export const diagnostics = writable<DiagnosticsResponse | null>(null);
@@ -64,6 +87,13 @@ export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
 export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
 export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
+export const predictionMarketScreener = writable<PredictionMarketListResponse | null>(null);
+export const selectedPredictionMarketId = writable<string | null>(null);
+export const predictionMarketDetail = writable<PredictionMarket | null>(null);
+export const predictionMarketHistory = writable<PredictionProbabilityHistoryResponse | null>(null);
+export const predictionMarketWallet = writable<PredictionWalletSummary | null>(null);
+export const predictionMarketRelated = writable<RelatedPredictionMarketListResponse | null>(null);
+export const predictionMarketCalibration = writable<PredictionCalibrationSummary | null>(null);
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -83,6 +113,8 @@ export const loading = writable<Record<string, boolean>>({
   portfolio: false,
   portfolioAction: false,
   research: false,
+  prediction: false,
+  predictionDetail: false,
   risk: false,
   iv: false,
   ivSession: false
@@ -326,6 +358,101 @@ export async function runResearch(options: ResearchRunOptions) {
     setError(error);
   } finally {
     setLoading("research", false);
+  }
+}
+
+export async function loadPredictionMarketScreener(options: PredictionMarketScreenerOptions = {}) {
+  setLoading("prediction", true);
+  try {
+    const response = await postJson<PredictionMarketListResponse>("/prediction-markets/screener", {
+      query: options.query ?? "",
+      venues: options.venues ?? [],
+      status: options.status ?? "open",
+      force_refresh: options.forceRefresh ?? false,
+      category: options.category ?? null,
+      min_volume: options.minVolume ?? null,
+      min_liquidity: options.minLiquidity ?? null,
+      min_open_interest: options.minOpenInterest ?? null,
+      min_probability: options.minProbability ?? null,
+      max_probability: options.maxProbability ?? null,
+      max_days_to_resolution: options.maxDaysToResolution ?? null,
+      min_repricing_abs: options.minRepricingAbs ?? null,
+      sort_by: options.sortBy ?? "research_rank",
+      limit: options.limit ?? 40
+    });
+    predictionMarketScreener.set(response);
+    const currentSelection = get(selectedPredictionMarketId);
+    const selectedStillVisible = response.markets.some((market) => market.market_id === currentSelection);
+    const nextSelection = selectedStillVisible ? currentSelection : (response.markets[0]?.market_id ?? null);
+    if (nextSelection) {
+      await selectPredictionMarket(nextSelection);
+    } else {
+      selectedPredictionMarketId.set(null);
+      predictionMarketDetail.set(null);
+      predictionMarketHistory.set(null);
+      predictionMarketWallet.set(null);
+      predictionMarketRelated.set(null);
+      predictionMarketCalibration.set(null);
+    }
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("prediction", false);
+  }
+}
+
+export async function selectPredictionMarket(marketId: string) {
+  selectedPredictionMarketId.set(marketId);
+  setLoading("predictionDetail", true);
+  try {
+    const [detailResult, historyResult, walletResult, relatedResult, calibrationResult] = await Promise.allSettled([
+      getJson<PredictionMarket>(`/prediction-markets/markets/${marketId}`),
+      getJson<PredictionProbabilityHistoryResponse>(`/prediction-markets/markets/${marketId}/history`),
+      getJson<PredictionWalletSummary>(`/prediction-markets/markets/${marketId}/wallet-summary`),
+      getJson<RelatedPredictionMarketListResponse>(`/prediction-markets/markets/${marketId}/related`),
+      getJson<PredictionCalibrationSummary>(`/prediction-markets/markets/${marketId}/calibration`)
+    ]);
+
+    const errors: unknown[] = [];
+
+    if (detailResult.status === "fulfilled") {
+      predictionMarketDetail.set(detailResult.value);
+    } else {
+      errors.push(detailResult.reason);
+    }
+    if (historyResult.status === "fulfilled") {
+      predictionMarketHistory.set(historyResult.value);
+    } else {
+      errors.push(historyResult.reason);
+    }
+    if (walletResult.status === "fulfilled") {
+      predictionMarketWallet.set(walletResult.value);
+    } else {
+      errors.push(walletResult.reason);
+    }
+    if (relatedResult.status === "fulfilled") {
+      predictionMarketRelated.set(relatedResult.value);
+    } else {
+      errors.push(relatedResult.reason);
+    }
+    if (calibrationResult.status === "fulfilled") {
+      predictionMarketCalibration.set(calibrationResult.value);
+    } else {
+      errors.push(calibrationResult.reason);
+    }
+
+    if (errors.length === 0) {
+      lastError.set("");
+    } else {
+      setError(errors[0]);
+    }
+  } catch (error) {
+    setError(error);
+  } finally {
+    setLoading("predictionDetail", false);
   }
 }
 

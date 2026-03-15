@@ -3,9 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   DiagnosticsResponse,
   IvSessionStatus,
+  PredictionCalibrationSummary,
+  PredictionMarket,
+  PredictionMarketListResponse,
+  PredictionProbabilityHistoryResponse,
+  PredictionWalletSummary,
   PortfolioHistoryResponse,
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
+  RelatedPredictionMarketListResponse,
   ResearchResult,
   RiskResult,
   SystemStatus
@@ -18,10 +24,17 @@ import {
   lastError,
   loadIvSession,
   loadPortfolioSnapshot,
+  loadPredictionMarketScreener,
   loading,
   portfolioHistory,
   portfolioPerformance,
   portfolioSnapshot,
+  predictionMarketCalibration,
+  predictionMarketDetail,
+  predictionMarketHistory,
+  predictionMarketRelated,
+  predictionMarketScreener,
+  predictionMarketWallet,
   researchResult,
   riskResult,
   runResearch,
@@ -39,6 +52,12 @@ describe("app store orchestration", () => {
     portfolioHistory.set(null);
     portfolioPerformance.set(null);
     researchResult.set(null);
+    predictionMarketScreener.set(null);
+    predictionMarketDetail.set(null);
+    predictionMarketHistory.set(null);
+    predictionMarketWallet.set(null);
+    predictionMarketRelated.set(null);
+    predictionMarketCalibration.set(null);
     riskResult.set(null);
     ivSurface.set(null);
     ivSession.set(null);
@@ -50,6 +69,8 @@ describe("app store orchestration", () => {
       portfolio: false,
       portfolioAction: false,
       research: false,
+      prediction: false,
+      predictionDetail: false,
       risk: false,
       iv: false,
       ivSession: false
@@ -379,6 +400,127 @@ describe("app store orchestration", () => {
     expect(get(riskResult)).toBeNull();
   });
 
+  it("loads the prediction screener and selected market bundle together", async () => {
+    const screener: PredictionMarketListResponse = {
+      markets: [makePredictionMarket("polymarket:fed-cut")],
+      venues: [
+        {
+          venue: "polymarket",
+          status: "active",
+          message: "1 research contract surfaced from polymarket.",
+          total_markets: 1,
+          matched_markets: 1,
+          visible_markets: 1,
+          stale_markets: 0,
+          broken_markets: 0,
+          retrieved_at: "2026-03-01T00:05:00Z"
+        }
+      ],
+      warnings: []
+    };
+    const detail: PredictionMarket = makePredictionMarket("polymarket:fed-cut");
+    const history: PredictionProbabilityHistoryResponse = {
+      market_id: "polymarket:fed-cut",
+      points: [
+        {
+          timestamp: "2026-03-01T00:00:00Z",
+          probability: 0.45,
+          volume: 100,
+          open_interest: 50,
+          bid: 0.44,
+          ask: 0.46,
+          spread: 0.02,
+          source_provider: "polymarket",
+          retrieved_at: "2026-03-01T00:05:00Z",
+          origin: "polymarket.history",
+          transformation_note: null
+        }
+      ]
+    };
+    const wallet: PredictionWalletSummary = {
+      market_id: "polymarket:fed-cut",
+      venue: "polymarket",
+      concentration_hhi: 0.4,
+      top_participant_share: 0.55,
+      total_trades: 4,
+      total_notional: 2500,
+      participants: [
+        {
+          participant_id: "wallet-1",
+          display_name: "Desk One",
+          venue: "polymarket",
+          side: "buy",
+          outcome_label: "Yes",
+          trade_count: 4,
+          total_size: 300,
+          average_price: 0.48,
+          first_seen: "2026-03-01T00:00:00Z",
+          last_seen: "2026-03-01T04:00:00Z",
+          current_edge: 0.03,
+          source_provider: "polymarket",
+          retrieved_at: "2026-03-01T04:00:00Z",
+          origin: "polymarket.wallets",
+          transformation_note: null
+        }
+      ],
+      warnings: [],
+      source_provider: "polymarket",
+      retrieved_at: "2026-03-01T04:00:00Z",
+      origin: "polymarket.wallets",
+      transformation_note: null
+    };
+    const related: RelatedPredictionMarketListResponse = {
+      market_id: "polymarket:fed-cut",
+      related: [
+        {
+          market_id: "kalshi:fed-cut",
+          venue: "kalshi",
+          title: "Will the Fed cut rates in March?",
+          probability: 0.49,
+          price_gap: 0.03,
+          relationship: "cross_venue_similarity",
+          note: "Cross-venue lexical similarity score 0.72.",
+          source_provider: "kalshi",
+          retrieved_at: "2026-03-01T05:00:00Z",
+          origin: "prediction_market_service.cross_venue_similarity",
+          transformation_note: null
+        }
+      ]
+    };
+    const calibration: PredictionCalibrationSummary = {
+      venue: "polymarket",
+      sample_size: 12,
+      buckets: [],
+      observations: [],
+      warnings: [],
+      source_provider: "polymarket",
+      retrieved_at: "2026-03-01T05:00:00Z",
+      origin: "polymarket.calibration",
+      transformation_note: "Calibration uses last traded probabilities as a proxy."
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(ok(screener))
+        .mockResolvedValueOnce(ok(detail))
+        .mockResolvedValueOnce(ok(history))
+        .mockResolvedValueOnce(ok(wallet))
+        .mockResolvedValueOnce(ok(related))
+        .mockResolvedValueOnce(ok(calibration))
+    );
+
+    await loadPredictionMarketScreener({ query: "fed", venues: ["polymarket"], status: "open", limit: 20 });
+
+    expect(get(predictionMarketScreener)?.markets).toHaveLength(1);
+    expect(get(predictionMarketDetail)?.market_id).toBe("polymarket:fed-cut");
+    expect(get(predictionMarketHistory)?.points[0]?.probability).toBe(0.45);
+    expect(get(predictionMarketWallet)?.participants[0]?.display_name).toBe("Desk One");
+    expect(get(predictionMarketRelated)?.related[0]?.venue).toBe("kalshi");
+    expect(get(predictionMarketCalibration)?.sample_size).toBe(12);
+  });
+
   it("synchronizes diagnostics when market data mode changes", async () => {
     const initialDiagnostics: DiagnosticsResponse = {
       generated_at: "2026-03-01T00:00:00Z",
@@ -705,5 +847,85 @@ function ok(body: unknown) {
     async json() {
       return body;
     }
+  };
+}
+
+function makePredictionMarket(marketId: string): PredictionMarket {
+  return {
+    market_id: marketId,
+    venue: "polymarket",
+    title: "Will the Fed cut rates in March?",
+    subtitle: "50+ bps cut",
+    description: "Fed decision contract",
+    status: "open",
+    category: "Economy",
+    event_id: "polymarket:event:1",
+    event_title: "Fed decision in March?",
+    series_id: "polymarket:series:1",
+    series_title: "FOMC",
+    provider_market_id: "fed-cut",
+    provider_condition_id: "0xabc",
+    provider_event_id: "1",
+    provider_series_id: "series-1",
+    slug: "fed-cut",
+    end_time: "2026-03-18T00:00:00Z",
+    open_time: "2026-03-01T00:00:00Z",
+    close_time: null,
+    current_probability: 0.51,
+    probability_label: "Yes",
+    volume: 100000,
+    volume_24h: 5000,
+    liquidity: 25000,
+    open_interest: 4000,
+    best_bid: 0.5,
+    best_ask: 0.52,
+    spread: 0.02,
+    recent_price_change: 0.03,
+    resolved_probability: null,
+    resolution_outcome: null,
+    image_url: null,
+    resolution_source: "Federal Reserve statement",
+    outcomes: [
+      {
+        outcome_id: `${marketId}:yes`,
+        label: "Yes",
+        probability: 0.51,
+        token_id: "yes-token",
+        resolved: false,
+        winner: null,
+        source_provider: "polymarket",
+        retrieved_at: "2026-03-01T00:05:00Z",
+        origin: "polymarket.seed",
+        transformation_note: null
+      },
+      {
+        outcome_id: `${marketId}:no`,
+        label: "No",
+        probability: 0.49,
+        token_id: "no-token",
+        resolved: false,
+        winner: null,
+        source_provider: "polymarket",
+        retrieved_at: "2026-03-01T00:05:00Z",
+        origin: "polymarket.seed",
+        transformation_note: "Derived as one minus the normalized Yes probability."
+      }
+    ],
+    tags: ["Fed Rates"],
+    freshness: {
+      status: "fresh",
+      is_stale: false,
+      is_broken: false,
+      reason: "Venue metadata is recent and no integrity issue was detected.",
+      last_history_point_at: "2026-03-01T00:00:00Z",
+      retrieval_age_seconds: 300,
+      history_lag_seconds: 300
+    },
+    research_score: 88.5,
+    research_rationale: "Research rank uses relevance 1.00, signal 0.75, recency 1.00, and resolution 0.86.",
+    source_provider: "polymarket",
+    retrieved_at: "2026-03-01T00:05:00Z",
+    origin: "polymarket.seed",
+    transformation_note: "Seed market."
   };
 }

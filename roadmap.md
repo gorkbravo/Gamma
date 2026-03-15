@@ -45,6 +45,16 @@ As Gamma expands, especially into fundamentals and AI-assisted outputs, every di
 - timestamp,
 - transformation logic.
 
+### 6. Research-workspace first
+New roadmap tabs and features should default to the existing research workflow unless there is a strong reason to introduce a different surface.
+
+The intended bias is:
+- keep new roadmap work primarily inside the research view,
+- avoid adding new top-level workspace abstractions unless the existing research flow cannot support the feature cleanly,
+- optimize for comparative analysis, cross-domain investigation, and hypothesis generation rather than separate operating modes.
+
+This applies across the roadmap, including prediction markets, macro, crypto, fundamentals, and AI-assisted research features.
+
 ---
 
 ## Phase 1 - Prediction Markets Tab
