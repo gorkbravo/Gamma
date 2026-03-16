@@ -24,6 +24,7 @@
     color: string;
     type?: "line" | "area";
     lineStyle?: "solid" | "dashed";
+    invertFilledArea?: boolean;
     data: ChartPoint[];
   }
 
@@ -119,8 +120,9 @@
             })
           : chart.addSeries(AreaSeries, {
               lineColor: resolvedColor,
-              topColor: `${resolvedColor}33`,
-              bottomColor: `${resolvedColor}03`,
+              topColor: item.invertFilledArea ? `${resolvedColor}03` : `${resolvedColor}33`,
+              bottomColor: item.invertFilledArea ? `${resolvedColor}33` : `${resolvedColor}03`,
+              invertFilledArea: item.invertFilledArea ?? false,
               lineWidth: 2,
               lastValueVisible: false,
               priceLineVisible: false
@@ -194,6 +196,7 @@
         item.id,
         item.type ?? "area",
         item.lineStyle ?? "solid",
+        item.invertFilledArea ?? false,
         item.data.length,
         item.data.at(0)?.time ?? null,
         item.data.at(-1)?.time ?? null

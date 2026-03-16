@@ -251,6 +251,7 @@
           label: "Drawdown",
           color: "#b65d54",
           type: "area",
+          invertFilledArea: true,
           data: growthPoints.map((point) => {
             peak = Math.max(peak, point.value);
             return {
@@ -637,6 +638,7 @@
     padding: 0.2rem 1rem;
     border-left: 1px solid rgba(46, 60, 74, 0.52);
     background: none;
+    text-align: center;
   }
 
   .metric strong {

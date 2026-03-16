@@ -924,6 +924,7 @@
     border-left: 1px solid rgba(50, 56, 64, 0.52);
     background: none;
     padding: 0.2rem 1rem;
+    text-align: center;
   }
 
   .metric:first-child {

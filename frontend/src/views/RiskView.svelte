@@ -217,6 +217,7 @@
       label: "Drawdown",
       color: "#d1645d",
       type: "area",
+      invertFilledArea: true,
       data: perf.map((point) => {
         cumulative *= 1 + point.value;
         peak = Math.max(peak, cumulative);
@@ -752,6 +753,7 @@
     border-left: 1px solid rgba(46, 60, 74, 0.52);
     background: none;
     min-width: 0;
+    text-align: center;
   }
 
   .metric strong {
