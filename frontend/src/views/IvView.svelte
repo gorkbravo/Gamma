@@ -280,7 +280,7 @@
   input,
   select,
   button {
-    background: #0b1219;
+    background: #0d0f12;
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.75rem 0.85rem;

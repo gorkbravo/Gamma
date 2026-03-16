@@ -106,6 +106,20 @@ export const riskResult = writable<RiskResult | null>(null);
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
 export const lastError = writable<string>("");
+
+export type ChartTheme = "blue" | "amber" | "green";
+export const chartTheme = writable<ChartTheme>("blue");
+
+export function setChartTheme(theme: ChartTheme) {
+  chartTheme.set(theme);
+  if (typeof document !== "undefined") {
+    if (theme === "blue") {
+      document.documentElement.removeAttribute("data-chart-theme");
+    } else {
+      document.documentElement.setAttribute("data-chart-theme", theme);
+    }
+  }
+}
 export const loading = writable<Record<string, boolean>>({
   status: false,
   diagnostics: false,

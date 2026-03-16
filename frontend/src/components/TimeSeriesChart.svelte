@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { chartTheme } from "../lib/stores/app";
   import {
     AreaSeries,
     ColorType,
@@ -38,6 +39,9 @@
   let pendingRecreate = false;
   let pendingFitContent = false;
 
+  let currentTheme = "blue";
+  $: currentTheme = $chartTheme;
+
   function destroyChart() {
     if (refreshHandle) {
       cancelAnimationFrame(refreshHandle);
@@ -59,22 +63,22 @@
       height: measuredHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#8c9dad"
+        textColor: "#8a919a"
       },
       grid: {
-        vertLines: { color: "rgba(42, 56, 70, 0.26)" },
-        horzLines: { color: "rgba(42, 56, 70, 0.26)" }
+        vertLines: { color: "rgba(48, 54, 62, 0.24)" },
+        horzLines: { color: "rgba(48, 54, 62, 0.24)" }
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "rgba(122, 166, 200, 0.3)" },
-        horzLine: { color: "rgba(122, 166, 200, 0.2)" }
+        vertLine: { color: "rgba(140, 145, 154, 0.25)" },
+        horzLine: { color: "rgba(140, 145, 154, 0.18)" }
       },
       rightPriceScale: {
-        borderColor: "rgba(46, 60, 74, 0.58)"
+        borderColor: "rgba(50, 56, 64, 0.55)"
       },
       timeScale: {
-        borderColor: "rgba(46, 60, 74, 0.58)",
+        borderColor: "rgba(50, 56, 64, 0.55)",
         timeVisible: true,
         secondsVisible: false
       },
@@ -94,20 +98,29 @@
     }
     seriesMap = new Map();
 
+    const resolvedPrimary = getComputedStyle(container).getPropertyValue("--chart-primary").trim() || "#7aa6c8";
+    const resolvedSecondary = getComputedStyle(container).getPropertyValue("--chart-secondary").trim() || "#c49a5a";
+    const resolvedNegative = getComputedStyle(container).getPropertyValue("--chart-negative").trim() || "#b65d54";
+
     for (const item of series) {
+      let resolvedColor = item.color;
+      if (item.color === "#7aa6c8") resolvedColor = resolvedPrimary;
+      else if (item.color === "#c49a5a") resolvedColor = resolvedSecondary;
+      else if (item.color === "#b65d54" || item.color === "#d1645d") resolvedColor = resolvedNegative;
+
       const api =
         item.type === "line"
           ? chart.addSeries(LineSeries, {
-              color: item.color,
+              color: resolvedColor,
               lineWidth: 2,
               lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
               lastValueVisible: false,
               priceLineVisible: false
             })
           : chart.addSeries(AreaSeries, {
-              lineColor: item.color,
-              topColor: `${item.color}33`,
-              bottomColor: `${item.color}03`,
+              lineColor: resolvedColor,
+              topColor: `${resolvedColor}33`,
+              bottomColor: `${resolvedColor}03`,
               lineWidth: 2,
               lastValueVisible: false,
               priceLineVisible: false
@@ -187,6 +200,7 @@
       ])
     );
     signature;
+    currentTheme;
     scheduleRefresh({ recreate: true, fitContent: true });
   }
 </script>

@@ -353,12 +353,12 @@
           </article>
           <article class="metric">
             <span>Cash Weight</span>
-            <strong>{pct(bookDiagnostics.cashWeight)}</strong>
+            <strong class:elevated={(bookDiagnostics.cashWeight ?? 0) > 0.25}>{pct(bookDiagnostics.cashWeight)}</strong>
             <small>{sortedPositions.length} visible lines</small>
           </article>
           <article class="metric">
             <span>Stored Return</span>
-            <strong>{pct(historyStats.totalReturn)}</strong>
+            <strong class:positive={(historyStats.totalReturn ?? 0) > 0} class:negative={(historyStats.totalReturn ?? 0) < 0}>{pct(historyStats.totalReturn)}</strong>
             <small>{history?.points.length ?? 0} local history points</small>
           </article>
         </div>
@@ -442,7 +442,7 @@
                     <td>{fmt(position.market_value)} {position.currency}</td>
                     <td>{fmt(position.base_market_value)} {currency}</td>
                     <td>{fmt(position.fx_rate, 4)}</td>
-                    <td>{pct(position.weight)}</td>
+                    <td class:elevated={(position.weight ?? 0) > 0.25}>{pct(position.weight)}</td>
                     <td class:positive={(position.unrealized_pnl ?? 0) > 0} class:negative={(position.unrealized_pnl ?? 0) < 0}>
                       {fmt(position.unrealized_pnl)} {currency}
                     </td>
@@ -600,7 +600,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(9, 14, 20, 0.97), rgba(6, 10, 15, 0.95));
+    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
     padding: 1.05rem;
   }
 
@@ -729,7 +729,7 @@
   select,
   button {
     border: 1px solid var(--panel-strong);
-    background: #0b1219;
+    background: #0d0f12;
     color: var(--text-0);
     padding: 0.68rem 0.78rem;
     font: inherit;
@@ -870,6 +870,16 @@
 
   .negative {
     color: var(--negative);
+  }
+
+  .elevated {
+    color: var(--data-warm);
+  }
+
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
   }
 
   @media (max-width: 980px) {

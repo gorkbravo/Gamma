@@ -407,7 +407,7 @@
           </article>
           <article class="metric">
             <span>Beta / Corr</span>
-            <strong>{fmt(result?.metrics.beta, 3)} / {fmt(result?.metrics.correlation, 3)}</strong>
+            <strong class:elevated={(result?.metrics.beta ?? 0) > 1.2}>{fmt(result?.metrics.beta, 3)} / {fmt(result?.metrics.correlation, 3)}</strong>
             <small>{result?.metrics.benchmark_overlap_count ?? 0} overlap obs</small>
           </article>
           <article class="metric">
@@ -693,7 +693,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(9, 14, 20, 0.97), rgba(6, 10, 15, 0.95));
+    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
     padding: 1.05rem;
   }
 
@@ -891,7 +891,7 @@
   select,
   button {
     border: 1px solid var(--panel-strong);
-    background: #0b1219;
+    background: #0d0f12;
     color: var(--text-0);
     padding: 0.68rem 0.78rem;
     font: inherit;
@@ -937,6 +937,10 @@
 
   .negative {
     color: var(--negative);
+  }
+
+  .elevated {
+    color: var(--data-warm);
   }
 
   @media (max-width: 1220px) {

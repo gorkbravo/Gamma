@@ -67,8 +67,8 @@
     padding: 1.5rem;
     border: 1px solid rgba(90, 128, 162, 0.24);
     background:
-      radial-gradient(circle at top, rgba(106, 168, 255, 0.16), transparent 48%),
-      rgba(5, 10, 14, 0.92);
+      radial-gradient(circle at top, rgba(138, 145, 154, 0.12), transparent 48%),
+      rgba(8, 10, 12, 0.92);
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
   }
 
@@ -120,7 +120,7 @@
   button {
     width: 100%;
     min-height: 3rem;
-    background: #0b1219;
+    background: #0d0f12;
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.85rem 0.95rem;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SystemStatus, WorkspaceMode } from "../lib/api/types";
+  import { setChartTheme } from "../lib/stores/app";
 
   export let status: SystemStatus | null = null;
   export let workspaceMode: WorkspaceMode = "portfolio";
@@ -24,6 +25,8 @@
   }
 
   $: workspaceLabel = workspaceMode === "portfolio" ? "Portfolio View" : "Research View";
+
+  let selectedChartTheme: string = "blue";
 </script>
 
 <section class="rail">
@@ -82,6 +85,19 @@
             <option value="auto">Auto</option>
           </select>
         </div>
+
+        <div class="settings-section field">
+          <span class="label">Chart Theme</span>
+          <select
+            bind:value={selectedChartTheme}
+            on:change={() => setChartTheme(selectedChartTheme as "blue" | "amber" | "green")}
+          >
+            <option value="blue">Blue (Default)</option>
+            <option value="amber">Amber Phosphor</option>
+            <option value="green">Green Phosphor</option>
+          </select>
+          <small>Changes chart line and area colors across all views.</small>
+        </div>
       </div>
     </details>
   </div>
@@ -126,7 +142,7 @@
   select,
   button,
   .settings-toggle {
-    background: #0b1219;
+    background: #0d0f12;
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.46rem 0.66rem;
