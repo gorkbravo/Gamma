@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -69,7 +69,7 @@ def default_json_fetcher(url: str, params: dict[str, Any] | None = None) -> Any:
             "User-Agent": "Gamma/0.1 prediction-market-research",
         },
     )
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=45) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -426,6 +426,7 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             wallet = str(trade.get("proxyWallet") or "").strip()
             if not wallet:
                 continue
+            trade_side = str(trade.get("side") or "").lower() or "mixed"
             item = participants.setdefault(
                 wallet,
                 {
@@ -436,10 +437,12 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
                     "price_x_size": 0.0,
                     "first_seen": None,
                     "last_seen": None,
-                    "side": str(trade.get("side") or "").lower() or "mixed",
+                    "side": trade_side,
                     "outcome_label": trade.get("outcome"),
                 },
             )
+            if item["side"] != trade_side:
+                item["side"] = "mixed"
             size = _to_float(trade.get("size")) or 0.0
             price = _to_float(trade.get("price"))
             timestamp = _parse_timestamp(trade.get("timestamp"))
@@ -485,23 +488,24 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
                 outcome_label=item.get("outcome_label"),
                 trade_count=int(item["trade_count"]),
                 total_size=float(item["total_size"]),
-                average_price=(
-                    float(item["price_x_size"]) / float(item["total_size"])
-                    if float(item["total_size"]) > 0
-                    else None
-                ),
+                average_price=avg_price,
                 first_seen=item["first_seen"],
                 last_seen=item["last_seen"],
-                current_edge=(
-                    (current_probability - (float(item["price_x_size"]) / float(item["total_size"])))
-                    if current_probability is not None and float(item["total_size"]) > 0
-                    else None
+                current_edge=_signed_trade_edge(
+                    _market_probability_for_outcome(market, item.get("outcome_label"), current_probability),
+                    avg_price,
+                    str(item["side"]),
                 ),
                 source_provider=self.provider,
                 retrieved_at=max(trades_retrieved_at, holders_retrieved_at),
                 origin="polymarket.data.wallet_summary",
             )
             for wallet, item in rows[:10]
+            for avg_price in [
+                float(item["price_x_size"]) / float(item["total_size"])
+                if float(item["total_size"]) > 0
+                else None
+            ]
         ]
         warnings: list[str] = []
         if not participant_rows:
@@ -636,36 +640,67 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         query: str = "",
         category: str | None = None,
     ) -> list[PredictionMarketRecord]:
-        raw_markets: list[dict[str, Any]] = []
+        raw_markets: list[tuple[dict[str, Any], str]] = []
+        event_metadata: dict[str, dict[str, Any]] = {}
         retrieved_at = now_utc()
         statuses = self._status_queries(status)
+        events_limit = min(max(limit, 50), 200)
         for state in statuses:
-            cache_key = self.cache.make_key("prediction_markets", self.provider, "screener", state or "all", str(limit))
+            cache_key = self.cache.make_key("prediction_markets", self.provider, "events_screener", state or "all", str(events_limit))
             payload, response_time = self._fetch_cached_json(
                 cache_key,
-                f"{self._trade_base}/markets",
-                {"limit": max(limit, 1), "status": state} if state else {"limit": max(limit, 1)},
+                f"{self._trade_base}/events",
+                {"limit": events_limit, "status": state, "with_nested_markets": "true"} if state else {"limit": events_limit, "with_nested_markets": "true"},
                 force_refresh=force_refresh,
             )
             retrieved_at = max(retrieved_at, response_time)
-            raw_markets.extend(payload.get("markets", []) if isinstance(payload, dict) else [])
+            for event in (payload.get("events", []) if isinstance(payload, dict) else []):
+                event_ticker = str(event.get("event_ticker") or "").strip()
+                event_meta = {
+                    "event": {
+                        "title": event.get("title"),
+                        "category": event.get("category"),
+                        "series_ticker": event.get("series_ticker"),
+                    }
+                }
+                if event_ticker:
+                    event_metadata[event_ticker] = event_meta
+                for market in event.get("markets", []):
+                    raw_markets.append((market, "kalshi.events_markets"))
+        if status in {"closed", "all"}:
+            historical_markets, historical_retrieved_at = self._list_historical_markets(
+                limit=events_limit,
+                force_refresh=force_refresh,
+            )
+            retrieved_at = max(retrieved_at, historical_retrieved_at)
+            for market in historical_markets:
+                raw_markets.append((market, "kalshi.historical_markets"))
         seen: set[str] = set()
         records: list[PredictionMarketRecord] = []
-        for item in raw_markets:
+        for item, origin in raw_markets:
             ticker = str(item.get("ticker") or "").strip()
             if not ticker or ticker in seen:
                 continue
+            item_event_ticker = str(item.get("event_ticker") or "").strip()
+            event_payload = event_metadata.get(item_event_ticker)
+            if event_payload is None and item_event_ticker:
+                fetched_event_payload = self._get_event_payload(item_event_ticker, force_refresh=force_refresh)
+                if fetched_event_payload is not None:
+                    event_payload, event_retrieved_at = fetched_event_payload
+                    event_metadata[item_event_ticker] = event_payload
+                    retrieved_at = max(retrieved_at, event_retrieved_at)
+            record = self._normalize_market(item, retrieved_at=retrieved_at, origin=origin, event_payload=event_payload)
+            if not _matches_market_status(status, record.status):
+                continue
             seen.add(ticker)
-            records.append(self._normalize_market(item, retrieved_at=retrieved_at, origin="kalshi.markets"))
+            records.append(record)
         return records
 
     def get_market(self, provider_market_id: str) -> PredictionMarketRecord | None:
-        cache_key = self.cache.make_key("prediction_markets", self.provider, "detail", provider_market_id)
-        payload, retrieved_at = self._fetch_cached_json(
-            cache_key,
-            f"{self._trade_base}/markets/{provider_market_id}",
-        )
-        market_payload = payload.get("market") if isinstance(payload, dict) else None
+        market_response = self._fetch_market_payload(provider_market_id)
+        if market_response is None:
+            return None
+        market_payload, retrieved_at = market_response
         if not isinstance(market_payload, dict):
             return None
         event_payload = self._get_event_payload(str(market_payload.get("event_ticker") or "").strip())
@@ -677,40 +712,41 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         )
 
     def get_history(self, market: PredictionMarketRecord) -> list[PredictionProbabilityPoint]:
-        if not market.provider_event_id or not market.provider_series_id:
+        if not market.provider_market_id:
             return []
-        end_time = int((market.close_time or market.end_time or now_utc()).timestamp())
-        start_time = end_time - 7 * 24 * 60 * 60
-        cache_key = self.cache.make_key("prediction_markets", self.provider, "history", market.provider_market_id)
+        start_time, end_time = self._history_window(market)
+        if end_time <= start_time:
+            return []
+        period_interval = self._history_period_interval(start_time, end_time)
+        historical = self._uses_historical_market_data(market)
+        cache_scope = "historical" if historical else "live"
+        cache_key = self.cache.make_key(
+            "prediction_markets",
+            self.provider,
+            "history",
+            cache_scope,
+            market.provider_market_id,
+            str(period_interval),
+            str(start_time),
+            str(end_time),
+        )
+        path = (
+            f"{self._trade_base}/historical/markets/{market.provider_market_id}/candlesticks"
+            if historical
+            else f"{self._trade_base}/series/{market.provider_series_id}/markets/{market.provider_market_id}/candlesticks"
+        )
         payload, retrieved_at = self._fetch_cached_json(
             cache_key,
-            f"{self._trade_base}/series/{market.provider_series_id}/markets/{market.provider_market_id}/candlesticks",
+            path,
             {
-                "period_interval": 60,
+                "period_interval": period_interval,
                 "start_ts": start_time,
                 "end_ts": end_time,
             },
         )
         candles = payload.get("candlesticks", []) if isinstance(payload, dict) else []
-        return [
-            PredictionProbabilityPoint(
-                timestamp=datetime.utcfromtimestamp(int(candle["end_period_ts"])),
-                probability=_to_float((candle.get("price") or {}).get("close_dollars")) or 0.0,
-                volume=_to_float(candle.get("volume_fp")),
-                open_interest=_to_float(candle.get("open_interest_fp")),
-                bid=_to_float((candle.get("yes_bid") or {}).get("close_dollars")),
-                ask=_to_float((candle.get("yes_ask") or {}).get("close_dollars")),
-                spread=_spread(
-                    _to_float((candle.get("yes_bid") or {}).get("close_dollars")),
-                    _to_float((candle.get("yes_ask") or {}).get("close_dollars")),
-                ),
-                source_provider=self.provider,
-                retrieved_at=retrieved_at,
-                origin="kalshi.candlesticks",
-            )
-            for candle in candles
-            if "end_period_ts" in candle
-        ]
+        origin = "kalshi.historical_candlesticks" if historical else "kalshi.candlesticks"
+        return self._normalize_candlesticks(candles, retrieved_at=retrieved_at, origin=origin)
 
     def get_wallet_summary(self, market: PredictionMarketRecord) -> WalletSummary:
         cache_key = self.cache.make_key("prediction_markets", self.provider, "trades", market.provider_market_id)
@@ -816,17 +852,154 @@ class KalshiAdapter(BasePredictionMarketAdapter):
             return ["closed", "settled"]
         return [None]
 
-    def _get_event_payload(self, event_ticker: str) -> tuple[dict[str, Any], datetime] | None:
+    def _get_event_payload(self, event_ticker: str, *, force_refresh: bool = False) -> tuple[dict[str, Any], datetime] | None:
         if not event_ticker:
             return None
         cache_key = self.cache.make_key("prediction_markets", self.provider, "event", event_ticker)
         payload, retrieved_at = self._fetch_cached_json(
             cache_key,
             f"{self._trade_base}/events/{event_ticker}",
+            force_refresh=force_refresh,
         )
         if not isinstance(payload, dict):
             return None
         return payload, retrieved_at
+
+    def _list_historical_markets(
+        self,
+        *,
+        limit: int,
+        force_refresh: bool,
+    ) -> tuple[list[dict[str, Any]], datetime]:
+        target = min(max(limit, 1), 1000)
+        markets: list[dict[str, Any]] = []
+        retrieved_at = now_utc()
+        cursor = ""
+        while len(markets) < target:
+            page_limit = min(target - len(markets), 1000)
+            params: dict[str, Any] = {"limit": page_limit}
+            if cursor:
+                params["cursor"] = cursor
+            cache_key = self.cache.make_key(
+                "prediction_markets",
+                self.provider,
+                "historical_markets",
+                str(page_limit),
+                cursor or "start",
+            )
+            payload, response_time = self._fetch_cached_json(
+                cache_key,
+                f"{self._trade_base}/historical/markets",
+                params,
+                force_refresh=force_refresh,
+            )
+            retrieved_at = max(retrieved_at, response_time)
+            page_rows = payload.get("markets", []) if isinstance(payload, dict) else []
+            if not isinstance(page_rows, list) or not page_rows:
+                break
+            markets.extend(item for item in page_rows if isinstance(item, dict))
+            cursor = str(payload.get("cursor") or "").strip() if isinstance(payload, dict) else ""
+            if not cursor:
+                break
+        return markets[:target], retrieved_at
+
+    def _fetch_market_payload(self, provider_market_id: str) -> tuple[dict[str, Any], datetime] | None:
+        attempts = (
+            ("live", f"{self._trade_base}/markets/{provider_market_id}"),
+            ("historical", f"{self._trade_base}/historical/markets/{provider_market_id}"),
+        )
+        last_error: Exception | None = None
+        for scope, url in attempts:
+            cache_key = self.cache.make_key("prediction_markets", self.provider, "detail", scope, provider_market_id)
+            try:
+                payload, retrieved_at = self._fetch_cached_json(cache_key, url)
+            except Exception as exc:
+                last_error = exc
+                continue
+            market_payload = payload.get("market") if isinstance(payload, dict) else None
+            if isinstance(market_payload, dict):
+                return market_payload, retrieved_at
+        if last_error is not None:
+            raise last_error
+        return None
+
+    def _get_historical_cutoff(self) -> datetime | None:
+        cache_key = self.cache.make_key("prediction_markets", self.provider, "historical_cutoff")
+        payload, _ = self._fetch_cached_json(
+            cache_key,
+            f"{self._trade_base}/historical/cutoff",
+        )
+        if not isinstance(payload, dict):
+            return None
+        return _parse_datetime(payload.get("market_settled_ts"))
+
+    def _uses_historical_market_data(self, market: PredictionMarketRecord) -> bool:
+        if market.status not in {"closed", "resolved"}:
+            return False
+        settled_at = market.close_time or market.end_time
+        if settled_at is None:
+            return False
+        cutoff = self._get_historical_cutoff()
+        if cutoff is None:
+            return False
+        return settled_at < cutoff
+
+    @staticmethod
+    def _history_window(market: PredictionMarketRecord) -> tuple[int, int]:
+        fallback_end = market.close_time or market.end_time or now_utc()
+        start_dt = market.open_time or fallback_end - timedelta(days=30)
+        end_dt = fallback_end
+        start_ts = int(start_dt.timestamp())
+        end_ts = int(end_dt.timestamp())
+        return start_ts, end_ts
+
+    @staticmethod
+    def _history_period_interval(start_ts: int, end_ts: int) -> int:
+        span_seconds = max(end_ts - start_ts, 0)
+        if span_seconds <= 3 * 24 * 60 * 60:
+            return 1
+        if span_seconds <= 180 * 24 * 60 * 60:
+            return 60
+        return 1440
+
+    def _normalize_candlesticks(
+        self,
+        candles: list[dict[str, Any]],
+        *,
+        retrieved_at: datetime,
+        origin: str,
+    ) -> list[PredictionProbabilityPoint]:
+        points: list[PredictionProbabilityPoint] = []
+        for candle in candles:
+            if "end_period_ts" not in candle:
+                continue
+            price = candle.get("price") or {}
+            yes_bid = candle.get("yes_bid") or {}
+            yes_ask = candle.get("yes_ask") or {}
+            probability = _first_float(price.get("close_dollars"), price.get("close"))
+            bid = _first_float(yes_bid.get("close_dollars"), yes_bid.get("close"))
+            ask = _first_float(yes_ask.get("close_dollars"), yes_ask.get("close"))
+            if probability is None:
+                probability = _midpoint(bid, ask)
+            if probability is None:
+                continue
+            points.append(
+                PredictionProbabilityPoint(
+                    timestamp=datetime.utcfromtimestamp(int(candle["end_period_ts"])),
+                    probability=probability,
+                    volume=_first_float(candle.get("volume_fp"), candle.get("volume")),
+                    open_interest=_first_float(candle.get("open_interest_fp"), candle.get("open_interest")),
+                    bid=bid,
+                    ask=ask,
+                    spread=_spread(bid, ask),
+                    source_provider=self.provider,
+                    retrieved_at=retrieved_at,
+                    origin=origin,
+                    transformation_note="Kalshi yes-side dollar prices are treated as implied probabilities for binary contracts.",
+                )
+            )
+        points.sort(key=lambda point: point.timestamp)
+        return points
 
     def _normalize_market(
         self,
@@ -1042,6 +1215,39 @@ def _normalize_kalshi_status(raw_status: Any, resolution_outcome: bool | None) -
     if status:
         return "closed"
     return "inactive"
+
+
+def _matches_market_status(requested_status: str, market_status: str) -> bool:
+    normalized_request = str(requested_status or "open").strip().lower()
+    normalized_status = str(market_status or "").strip().lower()
+    if normalized_request == "all":
+        return True
+    if normalized_request == "closed":
+        return normalized_status in {"closed", "resolved"}
+    if normalized_request == "open":
+        return normalized_status == "open"
+    return normalized_status == normalized_request
+
+
+def _market_probability_for_outcome(
+    market: PredictionMarketRecord,
+    outcome_label: Any,
+    fallback_probability: float | None = None,
+) -> float | None:
+    label = str(outcome_label or "").strip().lower()
+    if label:
+        for outcome in market.outcomes:
+            if str(outcome.label or "").strip().lower() == label:
+                return outcome.probability
+    return fallback_probability
+
+
+def _signed_trade_edge(current_probability: float | None, average_price: float | None, trade_side: str) -> float | None:
+    if current_probability is None or average_price is None:
+        return None
+    if str(trade_side or "").strip().lower() == "sell":
+        return average_price - current_probability
+    return current_probability - average_price
 
 
 def _min_dt(left: datetime | None, right: datetime | None) -> datetime | None:

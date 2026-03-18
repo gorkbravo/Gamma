@@ -6,6 +6,7 @@
     PredictionMarket,
     PredictionMarketListResponse,
     PredictionProbabilityHistoryResponse,
+    PredictionVenueStatus,
     PredictionWalletSummary,
     RelatedPredictionMarketListResponse
   } from "../lib/api/types";
@@ -25,12 +26,26 @@
   let status: "open" | "closed" | "all" = "open";
   let sortBy: "research_rank" | "volume_desc" | "liquidity_desc" | "repricing_desc" | "resolution_soon" = "volume_desc";
   let category = "";
-  let venueSelection: Array<"polymarket" | "kalshi"> = ["polymarket", "kalshi"];
+  type VenueKey = "polymarket" | "kalshi";
+  const allVenues: VenueKey[] = ["polymarket", "kalshi"];
+  let venueSelection: VenueKey[] = [...allVenues];
+  let cachedVenueStatuses: Partial<Record<VenueKey, PredictionVenueStatus>> = {};
   let autoRunHandle: ReturnType<typeof setTimeout> | null = null;
   let autoRunReady = false;
   let lastSubmittedKey = "";
   let currentScreenerKey = "";
   const availableCategories = ["Politics", "Finance", "Geopolitics", "Crypto", "Economy"];
+  const fallbackVenueStatus = (venue: VenueKey): PredictionVenueStatus => ({
+    venue,
+    status: "unknown",
+    message: null,
+    total_markets: 0,
+    matched_markets: 0,
+    visible_markets: 0,
+    stale_markets: 0,
+    broken_markets: 0,
+    retrieved_at: null
+  });
 
   const pct = (value: number | null | undefined, digits = 1) =>
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
@@ -265,6 +280,7 @@
   let hasCalibrationData = false;
   let hasCalibrationWarnings = false;
   let hasWalletRows = false;
+  let venueButtons: PredictionVenueStatus[] = allVenues.map((venue) => fallbackVenueStatus(venue));
 
   $: chartSeries = history?.points?.length
     ? [
@@ -312,6 +328,22 @@
   $: hasCalibrationData = Boolean(calibration?.buckets?.length || calibration?.observations?.length);
   $: hasCalibrationWarnings = Boolean(calibration?.warnings?.length || calibration?.transformation_note);
   $: hasWalletRows = Boolean(wallet?.participants?.length);
+  $: if (screener?.venues?.length) {
+    const nextStatuses = { ...cachedVenueStatuses };
+    let changed = false;
+    for (const venue of screener.venues) {
+      if (venue.venue === "polymarket" || venue.venue === "kalshi") {
+        if (nextStatuses[venue.venue] !== venue) {
+          nextStatuses[venue.venue] = venue;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      cachedVenueStatuses = nextStatuses;
+    }
+  }
+  $: venueButtons = allVenues.map((venue) => cachedVenueStatuses[venue] ?? fallbackVenueStatus(venue));
   $: currentScreenerKey = JSON.stringify({
     query: query.trim(),
     status,
@@ -752,11 +784,11 @@
         </label>
 
         <div class="venue-picker">
-          {#each (screener?.venues ?? [{ venue: "polymarket", status: "unknown", visible_markets: 0, matched_markets: 0 }, { venue: "kalshi", status: "unknown", visible_markets: 0, matched_markets: 0 }]) as venue}
+          {#each venueButtons as venue}
             <button
               type="button"
-              class="{venueSelection.includes(venue.venue as 'polymarket' | 'kalshi') ? 'selected' : ''} {venueSelection.includes(venue.venue as 'polymarket' | 'kalshi') ? venueTone(venue.status) : ''}"
-              on:click={() => toggleVenue(venue.venue as 'polymarket' | 'kalshi')}
+              class="{venueSelection.includes(venue.venue as VenueKey) ? 'selected' : ''} {venueSelection.includes(venue.venue as VenueKey) ? venueTone(venue.status) : ''}"
+              on:click={() => toggleVenue(venue.venue as VenueKey)}
             >
               <strong>{venue.venue === 'polymarket' ? 'PM' : 'KL'}</strong>
               <small>{venue.visible_markets ?? 0} mkts</small>

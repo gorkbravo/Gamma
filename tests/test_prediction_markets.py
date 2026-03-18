@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
@@ -137,39 +138,135 @@ def test_polymarket_adapter_uses_public_search_for_query_and_category_discovery(
     assert not any("/markets|" in key for key in calls)
 
 
+def test_polymarket_wallet_summary_uses_selected_outcome_probability_for_edge(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        if url.endswith("/trades"):
+            return [
+                {
+                    "proxyWallet": "0xwallet-no",
+                    "name": "No Desk",
+                    "side": "buy",
+                    "outcome": "No",
+                    "size": "100",
+                    "price": "0.97",
+                    "timestamp": 1_710_000_000,
+                }
+            ]
+        if url.endswith("/holders"):
+            return []
+        return []
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    market = PredictionMarketRecord(
+        market_id="polymarket:test-no-edge",
+        venue="polymarket",
+        title="Will X happen?",
+        subtitle=None,
+        description=None,
+        status="open",
+        category="Politics",
+        event_id="polymarket:event:test",
+        event_title="Will X happen?",
+        series_id=None,
+        series_title=None,
+        provider_market_id="test-no-edge",
+        provider_condition_id="condition-1",
+        provider_event_id="event-1",
+        provider_series_id=None,
+        slug="test-no-edge",
+        end_time=datetime(2026, 3, 31, 0, 0, 0),
+        open_time=datetime(2026, 3, 1, 0, 0, 0),
+        close_time=None,
+        current_probability=0.02,
+        probability_label="Yes",
+        volume=1000.0,
+        volume_24h=50.0,
+        liquidity=500.0,
+        open_interest=200.0,
+        best_bid=0.02,
+        best_ask=0.03,
+        spread=0.01,
+        recent_price_change=0.0,
+        resolved_probability=None,
+        resolution_outcome=None,
+        image_url=None,
+        resolution_source=None,
+        outcomes=[
+            PredictionMarketOutcome(outcome_id="yes", label="Yes", probability=0.02),
+            PredictionMarketOutcome(outcome_id="no", label="No", probability=0.98),
+        ],
+        tags=["Politics"],
+        source_provider="polymarket",
+        retrieved_at=datetime(2026, 3, 18, 17, 0, 0),
+        origin="test",
+    )
+
+    wallet = adapter.get_wallet_summary(market)
+
+    assert len(wallet.participants) == 1
+    assert wallet.participants[0].outcome_label == "No"
+    assert wallet.participants[0].current_edge == pytest.approx(0.01)
+
+
 def test_kalshi_adapter_normalizes_closed_markets_and_flow_summary(tmp_path):
     calls: defaultdict[str, int] = defaultdict(int)
 
     def fake_fetch(url: str, params: dict | None = None):
         key = f"{url}|{params}"
         calls[key] += 1
-        if url.endswith("/markets") and params == {"limit": 40, "status": "closed"}:
+        if url.endswith("/events") and params == {"limit": 50, "status": "closed", "with_nested_markets": "true"}:
             return {
-                "markets": [
+                "events": [
                     {
-                        "ticker": "KXTEST-YES",
                         "event_ticker": "KXEVENT-1",
                         "title": "Will X happen?",
-                        "yes_sub_title": "Yes",
-                        "status": "determined",
-                        "result": "yes",
-                        "last_price_dollars": "0.83",
-                        "previous_price_dollars": "0.80",
-                        "yes_bid_dollars": "0.82",
-                        "yes_ask_dollars": "0.84",
-                        "volume_fp": "1200",
-                        "volume_24h_fp": "400",
-                        "liquidity_dollars": "2500",
-                        "open_interest_fp": "600",
-                        "expiration_time": "2026-03-15T00:00:00Z",
-                        "close_time": "2026-03-14T23:00:00Z",
-                        "open_time": "2026-03-10T00:00:00Z",
-                        "rules_primary": "Primary rules",
+                        "category": "Politics",
+                        "series_ticker": "KXSERIES",
+                        "markets": [
+                            {
+                                "ticker": "KXTEST-YES",
+                                "event_ticker": "KXEVENT-1",
+                                "title": "Will X happen?",
+                                "yes_sub_title": "Yes",
+                                "status": "determined",
+                                "result": "yes",
+                                "last_price_dollars": "0.83",
+                                "previous_price_dollars": "0.80",
+                                "yes_bid_dollars": "0.82",
+                                "yes_ask_dollars": "0.84",
+                                "volume_fp": "1200",
+                                "volume_24h_fp": "400",
+                                "liquidity_dollars": "2500",
+                                "open_interest_fp": "600",
+                                "expiration_time": "2026-03-15T00:00:00Z",
+                                "close_time": "2026-03-14T23:00:00Z",
+                                "open_time": "2026-03-10T00:00:00Z",
+                                "rules_primary": "Primary rules",
+                            },
+                            {
+                                "ticker": "KXOPEN-YES",
+                                "event_ticker": "KXEVENT-1",
+                                "title": "Still open",
+                                "yes_sub_title": "Yes",
+                                "status": "active",
+                                "last_price_dollars": "0.40",
+                                "yes_bid_dollars": "0.39",
+                                "yes_ask_dollars": "0.41",
+                                "volume_fp": "200",
+                                "volume_24h_fp": "25",
+                                "liquidity_dollars": "500",
+                                "open_interest_fp": "150",
+                                "expiration_time": "2026-04-15T00:00:00Z",
+                                "close_time": "2026-04-14T23:00:00Z",
+                                "open_time": "2026-03-10T00:00:00Z",
+                                "rules_primary": "Secondary rules",
+                            },
+                        ],
                     }
                 ]
             }
-        if url.endswith("/markets") and params == {"limit": 40, "status": "settled"}:
-            return {"markets": []}
+        if url.endswith("/events") and params == {"limit": 50, "status": "settled", "with_nested_markets": "true"}:
+            return {"events": []}
         if url.endswith("/markets/trades"):
             return {
                 "trades": [
@@ -194,6 +291,245 @@ def test_kalshi_adapter_normalizes_closed_markets_and_flow_summary(tmp_path):
     assert wallet.transformation_note is not None
     assert {row.participant_id for row in wallet.participants} == {"kalshi:flow:yes", "kalshi:flow:no"}
     assert wallet.total_trades == 3
+
+
+def test_kalshi_adapter_closed_discovery_merges_archived_historical_markets(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        if url.endswith("/events") and params == {"limit": 50, "status": "closed", "with_nested_markets": "true"}:
+            return {
+                "events": [
+                    {
+                        "event_ticker": "KXEVENT-RECENT",
+                        "title": "Will Congress pass the bill?",
+                        "category": "Politics",
+                        "series_ticker": "KXPOL",
+                        "markets": [
+                            {
+                                "ticker": "KXRECENT-YES",
+                                "event_ticker": "KXEVENT-RECENT",
+                                "title": "Will Congress pass the bill?",
+                                "yes_sub_title": "Yes",
+                                "status": "determined",
+                                "result": "yes",
+                                "last_price_dollars": "0.74",
+                                "previous_price_dollars": "0.70",
+                                "yes_bid_dollars": "0.73",
+                                "yes_ask_dollars": "0.75",
+                                "volume_fp": "500",
+                                "volume_24h_fp": "0",
+                                "liquidity_dollars": "0",
+                                "open_interest_fp": "0",
+                                "expiration_time": "2026-03-10T00:00:00Z",
+                                "close_time": "2026-03-09T23:00:00Z",
+                                "open_time": "2026-03-01T00:00:00Z",
+                                "rules_primary": "Recent rules",
+                            }
+                        ],
+                    }
+                ]
+            }
+        if url.endswith("/events") and params == {"limit": 50, "status": "settled", "with_nested_markets": "true"}:
+            return {"events": []}
+        if url.endswith("/historical/markets") and params == {"limit": 50}:
+            return {
+                "markets": [
+                    {
+                        "ticker": "KXARCHIVE-YES",
+                        "event_ticker": "KXEVENT-ARCHIVE",
+                        "title": "Will the Fed cut rates by June?",
+                        "yes_sub_title": "Yes",
+                        "status": "determined",
+                        "result": "no",
+                        "last_price_dollars": "0.12",
+                        "previous_price_dollars": "0.15",
+                        "yes_bid_dollars": "0.11",
+                        "yes_ask_dollars": "0.13",
+                        "volume_fp": "900",
+                        "volume_24h_fp": "0",
+                        "liquidity_dollars": "0",
+                        "open_interest_fp": "0",
+                        "expiration_time": "2025-06-30T00:00:00Z",
+                        "close_time": "2025-06-29T23:00:00Z",
+                        "open_time": "2025-05-01T00:00:00Z",
+                        "rules_primary": "Archived rules",
+                    }
+                ],
+                "cursor": "",
+            }
+        if url.endswith("/events/KXEVENT-ARCHIVE"):
+            return {
+                "event": {
+                    "title": "Fed June decision",
+                    "category": "Economy",
+                    "series_ticker": "KXMACRO",
+                },
+                "markets": [],
+            }
+        if url.endswith("/events/KXEVENT-RECENT"):
+            return {
+                "event": {
+                    "title": "Will Congress pass the bill?",
+                    "category": "Politics",
+                    "series_ticker": "KXPOL",
+                },
+                "markets": [],
+            }
+        raise AssertionError(f"Unexpected request: {url} {params}")
+
+    adapter = KalshiAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+
+    markets = adapter.list_markets(status="closed", limit=40)
+
+    assert {market.market_id for market in markets} == {"kalshi:KXRECENT-YES", "kalshi:KXARCHIVE-YES"}
+    archived = next(market for market in markets if market.market_id == "kalshi:KXARCHIVE-YES")
+    assert archived.category == "Economy"
+    assert archived.event_title == "Fed June decision"
+    assert archived.series_id == "kalshi:series:KXMACRO"
+    assert archived.resolution_outcome is False
+
+
+def test_kalshi_adapter_uses_historical_endpoint_for_archived_market_history(tmp_path):
+    calls: list[tuple[str, dict | None]] = []
+
+    def fake_fetch(url: str, params: dict | None = None):
+        calls.append((url, params))
+        if url.endswith("/historical/cutoff"):
+            return {"market_settled_ts": "2026-01-01T00:00:00Z"}
+        if url.endswith("/historical/markets/KXOLD-YES/candlesticks"):
+            assert params == {
+                "period_interval": 60,
+                "start_ts": int(datetime(2025, 12, 20, 0, 0, 0).timestamp()),
+                "end_ts": int(datetime(2025, 12, 31, 23, 0, 0).timestamp()),
+            }
+            return {
+                "ticker": "KXOLD-YES",
+                "candlesticks": [
+                    {
+                        "end_period_ts": int(datetime(2025, 12, 30, 22, 0, 0).timestamp()),
+                        "yes_bid": {"close": "0.41"},
+                        "yes_ask": {"close": "0.43"},
+                        "price": {"close": "0.42"},
+                        "volume": "25.00",
+                        "open_interest": "100.00",
+                    },
+                    {
+                        "end_period_ts": int(datetime(2025, 12, 31, 23, 0, 0).timestamp()),
+                        "yes_bid": {"close": "0.58"},
+                        "yes_ask": {"close": "0.60"},
+                        "price": {"close": "0.59"},
+                        "volume": "40.00",
+                        "open_interest": "150.00",
+                    },
+                ],
+            }
+        raise AssertionError(f"Unexpected request: {url} {params}")
+
+    adapter = KalshiAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    market = PredictionMarketRecord(
+        market_id="kalshi:KXOLD-YES",
+        venue="kalshi",
+        title="Will X happen?",
+        subtitle=None,
+        description=None,
+        status="resolved",
+        category="Politics",
+        event_id="kalshi:event:KXEVENT-1",
+        event_title="Will X happen?",
+        series_id="kalshi:series:KXSERIES",
+        series_title="KXSERIES",
+        provider_market_id="KXOLD-YES",
+        provider_condition_id=None,
+        provider_event_id="KXEVENT-1",
+        provider_series_id="KXSERIES",
+        slug="KXOLD-YES",
+        end_time=datetime(2025, 12, 31, 23, 0, 0),
+        open_time=datetime(2025, 12, 20, 0, 0, 0),
+        close_time=datetime(2025, 12, 31, 23, 0, 0),
+        current_probability=0.59,
+        probability_label="Yes",
+        volume=500.0,
+        volume_24h=0.0,
+        liquidity=100.0,
+        open_interest=150.0,
+        best_bid=0.58,
+        best_ask=0.60,
+        spread=0.02,
+        recent_price_change=0.01,
+        resolved_probability=1.0,
+        resolution_outcome=True,
+        image_url=None,
+        resolution_source=None,
+        outcomes=[],
+        tags=["Politics"],
+        source_provider="kalshi",
+        retrieved_at=datetime(2026, 3, 18, 18, 0, 0),
+        origin="test",
+    )
+
+    history = adapter.get_history(market)
+
+    assert [point.probability for point in history] == [0.42, 0.59]
+    assert history[0].volume == 25.0
+    assert history[0].open_interest == 100.0
+    assert history[0].spread == pytest.approx(0.02)
+    assert all(point.origin == "kalshi.historical_candlesticks" for point in history)
+    assert any(url.endswith("/historical/cutoff") for url, _ in calls)
+    assert any(url.endswith("/historical/markets/KXOLD-YES/candlesticks") for url, _ in calls)
+    assert not any(url.endswith("/series/KXSERIES/markets/KXOLD-YES/candlesticks") for url, _ in calls)
+
+
+def test_kalshi_adapter_falls_back_to_historical_market_detail(tmp_path):
+    calls: list[str] = []
+
+    def fake_fetch(url: str, params: dict | None = None):
+        calls.append(url)
+        if url.endswith("/historical/markets/KXOLD-YES"):
+            return {
+                "market": {
+                    "ticker": "KXOLD-YES",
+                    "event_ticker": "KXEVENT-1",
+                    "title": "Will X happen?",
+                    "yes_sub_title": "Yes",
+                    "status": "determined",
+                    "result": "yes",
+                    "last_price_dollars": "0.91",
+                    "yes_bid_dollars": "0.90",
+                    "yes_ask_dollars": "0.92",
+                    "volume_fp": "1200",
+                    "volume_24h_fp": "0",
+                    "liquidity_dollars": "0",
+                    "open_interest_fp": "0",
+                    "expiration_time": "2025-12-31T23:00:00Z",
+                    "close_time": "2025-12-31T23:00:00Z",
+                    "open_time": "2025-12-20T00:00:00Z",
+                    "rules_primary": "Primary rules",
+                }
+            }
+        if url.endswith("/markets/KXOLD-YES"):
+            raise RuntimeError("live market not found")
+        if url.endswith("/events/KXEVENT-1"):
+            return {
+                "event": {
+                    "title": "Will X happen?",
+                    "category": "Politics",
+                    "series_ticker": "KXSERIES",
+                },
+                "markets": [],
+            }
+        raise AssertionError(f"Unexpected request: {url} {params}")
+
+    adapter = KalshiAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+
+    market = adapter.get_market("KXOLD-YES")
+
+    assert market is not None
+    assert market.market_id == "kalshi:KXOLD-YES"
+    assert market.status == "resolved"
+    assert market.current_probability == 0.91
+    assert market.category == "Politics"
+    assert market.provider_series_id == "KXSERIES"
+    assert calls[0].endswith("/markets/KXOLD-YES")
+    assert any(url.endswith("/historical/markets/KXOLD-YES") for url in calls)
 
 
 def test_prediction_market_service_and_api_routes(tmp_path):
