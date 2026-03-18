@@ -233,8 +233,8 @@
   .shell {
     border: 1px solid var(--divider);
     background:
-      linear-gradient(180deg, rgba(9, 14, 20, 0.96), rgba(6, 10, 15, 0.92)),
-      radial-gradient(circle at 20% 0%, rgba(122, 166, 200, 0.08), transparent 42%);
+      linear-gradient(180deg, rgba(12, 14, 16, 0.96), rgba(9, 10, 12, 0.92)),
+      radial-gradient(circle at 20% 0%, rgba(138, 145, 154, 0.06), transparent 42%);
     position: relative;
     overflow: hidden;
   }
@@ -296,7 +296,7 @@
 
   .sample-path {
     fill: none;
-    stroke: rgba(122, 166, 200, 0.06);
+    stroke: rgba(138, 145, 154, 0.06);
     stroke-width: 0.72;
   }
 

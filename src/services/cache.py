@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -23,6 +22,9 @@ class CacheService:
 
     def _value_path(self, key: str) -> Path:
         return self.base_dir / f"{key}.value.json"
+
+    def _json_path(self, key: str) -> Path:
+        return self.base_dir / f"{key}.payload.json"
 
     def get(self, key: str) -> Optional[pd.Series]:
         data_path = self._data_path(key)
@@ -66,6 +68,24 @@ class CacheService:
         value_path = self._value_path(key)
         meta = {"timestamp": datetime.utcnow().isoformat(), "value": float(value)}
         value_path.write_text(json.dumps(meta))
+
+    def get_json(self, key: str) -> Optional[Any]:
+        json_path = self._json_path(key)
+        if not json_path.exists():
+            return None
+        try:
+            payload = json.loads(json_path.read_text())
+            ts = datetime.fromisoformat(payload.get("timestamp"))
+            if datetime.utcnow() - ts > self.ttl:
+                return None
+            return payload.get("value")
+        except Exception:
+            return None
+
+    def set_json(self, key: str, value: Any) -> None:
+        json_path = self._json_path(key)
+        payload = {"timestamp": datetime.utcnow().isoformat(), "value": value}
+        json_path.write_text(json.dumps(payload))
 
     @staticmethod
     def make_key(*parts: str) -> str:

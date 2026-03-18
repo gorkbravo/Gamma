@@ -31,7 +31,7 @@ class LandingPage(QWidget):
         card_layout.setContentsMargins(28, 28, 28, 28)
         card_layout.setSpacing(14)
 
-        title = QLabel("StrataLab")
+        title = QLabel("Gamma")
         title.setObjectName("landingTitle")
         subtitle = QLabel("Research-first quant workstation for portfolio monitoring, risk, and volatility analysis.")
         subtitle.setObjectName("landingSubtitle")

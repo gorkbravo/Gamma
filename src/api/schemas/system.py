@@ -33,6 +33,14 @@ class MarketDataModeRequestModel(BaseModel):
     market_data_mode: str
 
 
+class BaseCurrencyRequestModel(BaseModel):
+    base_currency: str
+
+
+class BaseCurrencyResponseModel(SystemStatusResponseModel):
+    lines: list[str] = Field(default_factory=list)
+
+
 class DiagnosticsResponseModel(BaseModel):
     generated_at: datetime
     mock_mode: bool

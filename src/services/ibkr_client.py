@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ib_insync import IB, Contract
 
+from src.models.instruments import build_instrument_id
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.services.fx import FXService
 from src.services.ib_thread import IBThreadRunner
@@ -562,6 +563,20 @@ class IBKRClient:
                         market_price=float(p.marketPrice) if p.marketPrice is not None else None,
                         market_value=float(p.marketValue) if p.marketValue is not None else None,
                         unrealized_pnl=float(p.unrealizedPNL) if p.unrealizedPNL is not None else None,
+                        instrument_id=build_instrument_id(
+                            provider="ibkr",
+                            provider_id=str(contract.conId) if getattr(contract, "conId", None) else None,
+                            symbol=contract.symbol,
+                            sec_type=contract.secType,
+                            exchange=contract.exchange,
+                            primary_exchange=contract.primaryExchange,
+                            currency=contract.currency,
+                        ),
+                        display_symbol=contract.symbol,
+                        exchange=contract.exchange,
+                        primary_exchange=contract.primaryExchange,
+                        provider="ibkr",
+                        provider_id=str(contract.conId) if getattr(contract, "conId", None) else None,
                     ),
                     contract,
                 )
@@ -585,6 +600,20 @@ class IBKRClient:
                         market_price=None,
                         market_value=None,
                         unrealized_pnl=None,
+                        instrument_id=build_instrument_id(
+                            provider="ibkr",
+                            provider_id=str(contract.conId) if getattr(contract, "conId", None) else None,
+                            symbol=contract.symbol,
+                            sec_type=contract.secType,
+                            exchange=contract.exchange,
+                            primary_exchange=contract.primaryExchange,
+                            currency=contract.currency,
+                        ),
+                        display_symbol=contract.symbol,
+                        exchange=contract.exchange,
+                        primary_exchange=contract.primaryExchange,
+                        provider="ibkr",
+                        provider_id=str(contract.conId) if getattr(contract, "conId", None) else None,
                     ),
                     contract,
                 )
@@ -608,7 +637,22 @@ class IBKRClient:
                     replacement = qual_by_conid[contract.conId]
                 else:
                     replacement = qual_by_key.get(self._contract_key(contract))
-                updated.append((pos, replacement or contract))
+                active_contract = replacement or contract
+                pos.instrument_id = build_instrument_id(
+                    provider="ibkr",
+                    provider_id=str(active_contract.conId) if getattr(active_contract, "conId", None) else None,
+                    symbol=active_contract.symbol,
+                    sec_type=active_contract.secType,
+                    exchange=active_contract.exchange,
+                    primary_exchange=active_contract.primaryExchange,
+                    currency=active_contract.currency,
+                )
+                pos.display_symbol = active_contract.symbol
+                pos.exchange = active_contract.exchange
+                pos.primary_exchange = active_contract.primaryExchange
+                pos.provider = "ibkr"
+                pos.provider_id = str(active_contract.conId) if getattr(active_contract, "conId", None) else None
+                updated.append((pos, active_contract))
             items = updated
             self._last_contracts = [c for c in qualified]
         else:
@@ -1001,6 +1045,14 @@ class IBKRClient:
                 unrealized_pnl=0.0,
                 base_market_value=float(total_base),
                 fx_rate=1.0,
+                instrument_id=build_instrument_id(
+                    provider="ibkr",
+                    symbol="CASH",
+                    sec_type="CASH",
+                    currency=base_ccy,
+                ),
+                display_symbol="CASH",
+                provider="ibkr",
             )
             return [cash_position], float(total_base), warnings
 
@@ -1026,6 +1078,14 @@ class IBKRClient:
                     unrealized_pnl=0.0,
                     base_market_value=float(base_value) if base_value is not None else None,
                     fx_rate=rate,
+                    instrument_id=build_instrument_id(
+                        provider="ibkr",
+                        symbol=symbol,
+                        sec_type="CASH",
+                        currency=currency,
+                    ),
+                    display_symbol=symbol,
+                    provider="ibkr",
                 )
             )
         return positions, (total_cash if any_converted else None), warnings

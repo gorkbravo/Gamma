@@ -16,20 +16,20 @@ def test_resolve_client_defaults_to_tauri():
 def test_resolve_client_honors_env_override():
     args = argparse.Namespace(client=None)
 
-    assert desktop_launcher.resolve_client(args, {"STRATALAB_DESKTOP_CLIENT": "pyside"}) == "pyside"
+    assert desktop_launcher.resolve_client(args, {"GAMMA_DESKTOP_CLIENT": "pyside"}) == "pyside"
 
 
 def test_resolve_client_honors_cli_override_over_env():
     args = argparse.Namespace(client="tauri")
 
-    assert desktop_launcher.resolve_client(args, {"STRATALAB_DESKTOP_CLIENT": "pyside"}) == "tauri"
+    assert desktop_launcher.resolve_client(args, {"GAMMA_DESKTOP_CLIENT": "pyside"}) == "tauri"
 
 
 def test_resolve_client_rejects_unknown_value():
     args = argparse.Namespace(client=None)
 
     with pytest.raises(SystemExit, match="Unsupported desktop client"):
-        desktop_launcher.resolve_client(args, {"STRATALAB_DESKTOP_CLIENT": "unknown"})
+        desktop_launcher.resolve_client(args, {"GAMMA_DESKTOP_CLIENT": "unknown"})
 
 
 def test_resolve_launch_spec_uses_pyside_module():
@@ -48,7 +48,7 @@ def test_resolve_tauri_command_uses_explicit_npm_override(tmp_path):
 
     command = desktop_launcher.resolve_tauri_command(
         tmp_path,
-        {"STRATALAB_NPM": "C:\\tools\\npm.cmd"},
+        {"GAMMA_NPM": "C:\\tools\\npm.cmd"},
     )
 
     assert command == ["C:\\tools\\npm.cmd", "run", "tauri:dev"]

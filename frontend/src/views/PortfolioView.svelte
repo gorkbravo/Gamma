@@ -149,7 +149,7 @@
   function buildAllocationSlices(nextSnapshot: PortfolioSnapshot | null) {
     const positions = (nextSnapshot?.positions ?? [])
       .map((position) => ({
-        label: position.symbol,
+        label: position.display_symbol ?? position.symbol,
         secType: position.sec_type,
         value: Math.abs(position.base_market_value ?? 0),
         unrealizedPnl: position.unrealized_pnl
@@ -251,6 +251,7 @@
           label: "Drawdown",
           color: "#b65d54",
           type: "area",
+          invertFilledArea: true,
           data: growthPoints.map((point) => {
             peak = Math.max(peak, point.value);
             return {
@@ -353,12 +354,12 @@
           </article>
           <article class="metric">
             <span>Cash Weight</span>
-            <strong>{pct(bookDiagnostics.cashWeight)}</strong>
+            <strong class:elevated={(bookDiagnostics.cashWeight ?? 0) > 0.25}>{pct(bookDiagnostics.cashWeight)}</strong>
             <small>{sortedPositions.length} visible lines</small>
           </article>
           <article class="metric">
             <span>Stored Return</span>
-            <strong>{pct(historyStats.totalReturn)}</strong>
+            <strong class:positive={(historyStats.totalReturn ?? 0) > 0} class:negative={(historyStats.totalReturn ?? 0) < 0}>{pct(historyStats.totalReturn)}</strong>
             <small>{history?.points.length ?? 0} local history points</small>
           </article>
         </div>
@@ -433,7 +434,7 @@
               {#if sortedPositions.length}
                 {#each sortedPositions as position}
                   <tr>
-                    <td>{position.symbol}</td>
+                    <td>{position.display_symbol ?? position.symbol}</td>
                     <td>{position.sec_type}</td>
                     <td>{position.currency}</td>
                     <td>{fmt(position.quantity, 3)}</td>
@@ -442,7 +443,7 @@
                     <td>{fmt(position.market_value)} {position.currency}</td>
                     <td>{fmt(position.base_market_value)} {currency}</td>
                     <td>{fmt(position.fx_rate, 4)}</td>
-                    <td>{pct(position.weight)}</td>
+                    <td class:elevated={(position.weight ?? 0) > 0.25}>{pct(position.weight)}</td>
                     <td class:positive={(position.unrealized_pnl ?? 0) > 0} class:negative={(position.unrealized_pnl ?? 0) < 0}>
                       {fmt(position.unrealized_pnl)} {currency}
                     </td>
@@ -600,8 +601,8 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: var(--surface-0);
-    padding: 1rem;
+    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
+    padding: 1.05rem;
   }
 
   .performance-panel,
@@ -628,12 +629,16 @@
 
   .kpi-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+    padding-block: 0.15rem;
   }
 
   .metric {
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.68);
-    padding: 0.72rem 0.78rem;
+    min-width: 0;
+    padding: 0.2rem 1rem;
+    border-left: 1px solid rgba(46, 60, 74, 0.52);
+    background: none;
+    text-align: center;
   }
 
   .metric strong {
@@ -641,6 +646,11 @@
     margin: 0.22rem 0 0.26rem;
     font-size: 1.02rem;
     line-height: 1.2;
+  }
+
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .eyebrow,
@@ -707,8 +717,8 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.6);
+    border: 1px solid rgba(46, 60, 74, 0.52);
+    background: rgba(8, 13, 18, 0.38);
     padding: 0.6rem 0.72rem;
   }
 
@@ -721,7 +731,7 @@
   select,
   button {
     border: 1px solid var(--panel-strong);
-    background: #0b1219;
+    background: #0d0f12;
     color: var(--text-0);
     padding: 0.68rem 0.78rem;
     font: inherit;
@@ -783,22 +793,22 @@
   }
 
   .pill-list span {
-    border: 1px solid rgba(122, 166, 200, 0.18);
-    background: rgba(122, 166, 200, 0.08);
+    border: 1px solid rgba(122, 166, 200, 0.14);
+    background: rgba(122, 166, 200, 0.05);
     color: var(--text-1);
     padding: 0.34rem 0.46rem;
   }
 
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
   }
 
   .message-list {
     max-height: 14rem;
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.6);
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    background: none;
   }
 
   .message-row {
@@ -864,9 +874,18 @@
     color: var(--negative);
   }
 
+  .elevated {
+    color: var(--data-warm);
+  }
+
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
   @media (max-width: 980px) {
-    .workspace-grid,
-    .kpi-grid {
+    .workspace-grid {
       grid-template-columns: 1fr;
     }
 
@@ -876,6 +895,20 @@
   }
 
   @media (max-width: 1080px) {
+    .kpi-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .metric {
+      padding: 0.7rem 0;
+      border-left: 0;
+    }
+
+    .metric:first-child,
+    .metric:nth-child(2) {
+      padding-top: 0;
+    }
+
     .chart-controls,
     .table-controls,
     .support-column {

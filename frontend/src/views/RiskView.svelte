@@ -217,6 +217,7 @@
       label: "Drawdown",
       color: "#d1645d",
       type: "area",
+      invertFilledArea: true,
       data: perf.map((point) => {
         cumulative *= 1 + point.value;
         peak = Math.max(peak, cumulative);
@@ -257,7 +258,7 @@
     .filter((item) => Math.abs(item.variance_contribution_pct ?? 0) > 1e-4)
     .slice(0, 6)
     .map((item) => ({
-      label: item.symbol,
+      label: item.display_symbol ?? item.symbol,
       value: item.variance_contribution_pct ?? 0,
       tone: (item.variance_contribution_pct ?? 0) < 0 ? "negative" : "positive",
       meta: `${pct(item.weight)} wt | ${fmt(item.component_var)} Comp VaR`
@@ -329,7 +330,7 @@
           <article class="metric">
             <span>Horizon</span>
             <strong>{result?.metrics.monte_carlo_horizon_days ?? mcHorizonDays}D</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} covered base</small>
+            <small>{pct(result?.metrics.risk_coverage_ratio)} risk-basis coverage</small>
           </article>
         </div>
 
@@ -388,7 +389,7 @@
           <article class="metric">
             <span>Hist VaR</span>
             <strong>{fmt(result?.metrics.historical_var)}</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} coverage</small>
+            <small>{pct(result?.metrics.risk_coverage_ratio)} risk-basis coverage</small>
           </article>
           <article class="metric">
             <span>Hist CVaR</span>
@@ -407,7 +408,7 @@
           </article>
           <article class="metric">
             <span>Beta / Corr</span>
-            <strong>{fmt(result?.metrics.beta, 3)} / {fmt(result?.metrics.correlation, 3)}</strong>
+            <strong class:elevated={(result?.metrics.beta ?? 0) > 1.2}>{fmt(result?.metrics.beta, 3)} / {fmt(result?.metrics.correlation, 3)}</strong>
             <small>{result?.metrics.benchmark_overlap_count ?? 0} overlap obs</small>
           </article>
           <article class="metric">
@@ -434,7 +435,8 @@
               </div>
               <div class="stack">
                 <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
-                <div class="row"><span>Covered Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+                <div class="row"><span>Modeled Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+                <div class="row"><span>Risk Basis</span><strong>{fmt(result?.metrics.risk_basis_value)}</strong></div>
                 <div class="row"><span>Coverage Ratio</span><strong>{pct(result?.metrics.risk_coverage_ratio)}</strong></div>
                 <div class="row"><span>Aligned Obs</span><strong>{result?.metrics.aligned_obs_count ?? 0}</strong></div>
                 <div class="row"><span>Max Drawdown</span><strong class:negative={(result?.metrics.max_drawdown ?? 0) < 0}>{pct(result?.metrics.max_drawdown)}</strong></div>
@@ -502,7 +504,7 @@
               {#if result?.contributions?.length}
                 {#each result.contributions as contribution}
                   <tr>
-                    <td>{contribution.symbol}</td>
+                    <td>{contribution.display_symbol ?? contribution.symbol}</td>
                     <td>{pct(contribution.weight)}</td>
                     <td>{pct(contribution.daily_vol)}</td>
                     <td>{pct(contribution.variance_contribution_pct)}</td>
@@ -612,7 +614,8 @@
         <div class="stack">
           <div class="row"><span>Snapshot Lines</span><strong>{activeSnapshot?.positions.length ?? 0}</strong></div>
           <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
-          <div class="row"><span>Covered Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+          <div class="row"><span>Modeled Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
+          <div class="row"><span>Risk Basis</span><strong>{fmt(result?.metrics.risk_basis_value)}</strong></div>
           <div class="row"><span>Coverage Ratio</span><strong>{pct(result?.metrics.risk_coverage_ratio)}</strong></div>
           <div class="row"><span>HHI / Top-5</span><strong>{fmt(result?.metrics.concentration_hhi, 3)} / {pct(result?.metrics.top5_weight)}</strong></div>
           <div class="row"><span>Effective Bets</span><strong>{fmt(result?.metrics.effective_bets, 2)}</strong></div>
@@ -650,7 +653,7 @@
             {/each}
             {#each excludedAssets as asset}
               <div class="note-row">
-                <span class="note-tag">{asset.symbol}</span>
+                <span class="note-tag">{asset.display_symbol ?? asset.symbol}</span>
                 <p>{asset.reason}</p>
               </div>
             {/each}
@@ -691,8 +694,8 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: var(--surface-0);
-    padding: 1rem;
+    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
+    padding: 1.05rem;
   }
 
   .method-panel,
@@ -737,6 +740,8 @@
 
   .kpi-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0;
+    padding-block: 0.2rem;
   }
 
   .mc-kpi-grid {
@@ -744,10 +749,11 @@
   }
 
   .metric {
-    border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.62);
-    padding: 0.72rem 0.78rem;
+    padding: 0.2rem 1rem;
+    border-left: 1px solid rgba(46, 60, 74, 0.52);
+    background: none;
     min-width: 0;
+    text-align: center;
   }
 
   .metric strong {
@@ -755,6 +761,11 @@
     margin: 0.18rem 0 0.24rem;
     font-size: 1rem;
     line-height: 1.2;
+  }
+
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .method-grid {
@@ -854,7 +865,7 @@
 
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
   }
 
   table {
@@ -882,7 +893,7 @@
   select,
   button {
     border: 1px solid var(--panel-strong);
-    background: #0b1219;
+    background: #0d0f12;
     color: var(--text-0);
     padding: 0.68rem 0.78rem;
     font: inherit;
@@ -930,6 +941,10 @@
     color: var(--negative);
   }
 
+  .elevated {
+    color: var(--data-warm);
+  }
+
   @media (max-width: 1220px) {
     .workspace-grid,
     .method-grid,
@@ -944,16 +959,28 @@
 
     .kpi-grid,
     .mc-kpi-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
   @media (max-width: 980px) {
     .support-column,
-    .kpi-grid,
-    .mc-kpi-grid,
     .core-fields {
       grid-template-columns: 1fr;
+    }
+
+    .kpi-grid,
+    .mc-kpi-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .metric {
+      padding: 0.7rem 0;
+      border-left: 0;
+    }
+
+    .metric:first-child {
+      padding-top: 0;
     }
 
     .panel-header,

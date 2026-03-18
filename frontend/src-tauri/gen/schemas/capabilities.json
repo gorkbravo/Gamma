@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default desktop capability for the StrataLab shell.","local":true,"windows":["main","splashscreen"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default desktop capability for the Gamma shell.","local":true,"windows":["main","splashscreen"],"permissions":["core:default"]}}

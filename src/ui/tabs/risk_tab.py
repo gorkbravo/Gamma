@@ -72,7 +72,7 @@ class RiskTab(QWidget):
         "beta_label": "Beta: N/A",
         "corr_label": "Correlation: N/A",
         "alpha_label": "Jensen Alpha (ann.): N/A",
-        "coverage_label": "Risk Coverage: N/A",
+        "coverage_label": "Risk-Basis Coverage: N/A",
         "obs_used_label": "Obs Used: N/A",
         "benchmark_overlap_label": "Benchmark Overlap: N/A",
         "hhi_label": "HHI: N/A",
@@ -197,7 +197,7 @@ class RiskTab(QWidget):
         self.beta_label = QLabel("Beta: N/A")
         self.corr_label = QLabel("Correlation: N/A")
         self.alpha_label = QLabel("Jensen Alpha (ann.): N/A")
-        self.coverage_label = QLabel("Risk Coverage: N/A")
+        self.coverage_label = QLabel("Risk-Basis Coverage: N/A")
         self.obs_used_label = QLabel("Obs Used: N/A")
         self.benchmark_overlap_label = QLabel("Benchmark Overlap: N/A")
         metrics_layout.addWidget(self.hist_var_label, 0, 0)
@@ -528,7 +528,7 @@ class RiskTab(QWidget):
         self.beta_label.setText(self._fmt_number("Beta", results.beta))
         self.corr_label.setText(self._fmt_number("Correlation", results.correlation))
         self.alpha_label.setText(self._fmt_pct("Jensen Alpha (ann.)", results.alpha_annual))
-        self.coverage_label.setText(self._fmt_pct("Risk Coverage", results.risk_coverage_ratio))
+        self.coverage_label.setText(self._fmt_pct("Risk-Basis Coverage", results.risk_coverage_ratio))
         self.obs_used_label.setText(self._fmt_int("Obs Used", results.aligned_obs_count))
         self.benchmark_overlap_label.setText(self._fmt_int("Benchmark Overlap", results.benchmark_overlap_count))
         self.hhi_label.setText(self._fmt_number("HHI", results.concentration_hhi))

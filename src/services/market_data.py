@@ -18,6 +18,19 @@ from src.services.throttle import ThrottleQueue
 
 logger = logging.getLogger(__name__)
 
+_FX_PRIORITY = {
+    "EUR": 100,
+    "GBP": 90,
+    "AUD": 80,
+    "NZD": 70,
+    "USD": 60,
+    "CAD": 50,
+    "CHF": 40,
+    "JPY": 30,
+    "NOK": 20,
+    "SEK": 10,
+}
+
 
 @dataclass
 class QuoteSnapshot:
@@ -94,6 +107,25 @@ class MarketDataService:
     def _is_valid_currency_code(cls, value: str | None) -> bool:
         ccy = cls._normalize_currency(value)
         return len(ccy) == 3 and ccy.isalpha()
+
+    @classmethod
+    def _fx_contract_spec(cls, base: str, quote: str) -> tuple[Forex, bool] | None:
+        base_ccy = cls._normalize_currency(base)
+        quote_ccy = cls._normalize_currency(quote)
+        if base_ccy == quote_ccy:
+            return None
+        if not cls._is_valid_currency_code(base_ccy) or not cls._is_valid_currency_code(quote_ccy):
+            return None
+
+        base_rank = _FX_PRIORITY.get(base_ccy, 0)
+        quote_rank = _FX_PRIORITY.get(quote_ccy, 0)
+        if quote_rank > base_rank:
+            contract = Forex(f"{quote_ccy}{base_ccy}")
+            invert = False
+        else:
+            contract = Forex(f"{base_ccy}{quote_ccy}")
+            invert = True
+        return contract, invert
 
     def _sleep(self, seconds: float) -> None:
         if self.ib_runner is not None and self.ib_runner.in_thread():
@@ -227,19 +259,22 @@ class MarketDataService:
         contracts: List[Contract],
         lookback_days: int,
         progress_cb=None,
+        keys: List[str] | None = None,
+        labels: List[str] | None = None,
     ) -> Tuple[Dict[str, pd.Series], List[str]]:
         prices: Dict[str, pd.Series] = {}
         missing: List[str] = []
         total = len(contracts)
         for idx, contract in enumerate(contracts, start=1):
             series = self.fetch_history(contract, lookback_days)
-            symbol = contract.symbol
+            key = keys[idx - 1] if keys is not None and idx - 1 < len(keys) else contract.symbol
+            label = labels[idx - 1] if labels is not None and idx - 1 < len(labels) else contract.symbol
             if series is None:
-                missing.append(symbol)
+                missing.append(label)
             else:
-                prices[symbol] = series
+                prices[key] = series.astype(float)
             if progress_cb:
-                progress_cb(idx, total, symbol)
+                progress_cb(idx, total, label)
         return prices, missing
 
     def fetch_fx_rate(self, base: str, quote: str, timeout_seconds: float | None = None) -> Optional[float]:
@@ -249,6 +284,10 @@ class MarketDataService:
             return 1.0
         if not self._is_valid_currency_code(base_ccy) or not self._is_valid_currency_code(quote_ccy):
             return None
+        spec = self._fx_contract_spec(base_ccy, quote_ccy)
+        if spec is None:
+            return None
+        contract, invert = spec
         key = self.cache.make_key("fx", base_ccy, quote_ccy)
         cached = self.cache.get_value(key)
         if cached is not None:
@@ -258,13 +297,11 @@ class MarketDataService:
         timeout = timeout_seconds or self.quote_timeout_seconds
         prefer_live = self.market_data_mode in {"live", "auto"}
         self._set_market_data_type(live=prefer_live)
-        # Desired output is conversion from quote -> base.
-        # Example: base=EUR, quote=USD => rate in EUR per USD.
-        # Prefer requesting base/quote first and invert to avoid invalid pair spam like USDEUR.
-        inverse = Forex(f"{base_ccy}{quote_ccy}")
-        inverse_snapshot = self._fetch_snapshot_quote(inverse, timeout, prefer_live=prefer_live)
-        if inverse_snapshot.price is not None and inverse_snapshot.price != 0:
-            rate = 1.0 / float(inverse_snapshot.price)
+        snapshot = self._fetch_snapshot_quote(contract, timeout, prefer_live=prefer_live)
+        if snapshot.price is not None and snapshot.price != 0:
+            rate = float(snapshot.price)
+            if invert:
+                rate = 1.0 / rate
             self.cache.set_value(key, rate)
             return rate
         return None
@@ -276,14 +313,18 @@ class MarketDataService:
             return None
         if not self._is_valid_currency_code(base_ccy) or not self._is_valid_currency_code(quote_ccy):
             return None
-        inverse = Forex(f"{base_ccy}{quote_ccy}")
-        series = self.fetch_history(inverse, lookback_days)
+        spec = self._fx_contract_spec(base_ccy, quote_ccy)
+        if spec is None:
+            return None
+        contract, invert = spec
+        series = self.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             return None
         series = series.replace(0, pd.NA).dropna()
         if series.empty:
             return None
-        return 1.0 / series.astype(float)
+        series = series.astype(float)
+        return (1.0 / series) if invert else series
 
     def fetch_snapshot_quotes(
         self, contracts: List[Contract], timeout_seconds: float | None = None

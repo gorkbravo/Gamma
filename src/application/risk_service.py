@@ -17,8 +17,16 @@ from src.analytics.risk_metrics import (
     risk_contributions,
 )
 from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, parametric_var
+from src.application.instrument_identity import identity_for_position
+from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot, RiskResults
-from src.services.data_providers import AppDataProvider
+from src.services.data_providers import (
+    AppDataProvider,
+    contract_for_instrument,
+    contract_for_position,
+    convert_history_to_base_currency,
+    normalize_snapshot_price_histories,
+)
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
@@ -57,6 +65,7 @@ class BenchmarkMetricsResult:
 
 @dataclass
 class RiskComputationPayload:
+    snapshot: PortfolioSnapshot
     results: RiskResults
     portfolio_returns: pd.Series
     benchmark_returns: pd.Series
@@ -76,11 +85,18 @@ class RiskService:
         market_data: MarketDataService,
         mock_service: MockDataService,
         risk_free_service: RiskFreeRateService | None,
+        benchmark_defaults: InstrumentDefaults | None = None,
     ) -> None:
         self.client = client
         self.market_data = market_data
         self.mock_service = mock_service
         self.risk_free_service = risk_free_service
+        self.benchmark_defaults = benchmark_defaults or InstrumentDefaults(
+            provider="benchmark",
+            sec_type="STK",
+            exchange="SMART",
+            currency="USD",
+        )
 
     def compute(
         self,
@@ -101,46 +117,78 @@ class RiskService:
         if request.horizon_days > 1:
             warnings.append("Historical VaR/CVaR shown for 1d; parametric scaled by sqrt(time).")
 
-        prices, missing = self._load_prices(snapshot, request.lookback_days, progress_cb, data_provider=data_provider)
+        raw_prices, missing = self._load_prices(snapshot, request.lookback_days, progress_cb, data_provider=data_provider)
         if missing:
             warnings.append(f"Missing history for: {', '.join(missing)}")
-            for symbol in missing:
-                excluded_assets[symbol] = "No historical bars"
+        normalized_prices = normalize_snapshot_price_histories(
+            snapshot,
+            raw_prices,
+            request.lookback_days,
+            self.market_data,
+        )
+        prices = normalized_prices.prices
+        warnings.extend(normalized_prices.warnings)
+        excluded_assets.update(normalized_prices.excluded_assets)
+        for position in snapshot.positions:
+            if position.symbol.startswith("CASH"):
+                continue
+            identity = identity_for_position(position)
+            if identity.instrument_id not in raw_prices:
+                excluded_assets.setdefault(identity.instrument_id, "No historical bars")
+            elif identity.instrument_id not in prices:
+                excluded_assets.setdefault(identity.instrument_id, "No base-currency history")
         warnings.extend(self.market_data.drain_errors())
 
         price_df = align_prices(prices)
         returns_df = compute_returns(price_df)
         if returns_df.empty:
             warnings.append("No return history available")
-            for symbol in prices.keys():
-                excluded_assets.setdefault(symbol, "Insufficient overlapping history")
+            for instrument_id in prices.keys():
+                excluded_assets.setdefault(instrument_id, "Insufficient overlapping history")
 
         returns_df = self._ensure_cash_returns(snapshot, returns_df)
         weights = self._weights_for_symbols(snapshot, returns_df.columns.tolist())
-        for symbol in returns_df.columns:
-            if symbol not in weights.index:
-                excluded_assets.setdefault(symbol, "Missing base market value")
+        for instrument_id in returns_df.columns:
+            if instrument_id not in weights.index:
+                excluded_assets.setdefault(instrument_id, "Missing base market value")
         if weights.empty:
             warnings.append("No weights available for VaR")
 
-        risk_symbols = [symbol for symbol in returns_df.columns if symbol in weights.index]
-        risk_returns_df = returns_df.reindex(columns=risk_symbols) if not returns_df.empty else pd.DataFrame()
-        weights_aligned = weights.reindex(risk_symbols).dropna()
+        risk_instrument_ids = [instrument_id for instrument_id in returns_df.columns if instrument_id in weights.index]
+        risk_returns_df = returns_df.reindex(columns=risk_instrument_ids) if not returns_df.empty else pd.DataFrame()
+        weights_aligned = weights.reindex(risk_instrument_ids).dropna()
         if not risk_returns_df.empty:
             risk_returns_df = risk_returns_df.reindex(columns=weights_aligned.index.tolist())
 
         covered_portfolio_value = 0.0
+        covered_risk_basis_value = 0.0
         if not weights_aligned.empty:
-            covered_symbols = set(weights_aligned.index)
+            covered_instrument_ids = set(weights_aligned.index)
+            covered_positions = [
+                position
+                for position in snapshot.positions
+                if position.resolved_instrument_id() in covered_instrument_ids and position.base_market_value is not None
+            ]
             covered_portfolio_value = float(
-                sum(
-                    float(position.base_market_value or 0.0)
-                    for position in snapshot.positions
-                    if position.symbol in covered_symbols and position.base_market_value is not None
-                )
+                sum(float(position.base_market_value or 0.0) for position in covered_positions)
+            )
+            covered_risk_basis_value = float(
+                sum(abs(float(position.base_market_value or 0.0)) for position in covered_positions if not self._is_cash(position))
             )
         elif total_portfolio_value == 0:
             covered_portfolio_value = 0.0
+            covered_risk_basis_value = 0.0
+
+        known_risk_basis_value = float(
+            sum(
+                abs(float(position.base_market_value or 0.0))
+                for position in snapshot.positions
+                if position.base_market_value is not None and not self._is_cash(position)
+            )
+        )
+        risk_basis_value = known_risk_basis_value
+        if self._has_unknown_risky_values(snapshot):
+            risk_basis_value = max(float(total_portfolio_value or 0.0), known_risk_basis_value)
 
         port_ret = portfolio_returns(risk_returns_df, weights_aligned)
         if len(port_ret) < 2 and not returns_df.empty:
@@ -172,11 +220,11 @@ class RiskService:
         param_var = param_var_r * covered_portfolio_value if param_var_r is not None else None
 
         risk_coverage_ratio = None
-        if total_portfolio_value is not None and total_portfolio_value > 0:
-            risk_coverage_ratio = covered_portfolio_value / float(total_portfolio_value)
+        if risk_basis_value > 0:
+            risk_coverage_ratio = covered_risk_basis_value / float(risk_basis_value)
         scale_to_total = None
-        if covered_portfolio_value and total_portfolio_value and covered_portfolio_value > 0:
-            scale_to_total = float(total_portfolio_value) / float(covered_portfolio_value)
+        if covered_risk_basis_value > 0 and risk_basis_value > 0:
+            scale_to_total = float(risk_basis_value) / float(covered_risk_basis_value)
         hist_var_total_estimate = hist_var * scale_to_total if hist_var is not None and scale_to_total else None
         hist_cvar_total_estimate = hist_cvar * scale_to_total if hist_cvar is not None and scale_to_total else None
         param_var_total_estimate = param_var * scale_to_total if param_var is not None and scale_to_total else None
@@ -225,8 +273,8 @@ class RiskService:
         if risk_coverage_ratio is not None and risk_coverage_ratio < 0.999:
             warnings.append(
                 "Risk coverage is "
-                f"{risk_coverage_ratio * 100:.1f}% of portfolio value; covered risk is exact for included assets and "
-                "total VaR figures are coverage-scaled estimates."
+                f"{risk_coverage_ratio * 100:.1f}% of the modeled risk basis; covered risk is exact for included assets "
+                "and total VaR figures are risk-basis-scaled estimates."
             )
         if risk_coverage_ratio is not None and risk_coverage_ratio < 0.95:
             warnings.append("Risk coverage below 95%; headline risk estimates may be materially incomplete.")
@@ -262,6 +310,8 @@ class RiskService:
             correlation=benchmark.correlation,
             alpha_annual=benchmark.alpha_annual,
             covered_portfolio_value=covered_portfolio_value,
+            covered_risk_basis_value=covered_risk_basis_value,
+            risk_basis_value=risk_basis_value,
             risk_coverage_ratio=risk_coverage_ratio,
             historical_var_total_estimate=hist_var_total_estimate,
             historical_cvar_total_estimate=hist_cvar_total_estimate,
@@ -312,6 +362,7 @@ class RiskService:
                 warnings.append("Risk contributions unavailable: non-positive portfolio variance")
 
         return RiskComputationPayload(
+            snapshot=snapshot,
             results=results,
             portfolio_returns=port_ret,
             benchmark_returns=benchmark.returns if benchmark.returns is not None else pd.Series(dtype=float),
@@ -387,29 +438,25 @@ class RiskService:
         positions = [position for position in snapshot.positions if not position.symbol.startswith("CASH")]
         total = len(positions)
         for index, position in enumerate(positions, start=1):
-            symbol = position.symbol
+            identity = identity_for_position(position)
+            symbol = identity.symbol
             if self.client.mock:
                 series = self.mock_service.load_history(symbol)
             else:
-                contract = Contract(
-                    symbol=symbol,
-                    secType=position.sec_type or "STK",
-                    exchange="SMART",
-                    currency=position.currency or "USD",
-                )
+                contract = contract_for_position(position)
                 series = self.market_data.fetch_history(contract, lookback_days)
             if series is None or series.empty:
-                missing.append(symbol)
+                missing.append(identity.display_symbol)
             else:
-                prices[symbol] = series.astype(float)
+                prices[identity.instrument_id] = series.astype(float)
             if progress_cb is not None:
-                progress_cb(index, total, symbol)
+                progress_cb(index, total, identity.display_symbol)
         return prices, missing
 
     @staticmethod
     def _ensure_cash_returns(snapshot: PortfolioSnapshot, returns_df: pd.DataFrame) -> pd.DataFrame:
         cash_symbols = [
-            position.symbol
+            position.resolved_instrument_id()
             for position in snapshot.positions
             if position.symbol.startswith("CASH") and position.base_market_value is not None
         ]
@@ -423,9 +470,9 @@ class RiskService:
     @staticmethod
     def _weights_for_symbols(snapshot: PortfolioSnapshot, symbols: List[str]) -> pd.Series:
         values = {
-            position.symbol: position.base_market_value
+            position.resolved_instrument_id(): position.base_market_value
             for position in snapshot.positions
-            if position.symbol in symbols and position.base_market_value is not None
+            if position.resolved_instrument_id() in symbols and position.base_market_value is not None
         }
         return compute_weights(pd.Series(values))
 
@@ -501,15 +548,23 @@ class RiskService:
         symbol: str,
     ) -> tuple[pd.Series | None, List[str]]:
         warnings: List[str] = []
+        benchmark_instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
         if self.client.mock:
             series = self.mock_service.load_history(symbol)
         else:
-            contract = Contract(symbol=symbol, secType="STK", exchange="SMART", currency="USD")
+            contract = contract_for_instrument(benchmark_instrument)
             series = self.market_data.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             warnings.append(f"Benchmark history unavailable for {symbol}")
             return None, warnings
-        converted, fx_warnings = self._convert_benchmark_to_base(series.astype(float), "USD", base_currency, lookback_days)
+        converted, fx_warnings = self._convert_benchmark_to_base(
+            series.astype(float),
+            benchmark_instrument.currency,
+            base_currency,
+            lookback_days,
+            label=symbol,
+            context="Benchmark",
+        )
         warnings.extend(fx_warnings)
         if converted is None or converted.empty:
             warnings.append(f"Benchmark FX conversion failed for {symbol} into {base_currency}")
@@ -522,24 +577,20 @@ class RiskService:
         quote_ccy: str,
         base_ccy: str,
         lookback_days: int,
+        *,
+        label: str = "series",
+        context: str = "Series",
     ) -> tuple[pd.Series | None, List[str]]:
-        warnings: List[str] = []
-        quote = str(quote_ccy or "").upper()
-        base = str(base_ccy or "").upper()
-        if quote == base:
-            return series, warnings
-        fx_series = self.market_data.fetch_fx_history(base, quote, lookback_days)
-        if fx_series is not None and not fx_series.empty:
-            aligned = fx_series.reindex(series.index).ffill().dropna()
-            if not aligned.empty:
-                common_index = series.index.intersection(aligned.index)
-                if not common_index.empty:
-                    return series.reindex(common_index) * aligned.reindex(common_index), warnings
-        fx_rate = self.market_data.fetch_fx_rate(base, quote)
-        if fx_rate is None:
-            return None, warnings
-        warnings.append(f"Benchmark FX conversion used spot {quote}->{base} rate fallback")
-        return series * float(fx_rate), warnings
+        result = convert_history_to_base_currency(
+            series,
+            quote_ccy,
+            base_ccy,
+            lookback_days,
+            self.market_data,
+            label=label,
+            context=context,
+        )
+        return result.series, result.warnings
 
     @staticmethod
     def _concentration_metrics(weights: pd.Series) -> Tuple[float | None, float | None, float | None]:
@@ -554,3 +605,11 @@ class RiskService:
         top5 = float(normalized.sort_values(ascending=False).head(5).sum())
         effective_bets = float(1.0 / hhi) if hhi > 0 else None
         return hhi, top5, effective_bets
+
+    @staticmethod
+    def _is_cash(position) -> bool:
+        return position.sec_type == "CASH" or position.symbol.startswith("CASH")
+
+    @classmethod
+    def _has_unknown_risky_values(cls, snapshot: PortfolioSnapshot) -> bool:
+        return any(position.base_market_value is None and not cls._is_cash(position) for position in snapshot.positions)

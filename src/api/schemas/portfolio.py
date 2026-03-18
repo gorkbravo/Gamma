@@ -25,6 +25,12 @@ class PositionModel(BaseModel):
     weight: float | None = None
     base_market_value: float | None = None
     fx_rate: float | None = None
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+    exchange: str | None = None
+    primary_exchange: str | None = None
+    provider: str | None = None
+    provider_id: str | None = None
 
     @classmethod
     def from_domain(cls, position: PositionItem) -> "PositionModel":
@@ -40,6 +46,12 @@ class PositionModel(BaseModel):
             weight=position.weight,
             base_market_value=position.base_market_value,
             fx_rate=position.fx_rate,
+            instrument_id=position.resolved_instrument_id(),
+            display_symbol=position.resolved_display_symbol(),
+            exchange=position.exchange,
+            primary_exchange=position.primary_exchange,
+            provider=position.provider,
+            provider_id=position.provider_id,
         )
 
     def to_domain(self) -> PositionItem:
@@ -55,6 +67,12 @@ class PositionModel(BaseModel):
             weight=self.weight,
             base_market_value=self.base_market_value,
             fx_rate=self.fx_rate,
+            instrument_id=self.instrument_id,
+            display_symbol=self.display_symbol,
+            exchange=self.exchange,
+            primary_exchange=self.primary_exchange,
+            provider=self.provider,
+            provider_id=self.provider_id,
         )
 
 

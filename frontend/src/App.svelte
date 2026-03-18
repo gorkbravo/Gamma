@@ -5,6 +5,7 @@
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar from "./components/TabBar.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
+  import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
   import ResearchView from "./views/ResearchView.svelte";
   import RiskView from "./views/RiskView.svelte";
   import IvView from "./views/IvView.svelte";
@@ -28,11 +29,20 @@
     portfolioHistory,
     portfolioPerformance,
     portfolioSnapshot,
+    predictionMarketCalibration,
+    predictionMarketDetail,
+    predictionMarketHistory,
+    predictionMarketRelated,
+    predictionMarketScreener,
+    predictionMarketWallet,
     refreshSystemStatus,
     researchResult,
     riskResult,
+    loadPredictionMarketScreener,
     runDiagnosticsAction,
     runResearch,
+    selectPredictionMarket,
+    setBaseCurrency,
     setMarketDataMode,
     startIvSession,
     stopIvSession,
@@ -127,6 +137,9 @@
       push("Performance", $portfolioPerformance?.warnings, "warning");
     } else if ($activeTab === "research") {
       push("Research", $researchResult?.warnings, "warning");
+    } else if ($activeTab === "prediction_markets") {
+      push("Prediction", $predictionMarketDetail ? $predictionMarketWallet?.warnings : [], "warning");
+      push("Calibration", $predictionMarketCalibration?.warnings, "warning");
     } else if ($activeTab === "risk") {
       push("Risk", $riskResult?.warnings, "warning");
     } else {
@@ -160,11 +173,16 @@
       return;
     }
     const primaryTab = workspaceMode === "portfolio" ? "portfolio" : "research";
-    const nextTab = tab === "risk" || tab === "iv" ? tab : primaryTab;
+    const nextTab =
+      tab === "risk" || tab === "iv" || (workspaceMode === "research" && tab === "prediction_markets")
+        ? tab
+        : primaryTab;
 
     activeTab.set(nextTab);
 
-    if (nextTab === "iv") {
+    if (nextTab === "prediction_markets") {
+      await loadPredictionMarketScreener();
+    } else if (nextTab === "iv") {
       const autoLoaded = await loadResearchIvContext();
       if (!autoLoaded) {
         await loadIvSession();
@@ -222,11 +240,26 @@
     }
   }
 
+  async function handleBaseCurrencyChange(currency: string) {
+    const response = await setBaseCurrency(currency);
+    if (!response) {
+      return;
+    }
+    await loadDiagnostics();
+    if (workspaceMode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
+      await loadPortfolioSnapshot();
+    }
+  }
+
   async function handleRefreshWorkspace() {
     await Promise.allSettled([refreshSystemStatus(), loadDiagnostics()]);
 
     if (workspaceMode === "portfolio" && ($activeTab === "portfolio" || $activeTab === "risk")) {
       await loadPortfolioSnapshot();
+    }
+
+    if ($activeTab === "prediction_markets") {
+      await loadPredictionMarketScreener({ forceRefresh: true });
     }
 
     if ($activeTab === "iv") {
@@ -285,30 +318,29 @@
   }
 </script>
 
-<Shell>
-  <svelte:fragment slot="status">
-    {#if workspaceMode != null}
+{#if workspaceMode == null}
+  <LandingPage
+    status={$systemStatus}
+    busy={$loading.status}
+    onConnect={handleConnectionToggle}
+    onEnterPortfolio={() => enterWorkspace("portfolio")}
+    onEnterResearch={() => enterWorkspace("research")}
+  />
+{:else}
+  <Shell>
+    <svelte:fragment slot="status">
       <StatusRail
         status={$systemStatus}
         workspaceMode={workspaceMode}
         busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.ivSession}
         onToggleConnection={handleConnectionToggle}
+        onBaseCurrencyChange={handleBaseCurrencyChange}
         onMarketDataModeChange={handleMarketDataModeChange}
         onRefresh={handleRefreshWorkspace}
         onChangeView={handleChangeView}
       />
-    {/if}
-  </svelte:fragment>
+    </svelte:fragment>
 
-  {#if workspaceMode == null}
-    <LandingPage
-      status={$systemStatus}
-      busy={$loading.status}
-      onConnect={handleConnectionToggle}
-      onEnterPortfolio={() => enterWorkspace("portfolio")}
-      onEnterResearch={() => enterWorkspace("research")}
-    />
-  {:else}
     <section class="workspace-shell">
       <TabBar
         activeTab={$activeTab}
@@ -344,6 +376,18 @@
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
           />
+        {:else if $activeTab === "prediction_markets"}
+          <PredictionMarketsView
+            screener={$predictionMarketScreener}
+            detail={$predictionMarketDetail}
+            history={$predictionMarketHistory}
+            wallet={$predictionMarketWallet}
+            related={$predictionMarketRelated}
+            calibration={$predictionMarketCalibration}
+            loading={$loading.prediction || $loading.predictionDetail}
+            onLoadScreener={loadPredictionMarketScreener}
+            onSelectMarket={selectPredictionMarket}
+          />
         {:else if $activeTab === "risk"}
           <RiskView
             mode={workspaceMode}
@@ -369,8 +413,8 @@
         {/if}
       </section>
     </section>
-  {/if}
-</Shell>
+  </Shell>
+{/if}
 
 <style>
   .workspace-shell {

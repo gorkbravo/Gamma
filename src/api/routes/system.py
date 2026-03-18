@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi import HTTPException
 
 from src.api.schemas.system import (
     ActionResponseModel,
+    BaseCurrencyRequestModel,
+    BaseCurrencyResponseModel,
     ConnectionStateModel,
     DiagnosticsResponseModel,
     HealthResponseModel,
@@ -48,16 +51,29 @@ def set_market_data_mode(
     return _system_status_response(runtime)
 
 
+@router.post("/system/base-currency", response_model=BaseCurrencyResponseModel)
+def set_base_currency(
+    payload: BaseCurrencyRequestModel,
+    request: Request,
+) -> BaseCurrencyResponseModel:
+    runtime = request.app.state.runtime
+    try:
+        _, lines = runtime.set_base_currency(payload.base_currency)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return BaseCurrencyResponseModel(**_system_status_response(runtime).model_dump(), lines=lines)
+
+
 def _system_status_response(runtime) -> SystemStatusResponseModel:
     return SystemStatusResponseModel(
         healthy=True,
-        app_name="StrataLab API",
+        app_name="Gamma API",
         backend="fastapi",
         mock_mode=runtime.mock_mode,
         base_currency=runtime.base_currency,
         market_data_mode=runtime.market_data_mode,
         connection=_connection_state(runtime),
-        cached_symbols=sorted(runtime.app_context.cached_timeseries.keys()),
+        cached_symbols=runtime.research_cache.symbols(),
     )
 
 
@@ -75,10 +91,7 @@ def diagnostics(request: Request) -> DiagnosticsResponseModel:
         local_history_entries=int(len(history_df)),
         local_history_path=str(runtime.portfolio_history.path),
         recent_errors=runtime.portfolio_service.formatted_errors(50),
-        cached_symbols=sorted(runtime.app_context.cached_timeseries.keys()),
-        research_scope_type=runtime.app_context.research_scope_type.value,
-        research_primary_symbol=runtime.app_context.primary_symbol or None,
-        research_synthetic_count=len(runtime.app_context.synthetic_positions),
+        cached_symbols=runtime.research_cache.symbols(),
         iv_running=runtime.iv_service.is_running(),
         iv_status_text=runtime.iv_service.status_text(),
         iv_active_symbol=runtime.iv_service.active_symbol(),

@@ -17,7 +17,7 @@ const API_HOST: &str = "127.0.0.1";
 const DEFAULT_API_PORT: u16 = 8000;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
 const FRONTEND_LOAD_TIMEOUT: Duration = Duration::from_secs(20);
-const BUNDLED_BACKEND_NAME: &str = "stratalab-backend";
+const BUNDLED_BACKEND_NAME: &str = "gamma-backend";
 const LOG_TAIL_BYTES: usize = 2048;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -77,7 +77,7 @@ fn main() {
             state.frontend_loaded.store(true, Ordering::SeqCst);
             let _ = reveal_main_window(&app);
             let _ = write_smoke_marker(&app, window.label());
-            if env::var("STRATALAB_DESKTOP_SMOKE_FILE").is_ok() {
+            if env::var("GAMMA_DESKTOP_SMOKE_FILE").is_ok() {
                 app.exit(0);
             }
         })
@@ -92,7 +92,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build StrataLab shell");
+        .expect("failed to build Gamma shell");
 
     app.run(|app_handle, event| match event {
         RunEvent::Exit => kill_backend(app_handle),
@@ -219,7 +219,7 @@ fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, String> {
     }
 
     let repo_root = find_repo_root().ok_or_else(|| {
-        "Unable to locate the StrataLab repository root. Set STRATALAB_REPO_ROOT if you are running from a non-standard location.".to_string()
+        "Unable to locate the Gamma repository root. Set GAMMA_REPO_ROOT if you are running from a non-standard location.".to_string()
     })?;
     let executable = python_path(&repo_root)?;
     let sample_data_dir = repo_root.join("sample_data");
@@ -248,7 +248,7 @@ fn app_data_root(app: &AppHandle) -> Result<PathBuf, String> {
     let root = app
         .path()
         .app_data_dir()
-        .map_err(|error| format!("Failed to resolve the StrataLab app-data directory: {error}"))?
+        .map_err(|error| format!("Failed to resolve the Gamma app-data directory: {error}"))?
         .join("runtime");
     fs::create_dir_all(&root).map_err(|error| {
         format!(
@@ -303,14 +303,14 @@ fn spawn_backend(launch: &BackendLaunch, api_port: u16) -> Result<Child, String>
     let mut command = Command::new(&launch.executable);
     command
         .current_dir(&launch.working_dir)
-        .env("STRATALAB_API_PORT", api_port.to_string())
+        .env("GAMMA_API_PORT", api_port.to_string())
         .env("CACHE_DIR", &launch.cache_dir)
         .env("PORTFOLIO_HISTORY_DIR", &launch.history_dir)
         .env("SAMPLE_DATA_DIR", &launch.sample_data_dir)
-        .env("STRATALAB_LOG_DIR", &launch.log_dir)
-        .env("STRATALAB_BACKEND_FAILURE_REPORT", &launch.failure_report)
+        .env("GAMMA_LOG_DIR", &launch.log_dir)
+        .env("GAMMA_BACKEND_FAILURE_REPORT", &launch.failure_report)
         .env(
-            "STRATALAB_APP_DATA_DIR",
+            "GAMMA_APP_DATA_DIR",
             launch.cache_dir.parent().unwrap_or(&launch.cache_dir),
         );
 
@@ -435,7 +435,7 @@ fn create_main_window(app: &AppHandle, api_base: &str) -> Result<(), String> {
     }
     let api_base_json =
         serde_json::to_string(api_base).unwrap_or_else(|_| "\"http://127.0.0.1:8000\"".to_string());
-    let init_script = format!("window.__STRATALAB_API_BASE__ = {api_base_json};");
+    let init_script = format!("window.__GAMMA_API_BASE__ = {api_base_json};");
     let window_config = app
         .config()
         .app
@@ -485,7 +485,7 @@ fn reveal_main_window(app: &AppHandle) -> Result<(), String> {
 }
 
 fn write_smoke_marker(app: &AppHandle, window_label: &str) -> Result<(), String> {
-    let marker = match env::var("STRATALAB_DESKTOP_SMOKE_FILE") {
+    let marker = match env::var("GAMMA_DESKTOP_SMOKE_FILE") {
         Ok(value) if !value.trim().is_empty() => PathBuf::from(value),
         _ => return Ok(()),
     };
@@ -526,7 +526,7 @@ fn update_splash(app: &AppHandle, headline: &str, detail: &str) {
             serde_json::to_string(headline).unwrap_or_else(|_| "\"Status\"".to_string());
         let detail_json = serde_json::to_string(detail).unwrap_or_else(|_| "\"\"".to_string());
         let script = format!(
-            "window.__STRATALAB_SET_STATUS__ && window.__STRATALAB_SET_STATUS__({headline_json}, {detail_json});"
+            "window.__GAMMA_SET_STATUS__ && window.__GAMMA_SET_STATUS__({headline_json}, {detail_json});"
         );
         let _ = window.eval(&script);
     }
@@ -534,7 +534,7 @@ fn update_splash(app: &AppHandle, headline: &str, detail: &str) {
 
 fn find_repo_root() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(root) = env::var("STRATALAB_REPO_ROOT") {
+    if let Ok(root) = env::var("GAMMA_REPO_ROOT") {
         candidates.push(PathBuf::from(root));
     }
     if let Ok(current_dir) = env::current_dir() {
@@ -562,13 +562,13 @@ fn is_repo_root(candidate: &Path) -> bool {
 }
 
 fn select_api_port() -> Result<u16, String> {
-    if let Ok(value) = env::var("STRATALAB_API_PORT") {
+    if let Ok(value) = env::var("GAMMA_API_PORT") {
         let trimmed = value.trim();
         let port = trimmed
             .parse::<u16>()
-            .map_err(|error| format!("Invalid STRATALAB_API_PORT value '{trimmed}': {error}"))?;
+            .map_err(|error| format!("Invalid GAMMA_API_PORT value '{trimmed}': {error}"))?;
         if port == 0 {
-            return Err("STRATALAB_API_PORT must be greater than 0.".to_string());
+            return Err("GAMMA_API_PORT must be greater than 0.".to_string());
         }
         return Ok(port);
     }

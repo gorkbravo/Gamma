@@ -6,10 +6,17 @@ from datetime import datetime
 from typing import Mapping
 
 import pandas as pd
-from ib_insync import Contract
 
+from src.application.instrument_identity import identity_for_position
+from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot
-from src.services.data_providers import PortfolioDataProvider
+from src.services.data_providers import (
+    PortfolioDataProvider,
+    contract_for_instrument,
+    contract_for_position,
+    convert_history_to_base_currency,
+    normalize_snapshot_price_histories,
+)
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
@@ -68,6 +75,7 @@ class PortfolioService:
         history_store: PortfolioHistoryStore,
         data_provider: PortfolioDataProvider | None = None,
         mock_service: MockDataService | None = None,
+        benchmark_defaults: InstrumentDefaults | None = None,
     ) -> None:
         self.client = client
         self.market_data = market_data
@@ -75,6 +83,12 @@ class PortfolioService:
         self.history_store = history_store
         self.data_provider = data_provider
         self.mock_service = mock_service
+        self.benchmark_defaults = benchmark_defaults or InstrumentDefaults(
+            provider="benchmark",
+            sec_type="STK",
+            exchange="SMART",
+            currency="USD",
+        )
 
     def fetch_snapshot(self, request: PortfolioSnapshotRequest) -> PortfolioSnapshot:
         snapshot = self.client.fetch_snapshot(
@@ -115,10 +129,19 @@ class PortfolioService:
     def compute_performance(self, request: PortfolioPerformanceRequest) -> PortfolioPerformanceResult:
         snapshot = request.snapshot
         warnings: list[str] = []
-        prices, missing = self._load_prices(snapshot, request.lookback_days)
-        day_pnl, day_pnl_pct, day_pnl_source, pnl_warning = self.estimate_day_pnl_from_history(snapshot, prices)
+        raw_prices, missing = self._load_prices(snapshot, request.lookback_days)
+        day_pnl, day_pnl_pct, day_pnl_source, pnl_warning = self.estimate_day_pnl_from_history(snapshot, raw_prices)
         if pnl_warning:
             warnings.append(pnl_warning)
+        normalized_prices = normalize_snapshot_price_histories(
+            snapshot,
+            raw_prices,
+            request.lookback_days,
+            self.market_data,
+            fx_service=self.fx_service,
+        )
+        prices = normalized_prices.prices
+        warnings.extend(normalized_prices.warnings)
         warnings.extend(self.market_data.drain_errors())
         if missing:
             warnings.append(f"Missing history for: {', '.join(missing)}")
@@ -218,7 +241,7 @@ class PortfolioService:
         duration_text = f"{request.last_refresh_duration_ms:.0f} ms" if request.last_refresh_duration_ms is not None else "N/A"
         return "\n".join(
             [
-                "=== StrataLab Diagnostics Report ===",
+                "=== Gamma Diagnostics Report ===",
                 f"Generated: {format_ts(now_utc())}",
                 f"Mode: {'Mock' if self.client.mock else 'Live'}",
                 f"Connection: {connection}",
@@ -263,10 +286,11 @@ class PortfolioService:
             return pd.Series(dtype=float), "none", warnings
 
         symbol = str(benchmark_symbol or "").strip().upper() or "SPY"
+        benchmark_instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
         if self.client.mock and self.mock_service is not None:
             series = self.mock_service.load_history(symbol)
         else:
-            contract = Contract(symbol=symbol, secType="STK", exchange="SMART", currency="USD")
+            contract = contract_for_instrument(benchmark_instrument)
             series = self.market_data.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             warnings.append(f"No benchmark data for {symbol}; using Cash (0%) benchmark")
@@ -274,10 +298,12 @@ class PortfolioService:
 
         converted = self.convert_series_to_base(
             series.astype(float),
-            quote_ccy="USD",
+            quote_ccy=benchmark_instrument.currency,
             base_ccy=snapshot.base_currency,
             lookback_days=lookback_days,
             warnings=warnings,
+            label=symbol,
+            context="Benchmark",
         )
         if converted is None or converted.empty:
             warnings.append(f"Benchmark conversion failed for {symbol}; using Cash (0%) benchmark")
@@ -304,24 +330,22 @@ class PortfolioService:
         base_ccy: str,
         lookback_days: int,
         warnings: list[str],
+        *,
+        label: str = "series",
+        context: str = "Series",
     ) -> pd.Series | None:
-        quote = str(quote_ccy or "").upper()
-        base = str(base_ccy or "").upper()
-        if quote == base:
-            return series
-        fx_series = self.market_data.fetch_fx_history(base, quote, lookback_days)
-        if fx_series is not None and not fx_series.empty:
-            aligned = fx_series.reindex(series.index).ffill().dropna()
-            if not aligned.empty:
-                common_index = series.index.intersection(aligned.index)
-                if not common_index.empty:
-                    return series.reindex(common_index) * aligned.reindex(common_index)
-        rate = self.fx_service.get_rate(base, quote)
-        if rate is None:
-            warnings.append(f"FX unavailable for benchmark conversion {quote}->{base}")
-            return None
-        warnings.append(f"Benchmark FX conversion {quote}->{base} uses latest spot rate")
-        return series * float(rate)
+        result = convert_history_to_base_currency(
+            series,
+            quote_ccy,
+            base_ccy,
+            lookback_days,
+            self.market_data,
+            fx_service=self.fx_service,
+            label=label,
+            context=context,
+        )
+        warnings.extend(result.warnings)
+        return result.series
 
     def estimate_day_pnl_from_history(
         self,
@@ -337,13 +361,14 @@ class PortfolioService:
         for position in snapshot.positions:
             if position.symbol.startswith("CASH") or position.sec_type == "CASH":
                 continue
-            series = prices.get(position.symbol)
+            identity = identity_for_position(position)
+            series = prices.get(identity.instrument_id)
             if series is None:
-                missing_symbols.append(position.symbol)
+                missing_symbols.append(identity.display_symbol)
                 continue
             clean = series.dropna()
             if len(clean) < 2:
-                missing_symbols.append(position.symbol)
+                missing_symbols.append(identity.display_symbol)
                 continue
             latest = float(clean.iloc[-1])
             previous = float(clean.iloc[-2])
@@ -358,7 +383,7 @@ class PortfolioService:
                 fx_rate = self.fx_service.get_rate(snapshot.base_currency, currency)
                 fx_by_currency[currency] = fx_rate
             if fx_rate is None:
-                missing_symbols.append(position.symbol)
+                missing_symbols.append(identity.display_symbol)
                 continue
             total_pnl += float(position.quantity) * (latest - previous) * float(fx_rate)
 
@@ -411,20 +436,30 @@ class PortfolioService:
             for position in snapshot.positions:
                 if position.symbol.startswith("CASH"):
                     continue
+                identity = identity_for_position(position)
                 series = self.mock_service.load_history(position.symbol)
                 if series is None:
-                    missing.append(position.symbol)
+                    missing.append(identity.display_symbol)
                 else:
-                    prices[position.symbol] = series.astype(float)
+                    prices[identity.instrument_id] = series.astype(float)
             return prices, missing
 
-        contracts = self.client.get_contracts()
-        return self.market_data.fetch_histories(contracts, lookback_days)
+        contracts: list[Contract] = []
+        keys: list[str] = []
+        labels: list[str] = []
+        for position in snapshot.positions:
+            if position.symbol.startswith("CASH"):
+                continue
+            identity = identity_for_position(position)
+            contracts.append(contract_for_position(position))
+            keys.append(identity.instrument_id)
+            labels.append(identity.display_symbol)
+        return self.market_data.fetch_histories(contracts, lookback_days, keys=keys, labels=labels)
 
     @staticmethod
     def ensure_cash_returns(snapshot: PortfolioSnapshot, returns_df: pd.DataFrame) -> pd.DataFrame:
         cash_symbols = [
-            position.symbol
+            position.resolved_instrument_id()
             for position in snapshot.positions
             if position.symbol.startswith("CASH") and position.base_market_value is not None
         ]
@@ -439,8 +474,9 @@ class PortfolioService:
     def weights_for_symbols(snapshot: PortfolioSnapshot, symbols: list[str]) -> pd.Series:
         values: dict[str, float] = {}
         for position in snapshot.positions:
-            if position.symbol in symbols and position.base_market_value is not None:
-                values[position.symbol] = float(position.base_market_value)
+            instrument_id = position.resolved_instrument_id()
+            if instrument_id in symbols and position.base_market_value is not None:
+                values[instrument_id] = float(position.base_market_value)
         return PortfolioService._compute_weights(pd.Series(values))
 
     @staticmethod

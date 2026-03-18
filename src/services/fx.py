@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
-from ib_insync import IB, Forex
+from ib_insync import IB
 
 from src.services.cache import CacheService
 from src.services.ib_thread import IBThreadRunner
-
-if TYPE_CHECKING:
-    from src.services.market_data import MarketDataService
+from src.services.market_data import MarketDataService
 
 
 class FXService:
@@ -72,16 +70,20 @@ class FXService:
             return None
         def _do_request():
             try:
-                inverse = Forex(f"{base_ccy}{quote_ccy}")
-                ticker = self.ib.reqMktData(inverse, snapshot=True)
+                spec = MarketDataService._fx_contract_spec(base_ccy, quote_ccy)
+                if spec is None:
+                    return None
+                contract, invert = spec
+                ticker = self.ib.reqMktData(contract, snapshot=True)
                 self.ib.sleep(1)
-                inv_rate = ticker.marketPrice()
+                rate = ticker.marketPrice()
                 try:
                     self.ib.wrapper.endTicker(ticker, "mktData")
                 except Exception:
                     pass
-                if inv_rate is not None and inv_rate == inv_rate and inv_rate != 0:
-                    return float(1.0 / inv_rate)
+                if rate is not None and rate == rate and rate != 0:
+                    value = float(rate)
+                    return float(1.0 / value) if invert else value
                 return None
             except Exception:
                 return None

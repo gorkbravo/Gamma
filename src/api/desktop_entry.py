@@ -13,11 +13,11 @@ from src.utils.logging_config import setup_logging
 
 API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8000
-LOGGER = logging.getLogger("stratalab.desktop_backend")
+LOGGER = logging.getLogger("gamma.desktop_backend")
 
 
 def _resolve_failure_report_path() -> Path | None:
-    value = (os.getenv("STRATALAB_BACKEND_FAILURE_REPORT") or "").strip()
+    value = (os.getenv("GAMMA_BACKEND_FAILURE_REPORT") or "").strip()
     return Path(value).expanduser() if value else None
 
 
@@ -48,12 +48,12 @@ def _configure_runtime_paths() -> None:
 
 
 def _api_port() -> int:
-    value = (os.getenv("STRATALAB_API_PORT") or "").strip()
+    value = (os.getenv("GAMMA_API_PORT") or "").strip()
     if not value:
         return DEFAULT_API_PORT
     port = int(value)
     if port <= 0:
-        raise ValueError("STRATALAB_API_PORT must be greater than 0.")
+        raise ValueError("GAMMA_API_PORT must be greater than 0.")
     return port
 
 
@@ -65,14 +65,14 @@ def main() -> int:
     try:
         port = _api_port()
         app = create_app()
-        LOGGER.info("Starting StrataLab desktop backend on http://%s:%s", API_HOST, port)
+        LOGGER.info("Starting Gamma desktop backend on http://%s:%s", API_HOST, port)
         server = uvicorn.Server(
             uvicorn.Config(
                 app,
                 host=API_HOST,
                 port=port,
                 log_level=(os.getenv("UVICORN_LOG_LEVEL") or os.getenv("LOG_LEVEL", "info")).lower(),
-                access_log=(os.getenv("STRATALAB_ACCESS_LOG", "false").lower() == "true"),
+                access_log=(os.getenv("GAMMA_ACCESS_LOG", "false").lower() == "true"),
             )
         )
         server.run()

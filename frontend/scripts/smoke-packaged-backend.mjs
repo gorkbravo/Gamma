@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendDir = path.resolve(scriptDir, "..");
 const backendBuildScript = path.join(scriptDir, "build-backend.mjs");
-const backendExe = path.join(frontendDir, "src-tauri", "resources", "backend", "stratalab-backend", executableName("stratalab-backend"));
+const backendExe = path.join(frontendDir, "src-tauri", "resources", "backend", "gamma-backend", executableName("gamma-backend"));
 
 await main();
 
@@ -22,7 +22,7 @@ async function main() {
   }
 
   const port = await freePort();
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "stratalab-packaged-backend-"));
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "gamma-packaged-backend-"));
   const logDir = path.join(tempRoot, "logs");
   const failureReport = path.join(logDir, "backend-failure.txt");
   const child = spawn(backendExe, [], {
@@ -30,12 +30,12 @@ async function main() {
     env: {
       ...process.env,
       MOCK_DATA: "true",
-      STRATALAB_API_PORT: String(port),
+      GAMMA_API_PORT: String(port),
       CACHE_DIR: path.join(tempRoot, "cache"),
       PORTFOLIO_HISTORY_DIR: path.join(tempRoot, "data"),
       SAMPLE_DATA_DIR: path.join(path.dirname(backendExe), "sample_data"),
-      STRATALAB_LOG_DIR: logDir,
-      STRATALAB_BACKEND_FAILURE_REPORT: failureReport
+      GAMMA_LOG_DIR: logDir,
+      GAMMA_BACKEND_FAILURE_REPORT: failureReport
     },
     stdio: "ignore"
   });

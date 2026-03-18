@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "StrataLab",
+  "productName": "Gamma",
   "version": "0.1.0",
-  "identifier": "com.stratalab.shell",
+  "identifier": "com.gamma.shell",
   "build": {
     "beforeDevCommand": "node ./scripts/ensure-dev-server.mjs",
     "devUrl": "http://127.0.0.1:5173",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "splashscreen",
-        "title": "Starting StrataLab",
+        "title": "Starting Gamma",
         "url": "tauri-splash.html",
         "width": 540,
         "height": 320,
@@ -23,7 +23,7 @@
       },
       {
         "label": "main",
-        "title": "StrataLab",
+        "title": "Gamma",
         "url": "index.html",
         "width": 1440,
         "height": 960,

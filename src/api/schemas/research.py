@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from src.analytics.risk_metrics import max_drawdown, realized_vol
 from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, series_to_points
+from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.research_service import ResearchAnalysisResult
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 
@@ -11,9 +12,28 @@ from src.models.app_mode import ResearchScopeType, SyntheticPosition
 class SyntheticPositionModel(BaseModel):
     symbol: str
     weight: float
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+    sec_type: str | None = None
+    currency: str | None = None
+    exchange: str | None = None
+    primary_exchange: str | None = None
+    provider: str | None = None
+    provider_id: str | None = None
 
     def to_domain(self) -> SyntheticPosition:
-        return SyntheticPosition(symbol=self.symbol, weight=self.weight)
+        return SyntheticPosition(
+            symbol=self.symbol,
+            weight=self.weight,
+            instrument_id=self.instrument_id,
+            display_symbol=self.display_symbol,
+            sec_type=self.sec_type,
+            currency=self.currency,
+            exchange=self.exchange,
+            primary_exchange=self.primary_exchange,
+            provider=self.provider,
+            provider_id=self.provider_id,
+        )
 
 
 class ResearchAnalyzeRequestModel(BaseModel):
@@ -27,6 +47,8 @@ class ResearchAnalyzeRequestModel(BaseModel):
 class WeightPointModel(BaseModel):
     symbol: str
     weight: float
+    instrument_id: str | None = None
+    display_symbol: str | None = None
 
 
 class ResearchSummaryModel(BaseModel):
@@ -38,9 +60,36 @@ class ResearchSummaryModel(BaseModel):
     correlation: float | None = None
 
 
+class ResearchStructureModel(BaseModel):
+    total_weight: float | None = None
+    top_weight: float | None = None
+    top5_weight: float | None = None
+    concentration_hhi: float | None = None
+    effective_positions: float | None = None
+    aligned_symbol_count: int = 0
+
+
+class ResearchCoverageModel(BaseModel):
+    available_symbols: list[str] = Field(default_factory=list)
+    missing_symbols: list[str] = Field(default_factory=list)
+    benchmark_overlap_count: int = 0
+
+
+class ResearchConstituentModel(BaseModel):
+    symbol: str
+    weight: float
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+    total_return: float | None = None
+    annual_vol: float | None = None
+    max_drawdown: float | None = None
+    weighted_return: float | None = None
+
+
 class ResearchAnalyzeResponseModel(BaseModel):
     scope_type: ResearchScopeType
     benchmark_symbol: str
+    primary_symbol: str | None = None
     observations_count: int
     snapshot: PortfolioSnapshotModel | None = None
     performance_points: list[TimeSeriesPoint]
@@ -48,6 +97,9 @@ class ResearchAnalyzeResponseModel(BaseModel):
     primary_price_points: list[TimeSeriesPoint]
     weights: list[WeightPointModel]
     summary: ResearchSummaryModel
+    structure: ResearchStructureModel
+    coverage: ResearchCoverageModel
+    constituents: list[ResearchConstituentModel]
     warnings: list[str] = Field(default_factory=list)
 
     @classmethod
@@ -69,12 +121,16 @@ class ResearchAnalyzeResponseModel(BaseModel):
         return cls(
             scope_type=result.scope_type,
             benchmark_symbol=result.benchmark_symbol,
+            primary_symbol=result.primary_symbol,
             observations_count=int(len(result.perf)),
             snapshot=PortfolioSnapshotModel.from_domain(result.snapshot) if result.snapshot is not None else None,
             performance_points=series_to_points(result.perf),
             benchmark_points=series_to_points(result.benchmark_returns),
             primary_price_points=series_to_points(result.primary_price),
-            weights=[WeightPointModel(symbol=str(symbol), weight=float(weight)) for symbol, weight in result.weights.items()],
+            weights=[
+                _weight_point_model(result.snapshot, str(instrument_id), float(weight))
+                for instrument_id, weight in result.weights.items()
+            ],
             summary=ResearchSummaryModel(
                 total_return=total_return,
                 annual_return=annual_return,
@@ -83,6 +139,13 @@ class ResearchAnalyzeResponseModel(BaseModel):
                 beta=beta,
                 correlation=correlation,
             ),
+            structure=_structure_from_weights(result.weights),
+            coverage=ResearchCoverageModel(
+                available_symbols=list(result.available_symbols),
+                missing_symbols=list(result.missing_symbols),
+                benchmark_overlap_count=result.benchmark_overlap_count,
+            ),
+            constituents=_constituents_from_result(result),
             warnings=list(result.warnings),
         )
 
@@ -109,3 +172,84 @@ def _beta_corr(perf, benchmark_returns):
         return None, corr
     cov = float(aligned["portfolio"].cov(aligned["benchmark"]))
     return cov / benchmark_var, corr
+
+
+def _structure_from_weights(weights) -> ResearchStructureModel:
+    if weights.empty:
+        return ResearchStructureModel()
+    absolute_weights = weights.abs().astype(float)
+    total_weight = float(absolute_weights.sum())
+    if total_weight <= 0:
+        return ResearchStructureModel(total_weight=total_weight, aligned_symbol_count=int(len(weights)))
+    normalized = absolute_weights / total_weight
+    hhi = float((normalized**2).sum())
+    return ResearchStructureModel(
+        total_weight=total_weight,
+        top_weight=float(normalized.max()),
+        top5_weight=float(normalized.sort_values(ascending=False).head(5).sum()),
+        concentration_hhi=hhi,
+        effective_positions=float(1.0 / hhi) if hhi > 0 else None,
+        aligned_symbol_count=int(len(weights)),
+    )
+
+
+def _constituents_from_result(result: ResearchAnalysisResult) -> list[ResearchConstituentModel]:
+    if result.weights.empty:
+        return []
+    rows: list[ResearchConstituentModel] = []
+    for instrument_id, weight in result.weights.sort_values(ascending=False).items():
+        position_meta = _position_meta(result.snapshot, str(instrument_id))
+        total_return = _series_value(result.constituent_total_returns, instrument_id)
+        annual_vol = _series_value(result.constituent_annual_vol, instrument_id)
+        max_dd = _series_value(result.constituent_max_drawdown, instrument_id)
+        rows.append(
+            ResearchConstituentModel(
+                symbol=position_meta.get("symbol") or str(instrument_id),
+                weight=float(weight),
+                instrument_id=position_meta.get("instrument_id"),
+                display_symbol=position_meta.get("display_symbol"),
+                total_return=total_return,
+                annual_vol=annual_vol,
+                max_drawdown=max_dd,
+                weighted_return=float(weight) * total_return if total_return is not None else None,
+            )
+        )
+    return rows
+
+
+def _series_value(series, symbol: str) -> float | None:
+    if series is None or getattr(series, "empty", True):
+        return None
+    value = series.get(symbol)
+    return None if value is None else float(value)
+
+
+def _weight_point_model(snapshot, instrument_id: str, weight: float) -> WeightPointModel:
+    position_meta = _position_meta(snapshot, instrument_id)
+    return WeightPointModel(
+        symbol=position_meta.get("symbol") or instrument_id,
+        weight=weight,
+        instrument_id=position_meta.get("instrument_id"),
+        display_symbol=position_meta.get("display_symbol"),
+    )
+
+
+def _position_meta(snapshot, instrument_id: str) -> dict[str, str | None]:
+    identity_map = snapshot_identity_map(snapshot)
+    identity = identity_map.get(instrument_id)
+    if identity is not None:
+        return {
+            "instrument_id": identity.instrument_id,
+            "symbol": identity.symbol,
+            "display_symbol": identity.display_symbol,
+        }
+    fallback = find_identity_by_symbol(snapshot, instrument_id)
+    if fallback is not None:
+        return {
+            "instrument_id": fallback.instrument_id,
+            "symbol": fallback.symbol,
+            "display_symbol": fallback.display_symbol,
+        }
+    if snapshot is None:
+        return {"instrument_id": None, "symbol": None, "display_symbol": None}
+    return {"instrument_id": None, "symbol": None, "display_symbol": None}

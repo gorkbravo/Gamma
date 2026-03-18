@@ -4,6 +4,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, series_to_points
+from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.risk_service import RiskComputationPayload
 from src.models.portfolio import RiskResults
 
@@ -36,6 +37,8 @@ class RiskMetricsModel(BaseModel):
     correlation: float | None = None
     alpha_annual: float | None = None
     covered_portfolio_value: float | None = None
+    covered_risk_basis_value: float | None = None
+    risk_basis_value: float | None = None
     risk_coverage_ratio: float | None = None
     historical_var_total_estimate: float | None = None
     historical_cvar_total_estimate: float | None = None
@@ -60,6 +63,8 @@ class RiskMetricsModel(BaseModel):
 
 class RiskContributionModel(BaseModel):
     symbol: str
+    instrument_id: str | None = None
+    display_symbol: str | None = None
     weight: float | None = None
     daily_vol: float | None = None
     variance_contribution_pct: float | None = None
@@ -80,6 +85,8 @@ class MonteCarloChartsModel(BaseModel):
 
 class ExcludedAssetModel(BaseModel):
     symbol: str
+    instrument_id: str | None = None
+    display_symbol: str | None = None
     reason: str
 
 
@@ -100,10 +107,13 @@ class RiskComputeResponseModel(BaseModel):
         if not payload.contributions.empty:
             symbols.sort(key=lambda symbol: float(payload.contributions.get(symbol, np.nan)), reverse=True)
         for symbol in symbols:
+            meta = _position_meta(payload.snapshot, symbol)
             daily_vol = payload.returns_df[symbol].std() if symbol in payload.returns_df else None
             contribution_rows.append(
                 RiskContributionModel(
-                    symbol=symbol,
+                    symbol=meta.get("symbol") or symbol,
+                    instrument_id=meta.get("instrument_id"),
+                    display_symbol=meta.get("display_symbol"),
                     weight=_to_float(payload.weights.get(symbol)),
                     daily_vol=_to_float(daily_vol),
                     variance_contribution_pct=_to_float(payload.contributions.get(symbol)),
@@ -122,7 +132,12 @@ class RiskComputeResponseModel(BaseModel):
                 sample_paths=_fan_percentiles_to_payload(results.monte_carlo_sample_paths),
             ),
             excluded_assets=[
-                ExcludedAssetModel(symbol=symbol, reason=reason)
+                ExcludedAssetModel(
+                    symbol=_position_meta(payload.snapshot, symbol).get("symbol") or symbol,
+                    instrument_id=_position_meta(payload.snapshot, symbol).get("instrument_id"),
+                    display_symbol=_position_meta(payload.snapshot, symbol).get("display_symbol"),
+                    reason=reason,
+                )
                 for symbol, reason in sorted(results.excluded_assets.items())
             ],
             warnings=list(results.warnings),
@@ -159,3 +174,21 @@ def _fan_percentiles_to_payload(frame) -> dict[str, list[IndexedValuePoint]]:
             for index, value in series.items()
         ]
     return payload
+
+
+def _position_meta(snapshot, instrument_id: str) -> dict[str, str | None]:
+    identity = snapshot_identity_map(snapshot).get(instrument_id)
+    if identity is not None:
+        return {
+            "instrument_id": identity.instrument_id,
+            "symbol": identity.symbol,
+            "display_symbol": identity.display_symbol,
+        }
+    fallback = find_identity_by_symbol(snapshot, instrument_id)
+    if fallback is not None:
+        return {
+            "instrument_id": fallback.instrument_id,
+            "symbol": fallback.symbol,
+            "display_symbol": fallback.display_symbol,
+        }
+    return {"instrument_id": None, "symbol": None, "display_symbol": None}

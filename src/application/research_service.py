@@ -5,10 +5,12 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from src.analytics.returns import align_prices, compute_returns
-from src.analytics.risk_metrics import compute_weights, portfolio_returns
+from src.analytics.risk_metrics import compute_weights, max_drawdown, portfolio_returns, realized_vol
+from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
+from src.application.research_validation import ensure_valid_research_scope
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.portfolio import PortfolioSnapshot
-from src.services.data_providers import ResearchDataProvider
+from src.services.data_providers import ResearchDataProvider, normalize_snapshot_price_histories
 
 
 @dataclass(frozen=True)
@@ -27,8 +29,15 @@ class ResearchAnalysisResult:
     perf: pd.Series
     benchmark_returns: pd.Series
     benchmark_symbol: str
+    primary_symbol: str | None
     weights: pd.Series
     primary_price: pd.Series
+    available_symbols: list[str]
+    missing_symbols: list[str]
+    benchmark_overlap_count: int
+    constituent_total_returns: pd.Series
+    constituent_annual_vol: pd.Series
+    constituent_max_drawdown: pd.Series
     warnings: list[str]
 
 
@@ -38,34 +47,53 @@ class ResearchService:
 
     def analyze(self, request: ResearchAnalysisRequest) -> ResearchAnalysisResult:
         warnings: list[str] = []
-        primary_symbol = str(request.primary_symbol or "").strip().upper()
+        validated_scope = ensure_valid_research_scope(
+            request.scope_type,
+            request.primary_symbol,
+            request.synthetic_positions,
+        )
+        primary_symbol = validated_scope.primary_symbol
         benchmark_symbol = str(request.benchmark_symbol or "").strip().upper() or "SPY"
         snapshot, snapshot_warnings = self.provider.build_snapshot_for_scope(
             request.scope_type,
             primary_symbol=primary_symbol,
-            synthetic_positions=request.synthetic_positions,
+            synthetic_positions=validated_scope.synthetic_positions,
         )
         warnings.extend(snapshot_warnings)
         if snapshot is None:
             return self._empty_result(
                 scope_type=request.scope_type,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 warnings=warnings,
             )
 
-        prices, missing = self.provider.load_prices(snapshot, lookback_days=request.lookback_days)
-        primary_price = pd.Series(dtype=float)
-        if request.scope_type == ResearchScopeType.SINGLE_TICKER:
-            primary_price = prices.get(primary_symbol, pd.Series(dtype=float))
+        identity_map = snapshot_identity_map(snapshot)
+        raw_prices, missing = self.provider.load_prices(snapshot, lookback_days=request.lookback_days)
         if missing:
             warnings.append(f"Missing history for: {', '.join(missing)}")
+        normalized_prices = normalize_snapshot_price_histories(
+            snapshot,
+            raw_prices,
+            request.lookback_days,
+            self.provider.market_data,
+        )
+        warnings.extend(normalized_prices.warnings)
+        prices = normalized_prices.prices
+        primary_price = pd.Series(dtype=float)
+        if request.scope_type == ResearchScopeType.SINGLE_TICKER:
+            primary_identity = find_identity_by_symbol(snapshot, primary_symbol)
+            if primary_identity is not None:
+                primary_price = prices.get(primary_identity.instrument_id, pd.Series(dtype=float))
         if not prices:
             warnings.append("No valid history found for selected scope")
             return self._empty_result(
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 primary_price=primary_price,
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
@@ -76,14 +104,16 @@ class ResearchService:
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 primary_price=primary_price,
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
         values = {
-            position.symbol: float(position.base_market_value)
+            position.resolved_instrument_id(): float(position.base_market_value)
             for position in snapshot.positions
-            if position.base_market_value is not None and position.symbol in returns_df.columns
+            if position.base_market_value is not None and position.resolved_instrument_id() in returns_df.columns
         }
         weights = compute_weights(pd.Series(values))
         if weights.empty:
@@ -92,8 +122,11 @@ class ResearchService:
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 weights=weights,
                 primary_price=primary_price,
+                available_symbols=self._labels_for_ids(list(returns_df.columns), identity_map),
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
@@ -104,21 +137,43 @@ class ResearchService:
                 scope_type=request.scope_type,
                 snapshot=snapshot,
                 benchmark_symbol=benchmark_symbol,
+                primary_symbol=primary_symbol or None,
                 weights=weights,
                 primary_price=primary_price,
                 perf=perf,
+                available_symbols=self._labels_for_ids(weights.index.tolist(), identity_map),
+                missing_symbols=missing,
                 warnings=warnings,
             )
 
-        benchmark_returns = self.load_benchmark_returns(benchmark_symbol, request.lookback_days, warnings)
+        benchmark_returns = self.load_benchmark_returns(
+            benchmark_symbol,
+            request.lookback_days,
+            snapshot.base_currency,
+            warnings,
+        )
+        aligned_returns = returns_df.reindex(columns=weights.index.tolist())
+        constituent_total_returns = self._constituent_total_returns(aligned_returns)
+        constituent_annual_vol = aligned_returns.apply(lambda series: realized_vol(series.dropna())[1])
+        constituent_max_drawdown = aligned_returns.apply(lambda series: max_drawdown(series.dropna()))
+        benchmark_overlap_count = int(
+            len(perf.to_frame("portfolio").join(benchmark_returns.to_frame("benchmark"), how="inner").dropna())
+        )
         return ResearchAnalysisResult(
             scope_type=request.scope_type,
             snapshot=snapshot,
             perf=perf,
             benchmark_returns=benchmark_returns,
             benchmark_symbol=benchmark_symbol,
+            primary_symbol=primary_symbol or None,
             weights=weights,
             primary_price=primary_price,
+            available_symbols=self._labels_for_ids(weights.index.tolist(), identity_map),
+            missing_symbols=missing,
+            benchmark_overlap_count=benchmark_overlap_count,
+            constituent_total_returns=constituent_total_returns,
+            constituent_annual_vol=constituent_annual_vol,
+            constituent_max_drawdown=constituent_max_drawdown,
             warnings=warnings,
         )
 
@@ -126,11 +181,17 @@ class ResearchService:
         self,
         benchmark_symbol: str,
         lookback_days: int,
+        base_currency: str,
         warnings: list[str] | None = None,
     ) -> pd.Series:
         warning_list = warnings if warnings is not None else []
         symbol = str(benchmark_symbol or "").strip().upper() or "SPY"
-        bench_series = self.provider.load_symbol_history(symbol, lookback_days)
+        bench_series = self.provider.load_benchmark_history(
+            symbol,
+            lookback_days,
+            base_currency=base_currency,
+            warnings=warning_list,
+        )
         if bench_series is None or bench_series.empty:
             warning_list.append(f"Benchmark history unavailable for {symbol}")
             return pd.Series(dtype=float)
@@ -146,9 +207,12 @@ class ResearchService:
         benchmark_symbol: str,
         warnings: list[str],
         snapshot: PortfolioSnapshot | None = None,
+        primary_symbol: str | None = None,
         weights: pd.Series | None = None,
         primary_price: pd.Series | None = None,
         perf: pd.Series | None = None,
+        available_symbols: list[str] | None = None,
+        missing_symbols: list[str] | None = None,
     ) -> ResearchAnalysisResult:
         return ResearchAnalysisResult(
             scope_type=scope_type,
@@ -156,7 +220,33 @@ class ResearchService:
             perf=perf if perf is not None else pd.Series(dtype=float),
             benchmark_returns=pd.Series(dtype=float),
             benchmark_symbol=benchmark_symbol,
+            primary_symbol=primary_symbol,
             weights=weights if weights is not None else pd.Series(dtype=float),
             primary_price=primary_price if primary_price is not None else pd.Series(dtype=float),
+            available_symbols=list(available_symbols or []),
+            missing_symbols=list(missing_symbols or []),
+            benchmark_overlap_count=0,
+            constituent_total_returns=pd.Series(dtype=float),
+            constituent_annual_vol=pd.Series(dtype=float),
+            constituent_max_drawdown=pd.Series(dtype=float),
             warnings=warnings,
         )
+
+    @staticmethod
+    def _constituent_total_returns(returns_df: pd.DataFrame) -> pd.Series:
+        if returns_df.empty:
+            return pd.Series(dtype=float)
+        cumulative = (1.0 + returns_df).prod() - 1.0
+        return cumulative.astype(float)
+
+    @staticmethod
+    def _labels_for_ids(
+        instrument_ids: list[str],
+        identity_map: dict[str, object],
+    ) -> list[str]:
+        labels: list[str] = []
+        for instrument_id in instrument_ids:
+            identity = identity_map.get(instrument_id)
+            label = getattr(identity, "display_symbol", None) or getattr(identity, "symbol", None) or str(instrument_id)
+            labels.append(str(label))
+        return labels

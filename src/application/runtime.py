@@ -4,24 +4,36 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
 from src.application.iv_service import IVService
 from src.application.portfolio_service import PortfolioService
+from src.application.prediction_market_service import PredictionMarketService
 from src.application.research_service import ResearchService
 from src.application.risk_service import RiskService
 from src.application.system_service import normalize_market_data_mode
-from src.services.app_context import AppDataContext
+from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
+from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.services.portfolio_history_store import PortfolioHistoryStore
+from src.services.research_cache import ResearchHistoryCache
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.logging_config import setup_logging
+
+if TYPE_CHECKING:
+    from src.services.app_context import AppDataContext
+
+
+@dataclass
+class DesktopRuntimeState:
+    app_context: AppDataContext
 
 
 @dataclass
@@ -32,7 +44,7 @@ class ApplicationRuntime:
     quote_timeout_seconds: float
     market_data_mode: str
     mock_mode: bool
-    app_context: AppDataContext
+    research_cache: ResearchHistoryCache
     mock_service: MockDataService
     client: IBKRClient
     cache: CacheService
@@ -44,8 +56,16 @@ class ApplicationRuntime:
     research_provider: ResearchDataProvider
     portfolio_service: PortfolioService
     research_service: ResearchService
+    prediction_market_service: PredictionMarketService
     risk_service: RiskService
     iv_service: IVService
+    desktop: DesktopRuntimeState | None = None
+
+    @property
+    def app_context(self) -> AppDataContext | None:
+        if self.desktop is None:
+            return None
+        return self.desktop.app_context
 
     def set_market_data_mode(self, value: str | None) -> str:
         normalized = normalize_market_data_mode(value)
@@ -53,6 +73,26 @@ class ApplicationRuntime:
         self.market_data.set_market_data_mode(normalized)
         self.client.set_market_data_mode(normalized)
         self.iv_service.set_market_data_mode(normalized)
+        return normalized
+
+    def set_base_currency(self, value: str | None) -> tuple[str, list[str]]:
+        normalized = self._normalize_base_currency(value)
+        notes: list[str] = []
+        if normalized == self.base_currency:
+            return normalized, [f"Base currency already set to {normalized}."]
+        self.base_currency = normalized
+        self.research_provider.base_currency = normalized
+        self.portfolio_history.clear()
+        notes.append(f"Base currency set to {normalized}.")
+        notes.append("Local portfolio history was cleared because stored snapshots are base-currency specific.")
+        notes.append("Re-run research and risk views to refresh any previously loaded analytics.")
+        return normalized, notes
+
+    @staticmethod
+    def _normalize_base_currency(value: str | None) -> str:
+        normalized = str(value or "").strip().upper()
+        if len(normalized) != 3 or not normalized.isalpha():
+            raise ValueError("Base currency must be a 3-letter ISO currency code.")
         return normalized
 
     def shutdown(self) -> None:
@@ -68,6 +108,7 @@ def build_runtime(
     cache_dir: str | Path | None = None,
     history_dir: str | Path | None = None,
     sample_data_dir: str | Path | None = None,
+    include_desktop_session: bool = False,
 ) -> ApplicationRuntime:
     load_dotenv()
     setup_logging()
@@ -90,8 +131,20 @@ def build_runtime(
     resolved_cache_dir = Path(cache_dir or os.getenv("CACHE_DIR", "cache"))
     resolved_history_dir = Path(history_dir or os.getenv("PORTFOLIO_HISTORY_DIR", "data"))
     resolved_sample_data_dir = Path(sample_data_dir or os.getenv("SAMPLE_DATA_DIR", "sample_data"))
+    research_defaults = InstrumentDefaults(
+        provider=os.getenv("RESEARCH_DEFAULT_PROVIDER", "research"),
+        sec_type=os.getenv("RESEARCH_DEFAULT_SEC_TYPE", "STK"),
+        exchange=os.getenv("RESEARCH_DEFAULT_EXCHANGE", "SMART"),
+        currency=os.getenv("RESEARCH_DEFAULT_CURRENCY", "USD"),
+    )
+    benchmark_defaults = InstrumentDefaults(
+        provider=os.getenv("BENCHMARK_DEFAULT_PROVIDER", "benchmark"),
+        sec_type=os.getenv("BENCHMARK_DEFAULT_SEC_TYPE", "STK"),
+        exchange=os.getenv("BENCHMARK_DEFAULT_EXCHANGE", "SMART"),
+        currency=os.getenv("BENCHMARK_DEFAULT_CURRENCY", "USD"),
+    )
 
-    app_context = AppDataContext()
+    research_cache = ResearchHistoryCache()
     mock_service = MockDataService(base_path=resolved_sample_data_dir)
     client = IBKRClient(host, port, client_id, account, bool(mock_mode), mock_service)
     client.set_market_data_mode(market_data_mode)
@@ -116,8 +169,11 @@ def build_runtime(
         client,
         market_data,
         mock_service,
-        app_context,
+        None,
         base_currency,
+        research_cache,
+        research_defaults,
+        benchmark_defaults,
     )
 
     portfolio_service = PortfolioService(
@@ -127,10 +183,24 @@ def build_runtime(
         portfolio_history,
         data_provider=portfolio_provider,
         mock_service=mock_service,
+        benchmark_defaults=benchmark_defaults,
     )
     research_service = ResearchService(research_provider)
-    risk_service = RiskService(client, market_data, mock_service, risk_free_service)
+    prediction_market_service = PredictionMarketService(
+        adapters={
+            "polymarket": PolymarketAdapter(cache),
+            "kalshi": KalshiAdapter(cache),
+        }
+    )
+    risk_service = RiskService(
+        client,
+        market_data,
+        mock_service,
+        risk_free_service,
+        benchmark_defaults=benchmark_defaults,
+    )
     iv_service = IVService(client, market_data_mode)
+    desktop = _build_desktop_state(research_provider) if include_desktop_session else None
 
     return ApplicationRuntime(
         base_currency=base_currency,
@@ -139,7 +209,7 @@ def build_runtime(
         quote_timeout_seconds=quote_timeout,
         market_data_mode=market_data_mode,
         mock_mode=bool(mock_mode),
-        app_context=app_context,
+        research_cache=research_cache,
         mock_service=mock_service,
         client=client,
         cache=cache,
@@ -151,8 +221,26 @@ def build_runtime(
         research_provider=research_provider,
         portfolio_service=portfolio_service,
         research_service=research_service,
+        prediction_market_service=prediction_market_service,
         risk_service=risk_service,
         iv_service=iv_service,
+        desktop=desktop,
+    )
+
+
+def build_desktop_runtime(
+    *,
+    mock_mode: bool | None = None,
+    cache_dir: str | Path | None = None,
+    history_dir: str | Path | None = None,
+    sample_data_dir: str | Path | None = None,
+) -> ApplicationRuntime:
+    return build_runtime(
+        mock_mode=mock_mode,
+        cache_dir=cache_dir,
+        history_dir=history_dir,
+        sample_data_dir=sample_data_dir,
+        include_desktop_session=True,
     )
 
 
@@ -166,3 +254,11 @@ def reset_runtime() -> None:
         runtime = get_runtime()
         runtime.shutdown()
     get_runtime.cache_clear()
+
+
+def _build_desktop_state(research_provider: ResearchDataProvider) -> DesktopRuntimeState:
+    from src.services.app_context import AppDataContext
+
+    app_context = AppDataContext()
+    research_provider.context = app_context
+    return DesktopRuntimeState(app_context=app_context)

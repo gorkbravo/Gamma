@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 
-def setup_logging(*, log_dir: str | os.PathLike[str] | None = None, log_name: str = "stratalab.log") -> Path | None:
+def setup_logging(*, log_dir: str | os.PathLike[str] | None = None, log_name: str = "gamma.log") -> Path | None:
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
@@ -21,7 +21,7 @@ def setup_logging(*, log_dir: str | os.PathLike[str] | None = None, log_name: st
         stream_handler.setFormatter(formatter)
         root_logger.addHandler(stream_handler)
 
-    resolved_log_dir = Path(log_dir or os.getenv("STRATALAB_LOG_DIR", "")).expanduser() if (log_dir or os.getenv("STRATALAB_LOG_DIR")) else None
+    resolved_log_dir = Path(log_dir or os.getenv("GAMMA_LOG_DIR", "")).expanduser() if (log_dir or os.getenv("GAMMA_LOG_DIR")) else None
     log_path: Path | None = None
     if resolved_log_dir:
         resolved_log_dir.mkdir(parents=True, exist_ok=True)

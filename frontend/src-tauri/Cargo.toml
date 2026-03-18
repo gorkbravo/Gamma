@@ -1,5 +1,5 @@
 [package]
-name = "stratalab-shell"
+name = "gamma-shell"
 version = "0.1.0"
 edition = "2021"
 
