@@ -18,6 +18,15 @@ Because of that, every new tab should satisfy at least one of these goals:
 
 The roadmap is organized into phases so that development follows the highest **research value / implementation complexity** path first. The order is designed to avoid turning Gamma into a bloated dashboard with weak data foundations. The idea is to first build tabs where the data is relatively accessible and the research surface is rich, then later move into heavier normalization problems such as company fundamentals and valuation.
 
+## Progress Tracking
+
+Status markers in this roadmap are lightweight implementation estimates:
+- `Not started (0%)`
+- `In progress (~X%)`
+- `Complete (100%)`
+
+Per-task completion is tracked only for the currently active phase.
+
 ---
 
 ## Guiding Product Principles
@@ -58,6 +67,10 @@ This applies across the roadmap, including prediction markets, macro, crypto, fu
 ---
 
 ## Phase 1 - Prediction Markets Tab
+
+_Status: Complete (100%)_
+_Phase transition note: Phase 1 is considered complete as a first pass. Remaining refinements are intentionally deferred until later tabs create clearer comparative needs and reveal where a second pass is most valuable._
+_Recent hardening before transition: Kalshi historical discovery/history support, Kalshi closed-status filtering, outcome-aware wallet edge math, and venue-toggle persistence were corrected._
 
 ### Why this phase comes first
 
@@ -228,9 +241,23 @@ At the end of Phase 1, Gamma should be able to:
 
 This phase gives Gamma a highly distinctive research edge with relatively manageable implementation complexity.
 
+For roadmap purposes, this deliverable is now treated as achieved at a first-pass level. Future work on prediction markets should be driven by concrete needs discovered after later tabs land, rather than by continuing to deepen Phase 1 in isolation.
+
 ---
 
 ## Phase 2 - Macro Tab
+
+_Status: In progress (~5%)_
+_Active focus: establish the first usable Macro workspace, move cross-asset context into Gamma, and make Macro the new primary implementation track._
+
+#### Completion snapshot
+- `Snapshot mode`: ~0% complete. Not started.
+- `Cross-asset expectations mode`: ~0% complete. Not started.
+- `Rates & policy mode`: ~0% complete. Not started.
+- `Optional commodities mode`: ~0% complete. Not started and not required for the first pass.
+- `Coherence and divergence engine`: ~0% complete. Not started.
+- `Event and regime interpretation`: ~0% complete. Not started.
+- `Research notebook hooks`: ~0% complete. Not started.
 
 ### Why this phase comes next
 
@@ -408,6 +435,9 @@ This phase would make Gamma much more effective as a cross-market research envir
 
 ## Phase 3 - AI Copilot Layer
 
+_Status: Not started (0%)_
+_Remaining focus: full phase scope._
+
 ### Why this phase comes here
 
 The AI component becomes most useful **after** Gamma already has meaningful data surfaces. If added too early, it risks becoming a generic chatbot with little grounding. If added after the app has prediction-market and macro data infrastructure, it can act as a true research assistant rather than a novelty feature.
@@ -540,6 +570,9 @@ This phase does not replace the data tabs. It multiplies the value of every othe
 ---
 
 ## Phase 4 - Crypto Tab
+
+_Status: Not started (0%)_
+_Remaining focus: full phase scope._
 
 ### Why this phase comes here
 
@@ -683,6 +716,9 @@ This phase broadens the app into a more general market-research platform while s
 ---
 
 ## Phase 5 - Fundamentals Tab
+
+_Status: Not started (0%)_
+_Remaining focus: full phase scope._
 
 ### Why this phase comes later
 
@@ -887,19 +923,19 @@ This becomes increasingly important as fundamentals and AI-assisted outputs are 
 
 ## Summary of the Development Order
 
-### Phase 1 - Prediction Markets
+### Phase 1 - Prediction Markets (`Complete`)
 Build the most differentiated and accessible research tab first.
 
-### Phase 2 - Macro
+### Phase 2 - Macro (`In progress ~5%`)
 Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
 
-### Phase 3 - AI Copilot
+### Phase 3 - AI Copilot (`Not started`)
 Add a context-aware research assistant that sits on top of the data architecture already built.
 
-### Phase 4 - Crypto
+### Phase 4 - Crypto (`Not started`)
 Expand into a broader public-data market research environment with token, wallet, and on-chain analytics.
 
-### Phase 5 - Fundamentals
+### Phase 5 - Fundamentals (`Not started`)
 Add company financial analysis and valuation once the architecture is mature enough to handle normalization and provenance correctly.
 
 ---
