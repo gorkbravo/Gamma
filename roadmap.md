@@ -433,7 +433,55 @@ This phase would make Gamma much more effective as a cross-market research envir
 
 ---
 
-## Phase 3 - AI Copilot Layer
+## Phase 3 - Keyboard Navigation & Power-User Shortcuts
+
+_Status: Not started (0%)_
+_Remaining focus: full phase scope._
+
+### Why this phase comes here
+
+By this point Gamma has multiple data-rich tabs (Portfolio, Risk, IV, Prediction Markets, Macro with internal modes) and a collapsible sidebar for navigation. As the tab count grows, click-based navigation becomes friction for the power users this app is built for. Adding keyboard shortcuts after Phase 2 means there are enough views to make shortcuts valuable, but the investment is small enough to slot in before heavier feature phases.
+
+This phase is also a natural companion to the sidebar rework: the sidebar becomes the discovery and orientation layer for new users, while keybindings become the primary navigation method for regular users.
+
+### Goal of the phase
+
+Provide a keyboard-driven navigation layer that lets power users move between views, trigger common actions, and control the UI without touching the mouse.
+
+### Functionality
+
+#### 1. Tab/view switching via Ctrl+N
+`Ctrl+1` through `Ctrl+N` should map to the tab list in order. The mapping should be consistent within a workspace mode (e.g. in Research mode, `Ctrl+1` = Research, `Ctrl+2` = Prediction Markets, `Ctrl+3` = Risk, `Ctrl+4` = IV). This mirrors the convention used by browsers, VS Code, and terminal multiplexers.
+
+#### 2. Sidebar toggle
+A single keybinding (e.g. `Ctrl+B` or backtick) should toggle the sidebar open/closed. This gives keyboard users a way to check available views without reaching for the mouse.
+
+#### 3. Shortcut hints in sidebar
+Each tab entry in the sidebar should display its keybinding hint (e.g. `Portfolio  ⌃1`). This teaches the shortcuts through usage and eventually makes the sidebar unnecessary for regular users.
+
+#### 4. Action shortcuts
+Common actions should have keybindings:
+- `Ctrl+R` or `F5` for refresh,
+- `Ctrl+,` for settings,
+- `Escape` to close sidebar / dismiss popovers.
+
+#### 5. Workspace switching
+A keybinding (e.g. `Ctrl+Shift+P` / `Ctrl+Shift+R`) to switch between Portfolio and Research workspaces without returning to the landing page.
+
+### Implementation notes
+
+- Keybindings should be registered at the app level (window keydown listener) and cleaned up on unmount.
+- Avoid conflicts with browser defaults and Tauri/OS shortcuts.
+- Keybindings should be discoverable but not intrusive — no tooltip overlays or onboarding modals.
+- Consider a `?` shortcut that shows all available keybindings in a lightweight overlay.
+
+### Deliverable of the phase
+
+At the end of Phase 3, Gamma should support full keyboard-driven navigation across all views and common actions. The sidebar becomes a fallback discovery tool, and regular users can operate entirely from the keyboard.
+
+---
+
+## Phase 4 - AI Copilot Layer
 
 _Status: Not started (0%)_
 _Remaining focus: full phase scope._
@@ -569,7 +617,7 @@ This phase does not replace the data tabs. It multiplies the value of every othe
 
 ---
 
-## Phase 4 - Crypto Tab
+## Phase 5 - Crypto Tab
 
 _Status: Not started (0%)_
 _Remaining focus: full phase scope._
@@ -704,7 +752,7 @@ A practical approach would be to begin with CoinGecko for broad market data, the
 
 ### Deliverable of the phase
 
-At the end of Phase 4, Gamma should be able to:
+At the end of Phase 5, Gamma should be able to:
 - research tokens and sectors,
 - explore narrative baskets,
 - study wallet flows,
@@ -715,7 +763,7 @@ This phase broadens the app into a more general market-research platform while s
 
 ---
 
-## Phase 5 - Fundamentals Tab
+## Phase 6 - Fundamentals Tab
 
 _Status: Not started (0%)_
 _Remaining focus: full phase scope._
@@ -855,7 +903,7 @@ A practical implementation path would likely use a normalized provider first for
 
 ### Deliverable of the phase
 
-At the end of Phase 5, Gamma should be able to:
+At the end of Phase 6, Gamma should be able to:
 - display company financial history clearly,
 - compute major operating and valuation metrics,
 - allow scenario-based DCF research,
@@ -929,13 +977,16 @@ Build the most differentiated and accessible research tab first.
 ### Phase 2 - Macro (`In progress ~5%`)
 Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
 
-### Phase 3 - AI Copilot (`Not started`)
+### Phase 3 - Keyboard Navigation (`Not started`)
+Add keyboard shortcuts for view switching, sidebar toggle, and common actions so power users can navigate entirely without the mouse.
+
+### Phase 4 - AI Copilot (`Not started`)
 Add a context-aware research assistant that sits on top of the data architecture already built.
 
-### Phase 4 - Crypto (`Not started`)
+### Phase 5 - Crypto (`Not started`)
 Expand into a broader public-data market research environment with token, wallet, and on-chain analytics.
 
-### Phase 5 - Fundamentals (`Not started`)
+### Phase 6 - Fundamentals (`Not started`)
 Add company financial analysis and valuation once the architecture is mature enough to handle normalization and provenance correctly.
 
 ---
