@@ -1,19 +1,23 @@
 <script lang="ts">
   export let title = "Gamma";
+  export let activeViewLabel = "";
+  export let onToggleSidebar: () => void = () => {};
 </script>
 
 <div class="shell">
   <header class="topbar">
     <div class="brand">
-      <div class="mark-frame" aria-hidden="true">
-        <img class="mark" src="/gamma-mark.svg" alt="" />
-      </div>
-      <div class="copy">
-        <div class="title-row">
-          <h1>{title}</h1>
-          <span class="eyebrow">Research & Analysis Platform</span>
-        </div>
-      </div>
+      <button class="hamburger" on:click={onToggleSidebar} aria-label="Toggle navigation">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <img class="mark" src="/gamma-mark.svg" alt="" aria-hidden="true" />
+      <h1>{title}</h1>
+      {#if activeViewLabel}
+        <span class="separator">/</span>
+        <button class="view-label" on:click={onToggleSidebar}>{activeViewLabel}</button>
+      {/if}
     </div>
     <div class="status-slot">
       <slot name="status" />
@@ -36,63 +40,75 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.65rem 0.9rem;
+    gap: 0.6rem;
+    padding: 0.3rem 0.75rem;
     border: 1px solid var(--panel-border);
     background: var(--surface-1);
   }
 
-  .brand,
-  .title-row {
+  .brand {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.45rem;
+    min-width: 0;
   }
 
-  .brand {
-    min-width: 0;
+  .hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-1);
+    padding: 0.2rem;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+
+  .hamburger:hover {
+    color: var(--text-0);
+    border-color: rgba(122, 166, 200, 0.32);
   }
 
   .mark {
     display: block;
-    width: 1.95rem;
+    width: 1.15rem;
     height: auto;
-  }
-
-  .mark-frame {
-    display: grid;
-    place-items: center;
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    padding: 0.35rem;
-    border: 1px solid rgba(122, 166, 200, 0.26);
-    background:
-      radial-gradient(circle at 50% 28%, rgba(106, 168, 255, 0.16), transparent 62%),
-      linear-gradient(180deg, rgba(13, 22, 31, 0.96), rgba(7, 11, 16, 0.96));
-    box-shadow: inset 0 0 0 1px rgba(244, 247, 251, 0.03);
-  }
-
-  .copy {
-    min-width: 0;
-  }
-
-  .eyebrow {
-    color: var(--accent-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.62rem;
-    white-space: nowrap;
+    opacity: 0.85;
   }
 
   h1 {
     margin: 0;
-  }
-
-  h1 {
-    font-size: 0.95rem;
+    font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+  }
+
+  .separator {
+    color: var(--text-2);
+    font-size: 0.72rem;
+    opacity: 0.5;
+    user-select: none;
+  }
+
+  .view-label {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--accent);
+    font-size: 0.74rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    padding: 0.12rem 0.35rem;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+
+  .view-label:hover {
+    border-color: rgba(122, 166, 200, 0.32);
+    color: var(--text-0);
   }
 
   .status-slot {
@@ -100,8 +116,7 @@
     justify-content: flex-end;
     align-items: center;
     min-width: 0;
-    min-height: 100%;
-    padding-left: 0.75rem;
+    padding-left: 0.6rem;
     border-left: 1px solid var(--divider);
   }
 
@@ -111,8 +126,7 @@
 
   @media (max-width: 960px) {
     .topbar,
-    .brand,
-    .title-row {
+    .brand {
       align-items: flex-start;
     }
 
@@ -123,6 +137,7 @@
 
     .topbar {
       display: flex;
+      padding: 0.4rem 0.75rem;
     }
 
     .status-slot {
@@ -131,11 +146,7 @@
       padding-left: 0;
       border-left: 0;
       border-top: 1px solid var(--divider);
-      padding-top: 0.85rem;
-    }
-
-    .eyebrow {
-      white-space: normal;
+      padding-top: 0.5rem;
     }
   }
 </style>
