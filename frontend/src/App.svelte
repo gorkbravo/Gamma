@@ -64,6 +64,16 @@
   let ivPollingActive = false;
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
+  let sidebarOpen = false;
+
+  const tabLabels: Record<string, string> = {
+    portfolio: "Portfolio",
+    research: "Research",
+    prediction_markets: "Prediction Markets",
+    risk: "Risk",
+    iv: "IV",
+  };
+  $: activeViewLabel = tabLabels[$activeTab] ?? "";
 
   onMount(() => {
     void bootstrapApp();
@@ -327,7 +337,7 @@
     onEnterResearch={() => enterWorkspace("research")}
   />
 {:else}
-  <Shell>
+  <Shell activeViewLabel={activeViewLabel} onToggleSidebar={() => sidebarOpen = !sidebarOpen}>
     <svelte:fragment slot="status">
       <StatusRail
         status={$systemStatus}
@@ -345,7 +355,9 @@
       <TabBar
         activeTab={$activeTab}
         mode={workspaceMode}
+        open={sidebarOpen}
         onSelect={selectTab}
+        onClose={() => sidebarOpen = false}
       />
 
       <section class="workspace-main">

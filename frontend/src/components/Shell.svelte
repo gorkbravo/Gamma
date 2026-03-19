@@ -1,12 +1,23 @@
 <script lang="ts">
   export let title = "Gamma";
+  export let activeViewLabel = "";
+  export let onToggleSidebar: () => void = () => {};
 </script>
 
 <div class="shell">
   <header class="topbar">
     <div class="brand">
+      <button class="hamburger" on:click={onToggleSidebar} aria-label="Toggle navigation">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
       <img class="mark" src="/gamma-mark.svg" alt="" aria-hidden="true" />
       <h1>{title}</h1>
+      {#if activeViewLabel}
+        <span class="separator">/</span>
+        <button class="view-label" on:click={onToggleSidebar}>{activeViewLabel}</button>
+      {/if}
     </div>
     <div class="status-slot">
       <slot name="status" />
@@ -42,6 +53,24 @@
     min-width: 0;
   }
 
+  .hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-1);
+    padding: 0.2rem;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+
+  .hamburger:hover {
+    color: var(--text-0);
+    border-color: rgba(122, 166, 200, 0.32);
+  }
+
   .mark {
     display: block;
     width: 1.15rem;
@@ -55,6 +84,31 @@
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+  }
+
+  .separator {
+    color: var(--text-2);
+    font-size: 0.72rem;
+    opacity: 0.5;
+    user-select: none;
+  }
+
+  .view-label {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--accent);
+    font-size: 0.74rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    padding: 0.12rem 0.35rem;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+
+  .view-label:hover {
+    border-color: rgba(122, 166, 200, 0.32);
+    color: var(--text-0);
   }
 
   .status-slot {
