@@ -145,8 +145,9 @@
     background: #0d0f12;
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
-    padding: 0.46rem 0.66rem;
+    padding: 0.28rem 0.58rem;
     font: inherit;
+    font-size: 0.74rem;
     cursor: pointer;
   }
 
@@ -161,7 +162,7 @@
 
   .actions button,
   .settings-toggle {
-    min-width: 7rem;
+    min-width: 5.8rem;
   }
 
   .ghost {
