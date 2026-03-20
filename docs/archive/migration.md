@@ -1,9 +1,9 @@
-# Gamma Migration Plan
+# Gamma Migration Plan (Archived)
 
-This file is the detailed migration log and audit record for the ongoing strangler migration from PySide6/Qt to Tauri + FastAPI + Svelte.
+This archived file is the detailed migration log and audit record for the PySide6/Qt to Tauri + FastAPI + Svelte transition.
 
 `README.md` is intentionally kept shorter and operational. This document holds the fuller phase history, audit evidence, and open-risk tracking.
-As of March 12, 2026, the migration itself is largely complete. This document now serves primarily as the historical phase log plus burn-in/install-validation record. For pre-roadmap execution work, use `docs/roadmap_readiness_checklist.md` and `docs/p1_refactor_handoff.md`.
+As of March 12, 2026, the migration itself is largely complete. This document now serves primarily as the historical phase log plus burn-in/install-validation record. For related archived transition material, use `roadmap_readiness_checklist.md` and `p1_refactor_handoff.md`.
 
 ## Current Status
 

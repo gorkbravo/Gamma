@@ -4,8 +4,8 @@ For future product expansion work, start with [`roadmap.md`](./roadmap.md). It d
 
 Gamma is a hybrid quant workstation built around a Python analytics/runtime layer with FastAPI, a Svelte frontend, and a Tauri desktop shell. Tauri is now the primary desktop path. PySide remains available as an explicit fallback during burn-in.
 
-For the detailed migration log, phase history, and audit notes, see [`migration.md`](./migration.md).
-For pre-roadmap readiness work, handoff context, and operator follow-up, use [`docs/roadmap_readiness_checklist.md`](./docs/roadmap_readiness_checklist.md) and [`docs/p1_refactor_handoff.md`](./docs/p1_refactor_handoff.md).
+For the current documentation map, see [`docs/README.md`](./docs/README.md).
+Historical migration logs, audits, and handoff records now live under [`docs/archive/`](./docs/archive/README.md).
 
 ## Repo At A Glance
 
@@ -18,16 +18,14 @@ For pre-roadmap readiness work, handoff context, and operator follow-up, use [`d
 
 ## Current State
 
-- The migration itself is largely complete; remaining work is burn-in, packaging/install QA, and pre-roadmap hardening
+- The migration to the FastAPI + Svelte + Tauri stack is largely complete
 - Tauri is the default desktop launcher path
 - Core portfolio, research, risk, diagnostics, and IV workflows are usable through the web/Tauri stack
 - Packaging is implemented for Windows-first distribution
 - PySide is still supported as a fallback client
-- March 14, 2026 audit follow-up: mixed-currency historical analytics now normalize non-base-currency histories into the snapshot base currency across portfolio, research, and risk
-- March 14, 2026 audit follow-up: desktop compile validation is standardized on `cd frontend && npm run desktop:check`, which isolates Tauri compile checks from stale local target state
-- March 14, 2026 full audit: `pytest`, frontend tests, frontend build, `desktop:check`, direct `cargo check`, `backend:smoke`, `desktop:smoke`, and `tauri:build` all passed from this workspace
-- March 14, 2026 full audit: browser-level mock smoke validated portfolio rendering and risk computation through the web stack
-- Live IBKR was not revalidated in the latest audit session because the runtime reported `IBKR not connected`; broader live-IBKR and longer-session QA remain open
+- Mixed-currency historical analytics normalize non-base-currency histories into the snapshot base currency across portfolio, research, and risk
+- The supported desktop compile validation path is `cd frontend && npm run desktop:check`
+- Broader live-IBKR and longer-session QA remain ongoing burn-in work
 
 ## Core Workflows
 
@@ -185,6 +183,8 @@ src/
   ui/
 tests/
 docs/
+  README.md
+  archive/
 frontend/
 sample_data/
 ```

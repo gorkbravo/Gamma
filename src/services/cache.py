@@ -69,18 +69,25 @@ class CacheService:
         meta = {"timestamp": datetime.utcnow().isoformat(), "value": float(value)}
         value_path.write_text(json.dumps(meta))
 
-    def get_json(self, key: str) -> Optional[Any]:
+    def get_json_entry(self, key: str, *, max_age: timedelta | None = None) -> Optional[dict[str, Any]]:
         json_path = self._json_path(key)
         if not json_path.exists():
             return None
         try:
             payload = json.loads(json_path.read_text())
             ts = datetime.fromisoformat(payload.get("timestamp"))
-            if datetime.utcnow() - ts > self.ttl:
+            ttl = self.ttl if max_age is None else max_age
+            if ttl is not None and datetime.utcnow() - ts > ttl:
                 return None
-            return payload.get("value")
+            return payload
         except Exception:
             return None
+
+    def get_json(self, key: str, *, max_age: timedelta | None = None) -> Optional[Any]:
+        payload = self.get_json_entry(key, max_age=max_age)
+        if payload is None:
+            return None
+        return payload.get("value")
 
     def set_json(self, key: str, value: Any) -> None:
         json_path = self._json_path(key)

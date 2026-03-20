@@ -6,6 +6,11 @@ import type {
   DiagnosticsResponse,
   IvSessionStatus,
   IvSurface,
+  MacroContextState,
+  MacroDivergenceListResponse,
+  MacroEventsResponse,
+  MacroSeriesHistory,
+  MacroSnapshot,
   PredictionCalibrationSummary,
   PredictionMarket,
   PredictionMarketListResponse,
@@ -79,6 +84,15 @@ export interface PredictionMarketScreenerOptions {
   limit?: number;
 }
 
+export interface MacroLoadOptions {
+  region?: MacroContextState["region"];
+  timeframe?: MacroContextState["timeframe"];
+  theme?: MacroContextState["theme"];
+  comparisonRegion?: MacroContextState["comparisonRegion"];
+  mode?: MacroContextState["mode"];
+  forceRefresh?: boolean;
+}
+
 export const activeTab = writable<TabId>("portfolio");
 export const systemStatus = writable<SystemStatus | null>(null);
 export const diagnostics = writable<DiagnosticsResponse | null>(null);
@@ -87,6 +101,17 @@ export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
 export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
 export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
+export const macroContext = writable<MacroContextState>({
+  mode: "snapshot",
+  region: "US",
+  timeframe: "3M",
+  theme: "all",
+  comparisonRegion: null
+});
+export const macroSnapshot = writable<MacroSnapshot | null>(null);
+export const macroDivergences = writable<MacroDivergenceListResponse | null>(null);
+export const macroEvents = writable<MacroEventsResponse | null>(null);
+export const macroSeriesHistories = writable<Record<string, MacroSeriesHistory>>({});
 export const predictionMarketScreener = writable<PredictionMarketListResponse | null>(null);
 export const selectedPredictionMarketId = writable<string | null>(null);
 export const predictionMarketDetail = writable<PredictionMarket | null>(null);
@@ -127,6 +152,8 @@ export const loading = writable<Record<string, boolean>>({
   portfolio: false,
   portfolioAction: false,
   research: false,
+  macro: false,
+  macroHistory: false,
   prediction: false,
   predictionDetail: false,
   risk: false,
@@ -140,6 +167,10 @@ function setLoading(key: string, value: boolean) {
 
 export function setResearchDraft(nextDraft: ResearchDraftState) {
   researchDraft.set(nextDraft);
+}
+
+export function setMacroContext(nextContext: Partial<MacroContextState>) {
+  macroContext.update((current) => ({ ...current, ...nextContext }));
 }
 
 function setError(error: unknown) {
@@ -372,6 +403,73 @@ export async function runResearch(options: ResearchRunOptions) {
     setError(error);
   } finally {
     setLoading("research", false);
+  }
+}
+
+function macroPayloadFromOptions(options: MacroLoadOptions = {}) {
+  const current = get(macroContext);
+  return {
+    region: options.region ?? current.region,
+    timeframe: options.timeframe ?? current.timeframe,
+    theme: options.theme ?? current.theme,
+    comparison_region: options.comparisonRegion ?? current.comparisonRegion,
+    force_refresh: options.forceRefresh ?? false
+  };
+}
+
+function macroHistoryKey(seriesId: string, region: string, timeframe: string) {
+  return `${region}:${timeframe}:${seriesId}`;
+}
+
+export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
+  const nextContext: MacroContextState = {
+    ...get(macroContext),
+    ...(options.mode ? { mode: options.mode } : {}),
+    ...(options.region ? { region: options.region } : {}),
+    ...(options.timeframe ? { timeframe: options.timeframe } : {}),
+    ...(options.theme ? { theme: options.theme } : {}),
+    ...(options.comparisonRegion !== undefined ? { comparisonRegion: options.comparisonRegion } : {})
+  };
+  macroContext.set(nextContext);
+  const payload = macroPayloadFromOptions(options);
+  setLoading("macro", true);
+  try {
+    const [snapshot, divergences, events] = await Promise.all([
+      postJson<MacroSnapshot>("/macro/snapshot", payload),
+      postJson<MacroDivergenceListResponse>("/macro/divergences", payload),
+      getJson<MacroEventsResponse>(
+        `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
+      )
+    ]);
+    macroSnapshot.set(snapshot);
+    macroDivergences.set(divergences);
+    macroEvents.set(events);
+    lastError.set("");
+    return snapshot;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("macro", false);
+  }
+}
+
+export async function loadMacroSeriesHistory(seriesId: string, options: MacroLoadOptions = {}) {
+  const payload = macroPayloadFromOptions(options);
+  const cacheKey = macroHistoryKey(seriesId, payload.region, payload.timeframe);
+  setLoading("macroHistory", true);
+  try {
+    const history = await getJson<MacroSeriesHistory>(
+      `/macro/series/${encodeURIComponent(seriesId)}/history?region=${encodeURIComponent(payload.region)}&timeframe=${encodeURIComponent(payload.timeframe)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
+    );
+    macroSeriesHistories.update((current) => ({ ...current, [cacheKey]: history }));
+    lastError.set("");
+    return history;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("macroHistory", false);
   }
 }
 

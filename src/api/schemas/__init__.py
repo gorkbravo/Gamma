@@ -1,4 +1,11 @@
 from src.api.schemas.iv import IVSurfaceResponseModel
+from src.api.schemas.macro import (
+    MacroDivergenceListResponseModel,
+    MacroEventsResponseModel,
+    MacroSeriesHistoryResponseModel,
+    MacroSnapshotRequestModel,
+    MacroSnapshotResponseModel,
+)
 from src.api.schemas.portfolio import (
     PortfolioHistoryPointModel,
     PortfolioHistoryResponseModel,
@@ -42,6 +49,11 @@ __all__ = [
     "ExcludedAssetModel",
     "HealthResponseModel",
     "IVSurfaceResponseModel",
+    "MacroDivergenceListResponseModel",
+    "MacroEventsResponseModel",
+    "MacroSeriesHistoryResponseModel",
+    "MacroSnapshotRequestModel",
+    "MacroSnapshotResponseModel",
     "PortfolioHistoryPointModel",
     "PortfolioHistoryResponseModel",
     "PredictionMarketListResponseModel",

@@ -1,4 +1,6 @@
-# Roadmap Readiness Checklist
+# Roadmap Readiness Checklist (Archived)
+
+This archived checklist captures the pre-roadmap readiness gate as of March 2026. It is retained for historical audit context rather than current execution.
 
 ## Purpose
 
@@ -10,8 +12,8 @@ Read it together with:
 
 - `C:\Users\User\Desktop\Gamma\roadmap.md`
 - `C:\Users\User\Desktop\Gamma\README.md`
-- `C:\Users\User\Desktop\Gamma\migration.md`
-- `C:\Users\User\Desktop\Gamma\docs\p1_refactor_handoff.md`
+- `C:\Users\User\Desktop\Gamma\docs\archive\migration.md`
+- `C:\Users\User\Desktop\Gamma\docs\archive\p1_refactor_handoff.md`
 
 ## Current Decision
 

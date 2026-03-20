@@ -10,6 +10,7 @@ from urllib.request import urlopen
 import pandas as pd
 
 from src.services.cache import CacheService
+from src.services.fred import FredClient
 
 
 class RiskFreeRateService:
@@ -25,8 +26,12 @@ class RiskFreeRateService:
         timeout_seconds: float = 5.0,
     ) -> None:
         self.cache = cache
-        self.fred_api_key = (fred_api_key or os.getenv("FRED_API_KEY", "")).strip() or None
         self.timeout_seconds = timeout_seconds
+        self.fred_client = FredClient(
+            cache=cache,
+            api_key=fred_api_key or os.getenv("FRED_API_KEY", ""),
+            fetch_json=self._fetch_fred_json,
+        )
 
     def get_usd_daily_returns(
         self,
@@ -82,39 +87,36 @@ class RiskFreeRateService:
         observation_end: date,
         warnings: List[str],
     ) -> Optional[pd.Series]:
-        params = {
-            "series_id": series_id,
-            "file_type": "json",
-            "observation_start": observation_start.isoformat(),
-            "observation_end": observation_end.isoformat(),
-        }
-        if self.fred_api_key:
-            params["api_key"] = self.fred_api_key
-        url = f"{self.FRED_OBSERVATIONS_URL}?{urlencode(params)}"
         try:
-            with urlopen(url, timeout=self.timeout_seconds) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            observations, _ = self.fred_client.get_series_observations(
+                series_id,
+                observation_start=observation_start,
+                observation_end=observation_end,
+                ttl=timedelta(hours=24),
+            )
         except Exception as exc:
             warnings.append(f"Risk-free fetch failed (FRED {series_id}): {exc}")
             return None
-
-        observations = payload.get("observations", [])
         if not observations:
             warnings.append(f"Risk-free fetch returned no observations (FRED {series_id})")
             return None
 
-        rows = []
-        for obs in observations:
-            value = str(obs.get("value", "")).strip()
-            if value in {"", "."}:
-                continue
-            try:
-                rows.append((pd.Timestamp(obs["date"]), float(value)))
-            except Exception:
-                continue
+        rows = [(pd.Timestamp(obs.timestamp), float(obs.value)) for obs in observations]
         if not rows:
             warnings.append(f"Risk-free series {series_id} contained no numeric observations")
             return None
         series = pd.Series({ts: val for ts, val in rows}, dtype=float).sort_index()
         series = series[~series.index.duplicated(keep="last")]
         return series
+
+    def _fetch_fred_json(self, url: str, params: dict | None = None) -> dict:
+        cleaned = {
+            key: value
+            for key, value in (params or {}).items()
+            if value is not None and value != "" and value != []
+        }
+        target_url = url
+        if cleaned:
+            target_url = f"{url}?{urlencode(cleaned, doseq=True)}"
+        with urlopen(target_url, timeout=self.timeout_seconds) as response:
+            return json.loads(response.read().decode("utf-8"))

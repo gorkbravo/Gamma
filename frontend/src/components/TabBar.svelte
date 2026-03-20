@@ -10,6 +10,7 @@
 
   $: tabs = [
     { id: mode === "portfolio" ? "portfolio" : "research", label: mode === "portfolio" ? "Portfolio" : "Research" },
+    ...(mode === "research" ? [{ id: "macro" as TabId, label: "Macro" }] : []),
     ...(mode === "research" ? [{ id: "prediction_markets" as TabId, label: "Prediction Markets" }] : []),
     { id: "risk", label: "Risk" },
     { id: "iv", label: "IV" }

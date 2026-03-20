@@ -355,7 +355,7 @@ class PredictionMarketService:
         if request.min_repricing_abs is not None and abs(row.recent_price_change or 0.0) < request.min_repricing_abs:
             return False
         if request.max_days_to_resolution is not None and row.end_time is not None:
-            remaining = (row.end_time - now_utc()).total_seconds() / 86400.0
+            remaining = (row.end_time - self._reference_time(row)).total_seconds() / 86400.0
             if remaining > request.max_days_to_resolution:
                 return False
         return True
@@ -547,7 +547,8 @@ class PredictionMarketService:
         if row.retrieved_at is not None and last_history_point_at is not None:
             history_lag_seconds = max((row.retrieved_at - last_history_point_at).total_seconds(), 0.0)
 
-        if row.status == "open" and row.end_time is not None and row.end_time <= current_time:
+        integrity_reference_time = row.retrieved_at or current_time
+        if row.status == "open" and row.end_time is not None and row.end_time <= integrity_reference_time:
             reason = f"Venue still marks this market open even though end_time passed at {row.end_time.isoformat()}."
             if last_history_point_at is not None and last_history_point_at > row.end_time:
                 reason = (
@@ -767,7 +768,7 @@ class PredictionMarketService:
         }.get(freshness.status, 0.4)
 
     def _resolution_window_score(self, row: PredictionMarketRecord) -> float:
-        days = self._days_to_resolution(row, now_utc())
+        days = self._days_to_resolution(row, self._reference_time(row))
         if days is None:
             return 0.35
         if days < 0:
@@ -786,6 +787,9 @@ class PredictionMarketService:
         if row.end_time is None:
             return None
         return (row.end_time - current_time).total_seconds() / 86400.0
+
+    def _reference_time(self, row: PredictionMarketRecord) -> datetime:
+        return row.retrieved_at or now_utc()
 
     def _scaled_log(self, value: float | None, *, pivot: float) -> float:
         if value is None or value <= 0:

@@ -1,6 +1,19 @@
 export type WorkspaceMode = "portfolio" | "research";
 
-export type TabId = "portfolio" | "research" | "prediction_markets" | "risk" | "iv";
+export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "risk" | "iv";
+
+export type MacroMode = "snapshot" | "cross_asset" | "rates_policy";
+export type MacroRegion = "US" | "Global";
+export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
+export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";
+
+export interface MacroContextState {
+  mode: MacroMode;
+  region: MacroRegion;
+  timeframe: MacroTimeframe;
+  theme: MacroTheme;
+  comparisonRegion: MacroRegion | null;
+}
 
 export interface ConnectionState {
   connected: boolean;
@@ -434,6 +447,157 @@ export interface PredictionCalibrationSummary {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+}
+
+export interface MacroSeriesPoint {
+  timestamp: string;
+  value: number;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroMetric {
+  metric_id: string;
+  label: string;
+  value: number | null;
+  display_value: string | null;
+  unit: string | null;
+  delta_value: number | null;
+  delta_display: string | null;
+  series_id: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroCurveNode {
+  tenor: string;
+  current_value: number | null;
+  prior_value: number | null;
+  change_bps: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroEvent {
+  event_id: string;
+  title: string;
+  category: string;
+  region: string;
+  scheduled_at: string;
+  relative_label: string | null;
+  importance: string;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroSeriesHistory {
+  series_id: string;
+  title: string;
+  region: string;
+  unit: string | null;
+  frequency: string;
+  theme: string;
+  mode_tags: string[];
+  points: MacroSeriesPoint[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroSnapshotCard {
+  card_id: string;
+  title: string;
+  subtitle: string | null;
+  summary: string;
+  mode_target: string;
+  target_theme: string | null;
+  metrics: MacroMetric[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroDivergence {
+  divergence_id: string;
+  theme: string;
+  region: string;
+  headline: string;
+  summary: string;
+  score: number;
+  label: string;
+  metrics: MacroMetric[];
+  series_ids: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroThemeComparison {
+  theme: string;
+  headline: string;
+  summary: string;
+  agreement_label: string;
+  metrics: MacroMetric[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroRatesPolicySummary {
+  headline: string;
+  summary: string;
+  policy_metrics: MacroMetric[];
+  curve_nodes: MacroCurveNode[];
+  real_yield_metrics: MacroMetric[];
+  events: MacroEvent[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroSnapshot {
+  region: string;
+  timeframe: string;
+  theme: string;
+  comparison_region: string | null;
+  available_regions: string[];
+  available_timeframes: string[];
+  available_themes: string[];
+  snapshot_cards: MacroSnapshotCard[];
+  rates_policy: MacroRatesPolicySummary | null;
+  cross_asset: MacroThemeComparison[];
+  top_divergences: MacroDivergence[];
+  upcoming_events: MacroEvent[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroDivergenceListResponse {
+  region: string;
+  timeframe: string;
+  theme: string;
+  divergences: MacroDivergence[];
+}
+
+export interface MacroEventsResponse {
+  region: string;
+  events: MacroEvent[];
 }
 
 export interface IvSurface {

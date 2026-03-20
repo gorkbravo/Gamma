@@ -4,6 +4,7 @@
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar from "./components/TabBar.svelte";
+  import MacroView from "./views/MacroView.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
   import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
   import ResearchView from "./views/ResearchView.svelte";
@@ -23,9 +24,15 @@
     loadDiagnostics,
     loadIvSession,
     loadIvSurface,
+    loadMacroSeriesHistory,
+    loadMacroWorkspace,
     loadPortfolioPerformance,
     loading,
     loadPortfolioSnapshot,
+    macroDivergences,
+    macroEvents,
+    macroSeriesHistories,
+    macroSnapshot,
     portfolioHistory,
     portfolioPerformance,
     portfolioSnapshot,
@@ -69,6 +76,7 @@
   const tabLabels: Record<string, string> = {
     portfolio: "Portfolio",
     research: "Research",
+    macro: "Macro",
     prediction_markets: "Prediction Markets",
     risk: "Risk",
     iv: "IV",
@@ -147,6 +155,8 @@
       push("Performance", $portfolioPerformance?.warnings, "warning");
     } else if ($activeTab === "research") {
       push("Research", $researchResult?.warnings, "warning");
+    } else if ($activeTab === "macro") {
+      push("Macro", $macroSnapshot?.warnings, "warning");
     } else if ($activeTab === "prediction_markets") {
       push("Prediction", $predictionMarketDetail ? $predictionMarketWallet?.warnings : [], "warning");
       push("Calibration", $predictionMarketCalibration?.warnings, "warning");
@@ -184,13 +194,15 @@
     }
     const primaryTab = workspaceMode === "portfolio" ? "portfolio" : "research";
     const nextTab =
-      tab === "risk" || tab === "iv" || (workspaceMode === "research" && tab === "prediction_markets")
+      tab === "risk" || tab === "iv" || (workspaceMode === "research" && (tab === "prediction_markets" || tab === "macro"))
         ? tab
         : primaryTab;
 
     activeTab.set(nextTab);
 
-    if (nextTab === "prediction_markets") {
+    if (nextTab === "macro") {
+      await loadMacroWorkspace();
+    } else if (nextTab === "prediction_markets") {
       await loadPredictionMarketScreener();
     } else if (nextTab === "iv") {
       const autoLoaded = await loadResearchIvContext();
@@ -270,6 +282,10 @@
 
     if ($activeTab === "prediction_markets") {
       await loadPredictionMarketScreener({ forceRefresh: true });
+    }
+
+    if ($activeTab === "macro") {
+      await loadMacroWorkspace({ forceRefresh: true });
     }
 
     if ($activeTab === "iv") {
@@ -387,6 +403,16 @@
             onRun={runResearch}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
+          />
+        {:else if $activeTab === "macro"}
+          <MacroView
+            snapshot={$macroSnapshot}
+            divergences={$macroDivergences}
+            events={$macroEvents}
+            histories={$macroSeriesHistories}
+            loading={$loading.macro || $loading.macroHistory}
+            onLoadWorkspace={loadMacroWorkspace}
+            onLoadSeries={loadMacroSeriesHistory}
           />
         {:else if $activeTab === "prediction_markets"}
           <PredictionMarketsView

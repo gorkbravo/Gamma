@@ -1,4 +1,6 @@
-# P1 Refactor Handoff
+# P1 Refactor Handoff (Archived)
+
+This archived handoff captures the Phase 1 pre-roadmap refactor state as of March 2026. It is preserved for auditability, not as the current execution brief.
 
 ## Purpose
 
@@ -14,7 +16,7 @@ It is no longer just an identity-rekey note. It now serves as the pre-roadmap re
 Read this together with:
 
 - `C:\Users\User\Desktop\Gamma\roadmap.md`
-- `C:\Users\User\Desktop\Gamma\migration.md`
+- `C:\Users\User\Desktop\Gamma\docs\archive\migration.md`
 - `C:\Users\User\Desktop\Gamma\README.md`
 
 ## Repo State
@@ -160,7 +162,7 @@ Current limitation:
 
 - `roadmap.md`
 - `README.md`
-- `migration.md`
+- `docs/archive/migration.md`
 
 ### Automated checks run
 
@@ -459,9 +461,9 @@ You are continuing Gamma pre-roadmap foundation work on branch `codex/p1-foundat
 
 Start by reading:
 - C:\Users\User\Desktop\Gamma\roadmap.md
-- C:\Users\User\Desktop\Gamma\migration.md
+- C:\Users\User\Desktop\Gamma\docs\archive\migration.md
 - C:\Users\User\Desktop\Gamma\README.md
-- C:\Users\User\Desktop\Gamma\docs\p1_refactor_handoff.md
+- C:\Users\User\Desktop\Gamma\docs\archive\p1_refactor_handoff.md
 
 Current git state:
 - `main` baseline checkpoint: b72bd9f (`Checkpoint current UI and desktop changes`)

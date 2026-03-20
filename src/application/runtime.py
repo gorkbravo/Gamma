@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from dotenv import load_dotenv
 
 from src.application.iv_service import IVService
+from src.application.macro_service import MacroService
 from src.application.portfolio_service import PortfolioService
 from src.application.prediction_market_service import PredictionMarketService
 from src.application.research_service import ResearchService
@@ -16,6 +17,7 @@ from src.application.risk_service import RiskService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
+from src.services.macro_adapters import FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
@@ -57,6 +59,7 @@ class ApplicationRuntime:
     portfolio_service: PortfolioService
     research_service: ResearchService
     prediction_market_service: PredictionMarketService
+    macro_service: MacroService
     risk_service: RiskService
     iv_service: IVService
     desktop: DesktopRuntimeState | None = None
@@ -192,6 +195,11 @@ def build_runtime(
             "kalshi": KalshiAdapter(cache),
         }
     )
+    macro_service = MacroService(
+        fred_adapter=FredMacroAdapter(cache),
+        treasury_adapter=TreasuryCurveAdapter(cache),
+        events_adapter=USMacroEventsAdapter(cache),
+    )
     risk_service = RiskService(
         client,
         market_data,
@@ -222,6 +230,7 @@ def build_runtime(
         portfolio_service=portfolio_service,
         research_service=research_service,
         prediction_market_service=prediction_market_service,
+        macro_service=macro_service,
         risk_service=risk_service,
         iv_service=iv_service,
         desktop=desktop,
