@@ -303,6 +303,57 @@ A later extension could add:
 
 The UI should support collapsible, expandable, and reorderable cards so the user can move between a dense monitoring view and a deeper analytical view without fragmenting the product into too many tabs.
 
+The intended information architecture is:
+- one top-level **Macro** tab inside the existing research workspace,
+- one visible **mode bar** inside Macro for switching between the major research tasks,
+- one persistent **context bar** for region, timeframe, theme, and comparison state,
+- mode-specific cards and modules below that shared context.
+
+The navigation bias should be:
+- organize the tab primarily by **research task** rather than by geography or instrument family,
+- treat region and curve family as **lenses / filters** rather than as separate first-class pages,
+- allow overview cards to **deep-link** into another mode while preserving context,
+- avoid a long single-page dashboard and avoid multiplying pages such as `US Rates`, `EU Rates`, `US Macro`, and `EU Macro`.
+
+For the first pass, the user flow should feel like:
+- enter **Macro** and land on **Snapshot**,
+- adjust a persistent context such as `Region = US`, `Timeframe = 3M`, `Theme = Policy`,
+- switch to **Rates & Policy** or **Cross-Asset** without losing that context,
+- click important cards in **Snapshot** to jump directly into a deeper mode with the relevant lens pre-applied.
+
+#### Navigation model
+
+The main navigation inside Macro should be a visible horizontal mode bar rather than a dropdown. The purpose of this bar is to make mode switching one-click and always legible.
+
+The persistent context bar should contain compact selectors such as:
+- region,
+- timeframe,
+- theme,
+- comparison target,
+- event window when relevant.
+
+This means the user should navigate in three layers:
+- **Tab**: Macro
+- **Mode**: Snapshot, Cross-Asset, Rates & Policy, later Events / Regimes
+- **Lens**: region, market family, timeframe, and comparison state
+
+The important distinction is:
+- **mode** answers what kind of research the user is doing,
+- **lens** answers which slice of the macro world they are viewing,
+- **modules** answer which chart, table, or ranking is visible inside the chosen mode.
+
+#### Regional rollout model
+
+The first pass should not try to make every region equally deep.
+
+The intended rollout is:
+- **US** as the deepest initial region,
+- **EU** as a lighter but structurally compatible second region,
+- **Global** views only where cross-market comparison is naturally meaningful,
+- additional regions later, once the internal schemas and analytics are stable.
+
+This matters because the product should avoid duplicating the same workspace into a separate page for every region. The same mode should be reused with different regional lenses.
+
 ### Functionality
 
 #### 1. Snapshot mode
@@ -348,6 +399,14 @@ A dedicated internal mode should allow the user to inspect:
 
 This is likely the most practical Macro sub-mode to mature early because it has the strongest synergy with prediction markets and relatively manageable data complexity.
 
+For the first pass, this mode should emphasize:
+- Treasury and public-policy-rate context first,
+- real-yield and breakeven context where public coverage is clean,
+- meeting and event interpretation where official calendars are available,
+- public market proxies before attempting deeper swap-curve coverage.
+
+Free and clean public swap / OIS coverage is materially weaker than Treasury and public macro coverage, so swap-specific depth should be treated as a later extension unless a robust data source is selected.
+
 #### 4. Optional commodities mode
 A later internal mode can focus on selected futures-sensitive markets, especially where cross-market interpretation is strong:
 - energy,
@@ -384,6 +443,8 @@ The tab should support event-aware analysis such as:
 
 This should help the user study how different markets absorb new information rather than merely watch current levels.
 
+This may appear as a later dedicated **Events / Regimes** mode once the core Snapshot, Cross-Asset, and Rates & Policy modes are stable. It does not need to be a Day 1 requirement for the first usable Macro release.
+
 #### 7. Research notebook hooks
 As with prediction markets, the Macro tab should eventually support saving:
 - watched themes,
@@ -412,13 +473,44 @@ The tab would need:
 ### Data sources / APIs
 
 Potential sources include:
-- **FRED API** for major macro series and rate-related public datasets
-- **Treasury / central-bank public data** for policy and yield-curve context where available
-- **Stooq / Nasdaq Data Link / other market-data providers** for selected cross-asset market series
+- **FRED API / ALFRED** for major macro series, rate-related public datasets, and revision-aware history
+- **Treasury public data** for policy and yield-curve context where available, including Treasury curve feeds and Treasury Fiscal Data datasets
+- **BLS API** for inflation and labor series
+- **BEA API** for GDP, PCE, income, and related macro series
+- **Fed public releases** such as H.10 / H.15 for selected FX and rates context
+- **EIA API** for energy-sensitive macro overlays
+- **Stooq / Nasdaq Data Link / other market-data providers** only as selective later supplements where free public coverage is insufficient
 - existing and future internal Gamma market-data adapters for rates, commodity proxies, and linked market histories
 - prediction-market providers already planned in Phase 1 for contract linkage
 
-A practical implementation path would likely begin with public macro and rates series plus a narrow set of liquid market proxies, then expand into deeper commodity-curve and cross-asset coverage once the internal schema and caching layer are stable.
+A practical implementation path should begin with:
+- FRED / ALFRED as the backbone for normalized public macro series,
+- Treasury public data for US curve and issuance context,
+- BLS and BEA for canonical inflation, labor, growth, and income series,
+- a narrow set of official or durable public event-calendar sources,
+- a limited set of liquid cross-asset proxies rather than broad market coverage.
+
+The first-pass implementation should prefer:
+- official public data,
+- stable and reproducible identifiers,
+- series registries curated by Gamma rather than open-ended symbol search,
+- provenance-rich normalized records,
+- region-first depth in the US before broadening global coverage.
+
+Later additions can expand deeper commodity-curve coverage, broader cross-asset proxy sets, swap / OIS depth where data quality allows, and richer region-by-region support once the internal schema and cache behavior are proven.
+
+### First-pass implementation bias
+
+The first usable Macro release should be intentionally narrow and coherent.
+
+The expected V1 bias is:
+- ship **Snapshot**, **Rates & Policy**, and **Cross-Asset** first,
+- keep **Events / Regimes** as the next extension rather than forcing it into the first pass,
+- support **US** most deeply first,
+- treat **EU** as a lighter second-region extension,
+- prefer a few well-normalized public datasets over a broad but inconsistent market-data surface.
+
+This keeps the tab aligned with Gamma's research-first scope and reduces the risk of building a large UI before the normalized macro data layer is reliable.
 
 ### Deliverable of the phase
 
@@ -433,7 +525,7 @@ This phase would make Gamma much more effective as a cross-market research envir
 
 ---
 
-## Phase 3 - Keyboard Navigation & Power-User Shortcuts
+## Phase 3 - Keyboard Navigation & Power-User Workspace Customization
 
 _Status: Not started (0%)_
 _Remaining focus: full phase scope._
@@ -442,30 +534,45 @@ _Remaining focus: full phase scope._
 
 By this point Gamma has multiple data-rich tabs (Portfolio, Risk, IV, Prediction Markets, Macro with internal modes) and a collapsible sidebar for navigation. As the tab count grows, click-based navigation becomes friction for the power users this app is built for. Adding keyboard shortcuts after Phase 2 means there are enough views to make shortcuts valuable, but the investment is small enough to slot in before heavier feature phases.
 
-This phase is also a natural companion to the sidebar rework: the sidebar becomes the discovery and orientation layer for new users, while keybindings become the primary navigation method for regular users.
+This phase is also a natural companion to the sidebar rework: the sidebar becomes the discovery and orientation layer for new users, while keybindings become the primary navigation method for regular users. Combined with drag-and-drop reordering, it lets users fully personalize their navigation layout.
 
 ### Goal of the phase
 
-Provide a keyboard-driven navigation layer that lets power users move between views, trigger common actions, and control the UI without touching the mouse.
+Provide a keyboard-driven navigation layer and customizable tab ordering that lets power users move between views, trigger common actions, control the UI without touching the mouse, and arrange their workspace to match their workflow.
 
 ### Functionality
 
-#### 1. Tab/view switching via Ctrl+N
-`Ctrl+1` through `Ctrl+N` should map to the tab list in order. The mapping should be consistent within a workspace mode (e.g. in Research mode, `Ctrl+1` = Research, `Ctrl+2` = Prediction Markets, `Ctrl+3` = Risk, `Ctrl+4` = IV). This mirrors the convention used by browsers, VS Code, and terminal multiplexers.
+#### 1. Drag-and-drop tab reordering in sidebar
 
-#### 2. Sidebar toggle
+The sidebar should support drag-and-drop reordering of tabs, with the following rules:
+
+- **The first tab is pinned and not draggable.** In Portfolio mode, the Portfolio tab stays at position 1. In Research mode, the Research tab stays at position 1. This anchors orientation so the user always knows where "home" is.
+- **All other tabs are freely reorderable** by dragging within the sidebar list.
+- **Visual feedback during drag:** a subtle drag handle icon (`⠿` or `≡`) on the left of each draggable item, a ghost/shadow of the dragged item, and a clear insertion-line indicator at the drop target. Keep animations minimal — no bouncy physics.
+- **Order persists per workspace mode.** Portfolio mode and Research mode each maintain their own independent tab order. The order should be saved to localStorage (or a small config file) and restored on reload. A reset-to-default option should be available somewhere (e.g. right-click context menu or a small reset link in the sidebar footer).
+- **Order determines keybinding mapping.** If the user moves Risk to position 2, then `Ctrl+2` should navigate to Risk. The mental model must be consistent: visual order = shortcut order.
+
+Implementation options:
+- Native HTML5 drag-and-drop (`dragstart`, `dragover`, `drop`) is sufficient for a vertical list.
+- Alternatively, `svelte-dnd-action` is a lightweight Svelte-native library that handles edge cases (scroll during drag, touch support, accessible reorder).
+- Avoid heavy libraries — the interaction surface is small (3–8 items in a vertical list).
+
+#### 2. Tab/view switching via Ctrl+N
+`Ctrl+1` through `Ctrl+N` should map to the tab list in the user's custom order. The mapping should be consistent within a workspace mode (e.g. if the user has reordered Research mode to `Research, Risk, Prediction Markets, IV`, then `Ctrl+1` = Research, `Ctrl+2` = Risk, `Ctrl+3` = Prediction Markets, `Ctrl+4` = IV). This mirrors the convention used by browsers, VS Code, and terminal multiplexers.
+
+#### 3. Sidebar toggle
 A single keybinding (e.g. `Ctrl+B` or backtick) should toggle the sidebar open/closed. This gives keyboard users a way to check available views without reaching for the mouse.
 
-#### 3. Shortcut hints in sidebar
-Each tab entry in the sidebar should display its keybinding hint (e.g. `Portfolio  ⌃1`). This teaches the shortcuts through usage and eventually makes the sidebar unnecessary for regular users.
+#### 4. Shortcut hints in sidebar
+Each tab entry in the sidebar should display its keybinding hint (e.g. `Portfolio  ⌃1`). The hint number should reflect the current order, updating live if the user reorders tabs. This teaches the shortcuts through usage and eventually makes the sidebar unnecessary for regular users.
 
-#### 4. Action shortcuts
+#### 5. Action shortcuts
 Common actions should have keybindings:
 - `Ctrl+R` or `F5` for refresh,
 - `Ctrl+,` for settings,
 - `Escape` to close sidebar / dismiss popovers.
 
-#### 5. Workspace switching
+#### 6. Workspace switching
 A keybinding (e.g. `Ctrl+Shift+P` / `Ctrl+Shift+R`) to switch between Portfolio and Research workspaces without returning to the landing page.
 
 ### Implementation notes
@@ -474,10 +581,12 @@ A keybinding (e.g. `Ctrl+Shift+P` / `Ctrl+Shift+R`) to switch between Portfolio 
 - Avoid conflicts with browser defaults and Tauri/OS shortcuts.
 - Keybindings should be discoverable but not intrusive — no tooltip overlays or onboarding modals.
 - Consider a `?` shortcut that shows all available keybindings in a lightweight overlay.
+- Tab order state should be managed in a shared store (e.g. a Svelte writable store backed by localStorage) so that the sidebar, the keybinding handler, and the breadcrumb label all read from the same source of truth.
+- New tabs added in future phases should appear at the end of the user's custom order by default.
 
 ### Deliverable of the phase
 
-At the end of Phase 3, Gamma should support full keyboard-driven navigation across all views and common actions. The sidebar becomes a fallback discovery tool, and regular users can operate entirely from the keyboard.
+At the end of Phase 3, Gamma should support full keyboard-driven navigation across all views and common actions, with user-customizable tab ordering in the sidebar. The sidebar becomes a fallback discovery tool, keybindings follow the user's preferred order, and regular users can operate entirely from the keyboard with a layout that matches their workflow.
 
 ---
 
@@ -977,8 +1086,8 @@ Build the most differentiated and accessible research tab first.
 ### Phase 2 - Macro (`In progress ~5%`)
 Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
 
-### Phase 3 - Keyboard Navigation (`Not started`)
-Add keyboard shortcuts for view switching, sidebar toggle, and common actions so power users can navigate entirely without the mouse.
+### Phase 3 - Keyboard Navigation & Workspace Customization (`Not started`)
+Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
 
 ### Phase 4 - AI Copilot (`Not started`)
 Add a context-aware research assistant that sits on top of the data architecture already built.
