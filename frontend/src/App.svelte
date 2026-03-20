@@ -201,7 +201,9 @@
     activeTab.set(nextTab);
 
     if (nextTab === "macro") {
-      await loadMacroWorkspace();
+      if (!$macroSnapshot) {
+        await loadMacroWorkspace();
+      }
     } else if (nextTab === "prediction_markets") {
       await loadPredictionMarketScreener();
     } else if (nextTab === "iv") {

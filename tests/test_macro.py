@@ -170,6 +170,33 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert all(row.transformation_note is not None for row in divergences)
 
 
+def test_macro_service_applies_active_timeframe_to_snapshot_cross_asset_and_divergence_metrics(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+
+    snapshot_1m = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="1M", theme="all"))
+    snapshot_1y = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="1Y", theme="all"))
+
+    dollar_card_1m = next(card for card in snapshot_1m.snapshot_cards if card.card_id == "dollar")
+    dollar_card_1y = next(card for card in snapshot_1y.snapshot_cards if card.card_id == "dollar")
+    assert dollar_card_1m.metrics[0].delta_value != dollar_card_1y.metrics[0].delta_value
+
+    rates_metric_1m = next(metric for metric in snapshot_1m.rates_policy.policy_metrics if metric.series_id == "us-2y-yield")
+    rates_metric_1y = next(metric for metric in snapshot_1y.rates_policy.policy_metrics if metric.series_id == "us-2y-yield")
+    assert rates_metric_1m.delta_value != rates_metric_1y.delta_value
+
+    inflation_1m = next(row for row in snapshot_1m.cross_asset if row.theme == "inflation")
+    inflation_1y = next(row for row in snapshot_1y.cross_asset if row.theme == "inflation")
+    dollar_1m = next(metric for metric in inflation_1m.metrics if metric.series_id == "us-dollar-broad")
+    dollar_1y = next(metric for metric in inflation_1y.metrics if metric.series_id == "us-dollar-broad")
+    assert dollar_1m.delta_value != dollar_1y.delta_value
+
+    divergence_1m = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1M", theme="inflation"))
+    divergence_1y = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1Y", theme="inflation"))
+    assert divergence_1m[0].metrics[0].delta_value != divergence_1y[0].metrics[0].delta_value
+
+
 def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_path, monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 
@@ -194,8 +221,9 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         assert snapshot_response.status_code == 200
         snapshot_payload = snapshot_response.json()
         assert snapshot_payload["region"] == "Global"
-        assert snapshot_payload["comparison_region"] == "US"
-        assert snapshot_payload["warnings"]
+        assert snapshot_payload["comparison_region"] is None
+        assert any("light comparative lens" in warning for warning in snapshot_payload["warnings"])
+        assert any("ignored" in warning for warning in snapshot_payload["warnings"])
         assert snapshot_payload["rates_policy"]["curve_nodes"][0]["transformation_note"] is not None
         assert snapshot_payload["snapshot_cards"][0]["source_provider"]
 
@@ -331,16 +359,16 @@ def _build_macro_service() -> MacroService:
 
 def _build_series_map() -> dict[str, list[MacroSeriesPoint]]:
     return {
-        "DFF": _daily_points([140, 30, 0], [4.75, 4.70, 4.50], provider_series_id="DFF"),
-        "DGS2": _daily_points([140, 30, 0], [4.90, 4.70, 4.35], provider_series_id="DGS2"),
-        "DGS10": _daily_points([140, 30, 0], [4.60, 4.45, 4.20], provider_series_id="DGS10"),
-        "DGS30": _daily_points([140, 30, 0], [4.70, 4.55, 4.35], provider_series_id="DGS30"),
-        "DFII10": _daily_points([140, 30, 0], [2.20, 2.05, 1.85], provider_series_id="DFII10"),
-        "T5YIE": _daily_points([140, 30, 0], [2.10, 2.24, 2.45], provider_series_id="T5YIE"),
-        "T10YIE": _daily_points([140, 30, 0], [2.20, 2.32, 2.50], provider_series_id="T10YIE"),
+        "DFF": _daily_points([400, 140, 60, 30, 0], [5.10, 4.75, 4.82, 4.70, 4.50], provider_series_id="DFF"),
+        "DGS2": _daily_points([400, 140, 60, 30, 0], [5.20, 4.90, 4.95, 4.70, 4.35], provider_series_id="DGS2"),
+        "DGS10": _daily_points([400, 140, 60, 30, 0], [4.95, 4.60, 4.58, 4.45, 4.20], provider_series_id="DGS10"),
+        "DGS30": _daily_points([400, 140, 60, 30, 0], [4.98, 4.70, 4.68, 4.55, 4.35], provider_series_id="DGS30"),
+        "DFII10": _daily_points([400, 140, 60, 30, 0], [2.35, 2.20, 2.18, 2.05, 1.85], provider_series_id="DFII10"),
+        "T5YIE": _daily_points([400, 140, 60, 30, 0], [2.55, 2.10, 2.18, 2.24, 2.45], provider_series_id="T5YIE"),
+        "T10YIE": _daily_points([400, 140, 60, 30, 0], [2.60, 2.20, 2.28, 2.32, 2.50], provider_series_id="T10YIE"),
         "UNRATE": _daily_points([150, 60, 0], [4.20, 4.15, 4.10], provider_series_id="UNRATE"),
-        "DTWEXBGS": _daily_points([140, 30, 0], [118.0, 121.0, 124.0], provider_series_id="DTWEXBGS"),
-        "BAMLH0A0HYM2": _daily_points([140, 30, 0], [3.70, 3.90, 4.40], provider_series_id="BAMLH0A0HYM2"),
+        "DTWEXBGS": _daily_points([400, 140, 60, 30, 0], [114.0, 118.0, 119.5, 121.0, 124.0], provider_series_id="DTWEXBGS"),
+        "BAMLH0A0HYM2": _daily_points([400, 140, 60, 30, 0], [3.20, 3.70, 3.75, 3.90, 4.40], provider_series_id="BAMLH0A0HYM2"),
         "CPIAUCSL": _periodic_points(18, step_days=30, start_value=100.0, increment=1.0, provider_series_id="CPIAUCSL"),
         "CPILFESL": _periodic_points(18, step_days=30, start_value=101.0, increment=0.8, provider_series_id="CPILFESL"),
         "GDPC1": _periodic_points(18, step_days=90, start_value=19_000.0, increment=120.0, provider_series_id="GDPC1"),

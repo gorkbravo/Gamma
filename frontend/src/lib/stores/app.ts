@@ -161,6 +161,9 @@ export const loading = writable<Record<string, boolean>>({
   ivSession: false
 });
 
+const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
+const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
+
 function setLoading(key: string, value: boolean) {
   loading.update((current) => ({ ...current, [key]: value }));
 }
@@ -170,7 +173,7 @@ export function setResearchDraft(nextDraft: ResearchDraftState) {
 }
 
 export function setMacroContext(nextContext: Partial<MacroContextState>) {
-  macroContext.update((current) => ({ ...current, ...nextContext }));
+  macroContext.update((current) => normalizeMacroContextState({ ...current, ...nextContext }));
 }
 
 function setError(error: unknown) {
@@ -406,14 +409,20 @@ export async function runResearch(options: ResearchRunOptions) {
   }
 }
 
-function macroPayloadFromOptions(options: MacroLoadOptions = {}) {
-  const current = get(macroContext);
+function normalizeMacroContextState(context: MacroContextState): MacroContextState {
   return {
-    region: options.region ?? current.region,
-    timeframe: options.timeframe ?? current.timeframe,
-    theme: options.theme ?? current.theme,
-    comparison_region: options.comparisonRegion ?? current.comparisonRegion,
-    force_refresh: options.forceRefresh ?? false
+    ...context,
+    comparisonRegion: null
+  };
+}
+
+function macroPayloadFromContext(context: MacroContextState, forceRefresh = false) {
+  return {
+    region: context.region,
+    timeframe: context.timeframe,
+    theme: context.theme,
+    comparison_region: context.comparisonRegion,
+    force_refresh: forceRefresh
   };
 }
 
@@ -422,55 +431,82 @@ function macroHistoryKey(seriesId: string, region: string, timeframe: string) {
 }
 
 export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
-  const nextContext: MacroContextState = {
+  const nextContext = normalizeMacroContextState({
     ...get(macroContext),
     ...(options.mode ? { mode: options.mode } : {}),
     ...(options.region ? { region: options.region } : {}),
     ...(options.timeframe ? { timeframe: options.timeframe } : {}),
     ...(options.theme ? { theme: options.theme } : {}),
     ...(options.comparisonRegion !== undefined ? { comparisonRegion: options.comparisonRegion } : {})
-  };
+  });
   macroContext.set(nextContext);
-  const payload = macroPayloadFromOptions(options);
-  setLoading("macro", true);
-  try {
-    const [snapshot, divergences, events] = await Promise.all([
-      postJson<MacroSnapshot>("/macro/snapshot", payload),
-      postJson<MacroDivergenceListResponse>("/macro/divergences", payload),
-      getJson<MacroEventsResponse>(
-        `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
-      )
-    ]);
-    macroSnapshot.set(snapshot);
-    macroDivergences.set(divergences);
-    macroEvents.set(events);
-    lastError.set("");
-    return snapshot;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("macro", false);
+  const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
+  const requestKey = JSON.stringify(payload);
+  const existingRequest = macroWorkspaceInflight.get(requestKey);
+  if (existingRequest) {
+    return existingRequest;
   }
+  const requestPromise = (async () => {
+    setLoading("macro", true);
+    try {
+      const [snapshot, divergences, events] = await Promise.all([
+        postJson<MacroSnapshot>("/macro/snapshot", payload),
+        postJson<MacroDivergenceListResponse>("/macro/divergences", payload),
+        getJson<MacroEventsResponse>(
+          `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
+        )
+      ]);
+      macroSnapshot.set(snapshot);
+      macroDivergences.set(divergences);
+      macroEvents.set(events);
+      lastError.set("");
+      return snapshot;
+    } catch (error) {
+      setError(error);
+      return null;
+    } finally {
+      setLoading("macro", false);
+      macroWorkspaceInflight.delete(requestKey);
+    }
+  })();
+  macroWorkspaceInflight.set(requestKey, requestPromise);
+  return requestPromise;
 }
 
 export async function loadMacroSeriesHistory(seriesId: string, options: MacroLoadOptions = {}) {
-  const payload = macroPayloadFromOptions(options);
+  const nextContext = normalizeMacroContextState({
+    ...get(macroContext),
+    ...(options.region ? { region: options.region } : {}),
+    ...(options.timeframe ? { timeframe: options.timeframe } : {}),
+    ...(options.theme ? { theme: options.theme } : {}),
+    ...(options.comparisonRegion !== undefined ? { comparisonRegion: options.comparisonRegion } : {})
+  });
+  const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
   const cacheKey = macroHistoryKey(seriesId, payload.region, payload.timeframe);
-  setLoading("macroHistory", true);
-  try {
-    const history = await getJson<MacroSeriesHistory>(
-      `/macro/series/${encodeURIComponent(seriesId)}/history?region=${encodeURIComponent(payload.region)}&timeframe=${encodeURIComponent(payload.timeframe)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
-    );
-    macroSeriesHistories.update((current) => ({ ...current, [cacheKey]: history }));
-    lastError.set("");
-    return history;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("macroHistory", false);
+  const requestKey = `${cacheKey}:${payload.force_refresh ? "refresh" : "cached"}`;
+  const existingRequest = macroSeriesInflight.get(requestKey);
+  if (existingRequest) {
+    return existingRequest;
   }
+  const requestPromise = (async () => {
+    setLoading("macroHistory", true);
+    try {
+      const history = await getJson<MacroSeriesHistory>(
+        `/macro/series/${encodeURIComponent(seriesId)}/history?region=${encodeURIComponent(payload.region)}&timeframe=${encodeURIComponent(payload.timeframe)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
+      );
+      macroSeriesHistories.update((current) => ({ ...current, [cacheKey]: history }));
+      lastError.set("");
+      return history;
+    } catch (error) {
+      setError(error);
+      return null;
+    } finally {
+      setLoading("macroHistory", false);
+      macroSeriesInflight.delete(requestKey);
+    }
+  })();
+  macroSeriesInflight.set(requestKey, requestPromise);
+  return requestPromise;
 }
 
 export async function loadPredictionMarketScreener(options: PredictionMarketScreenerOptions = {}) {

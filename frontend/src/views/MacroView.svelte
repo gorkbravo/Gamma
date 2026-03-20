@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
     MacroContextState,
@@ -67,12 +66,6 @@
     }
   }
 
-  onMount(async () => {
-    if (!snapshot) {
-      await onLoadWorkspace();
-    }
-  });
-
   $: if ($macroContext.mode === "rates_policy") {
     void ensureSeries(modeSeries.rates_policy);
   }
@@ -113,6 +106,16 @@
       ? snapshot?.cross_asset ?? []
       : (snapshot?.cross_asset ?? []).filter((row) => row.theme === $macroContext.theme);
   $: eventRows = events?.events ?? snapshot?.upcoming_events ?? [];
+  $: coverageNote =
+    $macroContext.region === "Global"
+      ? "Global is a light V1 comparative lens. Some analytics still reuse US-first coverage and the warnings below call that out explicitly."
+      : "US is the only deep regional implementation in Macro V1.";
+  $: statusRows = Array.from(
+    new Set([
+      "Macro V1 is US-first. Global mode is intentionally lighter than the US view.",
+      ...(snapshot?.warnings ?? [])
+    ])
+  );
 </script>
 
 <section class="view">
@@ -163,13 +166,24 @@
           {/each}
         </select>
       </label>
-      <label>
-        <span>Compare</span>
-        <select value={$macroContext.comparisonRegion ?? ""} on:change={(event) => refreshContext({ comparisonRegion: ((event.currentTarget as HTMLSelectElement).value || null) as MacroContextState["comparisonRegion"] })}>
-          <option value="">None</option>
-          <option value="Global">Global</option>
-        </select>
-      </label>
+      <div class="context-note">
+        <span>Coverage</span>
+        <p>{coverageNote}</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="panel status-panel">
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">Macro Status</p>
+        <h3>Visible V1 limits</h3>
+      </div>
+    </div>
+    <div class="status-list">
+      {#each statusRows as row}
+        <p class="status-row">{row}</p>
+      {/each}
     </div>
   </article>
 
@@ -427,6 +441,13 @@
     cursor: pointer;
   }
 
+  .context-note,
+  .status-row {
+    border: 1px solid rgba(46, 60, 74, 0.52);
+    background: rgba(8, 13, 18, 0.62);
+    padding: 0.8rem;
+  }
+
   button,
   select {
     border: 1px solid var(--panel-strong);
@@ -460,11 +481,22 @@
 
   .metric span,
   .eyebrow,
-  label > span {
+  label > span,
+  .context-note > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 0.66rem;
+  }
+
+  .context-note p,
+  .status-row {
+    color: var(--text-1);
+  }
+
+  .status-list {
+    display: grid;
+    gap: 0.65rem;
   }
 
   .list-row {

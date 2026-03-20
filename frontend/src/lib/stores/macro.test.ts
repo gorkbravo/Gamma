@@ -54,24 +54,30 @@ describe("macro store orchestration", () => {
     const snapshot = makeSnapshot();
     const divergences = makeDivergences();
     const events = makeEvents();
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(ok(snapshot))
-      .mockResolvedValueOnce(ok(divergences))
-      .mockResolvedValueOnce(ok(events))
-      .mockResolvedValueOnce(ok(snapshot))
-      .mockResolvedValueOnce(ok(divergences))
-      .mockResolvedValueOnce(ok(events));
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/macro/snapshot")) {
+        return Promise.resolve(ok(snapshot));
+      }
+      if (url.endsWith("/macro/divergences")) {
+        return Promise.resolve(ok(divergences));
+      }
+      if (url.includes("/macro/events")) {
+        return Promise.resolve(ok(events));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
 
     vi.stubGlobal("fetch", fetchMock);
 
     await loadMacroWorkspace({
       region: "Global",
       timeframe: "6M",
-      theme: "inflation",
+      theme: "all",
       comparisonRegion: "US",
       mode: "snapshot"
     });
+    await loadMacroWorkspace({ mode: "cross_asset", theme: "inflation" });
     await loadMacroWorkspace({ mode: "rates_policy" });
 
     expect(get(macroContext)).toEqual({
@@ -79,7 +85,7 @@ describe("macro store orchestration", () => {
       region: "Global",
       timeframe: "6M",
       theme: "inflation",
-      comparisonRegion: "US"
+      comparisonRegion: null
     });
     expect(get(macroSnapshot)?.region).toBe("Global");
     expect(get(macroDivergences)?.divergences[0]?.theme).toBe("inflation");
@@ -87,17 +93,24 @@ describe("macro store orchestration", () => {
 
     const firstSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
     const secondSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body ?? "{}"));
+    const thirdSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[6]?.[1]?.body ?? "{}"));
     expect(firstSnapshotPayload).toMatchObject({
       region: "Global",
       timeframe: "6M",
-      theme: "inflation",
-      comparison_region: "US"
+      theme: "all",
+      comparison_region: null
     });
     expect(secondSnapshotPayload).toMatchObject({
       region: "Global",
       timeframe: "6M",
       theme: "inflation",
-      comparison_region: "US"
+      comparison_region: null
+    });
+    expect(thirdSnapshotPayload).toMatchObject({
+      region: "Global",
+      timeframe: "6M",
+      theme: "inflation",
+      comparison_region: null
     });
   });
 
@@ -118,6 +131,50 @@ describe("macro store orchestration", () => {
     expect(get(macroSeriesHistories)["US:1Y:us-cpi-yoy"]).toEqual(history);
     expect(get(lastError)).toBe("");
   });
+
+  it("dedupes identical macro workspace loads into one request bundle", async () => {
+    const snapshot = {
+      ...makeSnapshot(),
+      region: "US",
+      timeframe: "1Y",
+      theme: "policy",
+      warnings: [],
+    };
+    const divergences = {
+      ...makeDivergences(),
+      region: "US",
+      timeframe: "1Y",
+      theme: "policy",
+    };
+    const events = {
+      ...makeEvents(),
+      region: "US",
+      events: makeEvents().events.map((event) => ({ ...event, region: "US" }))
+    };
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/macro/snapshot")) {
+        return Promise.resolve(ok(snapshot));
+      }
+      if (url.endsWith("/macro/divergences")) {
+        return Promise.resolve(ok(divergences));
+      }
+      if (url.includes("/macro/events")) {
+        return Promise.resolve(ok(events));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await Promise.all([
+      loadMacroWorkspace({ region: "US", timeframe: "1Y", theme: "policy" }),
+      loadMacroWorkspace({ region: "US", timeframe: "1Y", theme: "policy" })
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(get(macroSnapshot)?.timeframe).toBe("1Y");
+  });
 });
 
 function makeSnapshot(): MacroSnapshot {
@@ -125,7 +182,7 @@ function makeSnapshot(): MacroSnapshot {
     region: "Global",
     timeframe: "6M",
     theme: "inflation",
-    comparison_region: "US",
+    comparison_region: null,
     available_regions: ["US", "Global"],
     available_timeframes: ["1M", "3M", "6M", "1Y"],
     available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],

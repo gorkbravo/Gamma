@@ -80,13 +80,14 @@ class MacroService:
         region = self._normalize_region(request.region)
         timeframe = self._normalize_timeframe(request.timeframe)
         theme = self._normalize_theme(request.theme)
-        warnings = ["Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first."] if region == "Global" else []
+        requested_comparison = self._parse_comparison(request.comparison_region)
+        warnings = self._snapshot_warnings(region=region, requested_comparison=requested_comparison)
         histories = self._load_histories(self._snapshot_series_ids(theme), timeframe=timeframe, force_refresh=request.force_refresh)
         events = self.get_events(region=region, force_refresh=request.force_refresh)
         divergences = self.get_divergences(request, histories=histories)
         rates_policy = self._build_rates_policy(histories, events, timeframe=timeframe, force_refresh=request.force_refresh)
         retrieved_at = max([row.retrieved_at for row in histories.values() if row.retrieved_at is not None] + [row.retrieved_at for row in events if row.retrieved_at is not None] + [row.retrieved_at for row in divergences if row.retrieved_at is not None] + ([rates_policy.retrieved_at] if rates_policy.retrieved_at is not None else []), default=now_utc())
-        return MacroSnapshotPayload(region=region, timeframe=timeframe, theme=theme, comparison_region=self._normalize_comparison(request.comparison_region), available_regions=["US", "Global"], available_timeframes=list(TIMEFRAME_DAYS), available_themes=THEME_ORDER, snapshot_cards=self._build_snapshot_cards(histories=histories, divergences=divergences, events=events), rates_policy=rates_policy, cross_asset=self._build_cross_asset(histories, divergences), top_divergences=divergences[:3], upcoming_events=events[:5], warnings=warnings, source_provider="fred", retrieved_at=retrieved_at, origin="macro_service.snapshot", transformation_note="Snapshot combines FRED series histories, Treasury curve snapshots, and official calendar events into a mode-oriented macro workspace.")
+        return MacroSnapshotPayload(region=region, timeframe=timeframe, theme=theme, comparison_region=self._normalize_comparison(request.comparison_region), available_regions=["US", "Global"], available_timeframes=list(TIMEFRAME_DAYS), available_themes=THEME_ORDER, snapshot_cards=self._build_snapshot_cards(histories=histories, divergences=divergences, events=events, timeframe=timeframe), rates_policy=rates_policy, cross_asset=self._build_cross_asset(histories, divergences, timeframe=timeframe), top_divergences=divergences[:3], upcoming_events=events[:5], warnings=warnings, source_provider="fred", retrieved_at=retrieved_at, origin="macro_service.snapshot", transformation_note="Snapshot combines FRED series histories, Treasury curve snapshots, and official calendar events into a mode-oriented macro workspace.")
 
     def get_series_history(self, series_id: str, *, region: str = "US", timeframe: str = "1Y", force_refresh: bool = False) -> MacroSeriesHistory | None:
         if self._normalize_region(region) == "Global" and not series_id.startswith("us-"):
@@ -165,13 +166,13 @@ class MacroService:
             points.append(MacroSeriesPoint(timestamp=datetime.combine(key, datetime.min.time()), value=(left.value - right.value) * 100.0, source_provider="fred", retrieved_at=max(filter(None, [left.retrieved_at, right.retrieved_at]), default=now_utc()), origin="macro_service.derived.spread", transformation_note=meta["transformation_note"]))
         return MacroSeriesHistory(series_id=series_id, title=meta["title"], region="US", unit=meta["unit"], frequency=meta["frequency"], theme=meta["theme"], mode_tags=list(meta["mode_tags"]), points=points, source_provider="fred", retrieved_at=max(left_retrieved_at, right_retrieved_at), origin="macro_service.derived.spread", transformation_note=meta["transformation_note"])
 
-    def _build_snapshot_cards(self, *, histories: dict[str, MacroSeriesHistory], divergences: list[MacroDivergenceRecord], events: list[MacroEventRecord]) -> list[MacroSnapshotCard]:
+    def _build_snapshot_cards(self, *, histories: dict[str, MacroSeriesHistory], divergences: list[MacroDivergenceRecord], events: list[MacroEventRecord], timeframe: str) -> list[MacroSnapshotCard]:
         cards = [
-            self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Labor and activity backdrop", summary="Growth context blends real activity, payrolls, and labor-market slack.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("us-real-gdp-yoy"), histories.get("us-payrolls-yoy"), histories.get("us-unemployment-rate")]),
-            self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="Realized inflation versus market-implied inflation", summary="Inflation context compares realized CPI with breakevens to show whether markets are running ahead or behind the data.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("us-cpi-yoy"), histories.get("us-core-cpi-yoy"), histories.get("us-5y-breakeven")]),
-            self._build_metric_card(card_id="policy", title="Policy Context", subtitle="Front-end rates and policy stance", summary="Front-end pricing leads the policy read and frames how restrictive the macro backdrop remains.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-fed-funds"), histories.get("us-2y-yield"), histories.get("us-10y-yield")]),
-            self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="Treasury slope and curve change", summary="Curve shape highlights whether rates are steepening or re-inverting against the prior reference window.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-2s10s-slope"), histories.get("us-10y-yield"), histories.get("us-30y-yield")]),
-            self._build_metric_card(card_id="real-yields", title="Real Yields / Breakevens", subtitle="Real-rate and inflation-compensation lens", summary="Real yields and breakevens capture how much of a rates move is real tightening versus inflation compensation.", mode_target="rates_policy", target_theme="inflation", metric_histories=[histories.get("us-real-10y-yield"), histories.get("us-5y-breakeven"), histories.get("us-10y-breakeven")]),
+            self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Labor and activity backdrop", summary="Growth context blends real activity, payrolls, and labor-market slack.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("us-real-gdp-yoy"), histories.get("us-payrolls-yoy"), histories.get("us-unemployment-rate")], timeframe=timeframe),
+            self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="Realized inflation versus market-implied inflation", summary="Inflation context compares realized CPI with breakevens to show whether markets are running ahead or behind the data.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("us-cpi-yoy"), histories.get("us-core-cpi-yoy"), histories.get("us-5y-breakeven")], timeframe=timeframe),
+            self._build_metric_card(card_id="policy", title="Policy Context", subtitle="Front-end rates and policy stance", summary="Front-end pricing leads the policy read and frames how restrictive the macro backdrop remains.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-fed-funds"), histories.get("us-2y-yield"), histories.get("us-10y-yield")], timeframe=timeframe),
+            self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="Treasury slope and curve change", summary="Curve shape highlights whether rates are steepening or re-inverting against the prior reference window.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-2s10s-slope"), histories.get("us-10y-yield"), histories.get("us-30y-yield")], timeframe=timeframe),
+            self._build_metric_card(card_id="real-yields", title="Real Yields / Breakevens", subtitle="Real-rate and inflation-compensation lens", summary="Real yields and breakevens capture how much of a rates move is real tightening versus inflation compensation.", mode_target="rates_policy", target_theme="inflation", metric_histories=[histories.get("us-real-10y-yield"), histories.get("us-5y-breakeven"), histories.get("us-10y-breakeven")], timeframe=timeframe),
         ]
         for card_id, title, subtitle, summary, series_id, mode_target, theme_name in (
             ("dollar", "Dollar / FX Proxy", "Broad dollar positioning", "A firmer dollar often confirms tighter policy and global stress; a softer dollar often points the other way.", "us-dollar-broad", "cross_asset", "policy"),
@@ -179,7 +180,7 @@ class MacroService:
         ):
             history = histories.get(series_id)
             if history is not None:
-                cards.append(MacroSnapshotCard(card_id=card_id, title=title, subtitle=subtitle, summary=summary, mode_target=mode_target, target_theme=theme_name, metrics=[self._metric_from_history(history, timeframe="3M")], source_provider="fred", retrieved_at=history.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Snapshot cards summarize the latest level and timeframe change for a curated macro series."))
+                cards.append(MacroSnapshotCard(card_id=card_id, title=title, subtitle=subtitle, summary=summary, mode_target=mode_target, target_theme=theme_name, metrics=[self._metric_from_history(history, timeframe=timeframe)], source_provider="fred", retrieved_at=history.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Snapshot cards summarize the latest level and active-timeframe change for a curated macro series."))
         if divergences:
             divergence = divergences[0]
             cards.append(MacroSnapshotCard(card_id="divergences", title="Top Divergences", subtitle="Where markets disagree most", summary=divergence.summary, mode_target="cross_asset", target_theme=divergence.theme, metrics=[MacroMetricRecord(metric_id=f"{divergence.divergence_id}:score", label=self._title_theme(divergence.theme), value=divergence.score, display_value=f"{divergence.score:.2f}", unit="score", source_provider=divergence.source_provider, retrieved_at=divergence.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Snapshot cards surface the highest-ranked divergence score from the reusable cross-asset engine.")], source_provider=divergence.source_provider, retrieved_at=divergence.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Snapshot cards surface the highest-ranked divergence score from the reusable cross-asset engine."))
@@ -188,12 +189,12 @@ class MacroService:
             cards.append(MacroSnapshotCard(card_id="events", title="Upcoming Macro Events", subtitle="Next catalyst on deck", summary=f"{event.title} is the next scheduled macro catalyst in the official event feed.", mode_target="rates_policy", target_theme="policy" if event.category == "policy" else "growth", metrics=[MacroMetricRecord(metric_id=f"{event.event_id}:date", label=event.title, value=None, display_value=event.scheduled_at.strftime('%b %d, %Y'), unit="date", source_provider=event.source_provider, retrieved_at=event.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Event cards surface the next upcoming macro release or meeting from official calendars.")], source_provider=event.source_provider, retrieved_at=event.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Event cards surface the next upcoming macro release or meeting from official calendars."))
         return cards
 
-    def _build_metric_card(self, *, card_id: str, title: str, subtitle: str, summary: str, mode_target: str, target_theme: str, metric_histories: list[MacroSeriesHistory | None]) -> MacroSnapshotCard:
-        metrics = [self._metric_from_history(history, timeframe="3M") for history in metric_histories if history is not None]
-        return MacroSnapshotCard(card_id=card_id, title=title, subtitle=subtitle, summary=summary, mode_target=mode_target, target_theme=target_theme, metrics=metrics, source_provider=metrics[0].source_provider if metrics else "fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.snapshot_cards", transformation_note="Snapshot cards summarize the latest level and timeframe change for curated macro series.")
+    def _build_metric_card(self, *, card_id: str, title: str, subtitle: str, summary: str, mode_target: str, target_theme: str, metric_histories: list[MacroSeriesHistory | None], timeframe: str) -> MacroSnapshotCard:
+        metrics = [self._metric_from_history(history, timeframe=timeframe) for history in metric_histories if history is not None]
+        return MacroSnapshotCard(card_id=card_id, title=title, subtitle=subtitle, summary=summary, mode_target=mode_target, target_theme=target_theme, metrics=metrics, source_provider=metrics[0].source_provider if metrics else "fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.snapshot_cards", transformation_note="Snapshot cards summarize the latest level and active-timeframe change for curated macro series.")
 
     def _build_rates_policy(self, histories: dict[str, MacroSeriesHistory], events: list[MacroEventRecord], *, timeframe: str, force_refresh: bool) -> MacroRatesPolicySummary:
-        curve_nodes, curve_retrieved_at = self._load_curve_nodes(force_refresh=force_refresh)
+        curve_nodes, curve_retrieved_at = self._load_curve_nodes(force_refresh=force_refresh, timeframe=timeframe)
         policy_metrics = [self._metric_from_history(histories[series_id], timeframe=timeframe) for series_id in ("us-fed-funds", "us-2y-yield", "us-10y-yield", "us-2s10s-slope") if series_id in histories]
         real_yield_metrics = [self._metric_from_history(histories[series_id], timeframe=timeframe) for series_id in ("us-real-10y-yield", "us-5y-breakeven", "us-10y-breakeven") if series_id in histories]
         slope_metric = next((metric for metric in policy_metrics if metric.series_id == "us-2s10s-slope"), None)
@@ -202,28 +203,32 @@ class MacroService:
             headline = "The curve is still inverted." if slope_metric.value < 0 else "The curve is positive and no longer inverted."
         return MacroRatesPolicySummary(headline=headline, summary="Rates & Policy emphasizes the current Treasury curve, front-end policy context, and the real-yield versus breakeven split.", policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=events[:4], source_provider="treasury", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in events[:4] if row.retrieved_at is not None], default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines Treasury XML curve snapshots with FRED series histories and official calendar events.")
 
-    def _build_cross_asset(self, histories: dict[str, MacroSeriesHistory], divergences: list[MacroDivergenceRecord]) -> list[MacroThemeComparison]:
+    def _build_cross_asset(self, histories: dict[str, MacroSeriesHistory], divergences: list[MacroDivergenceRecord], timeframe: str) -> list[MacroThemeComparison]:
         divergence_map = {row.theme: row for row in divergences}
         rows: list[MacroThemeComparison] = []
         for theme in [name for name in THEME_ORDER if name != "all"]:
-            metrics = [self._metric_from_history(histories[series_id], timeframe="3M") for series_id in THEME_SERIES.get(theme, []) if series_id in histories]
+            metrics = [self._metric_from_history(histories[series_id], timeframe=timeframe) for series_id in THEME_SERIES.get(theme, []) if series_id in histories]
             if metrics:
                 divergence = divergence_map.get(theme)
                 rows.append(MacroThemeComparison(theme=theme, headline=f"{self._title_theme(theme)} signals", summary=divergence.summary if divergence is not None else "Theme coverage is available, but disagreement is currently muted.", agreement_label=divergence.label if divergence is not None else "low", metrics=metrics, source_provider="fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.cross_asset", transformation_note="Cross-asset theme blocks line up curated series so the user can compare whether markets agree on a macro narrative."))
         return rows
 
-    def _load_curve_nodes(self, *, force_refresh: bool) -> tuple[list[MacroCurveNode], datetime]:
+    def _load_curve_nodes(self, *, force_refresh: bool, timeframe: str) -> tuple[list[MacroCurveNode], datetime]:
         current_time = now_utc()
         years = [current_time.year] + ([current_time.year - 1] if current_time.month == 1 else [])
         nominal_history, nominal_retrieved_at = self.treasury_adapter.get_curve_history("daily_treasury_yield_curve", years=years, ttl=timedelta(hours=6), force_refresh=force_refresh)
         latest_date = max((date for date in nominal_history if date <= current_time), default=None)
         if latest_date is None:
             return [], nominal_retrieved_at
-        prior_candidates = [date for date in nominal_history if date < latest_date - timedelta(days=5)]
-        prior_date = max(prior_candidates, default=latest_date)
+        cutoff = latest_date - timedelta(days=TIMEFRAME_DAYS.get(timeframe, 93))
+        prior_candidates = [date for date in nominal_history if date <= cutoff]
+        if prior_candidates:
+            prior_date = max(prior_candidates)
+        else:
+            prior_date = max((date for date in nominal_history if date < latest_date), default=latest_date)
         latest_curve = nominal_history.get(latest_date, {})
         prior_curve = nominal_history.get(prior_date, {})
-        nodes = [MacroCurveNode(tenor=tenor, current_value=latest_curve.get(tenor), prior_value=prior_curve.get(tenor), change_bps=((latest_curve.get(tenor) - prior_curve.get(tenor)) * 100.0) if latest_curve.get(tenor) is not None and prior_curve.get(tenor) is not None else None, source_provider="treasury", retrieved_at=nominal_retrieved_at, origin="treasury.daily_treasury_yield_curve", transformation_note="Curve comparison uses the latest available Treasury XML curve point versus the most recent prior point at least five days earlier.") for tenor in ("3M", "2Y", "5Y", "10Y", "30Y")]
+        nodes = [MacroCurveNode(tenor=tenor, current_value=latest_curve.get(tenor), prior_value=prior_curve.get(tenor), change_bps=((latest_curve.get(tenor) - prior_curve.get(tenor)) * 100.0) if latest_curve.get(tenor) is not None and prior_curve.get(tenor) is not None else None, source_provider="treasury", retrieved_at=nominal_retrieved_at, origin="treasury.daily_treasury_yield_curve", transformation_note="Curve comparison uses the latest available Treasury XML curve point versus the active-timeframe prior point, falling back to the nearest earlier observation when coverage is limited.") for tenor in ("3M", "2Y", "5Y", "10Y", "30Y")]
         return nodes, nominal_retrieved_at
 
     def _metric_from_history(self, history: MacroSeriesHistory, *, timeframe: str) -> MacroMetricRecord:
@@ -269,6 +274,11 @@ class MacroService:
 
     @staticmethod
     def _normalize_comparison(comparison_region: str | None) -> str | None:
+        _ = comparison_region
+        return None
+
+    @staticmethod
+    def _parse_comparison(comparison_region: str | None) -> str | None:
         if comparison_region is None:
             return None
         normalized = str(comparison_region).strip().upper()
@@ -277,6 +287,15 @@ class MacroService:
         if normalized == "US":
             return "US"
         return None
+
+    @staticmethod
+    def _snapshot_warnings(*, region: str, requested_comparison: str | None) -> list[str]:
+        warnings: list[str] = []
+        if region == "Global":
+            warnings.append("Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first and some analytics reuse US proxies.")
+        if requested_comparison is not None:
+            warnings.append("Comparison targets are not applied analytically in Macro V1; the comparison selection was ignored.")
+        return warnings
 
     @staticmethod
     def _title_theme(theme: str) -> str:

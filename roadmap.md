@@ -247,16 +247,16 @@ For roadmap purposes, this deliverable is now treated as achieved at a first-pas
 
 ## Phase 2 - Macro Tab
 
-_Status: In progress (~5%)_
+_Status: In progress (~20%)_
 _Active focus: establish the first usable Macro workspace, move cross-asset context into Gamma, and make Macro the new primary implementation track._
 
 #### Completion snapshot
-- `Snapshot mode`: ~0% complete. Not started.
-- `Cross-asset expectations mode`: ~0% complete. Not started.
-- `Rates & policy mode`: ~0% complete. Not started.
+- `Snapshot mode`: ~35% complete. Early V1 workspace exists, but breadth and interpretation depth remain limited.
+- `Cross-asset expectations mode`: ~25% complete. First-pass comparative surface and divergence rankings exist, but the expectations engine is still thin.
+- `Rates & policy mode`: ~40% complete. This is the strongest current Macro mode, but it still needs broader depth and richer interpretation.
 - `Optional commodities mode`: ~0% complete. Not started and not required for the first pass.
-- `Coherence and divergence engine`: ~0% complete. Not started.
-- `Event and regime interpretation`: ~0% complete. Not started.
+- `Coherence and divergence engine`: ~20% complete. A first-pass divergence layer exists, but it is still narrow and proxy-driven.
+- `Event and regime interpretation`: ~10% complete. Event context is present, but regime framing and event-window interpretation are still limited.
 - `Research notebook hooks`: ~0% complete. Not started.
 
 ### Why this phase comes next
