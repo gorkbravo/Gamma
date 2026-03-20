@@ -42,6 +42,14 @@
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "N/A";
 
+  function deltaClass(display: string | null | undefined): string {
+    if (!display) return "";
+    const trimmed = display.trim();
+    if (trimmed.startsWith("+") || trimmed.startsWith("▲")) return "positive";
+    if (trimmed.startsWith("-") || trimmed.startsWith("−") || trimmed.startsWith("▼")) return "negative";
+    return "";
+  }
+
   function historyKey(seriesId: string) {
     return `${$macroContext.region}:${$macroContext.timeframe}:${seriesId}`;
   }
@@ -108,8 +116,8 @@
   $: eventRows = events?.events ?? snapshot?.upcoming_events ?? [];
   $: coverageNote =
     $macroContext.region === "Global"
-      ? "Global is a light V1 comparative lens. Some analytics still reuse US-first coverage and the warnings below call that out explicitly."
-      : "US is the only deep regional implementation in Macro V1.";
+      ? "Global is a light V1 comparative lens. Some analytics reuse US-first coverage."
+      : "US is the primary regional implementation in Macro V1.";
   $: statusRows = Array.from(
     new Set([
       "Macro V1 is US-first. Global mode is intentionally lighter than the US view.",
@@ -120,12 +128,13 @@
 
 <section class="view">
   <article class="panel header-panel">
-    <div class="headline-block">
-      <p class="eyebrow">Macro</p>
-      <h2>Mode-driven research workspace</h2>
-      <p class="muted">Shared context stays live while you move between Snapshot, Cross-Asset, and Rates & Policy.</p>
+    <div class="header-top">
+      <div class="headline-block">
+        <p class="eyebrow">Macro</p>
+        <h2>Macro Research</h2>
+      </div>
       {#if loading}
-        <p class="eyebrow">Refreshing context</p>
+        <span class="loading-pill">Refreshing</span>
       {/if}
     </div>
 
@@ -133,6 +142,8 @@
       {#each modes as mode}
         <button
           class:selected={mode.id === $macroContext.mode}
+          role="tab"
+          aria-selected={mode.id === $macroContext.mode}
           type="button"
           on:click={() => refreshContext({ mode: mode.id })}
         >
@@ -166,52 +177,51 @@
           {/each}
         </select>
       </label>
-      <div class="context-note">
-        <span>Coverage</span>
-        <p>{coverageNote}</p>
-      </div>
     </div>
+    <p class="coverage-note">{coverageNote}</p>
   </article>
 
-  <article class="panel status-panel">
-    <div class="panel-header">
-      <div>
-        <p class="eyebrow">Macro Status</p>
-        <h3>Visible V1 limits</h3>
-      </div>
-    </div>
-    <div class="status-list">
+  {#if statusRows.length}
+    <div class="status-strip">
       {#each statusRows as row}
         <p class="status-row">{row}</p>
       {/each}
     </div>
-  </article>
+  {/if}
 
   {#if $macroContext.mode === "snapshot"}
     <div class="workspace-grid">
       {#each snapshot?.snapshot_cards ?? [] as card}
-        <button class="panel card-panel clickable" type="button" on:click={() => drillTo(card.mode_target as MacroMode, card.target_theme)}>
-          <div class="panel-header">
+        <button class="panel card-panel" type="button" on:click={() => drillTo(card.mode_target as MacroMode, card.target_theme)}>
+          <div class="card-head">
             <div>
               <small class="eyebrow">{themeLabels[(card.target_theme as MacroTheme) ?? "all"] ?? "Macro"}</small>
               <h3>{card.title}</h3>
             </div>
             <span class="tag">{card.mode_target.replace("_", " ")}</span>
           </div>
-          <p class="muted">{card.subtitle}</p>
-          <p>{card.summary}</p>
-          <div class="metric-grid">
+          <p class="card-subtitle">{card.subtitle}</p>
+          <p class="card-summary">{card.summary}</p>
+          <div class="metric-row">
             {#each card.metrics as metric}
-              <article class="metric">
-                <span>{metric.label}</span>
-                <strong>{metric.display_value ?? "N/A"}</strong>
-                <small>{metric.delta_display ?? ""}</small>
-              </article>
+              <div class="metric">
+                <span class="metric-label">{metric.label}</span>
+                <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
+                {#if metric.delta_display}
+                  <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+                {/if}
+              </div>
             {/each}
           </div>
         </button>
       {/each}
     </div>
+
+    {#if !snapshot?.snapshot_cards?.length && !loading}
+      <div class="panel empty-state">
+        <p>No snapshot cards available for this configuration.</p>
+      </div>
+    {/if}
 
     <div class="detail-grid">
       <article class="panel">
@@ -221,14 +231,18 @@
             <h3>Top ranked disagreements</h3>
           </div>
         </div>
-        <div class="list">
-          {#each snapshot?.top_divergences ?? [] as row}
-            <button class="list-row" type="button" on:click={() => drillTo("cross_asset", row.theme)}>
-              <strong>{row.headline}</strong>
-              <span>{row.summary}</span>
-            </button>
-          {/each}
-        </div>
+        {#if (snapshot?.top_divergences ?? []).length}
+          <div class="list">
+            {#each snapshot?.top_divergences ?? [] as row}
+              <button class="list-row interactive" type="button" on:click={() => drillTo("cross_asset", row.theme)}>
+                <strong>{row.headline}</strong>
+                <span class="list-detail">{row.summary}</span>
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No divergences detected for current context.</p>
+        {/if}
       </article>
 
       <article class="panel">
@@ -238,14 +252,21 @@
             <h3>Upcoming macro calendar</h3>
           </div>
         </div>
-        <div class="list">
-          {#each eventRows as event}
-            <div class="list-row static">
-              <strong>{event.title}</strong>
-              <span>{shortDate(event.scheduled_at)} | {event.category}</span>
-            </div>
-          {/each}
-        </div>
+        {#if eventRows.length}
+          <div class="list">
+            {#each eventRows as event}
+              <div class="list-row">
+                <strong>{event.title}</strong>
+                <span class="list-detail">
+                  <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                  <span class="event-category">{event.category}</span>
+                </span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No upcoming events for this region.</p>
+        {/if}
       </article>
     </div>
   {:else if $macroContext.mode === "rates_policy"}
@@ -258,14 +279,16 @@
           </div>
           <span class="tag">US-first</span>
         </div>
-        <p class="muted">{snapshot?.rates_policy?.summary}</p>
-        <div class="metric-grid">
+        <p class="section-summary">{snapshot?.rates_policy?.summary}</p>
+        <div class="metric-row">
           {#each snapshot?.rates_policy?.policy_metrics ?? [] as metric}
-            <article class="metric">
-              <span>{metric.label}</span>
-              <strong>{metric.display_value}</strong>
-              <small>{metric.delta_display}</small>
-            </article>
+            <div class="metric">
+              <span class="metric-label">{metric.label}</span>
+              <strong class="metric-value">{metric.display_value}</strong>
+              {#if metric.delta_display}
+                <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+              {/if}
+            </div>
           {/each}
         </div>
         <TimeSeriesChart series={ratesChart} height={320} emptyMessage="Loading rates history." />
@@ -278,26 +301,28 @@
             <h3>Current vs prior</h3>
           </div>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Tenor</th>
-              <th>Current</th>
-              <th>Prior</th>
-              <th>Delta</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each snapshot?.rates_policy?.curve_nodes ?? [] as node}
+        <div class="table-wrap">
+          <table>
+            <thead>
               <tr>
-                <td>{node.tenor}</td>
-                <td>{fmt(node.current_value)}</td>
-                <td>{fmt(node.prior_value)}</td>
-                <td>{node.change_bps == null ? "N/A" : `${node.change_bps.toFixed(0)} bps`}</td>
+                <th>Tenor</th>
+                <th>Current</th>
+                <th>Prior</th>
+                <th>Delta</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {#each snapshot?.rates_policy?.curve_nodes ?? [] as node}
+                <tr>
+                  <td>{node.tenor}</td>
+                  <td>{fmt(node.current_value)}</td>
+                  <td>{fmt(node.prior_value)}</td>
+                  <td class="{node.change_bps != null && node.change_bps > 0 ? 'positive' : ''} {node.change_bps != null && node.change_bps < 0 ? 'negative' : ''}">{node.change_bps == null ? "N/A" : `${node.change_bps > 0 ? "+" : ""}${node.change_bps.toFixed(0)} bps`}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       </article>
 
       <article class="panel">
@@ -307,13 +332,15 @@
             <h3>Breakeven split</h3>
           </div>
         </div>
-        <div class="metric-grid compact">
+        <div class="metric-row compact">
           {#each snapshot?.rates_policy?.real_yield_metrics ?? [] as metric}
-            <article class="metric">
-              <span>{metric.label}</span>
-              <strong>{metric.display_value}</strong>
-              <small>{metric.delta_display}</small>
-            </article>
+            <div class="metric">
+              <span class="metric-label">{metric.label}</span>
+              <strong class="metric-value">{metric.display_value}</strong>
+              {#if metric.delta_display}
+                <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+              {/if}
+            </div>
           {/each}
         </div>
         <TimeSeriesChart series={inflationChart} height={280} emptyMessage="Loading real-yield history." />
@@ -326,14 +353,21 @@
             <h3>Meeting and release context</h3>
           </div>
         </div>
-        <div class="list">
-          {#each snapshot?.rates_policy?.events ?? [] as event}
-            <div class="list-row static">
-              <strong>{event.title}</strong>
-              <span>{shortDate(event.scheduled_at)} | {event.category}</span>
-            </div>
-          {/each}
-        </div>
+        {#if (snapshot?.rates_policy?.events ?? []).length}
+          <div class="list">
+            {#each snapshot?.rates_policy?.events ?? [] as event}
+              <div class="list-row">
+                <strong>{event.title}</strong>
+                <span class="list-detail">
+                  <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                  <span class="event-category">{event.category}</span>
+                </span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No upcoming rate events.</p>
+        {/if}
       </article>
     </div>
   {:else}
@@ -345,29 +379,35 @@
             <h3>Do these markets agree?</h3>
           </div>
         </div>
-        <div class="workspace-grid">
-          {#each crossAssetCards as card}
-            <article class="card-panel secondary">
-              <div class="panel-header">
-                <div>
-                  <small class="eyebrow">{themeLabels[card.theme as MacroTheme] ?? card.theme}</small>
-                  <h3>{card.headline}</h3>
+        {#if crossAssetCards.length}
+          <div class="workspace-grid">
+            {#each crossAssetCards as card}
+              <article class="cross-card">
+                <div class="card-head">
+                  <div>
+                    <small class="eyebrow">{themeLabels[card.theme as MacroTheme] ?? card.theme}</small>
+                    <h3>{card.headline}</h3>
+                  </div>
+                  <span class="tag agreement">{card.agreement_label}</span>
                 </div>
-                <span class="tag">{card.agreement_label}</span>
-              </div>
-              <p class="muted">{card.summary}</p>
-              <div class="metric-grid compact">
-                {#each card.metrics as metric}
-                  <article class="metric">
-                    <span>{metric.label}</span>
-                    <strong>{metric.display_value}</strong>
-                    <small>{metric.delta_display}</small>
-                  </article>
-                {/each}
-              </div>
-            </article>
-          {/each}
-        </div>
+                <p class="card-subtitle">{card.summary}</p>
+                <div class="metric-row compact">
+                  {#each card.metrics as metric}
+                    <div class="metric">
+                      <span class="metric-label">{metric.label}</span>
+                      <strong class="metric-value">{metric.display_value}</strong>
+                      {#if metric.delta_display}
+                        <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No cross-asset comparisons for this theme.</p>
+        {/if}
       </article>
 
       <article class="panel span-2">
@@ -377,48 +417,207 @@
             <h3>Best research candidates</h3>
           </div>
         </div>
-        <div class="list">
-          {#each divergences?.divergences ?? [] as row}
-            <div class="list-row static">
-              <strong>{row.headline}</strong>
-              <span>{row.summary}</span>
-              <small>Score {row.score.toFixed(2)} | {row.label}</small>
-            </div>
-          {/each}
-        </div>
+        {#if (divergences?.divergences ?? []).length}
+          <div class="list">
+            {#each divergences?.divergences ?? [] as row}
+              <div class="list-row">
+                <strong>{row.headline}</strong>
+                <span class="list-detail">{row.summary}</span>
+                <small class="list-meta">Score {row.score.toFixed(2)} · {row.label}</small>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No divergences ranked for current context.</p>
+        {/if}
       </article>
     </div>
   {/if}
 </section>
 
 <style>
-  .view,
-  .workspace-grid,
-  .detail-grid,
-  .metric-grid,
-  .context-bar,
-  .mode-bar,
-  .list {
+  /* ── Layout scaffolding ── */
+  .view {
     display: grid;
-    gap: 0.9rem;
+    gap: 0.75rem;
   }
 
   .workspace-grid {
-    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: 0.75rem;
   }
 
   .detail-grid {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
   }
 
-  .header-panel,
+  /* ── Panels ── */
   .panel,
-  .card-panel {
+  .cross-card {
     border: 1px solid var(--panel-border);
     background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
-    padding: 1rem;
+    padding: 1.05rem;
+    display: grid;
+    gap: 0.75rem;
   }
 
+  .header-panel {
+    gap: 0.65rem;
+  }
+
+  .cross-card {
+    gap: 0.6rem;
+  }
+
+  /* ── Header block ── */
+  .header-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.8rem;
+  }
+
+  .headline-block {
+    display: grid;
+    gap: 0.15rem;
+  }
+
+  .loading-pill {
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    border: 1px solid rgba(122, 166, 200, 0.28);
+    background: rgba(122, 166, 200, 0.06);
+    padding: 0.25rem 0.6rem;
+    white-space: nowrap;
+    animation: pulse-opacity 1.6s ease-in-out infinite;
+  }
+
+  @keyframes pulse-opacity {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* ── Mode bar (segmented control) ── */
+  .mode-bar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border: 1px solid var(--panel-strong);
+    background: rgba(8, 13, 18, 0.82);
+  }
+
+  .mode-bar button {
+    border: 0;
+    border-right: 1px solid var(--panel-strong);
+    background: transparent;
+    color: var(--text-1);
+    padding: 0.55rem 0.8rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .mode-bar button:last-child {
+    border-right: 0;
+  }
+
+  .mode-bar button:hover {
+    background: rgba(122, 166, 200, 0.06);
+    color: var(--text-0);
+  }
+
+  .mode-bar button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .mode-bar button.selected {
+    background: rgba(122, 166, 200, 0.12);
+    color: var(--accent);
+  }
+
+  /* ── Context bar ── */
+  .context-bar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+
+  .context-bar label {
+    display: grid;
+    gap: 0.3rem;
+  }
+
+  .context-bar label > span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.64rem;
+  }
+
+  .context-bar select {
+    border: 1px solid var(--panel-strong);
+    background: #0d0f12;
+    color: var(--text-0);
+    padding: 0.55rem 0.7rem;
+    font: inherit;
+    width: 100%;
+    cursor: pointer;
+    transition: border-color 120ms ease;
+  }
+
+  .context-bar select:hover {
+    border-color: rgba(122, 166, 200, 0.32);
+  }
+
+  .context-bar select:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .coverage-note {
+    color: var(--text-2);
+    font-size: 0.78rem;
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  /* ── Status strip (compact warnings) ── */
+  .status-strip {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid rgba(196, 154, 90, 0.18);
+    background: rgba(196, 154, 90, 0.03);
+  }
+
+  .status-row {
+    color: var(--text-2);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    margin: 0;
+    padding-left: 0.75rem;
+    position: relative;
+  }
+
+  .status-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.45em;
+    width: 4px;
+    height: 4px;
+    background: var(--warning);
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  /* ── Panel header ── */
   .panel-header {
     display: flex;
     justify-content: space-between;
@@ -426,106 +625,218 @@
     align-items: start;
   }
 
-  .context-bar {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .mode-bar {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .mode-bar button,
-  .context-bar select,
-  .list-row,
-  .clickable {
-    cursor: pointer;
-  }
-
-  .context-note,
-  .status-row {
-    border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.62);
-    padding: 0.8rem;
-  }
-
-  button,
-  select {
-    border: 1px solid var(--panel-strong);
-    background: #0d0f12;
-    color: var(--text-0);
-    padding: 0.65rem 0.8rem;
-    font: inherit;
-    width: 100%;
-  }
-
-  .clickable {
-    text-align: left;
-  }
-
-  .mode-bar button.selected,
-  .tag {
-    border-color: rgba(122, 166, 200, 0.36);
-    background: rgba(122, 166, 200, 0.08);
-  }
-
-  .metric-grid {
-    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-  }
-
-  .metric {
-    border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.62);
-    padding: 0.8rem;
+  .panel-header > div {
     min-width: 0;
   }
 
-  .metric span,
-  .eyebrow,
-  label > span,
-  .context-note > span {
+  /* ── Snapshot cards ── */
+  .card-panel {
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 180ms ease, background 180ms ease;
+  }
+
+  .card-panel:hover {
+    border-color: rgba(122, 166, 200, 0.28);
+    background: linear-gradient(180deg, rgba(14, 17, 20, 0.97), rgba(11, 13, 15, 0.95));
+  }
+
+  .card-panel:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.6rem;
+    align-items: start;
+  }
+
+  .card-subtitle {
+    color: var(--text-2);
+    margin: 0;
+    font-size: 0.86rem;
+    line-height: 1.4;
+  }
+
+  .card-summary {
+    color: var(--text-1);
+    margin: 0;
+    line-height: 1.45;
+  }
+
+  /* ── Section summary (rates & policy) ── */
+  .section-summary {
+    color: var(--text-2);
+    margin: 0;
+    line-height: 1.45;
+  }
+
+  /* ── Tags ── */
+  .tag {
+    display: inline-block;
+    border: 1px solid rgba(122, 166, 200, 0.24);
+    background: rgba(122, 166, 200, 0.06);
+    color: var(--accent);
+    padding: 0.2rem 0.52rem;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .tag.agreement {
+    border-color: rgba(196, 154, 90, 0.24);
+    background: rgba(196, 154, 90, 0.06);
+    color: var(--accent-2);
+  }
+
+  /* ── Metric row ── */
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 0;
+  }
+
+  .metric-row.compact {
+    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  }
+
+  .metric {
+    padding: 0.55rem 0.75rem;
+    border-left: 1px solid rgba(46, 60, 74, 0.42);
+    min-width: 0;
+  }
+
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .metric-label {
+    display: block;
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.66rem;
+    font-size: 0.64rem;
   }
 
-  .context-note p,
-  .status-row {
-    color: var(--text-1);
+  .metric-value {
+    display: block;
+    margin-top: 0.18rem;
+    font-size: 0.95rem;
+    line-height: 1.3;
   }
 
-  .status-list {
+  .metric-delta {
+    display: block;
+    margin-top: 0.12rem;
+    color: var(--text-2);
+    font-size: 0.74rem;
+  }
+
+  .metric-delta.positive {
+    color: var(--positive);
+  }
+
+  .metric-delta.negative {
+    color: var(--negative);
+  }
+
+  /* ── Lists ── */
+  .list {
     display: grid;
-    gap: 0.65rem;
+    gap: 0;
   }
 
   .list-row {
     display: grid;
-    gap: 0.2rem;
+    gap: 0.15rem;
     text-align: left;
-    border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.62);
-    padding: 0.8rem;
-  }
-
-  .list-row.static {
+    padding: 0.7rem 0.75rem;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.35);
     cursor: default;
+    transition: background 120ms ease;
   }
 
-  .span-2 {
-    grid-column: span 2;
+  .list-row:last-child {
+    border-bottom: 0;
   }
 
-  .tag,
-  h2,
-  h3,
-  p,
-  small {
+  .list-row.interactive {
+    cursor: pointer;
+    border: 0;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.35);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    width: 100%;
+  }
+
+  .list-row.interactive:hover {
+    background: rgba(122, 166, 200, 0.04);
+  }
+
+  .list-row.interactive:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .list-row.interactive:last-child {
+    border-bottom: 0;
+  }
+
+  .list-detail {
+    color: var(--text-2);
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+
+  .list-meta {
+    color: var(--text-2);
+    font-size: 0.74rem;
+  }
+
+  .event-date {
+    color: var(--text-1);
+  }
+
+  .event-category {
+    color: var(--text-2);
+    margin-left: 0.5rem;
+  }
+
+  .event-category::before {
+    content: "·";
+    margin-right: 0.5rem;
+    opacity: 0.5;
+  }
+
+  /* ── Empty states ── */
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    color: var(--text-2);
+  }
+
+  .empty-state p {
     margin: 0;
   }
 
-  .muted {
+  .empty-hint {
     color: var(--text-2);
+    font-size: 0.82rem;
+    margin: 0;
+    padding: 0.5rem 0;
+  }
+
+  /* ── Table ── */
+  .table-wrap {
+    overflow: auto;
   }
 
   table {
@@ -535,19 +846,92 @@
 
   th,
   td {
-    padding: 0.7rem 0.5rem;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
+    padding: 0.65rem 0.55rem;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.35);
     text-align: left;
   }
 
+  th {
+    color: var(--text-2);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    background: rgba(8, 13, 18, 0.82);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .positive {
+    color: var(--positive);
+  }
+
+  .negative {
+    color: var(--negative);
+  }
+
+  /* ── Shared typography ── */
+  .eyebrow {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.64rem;
+    margin: 0;
+  }
+
+  h2,
+  h3,
+  p,
+  small {
+    margin: 0;
+  }
+
+  .span-2 {
+    grid-column: span 2;
+  }
+
+  /* ── Responsive ── */
   @media (max-width: 1080px) {
-    .detail-grid,
-    .context-bar {
+    .detail-grid {
       grid-template-columns: 1fr;
     }
 
     .span-2 {
       grid-column: auto;
+    }
+
+    .context-bar {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .mode-bar {
+      grid-template-columns: 1fr;
+    }
+
+    .mode-bar button {
+      border-right: 0;
+      border-bottom: 1px solid var(--panel-strong);
+    }
+
+    .mode-bar button:last-child {
+      border-bottom: 0;
+    }
+
+    .metric-row,
+    .metric-row.compact {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .metric {
+      padding: 0.5rem 0;
+      border-left: 0;
+    }
+
+    .header-top {
+      flex-direction: column;
+      gap: 0.4rem;
     }
   }
 </style>

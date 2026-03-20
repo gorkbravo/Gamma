@@ -28,7 +28,6 @@ describe("MacroView", () => {
       }
     });
 
-    expect(body).toContain("Visible V1 limits");
     expect(body).toContain("Macro V1 is US-first. Global mode is intentionally lighter than the US view.");
     expect(body).toContain("Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first and some analytics reuse US proxies.");
     expect(body).toContain("Comparison targets are not applied analytically in Macro V1; the comparison selection was ignored.");
