@@ -114,6 +114,76 @@ describe("macro store orchestration", () => {
     });
   });
 
+  it("preserves a valid US-versus-EU comparison lens across macro mode changes", async () => {
+    const snapshot = {
+      ...makeSnapshot(),
+      region: "EU",
+      timeframe: "1Y",
+      theme: "policy",
+      comparison_region: "US",
+      warnings: ["Comparison lens active: EU versus US. Only concepts with curated counterparts are compared directly."]
+    };
+    const divergences = {
+      ...makeDivergences(),
+      region: "EU",
+      timeframe: "1Y",
+      theme: "policy",
+      comparison_region: "US"
+    };
+    const events = {
+      ...makeEvents(),
+      region: "EU",
+      events: []
+    };
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/macro/snapshot")) {
+        return Promise.resolve(ok(snapshot));
+      }
+      if (url.endsWith("/macro/divergences")) {
+        return Promise.resolve(ok(divergences));
+      }
+      if (url.includes("/macro/events")) {
+        return Promise.resolve(ok(events));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadMacroWorkspace({
+      region: "EU",
+      timeframe: "1Y",
+      theme: "policy",
+      comparisonRegion: "US",
+      mode: "snapshot"
+    });
+    await loadMacroWorkspace({ mode: "cross_asset" });
+
+    expect(get(macroContext)).toEqual({
+      mode: "cross_asset",
+      region: "EU",
+      timeframe: "1Y",
+      theme: "policy",
+      comparisonRegion: "US"
+    });
+
+    const firstSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    const secondSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body ?? "{}"));
+    expect(firstSnapshotPayload).toMatchObject({
+      region: "EU",
+      timeframe: "1Y",
+      theme: "policy",
+      comparison_region: "US"
+    });
+    expect(secondSnapshotPayload).toMatchObject({
+      region: "EU",
+      timeframe: "1Y",
+      theme: "policy",
+      comparison_region: "US"
+    });
+  });
+
   it("stores macro histories under the active region and timeframe context", async () => {
     const history = makeHistory();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(history)));
@@ -183,7 +253,7 @@ function makeSnapshot(): MacroSnapshot {
     timeframe: "6M",
     theme: "inflation",
     comparison_region: null,
-    available_regions: ["US", "Global"],
+    available_regions: ["US", "EU", "Global"],
     available_timeframes: ["1M", "3M", "6M", "1Y"],
     available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],
     snapshot_cards: [
@@ -211,7 +281,9 @@ function makeSnapshot(): MacroSnapshot {
       source_provider: "treasury",
       retrieved_at: "2026-03-20T11:00:00Z",
       origin: "macro_service.rates_policy",
-      transformation_note: "Rates & Policy combines Treasury and FRED data."
+      transformation_note: "Rates & Policy combines Treasury and FRED data.",
+      comparison_region: null,
+      comparison_summary: null
     },
     cross_asset: [],
     top_divergences: [],
@@ -229,6 +301,7 @@ function makeDivergences(): MacroDivergenceListResponse {
     region: "Global",
     timeframe: "6M",
     theme: "inflation",
+    comparison_region: null,
     divergences: [
       {
         divergence_id: "global:inflation:divergence",
@@ -243,7 +316,11 @@ function makeDivergences(): MacroDivergenceListResponse {
         source_provider: "fred",
         retrieved_at: "2026-03-20T10:00:00Z",
         origin: "macro_service.divergences",
-        transformation_note: "Divergence scores compare directional changes across theme proxies."
+        transformation_note: "Divergence scores compare directional changes across theme proxies.",
+        comparison_region: null,
+        comparison_score: null,
+        score_gap: null,
+        score_gap_display: null,
       }
     ]
   };

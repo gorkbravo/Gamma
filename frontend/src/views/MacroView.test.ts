@@ -15,7 +15,7 @@ describe("MacroView", () => {
     });
   });
 
-  it("renders macro warnings and visible V1 scope limits inline", () => {
+  it("renders macro warnings and visible scope limits inline, including the compare lens", () => {
     const { body } = render(MacroView, {
       props: {
         snapshot: makeSnapshot(),
@@ -31,7 +31,8 @@ describe("MacroView", () => {
     expect(body).toContain("Macro V1 is US-first. Global mode is intentionally lighter than the US view.");
     expect(body).toContain("Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first and some analytics reuse US proxies.");
     expect(body).toContain("Comparison targets are not applied analytically in Macro V1; the comparison selection was ignored.");
-    expect(body).not.toContain(">Compare<");
+    expect(body).toContain(">Compare<");
+    expect(body).toContain("disabled");
   });
 });
 
@@ -41,7 +42,7 @@ function makeSnapshot(): MacroSnapshot {
     timeframe: "6M",
     theme: "inflation",
     comparison_region: null,
-    available_regions: ["US", "Global"],
+    available_regions: ["US", "EU", "Global"],
     available_timeframes: ["1M", "3M", "6M", "1Y"],
     available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],
     snapshot_cards: [],

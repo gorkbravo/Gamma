@@ -62,6 +62,14 @@ class MacroMetricModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_label: str | None = None
+    comparison_value: float | None = None
+    comparison_display_value: str | None = None
+    comparison_delta_value: float | None = None
+    comparison_delta_display: str | None = None
+    gap_value: float | None = None
+    gap_display: str | None = None
 
     @classmethod
     def from_domain(cls, row: MacroMetricRecord) -> "MacroMetricModel":
@@ -156,6 +164,10 @@ class MacroDivergenceModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_score: float | None = None
+    score_gap: float | None = None
+    score_gap_display: str | None = None
 
     @classmethod
     def from_domain(cls, row: MacroDivergenceRecord) -> "MacroDivergenceModel":
@@ -174,6 +186,8 @@ class MacroThemeComparisonModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_summary: str | None = None
 
     @classmethod
     def from_domain(cls, row: MacroThemeComparison) -> "MacroThemeComparisonModel":
@@ -193,6 +207,8 @@ class MacroRatesPolicySummaryModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_summary: str | None = None
 
     @classmethod
     def from_domain(cls, row: MacroRatesPolicySummary) -> "MacroRatesPolicySummaryModel":
@@ -240,6 +256,7 @@ class MacroDivergenceListResponseModel(BaseModel):
     region: str
     timeframe: str
     theme: str
+    comparison_region: str | None = None
     divergences: list[MacroDivergenceModel] = Field(default_factory=list)
 
     @classmethod
@@ -249,12 +266,14 @@ class MacroDivergenceListResponseModel(BaseModel):
         region: str,
         timeframe: str,
         theme: str,
+        comparison_region: str | None,
         rows: list[MacroDivergenceRecord],
     ) -> "MacroDivergenceListResponseModel":
         return cls(
             region=region,
             timeframe=timeframe,
             theme=theme,
+            comparison_region=comparison_region,
             divergences=[MacroDivergenceModel.from_domain(row) for row in rows],
         )
 

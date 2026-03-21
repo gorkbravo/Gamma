@@ -410,9 +410,13 @@ export async function runResearch(options: ResearchRunOptions) {
 }
 
 function normalizeMacroContextState(context: MacroContextState): MacroContextState {
+  const normalizedComparison =
+    context.region === "Global" || context.comparisonRegion == null || context.comparisonRegion === context.region || context.comparisonRegion === "Global"
+      ? null
+      : context.comparisonRegion;
   return {
     ...context,
-    comparisonRegion: null
+    comparisonRegion: normalizedComparison
   };
 }
 

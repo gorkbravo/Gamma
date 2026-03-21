@@ -31,10 +31,42 @@
     policy: "Policy",
     recession_risk: "Recession Risk",
   };
-  const modeSeries: Record<MacroMode, string[]> = {
-    snapshot: [],
-    cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
-    rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
+  const regionModeSeries: Record<MacroContextState["region"], Record<MacroMode, string[]>> = {
+    US: {
+      snapshot: [],
+      cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
+      rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
+    },
+    EU: {
+      snapshot: [],
+      cross_asset: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy"],
+      rates_policy: ["eu-policy-rate", "eu-3m-rate", "eu-10y-yield", "eu-hicp-yoy", "eu-eurusd"],
+    },
+    Global: {
+      snapshot: [],
+      cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
+      rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
+    },
+  };
+  const chartComparisonPairs: Record<string, string> = {
+    "us-2y-yield": "eu-3m-rate",
+    "us-10y-yield": "eu-10y-yield",
+    "us-real-10y-yield": "eu-hicp-yoy",
+    "us-5y-breakeven": "eu-eurusd",
+    "eu-3m-rate": "us-2y-yield",
+    "eu-10y-yield": "us-10y-yield",
+    "eu-hicp-yoy": "us-cpi-yoy",
+    "eu-eurusd": "us-dollar-broad",
+  };
+  const rateChartSeriesByRegion: Record<MacroContextState["region"], string[]> = {
+    US: ["us-2y-yield", "us-10y-yield"],
+    EU: ["eu-3m-rate", "eu-10y-yield"],
+    Global: ["us-2y-yield", "us-10y-yield"],
+  };
+  const inflationChartSeriesByRegion: Record<MacroContextState["region"], string[]> = {
+    US: ["us-real-10y-yield", "us-5y-breakeven"],
+    EU: ["eu-hicp-yoy", "eu-eurusd"],
+    Global: ["us-real-10y-yield", "us-5y-breakeven"],
   };
 
   const fmt = (value: number | null | undefined, digits = 2) =>
@@ -50,8 +82,13 @@
     return "";
   }
 
-  function historyKey(seriesId: string) {
-    return `${$macroContext.region}:${$macroContext.timeframe}:${seriesId}`;
+  function comparisonText(metric: { comparison_region: string | null; comparison_display_value: string | null; gap_display: string | null }) {
+    if (!metric.comparison_region || !metric.comparison_display_value) return null;
+    return `${metric.comparison_region} ${metric.comparison_display_value}${metric.gap_display ? ` | gap ${metric.gap_display}` : ""}`;
+  }
+
+  function historyKey(seriesId: string, region = $macroContext.region) {
+    return `${region}:${$macroContext.timeframe}:${seriesId}`;
   }
 
   async function refreshContext(next: Partial<MacroContextState>) {
@@ -71,28 +108,35 @@
       if (!histories[historyKey(seriesId)]) {
         await onLoadSeries(seriesId);
       }
+      const comparisonSeriesId =
+        $macroContext.comparisonRegion && $macroContext.region !== "Global" ? chartComparisonPairs[seriesId] : null;
+      if (comparisonSeriesId && !histories[historyKey(comparisonSeriesId, $macroContext.comparisonRegion)]) {
+        await onLoadSeries(comparisonSeriesId, { region: $macroContext.comparisonRegion });
+      }
     }
   }
 
   $: if ($macroContext.mode === "rates_policy") {
-    void ensureSeries(modeSeries.rates_policy);
+    void ensureSeries(regionModeSeries[$macroContext.region].rates_policy);
   }
 
   $: if ($macroContext.mode === "cross_asset") {
-    void ensureSeries(modeSeries.cross_asset);
+    void ensureSeries(regionModeSeries[$macroContext.region].cross_asset);
   }
 
-  function chartFromSeries(seriesId: string, color: string): ChartSeries[] {
-    const history = histories[historyKey(seriesId)];
+  function chartFromSeries(seriesId: string, color: string, options?: { region?: MacroContextState["region"]; lineStyle?: "solid" | "dashed"; labelSuffix?: string }): ChartSeries[] {
+    const region = options?.region ?? $macroContext.region;
+    const history = histories[historyKey(seriesId, region)];
     if (!history?.points?.length) {
       return [];
     }
     return [
       {
-        id: seriesId,
-        label: history.title,
+        id: `${region}:${seriesId}`,
+        label: `${history.title}${options?.labelSuffix ?? ""}`,
         color,
         type: "line",
+        lineStyle: options?.lineStyle,
         data: history.points.map((point) => ({
           time: Math.floor(new Date(point.timestamp).getTime() / 1000),
           value: point.value
@@ -101,14 +145,28 @@
     ];
   }
 
-  $: ratesChart = [
-    ...chartFromSeries("us-2y-yield", "#7aa6c8"),
-    ...chartFromSeries("us-10y-yield", "#c49a5a"),
-  ];
-  $: inflationChart = [
-    ...chartFromSeries("us-real-10y-yield", "#7aa6c8"),
-    ...chartFromSeries("us-5y-breakeven", "#c49a5a"),
-  ];
+  function buildChart(seriesIds: string[], colors: string[]) {
+    const rows: ChartSeries[] = [];
+    seriesIds.forEach((seriesId, index) => {
+      rows.push(...chartFromSeries(seriesId, colors[index] ?? "#7aa6c8"));
+      if ($macroContext.comparisonRegion && $macroContext.region !== "Global") {
+        const comparisonSeriesId = chartComparisonPairs[seriesId];
+        if (comparisonSeriesId) {
+          rows.push(
+            ...chartFromSeries(comparisonSeriesId, colors[index] ?? "#7aa6c8", {
+              region: $macroContext.comparisonRegion,
+              lineStyle: "dashed",
+              labelSuffix: ` (${ $macroContext.comparisonRegion })`
+            })
+          );
+        }
+      }
+    });
+    return rows;
+  }
+
+  $: ratesChart = buildChart(rateChartSeriesByRegion[$macroContext.region], ["#7aa6c8", "#c49a5a"]);
+  $: inflationChart = buildChart(inflationChartSeriesByRegion[$macroContext.region], ["#7aa6c8", "#c49a5a"]);
   $: crossAssetCards =
     $macroContext.theme === "all"
       ? snapshot?.cross_asset ?? []
@@ -117,7 +175,17 @@
   $: coverageNote =
     $macroContext.region === "Global"
       ? "Global is a light V1 comparative lens. Some analytics reuse US-first coverage."
-      : "US is the primary regional implementation in Macro V1.";
+      : $macroContext.region === "EU"
+        ? "EU is a lighter but structurally compatible region in Macro V1."
+        : "US is the primary regional implementation in Macro V1.";
+  $: compareOptions =
+    $macroContext.region === "Global"
+      ? []
+      : (["US", "EU"] as Array<MacroContextState["region"]>).filter((region) => region !== $macroContext.region);
+  $: ratesPolicyTag = $macroContext.region === "EU" ? "EU-light" : "US-first";
+  $: inflationPanelEyebrow = $macroContext.region === "EU" ? "Inflation / FX" : "Real Rates";
+  $: inflationPanelTitle = $macroContext.region === "EU" ? "Inflation and currency proxy split" : "Breakeven split";
+  $: inflationChartEmptyMessage = $macroContext.region === "EU" ? "Loading inflation and FX history." : "Loading real-yield history.";
   $: statusRows = Array.from(
     new Set([
       "Macro V1 is US-first. Global mode is intentionally lighter than the US view.",
@@ -157,6 +225,7 @@
         <span>Region</span>
         <select value={$macroContext.region} on:change={(event) => refreshContext({ region: (event.currentTarget as HTMLSelectElement).value as MacroContextState["region"] })}>
           <option value="US">US</option>
+          <option value="EU">EU</option>
           <option value="Global">Global</option>
         </select>
       </label>
@@ -174,6 +243,19 @@
         <select value={$macroContext.theme} on:change={(event) => refreshContext({ theme: (event.currentTarget as HTMLSelectElement).value as MacroTheme })}>
           {#each Object.entries(themeLabels) as [value, label]}
             <option value={value}>{label}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        <span>Compare</span>
+        <select
+          value={$macroContext.comparisonRegion ?? ""}
+          disabled={$macroContext.region === "Global"}
+          on:change={(event) => refreshContext({ comparisonRegion: ((event.currentTarget as HTMLSelectElement).value || null) as MacroContextState["comparisonRegion"] })}
+        >
+          <option value="">None</option>
+          {#each compareOptions as region}
+            <option value={region}>{region}</option>
           {/each}
         </select>
       </label>
@@ -209,6 +291,9 @@
                 <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
                 {#if metric.delta_display}
                   <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+                {/if}
+                {#if comparisonText(metric)}
+                  <small class="metric-compare">{comparisonText(metric)}</small>
                 {/if}
               </div>
             {/each}
@@ -277,9 +362,12 @@
             <p class="eyebrow">Rates & Policy</p>
             <h3>{snapshot?.rates_policy?.headline ?? "Rates context loading"}</h3>
           </div>
-          <span class="tag">US-first</span>
+          <span class="tag">{ratesPolicyTag}</span>
         </div>
         <p class="section-summary">{snapshot?.rates_policy?.summary}</p>
+        {#if snapshot?.rates_policy?.comparison_summary}
+          <p class="comparison-summary">{snapshot.rates_policy.comparison_summary}</p>
+        {/if}
         <div class="metric-row">
           {#each snapshot?.rates_policy?.policy_metrics ?? [] as metric}
             <div class="metric">
@@ -287,6 +375,9 @@
               <strong class="metric-value">{metric.display_value}</strong>
               {#if metric.delta_display}
                 <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+              {/if}
+              {#if comparisonText(metric)}
+                <small class="metric-compare">{comparisonText(metric)}</small>
               {/if}
             </div>
           {/each}
@@ -328,8 +419,8 @@
       <article class="panel">
         <div class="panel-header">
           <div>
-            <p class="eyebrow">Real Rates</p>
-            <h3>Breakeven split</h3>
+            <p class="eyebrow">{inflationPanelEyebrow}</p>
+            <h3>{inflationPanelTitle}</h3>
           </div>
         </div>
         <div class="metric-row compact">
@@ -340,10 +431,13 @@
               {#if metric.delta_display}
                 <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
               {/if}
+              {#if comparisonText(metric)}
+                <small class="metric-compare">{comparisonText(metric)}</small>
+              {/if}
             </div>
           {/each}
         </div>
-        <TimeSeriesChart series={inflationChart} height={280} emptyMessage="Loading real-yield history." />
+        <TimeSeriesChart series={inflationChart} height={280} emptyMessage={inflationChartEmptyMessage} />
       </article>
 
       <article class="panel span-2">
@@ -391,6 +485,9 @@
                   <span class="tag agreement">{card.agreement_label}</span>
                 </div>
                 <p class="card-subtitle">{card.summary}</p>
+                {#if card.comparison_summary}
+                  <p class="comparison-summary">{card.comparison_summary}</p>
+                {/if}
                 <div class="metric-row compact">
                   {#each card.metrics as metric}
                     <div class="metric">
@@ -398,6 +495,9 @@
                       <strong class="metric-value">{metric.display_value}</strong>
                       {#if metric.delta_display}
                         <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+                      {/if}
+                      {#if comparisonText(metric)}
+                        <small class="metric-compare">{comparisonText(metric)}</small>
                       {/if}
                     </div>
                   {/each}
@@ -544,7 +644,7 @@
   /* ── Context bar ── */
   .context-bar {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.65rem;
   }
 
@@ -673,6 +773,13 @@
     line-height: 1.45;
   }
 
+  .comparison-summary {
+    color: var(--text-2);
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+
   /* ── Tags ── */
   .tag {
     display: inline-block;
@@ -743,6 +850,14 @@
 
   .metric-delta.negative {
     color: var(--negative);
+  }
+
+  .metric-compare {
+    display: block;
+    margin-top: 0.12rem;
+    color: var(--text-2);
+    font-size: 0.72rem;
+    line-height: 1.4;
   }
 
   /* ── Lists ── */

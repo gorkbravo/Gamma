@@ -28,6 +28,14 @@ class MacroMetricRecord:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_label: str | None = None
+    comparison_value: float | None = None
+    comparison_display_value: str | None = None
+    comparison_delta_value: float | None = None
+    comparison_delta_display: str | None = None
+    gap_value: float | None = None
+    gap_display: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +111,10 @@ class MacroDivergenceRecord:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_score: float | None = None
+    score_gap: float | None = None
+    score_gap_display: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +128,8 @@ class MacroThemeComparison:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +144,8 @@ class MacroRatesPolicySummary:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+    comparison_region: str | None = None
+    comparison_summary: str | None = None
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@ export type WorkspaceMode = "portfolio" | "research";
 export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "risk" | "iv";
 
 export type MacroMode = "snapshot" | "cross_asset" | "rates_policy";
-export type MacroRegion = "US" | "Global";
+export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
 export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";
 
@@ -471,6 +471,14 @@ export interface MacroMetric {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  comparison_region: string | null;
+  comparison_label: string | null;
+  comparison_value: number | null;
+  comparison_display_value: string | null;
+  comparison_delta_value: number | null;
+  comparison_delta_display: string | null;
+  gap_value: number | null;
+  gap_display: string | null;
 }
 
 export interface MacroCurveNode {
@@ -541,6 +549,10 @@ export interface MacroDivergence {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  comparison_region: string | null;
+  comparison_score: number | null;
+  score_gap: number | null;
+  score_gap_display: string | null;
 }
 
 export interface MacroThemeComparison {
@@ -553,6 +565,8 @@ export interface MacroThemeComparison {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  comparison_region: string | null;
+  comparison_summary: string | null;
 }
 
 export interface MacroRatesPolicySummary {
@@ -566,6 +580,8 @@ export interface MacroRatesPolicySummary {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+  comparison_region: string | null;
+  comparison_summary: string | null;
 }
 
 export interface MacroSnapshot {
@@ -592,6 +608,7 @@ export interface MacroDivergenceListResponse {
   region: string;
   timeframe: string;
   theme: string;
+  comparison_region: string | null;
   divergences: MacroDivergence[];
 }
 

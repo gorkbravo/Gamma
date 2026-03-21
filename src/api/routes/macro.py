@@ -49,6 +49,7 @@ def macro_divergences(payload: MacroSnapshotRequestModel, request: Request) -> M
         region=payload.region,
         timeframe=payload.timeframe,
         theme=payload.theme,
+        comparison_region=payload.comparison_region,
         rows=rows,
     )
 

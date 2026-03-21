@@ -252,6 +252,25 @@ def test_macro_service_uses_frequency_aware_yoy_lag_for_quarterly_series(monkeyp
     assert history.points[-1].value == expected_latest_yoy
 
 
+def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="EU", timeframe="1Y", theme="policy", comparison_region="US"))
+
+    assert snapshot.region == "EU"
+    assert snapshot.comparison_region == "US"
+    assert snapshot.available_regions == ["US", "EU", "Global"]
+    assert any("Comparison lens active" in warning for warning in snapshot.warnings)
+    assert snapshot.rates_policy is not None
+    assert snapshot.rates_policy.comparison_region == "US"
+    assert snapshot.rates_policy.policy_metrics
+    assert snapshot.rates_policy.policy_metrics[0].comparison_region == "US"
+    assert snapshot.rates_policy.policy_metrics[0].comparison_display_value is not None
+    assert snapshot.cross_asset
+    assert any(row.comparison_region == "US" for row in snapshot.cross_asset)
+
+
 def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_path, monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 
@@ -428,6 +447,13 @@ def _build_series_map() -> dict[str, list[MacroSeriesPoint]]:
         "CPILFESL": _periodic_points(18, step_days=30, start_value=101.0, increment=0.8, provider_series_id="CPILFESL"),
         "GDPC1": _periodic_points(18, step_days=90, start_value=19_000.0, increment=120.0, provider_series_id="GDPC1"),
         "PAYEMS": _periodic_points(18, step_days=30, start_value=150.0, increment=0.7, provider_series_id="PAYEMS"),
+        "IRSTCI01EZM156N": _daily_points([420, 180, 90, 30, 0], [4.50, 4.00, 3.75, 3.25, 2.75], provider_series_id="IRSTCI01EZM156N"),
+        "IR3TIB01EZM156N": _daily_points([420, 180, 90, 30, 0], [4.10, 3.70, 3.55, 3.10, 2.65], provider_series_id="IR3TIB01EZM156N"),
+        "IRLTLT01EZM156N": _daily_points([420, 180, 90, 30, 0], [3.25, 3.00, 2.92, 2.74, 2.48], provider_series_id="IRLTLT01EZM156N"),
+        "LRHUTTTTEZM156S": _daily_points([420, 180, 90, 30, 0], [6.80, 6.65, 6.55, 6.45, 6.30], provider_series_id="LRHUTTTTEZM156S"),
+        "CCUSMA02EZM618N": _daily_points([420, 180, 90, 30, 0], [0.94, 0.91, 0.90, 0.87, 0.85], provider_series_id="CCUSMA02EZM618N"),
+        "CP0000EZ19M086NEST": _periodic_points(18, step_days=30, start_value=112.0, increment=0.55, provider_series_id="CP0000EZ19M086NEST"),
+        "EA19PRINTO01GYSAM": _daily_points([420, 180, 90, 30, 0], [-1.8, -0.9, -0.4, 0.6, 1.4], provider_series_id="EA19PRINTO01GYSAM"),
     }
 
 
