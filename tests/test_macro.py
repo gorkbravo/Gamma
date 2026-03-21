@@ -128,9 +128,51 @@ def test_us_macro_events_adapter_parses_official_sources_and_marks_global_transf
         "fomc:2026-05-06",
         "bls:cpi_release:2026-05-12",
     ]
+    assert us_rows[0].scheduled_at == datetime(2026, 5, 1, 8, 30, 0)
+    assert us_rows[2].scheduled_at == datetime(2026, 5, 12, 8, 30, 0)
     assert all(row.retrieved_at == EVENTS_RETRIEVED_AT for row in us_rows)
     assert all(row.region == "Global" for row in global_rows)
     assert all(row.transformation_note for row in global_rows)
+
+
+def test_us_macro_events_adapter_keeps_same_day_future_bls_release(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: EVENTS_RETRIEVED_AT)
+
+    fomc_html = """
+    <h4><a id="fomc2026">2026 FOMC Meetings</a></h4>
+    <div class="fomc-meeting__month"><strong>May</strong></div>
+    <div class="fomc-meeting__date">6-7</div>
+    """.strip()
+    cpi_html = """
+    <table>
+      <tr><td>April 2026</td><td>May 12, 2026</td><td>8:30 AM</td></tr>
+    </table>
+    """.strip()
+    employment_html = """
+    <table>
+      <tr><td>April 2026</td><td>May 1, 2026</td><td>8:30 AM</td></tr>
+    </table>
+    """.strip()
+
+    def fake_fetch_text(url: str) -> str:
+        if url.endswith("fomccalendars.htm"):
+            return fomc_html
+        if url.endswith("cpi.htm"):
+            return cpi_html
+        if url.endswith("empsit.htm"):
+            return employment_html
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
+
+    rows = adapter.list_events(region="US", as_of=datetime(2026, 5, 1, 7, 0, 0))
+
+    assert [row.event_id for row in rows] == [
+        "bls:employment_situation:2026-05-01",
+        "fomc:2026-05-06",
+        "bls:cpi_release:2026-05-12",
+    ]
+    assert rows[0].scheduled_at == datetime(2026, 5, 1, 8, 30, 0)
 
 
 def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch):
@@ -195,6 +237,19 @@ def test_macro_service_applies_active_timeframe_to_snapshot_cross_asset_and_dive
     divergence_1m = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1M", theme="inflation"))
     divergence_1y = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1Y", theme="inflation"))
     assert divergence_1m[0].metrics[0].delta_value != divergence_1y[0].metrics[0].delta_value
+
+
+def test_macro_service_uses_frequency_aware_yoy_lag_for_quarterly_series(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    history = service.get_series_history("us-real-gdp-yoy", timeframe="1Y")
+    raw_gdp_points = _build_series_map()["GDPC1"]
+
+    assert history is not None
+    expected_latest_yoy = ((raw_gdp_points[-1].value / raw_gdp_points[-5].value) - 1.0) * 100.0
+    assert history.points
+    assert history.points[-1].value == expected_latest_yoy
 
 
 def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_path, monkeypatch):

@@ -267,16 +267,19 @@ class USMacroEventsAdapter:
         )
         rows: list[MacroEventRecord] = []
         for match in row_pattern.finditer(html):
-            release_date = _parse_bls_release_date(_clean_html(match.group("release_date")))
-            if release_date is None:
+            scheduled_at = _parse_bls_release_datetime(
+                _clean_html(match.group("release_date")),
+                _clean_html(match.group("release_time")),
+            )
+            if scheduled_at is None:
                 continue
             rows.append(
                 MacroEventRecord(
-                    event_id=f"bls:{title.lower().replace(' ', '_')}:{release_date.date().isoformat()}",
+                    event_id=f"bls:{title.lower().replace(' ', '_')}:{scheduled_at.date().isoformat()}",
                     title=title,
                     category=category,
                     region="US",
-                    scheduled_at=release_date,
+                    scheduled_at=scheduled_at,
                     relative_label=_clean_html(match.group("period")),
                     importance="medium",
                     source_provider="bls",
@@ -337,3 +340,27 @@ def _parse_bls_release_date(value: str) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def _parse_bls_release_datetime(date_value: str, time_value: str) -> datetime | None:
+    release_date = _parse_bls_release_date(date_value)
+    if release_date is None:
+        return None
+    cleaned_time = (
+        str(time_value or "")
+        .replace("a.m.", "AM")
+        .replace("p.m.", "PM")
+        .replace("a.m", "AM")
+        .replace("p.m", "PM")
+        .replace("am", "AM")
+        .replace("pm", "PM")
+        .strip()
+    )
+    cleaned_time = re.sub(r"\bET\b|\bEST\b|\bEDT\b", "", cleaned_time, flags=re.IGNORECASE).strip()
+    for fmt in ("%I:%M %p", "%I %p"):
+        try:
+            parsed_time = datetime.strptime(cleaned_time, fmt)
+            return release_date.replace(hour=parsed_time.hour, minute=parsed_time.minute)
+        except ValueError:
+            continue
+    return release_date

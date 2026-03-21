@@ -150,7 +150,12 @@ class MacroService:
     def _load_yoy_history(self, series_id: str, meta: dict[str, Any], *, timeframe: str, force_refresh: bool) -> MacroSeriesHistory:
         start, end = self._history_window(meta["history_days"], timeframe)
         raw_points, retrieved_at = self.fred_adapter.get_series(meta["provider_series_id"], start=start - timedelta(days=400), end=end, ttl=timedelta(hours=meta["ttl_hours"]), force_refresh=force_refresh)
-        yoy_points = _compute_yoy_points(raw_points, retrieved_at=retrieved_at, note=meta["transformation_note"])
+        yoy_points = _compute_yoy_points(
+            raw_points,
+            retrieved_at=retrieved_at,
+            note=meta["transformation_note"],
+            periods_per_year=_periods_per_year(meta["frequency"]),
+        )
         return MacroSeriesHistory(series_id=series_id, title=meta["title"], region="US", unit=meta["unit"], frequency=meta["frequency"], theme=meta["theme"], mode_tags=list(meta["mode_tags"]), points=[point for point in yoy_points if point.timestamp >= start], source_provider="fred", retrieved_at=retrieved_at, origin="macro_service.derived.yoy", transformation_note=meta["transformation_note"])
 
     def _load_spread_history(self, series_id: str, meta: dict[str, Any], *, timeframe: str, force_refresh: bool) -> MacroSeriesHistory:
@@ -302,14 +307,27 @@ class MacroService:
         return theme.replace("_", " ").title()
 
 
-def _compute_yoy_points(raw_points: list[MacroSeriesPoint], *, retrieved_at: datetime, note: str) -> list[MacroSeriesPoint]:
+def _compute_yoy_points(
+    raw_points: list[MacroSeriesPoint],
+    *,
+    retrieved_at: datetime,
+    note: str,
+    periods_per_year: int,
+) -> list[MacroSeriesPoint]:
     rows: list[MacroSeriesPoint] = []
     for index, point in enumerate(raw_points):
-        prior = raw_points[index - 12] if index >= 12 else None
+        prior = raw_points[index - periods_per_year] if index >= periods_per_year else None
         if prior is None or prior.value == 0:
             continue
         rows.append(MacroSeriesPoint(timestamp=point.timestamp, value=((point.value / prior.value) - 1.0) * 100.0, source_provider="fred", retrieved_at=retrieved_at, origin="macro_service.derived.yoy", transformation_note=note))
     return rows
+
+
+def _periods_per_year(frequency: str) -> int:
+    normalized = str(frequency or "").strip().lower()
+    if normalized == "quarterly":
+        return 4
+    return 12
 
 
 def _point_before_cutoff(points: list[MacroSeriesPoint], *, days: int) -> MacroSeriesPoint | None:
