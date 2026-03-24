@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
+from zoneinfo import ZoneInfo
 
 from src.models.macro import MacroEventRecord, MacroSeriesPoint
 from src.services.cache import CacheService
@@ -14,6 +15,7 @@ from src.utils.time import now_utc
 
 
 TextFetcher = Callable[[str], str]
+_US_EASTERN = ZoneInfo("America/New_York")
 
 
 def default_text_fetcher(url: str) -> str:
@@ -165,9 +167,10 @@ class USMacroEventsAdapter:
         as_of: datetime,
         force_refresh: bool = False,
         limit: int = 8,
-    ) -> list[MacroEventRecord]:
+        ) -> list[MacroEventRecord]:
         if region not in {"US", "Global"}:
             return []
+        normalized_as_of = _as_utc_naive(as_of)
         ttl = timedelta(hours=12)
         events: list[MacroEventRecord] = []
         for source_name, url, parser in (
@@ -200,7 +203,7 @@ class USMacroEventsAdapter:
 
         unique: dict[str, MacroEventRecord] = {}
         for event in events:
-            if event.scheduled_at < as_of:
+            if _as_utc_naive(event.scheduled_at) < normalized_as_of:
                 continue
             normalized = event
             if region == "Global":
@@ -360,7 +363,14 @@ def _parse_bls_release_datetime(date_value: str, time_value: str) -> datetime | 
     for fmt in ("%I:%M %p", "%I %p"):
         try:
             parsed_time = datetime.strptime(cleaned_time, fmt)
-            return release_date.replace(hour=parsed_time.hour, minute=parsed_time.minute)
+            localized = release_date.replace(hour=parsed_time.hour, minute=parsed_time.minute, tzinfo=_US_EASTERN)
+            return localized.astimezone(timezone.utc).replace(tzinfo=None)
         except ValueError:
             continue
     return release_date
+
+
+def _as_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)

@@ -128,8 +128,8 @@ def test_us_macro_events_adapter_parses_official_sources_and_marks_global_transf
         "fomc:2026-05-06",
         "bls:cpi_release:2026-05-12",
     ]
-    assert us_rows[0].scheduled_at == datetime(2026, 5, 1, 8, 30, 0)
-    assert us_rows[2].scheduled_at == datetime(2026, 5, 12, 8, 30, 0)
+    assert us_rows[0].scheduled_at == datetime(2026, 5, 1, 12, 30, 0)
+    assert us_rows[2].scheduled_at == datetime(2026, 5, 12, 12, 30, 0)
     assert all(row.retrieved_at == EVENTS_RETRIEVED_AT for row in us_rows)
     assert all(row.region == "Global" for row in global_rows)
     assert all(row.transformation_note for row in global_rows)
@@ -165,14 +165,14 @@ def test_us_macro_events_adapter_keeps_same_day_future_bls_release(tmp_path, mon
 
     adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
 
-    rows = adapter.list_events(region="US", as_of=datetime(2026, 5, 1, 7, 0, 0))
+    rows = adapter.list_events(region="US", as_of=datetime(2026, 5, 1, 11, 0, 0))
 
     assert [row.event_id for row in rows] == [
         "bls:employment_situation:2026-05-01",
         "fomc:2026-05-06",
         "bls:cpi_release:2026-05-12",
     ]
-    assert rows[0].scheduled_at == datetime(2026, 5, 1, 8, 30, 0)
+    assert rows[0].scheduled_at == datetime(2026, 5, 1, 12, 30, 0)
 
 
 def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch):

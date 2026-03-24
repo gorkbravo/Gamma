@@ -499,19 +499,23 @@ describe("app store orchestration", () => {
       transformation_note: "Calibration uses last traded probabilities as a proxy."
     };
 
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(ok(screener))
-        .mockResolvedValueOnce(ok(detail))
-        .mockResolvedValueOnce(ok(history))
-        .mockResolvedValueOnce(ok(wallet))
-        .mockResolvedValueOnce(ok(related))
-        .mockResolvedValueOnce(ok(calibration))
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(screener))
+      .mockResolvedValueOnce(ok(detail))
+      .mockResolvedValueOnce(ok(history))
+      .mockResolvedValueOnce(ok(wallet))
+      .mockResolvedValueOnce(ok(related))
+      .mockResolvedValueOnce(ok(calibration));
+    vi.stubGlobal("fetch", fetchMock);
 
-    await loadPredictionMarketScreener({ query: "fed", venues: ["polymarket"], status: "open", limit: 20 });
+    await loadPredictionMarketScreener({
+      query: "fed",
+      venues: ["polymarket"],
+      status: "open",
+      sortBy: "open_interest_desc",
+      limit: 20
+    });
 
     expect(get(predictionMarketScreener)?.markets).toHaveLength(1);
     expect(get(predictionMarketDetail)?.market_id).toBe("polymarket:fed-cut");
@@ -519,6 +523,7 @@ describe("app store orchestration", () => {
     expect(get(predictionMarketWallet)?.participants[0]?.display_name).toBe("Desk One");
     expect(get(predictionMarketRelated)?.related[0]?.venue).toBe("kalshi");
     expect(get(predictionMarketCalibration)?.sample_size).toBe(12);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")).sort_by).toBe("open_interest_desc");
   });
 
   it("synchronizes diagnostics when market data mode changes", async () => {

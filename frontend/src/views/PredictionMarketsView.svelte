@@ -10,7 +10,7 @@
     PredictionWalletSummary,
     RelatedPredictionMarketListResponse
   } from "../lib/api/types";
-  import type { PredictionMarketScreenerOptions } from "../lib/stores/app";
+  import type { PredictionMarketScreenerOptions, PredictionMarketSortBy } from "../lib/stores/app";
 
   export let screener: PredictionMarketListResponse | null = null;
   export let detail: PredictionMarket | null = null;
@@ -24,7 +24,7 @@
 
   let query = "";
   let status: "open" | "closed" | "all" = "open";
-  let sortBy: "research_rank" | "volume_desc" | "liquidity_desc" | "repricing_desc" | "resolution_soon" = "volume_desc";
+  let sortBy: PredictionMarketSortBy = "volume_desc";
   let category = "";
   type VenueKey = "polymarket" | "kalshi";
   const allVenues: VenueKey[] = ["polymarket", "kalshi"];
@@ -767,6 +767,7 @@
               <option value="volume_desc">Volume</option>
               <option value="research_rank">Research Rank</option>
               <option value="liquidity_desc">Liquidity</option>
+              <option value="open_interest_desc">Open Interest</option>
               <option value="repricing_desc">Repricing</option>
               <option value="resolution_soon">Resolution</option>
             </select>
@@ -977,7 +978,6 @@
   .group-label,
   label > span,
   .metric span,
-  .summary-chip span,
   .outcome-card span {
     color: var(--text-2);
     text-transform: uppercase;

@@ -84,6 +84,8 @@ export interface PredictionMarketScreenerOptions {
   limit?: number;
 }
 
+export type PredictionMarketSortBy = NonNullable<PredictionMarketScreenerOptions["sortBy"]>;
+
 export interface MacroLoadOptions {
   region?: MacroContextState["region"];
   timeframe?: MacroContextState["timeframe"];

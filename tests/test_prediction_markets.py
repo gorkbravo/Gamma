@@ -138,6 +138,74 @@ def test_polymarket_adapter_uses_public_search_for_query_and_category_discovery(
     assert not any("/markets|" in key for key in calls)
 
 
+def test_polymarket_calibration_excludes_resolved_settlement_prices_without_last_trade(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        assert url.endswith("/markets")
+        return [
+            {
+                "id": "resolved-settlement-only",
+                "conditionId": "0xresolved1",
+                "question": "Resolved without trade proxy?",
+                "description": "Settlement-only record",
+                "outcomes": '["Yes", "No"]',
+                "outcomePrices": '["1.0000", "0.0000"]',
+                "clobTokenIds": '["yes-token", "no-token"]',
+                "slug": "resolved-settlement-only",
+                "category": "Politics",
+                "active": False,
+                "closed": True,
+                "volumeNum": 1500.0,
+                "volume24hr": 0.0,
+                "liquidityNum": 0.0,
+                "endDate": "2026-03-10T00:00:00Z",
+                "closedTime": "2026-03-10T01:00:00Z",
+                "events": [{"id": "event-1", "title": "Resolved event", "category": "Politics"}],
+            },
+            {
+                "id": "resolved-with-trade",
+                "conditionId": "0xresolved2",
+                "question": "Resolved with last trade?",
+                "description": "Resolved market with valid proxy",
+                "outcomes": '["Yes", "No"]',
+                "outcomePrices": '["0.0000", "1.0000"]',
+                "clobTokenIds": '["yes-token-2", "no-token-2"]',
+                "slug": "resolved-with-trade",
+                "category": "Politics",
+                "active": False,
+                "closed": True,
+                "lastTradePrice": 0.24,
+                "volumeNum": 2200.0,
+                "volume24hr": 0.0,
+                "liquidityNum": 0.0,
+                "endDate": "2026-03-11T00:00:00Z",
+                "closedTime": "2026-03-11T01:00:00Z",
+                "events": [{"id": "event-2", "title": "Resolved trade event", "category": "Politics"}],
+            },
+        ]
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+
+    markets = adapter.list_markets(status="closed", limit=10)
+    settlement_only = next(market for market in markets if market.market_id == "polymarket:resolved-settlement-only")
+    trade_proxy = next(market for market in markets if market.market_id == "polymarket:resolved-with-trade")
+    summary = adapter.build_calibration_summary(sample_size=10)
+
+    assert settlement_only.status == "resolved"
+    assert settlement_only.current_probability is None
+    assert settlement_only.resolved_probability == 1.0
+    assert settlement_only.resolution_outcome is True
+
+    assert trade_proxy.current_probability == 0.24
+    assert trade_proxy.resolved_probability == 0.0
+    assert trade_proxy.resolution_outcome is False
+
+    assert summary.sample_size == 1
+    assert [bucket.label for bucket in summary.buckets] == ["10-25%"]
+    assert summary.buckets[0].average_probability == pytest.approx(0.24)
+    assert summary.buckets[0].realized_frequency == 0.0
+    assert [observation.market_id for observation in summary.observations] == ["polymarket:resolved-with-trade"]
+
+
 def test_polymarket_wallet_summary_uses_selected_outcome_probability_for_edge(tmp_path):
     def fake_fetch(url: str, params: dict | None = None):
         if url.endswith("/trades"):

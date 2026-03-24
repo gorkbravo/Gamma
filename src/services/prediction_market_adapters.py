@@ -545,16 +545,20 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             records,
             sample_size=sample_size,
             origin="polymarket.gamma.calibration",
-            transformation_note="Uses lastTradePrice as the final pre-resolution probability proxy and resolved outcomePrices for the realized outcome.",
+            transformation_note="Uses lastTradePrice as the pre-resolution probability proxy for resolved markets; resolved outcomePrices are retained only for realized outcomes and do not backfill missing predictive probabilities.",
         )
 
     def _normalize_market(self, raw: dict[str, Any], *, retrieved_at: datetime, origin: str) -> PredictionMarketRecord:
         outcomes = _load_json_list(raw.get("outcomes"))
         outcome_prices = _load_json_list(raw.get("outcomePrices"))
         token_ids = _load_json_list(raw.get("clobTokenIds"))
-        current_probability = _first_float(raw.get("lastTradePrice"), outcome_prices[0] if outcome_prices else None)
-        resolved_probability = _to_float(outcome_prices[0]) if outcome_prices else None
         resolution_outcome = _resolve_polymarket_outcome(outcome_prices)
+        current_probability = _polymarket_probability_proxy(
+            raw.get("lastTradePrice"),
+            outcome_prices,
+            resolution_outcome=resolution_outcome,
+        )
+        resolved_probability = _to_float(outcome_prices[0]) if outcome_prices else None
         nested_event = (raw.get("events") or [None])[0] or {}
         nested_series = ((nested_event.get("series") or [None])[0] or {}) if isinstance(nested_event, dict) else {}
         tags = [
@@ -623,7 +627,7 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
             source_provider=self.provider,
             retrieved_at=retrieved_at,
             origin=origin,
-            transformation_note="Current probability tracks the first listed outcome and uses lastTradePrice when available.",
+            transformation_note="Current probability tracks the first listed outcome, prefers lastTradePrice, and excludes resolved settlement-style outcomePrices as a predictive proxy.",
         )
 
 
@@ -1185,6 +1189,20 @@ def _resolve_polymarket_outcome(outcome_prices: list[Any]) -> bool | None:
     if first == 0.0 and second == 1.0:
         return False
     return None
+
+
+def _polymarket_probability_proxy(
+    last_trade_price: Any,
+    outcome_prices: list[Any],
+    *,
+    resolution_outcome: bool | None,
+) -> float | None:
+    probability = _to_float(last_trade_price)
+    if probability is not None:
+        return probability
+    if resolution_outcome is not None:
+        return None
+    return _to_float(outcome_prices[0]) if outcome_prices else None
 
 
 def _resolve_kalshi_outcome(result: Any) -> bool | None:

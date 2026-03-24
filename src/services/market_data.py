@@ -150,7 +150,16 @@ class MarketDataService:
 
     def _cache_key(self, contract: Contract, lookback_days: int) -> str:
         base = str(contract.conId) if contract.conId else contract.symbol
-        return self.cache.make_key(base, contract.secType, contract.currency, f"lookback_{int(lookback_days)}")
+        if contract.conId:
+            return self.cache.make_key(base, contract.secType, contract.currency, f"lookback_{int(lookback_days)}")
+        return self.cache.make_key(
+            base,
+            contract.secType,
+            contract.currency,
+            contract.exchange,
+            contract.primaryExchange,
+            f"lookback_{int(lookback_days)}",
+        )
 
     def _record_error(self, message: str) -> None:
         with self._errors_lock:

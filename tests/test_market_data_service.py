@@ -53,6 +53,37 @@ def test_market_data_history_cache_is_lookback_specific(tmp_path):
     assert float(history_126_again.iloc[0]) == 126.0
 
 
+def test_market_data_history_cache_key_distinguishes_unqualified_exchange_identity(tmp_path):
+    cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
+    service = MarketDataService(
+        ib=_ConnectedIB(),
+        cache=cache,
+        min_interval_seconds=0.0,
+        history_request_timeout_seconds=0.2,
+    )
+    nasdaq_contract = SimpleNamespace(
+        symbol="VOD",
+        secType="STK",
+        currency="USD",
+        conId=0,
+        exchange="SMART",
+        primaryExchange="NASDAQ",
+    )
+    nyse_contract = SimpleNamespace(
+        symbol="VOD",
+        secType="STK",
+        currency="USD",
+        conId=0,
+        exchange="SMART",
+        primaryExchange="NYSE",
+    )
+    qualified_nasdaq = SimpleNamespace(**{**nasdaq_contract.__dict__, "conId": 12345})
+    qualified_nyse = SimpleNamespace(**{**nyse_contract.__dict__, "conId": 12345})
+
+    assert service._cache_key(nasdaq_contract, 30) != service._cache_key(nyse_contract, 30)
+    assert service._cache_key(qualified_nasdaq, 30) == service._cache_key(qualified_nyse, 30)
+
+
 def test_throttle_queue_survives_callback_failure():
     queue = ThrottleQueue(min_interval_seconds=0.0)
     callback_error_seen = threading.Event()
