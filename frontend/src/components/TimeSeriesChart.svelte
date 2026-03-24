@@ -236,9 +236,18 @@
     display: grid;
     place-items: center;
     color: var(--text-2);
-    background: linear-gradient(180deg, rgba(5, 8, 11, 0.28), rgba(5, 8, 11, 0.5));
+    background:
+      linear-gradient(90deg, transparent 25%, rgba(122, 166, 200, 0.04) 50%, transparent 75%),
+      linear-gradient(180deg, rgba(5, 8, 11, 0.28), rgba(5, 8, 11, 0.5));
+    background-size: 200% 100%, 100% 100%;
+    animation: shimmer 2.4s ease-in-out infinite;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.78rem;
+    font-size: 0.74rem;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0, 0 0; }
+    100% { background-position: -200% 0, 0 0; }
   }
 </style>

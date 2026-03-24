@@ -69,10 +69,39 @@
     Global: ["us-real-10y-yield", "us-5y-breakeven"],
   };
 
+  /* ── FX strip configuration ── */
+  const fxPairOptions: Array<{ id: string; label: string; seriesId: string }> = [
+    { id: "eurusd", label: "EUR/USD", seriesId: "fx-eurusd" },
+    { id: "gbpusd", label: "GBP/USD", seriesId: "fx-gbpusd" },
+    { id: "usdjpy", label: "USD/JPY", seriesId: "fx-usdjpy" },
+    { id: "usdchf", label: "USD/CHF", seriesId: "fx-usdchf" },
+    { id: "usdcad", label: "USD/CAD", seriesId: "fx-usdcad" },
+    { id: "audusd", label: "AUD/USD", seriesId: "fx-audusd" },
+  ];
+  const fxConfigurablePairs = fxPairOptions.filter((p) => p.id !== "eurusd");
+  let fxPair1 = "gbpusd";
+  let fxPair2 = "usdjpy";
+
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "N/A";
+
+  function groupEventsByMonth<T extends { scheduled_at: string }>(evts: T[]): Array<{ label: string; events: T[] }> {
+    const groups: Array<{ label: string; events: T[] }> = [];
+    let current = "";
+    for (const event of evts) {
+      if (!event.scheduled_at) continue;
+      const d = new Date(event.scheduled_at);
+      const key = d.toLocaleString(undefined, { month: "long", year: "numeric" });
+      if (key !== current) {
+        current = key;
+        groups.push({ label: key, events: [] });
+      }
+      groups.at(-1)!.events.push(event);
+    }
+    return groups;
+  }
 
   function deltaClass(display: string | null | undefined): string {
     if (!display) return "";
@@ -192,6 +221,21 @@
       ...(snapshot?.warnings ?? [])
     ])
   );
+
+  /* ── FX strip reactives ── */
+  $: fxPair1SeriesId = fxPairOptions.find((p) => p.id === fxPair1)?.seriesId ?? "fx-gbpusd";
+  $: fxPair2SeriesId = fxPairOptions.find((p) => p.id === fxPair2)?.seriesId ?? "fx-usdjpy";
+  $: fxSeriesIds = ["fx-eurusd", fxPair1SeriesId, fxPair2SeriesId];
+  $: if ($macroContext.mode === "snapshot") {
+    void ensureSeries(fxSeriesIds);
+  }
+  $: fxChart1 = chartFromSeries("fx-eurusd", "#7aa6c8");
+  $: fxChart2 = chartFromSeries(fxPair1SeriesId, "#c49a5a");
+  $: fxChart3 = chartFromSeries(fxPair2SeriesId, "#b65d54");
+
+  /* ── Grouped events ── */
+  $: groupedEvents = groupEventsByMonth(eventRows);
+  $: ratesPolicyGroupedEvents = groupEventsByMonth(snapshot?.rates_policy?.events ?? []);
 </script>
 
 <section class="view">
@@ -206,59 +250,65 @@
       {/if}
     </div>
 
-    <div class="mode-bar" role="tablist" aria-label="Macro modes">
-      {#each modes as mode}
-        <button
-          class:selected={mode.id === $macroContext.mode}
-          role="tab"
-          aria-selected={mode.id === $macroContext.mode}
-          type="button"
-          on:click={() => refreshContext({ mode: mode.id })}
-        >
-          {mode.label}
-        </button>
-      {/each}
+    <div class="mode-bar-wrap">
+      <div class="mode-bar" role="tablist" aria-label="Macro modes">
+        {#each modes as mode}
+          <button
+            class:selected={mode.id === $macroContext.mode}
+            role="tab"
+            aria-selected={mode.id === $macroContext.mode}
+            type="button"
+            on:click={() => refreshContext({ mode: mode.id })}
+          >
+            {mode.label}
+          </button>
+        {/each}
+      </div>
     </div>
 
     <div class="context-bar">
-      <label>
-        <span>Region</span>
-        <select value={$macroContext.region} on:change={(event) => refreshContext({ region: (event.currentTarget as HTMLSelectElement).value as MacroContextState["region"] })}>
-          <option value="US">US</option>
-          <option value="EU">EU</option>
-          <option value="Global">Global</option>
-        </select>
-      </label>
-      <label>
-        <span>Timeframe</span>
-        <select value={$macroContext.timeframe} on:change={(event) => refreshContext({ timeframe: (event.currentTarget as HTMLSelectElement).value as MacroContextState["timeframe"] })}>
-          <option value="1M">1M</option>
-          <option value="3M">3M</option>
-          <option value="6M">6M</option>
-          <option value="1Y">1Y</option>
-        </select>
-      </label>
-      <label>
-        <span>Theme</span>
-        <select value={$macroContext.theme} on:change={(event) => refreshContext({ theme: (event.currentTarget as HTMLSelectElement).value as MacroTheme })}>
-          {#each Object.entries(themeLabels) as [value, label]}
-            <option value={value}>{label}</option>
-          {/each}
-        </select>
-      </label>
-      <label>
-        <span>Compare</span>
-        <select
-          value={$macroContext.comparisonRegion ?? ""}
-          disabled={$macroContext.region === "Global"}
-          on:change={(event) => refreshContext({ comparisonRegion: ((event.currentTarget as HTMLSelectElement).value || null) as MacroContextState["comparisonRegion"] })}
-        >
-          <option value="">None</option>
-          {#each compareOptions as region}
-            <option value={region}>{region}</option>
-          {/each}
-        </select>
-      </label>
+      <div class="context-group">
+        <label>
+          <span>Region</span>
+          <select value={$macroContext.region} on:change={(event) => refreshContext({ region: (event.currentTarget as HTMLSelectElement).value as MacroContextState["region"] })}>
+            <option value="US">US</option>
+            <option value="EU">EU</option>
+            <option value="Global">Global</option>
+          </select>
+        </label>
+        <label>
+          <span>Timeframe</span>
+          <select value={$macroContext.timeframe} on:change={(event) => refreshContext({ timeframe: (event.currentTarget as HTMLSelectElement).value as MacroContextState["timeframe"] })}>
+            <option value="1M">1M</option>
+            <option value="3M">3M</option>
+            <option value="6M">6M</option>
+            <option value="1Y">1Y</option>
+          </select>
+        </label>
+      </div>
+      <div class="context-group">
+        <label>
+          <span>Theme</span>
+          <select value={$macroContext.theme} on:change={(event) => refreshContext({ theme: (event.currentTarget as HTMLSelectElement).value as MacroTheme })}>
+            {#each Object.entries(themeLabels) as [value, label]}
+              <option value={value}>{label}</option>
+            {/each}
+          </select>
+        </label>
+        <label>
+          <span>Compare</span>
+          <select
+            value={$macroContext.comparisonRegion ?? ""}
+            disabled={$macroContext.region === "Global"}
+            on:change={(event) => refreshContext({ comparisonRegion: ((event.currentTarget as HTMLSelectElement).value || null) as MacroContextState["comparisonRegion"] })}
+          >
+            <option value="">None</option>
+            {#each compareOptions as region}
+              <option value={region}>{region}</option>
+            {/each}
+          </select>
+        </label>
+      </div>
     </div>
     <p class="coverage-note">{coverageNote}</p>
   </article>
@@ -276,13 +326,10 @@
       {#each snapshot?.snapshot_cards ?? [] as card}
         <button class="panel card-panel" type="button" on:click={() => drillTo(card.mode_target as MacroMode, card.target_theme)}>
           <div class="card-head">
-            <div>
-              <small class="eyebrow">{themeLabels[(card.target_theme as MacroTheme) ?? "all"] ?? "Macro"}</small>
-              <h3>{card.title}</h3>
-            </div>
+            <small class="eyebrow">{themeLabels[(card.target_theme as MacroTheme) ?? "all"] ?? "Macro"}</small>
+            <h3>{card.title}</h3>
             <span class="tag">{card.mode_target.replace("_", " ")}</span>
           </div>
-          <p class="card-subtitle">{card.subtitle}</p>
           <p class="card-summary">{card.summary}</p>
           <div class="metric-row">
             {#each card.metrics as metric}
@@ -308,6 +355,38 @@
       </div>
     {/if}
 
+    <div class="fx-strip">
+      <article class="panel fx-panel">
+        <div class="fx-header">
+          <small class="eyebrow">FX</small>
+          <h3 class="fx-title">EUR/USD</h3>
+        </div>
+        <TimeSeriesChart series={fxChart1} height={200} emptyMessage="Loading EUR/USD" />
+      </article>
+      <article class="panel fx-panel">
+        <div class="fx-header">
+          <small class="eyebrow">FX</small>
+          <select class="fx-select" bind:value={fxPair1}>
+            {#each fxConfigurablePairs as pair}
+              <option value={pair.id}>{pair.label}</option>
+            {/each}
+          </select>
+        </div>
+        <TimeSeriesChart series={fxChart2} height={200} emptyMessage="Loading FX data" />
+      </article>
+      <article class="panel fx-panel">
+        <div class="fx-header">
+          <small class="eyebrow">FX</small>
+          <select class="fx-select" bind:value={fxPair2}>
+            {#each fxConfigurablePairs as pair}
+              <option value={pair.id}>{pair.label}</option>
+            {/each}
+          </select>
+        </div>
+        <TimeSeriesChart series={fxChart3} height={200} emptyMessage="Loading FX data" />
+      </article>
+    </div>
+
     <div class="detail-grid">
       <article class="panel">
         <div class="panel-header">
@@ -320,7 +399,10 @@
           <div class="list">
             {#each snapshot?.top_divergences ?? [] as row}
               <button class="list-row interactive" type="button" on:click={() => drillTo("cross_asset", row.theme)}>
-                <strong>{row.headline}</strong>
+                <div class="divergence-head">
+                  <strong>{row.headline}</strong>
+                  <span class="score-badge {row.label ?? ''}">{row.score?.toFixed(1) ?? '—'}</span>
+                </div>
                 <span class="list-detail">{row.summary}</span>
               </button>
             {/each}
@@ -338,15 +420,18 @@
           </div>
         </div>
         {#if eventRows.length}
-          <div class="list">
-            {#each eventRows as event}
-              <div class="list-row">
-                <strong>{event.title}</strong>
-                <span class="list-detail">
-                  <span class="event-date">{shortDate(event.scheduled_at)}</span>
-                  <span class="event-category">{event.category}</span>
-                </span>
-              </div>
+          <div class="list events-scroll">
+            {#each groupedEvents as group}
+              <div class="date-group-header">{group.label}</div>
+              {#each group.events as event}
+                <div class="list-row">
+                  <strong>{event.title}</strong>
+                  <span class="list-detail">
+                    <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                    <span class="event-category">{event.category}</span>
+                  </span>
+                </div>
+              {/each}
             {/each}
           </div>
         {:else}
@@ -448,15 +533,18 @@
           </div>
         </div>
         {#if (snapshot?.rates_policy?.events ?? []).length}
-          <div class="list">
-            {#each snapshot?.rates_policy?.events ?? [] as event}
-              <div class="list-row">
-                <strong>{event.title}</strong>
-                <span class="list-detail">
-                  <span class="event-date">{shortDate(event.scheduled_at)}</span>
-                  <span class="event-category">{event.category}</span>
-                </span>
-              </div>
+          <div class="list events-scroll">
+            {#each ratesPolicyGroupedEvents as group}
+              <div class="date-group-header">{group.label}</div>
+              {#each group.events as event}
+                <div class="list-row">
+                  <strong>{event.title}</strong>
+                  <span class="list-detail">
+                    <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                    <span class="event-category">{event.category}</span>
+                  </span>
+                </div>
+              {/each}
             {/each}
           </div>
         {:else}
@@ -521,9 +609,11 @@
           <div class="list">
             {#each divergences?.divergences ?? [] as row}
               <div class="list-row">
-                <strong>{row.headline}</strong>
+                <div class="divergence-head">
+                  <strong>{row.headline}</strong>
+                  <span class="score-badge {row.label}">{row.score.toFixed(1)}</span>
+                </div>
                 <span class="list-detail">{row.summary}</span>
-                <small class="list-meta">Score {row.score.toFixed(2)} · {row.label}</small>
               </div>
             {/each}
           </div>
@@ -539,19 +629,19 @@
   /* ── Layout scaffolding ── */
   .view {
     display: grid;
-    gap: 0.75rem;
+    gap: 0.6rem;
   }
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 0.5rem;
   }
 
   .detail-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
+    gap: 0.5rem;
   }
 
   /* ── Panels ── */
@@ -559,17 +649,17 @@
   .cross-card {
     border: 1px solid var(--panel-border);
     background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
-    padding: 1.05rem;
+    padding: 0.85rem;
     display: grid;
-    gap: 0.75rem;
+    gap: 0.5rem;
   }
 
   .header-panel {
-    gap: 0.65rem;
+    gap: 0.5rem;
   }
 
   .cross-card {
-    gap: 0.6rem;
+    gap: 0.45rem;
   }
 
   /* ── Header block ── */
@@ -582,7 +672,7 @@
 
   .headline-block {
     display: grid;
-    gap: 0.15rem;
+    gap: 0.1rem;
   }
 
   .loading-pill {
@@ -592,7 +682,7 @@
     color: var(--accent);
     border: 1px solid rgba(122, 166, 200, 0.28);
     background: rgba(122, 166, 200, 0.06);
-    padding: 0.25rem 0.6rem;
+    padding: 0.2rem 0.5rem;
     white-space: nowrap;
     animation: pulse-opacity 1.6s ease-in-out infinite;
   }
@@ -603,11 +693,17 @@
   }
 
   /* ── Mode bar (segmented control) ── */
+  .mode-bar-wrap {
+    display: flex;
+  }
+
   .mode-bar {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     border: 1px solid var(--panel-strong);
     background: rgba(8, 13, 18, 0.82);
+    max-width: 36rem;
+    width: 100%;
   }
 
   .mode-bar button {
@@ -615,9 +711,9 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.55rem 0.8rem;
+    padding: 0.45rem 0.8rem;
     font: inherit;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
   }
@@ -643,30 +739,36 @@
 
   /* ── Context bar ── */
   .context-bar {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.65rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .context-group {
+    display: flex;
+    gap: 0.5rem;
   }
 
   .context-bar label {
     display: grid;
-    gap: 0.3rem;
+    gap: 0.2rem;
   }
 
   .context-bar label > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    font-size: 0.62rem;
   }
 
   .context-bar select {
     border: 1px solid var(--panel-strong);
     background: #0d0f12;
     color: var(--text-0);
-    padding: 0.55rem 0.7rem;
+    padding: 0.4rem 0.6rem;
     font: inherit;
-    width: 100%;
+    font-size: 0.82rem;
+    min-width: 6rem;
     cursor: pointer;
     transition: border-color 120ms ease;
   }
@@ -682,26 +784,26 @@
 
   .coverage-note {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: 0.74rem;
     margin: 0;
-    line-height: 1.4;
+    line-height: 1.35;
   }
 
   /* ── Status strip (compact warnings) ── */
   .status-strip {
     display: grid;
-    gap: 0.35rem;
-    padding: 0.65rem 0.85rem;
+    gap: 0.25rem;
+    padding: 0.5rem 0.75rem;
     border: 1px solid rgba(196, 154, 90, 0.18);
     background: rgba(196, 154, 90, 0.03);
   }
 
   .status-row {
     color: var(--text-2);
-    font-size: 0.78rem;
-    line-height: 1.45;
+    font-size: 0.74rem;
+    line-height: 1.4;
     margin: 0;
-    padding-left: 0.75rem;
+    padding-left: 0.7rem;
     position: relative;
   }
 
@@ -733,11 +835,13 @@
   .card-panel {
     cursor: pointer;
     text-align: left;
+    gap: 0.35rem;
+    padding: 0.7rem;
     transition: border-color 180ms ease, background 180ms ease;
   }
 
   .card-panel:hover {
-    border-color: rgba(122, 166, 200, 0.28);
+    border-color: rgba(122, 166, 200, 0.32);
     background: linear-gradient(180deg, rgba(14, 17, 20, 0.97), rgba(11, 13, 15, 0.95));
   }
 
@@ -747,37 +851,42 @@
   }
 
   .card-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.6rem;
-    align-items: start;
+    display: grid;
+    gap: 0.15rem;
   }
 
-  .card-subtitle {
-    color: var(--text-2);
-    margin: 0;
-    font-size: 0.86rem;
-    line-height: 1.4;
+  .card-head h3 {
+    font-size: 0.92rem;
+  }
+
+  .card-head .tag {
+    margin-top: 0.2rem;
+    justify-self: start;
   }
 
   .card-summary {
-    color: var(--text-1);
+    color: var(--text-2);
     margin: 0;
-    line-height: 1.45;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   /* ── Section summary (rates & policy) ── */
   .section-summary {
     color: var(--text-2);
     margin: 0;
-    line-height: 1.45;
+    line-height: 1.4;
   }
 
   .comparison-summary {
     color: var(--text-2);
     margin: 0;
-    font-size: 0.8rem;
-    line-height: 1.45;
+    font-size: 0.78rem;
+    line-height: 1.4;
   }
 
   /* ── Tags ── */
@@ -786,8 +895,8 @@
     border: 1px solid rgba(122, 166, 200, 0.24);
     background: rgba(122, 166, 200, 0.06);
     color: var(--accent);
-    padding: 0.2rem 0.52rem;
-    font-size: 0.68rem;
+    padding: 0.15rem 0.42rem;
+    font-size: 0.58rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;
@@ -803,16 +912,16 @@
   /* ── Metric row ── */
   .metric-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
     gap: 0;
   }
 
   .metric-row.compact {
-    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
   }
 
   .metric {
-    padding: 0.55rem 0.75rem;
+    padding: 0.4rem 0.6rem;
     border-left: 1px solid rgba(46, 60, 74, 0.42);
     min-width: 0;
   }
@@ -826,22 +935,25 @@
     display: block;
     color: var(--text-2);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    font-size: 0.58rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .metric-value {
     display: block;
-    margin-top: 0.18rem;
-    font-size: 0.95rem;
-    line-height: 1.3;
+    margin-top: 0.12rem;
+    font-size: 1rem;
+    line-height: 1.25;
   }
 
   .metric-delta {
     display: block;
-    margin-top: 0.12rem;
+    margin-top: 0.08rem;
     color: var(--text-2);
-    font-size: 0.74rem;
+    font-size: 0.72rem;
   }
 
   .metric-delta.positive {
@@ -854,10 +966,52 @@
 
   .metric-compare {
     display: block;
-    margin-top: 0.12rem;
+    margin-top: 0.08rem;
     color: var(--text-2);
-    font-size: 0.72rem;
-    line-height: 1.4;
+    font-size: 0.68rem;
+    line-height: 1.35;
+  }
+
+  /* ── FX strip ── */
+  .fx-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .fx-panel {
+    gap: 0.4rem;
+    padding: 0.7rem;
+  }
+
+  .fx-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .fx-title {
+    font-size: 0.88rem;
+  }
+
+  .fx-select {
+    border: 1px solid var(--panel-strong);
+    background: #0d0f12;
+    color: var(--text-0);
+    padding: 0.2rem 0.4rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: border-color 120ms ease;
+  }
+
+  .fx-select:hover {
+    border-color: rgba(122, 166, 200, 0.32);
+  }
+
+  .fx-select:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   /* ── Lists ── */
@@ -866,12 +1020,19 @@
     gap: 0;
   }
 
+  .events-scroll {
+    max-height: 24rem;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(122, 166, 200, 0.18) transparent;
+  }
+
   .list-row {
     display: grid;
-    gap: 0.15rem;
+    gap: 0.1rem;
     text-align: left;
-    padding: 0.7rem 0.75rem;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.35);
+    padding: 0.55rem 0.65rem;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.3);
     cursor: default;
     transition: background 120ms ease;
   }
@@ -883,7 +1044,7 @@
   .list-row.interactive {
     cursor: pointer;
     border: 0;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.35);
+    border-bottom: 1px solid rgba(46, 60, 74, 0.3);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -905,13 +1066,8 @@
 
   .list-detail {
     color: var(--text-2);
-    font-size: 0.82rem;
-    line-height: 1.4;
-  }
-
-  .list-meta {
-    color: var(--text-2);
-    font-size: 0.74rem;
+    font-size: 0.78rem;
+    line-height: 1.35;
   }
 
   .event-date {
@@ -920,13 +1076,68 @@
 
   .event-category {
     color: var(--text-2);
-    margin-left: 0.5rem;
+    margin-left: 0.4rem;
   }
 
   .event-category::before {
     content: "·";
-    margin-right: 0.5rem;
+    margin-right: 0.4rem;
     opacity: 0.5;
+  }
+
+  /* ── Date group headers ── */
+  .date-group-header {
+    color: var(--text-2);
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    padding: 0.45rem 0.65rem 0.2rem;
+    background: rgba(8, 13, 18, 0.6);
+    border-bottom: 1px solid rgba(46, 60, 74, 0.2);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  /* ── Divergence head + Score badges ── */
+  .divergence-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .score-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.2rem;
+    padding: 0.12rem 0.35rem;
+    font-size: 0.64rem;
+    font-weight: 600;
+    border-radius: 2px;
+    flex-shrink: 0;
+    border: 1px solid rgba(122, 166, 200, 0.2);
+    background: rgba(122, 166, 200, 0.06);
+    color: var(--text-1);
+  }
+
+  .score-badge.high {
+    border-color: rgba(198, 107, 97, 0.35);
+    background: rgba(198, 107, 97, 0.1);
+    color: var(--negative);
+  }
+
+  .score-badge.moderate {
+    border-color: rgba(196, 154, 90, 0.3);
+    background: rgba(196, 154, 90, 0.08);
+    color: var(--accent-2);
+  }
+
+  .score-badge.low {
+    border-color: rgba(75, 180, 116, 0.25);
+    background: rgba(75, 180, 116, 0.06);
+    color: var(--positive);
   }
 
   /* ── Empty states ── */
@@ -944,9 +1155,9 @@
 
   .empty-hint {
     color: var(--text-2);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     margin: 0;
-    padding: 0.5rem 0;
+    padding: 0.4rem 0;
   }
 
   /* ── Table ── */
@@ -961,20 +1172,24 @@
 
   th,
   td {
-    padding: 0.65rem 0.55rem;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.35);
+    padding: 0.55rem 0.5rem;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.3);
     text-align: left;
   }
 
   th {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: 0.64rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     background: rgba(8, 13, 18, 0.82);
     position: sticky;
     top: 0;
     z-index: 1;
+  }
+
+  tbody tr:nth-child(even) {
+    background: rgba(122, 166, 200, 0.02);
   }
 
   .positive {
@@ -990,7 +1205,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    font-size: 0.62rem;
     margin: 0;
   }
 
@@ -1016,6 +1231,10 @@
     }
 
     .context-bar {
+      flex-direction: column;
+    }
+
+    .fx-strip {
       grid-template-columns: 1fr;
     }
   }
@@ -1023,6 +1242,7 @@
   @media (max-width: 640px) {
     .mode-bar {
       grid-template-columns: 1fr;
+      max-width: 100%;
     }
 
     .mode-bar button {
@@ -1034,13 +1254,22 @@
       border-bottom: 0;
     }
 
+    .context-group {
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .context-bar select {
+      width: 100%;
+    }
+
     .metric-row,
     .metric-row.compact {
       grid-template-columns: 1fr 1fr;
     }
 
     .metric {
-      padding: 0.5rem 0;
+      padding: 0.4rem 0;
       border-left: 0;
     }
 
