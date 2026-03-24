@@ -269,6 +269,20 @@ def test_macro_service_supports_snapshot_fx_chart_series(monkeypatch):
     assert history.points[-1].value == 1.08
 
 
+def test_macro_service_supports_inverse_snapshot_fx_chart_series(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    history = service.get_series_history("fx-usdeur", region="US", timeframe="6M")
+
+    assert history is not None
+    assert history.series_id == "fx-usdeur"
+    assert history.title == "USD/EUR"
+    assert history.source_provider == "ibkr"
+    assert history.points
+    assert history.points[-1].value == 0.93
+
+
 def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 
@@ -512,6 +526,12 @@ def _build_fx_series_map() -> dict[tuple[str, str], list[MacroSeriesPoint]]:
         ("USD", "CHF"): _fx_points([220, 120, 60, 20, 0], [0.88, 0.89, 0.90, 0.89, 0.91], pair_code="USDCHF"),
         ("USD", "CAD"): _fx_points([220, 120, 60, 20, 0], [1.34, 1.35, 1.36, 1.37, 1.36], pair_code="USDCAD"),
         ("AUD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.64, 0.66, 0.67, 0.65, 0.66], pair_code="AUDUSD"),
+        ("USD", "EUR"): _fx_points([220, 120, 60, 20, 0], [0.95, 0.93, 0.92, 0.94, 0.93], pair_code="USDEUR"),
+        ("USD", "GBP"): _fx_points([220, 120, 60, 20, 0], [0.81, 0.79, 0.78, 0.79, 0.78], pair_code="USDGBP"),
+        ("JPY", "USD"): _fx_points([220, 120, 60, 20, 0], [0.0068, 0.0067, 0.0066, 0.0067, 0.0066], pair_code="JPYUSD"),
+        ("CHF", "USD"): _fx_points([220, 120, 60, 20, 0], [1.14, 1.12, 1.11, 1.12, 1.10], pair_code="CHFUSD"),
+        ("CAD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.75, 0.74, 0.74, 0.73, 0.74], pair_code="CADUSD"),
+        ("USD", "AUD"): _fx_points([220, 120, 60, 20, 0], [1.56, 1.52, 1.49, 1.54, 1.52], pair_code="USDAUD"),
     }
 
 

@@ -72,11 +72,17 @@
   /* ── FX strip configuration ── */
   const fxPairOptions: Array<{ id: string; label: string; seriesId: string }> = [
     { id: "eurusd", label: "EUR/USD", seriesId: "fx-eurusd" },
+    { id: "usdeur", label: "USD/EUR", seriesId: "fx-usdeur" },
     { id: "gbpusd", label: "GBP/USD", seriesId: "fx-gbpusd" },
+    { id: "usdgbp", label: "USD/GBP", seriesId: "fx-usdgbp" },
     { id: "usdjpy", label: "USD/JPY", seriesId: "fx-usdjpy" },
+    { id: "jpyusd", label: "JPY/USD", seriesId: "fx-jpyusd" },
     { id: "usdchf", label: "USD/CHF", seriesId: "fx-usdchf" },
+    { id: "chfusd", label: "CHF/USD", seriesId: "fx-chfusd" },
     { id: "usdcad", label: "USD/CAD", seriesId: "fx-usdcad" },
+    { id: "cadusd", label: "CAD/USD", seriesId: "fx-cadusd" },
     { id: "audusd", label: "AUD/USD", seriesId: "fx-audusd" },
+    { id: "usdaud", label: "USD/AUD", seriesId: "fx-usdaud" },
   ];
   let fxPair0 = "eurusd";
   let fxPair1 = "gbpusd";

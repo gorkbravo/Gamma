@@ -43,6 +43,16 @@
   let currentTheme = "blue";
   $: currentTheme = $chartTheme;
 
+  function inferPricePrecision(data: ChartPoint[]): number {
+    const latest = data.at(-1)?.value ?? data[0]?.value ?? 0;
+    const magnitude = Math.abs(latest);
+    if (magnitude >= 100) return 1;
+    if (magnitude >= 1) return 2;
+    if (magnitude >= 0.1) return 3;
+    if (magnitude >= 0.01) return 4;
+    return 6;
+  }
+
   function destroyChart() {
     if (refreshHandle) {
       cancelAnimationFrame(refreshHandle);
@@ -76,7 +86,13 @@
         horzLine: { color: "rgba(140, 145, 154, 0.18)" }
       },
       rightPriceScale: {
-        borderColor: "rgba(50, 56, 64, 0.55)"
+        borderColor: "rgba(50, 56, 64, 0.55)",
+        minimumWidth: 60,
+        entireTextOnly: true,
+        scaleMargins: {
+          top: 0.08,
+          bottom: 0.08
+        }
       },
       timeScale: {
         borderColor: "rgba(50, 56, 64, 0.55)",
@@ -115,6 +131,11 @@
               color: resolvedColor,
               lineWidth: 2,
               lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
+              priceFormat: {
+                type: "price",
+                precision: inferPricePrecision(item.data),
+                minMove: 10 ** -inferPricePrecision(item.data)
+              },
               lastValueVisible: false,
               priceLineVisible: false
             })
@@ -124,6 +145,11 @@
               bottomColor: item.invertFilledArea ? `${resolvedColor}33` : `${resolvedColor}03`,
               invertFilledArea: item.invertFilledArea ?? false,
               lineWidth: 2,
+              priceFormat: {
+                type: "price",
+                precision: inferPricePrecision(item.data),
+                minMove: 10 ** -inferPricePrecision(item.data)
+              },
               lastValueVisible: false,
               priceLineVisible: false
             });
@@ -131,7 +157,8 @@
       seriesMap.set(item.id, api);
     }
 
-    chart.applyOptions({ height });
+    const measuredHeight = Math.max(container.clientHeight || height, 1);
+    chart.applyOptions({ height: measuredHeight });
     if (fitContent) {
       chart.timeScale().fitContent();
     }
@@ -219,7 +246,6 @@
   .chart-shell {
     position: relative;
     width: 100%;
-    min-height: 16rem;
     border: 1px solid var(--divider);
     background: rgba(7, 11, 16, 0.88);
     overflow: hidden;

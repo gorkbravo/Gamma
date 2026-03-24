@@ -80,8 +80,8 @@ class IBKRMacroFXAdapter:
 
     def get_series(
         self,
-        base_currency: str,
-        quote_currency: str,
+        display_base_currency: str,
+        display_quote_currency: str,
         *,
         start: datetime,
         end: datetime,
@@ -92,11 +92,13 @@ class IBKRMacroFXAdapter:
         if self.market_data is None:
             return [], retrieved_at
         lookback_days = max((end.date() - start.date()).days + 5, 5)
-        raw_series = self.market_data.fetch_fx_history(base_currency, quote_currency, lookback_days)
+        # MarketDataService.fetch_fx_history(base, quote) returns the quote->base conversion series.
+        # For display pairs like EUR/USD we want the direct displayed quote, so we reverse the inputs.
+        raw_series = self.market_data.fetch_fx_history(display_quote_currency, display_base_currency, lookback_days)
         if raw_series is None or raw_series.empty:
             return [], retrieved_at
         points: list[MacroSeriesPoint] = []
-        pair_code = f"{str(base_currency).upper()}{str(quote_currency).upper()}"
+        pair_code = f"{str(display_base_currency).upper()}{str(display_quote_currency).upper()}"
         for timestamp, value in raw_series.items():
             if value is None or value != value:
                 continue
