@@ -166,6 +166,26 @@ export const loading = writable<Record<string, boolean>>({
 const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = ["fx-eurusd", "fx-gbpusd", "fx-usdjpy"] as const;
+const MACRO_CROSS_ASSET_SERIES: Record<MacroContextState["region"], readonly string[]> = {
+  US: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
+  EU: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy"],
+  Global: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"]
+};
+const MACRO_RATES_POLICY_SERIES: Record<MacroContextState["region"], readonly string[]> = {
+  US: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
+  EU: ["eu-policy-rate", "eu-3m-rate", "eu-10y-yield", "eu-hicp-yoy", "eu-eurusd"],
+  Global: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"]
+};
+const MACRO_COMPARISON_SERIES: Record<string, string> = {
+  "us-2y-yield": "eu-3m-rate",
+  "us-10y-yield": "eu-10y-yield",
+  "us-real-10y-yield": "eu-hicp-yoy",
+  "us-5y-breakeven": "eu-eurusd",
+  "eu-3m-rate": "us-2y-yield",
+  "eu-10y-yield": "us-10y-yield",
+  "eu-hicp-yoy": "us-cpi-yoy",
+  "eu-eurusd": "us-dollar-broad"
+};
 
 function setLoading(key: string, value: boolean) {
   loading.update((current) => ({ ...current, [key]: value }));
@@ -445,6 +465,25 @@ async function prefetchMacroSeries(seriesIds: readonly string[], options: MacroL
   await Promise.all(uniqueSeriesIds.map((seriesId) => loadMacroSeriesHistory(seriesId, options)));
 }
 
+function seriesForMacroMode(context: MacroContextState) {
+  if (context.mode === "snapshot") {
+    return [...DEFAULT_MACRO_SNAPSHOT_FX_SERIES];
+  }
+  if (context.mode === "cross_asset") {
+    return [...MACRO_CROSS_ASSET_SERIES[context.region]];
+  }
+  return [...MACRO_RATES_POLICY_SERIES[context.region]];
+}
+
+function comparisonSeriesForContext(context: MacroContextState, seriesIds: readonly string[]) {
+  if (!context.comparisonRegion || context.region === "Global") {
+    return [];
+  }
+  return seriesIds
+    .map((seriesId) => MACRO_COMPARISON_SERIES[seriesId])
+    .filter((seriesId): seriesId is string => Boolean(seriesId));
+}
+
 export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
   const nextContext = normalizeMacroContextState({
     ...get(macroContext),
@@ -470,22 +509,33 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
         getJson<MacroEventsResponse>(
           `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
         )
-      ]);
-      macroSnapshot.set(snapshot);
-      macroDivergences.set(divergences);
-      macroEvents.set(events);
-      if (nextContext.mode === "snapshot") {
-        await prefetchMacroSeries(DEFAULT_MACRO_SNAPSHOT_FX_SERIES, {
-          region: nextContext.region,
-          timeframe: nextContext.timeframe,
-          theme: nextContext.theme,
-          comparisonRegion: nextContext.comparisonRegion,
-          forceRefresh: options.forceRefresh ?? false
-        });
-      }
-      lastError.set("");
-      return snapshot;
-    } catch (error) {
+        ]);
+        macroSnapshot.set(snapshot);
+        macroDivergences.set(divergences);
+        macroEvents.set(events);
+        const primarySeries = seriesForMacroMode(nextContext);
+        if (primarySeries.length) {
+          await prefetchMacroSeries(primarySeries, {
+            region: nextContext.region,
+            timeframe: nextContext.timeframe,
+            theme: nextContext.theme,
+            comparisonRegion: nextContext.comparisonRegion,
+            forceRefresh: options.forceRefresh ?? false
+          });
+        }
+        const comparisonSeries = comparisonSeriesForContext(nextContext, primarySeries);
+        if (comparisonSeries.length && nextContext.comparisonRegion) {
+          await prefetchMacroSeries(comparisonSeries, {
+            region: nextContext.comparisonRegion,
+            timeframe: nextContext.timeframe,
+            theme: nextContext.theme,
+            comparisonRegion: nextContext.comparisonRegion,
+            forceRefresh: options.forceRefresh ?? false
+          });
+        }
+        lastError.set("");
+        return snapshot;
+      } catch (error) {
       setError(error);
       return null;
     } finally {

@@ -93,6 +93,8 @@
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "N/A";
 
+  type MacroChartContext = Pick<MacroContextState, "region" | "timeframe" | "comparisonRegion">;
+
   function groupEventsByMonth<T extends { scheduled_at: string }>(evts: T[]): Array<{ label: string; events: T[] }> {
     const groups: Array<{ label: string; events: T[] }> = [];
     let current = "";
@@ -122,8 +124,12 @@
     return `${metric.comparison_region} ${metric.comparison_display_value}${metric.gap_display ? ` | gap ${metric.gap_display}` : ""}`;
   }
 
-  function historyKey(seriesId: string, region = $macroContext.region) {
-    return `${region}:${$macroContext.timeframe}:${seriesId}`;
+  function historyKey(
+    seriesId: string,
+    timeframe: MacroContextState["timeframe"],
+    region: MacroContextState["region"]
+  ) {
+    return `${region}:${timeframe}:${seriesId}`;
   }
 
   async function refreshContext(next: Partial<MacroContextState>) {
@@ -142,7 +148,7 @@
     const requests: Array<Promise<unknown> | void> = [];
     const requested = new Set<string>();
     for (const seriesId of seriesIds) {
-      const localKey = historyKey(seriesId);
+      const localKey = historyKey(seriesId, $macroContext.timeframe, $macroContext.region);
       if (!histories[localKey] && !requested.has(localKey)) {
         requested.add(localKey);
         requests.push(onLoadSeries(seriesId));
@@ -150,7 +156,9 @@
       const comparisonSeriesId =
         $macroContext.comparisonRegion && $macroContext.region !== "Global" ? chartComparisonPairs[seriesId] : null;
       const comparisonKey =
-        comparisonSeriesId && $macroContext.comparisonRegion ? historyKey(comparisonSeriesId, $macroContext.comparisonRegion) : null;
+        comparisonSeriesId && $macroContext.comparisonRegion
+          ? historyKey(comparisonSeriesId, $macroContext.timeframe, $macroContext.comparisonRegion)
+          : null;
       if (comparisonSeriesId && comparisonKey && !histories[comparisonKey] && !requested.has(comparisonKey)) {
         requested.add(comparisonKey);
         requests.push(onLoadSeries(comparisonSeriesId, { region: $macroContext.comparisonRegion }));
@@ -169,9 +177,15 @@
     void ensureSeries(regionModeSeries[$macroContext.region].cross_asset);
   }
 
-  function chartFromSeries(seriesId: string, color: string, options?: { region?: MacroContextState["region"]; lineStyle?: "solid" | "dashed"; labelSuffix?: string }): ChartSeries[] {
-    const region = options?.region ?? $macroContext.region;
-    const history = histories[historyKey(seriesId, region)];
+  function chartFromSeries(
+    seriesMap: Record<string, MacroSeriesHistory>,
+    context: MacroChartContext,
+    seriesId: string,
+    color: string,
+    options?: { region?: MacroContextState["region"]; lineStyle?: "solid" | "dashed"; labelSuffix?: string }
+  ): ChartSeries[] {
+    const region = options?.region ?? context.region;
+    const history = seriesMap[historyKey(seriesId, context.timeframe, region)];
     if (!history?.points?.length) {
       return [];
     }
@@ -190,18 +204,18 @@
     ];
   }
 
-  function buildChart(seriesIds: string[], colors: string[]) {
+  function buildChart(seriesMap: Record<string, MacroSeriesHistory>, context: MacroChartContext, seriesIds: string[], colors: string[]) {
     const rows: ChartSeries[] = [];
     seriesIds.forEach((seriesId, index) => {
-      rows.push(...chartFromSeries(seriesId, colors[index] ?? "#7aa6c8"));
-      if ($macroContext.comparisonRegion && $macroContext.region !== "Global") {
+      rows.push(...chartFromSeries(seriesMap, context, seriesId, colors[index] ?? "#7aa6c8"));
+      if (context.comparisonRegion && context.region !== "Global") {
         const comparisonSeriesId = chartComparisonPairs[seriesId];
         if (comparisonSeriesId) {
           rows.push(
-            ...chartFromSeries(comparisonSeriesId, colors[index] ?? "#7aa6c8", {
-              region: $macroContext.comparisonRegion,
+            ...chartFromSeries(seriesMap, context, comparisonSeriesId, colors[index] ?? "#7aa6c8", {
+              region: context.comparisonRegion,
               lineStyle: "dashed",
-              labelSuffix: ` (${ $macroContext.comparisonRegion })`
+              labelSuffix: ` (${context.comparisonRegion})`
             })
           );
         }
@@ -210,8 +224,19 @@
     return rows;
   }
 
-  $: ratesChart = buildChart(rateChartSeriesByRegion[$macroContext.region], ["#7aa6c8", "#c49a5a"]);
-  $: inflationChart = buildChart(inflationChartSeriesByRegion[$macroContext.region], ["#7aa6c8", "#c49a5a"]);
+  let ratesChart: ChartSeries[] = [];
+  let inflationChart: ChartSeries[] = [];
+  let fxChart1: ChartSeries[] = [];
+  let fxChart2: ChartSeries[] = [];
+  let fxChart3: ChartSeries[] = [];
+
+  $: chartContext = {
+    region: $macroContext.region,
+    timeframe: $macroContext.timeframe,
+    comparisonRegion: $macroContext.comparisonRegion
+  } satisfies MacroChartContext;
+  $: ratesChart = buildChart(histories, chartContext, rateChartSeriesByRegion[chartContext.region], ["#7aa6c8", "#c49a5a"]);
+  $: inflationChart = buildChart(histories, chartContext, inflationChartSeriesByRegion[chartContext.region], ["#7aa6c8", "#c49a5a"]);
   $: crossAssetCards =
     $macroContext.theme === "all"
       ? snapshot?.cross_asset ?? []
@@ -246,9 +271,9 @@
   $: if ($macroContext.mode === "snapshot") {
     void ensureSeries(fxSeriesIds);
   }
-  $: fxChart1 = chartFromSeries(fxPair0SeriesId, "#7aa6c8");
-  $: fxChart2 = chartFromSeries(fxPair1SeriesId, "#c49a5a");
-  $: fxChart3 = chartFromSeries(fxPair2SeriesId, "#b65d54");
+  $: fxChart1 = chartFromSeries(histories, chartContext, fxPair0SeriesId, "#7aa6c8");
+  $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "#c49a5a");
+  $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "#b65d54");
 
   /* ── Grouped events ── */
   $: groupedEvents = groupEventsByMonth(eventRows);
