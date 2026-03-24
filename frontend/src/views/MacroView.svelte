@@ -78,7 +78,7 @@
     { id: "usdcad", label: "USD/CAD", seriesId: "fx-usdcad" },
     { id: "audusd", label: "AUD/USD", seriesId: "fx-audusd" },
   ];
-  const fxConfigurablePairs = fxPairOptions.filter((p) => p.id !== "eurusd");
+  let fxPair0 = "eurusd";
   let fxPair1 = "gbpusd";
   let fxPair2 = "usdjpy";
 
@@ -133,15 +133,25 @@
   }
 
   async function ensureSeries(seriesIds: string[]) {
+    const requests: Array<Promise<unknown> | void> = [];
+    const requested = new Set<string>();
     for (const seriesId of seriesIds) {
-      if (!histories[historyKey(seriesId)]) {
-        await onLoadSeries(seriesId);
+      const localKey = historyKey(seriesId);
+      if (!histories[localKey] && !requested.has(localKey)) {
+        requested.add(localKey);
+        requests.push(onLoadSeries(seriesId));
       }
       const comparisonSeriesId =
         $macroContext.comparisonRegion && $macroContext.region !== "Global" ? chartComparisonPairs[seriesId] : null;
-      if (comparisonSeriesId && !histories[historyKey(comparisonSeriesId, $macroContext.comparisonRegion)]) {
-        await onLoadSeries(comparisonSeriesId, { region: $macroContext.comparisonRegion });
+      const comparisonKey =
+        comparisonSeriesId && $macroContext.comparisonRegion ? historyKey(comparisonSeriesId, $macroContext.comparisonRegion) : null;
+      if (comparisonSeriesId && comparisonKey && !histories[comparisonKey] && !requested.has(comparisonKey)) {
+        requested.add(comparisonKey);
+        requests.push(onLoadSeries(comparisonSeriesId, { region: $macroContext.comparisonRegion }));
       }
+    }
+    if (requests.length) {
+      await Promise.all(requests);
     }
   }
 
@@ -223,13 +233,14 @@
   );
 
   /* ── FX strip reactives ── */
+  $: fxPair0SeriesId = fxPairOptions.find((p) => p.id === fxPair0)?.seriesId ?? "fx-eurusd";
   $: fxPair1SeriesId = fxPairOptions.find((p) => p.id === fxPair1)?.seriesId ?? "fx-gbpusd";
   $: fxPair2SeriesId = fxPairOptions.find((p) => p.id === fxPair2)?.seriesId ?? "fx-usdjpy";
-  $: fxSeriesIds = ["fx-eurusd", fxPair1SeriesId, fxPair2SeriesId];
+  $: fxSeriesIds = Array.from(new Set([fxPair0SeriesId, fxPair1SeriesId, fxPair2SeriesId]));
   $: if ($macroContext.mode === "snapshot") {
     void ensureSeries(fxSeriesIds);
   }
-  $: fxChart1 = chartFromSeries("fx-eurusd", "#7aa6c8");
+  $: fxChart1 = chartFromSeries(fxPair0SeriesId, "#7aa6c8");
   $: fxChart2 = chartFromSeries(fxPair1SeriesId, "#c49a5a");
   $: fxChart3 = chartFromSeries(fxPair2SeriesId, "#b65d54");
 
@@ -361,15 +372,19 @@
       <article class="panel fx-panel">
         <div class="fx-header">
           <small class="eyebrow">FX</small>
-          <h3 class="fx-title">EUR/USD</h3>
+          <select class="fx-select" bind:value={fxPair0}>
+            {#each fxPairOptions as pair}
+              <option value={pair.id}>{pair.label}</option>
+            {/each}
+          </select>
         </div>
-        <TimeSeriesChart series={fxChart1} height={200} emptyMessage="Loading EUR/USD" />
+        <TimeSeriesChart series={fxChart1} height={200} emptyMessage="Loading FX data" />
       </article>
       <article class="panel fx-panel">
         <div class="fx-header">
           <small class="eyebrow">FX</small>
           <select class="fx-select" bind:value={fxPair1}>
-            {#each fxConfigurablePairs as pair}
+            {#each fxPairOptions as pair}
               <option value={pair.id}>{pair.label}</option>
             {/each}
           </select>
@@ -380,7 +395,7 @@
         <div class="fx-header">
           <small class="eyebrow">FX</small>
           <select class="fx-select" bind:value={fxPair2}>
-            {#each fxConfigurablePairs as pair}
+            {#each fxPairOptions as pair}
               <option value={pair.id}>{pair.label}</option>
             {/each}
           </select>

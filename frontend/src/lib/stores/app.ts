@@ -165,6 +165,7 @@ export const loading = writable<Record<string, boolean>>({
 
 const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
+const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = ["fx-eurusd", "fx-gbpusd", "fx-usdjpy"] as const;
 
 function setLoading(key: string, value: boolean) {
   loading.update((current) => ({ ...current, [key]: value }));
@@ -436,6 +437,14 @@ function macroHistoryKey(seriesId: string, region: string, timeframe: string) {
   return `${region}:${timeframe}:${seriesId}`;
 }
 
+async function prefetchMacroSeries(seriesIds: readonly string[], options: MacroLoadOptions = {}) {
+  const uniqueSeriesIds = Array.from(new Set(seriesIds));
+  if (!uniqueSeriesIds.length) {
+    return;
+  }
+  await Promise.all(uniqueSeriesIds.map((seriesId) => loadMacroSeriesHistory(seriesId, options)));
+}
+
 export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
   const nextContext = normalizeMacroContextState({
     ...get(macroContext),
@@ -465,6 +474,15 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
       macroSnapshot.set(snapshot);
       macroDivergences.set(divergences);
       macroEvents.set(events);
+      if (nextContext.mode === "snapshot") {
+        await prefetchMacroSeries(DEFAULT_MACRO_SNAPSHOT_FX_SERIES, {
+          region: nextContext.region,
+          timeframe: nextContext.timeframe,
+          theme: nextContext.theme,
+          comparisonRegion: nextContext.comparisonRegion,
+          forceRefresh: options.forceRefresh ?? false
+        });
+      }
       lastError.set("");
       return snapshot;
     } catch (error) {

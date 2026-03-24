@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   DiagnosticsResponse,
   IvSessionStatus,
+  MacroDivergenceListResponse,
+  MacroEventsResponse,
+  MacroSeriesHistory,
+  MacroSnapshot,
   PredictionCalibrationSummary,
   PredictionMarket,
   PredictionMarketListResponse,
@@ -23,9 +27,15 @@ import {
   ivSurface,
   lastError,
   loadIvSession,
+  loadMacroWorkspace,
   loadPortfolioSnapshot,
   loadPredictionMarketScreener,
   loading,
+  macroContext,
+  macroDivergences,
+  macroEvents,
+  macroSeriesHistories,
+  macroSnapshot,
   portfolioHistory,
   portfolioPerformance,
   portfolioSnapshot,
@@ -61,6 +71,17 @@ describe("app store orchestration", () => {
     riskResult.set(null);
     ivSurface.set(null);
     ivSession.set(null);
+    macroContext.set({
+      mode: "snapshot",
+      region: "US",
+      timeframe: "3M",
+      theme: "all",
+      comparisonRegion: null
+    });
+    macroSnapshot.set(null);
+    macroDivergences.set(null);
+    macroEvents.set(null);
+    macroSeriesHistories.set({});
     lastError.set("");
     loading.set({
       status: false,
@@ -69,6 +90,8 @@ describe("app store orchestration", () => {
       portfolio: false,
       portfolioAction: false,
       research: false,
+      macro: false,
+      macroHistory: false,
       prediction: false,
       predictionDetail: false,
       risk: false,
@@ -721,6 +744,79 @@ describe("app store orchestration", () => {
 
     expect(get(ivSession)?.running).toBe(true);
     expect(get(ivSurface)?.symbol).toBe("SPY");
+  });
+
+  it("prefetches default FX histories when loading the macro snapshot workspace", async () => {
+    const snapshot: MacroSnapshot = {
+      region: "US",
+      timeframe: "3M",
+      theme: "all",
+      comparison_region: null,
+      available_regions: ["US", "EU", "Global"],
+      available_timeframes: ["1M", "3M", "6M", "1Y"],
+      available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],
+      snapshot_cards: [],
+      rates_policy: null,
+      cross_asset: [],
+      top_divergences: [],
+      upcoming_events: [],
+      warnings: [],
+      source_provider: "fred",
+      retrieved_at: "2026-03-20T11:00:00Z",
+      origin: "macro_service.snapshot",
+      transformation_note: "Snapshot combines normalized macro sources."
+    };
+    const divergences: MacroDivergenceListResponse = {
+      region: "US",
+      timeframe: "3M",
+      theme: "all",
+      comparison_region: null,
+      divergences: []
+    };
+    const events: MacroEventsResponse = {
+      region: "US",
+      events: []
+    };
+    const fxHistory = (seriesId: string, title: string): MacroSeriesHistory => ({
+      series_id: seriesId,
+      title,
+      region: "Global",
+      unit: "fx",
+      frequency: "daily",
+      theme: "policy",
+      mode_tags: ["snapshot"],
+      points: [{ timestamp: "2026-03-20T00:00:00Z", value: 1.1, source_provider: "ibkr", retrieved_at: "2026-03-20T11:00:00Z", origin: `ibkr.fx_history:${title.replace("/", "")}`, transformation_note: null }],
+      source_provider: "ibkr",
+      retrieved_at: "2026-03-20T11:00:00Z",
+      origin: `ibkr.fx_history:${title.replace("/", "")}`,
+      transformation_note: null
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(snapshot))
+      .mockResolvedValueOnce(ok(divergences))
+      .mockResolvedValueOnce(ok(events))
+      .mockResolvedValueOnce(ok(fxHistory("fx-eurusd", "EUR/USD")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-gbpusd", "GBP/USD")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-usdjpy", "USD/JPY")));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadMacroWorkspace();
+
+    expect(get(macroSnapshot)?.region).toBe("US");
+    expect(Object.keys(get(macroSeriesHistories))).toEqual(
+      expect.arrayContaining(["US:3M:fx-eurusd", "US:3M:fx-gbpusd", "US:3M:fx-usdjpy"])
+    );
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/macro/series/fx-eurusd/history?region=US&timeframe=3M")
+    )).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/macro/series/fx-gbpusd/history?region=US&timeframe=3M")
+    )).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/macro/series/fx-usdjpy/history?region=US&timeframe=3M")
+    )).toBe(true);
   });
 
   it("preserves one-shot IV data when idle session polling returns an empty surface", async () => {

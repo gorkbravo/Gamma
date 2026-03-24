@@ -34,6 +34,25 @@ describe("MacroView", () => {
     expect(body).toContain(">Compare<");
     expect(body).toContain("disabled");
   });
+
+  it("renders three FX selectors with distinct default presets in snapshot mode", () => {
+    const { body } = render(MacroView, {
+      props: {
+        snapshot: makeSnapshot(),
+        divergences: null,
+        events: makeEvents(),
+        histories: {},
+        loading: false,
+        onLoadWorkspace: vi.fn(),
+        onLoadSeries: vi.fn()
+      }
+    });
+
+    expect(body.match(/fx-select/g)?.length ?? 0).toBe(3);
+    expect(body).toContain('option value="eurusd"');
+    expect(body).toContain('option value="gbpusd"');
+    expect(body).toContain('option value="usdjpy"');
+  });
 });
 
 function makeSnapshot(): MacroSnapshot {
