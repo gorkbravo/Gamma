@@ -18,6 +18,7 @@ NOW = datetime(2026, 3, 20, 12, 0, 0)
 FRED_RETRIEVED_AT = datetime(2026, 3, 20, 9, 0, 0)
 EVENTS_RETRIEVED_AT = datetime(2026, 3, 20, 10, 0, 0)
 TREASURY_RETRIEVED_AT = datetime(2026, 3, 20, 11, 0, 0)
+FX_RETRIEVED_AT = datetime(2026, 3, 20, 8, 30, 0)
 
 
 def test_fred_macro_adapter_normalizes_series_points_and_provenance(tmp_path):
@@ -252,6 +253,22 @@ def test_macro_service_uses_frequency_aware_yoy_lag_for_quarterly_series(monkeyp
     assert history.points[-1].value == expected_latest_yoy
 
 
+def test_macro_service_supports_snapshot_fx_chart_series(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    history = service.get_series_history("fx-eurusd", region="US", timeframe="6M")
+
+    assert history is not None
+    assert history.series_id == "fx-eurusd"
+    assert history.title == "EUR/USD"
+    assert history.source_provider == "ibkr"
+    assert history.origin == "ibkr.fx_history:EURUSD"
+    assert history.transformation_note is not None
+    assert history.points
+    assert history.points[-1].value == 1.08
+
+
 def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 
@@ -288,6 +305,7 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
             json={"region": "Global", "timeframe": "6M", "theme": "inflation", "comparison_region": "US"},
         )
         history_response = client.get("/macro/series/us-cpi-yoy/history", params={"region": "US", "timeframe": "1Y"})
+        fx_history_response = client.get("/macro/series/fx-eurusd/history", params={"region": "US", "timeframe": "6M"})
         divergence_response = client.post("/macro/divergences", json={"region": "US", "timeframe": "3M", "theme": "all"})
         events_response = client.get("/macro/events", params={"region": "Global"})
         missing_response = client.get("/macro/series/unknown-series/history")
@@ -306,6 +324,12 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         assert history_payload["series_id"] == "us-cpi-yoy"
         assert history_payload["transformation_note"] is not None
         assert history_payload["points"][0]["transformation_note"] is not None
+
+        assert fx_history_response.status_code == 200
+        fx_history_payload = fx_history_response.json()
+        assert fx_history_payload["series_id"] == "fx-eurusd"
+        assert fx_history_payload["source_provider"] == "ibkr"
+        assert fx_history_payload["points"]
 
         assert divergence_response.status_code == 200
         divergence_payload = divergence_response.json()
@@ -423,11 +447,34 @@ class _FakeEventsAdapter:
         return filtered[:limit]
 
 
+@dataclass
+class _FakeFXMacroAdapter:
+    series_map: dict[tuple[str, str], list[MacroSeriesPoint]]
+
+    def get_series(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        *,
+        start: datetime,
+        end: datetime,
+        force_refresh: bool = False,
+    ) -> tuple[list[MacroSeriesPoint], datetime]:
+        del force_refresh
+        rows = [
+            point
+            for point in self.series_map[(base_currency, quote_currency)]
+            if start <= point.timestamp <= end
+        ]
+        return rows, FX_RETRIEVED_AT
+
+
 def _build_macro_service() -> MacroService:
     return MacroService(
         fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
         treasury_adapter=_FakeTreasuryCurveAdapter(),
         events_adapter=_FakeEventsAdapter(),
+        fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
     )
 
 
@@ -454,6 +501,17 @@ def _build_series_map() -> dict[str, list[MacroSeriesPoint]]:
         "CCUSMA02EZM618N": _daily_points([420, 180, 90, 30, 0], [0.94, 0.91, 0.90, 0.87, 0.85], provider_series_id="CCUSMA02EZM618N"),
         "CP0000EZ19M086NEST": _periodic_points(18, step_days=30, start_value=112.0, increment=0.55, provider_series_id="CP0000EZ19M086NEST"),
         "EA19PRINTO01GYSAM": _daily_points([420, 180, 90, 30, 0], [-1.8, -0.9, -0.4, 0.6, 1.4], provider_series_id="EA19PRINTO01GYSAM"),
+    }
+
+
+def _build_fx_series_map() -> dict[tuple[str, str], list[MacroSeriesPoint]]:
+    return {
+        ("EUR", "USD"): _fx_points([220, 120, 60, 20, 0], [1.05, 1.07, 1.09, 1.06, 1.08], pair_code="EURUSD"),
+        ("GBP", "USD"): _fx_points([220, 120, 60, 20, 0], [1.24, 1.26, 1.28, 1.27, 1.29], pair_code="GBPUSD"),
+        ("USD", "JPY"): _fx_points([220, 120, 60, 20, 0], [147.0, 149.0, 151.5, 149.8, 150.6], pair_code="USDJPY"),
+        ("USD", "CHF"): _fx_points([220, 120, 60, 20, 0], [0.88, 0.89, 0.90, 0.89, 0.91], pair_code="USDCHF"),
+        ("USD", "CAD"): _fx_points([220, 120, 60, 20, 0], [1.34, 1.35, 1.36, 1.37, 1.36], pair_code="USDCAD"),
+        ("AUD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.64, 0.66, 0.67, 0.65, 0.66], pair_code="AUDUSD"),
     }
 
 
@@ -491,3 +549,16 @@ def _periodic_points(
             )
         )
     return rows
+
+
+def _fx_points(ages: list[int], values: list[float], *, pair_code: str) -> list[MacroSeriesPoint]:
+    return [
+        MacroSeriesPoint(
+            timestamp=NOW - timedelta(days=age),
+            value=value,
+            source_provider="ibkr",
+            retrieved_at=FX_RETRIEVED_AT,
+            origin=f"ibkr.fx_history:{pair_code}",
+        )
+        for age, value in sorted(zip(ages, values), reverse=True)
+    ]

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from src.models.macro import MacroEventRecord, MacroSeriesPoint
 from src.services.cache import CacheService
 from src.services.fred import FredClient
+from src.services.market_data import MarketDataService
 from src.utils.time import now_utc
 
 
@@ -69,6 +70,49 @@ class FredMacroAdapter:
             for observation in observations
         ]
         return points, retrieved_at
+
+
+class IBKRMacroFXAdapter:
+    provider = "ibkr"
+
+    def __init__(self, market_data: MarketDataService | None) -> None:
+        self.market_data = market_data
+
+    def get_series(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        *,
+        start: datetime,
+        end: datetime,
+        force_refresh: bool = False,
+    ) -> tuple[list[MacroSeriesPoint], datetime]:
+        del force_refresh
+        retrieved_at = now_utc()
+        if self.market_data is None:
+            return [], retrieved_at
+        lookback_days = max((end.date() - start.date()).days + 5, 5)
+        raw_series = self.market_data.fetch_fx_history(base_currency, quote_currency, lookback_days)
+        if raw_series is None or raw_series.empty:
+            return [], retrieved_at
+        points: list[MacroSeriesPoint] = []
+        pair_code = f"{str(base_currency).upper()}{str(quote_currency).upper()}"
+        for timestamp, value in raw_series.items():
+            if value is None or value != value:
+                continue
+            point_time = timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp
+            if point_time.tzinfo is not None:
+                point_time = point_time.astimezone(timezone.utc).replace(tzinfo=None)
+            points.append(
+                MacroSeriesPoint(
+                    timestamp=point_time,
+                    value=float(value),
+                    source_provider=self.provider,
+                    retrieved_at=retrieved_at,
+                    origin=f"ibkr.fx_history:{pair_code}",
+                )
+            )
+        return [point for point in points if start <= point.timestamp <= end], retrieved_at
 
 
 class TreasuryCurveAdapter:

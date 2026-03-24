@@ -16,7 +16,7 @@ from src.models.macro import (
     MacroSnapshotPayload,
     MacroThemeComparison,
 )
-from src.services.macro_adapters import FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.utils.time import now_utc
 
 
@@ -214,6 +214,90 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
         "history_days": 1200,
         "ttl_hours": 36,
         "comparison_key": "fx_proxy",
+    },
+    "fx-eurusd": {
+        "kind": "fx",
+        "region": "Global",
+        "base_currency": "EUR",
+        "quote_currency": "USD",
+        "title": "EUR/USD",
+        "unit": "fx",
+        "frequency": "daily",
+        "theme": "policy",
+        "mode_tags": ["snapshot"],
+        "history_days": 540,
+        "ttl_hours": 12,
+        "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
+    },
+    "fx-gbpusd": {
+        "kind": "fx",
+        "region": "Global",
+        "base_currency": "GBP",
+        "quote_currency": "USD",
+        "title": "GBP/USD",
+        "unit": "fx",
+        "frequency": "daily",
+        "theme": "policy",
+        "mode_tags": ["snapshot"],
+        "history_days": 540,
+        "ttl_hours": 12,
+        "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
+    },
+    "fx-usdjpy": {
+        "kind": "fx",
+        "region": "Global",
+        "base_currency": "USD",
+        "quote_currency": "JPY",
+        "title": "USD/JPY",
+        "unit": "fx",
+        "frequency": "daily",
+        "theme": "policy",
+        "mode_tags": ["snapshot"],
+        "history_days": 540,
+        "ttl_hours": 12,
+        "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
+    },
+    "fx-usdchf": {
+        "kind": "fx",
+        "region": "Global",
+        "base_currency": "USD",
+        "quote_currency": "CHF",
+        "title": "USD/CHF",
+        "unit": "fx",
+        "frequency": "daily",
+        "theme": "policy",
+        "mode_tags": ["snapshot"],
+        "history_days": 540,
+        "ttl_hours": 12,
+        "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
+    },
+    "fx-usdcad": {
+        "kind": "fx",
+        "region": "Global",
+        "base_currency": "USD",
+        "quote_currency": "CAD",
+        "title": "USD/CAD",
+        "unit": "fx",
+        "frequency": "daily",
+        "theme": "policy",
+        "mode_tags": ["snapshot"],
+        "history_days": 540,
+        "ttl_hours": 12,
+        "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
+    },
+    "fx-audusd": {
+        "kind": "fx",
+        "region": "Global",
+        "base_currency": "AUD",
+        "quote_currency": "USD",
+        "title": "AUD/USD",
+        "unit": "fx",
+        "frequency": "daily",
+        "theme": "policy",
+        "mode_tags": ["snapshot"],
+        "history_days": 540,
+        "ttl_hours": 12,
+        "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
     },
     "us-cpi-yoy": {
         "kind": "yoy",
@@ -440,10 +524,18 @@ class MacroSnapshotRequest:
 
 
 class MacroService:
-    def __init__(self, *, fred_adapter: FredMacroAdapter, treasury_adapter: TreasuryCurveAdapter, events_adapter: USMacroEventsAdapter) -> None:
+    def __init__(
+        self,
+        *,
+        fred_adapter: FredMacroAdapter,
+        treasury_adapter: TreasuryCurveAdapter,
+        events_adapter: USMacroEventsAdapter,
+        fx_adapter: IBKRMacroFXAdapter | None = None,
+    ) -> None:
         self.fred_adapter = fred_adapter
         self.treasury_adapter = treasury_adapter
         self.events_adapter = events_adapter
+        self.fx_adapter = fx_adapter
 
     def get_snapshot(self, request: MacroSnapshotRequest) -> MacroSnapshotPayload:
         region = self._normalize_region(request.region)
@@ -646,6 +738,8 @@ class MacroService:
         kind = meta["kind"]
         if kind == "raw":
             return self._load_raw_history(series_id, meta, timeframe=timeframe, force_refresh=force_refresh)
+        if kind == "fx":
+            return self._load_fx_history(series_id, meta, timeframe=timeframe, force_refresh=force_refresh)
         if kind == "yoy":
             return self._load_yoy_history(series_id, meta, timeframe=timeframe, force_refresh=force_refresh)
         if kind == "spread":
@@ -667,6 +761,34 @@ class MacroService:
             source_provider="fred",
             retrieved_at=retrieved_at,
             origin=f"fred.series.observations:{meta['provider_series_id']}",
+            transformation_note=meta.get("transformation_note"),
+        )
+
+    def _load_fx_history(self, series_id: str, meta: dict[str, Any], *, timeframe: str, force_refresh: bool) -> MacroSeriesHistory:
+        start, end = self._history_window(meta["history_days"], timeframe)
+        if self.fx_adapter is None:
+            points: list[MacroSeriesPoint] = []
+            retrieved_at = now_utc()
+        else:
+            points, retrieved_at = self.fx_adapter.get_series(
+                meta["base_currency"],
+                meta["quote_currency"],
+                start=start,
+                end=end,
+                force_refresh=force_refresh,
+            )
+        return MacroSeriesHistory(
+            series_id=series_id,
+            title=meta["title"],
+            region=meta["region"],
+            unit=meta["unit"],
+            frequency=meta["frequency"],
+            theme=meta["theme"],
+            mode_tags=list(meta["mode_tags"]),
+            points=[point for point in points if point.timestamp >= start],
+            source_provider="ibkr",
+            retrieved_at=retrieved_at,
+            origin=f"ibkr.fx_history:{meta['base_currency']}{meta['quote_currency']}",
             transformation_note=meta.get("transformation_note"),
         )
 

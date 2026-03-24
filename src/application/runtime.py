@@ -17,7 +17,7 @@ from src.application.risk_service import RiskService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
-from src.services.macro_adapters import FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
@@ -199,6 +199,7 @@ def build_runtime(
         fred_adapter=FredMacroAdapter(cache),
         treasury_adapter=TreasuryCurveAdapter(cache),
         events_adapter=USMacroEventsAdapter(cache),
+        fx_adapter=IBKRMacroFXAdapter(market_data),
     )
     risk_service = RiskService(
         client,
