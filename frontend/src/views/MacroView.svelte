@@ -326,9 +326,11 @@
       {#each snapshot?.snapshot_cards ?? [] as card}
         <button class="panel card-panel" type="button" on:click={() => drillTo(card.mode_target as MacroMode, card.target_theme)}>
           <div class="card-head">
-            <small class="eyebrow">{themeLabels[(card.target_theme as MacroTheme) ?? "all"] ?? "Macro"}</small>
+            <div class="card-head-top">
+              <small class="eyebrow">{themeLabels[(card.target_theme as MacroTheme) ?? "all"] ?? "Macro"}</small>
+              <span class="tag">{card.mode_target.replace("_", " ")}</span>
+            </div>
             <h3>{card.title}</h3>
-            <span class="tag">{card.mode_target.replace("_", " ")}</span>
           </div>
           <p class="card-summary">{card.summary}</p>
           <div class="metric-row">
@@ -634,7 +636,7 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
     gap: 0.5rem;
   }
 
@@ -855,13 +857,15 @@
     gap: 0.15rem;
   }
 
-  .card-head h3 {
-    font-size: 0.92rem;
+  .card-head-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
   }
 
-  .card-head .tag {
-    margin-top: 0.2rem;
-    justify-self: start;
+  .card-head h3 {
+    font-size: 0.92rem;
   }
 
   .card-summary {
@@ -921,10 +925,10 @@
   }
 
   .metric {
-    padding: 0.4rem 0.6rem;
+    padding: 0.4rem 0.5rem;
     border-left: 1px solid rgba(46, 60, 74, 0.42);
     min-width: 0;
-    flex: 1 1 6rem;
+    flex: 1 1 4.5rem;
   }
 
   .metric:first-child {
