@@ -794,9 +794,6 @@ class MacroService:
                     transformation_note="Snapshot cards surface the highest-ranked divergence score from the reusable cross-asset engine.",
                 )
             )
-        if events:
-            event = events[0]
-            cards.append(MacroSnapshotCard(card_id="events", title="Upcoming Macro Events", subtitle="Next catalyst on deck", summary=f"{event.title} is the next scheduled macro catalyst.", mode_target="rates_policy", target_theme="policy" if event.category == "policy" else "growth", metrics=[MacroMetricRecord(metric_id=f"{event.event_id}:date", label=event.title, value=None, display_value=event.scheduled_at.strftime("%b %d, %Y"), unit="date", source_provider=event.source_provider, retrieved_at=event.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Event cards surface the next upcoming macro release or meeting from official calendars.")], source_provider=event.source_provider, retrieved_at=event.retrieved_at, origin="macro_service.snapshot_cards", transformation_note="Event cards surface the next upcoming macro release or meeting from official calendars."))
         return cards
 
     def _build_metric_card(self, *, card_id: str, title: str, subtitle: str, summary: str, mode_target: str, target_theme: str, metric_histories: list[MacroSeriesHistory | None], timeframe: str, comparison_region: str | None, comparison_histories: dict[str, MacroSeriesHistory]) -> MacroSnapshotCard:
