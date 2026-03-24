@@ -133,6 +133,50 @@ class MacroThemeComparison:
 
 
 @dataclass(frozen=True)
+class MacroLinkedMarketRecord:
+    market_id: str
+    venue: str
+    title: str
+    event_title: str | None
+    probability: float | None
+    probability_display: str | None = None
+    recent_price_change: float | None = None
+    recent_price_change_display: str | None = None
+    research_score: float | None = None
+    resolution_date: datetime | None = None
+    note: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroExpectationRecord:
+    expectation_id: str
+    theme: str
+    region: str
+    headline: str
+    summary: str
+    agreement_label: str
+    macro_signal_score: float | None = None
+    macro_signal_display: str | None = None
+    market_signal_score: float | None = None
+    market_signal_display: str | None = None
+    market_probability: float | None = None
+    market_probability_display: str | None = None
+    score_gap: float | None = None
+    score_gap_display: str | None = None
+    lead_label: str | None = None
+    lead_summary: str | None = None
+    linked_markets: list[MacroLinkedMarketRecord] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class MacroRatesPolicySummary:
     headline: str
     summary: str
@@ -160,6 +204,7 @@ class MacroSnapshotPayload:
     snapshot_cards: list[MacroSnapshotCard] = field(default_factory=list)
     rates_policy: MacroRatesPolicySummary | None = None
     cross_asset: list[MacroThemeComparison] = field(default_factory=list)
+    linked_expectations: list[MacroExpectationRecord] = field(default_factory=list)
     top_divergences: list[MacroDivergenceRecord] = field(default_factory=list)
     upcoming_events: list[MacroEventRecord] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

@@ -286,13 +286,56 @@ function makeSnapshot(): MacroSnapshot {
       comparison_summary: null
     },
     cross_asset: [],
+    linked_expectations: [
+      {
+        expectation_id: "global:inflation:linked-expectation",
+        theme: "inflation",
+        region: "Global",
+        headline: "Inflation proxies versus linked inflation markets",
+        summary: "Macro proxies lean hotter inflation while linked prediction markets lean hotter inflation.",
+        agreement_label: "aligned",
+        macro_signal_score: 0.62,
+        macro_signal_display: "+0.62",
+        market_signal_score: 0.58,
+        market_signal_display: "+0.58",
+        market_probability: 0.59,
+        market_probability_display: "59%",
+        score_gap: 0.04,
+        score_gap_display: "+0.04",
+        lead_label: "Moving together",
+        lead_summary: "Macro proxies and linked prediction markets are repricing at a similar intensity.",
+        linked_markets: [
+          {
+            market_id: "polymarket:inflation-above-3",
+            venue: "polymarket",
+            title: "Will US CPI finish above 3% this year?",
+            event_title: "Inflation outlook",
+            probability: 0.59,
+            probability_display: "59%",
+            recent_price_change: 0.04,
+            recent_price_change_display: "+4.0 pp",
+            research_score: 88,
+            resolution_date: "2026-09-30T00:00:00Z",
+            note: "Higher probabilities are read as reinforcing the inflation narrative.",
+            source_provider: "polymarket",
+            retrieved_at: "2026-03-20T10:00:00Z",
+            origin: "polymarket.seed",
+            transformation_note: "Seed linked market."
+          }
+        ],
+        source_provider: "macro+prediction_markets",
+        retrieved_at: "2026-03-20T10:00:00Z",
+        origin: "macro_service.linked_expectations",
+        transformation_note: "Linked expectations combine macro and prediction-market signals."
+      }
+    ],
     top_divergences: [],
     upcoming_events: [],
     warnings: ["Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first."],
-    source_provider: "fred",
+    source_provider: "macro+prediction_markets",
     retrieved_at: "2026-03-20T11:00:00Z",
     origin: "macro_service.snapshot",
-    transformation_note: "Snapshot combines normalized macro sources."
+    transformation_note: "Snapshot combines normalized macro sources and linked prediction-market expectations."
   };
 }
 

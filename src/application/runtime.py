@@ -199,6 +199,7 @@ def build_runtime(
         fred_adapter=FredMacroAdapter(cache),
         treasury_adapter=TreasuryCurveAdapter(cache),
         events_adapter=USMacroEventsAdapter(cache),
+        prediction_market_service=prediction_market_service,
     )
     risk_service = RiskService(
         client,

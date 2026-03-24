@@ -8,7 +8,9 @@ from src.application.macro_service import MacroSnapshotRequest
 from src.models.macro import (
     MacroCurveNode,
     MacroDivergenceRecord,
+    MacroExpectationRecord,
     MacroEventRecord,
+    MacroLinkedMarketRecord,
     MacroMetricRecord,
     MacroRatesPolicySummary,
     MacroSeriesHistory,
@@ -196,6 +198,58 @@ class MacroThemeComparisonModel(BaseModel):
         return cls(**payload)
 
 
+class MacroLinkedMarketModel(BaseModel):
+    market_id: str
+    venue: str
+    title: str
+    event_title: str | None = None
+    probability: float | None = None
+    probability_display: str | None = None
+    recent_price_change: float | None = None
+    recent_price_change_display: str | None = None
+    research_score: float | None = None
+    resolution_date: datetime | None = None
+    note: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroLinkedMarketRecord) -> "MacroLinkedMarketModel":
+        return cls(**row.__dict__)
+
+
+class MacroExpectationModel(BaseModel):
+    expectation_id: str
+    theme: str
+    region: str
+    headline: str
+    summary: str
+    agreement_label: str
+    macro_signal_score: float | None = None
+    macro_signal_display: str | None = None
+    market_signal_score: float | None = None
+    market_signal_display: str | None = None
+    market_probability: float | None = None
+    market_probability_display: str | None = None
+    score_gap: float | None = None
+    score_gap_display: str | None = None
+    lead_label: str | None = None
+    lead_summary: str | None = None
+    linked_markets: list[MacroLinkedMarketModel] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroExpectationRecord) -> "MacroExpectationModel":
+        payload = dict(row.__dict__)
+        payload["linked_markets"] = [MacroLinkedMarketModel.from_domain(item) for item in row.linked_markets]
+        return cls(**payload)
+
+
 class MacroRatesPolicySummaryModel(BaseModel):
     headline: str
     summary: str
@@ -231,6 +285,7 @@ class MacroSnapshotResponseModel(BaseModel):
     snapshot_cards: list[MacroSnapshotCardModel] = Field(default_factory=list)
     rates_policy: MacroRatesPolicySummaryModel | None = None
     cross_asset: list[MacroThemeComparisonModel] = Field(default_factory=list)
+    linked_expectations: list[MacroExpectationModel] = Field(default_factory=list)
     top_divergences: list[MacroDivergenceModel] = Field(default_factory=list)
     upcoming_events: list[MacroEventModel] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -247,6 +302,7 @@ class MacroSnapshotResponseModel(BaseModel):
             MacroRatesPolicySummaryModel.from_domain(row.rates_policy) if row.rates_policy is not None else None
         )
         payload["cross_asset"] = [MacroThemeComparisonModel.from_domain(item) for item in row.cross_asset]
+        payload["linked_expectations"] = [MacroExpectationModel.from_domain(item) for item in row.linked_expectations]
         payload["top_divergences"] = [MacroDivergenceModel.from_domain(item) for item in row.top_divergences]
         payload["upcoming_events"] = [MacroEventModel.from_domain(item) for item in row.upcoming_events]
         return cls(**payload)

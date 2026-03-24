@@ -9,6 +9,7 @@ from src.api.main import create_app
 from src.application.macro_service import MacroService, MacroSnapshotRequest
 from src.application.runtime import build_runtime
 from src.models.macro import MacroEventRecord, MacroSeriesPoint
+from src.models.prediction_markets import PredictionMarketOutcome, PredictionMarketRecord, PredictionMarketScreenerResult
 from src.services.cache import CacheService
 from src.services.fred import FredObservation
 from src.services.macro_adapters import FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
@@ -185,7 +186,7 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     slope_history = service.get_series_history("us-2s10s-slope", timeframe="1Y")
     divergences = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
 
-    assert snapshot.source_provider == "fred"
+    assert snapshot.source_provider == "macro+prediction_markets"
     assert snapshot.transformation_note is not None
     assert snapshot.retrieved_at == TREASURY_RETRIEVED_AT
     assert {card.title for card in snapshot.snapshot_cards} >= {
@@ -194,7 +195,11 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
         "Policy Context",
         "Curve Shape",
         "Real Yields / Breakevens",
+        "Linked Expectations",
     }
+    assert snapshot.linked_expectations
+    assert snapshot.linked_expectations[0].linked_markets
+    assert snapshot.linked_expectations[0].transformation_note is not None
     assert snapshot.rates_policy is not None
     assert len(snapshot.rates_policy.curve_nodes) == 5
     assert snapshot.rates_policy.transformation_note is not None
@@ -269,6 +274,24 @@ def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):
     assert snapshot.rates_policy.policy_metrics[0].comparison_display_value is not None
     assert snapshot.cross_asset
     assert any(row.comparison_region == "US" for row in snapshot.cross_asset)
+    assert any("Linked prediction-market expectations remain US/global-topic first" in warning for warning in snapshot.warnings)
+
+
+def test_macro_service_builds_linked_expectations_with_prediction_market_bridge(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="policy"))
+
+    assert len(snapshot.linked_expectations) == 1
+    expectation = snapshot.linked_expectations[0]
+    assert expectation.theme == "policy"
+    assert expectation.market_probability is not None
+    assert expectation.market_probability_display is not None
+    assert expectation.linked_markets
+    assert expectation.linked_markets[0].market_id.startswith("polymarket:")
+    assert expectation.lead_label is not None
+    assert expectation.transformation_note is not None
 
 
 def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_path, monkeypatch):
@@ -300,6 +323,8 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         assert any("ignored" in warning for warning in snapshot_payload["warnings"])
         assert snapshot_payload["rates_policy"]["curve_nodes"][0]["transformation_note"] is not None
         assert snapshot_payload["snapshot_cards"][0]["source_provider"]
+        assert snapshot_payload["linked_expectations"][0]["linked_markets"][0]["market_id"].startswith("polymarket:")
+        assert snapshot_payload["linked_expectations"][0]["transformation_note"] is not None
 
         assert history_response.status_code == 200
         history_payload = history_response.json()
@@ -423,11 +448,18 @@ class _FakeEventsAdapter:
         return filtered[:limit]
 
 
+@dataclass
+class _FakePredictionMarketService:
+    def screener(self, request):
+        return PredictionMarketScreenerResult(markets=_build_prediction_markets_for_query(request.query), venues=[], warnings=[])
+
+
 def _build_macro_service() -> MacroService:
     return MacroService(
         fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
         treasury_adapter=_FakeTreasuryCurveAdapter(),
         events_adapter=_FakeEventsAdapter(),
+        prediction_market_service=_FakePredictionMarketService(),
     )
 
 
@@ -455,6 +487,135 @@ def _build_series_map() -> dict[str, list[MacroSeriesPoint]]:
         "CP0000EZ19M086NEST": _periodic_points(18, step_days=30, start_value=112.0, increment=0.55, provider_series_id="CP0000EZ19M086NEST"),
         "EA19PRINTO01GYSAM": _daily_points([420, 180, 90, 30, 0], [-1.8, -0.9, -0.4, 0.6, 1.4], provider_series_id="EA19PRINTO01GYSAM"),
     }
+
+
+def _build_prediction_markets_for_query(query: str) -> list[PredictionMarketRecord]:
+    normalized = str(query or "").strip().lower()
+    if "fed cut" in normalized:
+        return [
+            _build_prediction_market(
+                market_id="polymarket:fed-cut-june",
+                title="Will the Fed cut rates by June?",
+                event_title="Fed policy outlook",
+                probability=0.68,
+                recent_price_change=0.05,
+                research_score=92.0,
+                end_time=NOW + timedelta(days=85),
+            ),
+            _build_prediction_market(
+                market_id="kalshi:fed-cut-july",
+                title="Will the Fed cut rates by July?",
+                event_title="Fed policy outlook",
+                probability=0.64,
+                recent_price_change=0.03,
+                research_score=81.0,
+                end_time=NOW + timedelta(days=110),
+                venue="kalshi",
+            ),
+        ]
+    if "inflation" in normalized:
+        return [
+            _build_prediction_market(
+                market_id="polymarket:inflation-above-3",
+                title="Will US CPI finish above 3% this year?",
+                event_title="Inflation outlook",
+                probability=0.59,
+                recent_price_change=0.04,
+                research_score=88.0,
+                end_time=NOW + timedelta(days=150),
+            )
+        ]
+    if "recession" in normalized:
+        return [
+            _build_prediction_market(
+                market_id="polymarket:recession-2026",
+                title="Will the US enter recession in 2026?",
+                event_title="US recession odds",
+                probability=0.36,
+                recent_price_change=-0.02,
+                research_score=79.0,
+                end_time=NOW + timedelta(days=220),
+            )
+        ]
+    return []
+
+
+def _build_prediction_market(
+    *,
+    market_id: str,
+    title: str,
+    event_title: str,
+    probability: float,
+    recent_price_change: float,
+    research_score: float,
+    end_time: datetime,
+    venue: str = "polymarket",
+) -> PredictionMarketRecord:
+    provider_market_id = market_id.split(":", 1)[1]
+    return PredictionMarketRecord(
+        market_id=market_id,
+        venue=venue,
+        title=title,
+        subtitle=None,
+        description=title,
+        status="open",
+        category="Economy",
+        event_id=f"{venue}:event:macro",
+        event_title=event_title,
+        series_id=f"{venue}:series:macro",
+        series_title="Macro",
+        provider_market_id=provider_market_id,
+        provider_condition_id="condition-1" if venue == "polymarket" else None,
+        provider_event_id="macro-event",
+        provider_series_id="macro-series",
+        slug=provider_market_id,
+        end_time=end_time,
+        open_time=NOW - timedelta(days=30),
+        close_time=None,
+        current_probability=probability,
+        probability_label="Yes",
+        volume=120_000.0,
+        volume_24h=16_000.0,
+        liquidity=35_000.0,
+        open_interest=18_000.0,
+        best_bid=max(probability - 0.01, 0.0),
+        best_ask=min(probability + 0.01, 1.0),
+        spread=0.02,
+        recent_price_change=recent_price_change,
+        resolved_probability=None,
+        resolution_outcome=None,
+        image_url=None,
+        resolution_source="Rulebook",
+        outcomes=[
+            PredictionMarketOutcome(
+                outcome_id=f"{market_id}:yes",
+                label="Yes",
+                probability=probability,
+                token_id="yes-token" if venue == "polymarket" else None,
+                source_provider=venue,
+                retrieved_at=EVENTS_RETRIEVED_AT,
+                origin=f"{venue}.seed",
+            ),
+            PredictionMarketOutcome(
+                outcome_id=f"{market_id}:no",
+                label="No",
+                probability=1.0 - probability,
+                token_id="no-token" if venue == "polymarket" else None,
+                source_provider=venue,
+                retrieved_at=EVENTS_RETRIEVED_AT,
+                origin=f"{venue}.seed",
+                transformation_note="Derived as one minus the normalized Yes probability.",
+            ),
+        ],
+        tags=["Economy", "Macro"],
+        freshness=None,
+        research_score=research_score,
+        research_rationale="Seed macro link market.",
+        source_provider=venue,
+        retrieved_at=EVENTS_RETRIEVED_AT,
+        origin=f"{venue}.seed",
+        transformation_note="Seed prediction market for macro-link testing.",
+    )
 
 
 def _daily_points(ages: list[int], values: list[float], *, provider_series_id: str) -> list[MacroSeriesPoint]:

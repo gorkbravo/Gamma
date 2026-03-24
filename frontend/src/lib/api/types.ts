@@ -569,6 +569,48 @@ export interface MacroThemeComparison {
   comparison_summary: string | null;
 }
 
+export interface MacroLinkedMarket {
+  market_id: string;
+  venue: string;
+  title: string;
+  event_title: string | null;
+  probability: number | null;
+  probability_display: string | null;
+  recent_price_change: number | null;
+  recent_price_change_display: string | null;
+  research_score: number | null;
+  resolution_date: string | null;
+  note: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroExpectation {
+  expectation_id: string;
+  theme: string;
+  region: string;
+  headline: string;
+  summary: string;
+  agreement_label: string;
+  macro_signal_score: number | null;
+  macro_signal_display: string | null;
+  market_signal_score: number | null;
+  market_signal_display: string | null;
+  market_probability: number | null;
+  market_probability_display: string | null;
+  score_gap: number | null;
+  score_gap_display: string | null;
+  lead_label: string | null;
+  lead_summary: string | null;
+  linked_markets: MacroLinkedMarket[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface MacroRatesPolicySummary {
   headline: string;
   summary: string;
@@ -595,6 +637,7 @@ export interface MacroSnapshot {
   snapshot_cards: MacroSnapshotCard[];
   rates_policy: MacroRatesPolicySummary | null;
   cross_asset: MacroThemeComparison[];
+  linked_expectations: MacroExpectation[];
   top_divergences: MacroDivergence[];
   upcoming_events: MacroEvent[];
   warnings: string[];

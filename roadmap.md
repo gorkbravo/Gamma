@@ -247,15 +247,15 @@ For roadmap purposes, this deliverable is now treated as achieved at a first-pas
 
 ## Phase 2 - Macro Tab
 
-_Status: In progress (~20%)_
-_Active focus: establish the first usable Macro workspace, move cross-asset context into Gamma, and make Macro the new primary implementation track._
+_Status: In progress (~30%)_
+_Active focus: deepen the expectations engine, link Macro to prediction markets, and keep Macro the primary implementation track._
 
 #### Completion snapshot
-- `Snapshot mode`: ~35% complete. Early V1 workspace exists, but breadth and interpretation depth remain limited.
-- `Cross-asset expectations mode`: ~25% complete. First-pass comparative surface and divergence rankings exist, but the expectations engine is still thin.
+- `Snapshot mode`: ~45% complete. The early V1 workspace now includes linked-expectation context, but breadth and interpretation depth remain limited.
+- `Cross-asset expectations mode`: ~40% complete. A first-pass Macro-versus-prediction-markets bridge now exists, but the expectations engine is still early and mostly heuristic.
 - `Rates & policy mode`: ~40% complete. This is the strongest current Macro mode, but it still needs broader depth and richer interpretation.
 - `Optional commodities mode`: ~0% complete. Not started and not required for the first pass.
-- `Coherence and divergence engine`: ~20% complete. A first-pass divergence layer exists, but it is still narrow and proxy-driven.
+- `Coherence and divergence engine`: ~35% complete. A first-pass divergence layer exists and now has linked prediction-market comparisons, but the scoring is still narrow and proxy-driven.
 - `Event and regime interpretation`: ~10% complete. Event context is present, but regime framing and event-window interpretation are still limited.
 - `Research notebook hooks`: ~0% complete. Not started.
 
@@ -1083,7 +1083,7 @@ This becomes increasingly important as fundamentals and AI-assisted outputs are 
 ### Phase 1 - Prediction Markets (`Complete`)
 Build the most differentiated and accessible research tab first.
 
-### Phase 2 - Macro (`In progress ~5%`)
+### Phase 2 - Macro (`In progress ~30%`)
 Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
 
 ### Phase 3 - Keyboard Navigation & Workspace Customization (`Not started`)

@@ -4,10 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from src.application.prediction_market_service import PredictionMarketScreenerRequest, PredictionMarketService
 from src.models.macro import (
     MacroCurveNode,
     MacroDivergenceRecord,
+    MacroExpectationRecord,
     MacroEventRecord,
+    MacroLinkedMarketRecord,
     MacroMetricRecord,
     MacroRatesPolicySummary,
     MacroSeriesHistory,
@@ -16,6 +19,7 @@ from src.models.macro import (
     MacroSnapshotPayload,
     MacroThemeComparison,
 )
+from src.models.prediction_markets import PredictionMarketRecord
 from src.services.macro_adapters import FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.utils.time import now_utc
 
@@ -335,6 +339,37 @@ TIMEFRAME_DAYS = {"1M": 31, "3M": 93, "6M": 186, "1Y": 370}
 THEME_ORDER = ["all", "growth", "inflation", "policy", "recession_risk"]
 REGION_ORDER = ["US", "EU", "Global"]
 PRIMARY_COMPARISON_REGIONS = {"US", "EU"}
+PREDICTION_MARKET_THEME_LINKS: dict[str, dict[str, Any]] = {
+    "growth": {
+        "query": "recession",
+        "category": "Economy",
+        "market_direction": -1.0,
+        "headline": "Growth proxies versus recession pricing",
+        "market_note": "Recession contracts are used as an inverse growth proxy in Macro V1.",
+    },
+    "inflation": {
+        "query": "inflation",
+        "category": "Economy",
+        "market_direction": 1.0,
+        "headline": "Inflation proxies versus linked inflation markets",
+        "market_note": "Higher probabilities are read as reinforcing the inflation narrative.",
+    },
+    "policy": {
+        "query": "fed cut",
+        "category": "Economy",
+        "market_direction": -1.0,
+        "headline": "Rates proxies versus policy-cut pricing",
+        "market_note": "Rate-cut odds are inverted so higher cut probabilities read as easier policy.",
+    },
+    "recession_risk": {
+        "query": "recession",
+        "category": "Economy",
+        "market_direction": 1.0,
+        "headline": "Stress proxies versus recession pricing",
+        "market_note": "Higher recession probabilities are read as reinforcing the stress narrative.",
+    },
+}
+PREDICTION_MARKET_MAX_LINKS = 3
 
 REGION_THEME_SERIES = {
     "US": {
@@ -440,17 +475,24 @@ class MacroSnapshotRequest:
 
 
 class MacroService:
-    def __init__(self, *, fred_adapter: FredMacroAdapter, treasury_adapter: TreasuryCurveAdapter, events_adapter: USMacroEventsAdapter) -> None:
+    def __init__(
+        self,
+        *,
+        fred_adapter: FredMacroAdapter,
+        treasury_adapter: TreasuryCurveAdapter,
+        events_adapter: USMacroEventsAdapter,
+        prediction_market_service: PredictionMarketService | None = None,
+    ) -> None:
         self.fred_adapter = fred_adapter
         self.treasury_adapter = treasury_adapter
         self.events_adapter = events_adapter
+        self.prediction_market_service = prediction_market_service
 
     def get_snapshot(self, request: MacroSnapshotRequest) -> MacroSnapshotPayload:
         region = self._normalize_region(request.region)
         timeframe = self._normalize_timeframe(request.timeframe)
         theme = self._normalize_theme(request.theme)
         comparison_region = self._normalize_comparison(region, request.comparison_region)
-        warnings = self._snapshot_warnings(region=region, requested_comparison=request.comparison_region, comparison_region=comparison_region)
         data_region = self._data_region(region)
         histories = self._load_histories(self._snapshot_series_ids(data_region, theme), timeframe=timeframe, force_refresh=request.force_refresh)
         comparison_histories = self._load_comparison_histories(
@@ -472,6 +514,21 @@ class MacroService:
             histories=histories,
             comparison_histories=comparison_histories,
         )
+        linked_expectations = self._build_linked_expectations(
+            region=region,
+            theme=theme,
+            histories=histories,
+            comparison_histories=comparison_histories,
+            comparison_region=comparison_region,
+            timeframe=timeframe,
+            force_refresh=request.force_refresh,
+        )
+        warnings = self._snapshot_warnings(
+            region=region,
+            requested_comparison=request.comparison_region,
+            comparison_region=comparison_region,
+            linked_prediction_markets=bool(linked_expectations),
+        )
         rates_policy = self._build_rates_policy(
             region=region,
             histories=histories,
@@ -486,6 +543,7 @@ class MacroService:
             + [row.retrieved_at for row in comparison_histories.values() if row.retrieved_at is not None]
             + [row.retrieved_at for row in events if row.retrieved_at is not None]
             + [row.retrieved_at for row in divergences if row.retrieved_at is not None]
+            + [row.retrieved_at for row in linked_expectations if row.retrieved_at is not None]
             + ([rates_policy.retrieved_at] if rates_policy.retrieved_at is not None else []),
             default=now_utc(),
         )
@@ -504,6 +562,7 @@ class MacroService:
                 comparison_region=comparison_region,
                 divergences=divergences,
                 events=events,
+                linked_expectations=linked_expectations,
                 timeframe=timeframe,
             ),
             rates_policy=rates_policy,
@@ -515,13 +574,14 @@ class MacroService:
                 divergences=divergences,
                 timeframe=timeframe,
             ),
+            linked_expectations=linked_expectations,
             top_divergences=divergences[:3],
             upcoming_events=events[:5],
             warnings=warnings,
-            source_provider="fred",
+            source_provider="macro+prediction_markets" if linked_expectations else "fred",
             retrieved_at=retrieved_at,
             origin="macro_service.snapshot",
-            transformation_note="Snapshot combines normalized FRED series histories, Treasury curve snapshots where available, comparison-aware metric overlays, and official calendar events into a mode-oriented macro workspace.",
+            transformation_note="Snapshot combines normalized FRED series histories, Treasury curve snapshots where available, comparison-aware metric overlays, official calendar events, and linked prediction-market expectation packets into a mode-oriented macro workspace.",
         )
 
     def get_series_history(self, series_id: str, *, region: str = "US", timeframe: str = "1Y", force_refresh: bool = False) -> MacroSeriesHistory | None:
@@ -610,6 +670,140 @@ class MacroService:
 
     def get_events(self, *, region: str = "US", force_refresh: bool = False) -> list[MacroEventRecord]:
         return self.events_adapter.list_events(region=self._normalize_region(region), as_of=now_utc(), force_refresh=force_refresh)
+
+    def _build_linked_expectations(
+        self,
+        *,
+        region: str,
+        theme: str,
+        histories: dict[str, MacroSeriesHistory],
+        comparison_histories: dict[str, MacroSeriesHistory],
+        comparison_region: str | None,
+        timeframe: str,
+        force_refresh: bool,
+    ) -> list[MacroExpectationRecord]:
+        if self.prediction_market_service is None:
+            return []
+
+        data_region = self._data_region(region)
+        themes = [theme] if theme != "all" else [name for name in THEME_ORDER if name != "all"]
+        query_cache: dict[tuple[str, str | None, bool], list[PredictionMarketRecord]] = {}
+        rows: list[MacroExpectationRecord] = []
+
+        for theme_name in themes:
+            link_config = PREDICTION_MARKET_THEME_LINKS.get(theme_name)
+            if link_config is None:
+                continue
+            signal_rows = self._collect_signal_rows(
+                data_region,
+                theme_name,
+                histories,
+                timeframe=timeframe,
+                comparison_region=comparison_region,
+                comparison_histories=comparison_histories,
+            )
+            if not signal_rows:
+                continue
+
+            cache_key = (str(link_config["query"]), link_config.get("category"), force_refresh)
+            if cache_key not in query_cache:
+                try:
+                    result = self.prediction_market_service.screener(
+                        PredictionMarketScreenerRequest(
+                            query=str(link_config["query"]),
+                            category=link_config.get("category"),
+                            status="open",
+                            force_refresh=force_refresh,
+                            limit=6,
+                        )
+                    )
+                    query_cache[cache_key] = [
+                        market
+                        for market in result.markets
+                        if market.current_probability is not None and not (market.freshness and market.freshness.is_broken)
+                    ][:PREDICTION_MARKET_MAX_LINKS]
+                except Exception:
+                    query_cache[cache_key] = []
+
+            linked_markets = query_cache[cache_key]
+            if not linked_markets:
+                continue
+
+            macro_signal_score = self._average_signal_score(signal_rows)
+            market_signal_score, market_probability, repricing_signal = self._prediction_market_signal(
+                linked_markets,
+                direction=float(link_config["market_direction"]),
+            )
+            score_gap = round(macro_signal_score - market_signal_score, 2)
+            agreement_label = self._expectation_agreement_label(macro_signal_score, market_signal_score)
+            lead_label, lead_summary = self._lead_lag_summary(
+                macro_signal_score=macro_signal_score,
+                market_repricing_signal=repricing_signal,
+                timeframe=timeframe,
+            )
+
+            market_note = str(link_config["market_note"])
+            summary_parts = [
+                f"Macro proxies lean {self._theme_signal_text(theme_name, macro_signal_score)} while linked prediction markets lean {self._theme_signal_text(theme_name, market_signal_score)}.",
+                market_note,
+                lead_summary,
+            ]
+            if region != "US":
+                summary_parts.append("Prediction-market coverage remains US/global-topic first in this regional lens.")
+
+            linked_rows = [
+                MacroLinkedMarketRecord(
+                    market_id=market.market_id,
+                    venue=market.venue,
+                    title=market.title,
+                    event_title=market.event_title,
+                    probability=market.current_probability,
+                    probability_display=_format_probability(market.current_probability),
+                    recent_price_change=market.recent_price_change,
+                    recent_price_change_display=_format_probability_delta(market.recent_price_change),
+                    research_score=market.research_score,
+                    resolution_date=market.end_time,
+                    note=market_note,
+                    source_provider=market.source_provider,
+                    retrieved_at=market.retrieved_at,
+                    origin=market.origin,
+                    transformation_note=market.transformation_note or "Linked prediction-market rows preserve the underlying venue payload used in the macro expectations bridge.",
+                )
+                for market in linked_markets
+            ]
+            retrieved_at = max(
+                [row.retrieved_at for row in linked_rows if row.retrieved_at is not None]
+                + [row.retrieved_at for row, _ in signal_rows if row.retrieved_at is not None],
+                default=now_utc(),
+            )
+            rows.append(
+                MacroExpectationRecord(
+                    expectation_id=f"{region.lower()}:{theme_name}:linked-expectation",
+                    theme=theme_name,
+                    region=region,
+                    headline=str(link_config["headline"]),
+                    summary=" ".join(summary_parts),
+                    agreement_label=agreement_label,
+                    macro_signal_score=macro_signal_score,
+                    macro_signal_display=f"{macro_signal_score:+.2f}",
+                    market_signal_score=market_signal_score,
+                    market_signal_display=f"{market_signal_score:+.2f}",
+                    market_probability=market_probability,
+                    market_probability_display=_format_probability(market_probability),
+                    score_gap=score_gap,
+                    score_gap_display=f"{score_gap:+.2f}",
+                    lead_label=lead_label,
+                    lead_summary=lead_summary,
+                    linked_markets=linked_rows,
+                    source_provider="macro+prediction_markets",
+                    retrieved_at=retrieved_at,
+                    origin="macro_service.linked_expectations",
+                    transformation_note="Linked expectations combine macro theme signal scoring with prediction-market research-ranked contracts, theme-specific direction mapping, and a lightweight lead/lag proxy based on repricing intensity.",
+                )
+            )
+
+        rows.sort(key=lambda row: (0 if row.agreement_label == "conflicted" else 1, -abs(row.score_gap or 0.0), row.theme))
+        return rows
 
     def _load_histories(self, series_ids: list[str], *, timeframe: str, force_refresh: bool) -> dict[str, MacroSeriesHistory]:
         rows: dict[str, MacroSeriesHistory] = {}
@@ -733,6 +927,7 @@ class MacroService:
         comparison_region: str | None,
         divergences: list[MacroDivergenceRecord],
         events: list[MacroEventRecord],
+        linked_expectations: list[MacroExpectationRecord],
         timeframe: str,
     ) -> list[MacroSnapshotCard]:
         data_region = self._data_region(region)
@@ -792,6 +987,57 @@ class MacroService:
                     retrieved_at=divergence.retrieved_at,
                     origin="macro_service.snapshot_cards",
                     transformation_note="Snapshot cards surface the highest-ranked divergence score from the reusable cross-asset engine.",
+                )
+            )
+        if linked_expectations:
+            expectation = linked_expectations[0]
+            cards.append(
+                MacroSnapshotCard(
+                    card_id="linked-expectations",
+                    title="Linked Expectations",
+                    subtitle="Prediction markets versus macro proxies",
+                    summary=expectation.summary,
+                    mode_target="cross_asset",
+                    target_theme=expectation.theme,
+                    metrics=[
+                        MacroMetricRecord(
+                            metric_id=f"{expectation.expectation_id}:macro",
+                            label="Macro",
+                            value=expectation.macro_signal_score,
+                            display_value=expectation.macro_signal_display,
+                            unit="score",
+                            source_provider=expectation.source_provider,
+                            retrieved_at=expectation.retrieved_at,
+                            origin="macro_service.snapshot_cards",
+                            transformation_note="Linked-expectation cards summarize the macro-side directional score from the expectation bridge.",
+                        ),
+                        MacroMetricRecord(
+                            metric_id=f"{expectation.expectation_id}:markets",
+                            label="Prediction",
+                            value=expectation.market_signal_score,
+                            display_value=expectation.market_signal_display,
+                            unit="score",
+                            source_provider=expectation.source_provider,
+                            retrieved_at=expectation.retrieved_at,
+                            origin="macro_service.snapshot_cards",
+                            transformation_note="Linked-expectation cards summarize the prediction-market-side directional score from the expectation bridge.",
+                        ),
+                        MacroMetricRecord(
+                            metric_id=f"{expectation.expectation_id}:probability",
+                            label="Avg odds",
+                            value=expectation.market_probability,
+                            display_value=expectation.market_probability_display,
+                            unit="probability",
+                            source_provider=expectation.source_provider,
+                            retrieved_at=expectation.retrieved_at,
+                            origin="macro_service.snapshot_cards",
+                            transformation_note="Linked-expectation cards surface the average probability across the linked prediction-market set.",
+                        ),
+                    ],
+                    source_provider=expectation.source_provider,
+                    retrieved_at=expectation.retrieved_at,
+                    origin="macro_service.snapshot_cards",
+                    transformation_note="Snapshot cards surface the highest-priority linked expectation packet from the macro-to-prediction-market bridge.",
                 )
             )
         if events:
@@ -883,6 +1129,77 @@ class MacroService:
             signal_rows.append((metric, max(min((metric.delta_value / scale) * factor, 3.0), -3.0)))
         return signal_rows
 
+    @staticmethod
+    def _average_signal_score(signal_rows: list[tuple[MacroMetricRecord, float]]) -> float:
+        if not signal_rows:
+            return 0.0
+        return round(sum(score for _, score in signal_rows) / len(signal_rows), 2)
+
+    @staticmethod
+    def _prediction_market_signal(markets: list[PredictionMarketRecord], *, direction: float) -> tuple[float, float | None, float]:
+        weighted_probability = 0.0
+        weighted_probability_center = 0.0
+        weighted_repricing_center = 0.0
+        total_weight = 0.0
+        for market in markets:
+            if market.current_probability is None:
+                continue
+            weight = max((market.research_score or 0.0) / 100.0, 0.35)
+            total_weight += weight
+            weighted_probability += weight * market.current_probability
+            weighted_probability_center += weight * direction * ((market.current_probability - 0.5) * 2.0)
+            repricing = max(min((market.recent_price_change or 0.0) / 0.12, 1.5), -1.5)
+            weighted_repricing_center += weight * direction * repricing
+        if total_weight == 0:
+            return 0.0, None, 0.0
+        probability_center = weighted_probability_center / total_weight
+        repricing_center = weighted_repricing_center / total_weight
+        market_signal = max(min((probability_center * 2.0) + (repricing_center * 0.7), 3.0), -3.0)
+        repricing_signal = max(min(repricing_center * 2.0, 3.0), -3.0)
+        return round(market_signal, 2), round(weighted_probability / total_weight, 4), round(repricing_signal, 2)
+
+    @staticmethod
+    def _expectation_agreement_label(macro_signal_score: float, market_signal_score: float) -> str:
+        score_gap = abs(macro_signal_score - market_signal_score)
+        if macro_signal_score * market_signal_score < 0 and score_gap >= 0.75:
+            return "conflicted"
+        if score_gap <= 0.9:
+            return "aligned"
+        return "mixed"
+
+    @staticmethod
+    def _lead_lag_summary(*, macro_signal_score: float, market_repricing_signal: float, timeframe: str) -> tuple[str, str]:
+        macro_intensity = abs(macro_signal_score)
+        market_intensity = abs(market_repricing_signal)
+        if market_intensity > macro_intensity + 0.45:
+            return (
+                "Prediction markets leading",
+                f"Prediction-market repricing is moving faster than the macro proxy set in the active {timeframe} window. This is a lightweight lead/lag proxy, not a causal read.",
+            )
+        if macro_intensity > market_intensity + 0.45:
+            return (
+                "Macro markets leading",
+                f"Macro proxies are moving harder than the linked prediction-market set in the active {timeframe} window. This is a lightweight lead/lag proxy, not a causal read.",
+            )
+        return (
+            "Moving together",
+            f"Macro proxies and linked prediction markets are repricing at a similar intensity in the active {timeframe} window. This is a lightweight lead/lag proxy, not a causal read.",
+        )
+
+    @staticmethod
+    def _theme_signal_text(theme: str, score: float | None) -> str:
+        if score is None or abs(score) < 0.35:
+            return "a muted read"
+        if theme == "growth":
+            return "firmer growth" if score > 0 else "softer growth"
+        if theme == "inflation":
+            return "hotter inflation" if score > 0 else "cooler inflation"
+        if theme == "policy":
+            return "tighter policy" if score > 0 else "easier policy"
+        if theme == "recession_risk":
+            return "higher recession risk" if score > 0 else "lower recession risk"
+        return "the same direction" if score > 0 else "the opposite direction"
+
     def _metric_from_history(self, history: MacroSeriesHistory, *, timeframe: str, comparison_region: str | None = None, comparison_histories: dict[str, MacroSeriesHistory] | None = None) -> MacroMetricRecord:
         latest = history.points[-1] if history.points else None
         previous = _point_before_cutoff(history.points, days=TIMEFRAME_DAYS.get(timeframe, 93))
@@ -949,12 +1266,20 @@ class MacroService:
         return normalized
 
     @staticmethod
-    def _snapshot_warnings(*, region: str, requested_comparison: str | None, comparison_region: str | None) -> list[str]:
+    def _snapshot_warnings(
+        *,
+        region: str,
+        requested_comparison: str | None,
+        comparison_region: str | None,
+        linked_prediction_markets: bool,
+    ) -> list[str]:
         warnings: list[str] = []
         if region == "Global":
             warnings.append("Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first and some analytics reuse US proxies.")
         if region == "EU":
             warnings.append("EU mode is a lighter V1 region. Rates and inflation proxies are available, but event-calendar depth and curve coverage remain thinner than the US implementation.")
+        if linked_prediction_markets and region != "US":
+            warnings.append("Linked prediction-market expectations remain US/global-topic first in Macro V1.")
         if requested_comparison is not None and comparison_region is None:
             warnings.append("Comparison is currently available only for direct US-versus-EU views. The requested comparison target was ignored.")
         if comparison_region is not None:
@@ -1023,6 +1348,18 @@ def _format_metric(value: float | None, unit: str | None) -> str:
     if unit == "score":
         return f"{value:.2f}"
     return f"{value:.2f}"
+
+
+def _format_probability(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value * 100.0:.0f}%"
+
+
+def _format_probability_delta(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value * 100.0:+.1f} pp"
 
 
 def _format_delta(value: float | None, unit: str | None) -> str:

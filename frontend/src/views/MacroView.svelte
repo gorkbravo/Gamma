@@ -87,6 +87,12 @@
     return `${metric.comparison_region} ${metric.comparison_display_value}${metric.gap_display ? ` | gap ${metric.gap_display}` : ""}`;
   }
 
+  function expectationClass(label: string | null | undefined): string {
+    if (label === "aligned") return "aligned";
+    if (label === "conflicted") return "conflicted";
+    return "mixed";
+  }
+
   function historyKey(seriesId: string, region = $macroContext.region) {
     return `${region}:${$macroContext.timeframe}:${seriesId}`;
   }
@@ -171,6 +177,10 @@
     $macroContext.theme === "all"
       ? snapshot?.cross_asset ?? []
       : (snapshot?.cross_asset ?? []).filter((row) => row.theme === $macroContext.theme);
+  $: linkedExpectationRows =
+    $macroContext.theme === "all"
+      ? snapshot?.linked_expectations ?? []
+      : (snapshot?.linked_expectations ?? []).filter((row) => row.theme === $macroContext.theme);
   $: eventRows = events?.events ?? snapshot?.upcoming_events ?? [];
   $: coverageNote =
     $macroContext.region === "Global"
@@ -327,6 +337,28 @@
           </div>
         {:else}
           <p class="empty-hint">No divergences detected for current context.</p>
+        {/if}
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Linked Expectations</p>
+            <h3>Prediction markets versus macro</h3>
+          </div>
+        </div>
+        {#if (snapshot?.linked_expectations ?? []).length}
+          <div class="list">
+            {#each snapshot?.linked_expectations ?? [] as row}
+              <button class="list-row interactive" type="button" on:click={() => drillTo("cross_asset", row.theme)}>
+                <strong>{row.headline}</strong>
+                <span class="list-detail">{row.summary}</span>
+                <small class="list-meta">{row.lead_label} · Macro {row.macro_signal_display} · Markets {row.market_signal_display}</small>
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No linked expectation packets for current context.</p>
         {/if}
       </article>
 
@@ -507,6 +539,60 @@
           </div>
         {:else}
           <p class="empty-hint">No cross-asset comparisons for this theme.</p>
+        {/if}
+      </article>
+
+      <article class="panel span-2">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Linked Expectations</p>
+            <h3>Prediction markets versus traditional markets</h3>
+          </div>
+        </div>
+        {#if linkedExpectationRows.length}
+          <div class="workspace-grid">
+            {#each linkedExpectationRows as row}
+              <article class="cross-card">
+                <div class="card-head">
+                  <div>
+                    <small class="eyebrow">{themeLabels[row.theme as MacroTheme] ?? row.theme}</small>
+                    <h3>{row.headline}</h3>
+                  </div>
+                  <span class="tag agreement {expectationClass(row.agreement_label)}">{row.agreement_label}</span>
+                </div>
+                <p class="card-subtitle">{row.summary}</p>
+                {#if row.lead_label}
+                  <p class="comparison-summary">{row.lead_label}: {row.lead_summary}</p>
+                {/if}
+                <div class="metric-row compact">
+                  <div class="metric">
+                    <span class="metric-label">Macro</span>
+                    <strong class="metric-value">{row.macro_signal_display ?? "N/A"}</strong>
+                  </div>
+                  <div class="metric">
+                    <span class="metric-label">Prediction</span>
+                    <strong class="metric-value">{row.market_signal_display ?? "N/A"}</strong>
+                  </div>
+                  <div class="metric">
+                    <span class="metric-label">Avg odds</span>
+                    <strong class="metric-value">{row.market_probability_display ?? "N/A"}</strong>
+                  </div>
+                </div>
+                <div class="linked-market-list">
+                  {#each row.linked_markets as market}
+                    <div class="linked-market-row">
+                      <strong>{market.title}</strong>
+                      <span class="list-detail">
+                        {market.venue} · {market.probability_display ?? "N/A"} · {market.recent_price_change_display ?? "N/A"}
+                      </span>
+                    </div>
+                  {/each}
+                </div>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No linked prediction-market comparisons for this theme.</p>
         {/if}
       </article>
 
@@ -800,6 +886,18 @@
     color: var(--accent-2);
   }
 
+  .tag.agreement.aligned {
+    border-color: rgba(73, 153, 105, 0.3);
+    background: rgba(73, 153, 105, 0.08);
+    color: var(--positive);
+  }
+
+  .tag.agreement.conflicted {
+    border-color: rgba(190, 92, 92, 0.32);
+    background: rgba(190, 92, 92, 0.08);
+    color: var(--negative);
+  }
+
   /* ── Metric row ── */
   .metric-row {
     display: grid;
@@ -912,6 +1010,24 @@
   .list-meta {
     color: var(--text-2);
     font-size: 0.74rem;
+  }
+
+  .linked-market-list {
+    display: grid;
+    gap: 0;
+    border-top: 1px solid rgba(46, 60, 74, 0.35);
+  }
+
+  .linked-market-row {
+    display: grid;
+    gap: 0.12rem;
+    padding: 0.7rem 0;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.24);
+  }
+
+  .linked-market-row:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
   }
 
   .event-date {
