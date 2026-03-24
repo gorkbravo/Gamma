@@ -911,19 +911,20 @@
 
   /* ── Metric row ── */
   .metric-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+    display: flex;
+    flex-wrap: wrap;
     gap: 0;
   }
 
   .metric-row.compact {
-    grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+    gap: 0;
   }
 
   .metric {
     padding: 0.4rem 0.6rem;
     border-left: 1px solid rgba(46, 60, 74, 0.42);
     min-width: 0;
+    flex: 1 1 6rem;
   }
 
   .metric:first-child {
@@ -1263,14 +1264,10 @@
       width: 100%;
     }
 
-    .metric-row,
-    .metric-row.compact {
-      grid-template-columns: 1fr 1fr;
-    }
-
     .metric {
       padding: 0.4rem 0;
       border-left: 0;
+      flex: 1 1 45%;
     }
 
     .header-top {
