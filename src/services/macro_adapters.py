@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from html import unescape
@@ -17,6 +18,7 @@ from src.utils.time import now_utc
 
 TextFetcher = Callable[[str], str]
 _US_EASTERN = ZoneInfo("America/New_York")
+logger = logging.getLogger(__name__)
 
 
 def default_text_fetcher(url: str) -> str:
@@ -232,20 +234,24 @@ class USMacroEventsAdapter:
             cached: Any = None
             if not force_refresh:
                 cached = self.cache.get_json(cache_key, max_age=ttl)
-            if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
-                payload = str(cached["payload"])
-                source_retrieved_at = _parse_datetime(cached["retrieved_at"]) or now_utc()
-            else:
-                payload = self.fetch_text(url)
-                source_retrieved_at = now_utc()
-                self.cache.set_json(
-                    cache_key,
-                    {
-                        "retrieved_at": source_retrieved_at.isoformat(),
-                        "payload": payload,
-                    },
-                )
-            events.extend(parser(payload, source_retrieved_at))
+            try:
+                if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
+                    payload = str(cached["payload"])
+                    source_retrieved_at = _parse_datetime(cached["retrieved_at"]) or now_utc()
+                else:
+                    payload = self.fetch_text(url)
+                    source_retrieved_at = now_utc()
+                    self.cache.set_json(
+                        cache_key,
+                        {
+                            "retrieved_at": source_retrieved_at.isoformat(),
+                            "payload": payload,
+                        },
+                    )
+                events.extend(parser(payload, source_retrieved_at))
+            except Exception as exc:
+                logger.warning("Macro events source failed: source=%s url=%s error=%s", source_name, url, exc)
+                continue
 
         unique: dict[str, MacroEventRecord] = {}
         for event in events:

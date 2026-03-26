@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from urllib.error import HTTPError
 
 from fastapi.testclient import TestClient
 
@@ -176,6 +177,28 @@ def test_us_macro_events_adapter_keeps_same_day_future_bls_release(tmp_path, mon
     assert rows[0].scheduled_at == datetime(2026, 5, 1, 12, 30, 0)
 
 
+def test_us_macro_events_adapter_skips_blocked_sources_and_keeps_remaining_events(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: EVENTS_RETRIEVED_AT)
+
+    fomc_html = """
+    <h4><a id="fomc2026">2026 FOMC Meetings</a></h4>
+    <div class="fomc-meeting__month"><strong>May</strong></div>
+    <div class="fomc-meeting__date">6-7</div>
+    """.strip()
+
+    def fake_fetch_text(url: str) -> str:
+        if url.endswith("fomccalendars.htm"):
+            return fomc_html
+        raise HTTPError(url, 403, "Forbidden", hdrs=None, fp=None)
+
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
+
+    rows = adapter.list_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
+
+    assert [row.event_id for row in rows] == ["fomc:2026-05-06"]
+    assert rows[0].title == "FOMC Meeting (May 6-7)"
+
+
 def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 
@@ -238,6 +261,35 @@ def test_macro_service_applies_active_timeframe_to_snapshot_cross_asset_and_dive
     divergence_1m = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1M", theme="inflation"))
     divergence_1y = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1Y", theme="inflation"))
     assert divergence_1m[0].metrics[0].delta_value != divergence_1y[0].metrics[0].delta_value
+
+
+def test_macro_service_snapshot_survives_partial_event_source_failures(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: EVENTS_RETRIEVED_AT)
+
+    fomc_html = """
+    <h4><a id="fomc2026">2026 FOMC Meetings</a></h4>
+    <div class="fomc-meeting__month"><strong>May</strong></div>
+    <div class="fomc-meeting__date">6-7</div>
+    """.strip()
+
+    def fake_fetch_text(url: str) -> str:
+        if url.endswith("fomccalendars.htm"):
+            return fomc_html
+        raise HTTPError(url, 403, "Forbidden", hdrs=None, fp=None)
+
+    service = MacroService(
+        fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
+        treasury_adapter=_FakeTreasuryCurveAdapter(),
+        events_adapter=USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text),
+        fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
+    )
+
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
+
+    assert snapshot.region == "US"
+    assert snapshot.upcoming_events
+    assert [event.event_id for event in snapshot.upcoming_events] == ["fomc:2026-05-06"]
 
 
 def test_macro_service_uses_frequency_aware_yoy_lag_for_quarterly_series(monkeypatch):

@@ -65,6 +65,9 @@ describe("macro store orchestration", () => {
       if (url.includes("/macro/events")) {
         return Promise.resolve(ok(events));
       }
+      if (url.includes("/macro/series/")) {
+        return Promise.resolve(ok(makeHistory()));
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
 
@@ -91,9 +94,10 @@ describe("macro store orchestration", () => {
     expect(get(macroDivergences)?.divergences[0]?.theme).toBe("inflation");
     expect(get(macroEvents)?.events[0]?.region).toBe("Global");
 
-    const firstSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
-    const secondSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body ?? "{}"));
-    const thirdSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[6]?.[1]?.body ?? "{}"));
+    const snapshotPayloads = snapshotBodies(fetchMock);
+    const firstSnapshotPayload = snapshotPayloads[0] ?? {};
+    const secondSnapshotPayload = snapshotPayloads[1] ?? {};
+    const thirdSnapshotPayload = snapshotPayloads[2] ?? {};
     expect(firstSnapshotPayload).toMatchObject({
       region: "Global",
       timeframe: "6M",
@@ -146,6 +150,9 @@ describe("macro store orchestration", () => {
       if (url.includes("/macro/events")) {
         return Promise.resolve(ok(events));
       }
+      if (url.includes("/macro/series/")) {
+        return Promise.resolve(ok(makeHistory()));
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
 
@@ -168,8 +175,9 @@ describe("macro store orchestration", () => {
       comparisonRegion: "US"
     });
 
-    const firstSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
-    const secondSnapshotPayload = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body ?? "{}"));
+    const snapshotPayloads = snapshotBodies(fetchMock);
+    const firstSnapshotPayload = snapshotPayloads[0] ?? {};
+    const secondSnapshotPayload = snapshotPayloads[1] ?? {};
     expect(firstSnapshotPayload).toMatchObject({
       region: "EU",
       timeframe: "1Y",
@@ -232,6 +240,9 @@ describe("macro store orchestration", () => {
       if (url.includes("/macro/events")) {
         return Promise.resolve(ok(events));
       }
+      if (url.includes("/macro/series/")) {
+        return Promise.resolve(ok(makeHistory()));
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
 
@@ -242,10 +253,20 @@ describe("macro store orchestration", () => {
       loadMacroWorkspace({ region: "US", timeframe: "1Y", theme: "policy" })
     ]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(callsFor(fetchMock, "/macro/snapshot")).toHaveLength(1);
+    expect(callsFor(fetchMock, "/macro/divergences")).toHaveLength(1);
+    expect(callsFor(fetchMock, "/macro/events")).toHaveLength(1);
     expect(get(macroSnapshot)?.timeframe).toBe("1Y");
   });
 });
+
+function callsFor(fetchMock: ReturnType<typeof vi.fn>, segment: string) {
+  return fetchMock.mock.calls.filter(([input]) => String(input).includes(segment));
+}
+
+function snapshotBodies(fetchMock: ReturnType<typeof vi.fn>) {
+  return callsFor(fetchMock, "/macro/snapshot").map(([, init]) => JSON.parse(String(init?.body ?? "{}")));
+}
 
 function makeSnapshot(): MacroSnapshot {
   return {
