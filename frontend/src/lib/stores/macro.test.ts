@@ -276,7 +276,7 @@ function makeSnapshot(): MacroSnapshot {
     comparison_region: null,
     available_regions: ["US", "EU", "Global"],
     available_timeframes: ["1M", "3M", "6M", "1Y"],
-    available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],
+    available_themes: ["all", "growth", "inflation", "policy", "recession_risk", "geopolitics", "risk_appetite"],
     snapshot_cards: [
       {
         card_id: "inflation",
@@ -342,6 +342,14 @@ function makeDivergences(): MacroDivergenceListResponse {
         comparison_score: null,
         score_gap: null,
         score_gap_display: null,
+        agreement_score: 1.7,
+        bias_score: 0.9,
+        agreement_count: 3,
+        disagreement_count: 1,
+        neutral_count: 0,
+        lead_metric_label: "Headline CPI",
+        conflict_metric_label: "Broad Dollar Index",
+        cluster_direction: "inflation-firming",
       }
     ]
   };

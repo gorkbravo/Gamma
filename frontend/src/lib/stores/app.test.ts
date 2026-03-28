@@ -754,7 +754,7 @@ describe("app store orchestration", () => {
       comparison_region: null,
       available_regions: ["US", "EU", "Global"],
       available_timeframes: ["1M", "3M", "6M", "1Y"],
-      available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],
+      available_themes: ["all", "growth", "inflation", "policy", "recession_risk", "geopolitics", "risk_appetite"],
       snapshot_cards: [],
       rates_policy: null,
       cross_asset: [],

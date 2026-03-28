@@ -30,21 +30,23 @@
     inflation: "Inflation",
     policy: "Policy",
     recession_risk: "Recession Risk",
+    geopolitics: "Geopolitics",
+    risk_appetite: "Risk Appetite",
   };
   const regionModeSeries: Record<MacroContextState["region"], Record<MacroMode, string[]>> = {
     US: {
       snapshot: [],
-      cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
+      cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas", "global-oil-wti", "global-gold", "global-copper"],
       rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
     },
     EU: {
       snapshot: [],
-      cross_asset: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy"],
+      cross_asset: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy", "global-oil-wti", "global-gold", "global-copper"],
       rates_policy: ["eu-policy-rate", "eu-3m-rate", "eu-10y-yield", "eu-hicp-yoy", "eu-eurusd"],
     },
     Global: {
       snapshot: [],
-      cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
+      cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas", "global-oil-wti", "global-gold", "global-copper"],
       rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
     },
   };
@@ -122,6 +124,10 @@
   function comparisonText(metric: { comparison_region: string | null; comparison_display_value: string | null; gap_display: string | null }) {
     if (!metric.comparison_region || !metric.comparison_display_value) return null;
     return `${metric.comparison_region} ${metric.comparison_display_value}${metric.gap_display ? ` | gap ${metric.gap_display}` : ""}`;
+  }
+
+  function scoreText(value: number | null | undefined) {
+    return value == null ? "N/A" : value.toFixed(1);
   }
 
   function historyKey(
@@ -621,6 +627,24 @@
                   <span class="tag agreement">{card.agreement_label}</span>
                 </div>
                 <p class="card-subtitle">{card.summary}</p>
+                <div class="stat-strip">
+                  <span class="stat-chip">Agreement {scoreText(card.agreement_score)}</span>
+                  <span class="stat-chip">Divergence {scoreText(card.divergence_score)}</span>
+                  <span class="stat-chip">Aligned {card.agreement_count}/{card.metrics.length}</span>
+                  {#if card.cluster_direction}
+                    <span class="stat-chip">{card.cluster_direction}</span>
+                  {/if}
+                </div>
+                {#if card.lead_metric_label || card.conflict_metric_label}
+                  <p class="mini-detail">
+                    {#if card.lead_metric_label}
+                      Lead: {card.lead_metric_label}
+                    {/if}
+                    {#if card.conflict_metric_label}
+                      {card.lead_metric_label ? " | " : ""}Conflict: {card.conflict_metric_label}
+                    {/if}
+                  </p>
+                {/if}
                 {#if card.comparison_summary}
                   <p class="comparison-summary">{card.comparison_summary}</p>
                 {/if}
@@ -662,6 +686,13 @@
                   <span class="score-badge {row.label}">{row.score.toFixed(1)}</span>
                 </div>
                 <span class="list-detail">{row.summary}</span>
+                <div class="stat-strip compact">
+                  <span class="stat-chip">Agreement {scoreText(row.agreement_score)}</span>
+                  <span class="stat-chip">Aligned {row.agreement_count}/{row.metrics.length}</span>
+                  {#if row.cluster_direction}
+                    <span class="stat-chip">{row.cluster_direction}</span>
+                  {/if}
+                </div>
               </div>
             {/each}
           </div>
@@ -708,6 +739,33 @@
 
   .cross-card {
     gap: 0.45rem;
+  }
+
+  .stat-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .stat-strip.compact {
+    margin-top: 0.35rem;
+  }
+
+  .stat-chip {
+    border: 1px solid rgba(122, 166, 200, 0.18);
+    background: rgba(122, 166, 200, 0.05);
+    color: var(--text-2);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    padding: 0.18rem 0.42rem;
+    text-transform: uppercase;
+  }
+
+  .mini-detail {
+    color: var(--text-2);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    margin: 0;
   }
 
   /* ── Header block ── */

@@ -218,6 +218,7 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
         "Policy Context",
         "Curve Shape",
         "Real Yields / Breakevens",
+        "Commodity Context",
     }
     assert snapshot.rates_policy is not None
     assert len(snapshot.rates_policy.curve_nodes) == 5
@@ -231,9 +232,10 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert slope_history.points
     assert all(point.transformation_note == slope_history.transformation_note for point in slope_history.points)
     assert divergences
-    assert divergences[0].theme == "inflation"
     assert divergences[0].score >= divergences[-1].score
     assert all(row.transformation_note is not None for row in divergences)
+    assert any(row.theme == "inflation" for row in divergences)
+    assert any(row.theme == "geopolitics" for row in divergences)
 
 
 def test_macro_service_applies_active_timeframe_to_snapshot_cross_asset_and_divergence_metrics(monkeypatch):
@@ -254,9 +256,9 @@ def test_macro_service_applies_active_timeframe_to_snapshot_cross_asset_and_dive
 
     inflation_1m = next(row for row in snapshot_1m.cross_asset if row.theme == "inflation")
     inflation_1y = next(row for row in snapshot_1y.cross_asset if row.theme == "inflation")
-    dollar_1m = next(metric for metric in inflation_1m.metrics if metric.series_id == "us-dollar-broad")
-    dollar_1y = next(metric for metric in inflation_1y.metrics if metric.series_id == "us-dollar-broad")
-    assert dollar_1m.delta_value != dollar_1y.delta_value
+    oil_1m = next(metric for metric in inflation_1m.metrics if metric.series_id == "global-oil-wti")
+    oil_1y = next(metric for metric in inflation_1y.metrics if metric.series_id == "global-oil-wti")
+    assert oil_1m.delta_value != oil_1y.delta_value
 
     divergence_1m = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1M", theme="inflation"))
     divergence_1y = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1Y", theme="inflation"))
@@ -399,7 +401,8 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
 
         assert divergence_response.status_code == 200
         divergence_payload = divergence_response.json()
-        assert divergence_payload["divergences"][0]["theme"] == "inflation"
+        assert divergence_payload["divergences"]
+        assert divergence_payload["divergences"][0]["score"] >= divergence_payload["divergences"][-1]["score"]
         assert divergence_payload["divergences"][0]["transformation_note"] is not None
 
         assert events_response.status_code == 200
@@ -556,6 +559,10 @@ def _build_series_map() -> dict[str, list[MacroSeriesPoint]]:
         "UNRATE": _daily_points([150, 60, 0], [4.20, 4.15, 4.10], provider_series_id="UNRATE"),
         "DTWEXBGS": _daily_points([400, 140, 60, 30, 0], [114.0, 118.0, 119.5, 121.0, 124.0], provider_series_id="DTWEXBGS"),
         "BAMLH0A0HYM2": _daily_points([400, 140, 60, 30, 0], [3.20, 3.70, 3.75, 3.90, 4.40], provider_series_id="BAMLH0A0HYM2"),
+        "DCOILWTICO": _daily_points([400, 140, 60, 30, 0], [82.0, 78.0, 73.0, 70.0, 76.0], provider_series_id="DCOILWTICO"),
+        "DHHNGSP": _daily_points([400, 140, 60, 30, 0], [2.70, 2.45, 2.15, 1.95, 2.40], provider_series_id="DHHNGSP"),
+        "GOLDAMGBD228NLBM": _daily_points([400, 140, 60, 30, 0], [1885.0, 1940.0, 2010.0, 2075.0, 2140.0], provider_series_id="GOLDAMGBD228NLBM"),
+        "PCOPPUSDM": _daily_points([400, 140, 60, 30, 0], [4.05, 4.18, 4.33, 4.21, 4.36], provider_series_id="PCOPPUSDM"),
         "CPIAUCSL": _periodic_points(18, step_days=30, start_value=100.0, increment=1.0, provider_series_id="CPIAUCSL"),
         "CPILFESL": _periodic_points(18, step_days=30, start_value=101.0, increment=0.8, provider_series_id="CPILFESL"),
         "GDPC1": _periodic_points(18, step_days=90, start_value=19_000.0, increment=120.0, provider_series_id="GDPC1"),

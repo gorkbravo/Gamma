@@ -167,9 +167,9 @@ const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = ["fx-eurusd", "fx-gbpusd", "fx-usdjpy"] as const;
 const MACRO_CROSS_ASSET_SERIES: Record<MacroContextState["region"], readonly string[]> = {
-  US: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
-  EU: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy"],
-  Global: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"]
+  US: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas", "global-oil-wti", "global-gold", "global-copper"],
+  EU: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy", "global-oil-wti", "global-gold", "global-copper"],
+  Global: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas", "global-oil-wti", "global-gold", "global-copper"]
 };
 const MACRO_RATES_POLICY_SERIES: Record<MacroContextState["region"], readonly string[]> = {
   US: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],

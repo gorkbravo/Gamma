@@ -115,6 +115,14 @@ class MacroDivergenceRecord:
     comparison_score: float | None = None
     score_gap: float | None = None
     score_gap_display: str | None = None
+    agreement_score: float | None = None
+    bias_score: float | None = None
+    agreement_count: int = 0
+    disagreement_count: int = 0
+    neutral_count: int = 0
+    lead_metric_label: str | None = None
+    conflict_metric_label: str | None = None
+    cluster_direction: str | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +138,15 @@ class MacroThemeComparison:
     transformation_note: str | None = None
     comparison_region: str | None = None
     comparison_summary: str | None = None
+    divergence_score: float | None = None
+    agreement_score: float | None = None
+    bias_score: float | None = None
+    agreement_count: int = 0
+    disagreement_count: int = 0
+    neutral_count: int = 0
+    lead_metric_label: str | None = None
+    conflict_metric_label: str | None = None
+    cluster_direction: str | None = None
 
 
 @dataclass(frozen=True)

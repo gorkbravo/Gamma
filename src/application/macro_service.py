@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from statistics import fmean, pstdev
 from typing import Any
 
 from src.models.macro import (
@@ -149,6 +150,54 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
         "history_days": 540,
         "ttl_hours": 24,
         "comparison_key": "credit_proxy",
+    },
+    "global-oil-wti": {
+        "kind": "raw",
+        "region": "Global",
+        "provider_series_id": "DCOILWTICO",
+        "title": "WTI Crude Oil",
+        "unit": "usd",
+        "frequency": "daily",
+        "theme": "geopolitics",
+        "mode_tags": ["snapshot", "cross_asset"],
+        "history_days": 540,
+        "ttl_hours": 24,
+    },
+    "global-natural-gas": {
+        "kind": "raw",
+        "region": "Global",
+        "provider_series_id": "DHHNGSP",
+        "title": "Henry Hub Natural Gas",
+        "unit": "usd",
+        "frequency": "daily",
+        "theme": "inflation",
+        "mode_tags": ["snapshot", "cross_asset"],
+        "history_days": 540,
+        "ttl_hours": 24,
+    },
+    "global-gold": {
+        "kind": "raw",
+        "region": "Global",
+        "provider_series_id": "GOLDAMGBD228NLBM",
+        "title": "Gold Spot",
+        "unit": "usd",
+        "frequency": "daily",
+        "theme": "risk_appetite",
+        "mode_tags": ["snapshot", "cross_asset"],
+        "history_days": 540,
+        "ttl_hours": 24,
+    },
+    "global-copper": {
+        "kind": "raw",
+        "region": "Global",
+        "provider_series_id": "PCOPPUSDM",
+        "title": "Copper Spot",
+        "unit": "usd",
+        "frequency": "monthly",
+        "theme": "growth",
+        "mode_tags": ["snapshot", "cross_asset"],
+        "history_days": 1200,
+        "ttl_hours": 72,
     },
     "eu-policy-rate": {
         "kind": "raw",
@@ -500,37 +549,45 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 TIMEFRAME_DAYS = {"1M": 31, "3M": 93, "6M": 186, "1Y": 370}
-THEME_ORDER = ["all", "growth", "inflation", "policy", "recession_risk"]
+THEME_ORDER = ["all", "growth", "inflation", "policy", "recession_risk", "geopolitics", "risk_appetite"]
 REGION_ORDER = ["US", "EU", "Global"]
 PRIMARY_COMPARISON_REGIONS = {"US", "EU"}
 
 REGION_THEME_SERIES = {
     "US": {
-        "growth": ["us-real-gdp-yoy", "us-payrolls-yoy", "us-unemployment-rate", "us-2s10s-slope"],
-        "inflation": ["us-cpi-yoy", "us-core-cpi-yoy", "us-5y-breakeven", "us-10y-breakeven", "us-dollar-broad"],
+        "growth": ["us-real-gdp-yoy", "us-payrolls-yoy", "us-unemployment-rate", "us-2s10s-slope", "global-copper"],
+        "inflation": ["us-cpi-yoy", "us-core-cpi-yoy", "us-5y-breakeven", "us-10y-breakeven", "global-oil-wti", "global-natural-gas"],
         "policy": ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-dollar-broad", "us-real-10y-yield"],
-        "recession_risk": ["us-2s10s-slope", "us-hy-oas", "us-unemployment-rate", "us-dollar-broad"],
+        "recession_risk": ["us-2s10s-slope", "us-hy-oas", "us-unemployment-rate", "us-dollar-broad", "global-gold"],
+        "geopolitics": ["global-oil-wti", "global-gold", "us-dollar-broad", "us-hy-oas"],
+        "risk_appetite": ["us-hy-oas", "global-copper", "global-gold", "us-dollar-broad"],
     },
     "EU": {
-        "growth": ["eu-industrial-production-yoy", "eu-unemployment-rate", "eu-3m10y-slope"],
-        "inflation": ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield"],
+        "growth": ["eu-industrial-production-yoy", "eu-unemployment-rate", "eu-3m10y-slope", "global-copper"],
+        "inflation": ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "global-oil-wti", "global-natural-gas"],
         "policy": ["eu-policy-rate", "eu-3m-rate", "eu-10y-yield", "eu-eurusd"],
-        "recession_risk": ["eu-3m10y-slope", "eu-unemployment-rate", "eu-eurusd"],
+        "recession_risk": ["eu-3m10y-slope", "eu-unemployment-rate", "eu-eurusd", "global-gold"],
+        "geopolitics": ["global-oil-wti", "global-gold", "eu-eurusd", "eu-10y-yield"],
+        "risk_appetite": ["global-copper", "global-gold", "eu-eurusd", "eu-10y-yield"],
     },
 }
 
 REGION_THEME_FACTORS = {
     "US": {
-        "growth": {"us-real-gdp-yoy": 1.0, "us-payrolls-yoy": 1.0, "us-unemployment-rate": -1.0, "us-2s10s-slope": 0.6},
-        "inflation": {"us-cpi-yoy": 1.0, "us-core-cpi-yoy": 1.0, "us-5y-breakeven": 0.9, "us-10y-breakeven": 0.8, "us-dollar-broad": -0.5},
+        "growth": {"us-real-gdp-yoy": 1.0, "us-payrolls-yoy": 1.0, "us-unemployment-rate": -1.0, "us-2s10s-slope": 0.6, "global-copper": 0.8},
+        "inflation": {"us-cpi-yoy": 1.0, "us-core-cpi-yoy": 1.0, "us-5y-breakeven": 0.9, "us-10y-breakeven": 0.8, "global-oil-wti": 0.7, "global-natural-gas": 0.6},
         "policy": {"us-fed-funds": 1.0, "us-2y-yield": 1.0, "us-10y-yield": 0.4, "us-dollar-broad": 0.4, "us-real-10y-yield": 0.6},
-        "recession_risk": {"us-2s10s-slope": -0.8, "us-hy-oas": 1.0, "us-unemployment-rate": 0.8, "us-dollar-broad": 0.2},
+        "recession_risk": {"us-2s10s-slope": -0.8, "us-hy-oas": 1.0, "us-unemployment-rate": 0.8, "us-dollar-broad": 0.2, "global-gold": 0.5},
+        "geopolitics": {"global-oil-wti": 1.0, "global-gold": 0.8, "us-dollar-broad": 0.5, "us-hy-oas": 0.6},
+        "risk_appetite": {"us-hy-oas": -1.0, "global-copper": 0.9, "global-gold": -0.8, "us-dollar-broad": -0.5},
     },
     "EU": {
-        "growth": {"eu-industrial-production-yoy": 1.0, "eu-unemployment-rate": -0.9, "eu-3m10y-slope": 0.5},
-        "inflation": {"eu-hicp-yoy": 1.0, "eu-eurusd": -0.4, "eu-10y-yield": 0.3},
+        "growth": {"eu-industrial-production-yoy": 1.0, "eu-unemployment-rate": -0.9, "eu-3m10y-slope": 0.5, "global-copper": 0.8},
+        "inflation": {"eu-hicp-yoy": 1.0, "eu-eurusd": -0.4, "eu-10y-yield": 0.3, "global-oil-wti": 0.7, "global-natural-gas": 0.7},
         "policy": {"eu-policy-rate": 1.0, "eu-3m-rate": 0.9, "eu-10y-yield": 0.4, "eu-eurusd": -0.2},
-        "recession_risk": {"eu-3m10y-slope": -0.8, "eu-unemployment-rate": 0.8, "eu-eurusd": -0.2},
+        "recession_risk": {"eu-3m10y-slope": -0.8, "eu-unemployment-rate": 0.8, "eu-eurusd": -0.2, "global-gold": 0.5},
+        "geopolitics": {"global-oil-wti": 1.0, "global-gold": 0.8, "eu-eurusd": -0.3, "eu-10y-yield": 0.3},
+        "risk_appetite": {"global-copper": 0.9, "global-gold": -0.8, "eu-eurusd": 0.3, "eu-10y-yield": 0.2},
     },
 }
 
@@ -550,6 +607,10 @@ SIGNAL_SCALES = {
     "us-dollar-broad": 2.0,
     "us-hy-oas": 0.35,
     "us-2s10s-slope": 20.0,
+    "global-oil-wti": 4.0,
+    "global-natural-gas": 0.45,
+    "global-gold": 35.0,
+    "global-copper": 0.15,
     "eu-industrial-production-yoy": 1.0,
     "eu-unemployment-rate": 0.12,
     "eu-hicp-yoy": 0.25,
@@ -558,6 +619,31 @@ SIGNAL_SCALES = {
     "eu-10y-yield": 0.12,
     "eu-eurusd": 0.02,
     "eu-3m10y-slope": 20.0,
+}
+
+LEVEL_SIGNAL_CONFIG = {
+    "us-real-gdp-yoy": {"anchor": 2.0, "scale": 1.0},
+    "us-payrolls-yoy": {"anchor": 1.0, "scale": 0.75},
+    "us-unemployment-rate": {"anchor": 4.0, "scale": 0.35},
+    "us-cpi-yoy": {"anchor": 2.0, "scale": 0.75},
+    "us-core-cpi-yoy": {"anchor": 2.0, "scale": 0.6},
+    "us-fed-funds": {"anchor": 3.5, "scale": 0.75},
+    "us-2y-yield": {"anchor": 4.0, "scale": 0.75},
+    "us-real-10y-yield": {"anchor": 1.5, "scale": 0.5},
+    "us-5y-breakeven": {"anchor": 2.3, "scale": 0.3},
+    "us-10y-breakeven": {"anchor": 2.3, "scale": 0.3},
+    "us-hy-oas": {"anchor": 3.5, "scale": 0.6},
+    "us-2s10s-slope": {"anchor": 0.0, "scale": 40.0},
+    "eu-industrial-production-yoy": {"anchor": 1.0, "scale": 1.0},
+    "eu-unemployment-rate": {"anchor": 6.0, "scale": 0.4},
+    "eu-hicp-yoy": {"anchor": 2.0, "scale": 0.6},
+    "eu-policy-rate": {"anchor": 2.5, "scale": 0.5},
+    "eu-3m-rate": {"anchor": 2.5, "scale": 0.5},
+    "eu-3m10y-slope": {"anchor": 0.0, "scale": 35.0},
+    "global-oil-wti": {"anchor": 75.0, "scale": 10.0},
+    "global-natural-gas": {"anchor": 3.0, "scale": 0.8},
+    "global-gold": {"anchor": 2000.0, "scale": 120.0},
+    "global-copper": {"anchor": 4.2, "scale": 0.35},
 }
 
 REGION_SNAPSHOT_SERIES = {
@@ -577,6 +663,10 @@ REGION_SNAPSHOT_SERIES = {
         "us-10y-breakeven",
         "us-dollar-broad",
         "us-hy-oas",
+        "global-oil-wti",
+        "global-natural-gas",
+        "global-gold",
+        "global-copper",
     ],
     "EU": [
         "eu-industrial-production-yoy",
@@ -587,6 +677,10 @@ REGION_SNAPSHOT_SERIES = {
         "eu-10y-yield",
         "eu-3m10y-slope",
         "eu-eurusd",
+        "global-oil-wti",
+        "global-natural-gas",
+        "global-gold",
+        "global-copper",
     ],
 }
 
@@ -732,13 +826,17 @@ class MacroService:
         themes = [theme] if theme != "all" else [name for name in THEME_ORDER if name != "all"]
         rows: list[MacroDivergenceRecord] = []
         for theme_name in themes:
-            signal_rows = self._collect_signal_rows(data_region, theme_name, loaded_histories, timeframe=timeframe, comparison_region=comparison_region, comparison_histories=loaded_comparison_histories)
+            signal_rows = self._collect_signal_rows(
+                data_region,
+                theme_name,
+                loaded_histories,
+                timeframe=timeframe,
+                comparison_region=comparison_region,
+                comparison_histories=loaded_comparison_histories,
+            )
             if len(signal_rows) < 2:
                 continue
-            strongest_positive = max(signal_rows, key=lambda item: item[1])
-            strongest_negative = min(signal_rows, key=lambda item: item[1])
-            score = round(strongest_positive[1] - strongest_negative[1], 2)
-            label = "high" if score >= 2.4 else "moderate" if score >= 1.2 else "low"
+            analysis = self._analyze_theme_signals(theme_name, signal_rows)
             comparison_score = None
             score_gap = None
             score_gap_display = None
@@ -752,12 +850,11 @@ class MacroService:
                     comparison_histories={},
                 )
                 if len(comparison_signal_rows) >= 2:
-                    comparison_positive = max(comparison_signal_rows, key=lambda item: item[1])
-                    comparison_negative = min(comparison_signal_rows, key=lambda item: item[1])
-                    comparison_score = round(comparison_positive[1] - comparison_negative[1], 2)
-                    score_gap = round(score - comparison_score, 2)
+                    comparison_analysis = self._analyze_theme_signals(theme_name, comparison_signal_rows)
+                    comparison_score = comparison_analysis["divergence_score"]
+                    score_gap = round(analysis["divergence_score"] - comparison_score, 2)
                     score_gap_display = f"{score_gap:+.2f}"
-            summary = f"{strongest_positive[0].label} is reinforcing the theme while {strongest_negative[0].label} is leaning the other way."
+            summary = analysis["summary"]
             if comparison_region is not None and comparison_score is not None:
                 summary = f"{summary} Divergence is {score_gap_display} versus {comparison_region} on the same theme."
             rows.append(
@@ -765,20 +862,28 @@ class MacroService:
                     divergence_id=f"{region.lower()}:{theme_name}:divergence",
                     theme=theme_name,
                     region=region,
-                    headline=f"{self._title_theme(theme_name)} divergence score {score:.2f}",
+                    headline=f"{self._title_theme(theme_name)} divergence score {analysis['divergence_score']:.2f}",
                     summary=summary,
-                    score=score,
-                    label=label,
-                    metrics=[row for row, _ in signal_rows],
-                    series_ids=[row.series_id for row, _ in signal_rows if row.series_id],
+                    score=analysis["divergence_score"],
+                    label=analysis["divergence_label"],
+                    metrics=[row for row, _ in analysis["ordered_rows"]],
+                    series_ids=[row.series_id for row, _ in analysis["ordered_rows"] if row.series_id],
                     source_provider="fred",
                     retrieved_at=max((row.retrieved_at for row, _ in signal_rows if row.retrieved_at is not None), default=now_utc()),
                     origin="macro_service.divergences",
-                    transformation_note="Divergence scores compare directional changes across curated theme proxies, scaled by series-specific thresholds, theme orientation, and optional cross-region comparison overlays.",
+                    transformation_note="Divergence scores compare directional changes, level-aware regime bias, and agreement dispersion across curated theme proxies, with optional cross-region comparison overlays.",
                     comparison_region=comparison_region,
                     comparison_score=comparison_score,
                     score_gap=score_gap,
                     score_gap_display=score_gap_display,
+                    agreement_score=analysis["agreement_score"],
+                    bias_score=analysis["bias_score"],
+                    agreement_count=analysis["agreement_count"],
+                    disagreement_count=analysis["disagreement_count"],
+                    neutral_count=analysis["neutral_count"],
+                    lead_metric_label=analysis["lead_metric_label"],
+                    conflict_metric_label=analysis["conflict_metric_label"],
+                    cluster_direction=analysis["cluster_direction"],
                 )
             )
         rows.sort(key=lambda row: (-row.score, row.theme))
@@ -944,19 +1049,21 @@ class MacroService:
         data_region = self._data_region(region)
         if data_region == "EU":
             cards = [
-                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Activity and labor backdrop", summary="Industrial output, unemployment, and curve slope frame the EU growth picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("eu-industrial-production-yoy"), histories.get("eu-unemployment-rate"), histories.get("eu-3m10y-slope")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="HICP versus market signals", summary="Headline HICP alongside FX and long rates shows whether markets are absorbing the inflation narrative.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("eu-hicp-yoy"), histories.get("eu-eurusd"), histories.get("eu-10y-yield")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Activity, labor, and cyclicals", summary="Industrial output, unemployment, copper, and curve slope frame the EU growth picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("eu-industrial-production-yoy"), histories.get("eu-unemployment-rate"), histories.get("global-copper"), histories.get("eu-3m10y-slope")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="HICP versus market signals", summary="Headline HICP sits alongside energy and market rates to show whether inflation pressure is broadening or fading.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("eu-hicp-yoy"), histories.get("global-oil-wti"), histories.get("global-natural-gas"), histories.get("eu-10y-yield")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
                 self._build_metric_card(card_id="policy", title="Policy Context", subtitle="ECB rate and front-end pricing", summary="ECB and money-market rates lead; the long end confirms direction.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("eu-policy-rate"), histories.get("eu-3m-rate"), histories.get("eu-10y-yield")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
                 self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="3M–10Y slope", summary="Tracks the 3M-to-10Y slope as the primary EU curve signal.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("eu-3m10y-slope"), histories.get("eu-10y-yield")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="fx", title="EUR / USD Proxy", subtitle="Currency context", summary="EUR/USD often carries the policy and risk signal when deeper EU tooling is limited.", mode_target="cross_asset", target_theme="policy", metric_histories=[histories.get("eu-eurusd")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="fx", title="EUR / USD Proxy", subtitle="Currency context", summary="EUR/USD remains the cleanest liquid macro proxy for the EU first pass.", mode_target="cross_asset", target_theme="policy", metric_histories=[histories.get("eu-eurusd")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="commodities", title="Commodity Context", subtitle="Energy and hard-asset overlays", summary="Oil, gas, gold, and copper add the macro-sensitive commodity backdrop without forcing a separate commodities mode.", mode_target="cross_asset", target_theme="geopolitics", metric_histories=[histories.get("global-oil-wti"), histories.get("global-natural-gas"), histories.get("global-gold"), histories.get("global-copper")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
             ]
         else:
             cards = [
-                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Labor and activity backdrop", summary="GDP, payrolls, and unemployment frame the real-economy picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("us-real-gdp-yoy"), histories.get("us-payrolls-yoy"), histories.get("us-unemployment-rate")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="Realized vs. market-implied", summary="CPI versus breakevens shows whether markets lead or lag the data.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("us-cpi-yoy"), histories.get("us-core-cpi-yoy"), histories.get("us-5y-breakeven")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Labor, activity, and cyclicals", summary="GDP, payrolls, unemployment, and copper frame the real-economy picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("us-real-gdp-yoy"), histories.get("us-payrolls-yoy"), histories.get("us-unemployment-rate"), histories.get("global-copper")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="Realized, implied, and energy-sensitive", summary="CPI, breakevens, and energy inputs show whether inflation pressure is broadening or cooling.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("us-cpi-yoy"), histories.get("us-core-cpi-yoy"), histories.get("us-5y-breakeven"), histories.get("global-oil-wti"), histories.get("global-natural-gas")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
                 self._build_metric_card(card_id="policy", title="Policy Context", subtitle="Front-end pricing and stance", summary="Front-end rates lead the policy read and frame how restrictive conditions remain.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-fed-funds"), histories.get("us-2y-yield"), histories.get("us-10y-yield")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
                 self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="Treasury slope direction", summary="Steepening or re-inverting against the prior reference window.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-2s10s-slope"), histories.get("us-10y-yield"), histories.get("us-30y-yield")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
                 self._build_metric_card(card_id="real-yields", title="Real Yields / Breakevens", subtitle="Real rates vs. inflation comp.", summary="Splits a rates move into real tightening and inflation compensation.", mode_target="rates_policy", target_theme="inflation", metric_histories=[histories.get("us-real-10y-yield"), histories.get("us-5y-breakeven"), histories.get("us-10y-breakeven")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="commodities", title="Commodity Context", subtitle="Energy and hard-asset overlays", summary="Oil, gas, gold, and copper add the macro-sensitive commodity backdrop without forcing a separate commodities mode.", mode_target="cross_asset", target_theme="geopolitics", metric_histories=[histories.get("global-oil-wti"), histories.get("global-natural-gas"), histories.get("global-gold"), histories.get("global-copper")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
             ]
             for card_id, title, subtitle, summary, series_id, mode_target, theme_name in (
                 ("dollar", "Dollar / FX Proxy", "Broad dollar positioning", "Firmer dollar confirms tighter policy and global stress; softer dollar signals the opposite.", "us-dollar-broad", "cross_asset", "policy"),
@@ -1036,13 +1143,13 @@ class MacroService:
         divergence_map = {row.theme: row for row in divergences}
         rows: list[MacroThemeComparison] = []
         for theme in [name for name in THEME_ORDER if name != "all"]:
-            metrics = [self._metric_from_history(histories[series_id], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories) for series_id in REGION_THEME_SERIES.get(data_region, {}).get(theme, []) if series_id in histories]
+            divergence = divergence_map.get(theme)
+            metrics = divergence.metrics if divergence is not None else [self._metric_from_history(histories[series_id], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories) for series_id in REGION_THEME_SERIES.get(data_region, {}).get(theme, []) if series_id in histories]
             if metrics:
-                divergence = divergence_map.get(theme)
                 comparison_summary = None
                 if divergence is not None and divergence.comparison_region is not None and divergence.comparison_score is not None:
                     comparison_summary = f"{divergence.comparison_region} divergence score {divergence.comparison_score:.2f} ({divergence.score_gap_display} vs {region})."
-                rows.append(MacroThemeComparison(theme=theme, headline=f"{self._title_theme(theme)} signals", summary=divergence.summary if divergence is not None else "Theme coverage is available, but disagreement is currently muted.", agreement_label=divergence.label if divergence is not None else "low", metrics=metrics, source_provider="fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.cross_asset", transformation_note="Cross-asset theme blocks line up curated region-specific series so the user can compare whether markets agree on a macro narrative, with optional cross-region overlays where concept matches exist.", comparison_region=comparison_region, comparison_summary=comparison_summary))
+                rows.append(MacroThemeComparison(theme=theme, headline=f"{self._title_theme(theme)} signals", summary=divergence.summary if divergence is not None else "Theme coverage is available, but disagreement is currently muted.", agreement_label=self._agreement_label(divergence.agreement_score) if divergence is not None else "low", metrics=metrics, source_provider="fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.cross_asset", transformation_note="Cross-asset theme blocks line up curated region-specific series so the user can compare whether markets agree on a macro narrative, with level-aware bias, agreement counts, and optional cross-region overlays.", comparison_region=comparison_region, comparison_summary=comparison_summary, divergence_score=divergence.score if divergence is not None else None, agreement_score=divergence.agreement_score if divergence is not None else None, bias_score=divergence.bias_score if divergence is not None else None, agreement_count=divergence.agreement_count if divergence is not None else 0, disagreement_count=divergence.disagreement_count if divergence is not None else 0, neutral_count=divergence.neutral_count if divergence is not None else 0, lead_metric_label=divergence.lead_metric_label if divergence is not None else None, conflict_metric_label=divergence.conflict_metric_label if divergence is not None else None, cluster_direction=divergence.cluster_direction if divergence is not None else None))
         return rows
 
     def _load_curve_nodes(self, *, region: str, histories: dict[str, MacroSeriesHistory], force_refresh: bool, timeframe: str) -> tuple[list[MacroCurveNode], datetime]:
@@ -1081,10 +1188,98 @@ class MacroService:
             metric = self._metric_from_history(history, timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories)
             if metric.delta_value is None:
                 continue
-            factor = REGION_THEME_FACTORS.get(region, {}).get(theme_name, {}).get(series_id, 1.0)
-            scale = SIGNAL_SCALES.get(series_id, 1.0)
-            signal_rows.append((metric, max(min((metric.delta_value / scale) * factor, 3.0), -3.0)))
+            signal_rows.append((metric, self._signal_score(region, theme_name, metric)))
         return signal_rows
+
+    def _signal_score(self, region: str, theme_name: str, metric: MacroMetricRecord) -> float:
+        series_id = metric.series_id or metric.metric_id
+        factor = REGION_THEME_FACTORS.get(region, {}).get(theme_name, {}).get(series_id, 1.0)
+        scale = SIGNAL_SCALES.get(series_id, 1.0)
+        delta_component = ((metric.delta_value or 0.0) / scale) * factor
+        level_component = 0.0
+        if metric.value is not None:
+            level_component = self._level_signal(series_id, metric.value) * factor * 0.35
+        return max(min(delta_component + level_component, 4.0), -4.0)
+
+    def _level_signal(self, series_id: str, value: float) -> float:
+        config = LEVEL_SIGNAL_CONFIG.get(series_id)
+        if config is None:
+            return 0.0
+        anchor = float(config["anchor"])
+        scale = max(float(config["scale"]), 0.0001)
+        return max(min((value - anchor) / scale, 1.5), -1.5)
+
+    def _analyze_theme_signals(self, theme_name: str, signal_rows: list[tuple[MacroMetricRecord, float]]) -> dict[str, Any]:
+        ordered_rows = sorted(signal_rows, key=lambda item: abs(item[1]), reverse=True)
+        scores = [score for _, score in ordered_rows]
+        bias_score = round(fmean(scores), 2) if scores else 0.0
+        dispersion = pstdev(scores) if len(scores) > 1 else 0.0
+        neutral_threshold = 0.35
+        if bias_score > neutral_threshold:
+            agreement_count = sum(1 for score in scores if score > neutral_threshold)
+            disagreement_count = sum(1 for score in scores if score < -neutral_threshold)
+        elif bias_score < -neutral_threshold:
+            agreement_count = sum(1 for score in scores if score < -neutral_threshold)
+            disagreement_count = sum(1 for score in scores if score > neutral_threshold)
+        else:
+            agreement_count = sum(1 for score in scores if abs(score) <= neutral_threshold)
+            disagreement_count = sum(1 for score in scores if abs(score) > neutral_threshold)
+        neutral_count = max(len(scores) - agreement_count - disagreement_count, 0)
+        lead_metric = ordered_rows[0][0]
+        conflict_candidates = [item for item in ordered_rows if abs(item[1]) > neutral_threshold and ((bias_score > neutral_threshold and item[1] < -neutral_threshold) or (bias_score < -neutral_threshold and item[1] > neutral_threshold))]
+        conflict_metric = conflict_candidates[0][0] if conflict_candidates else (ordered_rows[-1][0] if ordered_rows else None)
+        agreement_score = round(max(0.0, min(4.0, ((agreement_count + (0.5 * neutral_count)) / max(len(scores), 1)) * 3.0 - (min(dispersion, 2.5) * 0.4) + (min(abs(bias_score), 1.5) * 0.5))), 2)
+        divergence_score = round((max(scores) - min(scores)) + (dispersion * 0.6) + ((disagreement_count / max(len(scores), 1)) * 0.75), 2)
+        cluster_direction = self._cluster_direction(theme_name, bias_score)
+        if disagreement_count == 0 and agreement_count >= max(2, len(scores) - 1):
+            summary = f"{agreement_count} of {len(scores)} signals are aligned in a {cluster_direction} cluster led by {lead_metric.label}."
+        elif disagreement_count > 0 and conflict_metric is not None:
+            summary = f"{agreement_count} of {len(scores)} signals are aligned in a {cluster_direction} backdrop, but {conflict_metric.label} is leaning the other way while {lead_metric.label} leads the move."
+        else:
+            summary = f"{lead_metric.label} is leading a {cluster_direction} read, but the theme still lacks a fully consistent cross-asset cluster."
+        return {
+            "ordered_rows": ordered_rows,
+            "bias_score": bias_score,
+            "agreement_score": agreement_score,
+            "agreement_count": agreement_count,
+            "disagreement_count": disagreement_count,
+            "neutral_count": neutral_count,
+            "lead_metric_label": lead_metric.label,
+            "conflict_metric_label": conflict_metric.label if conflict_metric is not None else None,
+            "cluster_direction": cluster_direction,
+            "divergence_score": divergence_score,
+            "divergence_label": "high" if divergence_score >= 3.0 else "moderate" if divergence_score >= 1.75 else "low",
+            "summary": summary,
+        }
+
+    @staticmethod
+    def _agreement_label(score: float | None) -> str:
+        if score is None:
+            return "low"
+        if score >= 2.6:
+            return "high"
+        if score >= 1.5:
+            return "moderate"
+        return "low"
+
+    @staticmethod
+    def _cluster_direction(theme_name: str, bias_score: float) -> str:
+        if abs(bias_score) <= 0.35:
+            return "mixed"
+        direction = bias_score > 0
+        if theme_name == "growth":
+            return "growth-firming" if direction else "growth-softening"
+        if theme_name == "inflation":
+            return "inflation-firming" if direction else "inflation-cooling"
+        if theme_name == "policy":
+            return "policy-tightening" if direction else "policy-easing"
+        if theme_name == "recession_risk":
+            return "stress-building" if direction else "stress-easing"
+        if theme_name == "geopolitics":
+            return "risk-rising" if direction else "risk-fading"
+        if theme_name == "risk_appetite":
+            return "risk-on" if direction else "risk-off"
+        return "mixed"
 
     def _metric_from_history(self, history: MacroSeriesHistory, *, timeframe: str, comparison_region: str | None = None, comparison_histories: dict[str, MacroSeriesHistory] | None = None) -> MacroMetricRecord:
         latest = history.points[-1] if history.points else None

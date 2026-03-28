@@ -5,7 +5,14 @@ export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | 
 export type MacroMode = "snapshot" | "cross_asset" | "rates_policy";
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
-export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";
+export type MacroTheme =
+  | "all"
+  | "growth"
+  | "inflation"
+  | "policy"
+  | "recession_risk"
+  | "geopolitics"
+  | "risk_appetite";
 
 export interface MacroContextState {
   mode: MacroMode;
@@ -553,6 +560,14 @@ export interface MacroDivergence {
   comparison_score: number | null;
   score_gap: number | null;
   score_gap_display: string | null;
+  agreement_score: number | null;
+  bias_score: number | null;
+  agreement_count: number;
+  disagreement_count: number;
+  neutral_count: number;
+  lead_metric_label: string | null;
+  conflict_metric_label: string | null;
+  cluster_direction: string | null;
 }
 
 export interface MacroThemeComparison {
@@ -567,6 +582,15 @@ export interface MacroThemeComparison {
   transformation_note: string | null;
   comparison_region: string | null;
   comparison_summary: string | null;
+  divergence_score: number | null;
+  agreement_score: number | null;
+  bias_score: number | null;
+  agreement_count: number;
+  disagreement_count: number;
+  neutral_count: number;
+  lead_metric_label: string | null;
+  conflict_metric_label: string | null;
+  cluster_direction: string | null;
 }
 
 export interface MacroRatesPolicySummary {
