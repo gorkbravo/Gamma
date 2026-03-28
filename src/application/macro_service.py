@@ -181,8 +181,8 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
     "global-gold": {
         "kind": "raw",
         "region": "Global",
-        "provider_series_id": "GOLDAMGBD228NLBM",
-        "title": "Gold Spot",
+        "provider_series_id": "NASDAQQGLDI",
+        "title": "Gold Price Index",
         "unit": "usd",
         "frequency": "daily",
         "theme": "risk_appetite",
