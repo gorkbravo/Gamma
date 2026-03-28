@@ -1,5 +1,8 @@
-import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(scriptDir, "..", "..");
 
 export function ensureCargoTargetDir(env, mode) {
   if (env.CARGO_TARGET_DIR) {
@@ -7,7 +10,7 @@ export function ensureCargoTargetDir(env, mode) {
   }
 
   const targetSuffix = mode === "build" ? "build" : mode === "check" ? "check" : "dev";
-  const targetDir = path.join(os.tmpdir(), `gamma-tauri-${targetSuffix}`);
+  const targetDir = path.join(repoRoot, "target", `gamma-tauri-${targetSuffix}`);
   env.CARGO_TARGET_DIR = targetDir;
   return targetDir;
 }

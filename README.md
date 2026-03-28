@@ -140,7 +140,7 @@ cd frontend
 npm run desktop:check
 ```
 
-`npm run desktop:check` sets `CARGO_TARGET_DIR` to `%TEMP%\gamma-tauri-check` unless you override it, so stale checked-out `frontend\src-tauri\target\` state does not affect the result. Plain `cargo check --manifest-path frontend\src-tauri\Cargo.toml` also works from this repo because `.cargo\config.toml` routes the default Cargo target directory to the repo-root `target\` tree instead of the stale checked-out Tauri target directories, but `npm run desktop:check` is the supported reproducible operator path.
+`npm run desktop:check` sets `CARGO_TARGET_DIR` to `target\gamma-tauri-check` unless you override it, so stale checked-out `frontend\src-tauri\target\` state does not affect the result and Windows dev launches do not depend on ephemeral `%TEMP%` cargo outputs. Plain `cargo check --manifest-path frontend\src-tauri\Cargo.toml` also works from this repo because `.cargo\config.toml` routes the default Cargo target directory to the repo-root `target\` tree instead of the stale checked-out Tauri target directories, but `npm run desktop:check` is the supported reproducible operator path.
 
 Additional desktop packaging validation:
 
@@ -149,7 +149,7 @@ cd frontend
 npm run tauri:build
 ```
 
-March 14, 2026 full-audit packaging result: passed and rebuilt `C:\Users\User\AppData\Local\Temp\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe`
+March 14, 2026 full-audit packaging result: passed and rebuilt `C:\Users\User\Desktop\Gamma\target\gamma-tauri-build\release\bundle\nsis\Gamma_0.1.0_x64-setup.exe`
 
 ## Packaging
 
@@ -161,7 +161,7 @@ npm run backend:smoke
 npm run tauri:build
 ```
 
-The installer output lands under `%TEMP%\gamma-tauri-build\release\bundle\nsis\` unless `CARGO_TARGET_DIR` is overridden.
+The installer output lands under `target\gamma-tauri-build\release\bundle\nsis\` unless `CARGO_TARGET_DIR` is overridden.
 
 ## Known Limitations
 
