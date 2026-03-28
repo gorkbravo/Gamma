@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import logging
 from statistics import fmean, pstdev
 from typing import Any
 
@@ -19,6 +20,8 @@ from src.models.macro import (
 )
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.utils.time import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 SERIES_REGISTRY: dict[str, dict[str, Any]] = {
@@ -721,14 +724,17 @@ class MacroService:
         theme = self._normalize_theme(request.theme)
         comparison_region = self._normalize_comparison(region, request.comparison_region)
         warnings = self._snapshot_warnings(region=region, requested_comparison=request.comparison_region, comparison_region=comparison_region)
+        if not getattr(getattr(self.fred_adapter, "client", None), "api_key", None):
+            warnings.append("FRED_API_KEY is not configured. Cached macro series can still render, but uncached public macro requests will fail until a key is set.")
         data_region = self._data_region(region)
-        histories = self._load_histories(self._snapshot_series_ids(data_region, theme), timeframe=timeframe, force_refresh=request.force_refresh)
+        histories = self._load_histories(self._snapshot_series_ids(data_region, theme), timeframe=timeframe, force_refresh=request.force_refresh, warnings=warnings)
         comparison_histories = self._load_comparison_histories(
             region=data_region,
             comparison_region=comparison_region,
             series_ids=list(histories),
             timeframe=timeframe,
             force_refresh=request.force_refresh,
+            warnings=warnings,
         )
         events = self.get_events(region=region, force_refresh=request.force_refresh)
         divergences = self.get_divergences(
@@ -892,10 +898,18 @@ class MacroService:
     def get_events(self, *, region: str = "US", force_refresh: bool = False) -> list[MacroEventRecord]:
         return self.events_adapter.list_events(region=self._normalize_region(region), as_of=now_utc(), force_refresh=force_refresh)
 
-    def _load_histories(self, series_ids: list[str], *, timeframe: str, force_refresh: bool) -> dict[str, MacroSeriesHistory]:
+    def _load_histories(self, series_ids: list[str], *, timeframe: str, force_refresh: bool, warnings: list[str] | None = None) -> dict[str, MacroSeriesHistory]:
         rows: dict[str, MacroSeriesHistory] = {}
         for series_id in series_ids:
-            history = self._load_history(series_id, timeframe=timeframe, force_refresh=force_refresh)
+            try:
+                history = self._load_history(series_id, timeframe=timeframe, force_refresh=force_refresh)
+            except Exception as exc:
+                logger.warning("Macro series load failed: series=%s timeframe=%s error=%s", series_id, timeframe, exc)
+                if warnings is not None:
+                    message = self._series_load_warning(series_id, exc)
+                    if message not in warnings:
+                        warnings.append(message)
+                continue
             if history is not None:
                 rows[series_id] = history
         return rows
@@ -908,6 +922,7 @@ class MacroService:
         series_ids: list[str],
         timeframe: str,
         force_refresh: bool,
+        warnings: list[str] | None = None,
     ) -> dict[str, MacroSeriesHistory]:
         if comparison_region is None:
             return {}
@@ -918,7 +933,7 @@ class MacroService:
                 counterpart_ids.append(counterpart)
         if not counterpart_ids:
             return {}
-        return self._load_histories(counterpart_ids, timeframe=timeframe, force_refresh=force_refresh)
+        return self._load_histories(counterpart_ids, timeframe=timeframe, force_refresh=force_refresh, warnings=warnings)
 
     def _load_history(self, series_id: str, *, timeframe: str, force_refresh: bool) -> MacroSeriesHistory | None:
         meta = SERIES_REGISTRY.get(series_id)
@@ -1377,6 +1392,16 @@ class MacroService:
         if comparison_key is None:
             return None
         return SERIES_BY_COMPARISON_KEY.get(str(comparison_key), {}).get(comparison_region)
+
+    @staticmethod
+    def _series_load_warning(series_id: str, exc: Exception) -> str:
+        meta = SERIES_REGISTRY.get(series_id, {})
+        title = str(meta.get("title") or series_id)
+        provider = str(meta.get("provider_series_id") or series_id)
+        text = str(exc)
+        if "HTTP Error 400" in text:
+            return f"{title} could not be loaded from FRED right now. If this environment does not have FRED_API_KEY configured, uncached macro requests will fail."
+        return f"{title} could not be loaded ({provider}). Gamma skipped that series for now."
 
 
 def _compute_yoy_points(raw_points: list[MacroSeriesPoint], *, retrieved_at: datetime, note: str, periods_per_year: int) -> list[MacroSeriesPoint]:
