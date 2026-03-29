@@ -278,6 +278,7 @@
   /* ── Grouped events ── */
   $: groupedEvents = groupEventsByMonth(eventRows);
   $: ratesPolicyGroupedEvents = groupEventsByMonth(snapshot?.rates_policy?.events ?? []);
+  $: maxSnapshotMetrics = Math.max(...(snapshot?.snapshot_cards ?? []).map((c) => c.metrics.length), 0);
 </script>
 
 <section class="view">
@@ -364,36 +365,48 @@
   {/if}
 
   {#if $macroContext.mode === "snapshot"}
-    <div class="workspace-grid">
-      {#each snapshot?.snapshot_cards ?? [] as card}
-        <button class="panel card-panel" type="button" on:click={() => drillTo(card.mode_target as MacroMode, card.target_theme)}>
-          <div class="card-head">
-            <div class="card-head-top">
-              <small class="eyebrow">{themeLabels[(card.target_theme as MacroTheme) ?? "all"] ?? "Macro"}</small>
-              <span class="tag">{card.mode_target.replace("_", " ")}</span>
-            </div>
-            <h3>{card.title}</h3>
-          </div>
-          <p class="card-summary">{card.summary}</p>
-          <div class="metric-row">
-            {#each card.metrics as metric}
-              <div class="metric">
-                <span class="metric-label">{metric.label}</span>
-                <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
-                {#if metric.delta_display}
-                  <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
-                {/if}
-                {#if comparisonText(metric)}
-                  <small class="metric-compare">{comparisonText(metric)}</small>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        </button>
-      {/each}
-    </div>
-
-    {#if !snapshot?.snapshot_cards?.length && !loading}
+    {#if (snapshot?.snapshot_cards ?? []).length}
+      <article class="panel snapshot-table-panel">
+        <div class="table-wrap">
+          <table class="snapshot-table">
+            <thead>
+              <tr>
+                <th class="col-theme">Theme</th>
+                <th class="col-drill"></th>
+                {#each Array.from({ length: maxSnapshotMetrics }) as _}
+                  <th class="col-metric"></th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#each snapshot?.snapshot_cards ?? [] as card}
+                <tr class="snapshot-row" tabindex="0" role="button" on:click={() => drillTo(card.mode_target as MacroMode, card.target_theme)} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drillTo(card.mode_target as MacroMode, card.target_theme); } }}>
+                  <td class="col-theme">
+                    <span class="row-theme">{card.title}</span>
+                    <span class="row-summary">{card.summary}</span>
+                  </td>
+                  <td class="col-drill">
+                    <span class="tag">{card.mode_target.replace("_", " ")}</span>
+                  </td>
+                  {#each card.metrics as metric}
+                    <td class="col-metric">
+                      <span class="metric-label">{metric.label}</span>
+                      <strong class="metric-value">{metric.display_value ?? "N/A"}</strong>
+                      {#if metric.delta_display}
+                        <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+                      {/if}
+                    </td>
+                  {/each}
+                  {#each Array.from({ length: maxSnapshotMetrics - card.metrics.length }) as _}
+                    <td class="col-metric"></td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    {:else if !loading}
       <div class="panel empty-state">
         <p>No snapshot cards available for this configuration.</p>
       </div>
@@ -879,23 +892,91 @@
     min-width: 0;
   }
 
-  /* ── Snapshot cards ── */
-  .card-panel {
-    cursor: pointer;
+  /* ── Snapshot table ── */
+  .snapshot-table-panel {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .snapshot-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .snapshot-table thead th {
+    padding: 0.4rem 0.55rem;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.4);
+    color: var(--text-2);
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    background: rgba(8, 13, 18, 0.82);
+    position: sticky;
+    top: 0;
+    z-index: 1;
     text-align: left;
-    gap: 0.35rem;
-    padding: 0.7rem;
-    transition: border-color 180ms ease, background 180ms ease;
+    font-weight: 500;
   }
 
-  .card-panel:hover {
-    border-color: rgba(122, 166, 200, 0.32);
-    background: linear-gradient(180deg, rgba(14, 17, 20, 0.97), rgba(11, 13, 15, 0.95));
+  .snapshot-table .col-theme {
+    width: 22%;
   }
 
-  .card-panel:focus-visible {
+  .snapshot-table .col-drill {
+    width: 7%;
+  }
+
+  .snapshot-table .col-metric {
+    width: auto;
+  }
+
+  .snapshot-row {
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+
+  .snapshot-row:hover {
+    background: rgba(122, 166, 200, 0.05);
+  }
+
+  .snapshot-row:focus-visible {
     outline: 1px solid var(--accent);
     outline-offset: -1px;
+  }
+
+  .snapshot-row td {
+    padding: 0.45rem 0.55rem;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.25);
+    vertical-align: top;
+  }
+
+  .snapshot-row:last-child td {
+    border-bottom: 0;
+  }
+
+  .row-theme {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-0);
+    line-height: 1.3;
+  }
+
+  .row-summary {
+    display: block;
+    color: var(--text-2);
+    font-size: 0.68rem;
+    line-height: 1.3;
+    margin-top: 0.15rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .col-drill {
+    vertical-align: middle !important;
   }
 
   .card-head {
@@ -1021,6 +1102,31 @@
     color: var(--text-2);
     font-size: 0.68rem;
     line-height: 1.35;
+  }
+
+  /* ── Snapshot table metric overrides ── */
+  .snapshot-table .metric-label {
+    display: block;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.54rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .snapshot-table .metric-value {
+    display: block;
+    font-size: 0.88rem;
+    line-height: 1.2;
+    margin-top: 0.08rem;
+  }
+
+  .snapshot-table .metric-delta {
+    display: inline-block;
+    font-size: 0.66rem;
+    margin-top: 0.04rem;
   }
 
   /* ── FX strip ── */
