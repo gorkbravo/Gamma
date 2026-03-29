@@ -275,6 +275,17 @@
   $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "#c49a5a");
   $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "#b65d54");
 
+  /* ── FX last prices ── */
+  function fxLastPrice(series: ChartSeries[]): string | null {
+    const pts = series[0]?.data;
+    if (!pts?.length) return null;
+    const last = pts[pts.length - 1].value;
+    return last.toFixed(last >= 100 ? 2 : 4);
+  }
+  $: fxLast0 = fxLastPrice(fxChart1);
+  $: fxLast1 = fxLastPrice(fxChart2);
+  $: fxLast2 = fxLastPrice(fxChart3);
+
   /* ── Grouped events ── */
   $: groupedEvents = groupEventsByMonth(eventRows);
   $: ratesPolicyGroupedEvents = groupEventsByMonth(snapshot?.rates_policy?.events ?? []);
@@ -421,6 +432,7 @@
               <option value={pair.id}>{pair.label}</option>
             {/each}
           </select>
+          {#if fxLast0}<strong class="fx-last-price">{fxLast0}</strong>{/if}
         </div>
         <TimeSeriesChart series={fxChart1} height={200} emptyMessage="Loading FX data" />
       </article>
@@ -432,6 +444,7 @@
               <option value={pair.id}>{pair.label}</option>
             {/each}
           </select>
+          {#if fxLast1}<strong class="fx-last-price">{fxLast1}</strong>{/if}
         </div>
         <TimeSeriesChart series={fxChart2} height={200} emptyMessage="Loading FX data" />
       </article>
@@ -443,6 +456,7 @@
               <option value={pair.id}>{pair.label}</option>
             {/each}
           </select>
+          {#if fxLast2}<strong class="fx-last-price">{fxLast2}</strong>{/if}
         </div>
         <TimeSeriesChart series={fxChart3} height={200} emptyMessage="Loading FX data" />
       </article>
@@ -1149,6 +1163,13 @@
 
   .fx-title {
     font-size: 0.88rem;
+  }
+
+  .fx-last-price {
+    margin-left: auto;
+    font-size: 0.92rem;
+    color: var(--text-0);
+    letter-spacing: 0.02em;
   }
 
   .fx-select {
