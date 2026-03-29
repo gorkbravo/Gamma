@@ -290,6 +290,28 @@
   $: groupedEvents = groupEventsByMonth(eventRows);
   $: ratesPolicyGroupedEvents = groupEventsByMonth(snapshot?.rates_policy?.events ?? []);
   $: maxSnapshotMetrics = Math.max(...(snapshot?.snapshot_cards ?? []).map((c) => c.metrics.length), 0);
+
+  /* ── Headline KPI strip (persistent context) ── */
+  const headlineSeriesUS = ["us-cpi-yoy", "us-fed-funds", "us-2s10s-slope", "us-dollar-broad"];
+  const headlineSeriesEU = ["eu-hicp-yoy", "eu-policy-rate", "eu-3m10y-slope", "eu-eurusd"];
+
+  type HeadlineKPI = { label: string; displayValue: string; delta: string | null; deltaClass: string };
+
+  function pickHeadlineKPIs(snap: MacroSnapshot | null, region: string): HeadlineKPI[] {
+    if (!snap?.snapshot_cards?.length) return [];
+    const target = region === "EU" ? headlineSeriesEU : headlineSeriesUS;
+    const allMetrics = snap.snapshot_cards.flatMap((c) => c.metrics);
+    const result: HeadlineKPI[] = [];
+    for (const sid of target) {
+      const m = allMetrics.find((metric) => metric.series_id === sid);
+      if (m?.display_value) {
+        result.push({ label: m.label, displayValue: m.display_value, delta: m.delta_display ?? null, deltaClass: deltaClass(m.delta_display) });
+      }
+    }
+    return result;
+  }
+
+  $: headlineKPIs = pickHeadlineKPIs(snapshot, $macroContext.region);
 </script>
 
 <section class="view">
@@ -299,9 +321,24 @@
         <p class="eyebrow">Macro</p>
         <h2>Macro Research</h2>
       </div>
-      {#if loading}
-        <span class="loading-pill">Refreshing</span>
-      {/if}
+      <div class="header-right">
+        {#if loading}
+          <span class="loading-pill">Refreshing</span>
+        {/if}
+        {#if headlineKPIs.length}
+          <div class="headline-strip">
+            {#each headlineKPIs as kpi}
+              <div class="headline-kpi">
+                <span class="headline-kpi-label">{kpi.label}</span>
+                <strong class="headline-kpi-value">{kpi.displayValue}</strong>
+                {#if kpi.delta}
+                  <small class="headline-kpi-delta {kpi.deltaClass}">{kpi.delta}</small>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
 
     <div class="mode-bar-wrap">
@@ -748,6 +785,63 @@
   .headline-block {
     display: grid;
     gap: 0.1rem;
+    flex-shrink: 0;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    min-width: 0;
+  }
+
+  /* ── Headline KPI strip ── */
+  .headline-strip {
+    display: flex;
+    gap: 0;
+  }
+
+  .headline-kpi {
+    padding: 0.2rem 0.65rem;
+    border-left: 1px solid rgba(46, 60, 74, 0.42);
+    text-align: right;
+  }
+
+  .headline-kpi:first-child {
+    border-left: 0;
+  }
+
+  .headline-kpi-label {
+    display: block;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.52rem;
+    white-space: nowrap;
+  }
+
+  .headline-kpi-value {
+    display: block;
+    font-size: 0.92rem;
+    line-height: 1.2;
+    margin-top: 0.06rem;
+    white-space: nowrap;
+  }
+
+  .headline-kpi-delta {
+    display: block;
+    color: var(--text-2);
+    font-size: 0.62rem;
+    margin-top: 0.02rem;
+    white-space: nowrap;
+  }
+
+  .headline-kpi-delta.positive {
+    color: var(--positive);
+  }
+
+  .headline-kpi-delta.negative {
+    color: var(--negative);
   }
 
   .loading-pill {
@@ -777,7 +871,7 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     border: 1px solid var(--panel-strong);
     background: rgba(8, 13, 18, 0.82);
-    max-width: 36rem;
+    max-width: 28.5rem;
     width: 100%;
   }
 
@@ -1450,6 +1544,10 @@
     .header-top {
       flex-direction: column;
       gap: 0.4rem;
+    }
+
+    .headline-strip {
+      display: none;
     }
   }
 </style>
