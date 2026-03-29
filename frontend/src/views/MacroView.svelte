@@ -312,6 +312,7 @@
   }
 
   $: headlineKPIs = pickHeadlineKPIs(snapshot, $macroContext.region);
+  $: nextEvent = (events?.events ?? snapshot?.upcoming_events ?? [])[0] ?? null;
 </script>
 
 <section class="view">
@@ -319,29 +320,16 @@
     <div class="header-top">
       <div class="headline-block">
         <p class="eyebrow">Macro</p>
-        <h2>Macro Research</h2>
-      </div>
-      <div class="header-right">
-        {#if loading}
-          <span class="loading-pill">Refreshing</span>
-        {/if}
-        {#if headlineKPIs.length}
-          <div class="headline-strip">
-            {#each headlineKPIs as kpi}
-              <div class="headline-kpi">
-                <span class="headline-kpi-label">{kpi.label}</span>
-                <strong class="headline-kpi-value">{kpi.displayValue}</strong>
-                {#if kpi.delta}
-                  <small class="headline-kpi-delta {kpi.deltaClass}">{kpi.delta}</small>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
+        <div class="headline-title-row">
+          <h2>Macro Research</h2>
+          {#if loading}
+            <span class="loading-pill">Refreshing</span>
+          {/if}
+        </div>
       </div>
     </div>
 
-    <div class="mode-bar-wrap">
+    <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Macro modes">
         {#each modes as mode}
           <button
@@ -354,6 +342,28 @@
             {mode.label}
           </button>
         {/each}
+      </div>
+      <div class="header-right">
+        {#if headlineKPIs.length}
+          <div class="headline-strip">
+            {#each headlineKPIs as kpi}
+              <div class="headline-kpi">
+                <span class="headline-kpi-label">{kpi.label}</span>
+                <strong class="headline-kpi-value">{kpi.displayValue}</strong>
+                {#if kpi.delta}
+                  <small class="headline-kpi-delta {kpi.deltaClass}">{kpi.delta}</small>
+                {/if}
+              </div>
+            {/each}
+          </div>
+          {#if nextEvent}
+            <div class="next-event">
+              <span class="next-event-label">Next</span>
+              <span class="next-event-title">{nextEvent.title}</span>
+              <span class="next-event-date">{shortDate(nextEvent.scheduled_at)}</span>
+            </div>
+          {/if}
+        {/if}
       </div>
     </div>
 
@@ -767,7 +777,7 @@
   }
 
   .header-panel {
-    gap: 0.5rem;
+    gap: 0.35rem;
   }
 
   .cross-card {
@@ -777,7 +787,7 @@
   /* ── Header block ── */
   .header-top {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 0.8rem;
   }
@@ -788,11 +798,20 @@
     flex-shrink: 0;
   }
 
-  .header-right {
+  .headline-title-row {
     display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    min-width: 0;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+
+  .header-right {
+    position: absolute;
+    right: 0;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0;
   }
 
   /* ── Headline KPI strip ── */
@@ -844,6 +863,42 @@
     color: var(--negative);
   }
 
+  /* ── Next event ── */
+  .next-event {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 0.6rem;
+    white-space: nowrap;
+    margin-top: 0.1rem;
+    padding-top: 0.2rem;
+    border-top: 1px solid rgba(46, 60, 74, 0.25);
+  }
+
+  .next-event-label {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.6rem;
+    color: var(--text-2);
+    opacity: 0.7;
+  }
+
+  .next-event-title {
+    color: var(--text-1);
+    font-size: 0.84rem;
+  }
+
+  .next-event-date {
+    color: var(--text-2);
+    font-size: 0.8rem;
+  }
+
+  .next-event-date::before {
+    content: "·";
+    margin-right: 0.5rem;
+    opacity: 0.5;
+  }
+
   .loading-pill {
     font-size: 0.64rem;
     text-transform: uppercase;
@@ -861,9 +916,13 @@
     50% { opacity: 0.5; }
   }
 
-  /* ── Mode bar (segmented control) ── */
-  .mode-bar-wrap {
+  /* ── Mode bar + KPI row ── */
+  .mode-kpi-row {
     display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    position: relative;
   }
 
   .mode-bar {
@@ -1546,7 +1605,8 @@
       gap: 0.4rem;
     }
 
-    .headline-strip {
+    .headline-strip,
+    .next-event {
       display: none;
     }
   }
