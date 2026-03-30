@@ -478,6 +478,12 @@
                           · <span class={linkedMarketTone(card.linked_markets[0].macro_alignment)}>{card.linked_markets[0].macro_alignment}</span>
                         {/if}
                       </span>
+                      <span class="linked-market-preview">
+                        {card.linked_markets[0].title}
+                        {#if card.linked_markets.length > 1}
+                          <span class="linked-market-preview-count">+{card.linked_markets.length - 1} more</span>
+                        {/if}
+                      </span>
                     {/if}
                   </td>
                   <td class="col-drill">
@@ -1581,6 +1587,19 @@
     font-size: 0.64rem;
   }
 
+  .linked-market-preview {
+    display: block;
+    margin-top: 0.18rem;
+    color: var(--text-1);
+    font-size: 0.68rem;
+    line-height: 1.35;
+  }
+
+  .linked-market-preview-count {
+    color: var(--text-2);
+    margin-left: 0.28rem;
+  }
+
   .linked-dot {
     display: inline-block;
     width: 0.42rem;
@@ -1600,14 +1619,6 @@
 
   .linked-market-list.inline {
     margin-top: 0.35rem;
-  }
-
-  .linked-market-chip {
-    border: 1px solid rgba(46, 60, 74, 0.34);
-    background: rgba(8, 13, 18, 0.55);
-    padding: 0.45rem 0.55rem;
-    display: grid;
-    gap: 0.16rem;
   }
 
   .linked-market-card {
@@ -1635,7 +1646,6 @@
     align-items: center;
   }
 
-  .linked-market-chip strong,
   .linked-market-card strong {
     font-size: 0.76rem;
     line-height: 1.35;

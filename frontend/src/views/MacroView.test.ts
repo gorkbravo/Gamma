@@ -30,7 +30,7 @@ describe("MacroView", () => {
 
     expect(body).toContain("Macro V1 is US-first. Global mode is intentionally lighter than the US view.");
     expect(body).toContain("Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first and some analytics reuse US proxies.");
-    expect(body).toContain("Comparison targets are not applied analytically in Macro V1; the comparison selection was ignored.");
+    expect(body).toContain("Comparison is currently available only for direct US-versus-EU views. The requested comparison target was ignored.");
     expect(body).toContain(">Compare<");
     expect(body).toContain("disabled");
   });
@@ -427,7 +427,7 @@ function makeSnapshot(overrides: Partial<MacroSnapshot> = {}): MacroSnapshot {
     upcoming_events: [],
     warnings: [
       "Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first and some analytics reuse US proxies.",
-      "Comparison targets are not applied analytically in Macro V1; the comparison selection was ignored."
+      "Comparison is currently available only for direct US-versus-EU views. The requested comparison target was ignored."
     ],
     source_provider: "fred",
     retrieved_at: "2026-03-20T11:00:00Z",
