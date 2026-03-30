@@ -1570,7 +1570,7 @@
 
   .linked-market-list {
     display: grid;
-    gap: 0.35rem;
+    gap: 0;
   }
 
   .linked-hint {
@@ -1603,8 +1603,7 @@
     margin-top: 0.35rem;
   }
 
-  .linked-market-chip,
-  .linked-market-card {
+  .linked-market-chip {
     border: 1px solid rgba(46, 60, 74, 0.34);
     background: rgba(8, 13, 18, 0.55);
     padding: 0.45rem 0.55rem;
@@ -1612,8 +1611,20 @@
     gap: 0.16rem;
   }
 
+  .linked-market-card {
+    padding: 0.35rem 0;
+    border-top: 1px solid rgba(46, 60, 74, 0.2);
+    display: grid;
+    gap: 0.12rem;
+  }
+
+  .linked-market-card:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
   .linked-market-card.compact {
-    padding: 0.4rem 0.5rem;
+    padding: 0.3rem 0;
   }
 
   .linked-market-head,
@@ -1669,20 +1680,18 @@
   .divergence-detail-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-    gap: 0.45rem;
-    margin-top: 0.55rem;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
   }
 
   .divergence-detail-grid.list-embedded {
-    margin-top: 0.45rem;
+    margin-top: 0.2rem;
   }
 
   .signal-brief {
     display: grid;
     gap: 0.2rem;
-    padding: 0.55rem 0.6rem;
-    border: 1px solid rgba(46, 60, 74, 0.34);
-    background: rgba(8, 13, 18, 0.55);
+    padding: 0.4rem 0;
   }
 
   .signal-head {
@@ -1733,13 +1742,12 @@
   }
 
   .research-focus {
-    margin: 0.55rem 0 0;
-    padding: 0.5rem 0.6rem;
-    border-left: 2px solid rgba(116, 89, 56, 0.2);
-    background: rgba(122, 166, 200, 0.08);
+    margin: 0.35rem 0 0;
+    padding: 0.15rem 0 0.15rem 0.55rem;
+    border-left: 2px solid rgba(46, 60, 74, 0.35);
     color: var(--text-2);
-    font-size: 0.75rem;
-    line-height: 1.45;
+    font-size: 0.73rem;
+    line-height: 1.4;
   }
 
   /* ── Tags ── */
