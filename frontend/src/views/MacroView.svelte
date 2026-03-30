@@ -1325,7 +1325,7 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
     border: 1px solid var(--panel-strong);
     background: rgba(8, 13, 18, 0.82);
-    max-width: 38rem;
+    max-width: 28rem;
     width: 100%;
   }
 
@@ -1334,9 +1334,9 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.45rem 0.8rem;
+    padding: 0.4rem 0.55rem;
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
   }
