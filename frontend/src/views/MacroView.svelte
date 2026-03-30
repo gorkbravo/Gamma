@@ -124,6 +124,22 @@
     return `${metric.comparison_region} ${metric.comparison_display_value}${metric.gap_display ? ` | gap ${metric.gap_display}` : ""}`;
   }
 
+  function linkedMarketTone(label: string | null | undefined): string {
+    if (label === "aligned") return "positive";
+    if (label === "diverging") return "negative";
+    return "";
+  }
+
+  function divergenceSignalTone(tone: string | null | undefined): string {
+    if (tone === "reinforcing") return "positive";
+    if (tone === "opposing") return "negative";
+    return "";
+  }
+
+  function linkedMarketScore(value: number | null | undefined): string | null {
+    return value == null ? null : value.toFixed(1);
+  }
+
   function historyKey(
     seriesId: string,
     timeframe: MacroContextState["timeframe"],
@@ -442,6 +458,25 @@
                   <td class="col-theme">
                     <span class="row-theme">{card.title}</span>
                     <span class="row-summary">{card.summary}</span>
+                    {#if card.linked_markets?.length}
+                      <div class="linked-market-list inline">
+                        {#each card.linked_markets.slice(0, 2) as market}
+                          <div class="linked-market-chip">
+                            <strong>{market.title}</strong>
+                            <span class="linked-market-meta">
+                              <span>{market.venue}</span>
+                              {#if market.probability_label}
+                                <span>{market.probability_label}</span>
+                              {/if}
+                              {#if market.change_display}
+                                <span class={linkedMarketTone(market.macro_alignment)}>{market.change_display}</span>
+                              {/if}
+                              <span class={linkedMarketTone(market.macro_alignment)}>{market.macro_alignment}</span>
+                            </span>
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
                   </td>
                   <td class="col-drill">
                     <span class="tag">{card.mode_target.replace("_", " ")}</span>
@@ -575,6 +610,30 @@
         {#if snapshot?.rates_policy?.comparison_summary}
           <p class="comparison-summary">{snapshot.rates_policy.comparison_summary}</p>
         {/if}
+        {#if snapshot?.rates_policy?.linked_markets?.length}
+          <div class="linked-market-list">
+            {#each snapshot.rates_policy.linked_markets as market}
+              <article class="linked-market-card">
+                <div class="linked-market-head">
+                  <strong>{market.title}</strong>
+                  <span class="tag">{market.venue}</span>
+                </div>
+                <div class="linked-market-stats">
+                  {#if market.probability_label}
+                    <span>{market.probability_label}</span>
+                  {/if}
+                  {#if market.change_display}
+                    <span class={linkedMarketTone(market.macro_alignment)}>{market.change_display}</span>
+                  {/if}
+                  {#if linkedMarketScore(market.research_score)}
+                    <span>rank {linkedMarketScore(market.research_score)}</span>
+                  {/if}
+                </div>
+                <p class="linked-market-summary {linkedMarketTone(market.macro_alignment)}">{market.macro_alignment_summary}</p>
+              </article>
+            {/each}
+          </div>
+        {/if}
         <div class="metric-row">
           {#each snapshot?.rates_policy?.policy_metrics ?? [] as metric}
             <div class="metric">
@@ -692,11 +751,65 @@
                     <small class="eyebrow">{themeLabels[card.theme as MacroTheme] ?? card.theme}</small>
                     <h3>{card.headline}</h3>
                   </div>
-                  <span class="tag agreement">{card.agreement_label}</span>
+                  <div class="card-badges">
+                    {#if card.divergence_score !== null}
+                      <span class="score-badge {card.agreement_label}">{card.divergence_score.toFixed(1)}</span>
+                    {/if}
+                    <span class="tag agreement">{card.agreement_label}</span>
+                  </div>
                 </div>
                 <p class="card-subtitle">{card.summary}</p>
                 {#if card.comparison_summary}
                   <p class="comparison-summary">{card.comparison_summary}</p>
+                {/if}
+                {#if card.primary_driver || card.counter_signal}
+                  <div class="divergence-detail-grid">
+                    {#if card.primary_driver}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Lead driver</span>
+                          <span class="signal-score {card.primary_driver.tone}">{card.primary_driver.signal_score_display}</span>
+                        </div>
+                        <strong>{card.primary_driver.metric.label}</strong>
+                        <p class="signal-summary {divergenceSignalTone(card.primary_driver.tone)}">{card.primary_driver.interpretation}</p>
+                      </article>
+                    {/if}
+                    {#if card.counter_signal}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Counter-signal</span>
+                          <span class="signal-score {card.counter_signal.tone}">{card.counter_signal.signal_score_display}</span>
+                        </div>
+                        <strong>{card.counter_signal.metric.label}</strong>
+                        <p class="signal-summary {divergenceSignalTone(card.counter_signal.tone)}">{card.counter_signal.interpretation}</p>
+                      </article>
+                    {/if}
+                  </div>
+                {/if}
+                {#if card.research_focus}
+                  <p class="research-focus">{card.research_focus}</p>
+                {/if}
+                {#if card.linked_markets?.length}
+                  <div class="linked-market-list">
+                    {#each card.linked_markets as market}
+                      <article class="linked-market-card compact">
+                        <div class="linked-market-head">
+                          <strong>{market.title}</strong>
+                          <span class="tag">{market.venue}</span>
+                        </div>
+                        <div class="linked-market-stats">
+                          {#if market.probability_label}
+                            <span>{market.probability_label}</span>
+                          {/if}
+                          {#if market.change_display}
+                            <span class={linkedMarketTone(market.macro_alignment)}>{market.change_display}</span>
+                          {/if}
+                          <span class={linkedMarketTone(market.macro_alignment)}>{market.macro_alignment}</span>
+                        </div>
+                        <p class="linked-market-summary {linkedMarketTone(market.macro_alignment)}">{market.macro_alignment_summary}</p>
+                      </article>
+                    {/each}
+                  </div>
                 {/if}
                 <div class="metric-row compact">
                   {#each card.metrics as metric}
@@ -736,6 +849,33 @@
                   <span class="score-badge {row.label}">{row.score.toFixed(1)}</span>
                 </div>
                 <span class="list-detail">{row.summary}</span>
+                {#if row.primary_driver || row.counter_signal}
+                  <div class="divergence-detail-grid list-embedded">
+                    {#if row.primary_driver}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Lead driver</span>
+                          <span class="signal-score {row.primary_driver.tone}">{row.primary_driver.signal_score_display}</span>
+                        </div>
+                        <strong>{row.primary_driver.metric.label}</strong>
+                        <p class="signal-summary {divergenceSignalTone(row.primary_driver.tone)}">{row.primary_driver.interpretation}</p>
+                      </article>
+                    {/if}
+                    {#if row.counter_signal}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Counter-signal</span>
+                          <span class="signal-score {row.counter_signal.tone}">{row.counter_signal.signal_score_display}</span>
+                        </div>
+                        <strong>{row.counter_signal.metric.label}</strong>
+                        <p class="signal-summary {divergenceSignalTone(row.counter_signal.tone)}">{row.counter_signal.interpretation}</p>
+                      </article>
+                    {/if}
+                  </div>
+                {/if}
+                {#if row.research_focus}
+                  <p class="research-focus">{row.research_focus}</p>
+                {/if}
               </div>
             {/each}
           </div>
@@ -1173,6 +1313,56 @@
     overflow: hidden;
   }
 
+  .linked-market-list {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .linked-market-list.inline {
+    margin-top: 0.35rem;
+  }
+
+  .linked-market-chip,
+  .linked-market-card {
+    border: 1px solid rgba(46, 60, 74, 0.34);
+    background: rgba(8, 13, 18, 0.55);
+    padding: 0.45rem 0.55rem;
+    display: grid;
+    gap: 0.16rem;
+  }
+
+  .linked-market-card.compact {
+    padding: 0.4rem 0.5rem;
+  }
+
+  .linked-market-head,
+  .linked-market-meta,
+  .linked-market-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+  }
+
+  .linked-market-chip strong,
+  .linked-market-card strong {
+    font-size: 0.76rem;
+    line-height: 1.35;
+  }
+
+  .linked-market-meta,
+  .linked-market-stats {
+    color: var(--text-2);
+    font-size: 0.66rem;
+  }
+
+  .linked-market-summary {
+    color: var(--text-2);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    margin: 0;
+  }
+
   /* ── Section summary (rates & policy) ── */
   .section-summary {
     color: var(--text-2);
@@ -1185,6 +1375,90 @@
     margin: 0;
     font-size: 0.78rem;
     line-height: 1.4;
+  }
+
+  .card-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .divergence-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+  }
+
+  .divergence-detail-grid.list-embedded {
+    margin-top: 0.45rem;
+  }
+
+  .signal-brief {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.55rem 0.6rem;
+    border: 1px solid rgba(116, 89, 56, 0.14);
+    background: rgba(244, 237, 228, 0.55);
+  }
+
+  .signal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem;
+  }
+
+  .signal-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  .signal-score {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 999px;
+    border: 1px solid rgba(116, 89, 56, 0.14);
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--text-1);
+    font-size: 0.68rem;
+    font-weight: 600;
+  }
+
+  .signal-score.reinforcing {
+    border-color: rgba(75, 180, 116, 0.25);
+    background: rgba(75, 180, 116, 0.08);
+    color: var(--positive);
+  }
+
+  .signal-score.opposing {
+    border-color: rgba(198, 107, 97, 0.3);
+    background: rgba(198, 107, 97, 0.1);
+    color: var(--negative);
+  }
+
+  .signal-summary {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 0.73rem;
+    line-height: 1.4;
+  }
+
+  .research-focus {
+    margin: 0.55rem 0 0;
+    padding: 0.5rem 0.6rem;
+    border-left: 2px solid rgba(116, 89, 56, 0.2);
+    background: rgba(255, 255, 255, 0.62);
+    color: var(--text-2);
+    font-size: 0.75rem;
+    line-height: 1.45;
   }
 
   /* ── Tags ── */

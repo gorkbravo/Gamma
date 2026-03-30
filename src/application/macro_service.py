@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import re
 from typing import Any
 
 from src.models.macro import (
     MacroCurveNode,
     MacroDivergenceRecord,
+    MacroDivergenceSignal,
     MacroEventRecord,
+    MacroLinkedPredictionMarket,
     MacroMetricRecord,
     MacroRatesPolicySummary,
     MacroSeriesHistory,
@@ -16,6 +19,8 @@ from src.models.macro import (
     MacroSnapshotPayload,
     MacroThemeComparison,
 )
+from src.application.prediction_market_service import PredictionMarketScreenerRequest, PredictionMarketService
+from src.models.prediction_markets import PredictionMarketRecord
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.utils.time import now_utc
 
@@ -560,6 +565,34 @@ SIGNAL_SCALES = {
     "eu-3m10y-slope": 20.0,
 }
 
+MACRO_PREDICTION_QUERY_TERMS = {
+    "US": {
+        "growth": "US economy GDP payrolls unemployment jobs",
+        "inflation": "US inflation CPI PCE prices",
+        "policy": "Fed FOMC rates cut hike policy",
+        "recession_risk": "US recession unemployment slowdown",
+    },
+    "EU": {
+        "growth": "eurozone economy growth unemployment",
+        "inflation": "eurozone inflation HICP ECB prices",
+        "policy": "ECB eurozone rates cut hike policy",
+        "recession_risk": "eurozone recession slowdown unemployment",
+    },
+    "Global": {
+        "growth": "global economy growth recession",
+        "inflation": "global inflation CPI prices",
+        "policy": "global rates Fed ECB policy",
+        "recession_risk": "global recession slowdown",
+    },
+}
+
+THEME_ALIGNMENT_LABELS = {
+    "growth": {1: "growth-up", -1: "growth-down"},
+    "inflation": {1: "inflation-up", -1: "inflation-down"},
+    "policy": {1: "policy-tighter", -1: "policy-easier"},
+    "recession_risk": {1: "recession-risk-up", -1: "recession-risk-down"},
+}
+
 REGION_SNAPSHOT_SERIES = {
     "US": [
         "us-real-gdp-yoy",
@@ -615,11 +648,13 @@ class MacroService:
         treasury_adapter: TreasuryCurveAdapter,
         events_adapter: USMacroEventsAdapter,
         fx_adapter: IBKRMacroFXAdapter | None = None,
+        prediction_market_service: PredictionMarketService | None = None,
     ) -> None:
         self.fred_adapter = fred_adapter
         self.treasury_adapter = treasury_adapter
         self.events_adapter = events_adapter
         self.fx_adapter = fx_adapter
+        self.prediction_market_service = prediction_market_service
 
     def get_snapshot(self, request: MacroSnapshotRequest) -> MacroSnapshotPayload:
         region = self._normalize_region(request.region)
@@ -637,6 +672,12 @@ class MacroService:
             force_refresh=request.force_refresh,
         )
         events = self.get_events(region=region, force_refresh=request.force_refresh)
+        linked_markets = self._build_linked_prediction_market_map(
+            region=region,
+            timeframe=timeframe,
+            histories=histories,
+            force_refresh=request.force_refresh,
+        )
         divergences = self.get_divergences(
             MacroSnapshotRequest(
                 region=region,
@@ -654,6 +695,7 @@ class MacroService:
             comparison_histories=comparison_histories,
             comparison_region=comparison_region,
             events=events,
+            linked_markets=linked_markets.get("policy", []),
             timeframe=timeframe,
             force_refresh=request.force_refresh,
         )
@@ -680,6 +722,7 @@ class MacroService:
                 comparison_region=comparison_region,
                 divergences=divergences,
                 events=events,
+                linked_markets=linked_markets,
                 timeframe=timeframe,
             ),
             rates_policy=rates_policy,
@@ -689,6 +732,7 @@ class MacroService:
                 comparison_histories=comparison_histories,
                 comparison_region=comparison_region,
                 divergences=divergences,
+                linked_markets=linked_markets,
                 timeframe=timeframe,
             ),
             top_divergences=divergences[:3],
@@ -739,6 +783,8 @@ class MacroService:
             strongest_negative = min(signal_rows, key=lambda item: item[1])
             score = round(strongest_positive[1] - strongest_negative[1], 2)
             label = "high" if score >= 2.4 else "moderate" if score >= 1.2 else "low"
+            primary_driver = self._build_divergence_signal(theme_name, strongest_positive[0], strongest_positive[1], role="driver")
+            counter_signal = self._build_divergence_signal(theme_name, strongest_negative[0], strongest_negative[1], role="counter")
             comparison_score = None
             score_gap = None
             score_gap_display = None
@@ -757,9 +803,16 @@ class MacroService:
                     comparison_score = round(comparison_positive[1] - comparison_negative[1], 2)
                     score_gap = round(score - comparison_score, 2)
                     score_gap_display = f"{score_gap:+.2f}"
-            summary = f"{strongest_positive[0].label} is reinforcing the theme while {strongest_negative[0].label} is leaning the other way."
+            summary = self._divergence_summary(theme_name, primary_driver, counter_signal)
             if comparison_region is not None and comparison_score is not None:
                 summary = f"{summary} Divergence is {score_gap_display} versus {comparison_region} on the same theme."
+            research_focus = self._divergence_research_focus(
+                theme_name,
+                primary_driver=primary_driver,
+                counter_signal=counter_signal,
+                comparison_region=comparison_region,
+                score_gap_display=score_gap_display,
+            )
             rows.append(
                 MacroDivergenceRecord(
                     divergence_id=f"{region.lower()}:{theme_name}:divergence",
@@ -771,6 +824,9 @@ class MacroService:
                     label=label,
                     metrics=[row for row, _ in signal_rows],
                     series_ids=[row.series_id for row, _ in signal_rows if row.series_id],
+                    primary_driver=primary_driver,
+                    counter_signal=counter_signal,
+                    research_focus=research_focus,
                     source_provider="fred",
                     retrieved_at=max((row.retrieved_at for row, _ in signal_rows if row.retrieved_at is not None), default=now_utc()),
                     origin="macro_service.divergences",
@@ -939,31 +995,32 @@ class MacroService:
         comparison_region: str | None,
         divergences: list[MacroDivergenceRecord],
         events: list[MacroEventRecord],
+        linked_markets: dict[str, list[MacroLinkedPredictionMarket]],
         timeframe: str,
     ) -> list[MacroSnapshotCard]:
         data_region = self._data_region(region)
         if data_region == "EU":
             cards = [
-                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Activity and labor backdrop", summary="Industrial output, unemployment, and curve slope frame the EU growth picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("eu-industrial-production-yoy"), histories.get("eu-unemployment-rate"), histories.get("eu-3m10y-slope"), histories.get("eu-10y-yield"), histories.get("eu-eurusd")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="HICP versus market signals", summary="Headline HICP alongside FX and long rates shows whether markets are absorbing the inflation narrative.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("eu-hicp-yoy"), histories.get("eu-eurusd"), histories.get("eu-10y-yield"), histories.get("eu-policy-rate"), histories.get("eu-3m10y-slope")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="policy", title="Policy Context", subtitle="ECB rate and front-end pricing", summary="ECB and money-market rates lead; the long end confirms direction.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("eu-policy-rate"), histories.get("eu-3m-rate"), histories.get("eu-10y-yield"), histories.get("eu-eurusd"), histories.get("eu-3m10y-slope")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="3M–10Y slope", summary="Tracks the 3M-to-10Y slope as the primary EU curve signal.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("eu-3m10y-slope"), histories.get("eu-10y-yield"), histories.get("eu-3m-rate"), histories.get("eu-policy-rate")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="fx", title="EUR / USD Proxy", subtitle="Currency context", summary="EUR/USD often carries the policy and risk signal when deeper EU tooling is limited.", mode_target="cross_asset", target_theme="policy", metric_histories=[histories.get("eu-eurusd"), histories.get("eu-10y-yield"), histories.get("eu-hicp-yoy")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Activity and labor backdrop", summary="Industrial output, unemployment, and curve slope frame the EU growth picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("eu-industrial-production-yoy"), histories.get("eu-unemployment-rate"), histories.get("eu-3m10y-slope"), histories.get("eu-10y-yield"), histories.get("eu-eurusd")], linked_markets=linked_markets.get("growth", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="HICP versus market signals", summary="Headline HICP alongside FX and long rates shows whether markets are absorbing the inflation narrative.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("eu-hicp-yoy"), histories.get("eu-eurusd"), histories.get("eu-10y-yield"), histories.get("eu-policy-rate"), histories.get("eu-3m10y-slope")], linked_markets=linked_markets.get("inflation", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="policy", title="Policy Context", subtitle="ECB rate and front-end pricing", summary="ECB and money-market rates lead; the long end confirms direction.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("eu-policy-rate"), histories.get("eu-3m-rate"), histories.get("eu-10y-yield"), histories.get("eu-eurusd"), histories.get("eu-3m10y-slope")], linked_markets=linked_markets.get("policy", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="3M–10Y slope", summary="Tracks the 3M-to-10Y slope as the primary EU curve signal.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("eu-3m10y-slope"), histories.get("eu-10y-yield"), histories.get("eu-3m-rate"), histories.get("eu-policy-rate")], linked_markets=linked_markets.get("policy", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="fx", title="EUR / USD Proxy", subtitle="Currency context", summary="EUR/USD often carries the policy and risk signal when deeper EU tooling is limited.", mode_target="cross_asset", target_theme="policy", metric_histories=[histories.get("eu-eurusd"), histories.get("eu-10y-yield"), histories.get("eu-hicp-yoy")], linked_markets=linked_markets.get("policy", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
             ]
         else:
             cards = [
-                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Labor and activity backdrop", summary="GDP, payrolls, unemployment, and copper frame the real-economy picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("us-real-gdp-yoy"), histories.get("us-payrolls-yoy"), histories.get("us-unemployment-rate"), histories.get("us-2s10s-slope"), histories.get("us-hy-oas")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="Realized vs. market-implied", summary="CPI, breakevens, and energy inputs show whether inflation pressure is broadening or cooling.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("us-cpi-yoy"), histories.get("us-core-cpi-yoy"), histories.get("us-5y-breakeven"), histories.get("us-10y-breakeven"), histories.get("us-dollar-broad")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="policy", title="Policy Context", subtitle="Front-end pricing and stance", summary="Front-end rates lead the policy read and frame how restrictive conditions remain.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-fed-funds"), histories.get("us-2y-yield"), histories.get("us-10y-yield"), histories.get("us-real-10y-yield"), histories.get("us-dollar-broad")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="Treasury slope direction", summary="Steepening or re-inverting against the prior reference window.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-2s10s-slope"), histories.get("us-10y-yield"), histories.get("us-30y-yield"), histories.get("us-2y-yield"), histories.get("us-real-10y-yield")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
-                self._build_metric_card(card_id="real-yields", title="Real Yields / Breakevens", subtitle="Real rates vs. inflation comp.", summary="Splits a rates move into real tightening and inflation compensation.", mode_target="rates_policy", target_theme="inflation", metric_histories=[histories.get("us-real-10y-yield"), histories.get("us-5y-breakeven"), histories.get("us-10y-breakeven"), histories.get("us-10y-yield"), histories.get("us-cpi-yoy")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="growth", title="Growth Context", subtitle="Labor and activity backdrop", summary="GDP, payrolls, unemployment, and copper frame the real-economy picture.", mode_target="cross_asset", target_theme="growth", metric_histories=[histories.get("us-real-gdp-yoy"), histories.get("us-payrolls-yoy"), histories.get("us-unemployment-rate"), histories.get("us-2s10s-slope"), histories.get("us-hy-oas")], linked_markets=linked_markets.get("growth", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="inflation", title="Inflation Context", subtitle="Realized vs. market-implied", summary="CPI, breakevens, and energy inputs show whether inflation pressure is broadening or cooling.", mode_target="cross_asset", target_theme="inflation", metric_histories=[histories.get("us-cpi-yoy"), histories.get("us-core-cpi-yoy"), histories.get("us-5y-breakeven"), histories.get("us-10y-breakeven"), histories.get("us-dollar-broad")], linked_markets=linked_markets.get("inflation", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="policy", title="Policy Context", subtitle="Front-end pricing and stance", summary="Front-end rates lead the policy read and frame how restrictive conditions remain.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-fed-funds"), histories.get("us-2y-yield"), histories.get("us-10y-yield"), histories.get("us-real-10y-yield"), histories.get("us-dollar-broad")], linked_markets=linked_markets.get("policy", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="curve-shape", title="Curve Shape", subtitle="Treasury slope direction", summary="Steepening or re-inverting against the prior reference window.", mode_target="rates_policy", target_theme="policy", metric_histories=[histories.get("us-2s10s-slope"), histories.get("us-10y-yield"), histories.get("us-30y-yield"), histories.get("us-2y-yield"), histories.get("us-real-10y-yield")], linked_markets=linked_markets.get("policy", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
+                self._build_metric_card(card_id="real-yields", title="Real Yields / Breakevens", subtitle="Real rates vs. inflation comp.", summary="Splits a rates move into real tightening and inflation compensation.", mode_target="rates_policy", target_theme="inflation", metric_histories=[histories.get("us-real-10y-yield"), histories.get("us-5y-breakeven"), histories.get("us-10y-breakeven"), histories.get("us-10y-yield"), histories.get("us-cpi-yoy")], linked_markets=linked_markets.get("inflation", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories),
             ]
             dollar_history = histories.get("us-dollar-broad")
             if dollar_history is not None:
-                cards.append(self._build_metric_card(card_id="dollar", title="Dollar / FX Proxy", subtitle="Broad dollar positioning", summary="Firmer dollar confirms tighter policy and global stress; softer dollar signals the opposite.", mode_target="cross_asset", target_theme="policy", metric_histories=[histories.get("us-dollar-broad"), histories.get("us-10y-yield"), histories.get("us-fed-funds")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories))
+                cards.append(self._build_metric_card(card_id="dollar", title="Dollar / FX Proxy", subtitle="Broad dollar positioning", summary="Firmer dollar confirms tighter policy and global stress; softer dollar signals the opposite.", mode_target="cross_asset", target_theme="policy", metric_histories=[histories.get("us-dollar-broad"), histories.get("us-10y-yield"), histories.get("us-fed-funds")], linked_markets=linked_markets.get("policy", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories))
             credit_history = histories.get("us-hy-oas")
             if credit_history is not None:
-                cards.append(self._build_metric_card(card_id="credit", title="Credit / Stress Proxy", subtitle="HY spread as stress gauge", summary="Credit spreads proxy tightening financial conditions and recession risk.", mode_target="cross_asset", target_theme="recession_risk", metric_histories=[histories.get("us-hy-oas"), histories.get("us-2s10s-slope"), histories.get("us-unemployment-rate")], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories))
+                cards.append(self._build_metric_card(card_id="credit", title="Credit / Stress Proxy", subtitle="HY spread as stress gauge", summary="Credit spreads proxy tightening financial conditions and recession risk.", mode_target="cross_asset", target_theme="recession_risk", metric_histories=[histories.get("us-hy-oas"), histories.get("us-2s10s-slope"), histories.get("us-unemployment-rate")], linked_markets=linked_markets.get("recession_risk", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories))
         if divergences:
             divergence = divergences[0]
             cards.append(
@@ -993,6 +1050,7 @@ class MacroService:
                             gap_display=divergence.score_gap_display,
                         )
                     ],
+                    linked_markets=list(linked_markets.get(divergence.theme, [])),
                     source_provider=divergence.source_provider,
                     retrieved_at=divergence.retrieved_at,
                     origin="macro_service.snapshot_cards",
@@ -1001,11 +1059,11 @@ class MacroService:
             )
         return cards
 
-    def _build_metric_card(self, *, card_id: str, title: str, subtitle: str, summary: str, mode_target: str, target_theme: str, metric_histories: list[MacroSeriesHistory | None], timeframe: str, comparison_region: str | None, comparison_histories: dict[str, MacroSeriesHistory]) -> MacroSnapshotCard:
+    def _build_metric_card(self, *, card_id: str, title: str, subtitle: str, summary: str, mode_target: str, target_theme: str, metric_histories: list[MacroSeriesHistory | None], linked_markets: list[MacroLinkedPredictionMarket], timeframe: str, comparison_region: str | None, comparison_histories: dict[str, MacroSeriesHistory]) -> MacroSnapshotCard:
         metrics = [self._metric_from_history(history, timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories) for history in metric_histories if history is not None]
-        return MacroSnapshotCard(card_id=card_id, title=title, subtitle=subtitle, summary=summary, mode_target=mode_target, target_theme=target_theme, metrics=metrics, source_provider=metrics[0].source_provider if metrics else "fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.snapshot_cards", transformation_note="Snapshot cards summarize the latest level and active-timeframe change for curated macro series, with optional cross-region comparison fields when counterparts exist.")
+        return MacroSnapshotCard(card_id=card_id, title=title, subtitle=subtitle, summary=summary, mode_target=mode_target, target_theme=target_theme, metrics=metrics, linked_markets=list(linked_markets), source_provider=metrics[0].source_provider if metrics else "fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.snapshot_cards", transformation_note="Snapshot cards summarize the latest level and active-timeframe change for curated macro series, with optional cross-region comparison fields when counterparts exist.")
 
-    def _build_rates_policy(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, events: list[MacroEventRecord], timeframe: str, force_refresh: bool) -> MacroRatesPolicySummary:
+    def _build_rates_policy(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, events: list[MacroEventRecord], linked_markets: list[MacroLinkedPredictionMarket], timeframe: str, force_refresh: bool) -> MacroRatesPolicySummary:
         data_region = self._data_region(region)
         curve_nodes, curve_retrieved_at = self._load_curve_nodes(region=data_region, histories=histories, force_refresh=force_refresh, timeframe=timeframe)
         if data_region == "EU":
@@ -1028,9 +1086,9 @@ class MacroService:
         real_yield_metrics = [self._metric_from_history(histories[series_id], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories) for series_id in real_ids if series_id in histories]
         visible_events = events[:4] if data_region == "US" else []
         comparison_summary = f"Comparing {region} rates context against {comparison_region} where equivalent concepts exist." if comparison_region is not None else None
-        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, source_provider="treasury" if data_region == "US" else "fred", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in visible_events if row.retrieved_at is not None], default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, and optional cross-region comparison overlays for matched concepts.", comparison_region=comparison_region, comparison_summary=comparison_summary)
+        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, linked_markets=list(linked_markets), source_provider="treasury" if data_region == "US" else "fred", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in visible_events if row.retrieved_at is not None], default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, optional cross-region comparison overlays for matched concepts, and linked prediction-market context for policy-sensitive contracts.", comparison_region=comparison_region, comparison_summary=comparison_summary)
 
-    def _build_cross_asset(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, divergences: list[MacroDivergenceRecord], timeframe: str) -> list[MacroThemeComparison]:
+    def _build_cross_asset(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, divergences: list[MacroDivergenceRecord], linked_markets: dict[str, list[MacroLinkedPredictionMarket]], timeframe: str) -> list[MacroThemeComparison]:
         data_region = self._data_region(region)
         divergence_map = {row.theme: row for row in divergences}
         rows: list[MacroThemeComparison] = []
@@ -1041,8 +1099,258 @@ class MacroService:
                 comparison_summary = None
                 if divergence is not None and divergence.comparison_region is not None and divergence.comparison_score is not None:
                     comparison_summary = f"{divergence.comparison_region} divergence score {divergence.comparison_score:.2f} ({divergence.score_gap_display} vs {region})."
-                rows.append(MacroThemeComparison(theme=theme, headline=f"{self._title_theme(theme)} signals", summary=divergence.summary if divergence is not None else "Theme coverage is available, but disagreement is currently muted.", agreement_label=divergence.label if divergence is not None else "low", metrics=metrics, source_provider="fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.cross_asset", transformation_note="Cross-asset theme blocks line up curated region-specific series so the user can compare whether markets agree on a macro narrative, with optional cross-region overlays where concept matches exist.", comparison_region=comparison_region, comparison_summary=comparison_summary))
+                rows.append(MacroThemeComparison(theme=theme, headline=f"{self._title_theme(theme)} signals", summary=divergence.summary if divergence is not None else "Theme coverage is available, but disagreement is currently muted.", agreement_label=divergence.label if divergence is not None else "low", metrics=metrics, linked_markets=list(linked_markets.get(theme, [])), primary_driver=divergence.primary_driver if divergence is not None else None, counter_signal=divergence.counter_signal if divergence is not None else None, divergence_score=divergence.score if divergence is not None else None, research_focus=divergence.research_focus if divergence is not None else None, source_provider="fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.cross_asset", transformation_note="Cross-asset theme blocks line up curated region-specific series so the user can compare whether markets agree on a macro narrative, with optional cross-region overlays where concept matches exist and linked prediction contracts for the same theme.", comparison_region=comparison_region, comparison_summary=comparison_summary))
         return rows
+
+    def _build_linked_prediction_market_map(
+        self,
+        *,
+        region: str,
+        timeframe: str,
+        histories: dict[str, MacroSeriesHistory],
+        force_refresh: bool,
+    ) -> dict[str, list[MacroLinkedPredictionMarket]]:
+        if self.prediction_market_service is None:
+            return {}
+        rows: dict[str, list[MacroLinkedPredictionMarket]] = {}
+        for theme in [name for name in THEME_ORDER if name != "all"]:
+            rows[theme] = self._linked_prediction_markets_for_theme(
+                region=region,
+                theme=theme,
+                timeframe=timeframe,
+                histories=histories,
+                force_refresh=force_refresh,
+            )
+        return rows
+
+    def _linked_prediction_markets_for_theme(
+        self,
+        *,
+        region: str,
+        theme: str,
+        timeframe: str,
+        histories: dict[str, MacroSeriesHistory],
+        force_refresh: bool,
+    ) -> list[MacroLinkedPredictionMarket]:
+        if self.prediction_market_service is None:
+            return []
+        query = MACRO_PREDICTION_QUERY_TERMS.get(region, MACRO_PREDICTION_QUERY_TERMS["US"]).get(theme)
+        if not query:
+            return []
+        try:
+            result = self.prediction_market_service.screener(
+                PredictionMarketScreenerRequest(
+                    query=query,
+                    status="open",
+                    force_refresh=force_refresh,
+                    category="Economy",
+                    min_volume=5_000.0,
+                    sort_by="research_rank",
+                    limit=6,
+                )
+            )
+        except Exception:
+            return []
+        bias_score, bias_summary = self._theme_bias_summary(
+            region=self._data_region(region),
+            theme=theme,
+            histories=histories,
+            timeframe=timeframe,
+        )
+        linked: list[MacroLinkedPredictionMarket] = []
+        for market in result.markets[:3]:
+            linked.append(
+                self._linked_prediction_market_record(
+                    market,
+                    theme=theme,
+                    bias_score=bias_score,
+                    bias_summary=bias_summary,
+                )
+            )
+        return linked
+
+    def _linked_prediction_market_record(
+        self,
+        market: PredictionMarketRecord,
+        *,
+        theme: str,
+        bias_score: float,
+        bias_summary: str,
+    ) -> MacroLinkedPredictionMarket:
+        stance = self._infer_prediction_contract_stance(theme, market)
+        alignment = "mixed"
+        if abs(bias_score) < 0.25 or stance == 0:
+            alignment = "mixed"
+        elif (stance == 1 and bias_score > 0) or (stance == -1 and bias_score < 0):
+            alignment = "aligned"
+        else:
+            alignment = "diverging"
+        stance_label = THEME_ALIGNMENT_LABELS.get(theme, {}).get(stance)
+        alignment_summary = bias_summary if stance_label is None else f"Gamma maps this contract as {stance_label}; {bias_summary}"
+        return MacroLinkedPredictionMarket(
+            market_id=market.market_id,
+            venue=market.venue,
+            title=market.title,
+            status=market.status,
+            category=market.category,
+            end_time=market.end_time,
+            current_probability=market.current_probability,
+            probability_label=market.probability_label or (_format_probability(market.current_probability) if market.current_probability is not None else None),
+            recent_price_change=market.recent_price_change,
+            change_display=_format_prediction_change(market.recent_price_change),
+            research_score=market.research_score,
+            macro_alignment=alignment,
+            macro_alignment_summary=alignment_summary,
+            source_provider=market.source_provider,
+            retrieved_at=market.retrieved_at,
+            origin="macro_service.linked_prediction_markets",
+            transformation_note="Linked prediction-market context reuses Gamma's normalized prediction screener, filtered by macro-theme queries and annotated with a lightweight macro-bias alignment heuristic.",
+        )
+
+    def _theme_bias_summary(
+        self,
+        *,
+        region: str,
+        theme: str,
+        histories: dict[str, MacroSeriesHistory],
+        timeframe: str,
+    ) -> tuple[float, str]:
+        signal_rows = self._collect_signal_rows(region, theme, histories, timeframe=timeframe, comparison_region=None, comparison_histories={})
+        if not signal_rows:
+            return 0.0, "Macro proxies are currently mixed."
+        average_signal = sum(score for _, score in signal_rows) / len(signal_rows)
+        if theme == "inflation":
+            if average_signal >= 0.25:
+                return average_signal, "Macro inflation proxies are firming."
+            if average_signal <= -0.25:
+                return average_signal, "Macro inflation proxies are cooling."
+        if theme == "policy":
+            if average_signal >= 0.25:
+                return average_signal, "Macro policy proxies lean tighter."
+            if average_signal <= -0.25:
+                return average_signal, "Macro policy proxies lean easier."
+        if theme == "growth":
+            if average_signal >= 0.25:
+                return average_signal, "Macro growth proxies are improving."
+            if average_signal <= -0.25:
+                return average_signal, "Macro growth proxies are softening."
+        if theme == "recession_risk":
+            if average_signal >= 0.25:
+                return average_signal, "Macro stress proxies are worsening."
+            if average_signal <= -0.25:
+                return average_signal, "Macro stress proxies are easing."
+        return average_signal, "Macro proxies are currently mixed."
+
+    def _build_divergence_signal(
+        self,
+        theme: str,
+        metric: MacroMetricRecord,
+        signal_score: float,
+        *,
+        role: str,
+    ) -> MacroDivergenceSignal:
+        rounded_score = round(signal_score, 2)
+        return MacroDivergenceSignal(
+            role=role,
+            tone=self._divergence_signal_tone(signal_score, role=role),
+            signal_score=rounded_score,
+            signal_score_display=f"{rounded_score:+.2f}",
+            interpretation=self._divergence_signal_interpretation(theme, metric, signal_score, role=role),
+            metric=metric,
+            source_provider=metric.source_provider,
+            retrieved_at=metric.retrieved_at,
+            origin="macro_service.divergence_signal",
+            transformation_note="Divergence signal annotations package the lead driver and counter-signal behind each theme score using scaled directional proxy moves.",
+        )
+
+    def _divergence_summary(
+        self,
+        theme: str,
+        primary_driver: MacroDivergenceSignal,
+        counter_signal: MacroDivergenceSignal,
+    ) -> str:
+        if counter_signal.signal_score <= -0.2:
+            return f"{primary_driver.metric.label} is driving the {theme.replace('_', ' ')} read while {counter_signal.metric.label} is the clearest counter-signal."
+        return f"{primary_driver.metric.label} is driving the {theme.replace('_', ' ')} read while {counter_signal.metric.label} is lagging as the weakest confirmation."
+
+    def _divergence_research_focus(
+        self,
+        theme: str,
+        *,
+        primary_driver: MacroDivergenceSignal,
+        counter_signal: MacroDivergenceSignal,
+        comparison_region: str | None,
+        score_gap_display: str | None,
+    ) -> str:
+        if counter_signal.signal_score <= -0.2:
+            focus = f"Test whether {primary_driver.metric.label} or {counter_signal.metric.label} is more likely to reset first; that disagreement is carrying most of the {theme.replace('_', ' ')} divergence."
+        else:
+            focus = f"Test whether {counter_signal.metric.label} eventually catches up to {primary_driver.metric.label}; the theme currently depends on a narrow set of confirming proxies."
+        if comparison_region is not None and score_gap_display is not None:
+            focus = f"{focus} Versus {comparison_region}, the divergence spread is {score_gap_display}."
+        return focus
+
+    def _divergence_signal_tone(self, signal_score: float, *, role: str) -> str:
+        if role == "driver":
+            return "reinforcing" if signal_score >= 0.2 else "mixed"
+        if signal_score <= -0.2:
+            return "opposing"
+        if signal_score >= 0.2:
+            return "mixed"
+        return "mixed"
+
+    def _divergence_signal_interpretation(
+        self,
+        theme: str,
+        metric: MacroMetricRecord,
+        signal_score: float,
+        *,
+        role: str,
+    ) -> str:
+        move_text = metric.delta_display or metric.display_value or "latest move"
+        supportive_state, opposing_state = self._theme_signal_states(theme)
+        if role == "driver":
+            if signal_score >= 0.2:
+                return f"{metric.label} is the lead driver. Its {move_text} move points to {supportive_state}."
+            return f"{metric.label} is still the strongest available proxy, but its {move_text} move is only weakly supportive."
+        if signal_score <= -0.2:
+            return f"{metric.label} is the clearest counter-signal. Its {move_text} move points to {opposing_state}."
+        return f"{metric.label} is not outright opposing the theme, but its {move_text} move is lagging the stronger proxies."
+
+    def _theme_signal_states(self, theme: str) -> tuple[str, str]:
+        if theme == "inflation":
+            return "firmer inflation pressure", "cooling inflation pressure"
+        if theme == "policy":
+            return "tighter policy conditions", "easier policy conditions"
+        if theme == "growth":
+            return "improving growth momentum", "softer growth momentum"
+        if theme == "recession_risk":
+            return "worsening stress conditions", "easing stress conditions"
+        return "stronger macro pressure", "softer macro pressure"
+
+    def _infer_prediction_contract_stance(self, theme: str, market: PredictionMarketRecord) -> int:
+        text = f" {_normalize_text(' '.join(filter(None, [market.title, market.subtitle, market.event_title, market.series_title, ' '.join(market.tags)])))} "
+        if theme == "inflation":
+            if any(token in text for token in (" above ", " over ", " higher ", " hotter ", " rise ", " rising ", " increase ", " sticky ")):
+                return 1
+            if any(token in text for token in (" below ", " under ", " lower ", " cooler ", " fall ", " falling ", " decline ", " disinflation ")):
+                return -1
+        if theme == "policy":
+            if any(token in text for token in (" hike ", " hikes ", " hold ", " higher ", " above ", " no cut ", " fewer cuts ", " hawkish ")):
+                return 1
+            if any(token in text for token in (" cut ", " cuts ", " lower ", " below ", " easing ", " dovish ")):
+                return -1
+        if theme == "growth":
+            if any(token in text for token in (" soft landing ", " above ", " stronger ", " accelerate ", " expansion ", " payrolls beat ", " growth beats ")):
+                return 1
+            if any(token in text for token in (" below ", " weaker ", " slowdown ", " contraction ", " miss ", " unemployment rises ")):
+                return -1
+        if theme == "recession_risk":
+            if any(token in text for token in (" recession ", " hard landing ", " unemployment above ", " layoffs ", " contraction ")):
+                return 1
+            if any(token in text for token in (" no recession ", " avoid recession ", " soft landing ")):
+                return -1
+        return 0
 
     def _load_curve_nodes(self, *, region: str, histories: dict[str, MacroSeriesHistory], force_refresh: bool, timeframe: str) -> tuple[list[MacroCurveNode], datetime]:
         if region == "EU":
@@ -1227,6 +1535,12 @@ def _format_metric(value: float | None, unit: str | None) -> str:
     return f"{value:.2f}"
 
 
+def _format_probability(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value * 100.0:.0f}%"
+
+
 def _format_delta(value: float | None, unit: str | None) -> str:
     if value is None:
         return "N/A"
@@ -1241,3 +1555,13 @@ def _format_delta(value: float | None, unit: str | None) -> str:
     if unit == "score":
         return f"{value:+.2f}"
     return f"{value:+.2f}"
+
+
+def _format_prediction_change(value: float | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value * 100.0:+.1f} pts"
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()

@@ -506,6 +506,26 @@ export interface MacroEvent {
   transformation_note: string | null;
 }
 
+export interface MacroLinkedPredictionMarket {
+  market_id: string;
+  venue: string;
+  title: string;
+  status: string;
+  category: string | null;
+  end_time: string | null;
+  current_probability: number | null;
+  probability_label: string | null;
+  recent_price_change: number | null;
+  change_display: string | null;
+  research_score: number | null;
+  macro_alignment: string;
+  macro_alignment_summary: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface MacroSeriesHistory {
   series_id: string;
   title: string;
@@ -529,6 +549,20 @@ export interface MacroSnapshotCard {
   mode_target: string;
   target_theme: string | null;
   metrics: MacroMetric[];
+  linked_markets: MacroLinkedPredictionMarket[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroDivergenceSignal {
+  role: string;
+  tone: string;
+  signal_score: number;
+  signal_score_display: string;
+  interpretation: string;
+  metric: MacroMetric;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
@@ -545,6 +579,9 @@ export interface MacroDivergence {
   label: string;
   metrics: MacroMetric[];
   series_ids: string[];
+  primary_driver: MacroDivergenceSignal | null;
+  counter_signal: MacroDivergenceSignal | null;
+  research_focus: string | null;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
@@ -561,6 +598,11 @@ export interface MacroThemeComparison {
   summary: string;
   agreement_label: string;
   metrics: MacroMetric[];
+  linked_markets: MacroLinkedPredictionMarket[];
+  primary_driver: MacroDivergenceSignal | null;
+  counter_signal: MacroDivergenceSignal | null;
+  divergence_score: number | null;
+  research_focus: string | null;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
@@ -576,6 +618,7 @@ export interface MacroRatesPolicySummary {
   curve_nodes: MacroCurveNode[];
   real_yield_metrics: MacroMetric[];
   events: MacroEvent[];
+  linked_markets: MacroLinkedPredictionMarket[];
   source_provider: string;
   retrieved_at: string | null;
   origin: string;

@@ -75,6 +75,7 @@ class MacroSnapshotCard:
     mode_target: str
     target_theme: str | None
     metrics: list[MacroMetricRecord] = field(default_factory=list)
+    linked_markets: list["MacroLinkedPredictionMarket"] = field(default_factory=list)
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
@@ -107,6 +108,9 @@ class MacroDivergenceRecord:
     label: str
     metrics: list[MacroMetricRecord] = field(default_factory=list)
     series_ids: list[str] = field(default_factory=list)
+    primary_driver: "MacroDivergenceSignal" | None = None
+    counter_signal: "MacroDivergenceSignal" | None = None
+    research_focus: str | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
@@ -118,12 +122,52 @@ class MacroDivergenceRecord:
 
 
 @dataclass(frozen=True)
+class MacroLinkedPredictionMarket:
+    market_id: str
+    venue: str
+    title: str
+    status: str
+    category: str | None
+    end_time: datetime | None
+    current_probability: float | None
+    probability_label: str | None = None
+    recent_price_change: float | None = None
+    change_display: str | None = None
+    research_score: float | None = None
+    macro_alignment: str = "mixed"
+    macro_alignment_summary: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroDivergenceSignal:
+    role: str
+    tone: str
+    signal_score: float
+    signal_score_display: str
+    interpretation: str
+    metric: MacroMetricRecord
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class MacroThemeComparison:
     theme: str
     headline: str
     summary: str
     agreement_label: str
     metrics: list[MacroMetricRecord] = field(default_factory=list)
+    linked_markets: list[MacroLinkedPredictionMarket] = field(default_factory=list)
+    primary_driver: MacroDivergenceSignal | None = None
+    counter_signal: MacroDivergenceSignal | None = None
+    divergence_score: float | None = None
+    research_focus: str | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
@@ -140,6 +184,7 @@ class MacroRatesPolicySummary:
     curve_nodes: list[MacroCurveNode] = field(default_factory=list)
     real_yield_metrics: list[MacroMetricRecord] = field(default_factory=list)
     events: list[MacroEventRecord] = field(default_factory=list)
+    linked_markets: list[MacroLinkedPredictionMarket] = field(default_factory=list)
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""

@@ -200,6 +200,7 @@ def build_runtime(
         treasury_adapter=TreasuryCurveAdapter(cache),
         events_adapter=USMacroEventsAdapter(cache),
         fx_adapter=IBKRMacroFXAdapter(market_data),
+        prediction_market_service=prediction_market_service,
     )
     risk_service = RiskService(
         client,

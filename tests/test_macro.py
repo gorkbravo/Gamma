@@ -10,6 +10,7 @@ from src.api.main import create_app
 from src.application.macro_service import MacroService, MacroSnapshotRequest
 from src.application.runtime import build_runtime
 from src.models.macro import MacroEventRecord, MacroSeriesPoint
+from src.models.prediction_markets import PredictionMarketRecord, PredictionMarketScreenerResult
 from src.services.cache import CacheService
 from src.services.fred import FredObservation
 from src.services.macro_adapters import FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
@@ -222,6 +223,8 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert snapshot.rates_policy is not None
     assert len(snapshot.rates_policy.curve_nodes) == 5
     assert snapshot.rates_policy.transformation_note is not None
+    assert snapshot.rates_policy.linked_markets
+    assert snapshot.rates_policy.linked_markets[0].macro_alignment_summary is not None
     assert cpi_history is not None
     assert cpi_history.transformation_note is not None
     assert cpi_history.points
@@ -233,6 +236,9 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert divergences
     assert divergences[0].theme == "inflation"
     assert divergences[0].score >= divergences[-1].score
+    assert divergences[0].primary_driver is not None
+    assert divergences[0].counter_signal is not None
+    assert divergences[0].research_focus is not None
     assert all(row.transformation_note is not None for row in divergences)
 
 
@@ -257,6 +263,10 @@ def test_macro_service_applies_active_timeframe_to_snapshot_cross_asset_and_dive
     dollar_1m = next(metric for metric in inflation_1m.metrics if metric.series_id == "us-dollar-broad")
     dollar_1y = next(metric for metric in inflation_1y.metrics if metric.series_id == "us-dollar-broad")
     assert dollar_1m.delta_value != dollar_1y.delta_value
+    assert inflation_1m.primary_driver is not None
+    assert inflation_1m.counter_signal is not None
+    assert inflation_1m.divergence_score is not None
+    assert inflation_1m.research_focus is not None
 
     divergence_1m = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1M", theme="inflation"))
     divergence_1y = service.get_divergences(MacroSnapshotRequest(region="US", timeframe="1Y", theme="inflation"))
@@ -352,6 +362,7 @@ def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):
     assert snapshot.rates_policy.policy_metrics[0].comparison_display_value is not None
     assert snapshot.cross_asset
     assert any(row.comparison_region == "US" for row in snapshot.cross_asset)
+    assert snapshot.cross_asset[0].linked_markets is not None
 
 
 def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_path, monkeypatch):
@@ -384,6 +395,13 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         assert any("ignored" in warning for warning in snapshot_payload["warnings"])
         assert snapshot_payload["rates_policy"]["curve_nodes"][0]["transformation_note"] is not None
         assert snapshot_payload["snapshot_cards"][0]["source_provider"]
+        assert snapshot_payload["snapshot_cards"][0]["linked_markets"]
+        inflation_cross_asset = next(row for row in snapshot_payload["cross_asset"] if row["theme"] == "inflation")
+        assert inflation_cross_asset["primary_driver"] is not None
+        assert inflation_cross_asset["counter_signal"] is not None
+        assert snapshot_payload["rates_policy"]["linked_markets"]
+        assert snapshot_payload["top_divergences"][0]["primary_driver"] is not None
+        assert snapshot_payload["top_divergences"][0]["research_focus"] is not None
 
         assert history_response.status_code == 200
         history_payload = history_response.json()
@@ -401,6 +419,7 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         divergence_payload = divergence_response.json()
         assert divergence_payload["divergences"][0]["theme"] == "inflation"
         assert divergence_payload["divergences"][0]["transformation_note"] is not None
+        assert divergence_payload["divergences"][0]["counter_signal"] is not None
 
         assert events_response.status_code == 200
         events_payload = events_response.json()
@@ -535,12 +554,48 @@ class _FakeFXMacroAdapter:
         return rows, FX_RETRIEVED_AT
 
 
+@dataclass
+class _FakePredictionMarketService:
+    def screener(self, request) -> PredictionMarketScreenerResult:
+        query = str(request.query).lower()
+        if "inflation" in query or "cpi" in query:
+            market = _prediction_market_record(
+                market_id="polymarket:inflation-above",
+                title="Will CPI print above 3% in June?",
+                probability=0.62,
+                recent_change=0.04,
+            )
+        elif "fed" in query or "ecb" in query or "rates" in query:
+            market = _prediction_market_record(
+                market_id="kalshi:fed-cut",
+                title="Will the Fed cut rates by September?",
+                probability=0.58,
+                recent_change=-0.02,
+            )
+        elif "recession" in query:
+            market = _prediction_market_record(
+                market_id="polymarket:recession",
+                title="Will the US enter recession in 2026?",
+                probability=0.37,
+                recent_change=0.03,
+            )
+        else:
+            market = _prediction_market_record(
+                market_id="polymarket:soft-landing",
+                title="Will the US avoid recession in 2026?",
+                probability=0.64,
+                recent_change=0.01,
+            )
+        return PredictionMarketScreenerResult(markets=[market], venues=[], warnings=[])
+
+
 def _build_macro_service() -> MacroService:
     return MacroService(
         fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
         treasury_adapter=_FakeTreasuryCurveAdapter(),
         events_adapter=_FakeEventsAdapter(),
         fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
+        prediction_market_service=_FakePredictionMarketService(),
     )
 
 
@@ -585,6 +640,54 @@ def _build_fx_series_map() -> dict[tuple[str, str], list[MacroSeriesPoint]]:
         ("CAD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.75, 0.74, 0.74, 0.73, 0.74], pair_code="CADUSD"),
         ("USD", "AUD"): _fx_points([220, 120, 60, 20, 0], [1.56, 1.52, 1.49, 1.54, 1.52], pair_code="USDAUD"),
     }
+
+
+def _prediction_market_record(*, market_id: str, title: str, probability: float, recent_change: float) -> PredictionMarketRecord:
+    venue, provider_market_id = market_id.split(":", 1)
+    return PredictionMarketRecord(
+        market_id=market_id,
+        venue=venue,
+        title=title,
+        subtitle=None,
+        description=None,
+        status="open",
+        category="Economy",
+        event_id=None,
+        event_title=None,
+        series_id=None,
+        series_title=None,
+        provider_market_id=provider_market_id,
+        provider_condition_id=None,
+        provider_event_id=None,
+        provider_series_id=None,
+        slug=None,
+        end_time=datetime(2026, 6, 30, 0, 0, 0),
+        open_time=datetime(2026, 3, 1, 0, 0, 0),
+        close_time=None,
+        current_probability=probability,
+        probability_label=f"{probability * 100:.0f}%",
+        volume=25_000.0,
+        volume_24h=7_500.0,
+        liquidity=50_000.0,
+        open_interest=12_000.0,
+        best_bid=probability - 0.01,
+        best_ask=probability + 0.01,
+        spread=0.02,
+        recent_price_change=recent_change,
+        resolved_probability=None,
+        resolution_outcome=None,
+        image_url=None,
+        resolution_source=None,
+        outcomes=[],
+        tags=["Economy", "Macro"],
+        freshness=None,
+        research_score=88.0,
+        research_rationale="Test fixture",
+        source_provider=venue,
+        retrieved_at=FRED_RETRIEVED_AT,
+        origin="test.prediction_market",
+        transformation_note="Fixture market for macro linkage tests.",
+    )
 
 
 def _daily_points(ages: list[int], values: list[float], *, provider_series_id: str) -> list[MacroSeriesPoint]:
