@@ -1321,12 +1321,10 @@
   }
 
   .mode-bar {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: inline-grid;
+    grid-template-columns: repeat(4, auto);
     border: 1px solid var(--panel-strong);
     background: rgba(8, 13, 18, 0.82);
-    max-width: 28rem;
-    width: 100%;
   }
 
   .mode-bar button {
@@ -1334,9 +1332,10 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.4rem 0.55rem;
+    padding: 0.4rem 0.7rem;
     font: inherit;
-    font-size: 0.76rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
   }
