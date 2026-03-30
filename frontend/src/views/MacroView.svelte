@@ -471,23 +471,13 @@
                     <span class="row-theme">{card.title}</span>
                     <span class="row-summary">{card.summary}</span>
                     {#if card.linked_markets?.length}
-                      <div class="linked-market-list inline">
-                        {#each card.linked_markets.slice(0, 2) as market}
-                          <div class="linked-market-chip">
-                            <strong>{market.title}</strong>
-                            <span class="linked-market-meta">
-                              <span>{market.venue}</span>
-                              {#if market.probability_label}
-                                <span>{market.probability_label}</span>
-                              {/if}
-                              {#if market.change_display}
-                                <span class={linkedMarketTone(market.macro_alignment)}>{market.change_display}</span>
-                              {/if}
-                              <span class={linkedMarketTone(market.macro_alignment)}>{market.macro_alignment}</span>
-                            </span>
-                          </div>
-                        {/each}
-                      </div>
+                      <span class="linked-hint">
+                        <span class="linked-dot {linkedMarketTone(card.linked_markets[0].macro_alignment)}"></span>
+                        {card.linked_markets.length} linked {card.linked_markets.length === 1 ? "market" : "markets"}
+                        {#if card.linked_markets[0].macro_alignment}
+                          · <span class={linkedMarketTone(card.linked_markets[0].macro_alignment)}>{card.linked_markets[0].macro_alignment}</span>
+                        {/if}
+                      </span>
                     {/if}
                   </td>
                   <td class="col-drill">
@@ -1161,7 +1151,7 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.5rem;
   }
 
@@ -1583,6 +1573,32 @@
     gap: 0.35rem;
   }
 
+  .linked-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.25rem;
+    color: var(--text-2);
+    font-size: 0.64rem;
+  }
+
+  .linked-dot {
+    display: inline-block;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 50%;
+    background: var(--text-2);
+    flex-shrink: 0;
+  }
+
+  .linked-dot.positive {
+    background: var(--positive);
+  }
+
+  .linked-dot.negative {
+    background: var(--negative);
+  }
+
   .linked-market-list.inline {
     margin-top: 0.35rem;
   }
@@ -1665,8 +1681,8 @@
     display: grid;
     gap: 0.2rem;
     padding: 0.55rem 0.6rem;
-    border: 1px solid rgba(116, 89, 56, 0.14);
-    background: rgba(244, 237, 228, 0.55);
+    border: 1px solid rgba(46, 60, 74, 0.34);
+    background: rgba(8, 13, 18, 0.55);
   }
 
   .signal-head {
@@ -1690,8 +1706,8 @@
     min-width: 3rem;
     padding: 0.15rem 0.4rem;
     border-radius: 999px;
-    border: 1px solid rgba(116, 89, 56, 0.14);
-    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(46, 60, 74, 0.42);
+    background: rgba(122, 166, 200, 0.06);
     color: var(--text-1);
     font-size: 0.68rem;
     font-weight: 600;
