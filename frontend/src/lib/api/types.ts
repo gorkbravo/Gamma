@@ -2,6 +2,40 @@ export type WorkspaceMode = "portfolio" | "research";
 
 export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "risk" | "iv";
 
+export interface WorkspaceTabDefinition {
+  id: TabId;
+  label: string;
+  pinned: boolean;
+  defaultIndex: number;
+}
+
+export type WorkspaceTabOrderState = Record<WorkspaceMode, TabId[]>;
+
+export type ActionKeybindingId =
+  | "toggle_sidebar"
+  | "refresh_view"
+  | "open_settings"
+  | "dismiss_surface"
+  | "switch_portfolio_workspace"
+  | "switch_research_workspace";
+
+export interface ShortcutCombo {
+  id: string;
+  label: string;
+  key: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  meta?: boolean;
+}
+
+export interface ActionKeybindingDefinition {
+  id: ActionKeybindingId;
+  label: string;
+  description: string;
+  combos: ShortcutCombo[];
+}
+
 export type MacroMode = "snapshot" | "cross_asset" | "rates_policy" | "events_regimes";
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";

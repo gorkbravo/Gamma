@@ -17,14 +17,15 @@
     "tauri:build": "node ./scripts/run-tauri.mjs build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@tauri-apps/cli": "^2.0.0",
     "svelte": "^5.53.7",
     "typescript": "^5.8.3",
     "vite": "^7.3.1",
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
     "lightweight-charts": "^5.1.0"
   }
 }

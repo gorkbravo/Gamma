@@ -1,20 +1,24 @@
 <script lang="ts">
   import type { SystemStatus, WorkspaceMode } from "../lib/api/types";
+  import { getWorkspaceLabel } from "../lib/navigation";
   import { setChartTheme } from "../lib/stores/app";
 
   export let status: SystemStatus | null = null;
   export let workspaceMode: WorkspaceMode = "portfolio";
   export let busy = false;
+  export let settingsOpen = false;
   export let onToggleConnection: () => void;
   export let onBaseCurrencyChange: (currency: string) => void;
   export let onMarketDataModeChange: (mode: string) => void;
   export let onRefresh: () => void;
   export let onChangeView: () => void;
+  export let onToggleSettings: () => void = () => {};
+  export let onOpenKeyBindings: () => void = () => {};
 
   const baseCurrencyOptions = ["USD", "EUR", "GBP", "CHF", "JPY", "CAD", "AUD"];
   let selectedBaseCurrency = status?.base_currency ?? "USD";
   let selectedMarketDataMode = status?.market_data_mode ?? "delayed";
-  let workspaceLabel = "Portfolio View";
+  let workspaceLabel = getWorkspaceLabel("portfolio");
 
   $: if (status?.base_currency) {
     selectedBaseCurrency = status.base_currency;
@@ -24,7 +28,7 @@
     selectedMarketDataMode = status.market_data_mode;
   }
 
-  $: workspaceLabel = workspaceMode === "portfolio" ? "Portfolio View" : "Research View";
+  $: workspaceLabel = getWorkspaceLabel(workspaceMode);
 
   let selectedChartTheme: string = "blue";
 </script>
@@ -33,8 +37,18 @@
   <div class="actions">
     <button class="ghost" on:click={onChangeView}>Change View</button>
     <button class="accent" on:click={onRefresh} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
-    <details class="settings-menu">
-      <summary class="ghost settings-toggle">Settings</summary>
+    <div class="settings-menu">
+      <button
+        type="button"
+        class="ghost settings-toggle"
+        class:open={settingsOpen}
+        on:click={onToggleSettings}
+        aria-expanded={settingsOpen}
+        aria-haspopup="dialog"
+      >
+        Settings
+      </button>
+      {#if settingsOpen}
       <div class="settings-popover">
         <div class="settings-section">
           <div class="settings-head">
@@ -98,8 +112,18 @@
           </select>
           <small>Changes chart line and area colors across all views.</small>
         </div>
+
+        <div class="settings-section">
+          <div class="settings-head">
+            <span class="label">Navigation</span>
+            <strong>Keyboard</strong>
+          </div>
+          <small>Open the dedicated key bindings window to review default and derived shortcuts.</small>
+          <button class="ghost wide" type="button" on:click={onOpenKeyBindings}>Key Bindings</button>
+        </div>
       </div>
-    </details>
+      {/if}
+    </div>
   </div>
 </section>
 
@@ -178,7 +202,7 @@
     position: relative;
   }
 
-  .settings-menu[open] .settings-toggle {
+  .settings-toggle.open {
     border-color: rgba(122, 166, 200, 0.5);
     color: var(--accent);
   }

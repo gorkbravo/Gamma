@@ -2,6 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default desktop capability for the Gamma shell.",
-  "windows": ["main", "splashscreen"],
-  "permissions": ["core:default"]
+  "windows": ["main", "splashscreen", "keybindings"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-create",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
+  ]
 }

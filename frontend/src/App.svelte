@@ -3,13 +3,23 @@
   import LandingPage from "./components/LandingPage.svelte";
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
-  import TabBar from "./components/TabBar.svelte";
+  import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
   import MacroView from "./views/MacroView.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
   import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
   import ResearchView from "./views/ResearchView.svelte";
   import RiskView from "./views/RiskView.svelte";
   import IvView from "./views/IvView.svelte";
+  import { matchesActionKeybinding, isEditableEventTarget } from "./lib/keybindings";
+  import { openKeyBindingsWindow } from "./lib/keybindings-window";
+  import {
+    getOrderedWorkspaceTabs,
+    getShortcutHintForIndex,
+    getTabByShortcutIndex,
+    getTabLabel,
+    getWorkspaceHomeTab,
+    isWorkspaceTab,
+  } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
   import {
     activeTab,
@@ -56,6 +66,12 @@
     systemStatus,
     toggleConnection
   } from "./lib/stores/app";
+  import {
+    reorderWorkspaceTab,
+    resetWorkspaceTabOrder,
+    restoreWorkspaceTabOrders,
+    workspaceTabOrders,
+  } from "./lib/stores/navigation";
   import type { TabId, WorkspaceMode } from "./lib/api/types";
 
   type ConsoleEntry = {
@@ -72,23 +88,35 @@
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
   let sidebarOpen = false;
+  let settingsOpen = false;
+  let activeViewLabel = "";
+  let orderedTabs: ReturnType<typeof getOrderedWorkspaceTabs> = [];
+  let tabBarTabs: TabBarItem[] = [];
 
-  const tabLabels: Record<string, string> = {
-    portfolio: "Portfolio",
-    research: "Research",
-    macro: "Macro",
-    prediction_markets: "Prediction Markets",
-    risk: "Risk",
-    iv: "IV",
-  };
-  $: activeViewLabel = tabLabels[$activeTab] ?? "";
+  $: activeViewLabel = getTabLabel($activeTab);
+  $: orderedTabs =
+    workspaceMode == null
+      ? []
+      : getOrderedWorkspaceTabs(workspaceMode, $workspaceTabOrders);
+  $: tabBarTabs = orderedTabs.map<TabBarItem>((tab, index) => ({
+    id: tab.id,
+    label: tab.label,
+    pinned: tab.pinned,
+    shortcutHint: getShortcutHintForIndex(index),
+  }));
 
   onMount(() => {
+    restoreWorkspaceTabOrders();
     void bootstrapApp();
+    const handleGlobalKeydown = (event: KeyboardEvent) => {
+      void handleAppKeydown(event);
+    };
+    window.addEventListener("keydown", handleGlobalKeydown);
     pollHandle = setInterval(() => {
       void refreshSystemStatus();
     }, 5000);
     return () => {
+      window.removeEventListener("keydown", handleGlobalKeydown);
       if (pollHandle) {
         clearInterval(pollHandle);
       }
@@ -173,7 +201,9 @@
 
   async function enterWorkspace(mode: WorkspaceMode) {
     workspaceMode = mode;
-    activeTab.set(mode === "portfolio" ? "portfolio" : "research");
+    sidebarOpen = false;
+    settingsOpen = false;
+    activeTab.set(getWorkspaceHomeTab(mode));
     const tasks: Array<Promise<unknown>> = [loadDiagnostics()];
     if (mode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
       tasks.push(loadPortfolioSnapshot());
@@ -183,6 +213,8 @@
 
   async function switchWorkspace(mode: WorkspaceMode) {
     if (workspaceMode === mode) {
+      activeTab.set(getWorkspaceHomeTab(mode));
+      dismissSurfaces();
       return;
     }
     await enterWorkspace(mode);
@@ -192,11 +224,8 @@
     if (!workspaceMode) {
       return;
     }
-    const primaryTab = workspaceMode === "portfolio" ? "portfolio" : "research";
-    const nextTab =
-      tab === "risk" || tab === "iv" || (workspaceMode === "research" && (tab === "prediction_markets" || tab === "macro"))
-        ? tab
-        : primaryTab;
+    const primaryTab = getWorkspaceHomeTab(workspaceMode);
+    const nextTab = isWorkspaceTab(workspaceMode, tab) ? tab : primaryTab;
 
     activeTab.set(nextTab);
 
@@ -305,6 +334,8 @@
   async function handleChangeView() {
     workspaceMode = null;
     diagnosticsOpen = false;
+    sidebarOpen = false;
+    settingsOpen = false;
   }
 
   async function handleToggleDiagnostics() {
@@ -344,6 +375,118 @@
       ivPollHandle = undefined;
     }
   }
+
+  function handleToggleSidebar() {
+    if (workspaceMode == null) {
+      return;
+    }
+    sidebarOpen = !sidebarOpen;
+    if (sidebarOpen) {
+      settingsOpen = false;
+    }
+  }
+
+  function handleToggleSettings() {
+    settingsOpen = !settingsOpen;
+    if (settingsOpen) {
+      sidebarOpen = false;
+    }
+  }
+
+  function dismissSurfaces() {
+    sidebarOpen = false;
+    settingsOpen = false;
+  }
+
+  async function handleOpenKeyBindings() {
+    settingsOpen = false;
+    await openKeyBindingsWindow();
+  }
+
+  function handleTabReorder(draggedTabId: TabId, dropIndex: number) {
+    if (!workspaceMode) {
+      return;
+    }
+    reorderWorkspaceTab(workspaceMode, draggedTabId, dropIndex);
+  }
+
+  function handleResetTabOrder() {
+    if (!workspaceMode) {
+      return;
+    }
+    resetWorkspaceTabOrder(workspaceMode);
+  }
+
+  async function handleAppKeydown(event: KeyboardEvent) {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    const hasDismissibleSurface = sidebarOpen || settingsOpen;
+    const editableTarget = isEditableEventTarget(event.target);
+
+    if (matchesActionKeybinding(event, "dismiss_surface")) {
+      if (hasDismissibleSurface) {
+        event.preventDefault();
+        dismissSurfaces();
+      }
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "refresh_view")) {
+      event.preventDefault();
+      await handleRefreshWorkspace();
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "open_settings")) {
+      if (!editableTarget && workspaceMode != null) {
+        event.preventDefault();
+        settingsOpen = true;
+        sidebarOpen = false;
+      }
+      return;
+    }
+
+    if (editableTarget) {
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "toggle_sidebar")) {
+      if (workspaceMode != null) {
+        event.preventDefault();
+        handleToggleSidebar();
+      }
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "switch_portfolio_workspace")) {
+      event.preventDefault();
+      await switchWorkspace("portfolio");
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "switch_research_workspace")) {
+      event.preventDefault();
+      await switchWorkspace("research");
+      return;
+    }
+
+    if (
+      workspaceMode != null &&
+      event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      /^[1-9]$/.test(event.key)
+    ) {
+      const nextTab = getTabByShortcutIndex(workspaceMode, $workspaceTabOrders, Number(event.key));
+      if (nextTab) {
+        event.preventDefault();
+        await selectTab(nextTab);
+      }
+    }
+  }
 </script>
 
 {#if workspaceMode == null}
@@ -355,27 +498,32 @@
     onEnterResearch={() => enterWorkspace("research")}
   />
 {:else}
-  <Shell activeViewLabel={activeViewLabel} onToggleSidebar={() => sidebarOpen = !sidebarOpen}>
+  <Shell activeViewLabel={activeViewLabel} onToggleSidebar={handleToggleSidebar}>
     <svelte:fragment slot="status">
       <StatusRail
         status={$systemStatus}
         workspaceMode={workspaceMode}
         busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.ivSession}
+        settingsOpen={settingsOpen}
         onToggleConnection={handleConnectionToggle}
         onBaseCurrencyChange={handleBaseCurrencyChange}
         onMarketDataModeChange={handleMarketDataModeChange}
         onRefresh={handleRefreshWorkspace}
         onChangeView={handleChangeView}
+        onToggleSettings={handleToggleSettings}
+        onOpenKeyBindings={handleOpenKeyBindings}
       />
     </svelte:fragment>
 
     <section class="workspace-shell">
       <TabBar
         activeTab={$activeTab}
-        mode={workspaceMode}
         open={sidebarOpen}
+        tabs={tabBarTabs}
         onSelect={selectTab}
         onClose={() => sidebarOpen = false}
+        onReset={handleResetTabOrder}
+        onReorder={handleTabReorder}
       />
 
       <section class="workspace-main">

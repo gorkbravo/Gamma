@@ -1,0 +1,246 @@
+<script lang="ts">
+  import { workspaceTabOrders } from "./lib/stores/navigation";
+  import {
+    ACTION_KEYBINDINGS,
+    getOrderedWorkspaceTabs,
+    getShortcutHintForIndex,
+  } from "./lib/navigation";
+  import type { WorkspaceMode } from "./lib/api/types";
+
+  const workspaceLabels: Record<WorkspaceMode, string> = {
+    portfolio: "Portfolio Workspace",
+    research: "Research Workspace",
+  };
+
+  const workspaceModes: WorkspaceMode[] = ["portfolio", "research"];
+
+  $: workspaceSections = workspaceModes.map((mode) => ({
+    mode,
+    label: workspaceLabels[mode],
+    tabs: getOrderedWorkspaceTabs(mode, $workspaceTabOrders).map((tab, index) => ({
+      ...tab,
+      shortcut: getShortcutHintForIndex(index),
+    })),
+  }));
+</script>
+
+<svelte:head>
+  <title>Gamma Key Bindings</title>
+</svelte:head>
+
+<main class="page">
+  <section class="hero panel">
+    <p class="eyebrow">Navigation</p>
+    <h1>Key Bindings</h1>
+    <p class="copy">
+      Gamma keeps app actions explicit and derives tab shortcuts directly from each workspace's saved sidebar order.
+    </p>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">App Actions</p>
+        <h2>Default and Effective</h2>
+      </div>
+      <p class="annotation">Current action bindings match the explicit defaults in this phase.</p>
+    </div>
+
+    <div class="table">
+      <div class="row header">
+        <span>Action</span>
+        <span>Default</span>
+        <span>Effective</span>
+        <span>Source</span>
+      </div>
+      {#each ACTION_KEYBINDINGS as binding}
+        <div class="row">
+          <div>
+            <strong>{binding.label}</strong>
+            <small>{binding.description}</small>
+          </div>
+          <span>{binding.combos.map((combo) => combo.label).join(" or ")}</span>
+          <span>{binding.combos.map((combo) => combo.label).join(" or ")}</span>
+          <span>Explicit</span>
+        </div>
+      {/each}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Derived Shortcuts</p>
+        <h2>Workspace Tab Order</h2>
+      </div>
+      <p class="annotation">`Ctrl+1` through `Ctrl+N` always follow the live visual order shown here.</p>
+    </div>
+
+    <div class="workspace-grid">
+      {#each workspaceSections as workspace}
+        <article class="workspace-card">
+          <div class="workspace-card-head">
+            <h3>{workspace.label}</h3>
+            <small>{workspace.tabs.length} tabs</small>
+          </div>
+          <div class="table compact">
+            <div class="row header">
+              <span>Tab</span>
+              <span>Effective</span>
+              <span>Source</span>
+            </div>
+            {#each workspace.tabs as tab}
+              <div class="row">
+                <div>
+                  <strong>{tab.label}</strong>
+                  {#if tab.pinned}
+                    <small>Pinned home tab</small>
+                  {/if}
+                </div>
+                <span>{tab.shortcut}</span>
+                <span>{tab.pinned ? "Derived / pinned" : "Derived"}</span>
+              </div>
+            {/each}
+          </div>
+        </article>
+      {/each}
+    </div>
+  </section>
+</main>
+
+<style>
+  :global(body) {
+    margin: 0;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(122, 166, 200, 0.16), transparent 28%),
+      linear-gradient(180deg, #0a0f14 0%, #080d12 100%);
+    color: var(--text-0);
+  }
+
+  .page {
+    width: min(1080px, calc(100vw - 2rem));
+    margin: 0 auto;
+    padding: 1.25rem 0 1.5rem;
+    display: grid;
+    gap: 1rem;
+  }
+
+  .panel {
+    border: 1px solid var(--panel-border);
+    background: rgba(8, 13, 18, 0.92);
+    padding: 1rem;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
+  }
+
+  .hero h1,
+  .section-head h2,
+  .workspace-card-head h3 {
+    margin: 0;
+  }
+
+  .hero {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  .eyebrow {
+    margin: 0;
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text-2);
+  }
+
+  .copy,
+  .annotation,
+  small {
+    color: var(--text-2);
+  }
+
+  .copy,
+  .annotation {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  .section-head,
+  .workspace-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+    margin-bottom: 0.8rem;
+  }
+
+  .table {
+    display: grid;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 0.9fr);
+    gap: 0.8rem;
+    align-items: center;
+    padding: 0.7rem 0;
+    border-top: 1px solid rgba(46, 60, 74, 0.52);
+  }
+
+  .compact .row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr) minmax(0, 1fr);
+  }
+
+  .header {
+    padding-top: 0;
+    border-top: 0;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  strong {
+    display: block;
+    color: var(--text-0);
+    font-size: 0.84rem;
+  }
+
+  small {
+    display: block;
+    margin-top: 0.14rem;
+    font-size: 0.72rem;
+  }
+
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .workspace-card {
+    border: 1px solid rgba(46, 60, 74, 0.52);
+    background: rgba(12, 18, 24, 0.72);
+    padding: 0.9rem;
+  }
+
+  @media (max-width: 820px) {
+    .page {
+      width: min(100vw, calc(100vw - 1rem));
+      padding: 0.75rem 0 1rem;
+    }
+
+    .section-head,
+    .workspace-card-head,
+    .row,
+    .compact .row,
+    .workspace-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .row {
+      gap: 0.35rem;
+    }
+  }
+</style>

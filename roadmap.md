@@ -529,8 +529,17 @@ This phase would make Gamma much more effective as a cross-market research envir
 
 ## Phase 3 - Keyboard Navigation & Power-User Workspace Customization
 
-_Status: Not started (0%)_
-_Remaining focus: full phase scope._
+_Status: Complete (100%)_
+_Phase transition note: Phase 3 is complete as a first pass. Gamma now ships keyboard-first navigation, per-workspace tab ordering, and a dedicated keybindings viewer; optional shortcut-overlay and editable rebinding work remain intentionally deferred._
+_Recent progress: Sidebar drag-and-drop now persists independently per workspace, app-level shortcuts follow the live visual tab order, and Settings can open a separate Key Bindings window._
+
+#### Completion snapshot
+- `Shared tab-order state`: 100% complete. Portfolio and Research each persist their own tab order through one shared localStorage-backed store that is consumed by the sidebar, the shortcut handler, and the visible shortcut hints.
+- `Sidebar reordering`: 100% complete. The sidebar now supports vertical drag-and-drop with a pinned home tab, visible drag handles, restrained motion, insertion markers, and a reset-to-default control.
+- `Keyboard-driven tab and workspace switching`: 100% complete. `Ctrl+1` through `Ctrl+N` now follow the current visual order, `Ctrl+B` / backtick toggles the sidebar, and `Ctrl+Shift+P` / `Ctrl+Shift+R` switch directly to workspace home tabs.
+- `Common action shortcuts`: 100% complete. Refresh, settings, and dismiss behavior are registered once at the app shell, cleaned up on unmount, and scoped away from inappropriate text-entry interactions.
+- `Keybinding discoverability`: 100% complete. Sidebar rows render live shortcut hints, and the Settings surface can open a separate Key Bindings window that shows explicit action bindings alongside tab-order-derived workspace bindings.
+- `Optional rebinding and help overlay`: ~0% complete. Editable keybinding assignment and a lightweight `?` overlay remain optional follow-on ergonomics work rather than blockers for the Phase 3 deliverable.
 
 ### Why this phase comes here
 
@@ -1085,10 +1094,10 @@ This becomes increasingly important as fundamentals and AI-assisted outputs are 
 ### Phase 1 - Prediction Markets (`Complete`)
 Build the most differentiated and accessible research tab first.
 
-### Phase 2 - Macro (`In progress ~40%`)
+### Phase 2 - Macro (`In progress ~55%`)
 Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
 
-### Phase 3 - Keyboard Navigation & Workspace Customization (`Not started`)
+### Phase 3 - Keyboard Navigation & Workspace Customization (`Complete`)
 Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
 
 ### Phase 4 - AI Copilot (`Not started`)

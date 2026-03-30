@@ -7,6 +7,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: "index.html",
+        keybindings: "keybindings.html",
         splash: "tauri-splash.html"
       }
     }
