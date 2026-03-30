@@ -1931,6 +1931,10 @@
     transition: background 120ms ease;
   }
 
+  .list-row:first-child {
+    padding-top: 0;
+  }
+
   .list-row:last-child {
     border-bottom: 0;
   }
