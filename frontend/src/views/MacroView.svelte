@@ -1332,7 +1332,7 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.4rem 0.7rem;
+    padding: 0.4rem 0.85rem;
     font: inherit;
     font-size: 0.78rem;
     white-space: nowrap;
