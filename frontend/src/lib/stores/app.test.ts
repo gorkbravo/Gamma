@@ -759,6 +759,7 @@ describe("app store orchestration", () => {
       rates_policy: null,
       cross_asset: [],
       top_divergences: [],
+      event_studies: [],
       upcoming_events: [],
       warnings: [],
       source_provider: "fred",

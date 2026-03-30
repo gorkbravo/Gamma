@@ -10,6 +10,8 @@ from src.models.macro import (
     MacroDivergenceRecord,
     MacroDivergenceSignal,
     MacroEventRecord,
+    MacroEventReactionSignal,
+    MacroEventStudy,
     MacroLinkedPredictionMarket,
     MacroMetricRecord,
     MacroRatesPolicySummary,
@@ -593,6 +595,14 @@ THEME_ALIGNMENT_LABELS = {
     "recession_risk": {1: "recession-risk-up", -1: "recession-risk-down"},
 }
 
+EVENT_STUDY_LOOKBACK_DAYS = 60
+EVENT_STUDY_LIMIT = 6
+EVENT_WINDOW_DAYS = {
+    "daily": 7,
+    "monthly": 40,
+    "quarterly": 120,
+}
+
 REGION_SNAPSHOT_SERIES = {
     "US": [
         "us-real-gdp-yoy",
@@ -678,6 +688,12 @@ class MacroService:
             histories=histories,
             force_refresh=request.force_refresh,
         )
+        event_studies = self._build_event_studies(
+            region=region,
+            histories=histories,
+            linked_markets=linked_markets,
+            force_refresh=request.force_refresh,
+        )
         divergences = self.get_divergences(
             MacroSnapshotRequest(
                 region=region,
@@ -703,6 +719,7 @@ class MacroService:
             [row.retrieved_at for row in histories.values() if row.retrieved_at is not None]
             + [row.retrieved_at for row in comparison_histories.values() if row.retrieved_at is not None]
             + [row.retrieved_at for row in events if row.retrieved_at is not None]
+            + [row.retrieved_at for row in event_studies if row.retrieved_at is not None]
             + [row.retrieved_at for row in divergences if row.retrieved_at is not None]
             + ([rates_policy.retrieved_at] if rates_policy.retrieved_at is not None else []),
             default=now_utc(),
@@ -736,12 +753,13 @@ class MacroService:
                 timeframe=timeframe,
             ),
             top_divergences=divergences[:3],
+            event_studies=event_studies,
             upcoming_events=events[:5],
             warnings=warnings,
             source_provider="fred",
             retrieved_at=retrieved_at,
             origin="macro_service.snapshot",
-            transformation_note="Snapshot combines normalized FRED series histories, Treasury curve snapshots where available, comparison-aware metric overlays, and official calendar events into a mode-oriented macro workspace.",
+            transformation_note="Snapshot combines normalized FRED series histories, Treasury curve snapshots where available, comparison-aware metric overlays, event-window studies, and official calendar events into a mode-oriented macro workspace.",
         )
 
     def get_series_history(self, series_id: str, *, region: str = "US", timeframe: str = "1Y", force_refresh: bool = False) -> MacroSeriesHistory | None:
@@ -842,6 +860,163 @@ class MacroService:
 
     def get_events(self, *, region: str = "US", force_refresh: bool = False) -> list[MacroEventRecord]:
         return self.events_adapter.list_events(region=self._normalize_region(region), as_of=now_utc(), force_refresh=force_refresh)
+
+    def _build_event_studies(
+        self,
+        *,
+        region: str,
+        histories: dict[str, MacroSeriesHistory],
+        linked_markets: dict[str, list[MacroLinkedPredictionMarket]],
+        force_refresh: bool,
+    ) -> list[MacroEventStudy]:
+        normalized_region = self._normalize_region(region)
+        current_time = now_utc()
+        source_events = self.events_adapter.list_events(
+            region=normalized_region,
+            as_of=current_time - timedelta(days=EVENT_STUDY_LOOKBACK_DAYS),
+            force_refresh=force_refresh,
+            limit=EVENT_STUDY_LIMIT * 2,
+        )
+        recent_events = sorted(
+            [event for event in source_events if event.scheduled_at <= current_time],
+            key=lambda event: event.scheduled_at,
+            reverse=True,
+        )[:3]
+        upcoming_events = sorted(
+            [event for event in source_events if event.scheduled_at > current_time],
+            key=lambda event: event.scheduled_at,
+        )[:3]
+        rows: list[MacroEventStudy] = []
+        for event in [*recent_events, *upcoming_events]:
+            theme = self._event_study_theme(event.category)
+            if theme is None:
+                continue
+            study = self._build_event_study(
+                region=region,
+                theme=theme,
+                event=event,
+                histories=histories,
+                linked_markets=linked_markets.get(theme, []),
+                current_time=current_time,
+            )
+            if study is not None:
+                rows.append(study)
+        return rows
+
+    def _build_event_study(
+        self,
+        *,
+        region: str,
+        theme: str,
+        event: MacroEventRecord,
+        histories: dict[str, MacroSeriesHistory],
+        linked_markets: list[MacroLinkedPredictionMarket],
+        current_time: datetime,
+    ) -> MacroEventStudy | None:
+        data_region = self._data_region(region)
+        reactions: list[MacroEventReactionSignal] = []
+        for series_id in REGION_THEME_SERIES.get(data_region, {}).get(theme, []):
+            history = histories.get(series_id)
+            if history is None:
+                continue
+            signal = self._build_event_reaction_signal(
+                region=data_region,
+                theme=theme,
+                event=event,
+                history=history,
+                current_time=current_time,
+            )
+            if signal is not None:
+                reactions.append(signal)
+        if len(reactions) < 2:
+            return None
+        primary_reaction = max(reactions, key=lambda row: row.signal_score)
+        counter_reaction = min(reactions, key=lambda row: row.signal_score)
+        sorted_reactions = sorted(reactions, key=lambda row: (-abs(row.signal_score), row.metric.label))
+        timing = "recent" if event.scheduled_at <= current_time else "upcoming"
+        return MacroEventStudy(
+            study_id=f"{event.event_id}:{theme}",
+            theme=theme,
+            timing=timing,
+            headline=self._event_study_headline(event, theme=theme, timing=timing),
+            summary=self._event_study_summary(theme, timing=timing, primary_reaction=primary_reaction, counter_reaction=counter_reaction),
+            window_label="Post-event window" if timing == "recent" else "Pre-event window",
+            event=event,
+            reactions=sorted_reactions[:4],
+            primary_reaction=primary_reaction,
+            counter_reaction=counter_reaction,
+            linked_markets=list(linked_markets),
+            research_focus=self._event_study_research_focus(
+                theme,
+                timing=timing,
+                primary_reaction=primary_reaction,
+                counter_reaction=counter_reaction,
+            ),
+            source_provider=event.source_provider,
+            retrieved_at=max(
+                [event.retrieved_at] if event.retrieved_at is not None else []
+                + [row.retrieved_at for row in reactions if row.retrieved_at is not None],
+                default=now_utc(),
+            ),
+            origin="macro_service.event_studies",
+            transformation_note="Event studies score the strongest and weakest macro reactions around scheduled catalysts using nearest pre-event and post-event observations for curated theme proxies.",
+        )
+
+    def _build_event_reaction_signal(
+        self,
+        *,
+        region: str,
+        theme: str,
+        event: MacroEventRecord,
+        history: MacroSeriesHistory,
+        current_time: datetime,
+    ) -> MacroEventReactionSignal | None:
+        timing = "recent" if event.scheduled_at <= current_time else "upcoming"
+        before_point, after_point = self._event_window_points(history=history, event_time=event.scheduled_at, current_time=current_time)
+        if before_point is None or after_point is None:
+            return None
+        if after_point.timestamp <= before_point.timestamp:
+            return None
+        move_value = after_point.value - before_point.value
+        factor = REGION_THEME_FACTORS.get(region, {}).get(theme, {}).get(history.series_id, 1.0)
+        scale = SIGNAL_SCALES.get(history.series_id, 1.0)
+        signal_score = round(max(min((move_value / scale) * factor, 3.0), -3.0), 2)
+        metric = MacroMetricRecord(
+            metric_id=f"{event.event_id}:{history.series_id}",
+            label=history.title,
+            value=after_point.value,
+            display_value=_format_metric(after_point.value, history.unit),
+            unit=history.unit,
+            delta_value=move_value,
+            delta_display=_format_delta(move_value, history.unit),
+            series_id=history.series_id,
+            source_provider=history.source_provider,
+            retrieved_at=max(filter(None, [history.retrieved_at, before_point.retrieved_at, after_point.retrieved_at]), default=history.retrieved_at),
+            origin="macro_service.event_study_metric",
+            transformation_note="Event-study metrics anchor each curated proxy to the nearest pre-event and post-event observations so macro reactions can be compared across series frequencies.",
+        )
+        return MacroEventReactionSignal(
+            role="lead" if signal_score >= 0.2 else "counter" if signal_score <= -0.2 else "lagging",
+            tone="reinforcing" if signal_score >= 0.2 else "opposing" if signal_score <= -0.2 else "mixed",
+            signal_score=signal_score,
+            signal_score_display=f"{signal_score:+.2f}",
+            move_value=move_value,
+            move_display=metric.delta_display,
+            before_display_value=_format_metric(before_point.value, history.unit),
+            after_display_value=metric.display_value,
+            interpretation=self._event_reaction_interpretation(
+                theme,
+                timing=timing,
+                metric=metric,
+                signal_score=signal_score,
+                event_title=event.title,
+            ),
+            metric=metric,
+            source_provider=history.source_provider,
+            retrieved_at=metric.retrieved_at,
+            origin="macro_service.event_reaction_signal",
+            transformation_note="Event-reaction signals rank which curated proxies are leading, confirming, or lagging around a scheduled catalyst.",
+        )
 
     def _load_histories(self, series_ids: list[str], *, timeframe: str, force_refresh: bool) -> dict[str, MacroSeriesHistory]:
         rows: dict[str, MacroSeriesHistory] = {}
@@ -1063,12 +1238,129 @@ class MacroService:
         metrics = [self._metric_from_history(history, timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories) for history in metric_histories if history is not None]
         return MacroSnapshotCard(card_id=card_id, title=title, subtitle=subtitle, summary=summary, mode_target=mode_target, target_theme=target_theme, metrics=metrics, linked_markets=list(linked_markets), source_provider=metrics[0].source_provider if metrics else "fred", retrieved_at=max((metric.retrieved_at for metric in metrics if metric.retrieved_at is not None), default=now_utc()), origin="macro_service.snapshot_cards", transformation_note="Snapshot cards summarize the latest level and active-timeframe change for curated macro series, with optional cross-region comparison fields when counterparts exist.")
 
+    def _build_policy_path_proxy(
+        self,
+        *,
+        region: str,
+        histories: dict[str, MacroSeriesHistory],
+        comparison_histories: dict[str, MacroSeriesHistory],
+        comparison_region: str | None,
+        timeframe: str,
+        events: list[MacroEventRecord],
+        linked_markets: list[MacroLinkedPredictionMarket],
+        policy_id: str,
+        front_id: str,
+        slope_id: str,
+        policy_label: str,
+        front_label: str,
+    ) -> tuple[str | None, str | None, list[MacroMetricRecord], str | None, str | None, str | None]:
+        policy_history = histories.get(policy_id)
+        front_history = histories.get(front_id)
+        slope_history = histories.get(slope_id)
+        if policy_history is None or front_history is None:
+            return None, None, [], None, None, None
+        policy_metric = self._metric_from_history(
+            policy_history,
+            timeframe=timeframe,
+            comparison_region=comparison_region,
+            comparison_histories=comparison_histories,
+        )
+        front_metric = self._metric_from_history(
+            front_history,
+            timeframe=timeframe,
+            comparison_region=comparison_region,
+            comparison_histories=comparison_histories,
+        )
+        slope_metric = (
+            self._metric_from_history(
+                slope_history,
+                timeframe=timeframe,
+                comparison_region=comparison_region,
+                comparison_histories=comparison_histories,
+            )
+            if slope_history is not None
+            else None
+        )
+        gap_metric = self._build_difference_metric(
+            label=f"{front_label} minus {policy_label}",
+            left_history=front_history,
+            right_history=policy_history,
+            timeframe=timeframe,
+            unit="bps",
+            factor=100.0,
+            comparison_region=comparison_region,
+            comparison_histories=comparison_histories,
+            metric_id=f"{front_id}:{policy_id}:gap",
+            note="Policy-path proxy uses the front-end rates instrument minus the current policy rate/proxy. It is a research aid, not a full meeting-by-meeting curve.",
+        )
+        path_metrics = [policy_metric, front_metric, gap_metric]
+        if slope_metric is not None:
+            path_metrics.append(slope_metric)
+        gap_bps = gap_metric.value
+        if gap_bps is None:
+            return None, None, path_metrics, None, None, None
+        if gap_bps <= -25.0:
+            stance = "easier"
+            headline = f"{front_label} sits {abs(gap_bps):.0f} bps below {policy_label}; the path proxy leans toward cuts."
+        elif gap_bps >= 25.0:
+            stance = "tighter"
+            headline = f"{front_label} sits {gap_bps:.0f} bps above {policy_label}; the path proxy leans toward further tightening."
+        else:
+            stance = "hold"
+            headline = f"{front_label} is within {abs(gap_bps):.0f} bps of {policy_label}; hold remains the cleanest path proxy."
+        next_policy_event = next((event for event in events if event.category == "policy"), None)
+        next_event_text = (
+            f" Next policy catalyst: {next_policy_event.title} on {next_policy_event.scheduled_at.date().isoformat()}."
+            if next_policy_event is not None
+            else ""
+        )
+        alignment_label, alignment_summary = self._linked_market_alignment(linked_markets=linked_markets)
+        summary = (
+            f"This is a front-end path proxy rather than a full meeting curve: compare {front_label}, {policy_label}, "
+            f"and the active curve slope to judge whether easing or tightening is actually being priced.{next_event_text}"
+        )
+        research_focus = self._policy_path_research_focus(
+            stance=stance,
+            front_label=front_label,
+            policy_label=policy_label,
+            alignment_label=alignment_label,
+        )
+        return headline, summary, path_metrics, research_focus, alignment_label, alignment_summary
+
+    def _linked_market_alignment(self, *, linked_markets: list[MacroLinkedPredictionMarket]) -> tuple[str | None, str | None]:
+        if not linked_markets:
+            return None, None
+        aligned = sum(1 for market in linked_markets if market.macro_alignment == "aligned")
+        diverging = sum(1 for market in linked_markets if market.macro_alignment == "diverging")
+        if aligned > diverging:
+            return "aligned", "Linked policy contracts broadly agree with the rates-path proxy."
+        if diverging > aligned:
+            return "diverging", "Linked policy contracts are leaning the other way versus the rates-path proxy."
+        return "mixed", "Linked policy contracts are mixed relative to the rates-path proxy."
+
+    @staticmethod
+    def _policy_path_research_focus(*, stance: str, front_label: str, policy_label: str, alignment_label: str | None) -> str:
+        if alignment_label == "diverging":
+            return f"Test why linked policy contracts disagree with the {front_label} versus {policy_label} path proxy before the next policy event."
+        if stance == "easier":
+            return f"Watch whether {front_label} continues to move below {policy_label} or snaps back as the next policy meeting approaches."
+        if stance == "tighter":
+            return f"Watch whether {front_label} keeps pushing above {policy_label} or rolls over into the next policy meeting."
+        return f"Watch whether {front_label} breaks away from {policy_label}; that move would be the first sign the hold proxy is no longer stable."
+
     def _build_rates_policy(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, events: list[MacroEventRecord], linked_markets: list[MacroLinkedPredictionMarket], timeframe: str, force_refresh: bool) -> MacroRatesPolicySummary:
         data_region = self._data_region(region)
         curve_nodes, curve_retrieved_at = self._load_curve_nodes(region=data_region, histories=histories, force_refresh=force_refresh, timeframe=timeframe)
         if data_region == "EU":
             policy_ids = ("eu-policy-rate", "eu-3m-rate", "eu-10y-yield", "eu-3m10y-slope")
             real_ids = ("eu-hicp-yoy", "eu-eurusd")
+            path_config = {
+                "policy_id": "eu-policy-rate",
+                "front_id": "eu-3m-rate",
+                "slope_id": "eu-3m10y-slope",
+                "policy_label": "ECB policy proxy",
+                "front_label": "3M rate proxy",
+            }
             headline = "ECB and money-market proxies remain the cleanest read on EU macro conditions."
             slope_metric = next((self._metric_from_history(histories[series_id], timeframe=timeframe) for series_id in ("eu-3m10y-slope",) if series_id in histories), None)
             if slope_metric and slope_metric.value is not None:
@@ -1077,6 +1369,13 @@ class MacroService:
         else:
             policy_ids = ("us-fed-funds", "us-2y-yield", "us-10y-yield", "us-2s10s-slope")
             real_ids = ("us-real-10y-yield", "us-5y-breakeven", "us-10y-breakeven")
+            path_config = {
+                "policy_id": "us-fed-funds",
+                "front_id": "us-2y-yield",
+                "slope_id": "us-2s10s-slope",
+                "policy_label": "Fed Funds",
+                "front_label": "2Y Treasury",
+            }
             headline = "Front-end policy pricing remains the cleanest read on US macro conditions."
             slope_metric = next((self._metric_from_history(histories[series_id], timeframe=timeframe) for series_id in ("us-2s10s-slope",) if series_id in histories), None)
             if slope_metric and slope_metric.value is not None:
@@ -1086,7 +1385,21 @@ class MacroService:
         real_yield_metrics = [self._metric_from_history(histories[series_id], timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories) for series_id in real_ids if series_id in histories]
         visible_events = events[:4] if data_region == "US" else []
         comparison_summary = f"Comparing {region} rates context against {comparison_region} where equivalent concepts exist." if comparison_region is not None else None
-        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, linked_markets=list(linked_markets), source_provider="treasury" if data_region == "US" else "fred", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in visible_events if row.retrieved_at is not None], default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, optional cross-region comparison overlays for matched concepts, and linked prediction-market context for policy-sensitive contracts.", comparison_region=comparison_region, comparison_summary=comparison_summary)
+        path_headline, path_summary, path_metrics, path_research_focus, market_alignment_label, market_alignment_summary = self._build_policy_path_proxy(
+            region=region,
+            histories=histories,
+            comparison_histories=comparison_histories,
+            comparison_region=comparison_region,
+            timeframe=timeframe,
+            events=visible_events,
+            linked_markets=linked_markets,
+            policy_id=path_config["policy_id"],
+            front_id=path_config["front_id"],
+            slope_id=path_config["slope_id"],
+            policy_label=path_config["policy_label"],
+            front_label=path_config["front_label"],
+        )
+        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, linked_markets=list(linked_markets), path_headline=path_headline, path_summary=path_summary, path_metrics=path_metrics, path_research_focus=path_research_focus, market_alignment_label=market_alignment_label, market_alignment_summary=market_alignment_summary, source_provider="treasury" if data_region == "US" else "fred", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in path_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in visible_events if row.retrieved_at is not None], default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, optional cross-region comparison overlays for matched concepts, linked prediction-market context, and a front-end policy-path proxy for policy-sensitive research.", comparison_region=comparison_region, comparison_summary=comparison_summary)
 
     def _build_cross_asset(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, divergences: list[MacroDivergenceRecord], linked_markets: dict[str, list[MacroLinkedPredictionMarket]], timeframe: str) -> list[MacroThemeComparison]:
         data_region = self._data_region(region)
@@ -1317,6 +1630,107 @@ class MacroService:
             return f"{metric.label} is the clearest counter-signal. Its {move_text} move points to {opposing_state}."
         return f"{metric.label} is not outright opposing the theme, but its {move_text} move is lagging the stronger proxies."
 
+    @staticmethod
+    def _event_study_theme(category: str) -> str | None:
+        normalized = str(category or "").strip().lower().replace(" ", "_")
+        if normalized in {"growth", "inflation", "policy", "recession_risk"}:
+            return normalized
+        return None
+
+    def _event_window_points(
+        self,
+        *,
+        history: MacroSeriesHistory,
+        event_time: datetime,
+        current_time: datetime,
+    ) -> tuple[MacroSeriesPoint | None, MacroSeriesPoint | None]:
+        frequency = str(history.frequency or "").strip().lower()
+        window_days = EVENT_WINDOW_DAYS.get(frequency, 30)
+        if event_time <= current_time:
+            before_point = _latest_point_at_or_before(history.points, event_time)
+            after_point = _earliest_point_at_or_after(history.points, event_time, max_days=window_days)
+            return before_point, after_point
+        before_anchor = event_time - timedelta(days=window_days)
+        before_point = _latest_point_at_or_before(history.points, before_anchor)
+        after_point = _latest_point_at_or_before(history.points, current_time)
+        return before_point, after_point
+
+    def _event_study_headline(self, event: MacroEventRecord, *, theme: str, timing: str) -> str:
+        if timing == "recent":
+            return f"{event.title}: how {theme.replace('_', ' ')} proxies absorbed the release"
+        return f"{event.title}: what is repricing into the event"
+
+    def _event_study_summary(
+        self,
+        theme: str,
+        *,
+        timing: str,
+        primary_reaction: MacroEventReactionSignal,
+        counter_reaction: MacroEventReactionSignal,
+    ) -> str:
+        theme_label = theme.replace("_", " ")
+        if timing == "recent":
+            if counter_reaction.signal_score <= -0.2:
+                return (
+                    f"After the event, {primary_reaction.metric.label} absorbed the clearest {theme_label} move "
+                    f"while {counter_reaction.metric.label} pushed the other way."
+                )
+            return (
+                f"After the event, {primary_reaction.metric.label} led the {theme_label} repricing "
+                f"while {counter_reaction.metric.label} lagged as the weakest confirmation."
+            )
+        if counter_reaction.signal_score <= -0.2:
+            return (
+                f"Into the event, {primary_reaction.metric.label} is leading the {theme_label} setup "
+                f"while {counter_reaction.metric.label} is the clearest counter-signal."
+            )
+        return (
+            f"Into the event, {primary_reaction.metric.label} is setting the {theme_label} tone "
+            f"while {counter_reaction.metric.label} is lagging the move."
+        )
+
+    def _event_study_research_focus(
+        self,
+        theme: str,
+        *,
+        timing: str,
+        primary_reaction: MacroEventReactionSignal,
+        counter_reaction: MacroEventReactionSignal,
+    ) -> str:
+        theme_label = theme.replace("_", " ")
+        if timing == "recent":
+            return (
+                f"Test whether the post-event move in {primary_reaction.metric.label} broadens into the rest of the "
+                f"{theme_label} complex or mean-reverts first, especially versus {counter_reaction.metric.label}."
+            )
+        return (
+            f"Track whether {counter_reaction.metric.label} catches up to {primary_reaction.metric.label} into the event; "
+            f"that gap is the main pre-event research question."
+        )
+
+    def _event_reaction_interpretation(
+        self,
+        theme: str,
+        *,
+        timing: str,
+        metric: MacroMetricRecord,
+        signal_score: float,
+        event_title: str,
+    ) -> str:
+        move_text = metric.delta_display or metric.display_value or "latest move"
+        supportive_state, opposing_state = self._theme_signal_states(theme)
+        if timing == "recent":
+            if signal_score >= 0.2:
+                return f"After {event_title}, {metric.label} moved {move_text} and points to {supportive_state}."
+            if signal_score <= -0.2:
+                return f"After {event_title}, {metric.label} moved {move_text} and points to {opposing_state}."
+            return f"After {event_title}, {metric.label} moved {move_text} but remains a muted confirmation."
+        if signal_score >= 0.2:
+            return f"Into {event_title}, {metric.label} has moved {move_text} and is reinforcing {supportive_state}."
+        if signal_score <= -0.2:
+            return f"Into {event_title}, {metric.label} has moved {move_text} and is leaning toward {opposing_state}."
+        return f"Into {event_title}, {metric.label} has moved {move_text} but is not yet a decisive signal."
+
     def _theme_signal_states(self, theme: str) -> tuple[str, str]:
         if theme == "inflation":
             return "firmer inflation pressure", "cooling inflation pressure"
@@ -1409,6 +1823,67 @@ class MacroService:
         comparison_delta = comparison_latest.value - comparison_previous.value if comparison_latest is not None and comparison_previous is not None else None
         gap_value = latest.value - comparison_latest.value if latest is not None and comparison_latest is not None else None
         return MacroMetricRecord(metric_id=history.series_id, label=history.title, value=latest.value if latest is not None else None, display_value=_format_metric(latest.value if latest else None, history.unit), unit=history.unit, delta_value=delta, delta_display=_format_delta(delta, history.unit), series_id=history.series_id, source_provider=history.source_provider, retrieved_at=history.retrieved_at, origin=history.origin, transformation_note=history.transformation_note, comparison_region=comparison_region if comparison_history is not None else None, comparison_label=comparison_label, comparison_value=comparison_latest.value if comparison_latest is not None else None, comparison_display_value=_format_metric(comparison_latest.value if comparison_latest else None, history.unit) if comparison_history is not None else None, comparison_delta_value=comparison_delta, comparison_delta_display=_format_delta(comparison_delta, history.unit) if comparison_history is not None else None, gap_value=gap_value, gap_display=_format_delta(gap_value, history.unit) if gap_value is not None else None)
+
+    def _build_difference_metric(
+        self,
+        *,
+        label: str,
+        left_history: MacroSeriesHistory,
+        right_history: MacroSeriesHistory,
+        timeframe: str,
+        unit: str,
+        factor: float,
+        comparison_region: str | None,
+        comparison_histories: dict[str, MacroSeriesHistory],
+        metric_id: str,
+        note: str,
+    ) -> MacroMetricRecord:
+        latest_left = left_history.points[-1] if left_history.points else None
+        latest_right = right_history.points[-1] if right_history.points else None
+        previous_left = _point_before_cutoff(left_history.points, days=TIMEFRAME_DAYS.get(timeframe, 93))
+        previous_right = _point_before_cutoff(right_history.points, days=TIMEFRAME_DAYS.get(timeframe, 93))
+        current_value = (latest_left.value - latest_right.value) * factor if latest_left is not None and latest_right is not None else None
+        previous_value = (previous_left.value - previous_right.value) * factor if previous_left is not None and previous_right is not None else None
+        delta_value = current_value - previous_value if current_value is not None and previous_value is not None else None
+        comparison_value = None
+        comparison_delta_value = None
+        if comparison_region is not None:
+            comparison_left_id = self._counterpart_series_id(left_history.series_id, comparison_region)
+            comparison_right_id = self._counterpart_series_id(right_history.series_id, comparison_region)
+            comparison_left = comparison_histories.get(comparison_left_id) if comparison_left_id is not None else None
+            comparison_right = comparison_histories.get(comparison_right_id) if comparison_right_id is not None else None
+            if comparison_left is not None and comparison_right is not None and comparison_left.points and comparison_right.points:
+                comparison_latest_left = comparison_left.points[-1]
+                comparison_latest_right = comparison_right.points[-1]
+                comparison_previous_left = _point_before_cutoff(comparison_left.points, days=TIMEFRAME_DAYS.get(timeframe, 93))
+                comparison_previous_right = _point_before_cutoff(comparison_right.points, days=TIMEFRAME_DAYS.get(timeframe, 93))
+                comparison_value = (comparison_latest_left.value - comparison_latest_right.value) * factor
+                if comparison_previous_left is not None and comparison_previous_right is not None:
+                    comparison_previous_value = (comparison_previous_left.value - comparison_previous_right.value) * factor
+                    comparison_delta_value = comparison_value - comparison_previous_value
+        gap_value = current_value - comparison_value if current_value is not None and comparison_value is not None else None
+        return MacroMetricRecord(
+            metric_id=metric_id,
+            label=label,
+            value=current_value,
+            display_value=_format_metric(current_value, unit),
+            unit=unit,
+            delta_value=delta_value,
+            delta_display=_format_delta(delta_value, unit),
+            series_id=None,
+            source_provider=left_history.source_provider,
+            retrieved_at=max(filter(None, [left_history.retrieved_at, right_history.retrieved_at]), default=now_utc()),
+            origin="macro_service.derived.policy_path_gap",
+            transformation_note=note,
+            comparison_region=comparison_region if comparison_value is not None else None,
+            comparison_label=f"{comparison_region} gap" if comparison_value is not None and comparison_region is not None else None,
+            comparison_value=comparison_value,
+            comparison_display_value=_format_metric(comparison_value, unit) if comparison_value is not None else None,
+            comparison_delta_value=comparison_delta_value,
+            comparison_delta_display=_format_delta(comparison_delta_value, unit) if comparison_delta_value is not None else None,
+            gap_value=gap_value,
+            gap_display=_format_delta(gap_value, unit) if gap_value is not None else None,
+        )
 
     def _snapshot_series_ids(self, region: str, theme: str) -> list[str]:
         base = list(REGION_SNAPSHOT_SERIES.get(region, []))
@@ -1517,6 +1992,24 @@ def _point_before_cutoff(points: list[MacroSeriesPoint], *, days: int) -> MacroS
         if point.timestamp <= cutoff:
             return point
     return points[0]
+
+
+def _latest_point_at_or_before(points: list[MacroSeriesPoint], anchor: datetime) -> MacroSeriesPoint | None:
+    for point in reversed(points):
+        if point.timestamp <= anchor:
+            return point
+    return None
+
+
+def _earliest_point_at_or_after(points: list[MacroSeriesPoint], anchor: datetime, *, max_days: int) -> MacroSeriesPoint | None:
+    deadline = anchor + timedelta(days=max_days)
+    for point in points:
+        if point.timestamp < anchor:
+            continue
+        if point.timestamp <= deadline:
+            return point
+        break
+    return None
 
 
 def _format_metric(value: float | None, unit: str | None) -> str:

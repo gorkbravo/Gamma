@@ -10,6 +10,8 @@ from src.models.macro import (
     MacroDivergenceRecord,
     MacroDivergenceSignal,
     MacroEventRecord,
+    MacroEventReactionSignal,
+    MacroEventStudy,
     MacroLinkedPredictionMarket,
     MacroMetricRecord,
     MacroRatesPolicySummary,
@@ -109,6 +111,29 @@ class MacroEventModel(BaseModel):
     @classmethod
     def from_domain(cls, row: MacroEventRecord) -> "MacroEventModel":
         return cls(**row.__dict__)
+
+
+class MacroEventReactionSignalModel(BaseModel):
+    role: str
+    tone: str
+    signal_score: float
+    signal_score_display: str
+    move_value: float | None = None
+    move_display: str | None = None
+    before_display_value: str | None = None
+    after_display_value: str | None = None
+    interpretation: str
+    metric: MacroMetricModel
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroEventReactionSignal) -> "MacroEventReactionSignalModel":
+        payload = dict(row.__dict__)
+        payload["metric"] = MacroMetricModel.from_domain(row.metric)
+        return cls(**payload)
 
 
 class MacroLinkedPredictionMarketModel(BaseModel):
@@ -264,6 +289,12 @@ class MacroRatesPolicySummaryModel(BaseModel):
     real_yield_metrics: list[MacroMetricModel] = Field(default_factory=list)
     events: list[MacroEventModel] = Field(default_factory=list)
     linked_markets: list[MacroLinkedPredictionMarketModel] = Field(default_factory=list)
+    path_headline: str | None = None
+    path_summary: str | None = None
+    path_metrics: list[MacroMetricModel] = Field(default_factory=list)
+    path_research_focus: str | None = None
+    market_alignment_label: str | None = None
+    market_alignment_summary: str | None = None
     source_provider: str
     retrieved_at: datetime | None = None
     origin: str
@@ -278,6 +309,40 @@ class MacroRatesPolicySummaryModel(BaseModel):
         payload["curve_nodes"] = [MacroCurveNodeModel.from_domain(node) for node in row.curve_nodes]
         payload["real_yield_metrics"] = [MacroMetricModel.from_domain(metric) for metric in row.real_yield_metrics]
         payload["events"] = [MacroEventModel.from_domain(event) for event in row.events]
+        payload["linked_markets"] = [MacroLinkedPredictionMarketModel.from_domain(item) for item in row.linked_markets]
+        payload["path_metrics"] = [MacroMetricModel.from_domain(metric) for metric in row.path_metrics]
+        return cls(**payload)
+
+
+class MacroEventStudyModel(BaseModel):
+    study_id: str
+    theme: str
+    timing: str
+    headline: str
+    summary: str
+    window_label: str
+    event: MacroEventModel
+    reactions: list[MacroEventReactionSignalModel] = Field(default_factory=list)
+    primary_reaction: MacroEventReactionSignalModel | None = None
+    counter_reaction: MacroEventReactionSignalModel | None = None
+    linked_markets: list[MacroLinkedPredictionMarketModel] = Field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroEventStudy) -> "MacroEventStudyModel":
+        payload = dict(row.__dict__)
+        payload["event"] = MacroEventModel.from_domain(row.event)
+        payload["reactions"] = [MacroEventReactionSignalModel.from_domain(signal) for signal in row.reactions]
+        payload["primary_reaction"] = (
+            MacroEventReactionSignalModel.from_domain(row.primary_reaction) if row.primary_reaction is not None else None
+        )
+        payload["counter_reaction"] = (
+            MacroEventReactionSignalModel.from_domain(row.counter_reaction) if row.counter_reaction is not None else None
+        )
         payload["linked_markets"] = [MacroLinkedPredictionMarketModel.from_domain(item) for item in row.linked_markets]
         return cls(**payload)
 
@@ -294,6 +359,7 @@ class MacroSnapshotResponseModel(BaseModel):
     rates_policy: MacroRatesPolicySummaryModel | None = None
     cross_asset: list[MacroThemeComparisonModel] = Field(default_factory=list)
     top_divergences: list[MacroDivergenceModel] = Field(default_factory=list)
+    event_studies: list[MacroEventStudyModel] = Field(default_factory=list)
     upcoming_events: list[MacroEventModel] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     source_provider: str
@@ -310,6 +376,7 @@ class MacroSnapshotResponseModel(BaseModel):
         )
         payload["cross_asset"] = [MacroThemeComparisonModel.from_domain(item) for item in row.cross_asset]
         payload["top_divergences"] = [MacroDivergenceModel.from_domain(item) for item in row.top_divergences]
+        payload["event_studies"] = [MacroEventStudyModel.from_domain(item) for item in row.event_studies]
         payload["upcoming_events"] = [MacroEventModel.from_domain(item) for item in row.upcoming_events]
         return cls(**payload)
 

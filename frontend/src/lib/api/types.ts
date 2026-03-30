@@ -2,7 +2,7 @@ export type WorkspaceMode = "portfolio" | "research";
 
 export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "risk" | "iv";
 
-export type MacroMode = "snapshot" | "cross_asset" | "rates_policy";
+export type MacroMode = "snapshot" | "cross_asset" | "rates_policy" | "events_regimes";
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
 export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";
@@ -526,6 +526,23 @@ export interface MacroLinkedPredictionMarket {
   transformation_note: string | null;
 }
 
+export interface MacroEventReactionSignal {
+  role: string;
+  tone: string;
+  signal_score: number;
+  signal_score_display: string;
+  move_value: number | null;
+  move_display: string | null;
+  before_display_value: string | null;
+  after_display_value: string | null;
+  interpretation: string;
+  metric: MacroMetric;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface MacroSeriesHistory {
   series_id: string;
   title: string;
@@ -619,12 +636,37 @@ export interface MacroRatesPolicySummary {
   real_yield_metrics: MacroMetric[];
   events: MacroEvent[];
   linked_markets: MacroLinkedPredictionMarket[];
+  path_headline: string | null;
+  path_summary: string | null;
+  path_metrics: MacroMetric[];
+  path_research_focus: string | null;
+  market_alignment_label: string | null;
+  market_alignment_summary: string | null;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
   comparison_region: string | null;
   comparison_summary: string | null;
+}
+
+export interface MacroEventStudy {
+  study_id: string;
+  theme: string;
+  timing: string;
+  headline: string;
+  summary: string;
+  window_label: string;
+  event: MacroEvent;
+  reactions: MacroEventReactionSignal[];
+  primary_reaction: MacroEventReactionSignal | null;
+  counter_reaction: MacroEventReactionSignal | null;
+  linked_markets: MacroLinkedPredictionMarket[];
+  research_focus: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
 }
 
 export interface MacroSnapshot {
@@ -639,6 +681,7 @@ export interface MacroSnapshot {
   rates_policy: MacroRatesPolicySummary | null;
   cross_asset: MacroThemeComparison[];
   top_divergences: MacroDivergence[];
+  event_studies: MacroEventStudy[];
   upcoming_events: MacroEvent[];
   warnings: string[];
   source_provider: string;

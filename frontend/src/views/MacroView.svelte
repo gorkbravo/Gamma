@@ -23,6 +23,7 @@
     { id: "snapshot", label: "Snapshot" },
     { id: "cross_asset", label: "Cross-Asset" },
     { id: "rates_policy", label: "Rates & Policy" },
+    { id: "events_regimes", label: "Events / Regimes" },
   ];
   const themeLabels: Record<MacroTheme, string> = {
     all: "All",
@@ -36,16 +37,19 @@
       snapshot: [],
       cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
       rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
+      events_regimes: [],
     },
     EU: {
       snapshot: [],
       cross_asset: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy"],
       rates_policy: ["eu-policy-rate", "eu-3m-rate", "eu-10y-yield", "eu-hicp-yoy", "eu-eurusd"],
+      events_regimes: [],
     },
     Global: {
       snapshot: [],
       cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
       rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
+      events_regimes: [],
     },
   };
   const chartComparisonPairs: Record<string, string> = {
@@ -127,6 +131,12 @@
   function linkedMarketTone(label: string | null | undefined): string {
     if (label === "aligned") return "positive";
     if (label === "diverging") return "negative";
+    return "";
+  }
+
+  function eventStudyTone(label: string | null | undefined): string {
+    if (label === "reinforcing") return "positive";
+    if (label === "opposing") return "negative";
     return "";
   }
 
@@ -305,6 +315,8 @@
   /* ── Grouped events ── */
   $: groupedEvents = groupEventsByMonth(eventRows);
   $: ratesPolicyGroupedEvents = groupEventsByMonth(snapshot?.rates_policy?.events ?? []);
+  $: recentEventStudies = (snapshot?.event_studies ?? []).filter((study) => study.timing === "recent");
+  $: upcomingEventStudies = (snapshot?.event_studies ?? []).filter((study) => study.timing === "upcoming");
   $: maxSnapshotMetrics = Math.max(...(snapshot?.snapshot_cards ?? []).map((c) => c.metrics.length), 0);
 
   /* ── Headline KPI strip (persistent context) ── */
@@ -651,6 +663,41 @@
         <TimeSeriesChart series={ratesChart} height={320} emptyMessage="Loading rates history." />
       </article>
 
+      <article class="panel span-2">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Path Proxy</p>
+            <h3>{snapshot?.rates_policy?.path_headline ?? "Front-end path proxy loading"}</h3>
+          </div>
+          {#if snapshot?.rates_policy?.market_alignment_label}
+            <span class="tag agreement">{snapshot.rates_policy.market_alignment_label}</span>
+          {/if}
+        </div>
+        {#if snapshot?.rates_policy?.path_summary}
+          <p class="section-summary">{snapshot.rates_policy.path_summary}</p>
+        {/if}
+        {#if snapshot?.rates_policy?.market_alignment_summary}
+          <p class="comparison-summary">{snapshot.rates_policy.market_alignment_summary}</p>
+        {/if}
+        <div class="metric-row compact">
+          {#each snapshot?.rates_policy?.path_metrics ?? [] as metric}
+            <div class="metric">
+              <span class="metric-label">{metric.label}</span>
+              <strong class="metric-value">{metric.display_value}</strong>
+              {#if metric.delta_display}
+                <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+              {/if}
+              {#if comparisonText(metric)}
+                <small class="metric-compare">{comparisonText(metric)}</small>
+              {/if}
+            </div>
+          {/each}
+        </div>
+        {#if snapshot?.rates_policy?.path_research_focus}
+          <p class="research-focus">{snapshot.rates_policy.path_research_focus}</p>
+        {/if}
+      </article>
+
       <article class="panel">
         <div class="panel-header">
           <div>
@@ -730,6 +777,224 @@
           </div>
         {:else}
           <p class="empty-hint">No upcoming rate events.</p>
+        {/if}
+      </article>
+    </div>
+  {:else if $macroContext.mode === "events_regimes"}
+    <div class="detail-grid">
+      <article class="panel span-2">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Regime Framing</p>
+            <h3>Current cross-market read</h3>
+          </div>
+        </div>
+        {#if (snapshot?.top_divergences ?? []).length}
+          <div class="workspace-grid">
+            {#each snapshot?.top_divergences ?? [] as row}
+              <article class="cross-card">
+                <div class="card-head">
+                  <div>
+                    <small class="eyebrow">{themeLabels[row.theme as MacroTheme] ?? row.theme}</small>
+                    <h3>{row.headline}</h3>
+                  </div>
+                  <div class="card-badges">
+                    <span class="score-badge {row.label}">{row.score.toFixed(1)}</span>
+                    <span class="tag agreement">{row.label}</span>
+                  </div>
+                </div>
+                <p class="card-summary">{row.summary}</p>
+                {#if row.primary_driver || row.counter_signal}
+                  <div class="divergence-detail-grid list-embedded">
+                    {#if row.primary_driver}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Lead driver</span>
+                          <span class="signal-score {row.primary_driver.tone}">{row.primary_driver.signal_score_display}</span>
+                        </div>
+                        <strong>{row.primary_driver.metric.label}</strong>
+                        <p class="signal-summary {divergenceSignalTone(row.primary_driver.tone)}">{row.primary_driver.interpretation}</p>
+                      </article>
+                    {/if}
+                    {#if row.counter_signal}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Counter-signal</span>
+                          <span class="signal-score {row.counter_signal.tone}">{row.counter_signal.signal_score_display}</span>
+                        </div>
+                        <strong>{row.counter_signal.metric.label}</strong>
+                        <p class="signal-summary {divergenceSignalTone(row.counter_signal.tone)}">{row.counter_signal.interpretation}</p>
+                      </article>
+                    {/if}
+                  </div>
+                {/if}
+                {#if row.research_focus}
+                  <p class="research-focus">{row.research_focus}</p>
+                {/if}
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No regime framing is available for this lens yet.</p>
+        {/if}
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Recent Windows</p>
+            <h3>Post-event absorption</h3>
+          </div>
+        </div>
+        {#if recentEventStudies.length}
+          <div class="list events-scroll">
+            {#each recentEventStudies as study}
+              <article class="list-row study-row">
+                <div class="card-head-top">
+                  <strong>{study.event.title}</strong>
+                  <span class="tag agreement">{themeLabels[study.theme as MacroTheme] ?? study.theme}</span>
+                </div>
+                <span class="list-detail">
+                  <span class="event-date">{shortDate(study.event.scheduled_at)}</span>
+                  <span class="event-category">{study.window_label}</span>
+                </span>
+                <p class="card-summary">{study.summary}</p>
+                {#if study.primary_reaction || study.counter_reaction}
+                  <div class="divergence-detail-grid list-embedded">
+                    {#if study.primary_reaction}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Lead reaction</span>
+                          <span class="signal-score {study.primary_reaction.tone}">{study.primary_reaction.signal_score_display}</span>
+                        </div>
+                        <strong>{study.primary_reaction.metric.label}</strong>
+                        <p class="signal-summary {eventStudyTone(study.primary_reaction.tone)}">{study.primary_reaction.interpretation}</p>
+                      </article>
+                    {/if}
+                    {#if study.counter_reaction}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Lagging reaction</span>
+                          <span class="signal-score {study.counter_reaction.tone}">{study.counter_reaction.signal_score_display}</span>
+                        </div>
+                        <strong>{study.counter_reaction.metric.label}</strong>
+                        <p class="signal-summary {eventStudyTone(study.counter_reaction.tone)}">{study.counter_reaction.interpretation}</p>
+                      </article>
+                    {/if}
+                  </div>
+                {/if}
+                {#if study.research_focus}
+                  <p class="research-focus">{study.research_focus}</p>
+                {/if}
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No recent event windows are available yet.</p>
+        {/if}
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Upcoming Windows</p>
+            <h3>Pre-event setup</h3>
+          </div>
+        </div>
+        {#if upcomingEventStudies.length}
+          <div class="list events-scroll">
+            {#each upcomingEventStudies as study}
+              <article class="list-row study-row">
+                <div class="card-head-top">
+                  <strong>{study.event.title}</strong>
+                  <span class="tag">{themeLabels[study.theme as MacroTheme] ?? study.theme}</span>
+                </div>
+                <span class="list-detail">
+                  <span class="event-date">{shortDate(study.event.scheduled_at)}</span>
+                  <span class="event-category">{study.window_label}</span>
+                </span>
+                <p class="card-summary">{study.summary}</p>
+                {#if study.primary_reaction || study.counter_reaction}
+                  <div class="divergence-detail-grid list-embedded">
+                    {#if study.primary_reaction}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Lead setup</span>
+                          <span class="signal-score {study.primary_reaction.tone}">{study.primary_reaction.signal_score_display}</span>
+                        </div>
+                        <strong>{study.primary_reaction.metric.label}</strong>
+                        <p class="signal-summary {eventStudyTone(study.primary_reaction.tone)}">{study.primary_reaction.interpretation}</p>
+                      </article>
+                    {/if}
+                    {#if study.counter_reaction}
+                      <article class="signal-brief">
+                        <div class="signal-head">
+                          <span class="signal-label">Counter-signal</span>
+                          <span class="signal-score {study.counter_reaction.tone}">{study.counter_reaction.signal_score_display}</span>
+                        </div>
+                        <strong>{study.counter_reaction.metric.label}</strong>
+                        <p class="signal-summary {eventStudyTone(study.counter_reaction.tone)}">{study.counter_reaction.interpretation}</p>
+                      </article>
+                    {/if}
+                  </div>
+                {/if}
+                {#if study.linked_markets?.length}
+                  <div class="linked-market-list">
+                    {#each study.linked_markets as market}
+                      <article class="linked-market-card compact">
+                        <div class="linked-market-head">
+                          <strong>{market.title}</strong>
+                          <span class="tag">{market.venue}</span>
+                        </div>
+                        <div class="linked-market-stats">
+                          {#if market.probability_label}
+                            <span>{market.probability_label}</span>
+                          {/if}
+                          {#if market.change_display}
+                            <span class={linkedMarketTone(market.macro_alignment)}>{market.change_display}</span>
+                          {/if}
+                          <span class={linkedMarketTone(market.macro_alignment)}>{market.macro_alignment}</span>
+                        </div>
+                        <p class="linked-market-summary {linkedMarketTone(market.macro_alignment)}">{market.macro_alignment_summary}</p>
+                      </article>
+                    {/each}
+                  </div>
+                {/if}
+                {#if study.research_focus}
+                  <p class="research-focus">{study.research_focus}</p>
+                {/if}
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No upcoming event windows are available yet.</p>
+        {/if}
+      </article>
+
+      <article class="panel span-2">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Calendar</p>
+            <h3>Scheduled catalysts</h3>
+          </div>
+        </div>
+        {#if groupedEvents.length}
+          <div class="list events-scroll">
+            {#each groupedEvents as group}
+              <div class="date-group-header">{group.label}</div>
+              {#each group.events as event}
+                <div class="list-row">
+                  <strong>{event.title}</strong>
+                  <span class="list-detail">
+                    <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                    <span class="event-category">{event.category}</span>
+                  </span>
+                </div>
+              {/each}
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-hint">No event calendar entries are available for this region.</p>
         {/if}
       </article>
     </div>
@@ -1067,10 +1332,10 @@
 
   .mode-bar {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     border: 1px solid var(--panel-strong);
     background: rgba(8, 13, 18, 0.82);
-    max-width: 28.5rem;
+    max-width: 38rem;
     width: 100%;
   }
 
@@ -1455,7 +1720,7 @@
     margin: 0.55rem 0 0;
     padding: 0.5rem 0.6rem;
     border-left: 2px solid rgba(116, 89, 56, 0.2);
-    background: rgba(255, 255, 255, 0.62);
+    background: rgba(122, 166, 200, 0.08);
     color: var(--text-2);
     font-size: 0.75rem;
     line-height: 1.45;
@@ -1667,6 +1932,10 @@
 
   .list-row.interactive:last-child {
     border-bottom: 0;
+  }
+
+  .study-row {
+    gap: 0.45rem;
   }
 
   .list-detail {

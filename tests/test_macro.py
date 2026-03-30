@@ -225,6 +225,9 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert snapshot.rates_policy.transformation_note is not None
     assert snapshot.rates_policy.linked_markets
     assert snapshot.rates_policy.linked_markets[0].macro_alignment_summary is not None
+    assert snapshot.rates_policy.path_headline is not None
+    assert snapshot.rates_policy.path_metrics
+    assert snapshot.rates_policy.path_research_focus is not None
     assert cpi_history is not None
     assert cpi_history.transformation_note is not None
     assert cpi_history.points
@@ -239,6 +242,10 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert divergences[0].primary_driver is not None
     assert divergences[0].counter_signal is not None
     assert divergences[0].research_focus is not None
+    assert snapshot.event_studies
+    assert snapshot.event_studies[0].timing == "upcoming"
+    assert snapshot.event_studies[0].primary_reaction is not None
+    assert snapshot.event_studies[0].counter_reaction is not None
     assert all(row.transformation_note is not None for row in divergences)
 
 
@@ -300,6 +307,54 @@ def test_macro_service_snapshot_survives_partial_event_source_failures(tmp_path,
     assert snapshot.region == "US"
     assert snapshot.upcoming_events
     assert [event.event_id for event in snapshot.upcoming_events] == ["fomc:2026-05-06"]
+
+
+def test_macro_service_builds_recent_event_window_studies(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    @dataclass
+    class _RecentEventsAdapter:
+        def list_events(
+            self,
+            *,
+            region: str,
+            as_of: datetime,
+            force_refresh: bool = False,
+            limit: int = 8,
+        ) -> list[MacroEventRecord]:
+            del force_refresh
+            rows = [
+                MacroEventRecord(
+                    event_id="bls:cpi_release:2026-03-12",
+                    title="CPI Release",
+                    category="inflation",
+                    region=region,
+                    scheduled_at=datetime(2026, 3, 12, 0, 0, 0),
+                    relative_label="February 2026",
+                    importance="medium",
+                    source_provider="bls",
+                    retrieved_at=EVENTS_RETRIEVED_AT,
+                    origin="macro.events.bls_schedule",
+                ),
+            ]
+            return [row for row in rows if row.scheduled_at >= as_of][:limit]
+
+    service = MacroService(
+        fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
+        treasury_adapter=_FakeTreasuryCurveAdapter(),
+        events_adapter=_RecentEventsAdapter(),
+        fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
+        prediction_market_service=_FakePredictionMarketService(),
+    )
+
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
+
+    assert snapshot.event_studies
+    recent_study = snapshot.event_studies[0]
+    assert recent_study.timing == "recent"
+    assert recent_study.event.event_id == "bls:cpi_release:2026-03-12"
+    assert recent_study.primary_reaction is not None
+    assert recent_study.primary_reaction.metric.delta_display is not None
 
 
 def test_macro_service_uses_frequency_aware_yoy_lag_for_quarterly_series(monkeypatch):
@@ -396,12 +451,16 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         assert snapshot_payload["rates_policy"]["curve_nodes"][0]["transformation_note"] is not None
         assert snapshot_payload["snapshot_cards"][0]["source_provider"]
         assert snapshot_payload["snapshot_cards"][0]["linked_markets"]
+        assert snapshot_payload["rates_policy"]["path_headline"] is not None
+        assert snapshot_payload["rates_policy"]["path_metrics"]
         inflation_cross_asset = next(row for row in snapshot_payload["cross_asset"] if row["theme"] == "inflation")
         assert inflation_cross_asset["primary_driver"] is not None
         assert inflation_cross_asset["counter_signal"] is not None
         assert snapshot_payload["rates_policy"]["linked_markets"]
         assert snapshot_payload["top_divergences"][0]["primary_driver"] is not None
         assert snapshot_payload["top_divergences"][0]["research_focus"] is not None
+        assert snapshot_payload["event_studies"]
+        assert snapshot_payload["event_studies"][0]["primary_reaction"] is not None
 
         assert history_response.status_code == 200
         history_payload = history_response.json()

@@ -98,6 +98,44 @@ class MacroEventRecord:
 
 
 @dataclass(frozen=True)
+class MacroEventReactionSignal:
+    role: str
+    tone: str
+    signal_score: float
+    signal_score_display: str
+    move_value: float | None
+    move_display: str | None
+    before_display_value: str | None
+    after_display_value: str | None
+    interpretation: str
+    metric: MacroMetricRecord
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroEventStudy:
+    study_id: str
+    theme: str
+    timing: str
+    headline: str
+    summary: str
+    window_label: str
+    event: MacroEventRecord
+    reactions: list[MacroEventReactionSignal] = field(default_factory=list)
+    primary_reaction: MacroEventReactionSignal | None = None
+    counter_reaction: MacroEventReactionSignal | None = None
+    linked_markets: list["MacroLinkedPredictionMarket"] = field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class MacroDivergenceRecord:
     divergence_id: str
     theme: str
@@ -185,6 +223,12 @@ class MacroRatesPolicySummary:
     real_yield_metrics: list[MacroMetricRecord] = field(default_factory=list)
     events: list[MacroEventRecord] = field(default_factory=list)
     linked_markets: list[MacroLinkedPredictionMarket] = field(default_factory=list)
+    path_headline: str | None = None
+    path_summary: str | None = None
+    path_metrics: list[MacroMetricRecord] = field(default_factory=list)
+    path_research_focus: str | None = None
+    market_alignment_label: str | None = None
+    market_alignment_summary: str | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
@@ -206,6 +250,7 @@ class MacroSnapshotPayload:
     rates_policy: MacroRatesPolicySummary | None = None
     cross_asset: list[MacroThemeComparison] = field(default_factory=list)
     top_divergences: list[MacroDivergenceRecord] = field(default_factory=list)
+    event_studies: list[MacroEventStudy] = field(default_factory=list)
     upcoming_events: list[MacroEventRecord] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     source_provider: str = ""
