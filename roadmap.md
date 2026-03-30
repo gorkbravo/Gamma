@@ -247,17 +247,17 @@ For roadmap purposes, this deliverable is now treated as achieved at a first-pas
 
 ## Phase 2 - Macro Tab
 
-_Status: In progress (~40%)_
-_Active focus: deepen the first usable Macro workspace, strengthen coherence/divergence interpretation, and keep Events / Regimes as the next extension rather than expanding into new modes too early._
-_Recent progress: Snapshot, Cross-Asset, and Rates & Policy now exist as a shared Macro workspace with persistent context, linked prediction-market contract overlays, and richer divergence framing built around lead drivers, counter-signals, and research follow-up angles._
+_Status: In progress (~55%)_
+_Active focus: deepen the current Macro workspace, improve event-window density and coherence interpretation, and push Rates & Policy beyond a front-end proxy into richer policy-expectation depth before adding new modes._
+_Recent progress: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes now exist inside one shared Macro workspace with persistent context, linked prediction-market contract overlays, stronger divergence framing, and a first-pass rates-path proxy layer in Rates & Policy._
 
 #### Completion snapshot
-- `Snapshot mode`: ~50% complete. A usable V1 workspace exists with shared context, US/EU/Global lenses, deep-link cards, and linked prediction-market context, but breadth and macro interpretation depth remain limited.
-- `Cross-asset expectations mode`: ~45% complete. Theme comparisons, ranked divergences, and linked contract context are live, and divergence explanations now expose the main driver and counter-signal, but the expectations engine is still narrow and proxy-based.
-- `Rates & policy mode`: ~55% complete. Curve, breakeven, real-yield, event-calendar, and linked policy-contract context are in place, but meeting-path depth and richer policy-expectation interpretation still need work.
+- `Snapshot mode`: ~55% complete. A usable V1 workspace exists with shared context, US/EU/Global lenses, deep-link cards, linked prediction-market context, and context-preserving navigation, but breadth and macro interpretation depth remain limited.
+- `Cross-asset expectations mode`: ~50% complete. Theme comparisons, ranked divergences, linked contract context, and driver / counter-signal framing are live, but the expectations engine is still narrow, curated, and proxy-based.
+- `Rates & policy mode`: ~65% complete. Curve, breakeven, real-yield, event-calendar, linked policy-contract context, and a first-pass path proxy are in place, but meeting-path depth and richer policy-expectation interpretation still need work.
 - `Optional commodities mode`: ~0% complete. Not started and not required for the first pass.
-- `Coherence and divergence engine`: ~40% complete. A structured first-pass divergence layer exists, including ranked gaps, primary driver / counter-signal framing, and research focus text, but it is still curated, proxy-driven, and not yet a deeper lead/lag or coherence model.
-- `Event and regime interpretation`: ~15% complete. Event context is present in the current Macro workspace, but regime framing and event-window interpretation are still limited and no dedicated Events / Regimes mode exists yet.
+- `Coherence and divergence engine`: ~45% complete. A structured first-pass divergence layer exists, including ranked gaps, primary driver / counter-signal framing, comparison overlays, and research focus text, but it is still curated, proxy-driven, and not yet a deeper lead/lag or coherence model.
+- `Event and regime interpretation`: ~35% complete. A dedicated Events / Regimes mode now exists with regime framing and event-study windows, but live event-window density is still sparse and the interpretation layer remains limited by the current study horizon and public event coverage.
 - `Research notebook hooks`: ~0% complete. Not started.
 
 ### Why this phase comes next
@@ -506,7 +506,7 @@ The first usable Macro release should be intentionally narrow and coherent.
 
 The expected V1 bias is:
 - ship **Snapshot**, **Rates & Policy**, and **Cross-Asset** first,
-- keep **Events / Regimes** as the next extension rather than forcing it into the first pass,
+- add **Events / Regimes** as the first extension before expanding into any new macro mode,
 - support **US** most deeply first,
 - treat **EU** as a lighter second-region extension,
 - prefer a few well-normalized public datasets over a broad but inconsistent market-data surface.
@@ -519,6 +519,7 @@ At the end of Phase 2, Gamma should be able to:
 - present a useful macro snapshot,
 - compare cross-asset expectations,
 - analyze rates and policy pricing,
+- support event-aware regime framing inside the same Macro workspace,
 - link prediction markets to macro market context,
 - surface coherence breaks and divergence candidates for research.
 
