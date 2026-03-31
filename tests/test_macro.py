@@ -228,6 +228,10 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert snapshot.rates_policy.path_headline is not None
     assert snapshot.rates_policy.path_metrics
     assert snapshot.rates_policy.path_research_focus is not None
+    assert snapshot.rates_policy.meeting_path is not None
+    assert snapshot.rates_policy.meeting_path.metrics
+    assert snapshot.rates_policy.meeting_path.meetings
+    assert snapshot.rates_policy.meeting_path.meetings[0].transformation_note is not None
     assert cpi_history is not None
     assert cpi_history.transformation_note is not None
     assert cpi_history.points
@@ -357,6 +361,27 @@ def test_macro_service_builds_recent_event_window_studies(monkeypatch):
     assert recent_study.primary_reaction.metric.delta_display is not None
 
 
+def test_macro_service_builds_meeting_ladder_proxy(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="policy"))
+
+    assert snapshot.rates_policy is not None
+    assert snapshot.rates_policy.meeting_path is not None
+    ladder = snapshot.rates_policy.meeting_path
+
+    assert ladder.window_label == "Next 3 policy meetings"
+    assert [meeting.meeting_id for meeting in ladder.meetings] == [
+        "fomc:2026-04-29",
+        "fomc:2026-06-17",
+        "fomc:2026-07-29",
+    ]
+    assert [meeting.incremental_change_display for meeting in ladder.meetings] == ["-5 bps", "-5 bps", "-5 bps"]
+    assert [meeting.cumulative_change_display for meeting in ladder.meetings] == ["-5 bps", "-10 bps", "-15 bps"]
+    assert ladder.meetings[-1].implied_policy_rate_display == "4.35%"
+
+
 def test_macro_service_uses_frequency_aware_yoy_lag_for_quarterly_series(monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 
@@ -453,6 +478,8 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         assert snapshot_payload["snapshot_cards"][0]["linked_markets"]
         assert snapshot_payload["rates_policy"]["path_headline"] is not None
         assert snapshot_payload["rates_policy"]["path_metrics"]
+        assert snapshot_payload["rates_policy"]["meeting_path"] is not None
+        assert snapshot_payload["rates_policy"]["meeting_path"]["meetings"]
         inflation_cross_asset = next(row for row in snapshot_payload["cross_asset"] if row["theme"] == "inflation")
         assert inflation_cross_asset["primary_driver"] is not None
         assert inflation_cross_asset["counter_signal"] is not None
@@ -557,6 +584,30 @@ class _FakeEventsAdapter:
                 category="policy",
                 region="US",
                 scheduled_at=datetime(2026, 4, 29, 0, 0, 0),
+                relative_label=None,
+                importance="high",
+                source_provider="federalreserve",
+                retrieved_at=EVENTS_RETRIEVED_AT,
+                origin="macro.events.fomc_calendar",
+            ),
+            MacroEventRecord(
+                event_id="fomc:2026-06-17",
+                title="FOMC Meeting (June 17-18)",
+                category="policy",
+                region="US",
+                scheduled_at=datetime(2026, 6, 17, 0, 0, 0),
+                relative_label=None,
+                importance="high",
+                source_provider="federalreserve",
+                retrieved_at=EVENTS_RETRIEVED_AT,
+                origin="macro.events.fomc_calendar",
+            ),
+            MacroEventRecord(
+                event_id="fomc:2026-07-29",
+                title="FOMC Meeting (July 29-30)",
+                category="policy",
+                region="US",
+                scheduled_at=datetime(2026, 7, 29, 0, 0, 0),
                 relative_label=None,
                 importance="high",
                 source_provider="federalreserve",

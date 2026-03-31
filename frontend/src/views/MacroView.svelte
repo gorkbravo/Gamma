@@ -694,6 +694,57 @@
         {/if}
       </article>
 
+      {#if snapshot?.rates_policy?.meeting_path}
+        <article class="panel span-2">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Meeting Ladder</p>
+              <h3>{snapshot.rates_policy.meeting_path.headline}</h3>
+            </div>
+            <span class="tag agreement">{snapshot.rates_policy.meeting_path.window_label}</span>
+          </div>
+          <p class="section-summary">{snapshot.rates_policy.meeting_path.summary}</p>
+          <div class="metric-row compact">
+            {#each snapshot.rates_policy.meeting_path.metrics as metric}
+              <div class="metric">
+                <span class="metric-label">{metric.label}</span>
+                <strong class="metric-value">{metric.display_value}</strong>
+                {#if metric.delta_display}
+                  <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+                {/if}
+              </div>
+            {/each}
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Meeting</th>
+                  <th>Date</th>
+                  <th>Implied policy</th>
+                  <th>Step</th>
+                  <th>Cumulative</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each snapshot.rates_policy.meeting_path.meetings as meeting}
+                  <tr>
+                    <td>{meeting.title}</td>
+                    <td>{shortDate(meeting.scheduled_at)}</td>
+                    <td>{meeting.implied_policy_rate_display ?? "N/A"}</td>
+                    <td class={deltaClass(meeting.incremental_change_display)}>{meeting.incremental_change_display ?? "N/A"}</td>
+                    <td class={deltaClass(meeting.cumulative_change_display)}>{meeting.cumulative_change_display ?? "N/A"}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          {#if snapshot.rates_policy.meeting_path.research_focus}
+            <p class="research-focus">{snapshot.rates_policy.meeting_path.research_focus}</p>
+          {/if}
+        </article>
+      {/if}
+
       <article class="panel">
         <div class="panel-header">
           <div>

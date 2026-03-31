@@ -215,6 +215,38 @@ class MacroThemeComparison:
 
 
 @dataclass(frozen=True)
+class MacroPolicyMeetingPathRow:
+    meeting_id: str
+    title: str
+    scheduled_at: datetime
+    meeting_index: int
+    implied_policy_rate: float | None
+    implied_policy_rate_display: str | None = None
+    incremental_change_bps: float | None = None
+    incremental_change_display: str | None = None
+    cumulative_change_bps: float | None = None
+    cumulative_change_display: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroPolicyMeetingPathSummary:
+    headline: str
+    summary: str
+    window_label: str
+    metrics: list[MacroMetricRecord] = field(default_factory=list)
+    meetings: list[MacroPolicyMeetingPathRow] = field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class MacroRatesPolicySummary:
     headline: str
     summary: str
@@ -227,6 +259,7 @@ class MacroRatesPolicySummary:
     path_summary: str | None = None
     path_metrics: list[MacroMetricRecord] = field(default_factory=list)
     path_research_focus: str | None = None
+    meeting_path: MacroPolicyMeetingPathSummary | None = None
     market_alignment_label: str | None = None
     market_alignment_summary: str | None = None
     source_provider: str = ""

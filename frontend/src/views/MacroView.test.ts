@@ -230,6 +230,54 @@ describe("MacroView", () => {
               }
             ],
             path_research_focus: "Watch whether 2Y Treasury breaks away from Fed Funds before the next policy event.",
+            meeting_path: {
+              headline: "Next 3 meetings keep policy near 4.35% if the hold proxy persists.",
+              summary: "The ladder spreads the current 2Y Treasury versus Fed Funds gap evenly across the next 3 scheduled policy meetings.",
+              window_label: "Next 3 policy meetings",
+              metrics: [
+                {
+                  ...makeMetric("meeting-count", "Meetings"),
+                  value: 3,
+                  display_value: "3",
+                  unit: null,
+                  delta_value: null,
+                  delta_display: null,
+                  series_id: null
+                },
+                {
+                  ...makeMetric("avg-move", "Avg / meeting"),
+                  value: -5,
+                  display_value: "-5 bps",
+                  unit: "bps",
+                  delta_value: null,
+                  delta_display: null,
+                  series_id: null
+                }
+              ],
+              meetings: [
+                {
+                  meeting_id: "fomc:2026-04-29",
+                  title: "FOMC Meeting (April 29-30)",
+                  scheduled_at: "2026-04-29T00:00:00Z",
+                  meeting_index: 1,
+                  implied_policy_rate: 4.45,
+                  implied_policy_rate_display: "4.45%",
+                  incremental_change_bps: -5,
+                  incremental_change_display: "-5 bps",
+                  cumulative_change_bps: -5,
+                  cumulative_change_display: "-5 bps",
+                  source_provider: "treasury",
+                  retrieved_at: "2026-03-20T11:00:00Z",
+                  origin: "macro_service.policy_meeting_path",
+                  transformation_note: "Meeting ladder proxy."
+                }
+              ],
+              research_focus: "Focus on what would break the hold ladder first: 2Y Treasury, Fed Funds, or linked policy contracts.",
+              source_provider: "treasury",
+              retrieved_at: "2026-03-20T11:00:00Z",
+              origin: "macro_service.policy_meeting_path",
+              transformation_note: "Meeting ladder proxy."
+            },
             market_alignment_label: "mixed",
             market_alignment_summary: "Linked policy contracts are mixed relative to the rates-path proxy.",
             source_provider: "treasury",
@@ -253,6 +301,9 @@ describe("MacroView", () => {
     expect(body).toContain("hold remains the cleanest path proxy");
     expect(body).toContain("2Y Treasury minus Fed Funds");
     expect(body).toContain("Linked policy contracts are mixed relative to the rates-path proxy.");
+    expect(body).toContain("Meeting Ladder");
+    expect(body).toContain("Next 3 policy meetings");
+    expect(body).toContain("FOMC Meeting (April 29-30)");
   });
 
   it("renders event studies and regime framing in events/regimes mode", () => {

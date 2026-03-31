@@ -14,6 +14,8 @@ from src.models.macro import (
     MacroEventStudy,
     MacroLinkedPredictionMarket,
     MacroMetricRecord,
+    MacroPolicyMeetingPathRow,
+    MacroPolicyMeetingPathSummary,
     MacroRatesPolicySummary,
     MacroSeriesHistory,
     MacroSeriesPoint,
@@ -597,6 +599,7 @@ THEME_ALIGNMENT_LABELS = {
 
 EVENT_STUDY_LOOKBACK_DAYS = 60
 EVENT_STUDY_LIMIT = 6
+POLICY_MEETING_PATH_LIMIT = 4
 EVENT_WINDOW_DAYS = {
     "daily": 7,
     "monthly": 40,
@@ -1327,6 +1330,141 @@ class MacroService:
         )
         return headline, summary, path_metrics, research_focus, alignment_label, alignment_summary
 
+    def _build_policy_meeting_path(
+        self,
+        *,
+        histories: dict[str, MacroSeriesHistory],
+        events: list[MacroEventRecord],
+        timeframe: str,
+        policy_id: str,
+        front_id: str,
+        policy_label: str,
+        front_label: str,
+        alignment_label: str | None,
+    ) -> MacroPolicyMeetingPathSummary | None:
+        policy_history = histories.get(policy_id)
+        front_history = histories.get(front_id)
+        if policy_history is None or front_history is None:
+            return None
+        policy_metric = self._metric_from_history(policy_history, timeframe=timeframe)
+        front_metric = self._metric_from_history(front_history, timeframe=timeframe)
+        if policy_metric.value is None or front_metric.value is None:
+            return None
+        policy_events = [event for event in events if event.category == "policy"][:POLICY_MEETING_PATH_LIMIT]
+        if not policy_events:
+            return None
+        meeting_count = len(policy_events)
+        total_gap_bps = (front_metric.value - policy_metric.value) * 100.0
+        incremental_bps = total_gap_bps / meeting_count
+        note = (
+            "Meeting ladder proxy spreads the current front-end minus policy gap evenly across the next scheduled "
+            "policy meetings. It is a transparent research aid, not a futures-implied meeting curve."
+        )
+        meetings: list[MacroPolicyMeetingPathRow] = []
+        for index, event in enumerate(policy_events, start=1):
+            cumulative_bps = incremental_bps * index
+            implied_policy_rate = policy_metric.value + (cumulative_bps / 100.0)
+            meetings.append(
+                MacroPolicyMeetingPathRow(
+                    meeting_id=event.event_id,
+                    title=event.title,
+                    scheduled_at=event.scheduled_at,
+                    meeting_index=index,
+                    implied_policy_rate=implied_policy_rate,
+                    implied_policy_rate_display=_format_metric(implied_policy_rate, "pct"),
+                    incremental_change_bps=incremental_bps,
+                    incremental_change_display=_format_delta(incremental_bps, "bps"),
+                    cumulative_change_bps=cumulative_bps,
+                    cumulative_change_display=_format_delta(cumulative_bps, "bps"),
+                    source_provider=policy_history.source_provider,
+                    retrieved_at=max(
+                        filter(None, [policy_history.retrieved_at, front_history.retrieved_at, event.retrieved_at]),
+                        default=now_utc(),
+                    ),
+                    origin="macro_service.policy_meeting_path",
+                    transformation_note=note,
+                )
+            )
+        terminal_rate = meetings[-1].implied_policy_rate if meetings else None
+        metrics = [
+            MacroMetricRecord(
+                metric_id=f"{policy_id}:{front_id}:meeting_count",
+                label="Meetings",
+                value=float(meeting_count),
+                display_value=str(meeting_count),
+                unit=None,
+                source_provider=policy_history.source_provider,
+                retrieved_at=policy_history.retrieved_at,
+                origin="macro_service.policy_meeting_path_metric",
+                transformation_note=note,
+            ),
+            MacroMetricRecord(
+                metric_id=f"{policy_id}:{front_id}:cumulative_move",
+                label="Cum. move",
+                value=total_gap_bps,
+                display_value=_format_delta(total_gap_bps, "bps"),
+                unit="bps",
+                source_provider=policy_history.source_provider,
+                retrieved_at=policy_history.retrieved_at,
+                origin="macro_service.policy_meeting_path_metric",
+                transformation_note=note,
+            ),
+            MacroMetricRecord(
+                metric_id=f"{policy_id}:{front_id}:avg_move",
+                label="Avg / meeting",
+                value=incremental_bps,
+                display_value=_format_delta(incremental_bps, "bps"),
+                unit="bps",
+                source_provider=policy_history.source_provider,
+                retrieved_at=policy_history.retrieved_at,
+                origin="macro_service.policy_meeting_path_metric",
+                transformation_note=note,
+            ),
+            MacroMetricRecord(
+                metric_id=f"{policy_id}:{front_id}:terminal_rate",
+                label="Terminal proxy",
+                value=terminal_rate,
+                display_value=_format_metric(terminal_rate, "pct"),
+                unit="pct",
+                source_provider=policy_history.source_provider,
+                retrieved_at=policy_history.retrieved_at,
+                origin="macro_service.policy_meeting_path_metric",
+                transformation_note=note,
+            ),
+        ]
+        if total_gap_bps <= -25.0:
+            headline = f"Next {meeting_count} meetings spread an easing ladder toward {metrics[-1].display_value}."
+        elif total_gap_bps >= 25.0:
+            headline = f"Next {meeting_count} meetings spread a tightening ladder toward {metrics[-1].display_value}."
+        else:
+            headline = f"Next {meeting_count} meetings keep policy near {metrics[-1].display_value} if the hold proxy persists."
+        summary = (
+            f"The ladder spreads the current {front_label} versus {policy_label} gap evenly across the next "
+            f"{meeting_count} scheduled policy meetings. Use it to judge whether current front-end pricing implies "
+            "a gradual easing, hold, or tightening path."
+        )
+        return MacroPolicyMeetingPathSummary(
+            headline=headline,
+            summary=summary,
+            window_label=f"Next {meeting_count} policy meetings",
+            metrics=metrics,
+            meetings=meetings,
+            research_focus=self._policy_meeting_path_research_focus(
+                total_gap_bps=total_gap_bps,
+                front_label=front_label,
+                policy_label=policy_label,
+                alignment_label=alignment_label,
+            ),
+            source_provider=policy_history.source_provider,
+            retrieved_at=max(
+                [metric.retrieved_at for metric in metrics if metric.retrieved_at is not None]
+                + [meeting.retrieved_at for meeting in meetings if meeting.retrieved_at is not None],
+                default=now_utc(),
+            ),
+            origin="macro_service.policy_meeting_path",
+            transformation_note=note,
+        )
+
     def _linked_market_alignment(self, *, linked_markets: list[MacroLinkedPredictionMarket]) -> tuple[str | None, str | None]:
         if not linked_markets:
             return None, None
@@ -1347,6 +1485,22 @@ class MacroService:
         if stance == "tighter":
             return f"Watch whether {front_label} keeps pushing above {policy_label} or rolls over into the next policy meeting."
         return f"Watch whether {front_label} breaks away from {policy_label}; that move would be the first sign the hold proxy is no longer stable."
+
+    @staticmethod
+    def _policy_meeting_path_research_focus(
+        *,
+        total_gap_bps: float,
+        front_label: str,
+        policy_label: str,
+        alignment_label: str | None,
+    ) -> str:
+        if alignment_label == "diverging":
+            return f"Check whether linked policy contracts disagree with the meeting ladder because the {front_label} gap is overstating the path versus {policy_label}."
+        if total_gap_bps <= -25.0:
+            return f"Watch whether the next meetings actually validate the easing ladder implied by {front_label} versus {policy_label}."
+        if total_gap_bps >= 25.0:
+            return f"Watch whether the next meetings validate the tightening ladder implied by {front_label} versus {policy_label}."
+        return f"Focus on what would break the hold ladder first: {front_label}, {policy_label}, or linked policy contracts."
 
     def _build_rates_policy(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, events: list[MacroEventRecord], linked_markets: list[MacroLinkedPredictionMarket], timeframe: str, force_refresh: bool) -> MacroRatesPolicySummary:
         data_region = self._data_region(region)
@@ -1399,7 +1553,17 @@ class MacroService:
             policy_label=path_config["policy_label"],
             front_label=path_config["front_label"],
         )
-        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, linked_markets=list(linked_markets), path_headline=path_headline, path_summary=path_summary, path_metrics=path_metrics, path_research_focus=path_research_focus, market_alignment_label=market_alignment_label, market_alignment_summary=market_alignment_summary, source_provider="treasury" if data_region == "US" else "fred", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in path_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in visible_events if row.retrieved_at is not None], default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, optional cross-region comparison overlays for matched concepts, linked prediction-market context, and a front-end policy-path proxy for policy-sensitive research.", comparison_region=comparison_region, comparison_summary=comparison_summary)
+        meeting_path = self._build_policy_meeting_path(
+            histories=histories,
+            events=events,
+            timeframe=timeframe,
+            policy_id=path_config["policy_id"],
+            front_id=path_config["front_id"],
+            policy_label=path_config["policy_label"],
+            front_label=path_config["front_label"],
+            alignment_label=market_alignment_label,
+        )
+        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, linked_markets=list(linked_markets), path_headline=path_headline, path_summary=path_summary, path_metrics=path_metrics, path_research_focus=path_research_focus, meeting_path=meeting_path, market_alignment_label=market_alignment_label, market_alignment_summary=market_alignment_summary, source_provider="treasury" if data_region == "US" else "fred", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in path_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in visible_events if row.retrieved_at is not None] + ([meeting_path.retrieved_at] if meeting_path is not None and meeting_path.retrieved_at is not None else []), default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, optional cross-region comparison overlays for matched concepts, linked prediction-market context, a front-end policy-path proxy, and a meeting-ladder proxy derived from scheduled policy events.", comparison_region=comparison_region, comparison_summary=comparison_summary)
 
     def _build_cross_asset(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, divergences: list[MacroDivergenceRecord], linked_markets: dict[str, list[MacroLinkedPredictionMarket]], timeframe: str) -> list[MacroThemeComparison]:
         data_region = self._data_region(region)

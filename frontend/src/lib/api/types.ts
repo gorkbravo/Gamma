@@ -662,6 +662,36 @@ export interface MacroThemeComparison {
   comparison_summary: string | null;
 }
 
+export interface MacroPolicyMeetingPathRow {
+  meeting_id: string;
+  title: string;
+  scheduled_at: string;
+  meeting_index: number;
+  implied_policy_rate: number | null;
+  implied_policy_rate_display: string | null;
+  incremental_change_bps: number | null;
+  incremental_change_display: string | null;
+  cumulative_change_bps: number | null;
+  cumulative_change_display: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroPolicyMeetingPathSummary {
+  headline: string;
+  summary: string;
+  window_label: string;
+  metrics: MacroMetric[];
+  meetings: MacroPolicyMeetingPathRow[];
+  research_focus: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface MacroRatesPolicySummary {
   headline: string;
   summary: string;
@@ -674,6 +704,7 @@ export interface MacroRatesPolicySummary {
   path_summary: string | null;
   path_metrics: MacroMetric[];
   path_research_focus: string | null;
+  meeting_path: MacroPolicyMeetingPathSummary | null;
   market_alignment_label: string | null;
   market_alignment_summary: string | null;
   source_provider: string;

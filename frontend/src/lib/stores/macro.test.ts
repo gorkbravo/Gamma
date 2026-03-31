@@ -305,6 +305,7 @@ function makeSnapshot(): MacroSnapshot {
       path_summary: "This is a front-end path proxy rather than a full meeting curve.",
       path_metrics: [],
       path_research_focus: "Watch for a clean break between front-end pricing and the policy rate.",
+      meeting_path: null,
       market_alignment_label: "mixed",
       market_alignment_summary: "Linked policy contracts are mixed relative to the rates-path proxy.",
       source_provider: "treasury",

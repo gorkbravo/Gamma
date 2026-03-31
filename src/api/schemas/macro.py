@@ -14,6 +14,8 @@ from src.models.macro import (
     MacroEventStudy,
     MacroLinkedPredictionMarket,
     MacroMetricRecord,
+    MacroPolicyMeetingPathRow,
+    MacroPolicyMeetingPathSummary,
     MacroRatesPolicySummary,
     MacroSeriesHistory,
     MacroSeriesPoint,
@@ -293,6 +295,7 @@ class MacroRatesPolicySummaryModel(BaseModel):
     path_summary: str | None = None
     path_metrics: list[MacroMetricModel] = Field(default_factory=list)
     path_research_focus: str | None = None
+    meeting_path: MacroPolicyMeetingPathSummaryModel | None = None
     market_alignment_label: str | None = None
     market_alignment_summary: str | None = None
     source_provider: str
@@ -311,6 +314,50 @@ class MacroRatesPolicySummaryModel(BaseModel):
         payload["events"] = [MacroEventModel.from_domain(event) for event in row.events]
         payload["linked_markets"] = [MacroLinkedPredictionMarketModel.from_domain(item) for item in row.linked_markets]
         payload["path_metrics"] = [MacroMetricModel.from_domain(metric) for metric in row.path_metrics]
+        payload["meeting_path"] = (
+            MacroPolicyMeetingPathSummaryModel.from_domain(row.meeting_path) if row.meeting_path is not None else None
+        )
+        return cls(**payload)
+
+
+class MacroPolicyMeetingPathRowModel(BaseModel):
+    meeting_id: str
+    title: str
+    scheduled_at: datetime
+    meeting_index: int
+    implied_policy_rate: float | None = None
+    implied_policy_rate_display: str | None = None
+    incremental_change_bps: float | None = None
+    incremental_change_display: str | None = None
+    cumulative_change_bps: float | None = None
+    cumulative_change_display: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroPolicyMeetingPathRow) -> "MacroPolicyMeetingPathRowModel":
+        return cls(**row.__dict__)
+
+
+class MacroPolicyMeetingPathSummaryModel(BaseModel):
+    headline: str
+    summary: str
+    window_label: str
+    metrics: list[MacroMetricModel] = Field(default_factory=list)
+    meetings: list[MacroPolicyMeetingPathRowModel] = Field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroPolicyMeetingPathSummary) -> "MacroPolicyMeetingPathSummaryModel":
+        payload = dict(row.__dict__)
+        payload["metrics"] = [MacroMetricModel.from_domain(metric) for metric in row.metrics]
+        payload["meetings"] = [MacroPolicyMeetingPathRowModel.from_domain(meeting) for meeting in row.meetings]
         return cls(**payload)
 
 

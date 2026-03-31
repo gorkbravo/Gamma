@@ -7,6 +7,7 @@ This directory is split into active documentation and archived project history.
 - [`../README.md`](../README.md): setup, run commands, validation commands, and current product status
 - [`../roadmap.md`](../roadmap.md): source of truth for future product direction and expansion order
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
+- [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
 
 ## Archived Documents
 
