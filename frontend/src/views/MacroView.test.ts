@@ -15,7 +15,7 @@ describe("MacroView", () => {
     });
   });
 
-  it("renders macro warnings and visible scope limits inline, including the compare lens", () => {
+  it("renders coverage note and visible scope limits inline, including the compare lens", () => {
     const { body } = render(MacroView, {
       props: {
         snapshot: makeSnapshot(),
@@ -28,9 +28,7 @@ describe("MacroView", () => {
       }
     });
 
-    expect(body).toContain("Macro V1 is US-first. Global mode is intentionally lighter than the US view.");
-    expect(body).toContain("Global mode is a light comparative lens in V1; the deepest normalized coverage remains US-first and some analytics reuse US proxies.");
-    expect(body).toContain("Comparison is currently available only for direct US-versus-EU views. The requested comparison target was ignored.");
+    expect(body).toContain("Global is a light V1 comparative lens. Some analytics reuse US-first coverage.");
     expect(body).toContain(">Compare<");
     expect(body).toContain("disabled");
   });
@@ -54,7 +52,7 @@ describe("MacroView", () => {
     expect(body).toContain('option value="usdjpy"');
   });
 
-  it("renders snapshot focus items and why-now drilldowns", () => {
+  it("renders snapshot focus items and drilldown targets", () => {
     const { body } = render(MacroView, {
       props: {
         snapshot: makeSnapshot({
@@ -103,12 +101,11 @@ describe("MacroView", () => {
     });
 
     expect(body).toContain("What Matters Now");
-    expect(body).toContain("Gamma's lead-lag heuristic shows breakevens moved first");
     expect(body).toContain("coherent");
     expect(body).toContain("Open Cross-Asset (inflation)");
   });
 
-  it("renders linked prediction-market context inside macro cards", () => {
+  it("renders linked prediction-market hints inside macro cards", () => {
     const { body } = render(MacroView, {
       props: {
         snapshot: makeSnapshot({
@@ -158,7 +155,7 @@ describe("MacroView", () => {
       }
     });
 
-    expect(body).toContain("Will CPI print above 3% in June?");
+    expect(body).toContain("1 linked market");
     expect(body).toContain("aligned");
   });
 
@@ -283,8 +280,8 @@ describe("MacroView", () => {
 
     expect(body).toContain("Lead driver");
     expect(body).toContain("Counter-signal");
-    expect(body).toContain("US 5Y Breakeven Inflation moved first");
-    expect(body).toContain("Leader");
+    expect(body).toContain("3 confirm");
+    expect(body).toContain("1 oppose");
     expect(body).toContain("Test whether breakevens or the dollar is more likely to reset first.");
   });
 
@@ -442,10 +439,8 @@ describe("MacroView", () => {
     expect(body).toContain("Path Proxy");
     expect(body).toContain("hold remains the cleanest path proxy");
     expect(body).toContain("2Y Treasury minus Fed Funds");
-    expect(body).toContain("Linked policy contracts are mixed relative to the rates-path proxy.");
     expect(body).toContain("Expectation Overlay");
     expect(body).toContain("Linked policy contracts skew easier");
-    expect(body).toContain("Prediction-market contracts are mapped by text and topic");
     expect(body).toContain("Easier");
     expect(body).toContain("Meeting Ladder");
     expect(body).toContain("Next 3 policy meetings");
@@ -667,9 +662,8 @@ describe("MacroView", () => {
     expect(body).toContain("Post-event absorption");
     expect(body).toContain("CPI Release");
     expect(body).toContain("Lead reaction");
-    expect(body).toContain("2026-03-01 to 2026-03-19");
-    expect(body).toContain("same-day follow-through");
-    expect(body).toContain("reacted first after CPI Release");
+    expect(body).toContain("2 confirm");
+    expect(body).toContain("1 oppose");
     expect(body).toContain("Scheduled catalysts");
   });
 });
