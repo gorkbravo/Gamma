@@ -8,8 +8,8 @@
   <header class="topbar">
     <div class="brand">
       <button class="hamburger" on:click={onToggleSidebar} aria-label="Toggle navigation">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
         </svg>
       </button>
       <img class="mark" src="/gamma-mark.svg" alt="" aria-hidden="true" />

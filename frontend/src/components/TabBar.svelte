@@ -5,7 +5,6 @@
     id: TabId;
     label: string;
     pinned: boolean;
-    shortcutHint: string;
   }
 
   export let activeTab: TabId = "portfolio";
@@ -34,6 +33,7 @@
     dropIndex = tabs.findIndex((tab) => tab.id === tabId);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.dropEffect = "move";
       event.dataTransfer.setData("text/plain", tabId);
     }
   }
@@ -44,6 +44,9 @@
     }
 
     event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
     const row = event.currentTarget as HTMLElement;
     const rect = row.getBoundingClientRect();
     const nextDropIndex = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
@@ -55,6 +58,9 @@
       return;
     }
     event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
     if (dropIndex == null) {
       dropIndex = tabs.length;
     }
@@ -79,7 +85,6 @@
   <div class="sidebar-header">
     <div>
       <span class="sidebar-title">Navigation</span>
-      <small class="sidebar-subtitle">Visual order controls `Ctrl+1...N`.</small>
     </div>
     <div class="sidebar-actions">
       <button class="header-btn" type="button" on:click={onReset}>Reset</button>
@@ -107,30 +112,29 @@
         class:selected={tab.id === activeTab}
         class:dragging={draggingTabId === tab.id}
         role="listitem"
+        draggable={!tab.pinned}
+        on:dragstart={(event) => !tab.pinned && handleDragStart(event, tab.id)}
+        on:dragend={clearDragState}
         on:dragover={(event) => handleDragOver(event, index)}
         on:drop={handleDrop}
       >
         <div class="tab-row-main">
           {#if tab.pinned}
-            <span class="tab-badge">Pinned</span>
+            <span class="tab-pin" aria-label="Pinned">
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                <path d="M10 1L6 5H3l-1 1 4 4-1 1v3l1-1 4-4 1 1v-3L8 3z" fill="currentColor" opacity="0.55" />
+              </svg>
+            </span>
           {:else}
-            <button
-              class="drag-handle"
-              type="button"
-              draggable="true"
-              aria-label={`Reorder ${tab.label}`}
-              on:dragstart={(event) => handleDragStart(event, tab.id)}
-              on:dragend={clearDragState}
-            >
+            <span class="drag-handle" aria-hidden="true">
               <span></span>
               <span></span>
               <span></span>
-            </button>
+            </span>
           {/if}
 
           <button class="tab-button" class:selected={tab.id === activeTab} type="button" on:click={() => handleSelect(tab.id)}>
             <span class="tab-label">{tab.label}</span>
-            <span class="tab-hint">{tab.shortcutHint}</span>
           </button>
         </div>
       </div>
@@ -192,14 +196,6 @@
     color: var(--text-2);
   }
 
-  .sidebar-subtitle {
-    display: block;
-    margin-top: 0.2rem;
-    color: var(--text-2);
-    font-size: 0.7rem;
-    line-height: 1.4;
-  }
-
   .sidebar-actions {
     display: flex;
     align-items: center;
@@ -208,7 +204,6 @@
 
   .header-btn,
   .close-btn,
-  .drag-handle,
   .tab-button {
     border: 1px solid transparent;
     background: transparent;
@@ -237,7 +232,6 @@
 
   .header-btn:hover,
   .close-btn:hover,
-  .drag-handle:hover,
   .tab-button:hover {
     color: var(--text-0);
     border-color: rgba(122, 166, 200, 0.32);
@@ -253,6 +247,10 @@
   .tab-row {
     display: grid;
     gap: 0.18rem;
+  }
+
+  .tab-row:not(.selected):not([draggable="false"]) {
+    cursor: grab;
   }
 
   .tab-row-main {
@@ -271,36 +269,29 @@
     align-content: center;
     gap: 0.14rem;
     padding: 0.45rem 0.35rem;
-    cursor: grab;
-    border-radius: 2px;
+    color: var(--text-1);
   }
 
   .drag-handle span {
     display: block;
-    width: 0.7rem;
-    height: 2px;
+    width: 0.55rem;
+    height: 1.5px;
     border-radius: 99px;
     background: currentColor;
-    opacity: 0.7;
+    opacity: 0.45;
   }
 
-  .tab-badge {
+  .tab-pin {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 3rem;
-    padding: 0 0.45rem;
-    border: 1px solid rgba(122, 166, 200, 0.28);
-    color: var(--accent);
-    font-size: 0.62rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    padding: 0 0.35rem;
+    color: var(--text-2);
   }
 
   .tab-button {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.75rem;
     width: 100%;
     padding: 0.58rem 0.7rem;
@@ -318,21 +309,13 @@
     color: var(--text-0);
   }
 
-  .tab-label,
-  .tab-hint {
+  .tab-label {
     display: inline-block;
-  }
-
-  .tab-hint {
-    color: var(--text-2);
-    font-size: 0.7rem;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
   }
 
   .insertion-marker {
     height: 2px;
-    margin-left: 3.35rem;
+    margin-left: 2rem;
     background: linear-gradient(90deg, rgba(122, 166, 200, 0.85), rgba(122, 166, 200, 0.18));
     box-shadow: 0 0 0 1px rgba(122, 166, 200, 0.14);
   }
