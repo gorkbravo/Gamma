@@ -14,7 +14,6 @@
   import { openKeyBindingsWindow } from "./lib/keybindings-window";
   import {
     getOrderedWorkspaceTabs,
-    getShortcutHintForIndex,
     getTabByShortcutIndex,
     getTabLabel,
     getWorkspaceHomeTab,
@@ -98,11 +97,10 @@
     workspaceMode == null
       ? []
       : getOrderedWorkspaceTabs(workspaceMode, $workspaceTabOrders);
-  $: tabBarTabs = orderedTabs.map<TabBarItem>((tab, index) => ({
+  $: tabBarTabs = orderedTabs.map<TabBarItem>((tab) => ({
     id: tab.id,
     label: tab.label,
     pinned: tab.pinned,
-    shortcutHint: getShortcutHintForIndex(index),
   }));
 
   onMount(() => {
