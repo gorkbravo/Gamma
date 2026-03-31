@@ -247,17 +247,17 @@ For roadmap purposes, this deliverable is now treated as achieved at a first-pas
 
 ## Phase 2 - Macro Tab
 
-_Status: In progress (~55%)_
+_Status: In progress (~60%)_
 _Active focus: deepen the current Macro workspace, improve event-window density and coherence interpretation, and push Rates & Policy beyond a front-end proxy into richer policy-expectation depth before adding new modes._
-_Recent progress: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes now exist inside one shared Macro workspace with persistent context, linked prediction-market contract overlays, stronger divergence framing, and a first-pass rates-path proxy layer in Rates & Policy._
+_Recent progress: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes now exist inside one shared Macro workspace with persistent context, linked prediction-market contract overlays, stronger divergence framing, a first-pass rates-path proxy layer, and a meeting-ladder proxy inside Rates & Policy._
 
 #### Completion snapshot
-- `Snapshot mode`: ~55% complete. A usable V1 workspace exists with shared context, US/EU/Global lenses, deep-link cards, linked prediction-market context, and context-preserving navigation, but breadth and macro interpretation depth remain limited.
+- `Snapshot mode`: ~58% complete. A usable V1 workspace exists with shared context, US/EU/Global lenses, deep-link cards, linked prediction-market context, and context-preserving navigation, but breadth and macro interpretation depth remain limited.
 - `Cross-asset expectations mode`: ~50% complete. Theme comparisons, ranked divergences, linked contract context, and driver / counter-signal framing are live, but the expectations engine is still narrow, curated, and proxy-based.
-- `Rates & policy mode`: ~65% complete. Curve, breakeven, real-yield, event-calendar, linked policy-contract context, and a first-pass path proxy are in place, but meeting-path depth and richer policy-expectation interpretation still need work.
+- `Rates & policy mode`: ~73% complete. Curve, breakeven, real-yield, event-calendar, linked policy-contract context, a first-pass path proxy, and a meeting-ladder proxy are in place, but richer policy-expectation interpretation and less proxy-driven depth still need work.
 - `Optional commodities mode`: ~0% complete. Not started and not required for the first pass.
-- `Coherence and divergence engine`: ~45% complete. A structured first-pass divergence layer exists, including ranked gaps, primary driver / counter-signal framing, comparison overlays, and research focus text, but it is still curated, proxy-driven, and not yet a deeper lead/lag or coherence model.
-- `Event and regime interpretation`: ~35% complete. A dedicated Events / Regimes mode now exists with regime framing and event-study windows, but live event-window density is still sparse and the interpretation layer remains limited by the current study horizon and public event coverage.
+- `Coherence and divergence engine`: ~48% complete. A structured first-pass divergence layer exists, including ranked gaps, primary driver / counter-signal framing, comparison overlays, and research focus text, but it is still curated, proxy-driven, and not yet a deeper lead/lag or coherence model.
+- `Event and regime interpretation`: ~38% complete. A dedicated Events / Regimes mode now exists with regime framing and event-study windows, but live event-window density is still sparse and the interpretation layer remains limited by the current study horizon and public event coverage.
 - `Research notebook hooks`: ~0% complete. Not started.
 
 ### Why this phase comes next
