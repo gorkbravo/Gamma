@@ -247,17 +247,17 @@ For roadmap purposes, this deliverable is now treated as achieved at a first-pas
 
 ## Phase 2 - Macro Tab
 
-_Status: In progress (~60%)_
-_Active focus: deepen the current Macro workspace, improve event-window density and coherence interpretation, and push Rates & Policy beyond a front-end proxy into richer policy-expectation depth before adding new modes._
-_Recent progress: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes now exist inside one shared Macro workspace with persistent context, linked prediction-market contract overlays, stronger divergence framing, a first-pass rates-path proxy layer, and a meeting-ladder proxy inside Rates & Policy._
+_Status: In progress (~72%)_
+_Active focus: deepen the current Macro workspace with denser official catalysts, clearer event-window interpretation, a transparent first-pass lead/lag engine, and stronger daily-use snapshot framing before adding any new modes._
+_Recent progress: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes now share a denser interpretation layer: snapshot focus items and why-now copy, coherence/lead-lag annotations, broader public event coverage across policy/inflation/growth catalysts, a policy-expectation overlay next to the rates-path proxy, and a meeting-ladder proxy inside Rates & Policy._
 
 #### Completion snapshot
-- `Snapshot mode`: ~58% complete. A usable V1 workspace exists with shared context, US/EU/Global lenses, deep-link cards, linked prediction-market context, and context-preserving navigation, but breadth and macro interpretation depth remain limited.
-- `Cross-asset expectations mode`: ~50% complete. Theme comparisons, ranked divergences, linked contract context, and driver / counter-signal framing are live, but the expectations engine is still narrow, curated, and proxy-based.
-- `Rates & policy mode`: ~73% complete. Curve, breakeven, real-yield, event-calendar, linked policy-contract context, a first-pass path proxy, and a meeting-ladder proxy are in place, but richer policy-expectation interpretation and less proxy-driven depth still need work.
+- `Snapshot mode`: ~74% complete. A usable daily macro workspace now exists with shared context, focus items, why-now interpretation, deep-link cards, linked prediction-market context, and context-preserving navigation, but it is still constrained by the current curated series set.
+- `Cross-asset expectations mode`: ~68% complete. Theme comparisons, ranked divergences, linked contract context, driver / counter-signal framing, and a first-pass coherence / lead-lag layer are live, but the engine remains heuristic and intentionally transparent rather than statistically overfit.
+- `Rates & policy mode`: ~82% complete. Curve, breakeven, real-yield, event-calendar, linked policy-contract context, a first-pass path proxy, a qualitative policy-expectation overlay, and a meeting-ladder proxy are in place, but the path is still public-data and proxy constrained.
 - `Optional commodities mode`: ~0% complete. Not started and not required for the first pass.
-- `Coherence and divergence engine`: ~48% complete. A structured first-pass divergence layer exists, including ranked gaps, primary driver / counter-signal framing, comparison overlays, and research focus text, but it is still curated, proxy-driven, and not yet a deeper lead/lag or coherence model.
-- `Event and regime interpretation`: ~38% complete. A dedicated Events / Regimes mode now exists with regime framing and event-study windows, but live event-window density is still sparse and the interpretation layer remains limited by the current study horizon and public event coverage.
+- `Coherence and divergence engine`: ~70% complete. A structured divergence layer now includes ranked gaps, primary driver / counter-signal framing, comparison overlays, research focus text, and a first-pass lead/lag/coherence model, but it remains heuristic and should not be treated as precise causal inference.
+- `Event and regime interpretation`: ~67% complete. Events / Regimes now has denser policy/inflation/growth catalyst coverage, clearer recent/upcoming window framing, and post/pre-event coherence summaries, but EU coverage and event-source breadth are still lighter than the US lens.
 - `Research notebook hooks`: ~0% complete. Not started.
 
 ### Why this phase comes next

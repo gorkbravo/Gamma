@@ -26,12 +26,37 @@ This change extends the existing `MacroRatesPolicySummary` payload and `Rates & 
    - cumulative move through that meeting.
 4. UI copy that states the methodology and limitation clearly.
 
+## Shipped State
+
+The current implementation now includes, in addition to the original meeting-ladder proxy:
+
+1. A policy-expectation overlay derived from linked public prediction-market contracts.
+2. Compact expectation metrics covering:
+   - linked contract count,
+   - qualitative easier/tighter bias,
+   - average contract probability,
+   - average recent repricing.
+3. UI framing that places the linked-contract set beside the front-end path proxy rather than treating it as a substitute for a derivatives curve.
+4. Explicit caveat copy that the linked-contract layer is text-mapped and qualitative.
+
+This means `Rates & Policy` now answers two separate but related questions:
+
+- what the current front-end rates proxy implies about the path,
+- whether linked public policy contracts are leaning the same way, the other way, or are mixed.
+
 ## Non-Goals
 
 - No claim that the ladder is a market-implied OIS or fed-funds-futures curve.
 - No new paid market-data dependency.
 - No new Macro mode.
 - No notebook hooks or AI Copilot work.
+
+## Current Limitations
+
+- The meeting ladder is still a deterministic proxy built from the current front-end gap, not an implied OIS/futures curve.
+- Linked policy contracts are categorized heuristically from public titles and topics; they are a qualitative overlay, not meeting-specific pricing.
+- EU coverage remains lighter than US coverage and currently depends on available public policy-calendar coverage.
+- This layer should be interpreted together with the broader Macro coherence and event-study outputs, not as a standalone policy model.
 
 ## Method
 

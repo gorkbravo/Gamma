@@ -138,6 +138,90 @@ def test_us_macro_events_adapter_parses_official_sources_and_marks_global_transf
     assert all(row.transformation_note for row in global_rows)
 
 
+def test_us_macro_events_adapter_expands_official_event_coverage_across_us_and_eu(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: EVENTS_RETRIEVED_AT)
+
+    fomc_html = """
+    <h4><a id="fomc2026">2026 FOMC Meetings</a></h4>
+    <div class="fomc-meeting__month"><strong>May</strong></div>
+    <div class="fomc-meeting__date">6-7</div>
+    """.strip()
+    cpi_html = """
+    <table>
+      <tr><td>April 2026</td><td>May 12, 2026</td><td>8:30 AM</td></tr>
+    </table>
+    """.strip()
+    ppi_html = """
+    <table>
+      <tr><td>April 2026</td><td>May 14, 2026</td><td>8:30 AM</td></tr>
+    </table>
+    """.strip()
+    employment_html = """
+    <table>
+      <tr><td>April 2026</td><td>May 1, 2026</td><td>8:30 AM</td></tr>
+    </table>
+    """.strip()
+    jolts_html = """
+    <table>
+      <tr><td>March 2026</td><td>May 5, 2026</td><td>10:00 AM</td></tr>
+    </table>
+    """.strip()
+    bea_html = """
+    <div class="release-date">April 30</div>
+    <small class="text-muted">8:30 AM</small>
+    <h3>Gross Domestic Product, 1st Quarter 2026 (Advance Estimate)</h3>
+    """.strip()
+    ecb_html = """
+    <dl>
+      <dt>16 April 2026</dt>
+      <dd>Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 2), followed by press conference</dd>
+    </dl>
+    """.strip()
+
+    def fake_fetch_text(url: str) -> str:
+        if url.endswith("fomccalendars.htm"):
+            return fomc_html
+        if url.endswith("cpi.htm"):
+            return cpi_html
+        if url.endswith("ppi.htm"):
+            return ppi_html
+        if url.endswith("empsit.htm"):
+            return employment_html
+        if url.endswith("jolts.htm"):
+            return jolts_html
+        if url.endswith("/news/schedule"):
+            return bea_html
+        if url.endswith("/index.en.html"):
+            return ecb_html
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
+
+    us_rows = adapter.list_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
+    eu_rows = adapter.list_events(region="EU", as_of=datetime(2026, 4, 1, 0, 0, 0))
+
+    assert [row.event_id for row in us_rows] == [
+        "bea:gross-domestic-product-1st-quarter-2026-advance-estimate:2026-04-30",
+        "bls:employment_situation:2026-05-01",
+        "bls:jolts:2026-05-05",
+        "fomc:2026-05-06",
+        "bls:cpi_release:2026-05-12",
+        "bls:ppi_release:2026-05-14",
+    ]
+    assert us_rows[0].category == "growth"
+    assert us_rows[0].importance == "high"
+    assert us_rows[0].source_provider == "bea"
+    assert us_rows[0].transformation_note is not None
+    assert us_rows[2].scheduled_at == datetime(2026, 5, 5, 14, 0, 0)
+
+    assert [row.event_id for row in eu_rows] == [
+        "ecb:governing-council-of-the-ecb-monetary-policy-meeting-in-frankfurt-day-2-followed-by-press-conference:2026-04-16"
+    ]
+    assert eu_rows[0].category == "policy"
+    assert eu_rows[0].importance == "high"
+    assert eu_rows[0].source_provider == "ecb"
+
+
 def test_us_macro_events_adapter_keeps_same_day_future_bls_release(tmp_path, monkeypatch):
     monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: EVENTS_RETRIEVED_AT)
 
@@ -228,10 +312,18 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert snapshot.rates_policy.path_headline is not None
     assert snapshot.rates_policy.path_metrics
     assert snapshot.rates_policy.path_research_focus is not None
+    assert snapshot.rates_policy.expectation_metrics
+    assert snapshot.rates_policy.expectation_summary is not None
+    assert snapshot.rates_policy.expectation_caveat is not None
     assert snapshot.rates_policy.meeting_path is not None
     assert snapshot.rates_policy.meeting_path.metrics
     assert snapshot.rates_policy.meeting_path.meetings
     assert snapshot.rates_policy.meeting_path.meetings[0].transformation_note is not None
+    assert snapshot.focus_items
+    assert snapshot.focus_items[0].why_now
+    assert snapshot.focus_items[0].mode_target
+    assert any(card.why_now for card in snapshot.snapshot_cards)
+    assert all(card.drilldown_label for card in snapshot.snapshot_cards)
     assert cpi_history is not None
     assert cpi_history.transformation_note is not None
     assert cpi_history.points
@@ -245,11 +337,19 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert divergences[0].score >= divergences[-1].score
     assert divergences[0].primary_driver is not None
     assert divergences[0].counter_signal is not None
+    assert divergences[0].coherence is not None
+    assert divergences[0].coherence.lead_signal is not None
     assert divergences[0].research_focus is not None
     assert snapshot.event_studies
     assert snapshot.event_studies[0].timing == "upcoming"
     assert snapshot.event_studies[0].primary_reaction is not None
     assert snapshot.event_studies[0].counter_reaction is not None
+    assert any(study.coherence is not None for study in snapshot.event_studies)
+    first_coherent_study = next(study for study in snapshot.event_studies if study.coherence is not None)
+    assert first_coherent_study.window_start_label is not None
+    assert first_coherent_study.window_end_label is not None
+    assert first_coherent_study.primary_reaction.observed_label is not None
+    assert first_coherent_study.primary_reaction.lag_label is not None
     assert all(row.transformation_note is not None for row in divergences)
 
 
@@ -478,16 +578,25 @@ def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_pat
         assert snapshot_payload["snapshot_cards"][0]["linked_markets"]
         assert snapshot_payload["rates_policy"]["path_headline"] is not None
         assert snapshot_payload["rates_policy"]["path_metrics"]
+        assert snapshot_payload["rates_policy"]["expectation_metrics"]
+        assert snapshot_payload["rates_policy"]["expectation_summary"] is not None
+        assert snapshot_payload["rates_policy"]["expectation_caveat"] is not None
         assert snapshot_payload["rates_policy"]["meeting_path"] is not None
         assert snapshot_payload["rates_policy"]["meeting_path"]["meetings"]
+        assert snapshot_payload["focus_items"]
         inflation_cross_asset = next(row for row in snapshot_payload["cross_asset"] if row["theme"] == "inflation")
         assert inflation_cross_asset["primary_driver"] is not None
         assert inflation_cross_asset["counter_signal"] is not None
+        assert inflation_cross_asset["coherence"] is not None
         assert snapshot_payload["rates_policy"]["linked_markets"]
+        assert snapshot_payload["rates_policy"]["linked_markets"][0]["macro_stance"] is not None
         assert snapshot_payload["top_divergences"][0]["primary_driver"] is not None
+        assert snapshot_payload["top_divergences"][0]["coherence"] is not None
         assert snapshot_payload["top_divergences"][0]["research_focus"] is not None
         assert snapshot_payload["event_studies"]
         assert snapshot_payload["event_studies"][0]["primary_reaction"] is not None
+        assert snapshot_payload["event_studies"][0]["window_start_label"] is not None
+        assert snapshot_payload["event_studies"][0]["coherence"] is not None
 
         assert history_response.status_code == 200
         history_payload = history_response.json()

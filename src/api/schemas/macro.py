@@ -6,12 +6,14 @@ from pydantic import BaseModel, Field
 
 from src.application.macro_service import MacroSnapshotRequest
 from src.models.macro import (
+    MacroCoherenceProfile,
     MacroCurveNode,
     MacroDivergenceRecord,
     MacroDivergenceSignal,
     MacroEventRecord,
     MacroEventReactionSignal,
     MacroEventStudy,
+    MacroLeadLagSignal,
     MacroLinkedPredictionMarket,
     MacroMetricRecord,
     MacroPolicyMeetingPathRow,
@@ -20,6 +22,7 @@ from src.models.macro import (
     MacroSeriesHistory,
     MacroSeriesPoint,
     MacroSnapshotCard,
+    MacroSnapshotFocusItem,
     MacroSnapshotPayload,
     MacroThemeComparison,
 )
@@ -124,6 +127,10 @@ class MacroEventReactionSignalModel(BaseModel):
     move_display: str | None = None
     before_display_value: str | None = None
     after_display_value: str | None = None
+    observed_at: datetime | None = None
+    observed_label: str | None = None
+    lag_days: float | None = None
+    lag_label: str | None = None
     interpretation: str
     metric: MacroMetricModel
     source_provider: str
@@ -150,6 +157,7 @@ class MacroLinkedPredictionMarketModel(BaseModel):
     recent_price_change: float | None = None
     change_display: str | None = None
     research_score: float | None = None
+    macro_stance: str | None = None
     macro_alignment: str
     macro_alignment_summary: str | None = None
     source_provider: str
@@ -188,8 +196,11 @@ class MacroSnapshotCardModel(BaseModel):
     title: str
     subtitle: str | None = None
     summary: str
+    why_now: str | None = None
     mode_target: str
     target_theme: str | None = None
+    signal_label: str | None = None
+    drilldown_label: str | None = None
     metrics: list[MacroMetricModel] = Field(default_factory=list)
     linked_markets: list[MacroLinkedPredictionMarketModel] = Field(default_factory=list)
     source_provider: str
@@ -224,6 +235,55 @@ class MacroDivergenceSignalModel(BaseModel):
         return cls(**payload)
 
 
+class MacroLeadLagSignalModel(BaseModel):
+    label: str
+    series_id: str | None = None
+    role: str
+    tone: str
+    signal_score: float
+    signal_score_display: str | None = None
+    move_value: float | None = None
+    move_display: str | None = None
+    observed_at: datetime | None = None
+    observed_label: str | None = None
+    lag_days: float | None = None
+    lag_label: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroLeadLagSignal) -> "MacroLeadLagSignalModel":
+        return cls(**row.__dict__)
+
+
+class MacroCoherenceProfileModel(BaseModel):
+    theme: str
+    direction_label: str
+    coherence_label: str
+    supporting_signals: int
+    opposing_signals: int
+    neutral_signals: int
+    lead_signal: MacroLeadLagSignalModel | None = None
+    lag_signal: MacroLeadLagSignalModel | None = None
+    lag_span_days: float | None = None
+    lag_span_display: str | None = None
+    summary: str
+    methodology: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroCoherenceProfile) -> "MacroCoherenceProfileModel":
+        payload = dict(row.__dict__)
+        payload["lead_signal"] = MacroLeadLagSignalModel.from_domain(row.lead_signal) if row.lead_signal is not None else None
+        payload["lag_signal"] = MacroLeadLagSignalModel.from_domain(row.lag_signal) if row.lag_signal is not None else None
+        return cls(**payload)
+
+
 class MacroDivergenceModel(BaseModel):
     divergence_id: str
     theme: str
@@ -236,6 +296,7 @@ class MacroDivergenceModel(BaseModel):
     series_ids: list[str] = Field(default_factory=list)
     primary_driver: MacroDivergenceSignalModel | None = None
     counter_signal: MacroDivergenceSignalModel | None = None
+    coherence: MacroCoherenceProfileModel | None = None
     research_focus: str | None = None
     source_provider: str
     retrieved_at: datetime | None = None
@@ -252,6 +313,7 @@ class MacroDivergenceModel(BaseModel):
         payload["metrics"] = [MacroMetricModel.from_domain(metric) for metric in row.metrics]
         payload["primary_driver"] = MacroDivergenceSignalModel.from_domain(row.primary_driver) if row.primary_driver is not None else None
         payload["counter_signal"] = MacroDivergenceSignalModel.from_domain(row.counter_signal) if row.counter_signal is not None else None
+        payload["coherence"] = MacroCoherenceProfileModel.from_domain(row.coherence) if row.coherence is not None else None
         return cls(**payload)
 
 
@@ -264,6 +326,7 @@ class MacroThemeComparisonModel(BaseModel):
     linked_markets: list[MacroLinkedPredictionMarketModel] = Field(default_factory=list)
     primary_driver: MacroDivergenceSignalModel | None = None
     counter_signal: MacroDivergenceSignalModel | None = None
+    coherence: MacroCoherenceProfileModel | None = None
     divergence_score: float | None = None
     research_focus: str | None = None
     source_provider: str
@@ -280,6 +343,7 @@ class MacroThemeComparisonModel(BaseModel):
         payload["linked_markets"] = [MacroLinkedPredictionMarketModel.from_domain(item) for item in row.linked_markets]
         payload["primary_driver"] = MacroDivergenceSignalModel.from_domain(row.primary_driver) if row.primary_driver is not None else None
         payload["counter_signal"] = MacroDivergenceSignalModel.from_domain(row.counter_signal) if row.counter_signal is not None else None
+        payload["coherence"] = MacroCoherenceProfileModel.from_domain(row.coherence) if row.coherence is not None else None
         return cls(**payload)
 
 
@@ -295,6 +359,9 @@ class MacroRatesPolicySummaryModel(BaseModel):
     path_summary: str | None = None
     path_metrics: list[MacroMetricModel] = Field(default_factory=list)
     path_research_focus: str | None = None
+    expectation_metrics: list[MacroMetricModel] = Field(default_factory=list)
+    expectation_summary: str | None = None
+    expectation_caveat: str | None = None
     meeting_path: MacroPolicyMeetingPathSummaryModel | None = None
     market_alignment_label: str | None = None
     market_alignment_summary: str | None = None
@@ -314,6 +381,7 @@ class MacroRatesPolicySummaryModel(BaseModel):
         payload["events"] = [MacroEventModel.from_domain(event) for event in row.events]
         payload["linked_markets"] = [MacroLinkedPredictionMarketModel.from_domain(item) for item in row.linked_markets]
         payload["path_metrics"] = [MacroMetricModel.from_domain(metric) for metric in row.path_metrics]
+        payload["expectation_metrics"] = [MacroMetricModel.from_domain(metric) for metric in row.expectation_metrics]
         payload["meeting_path"] = (
             MacroPolicyMeetingPathSummaryModel.from_domain(row.meeting_path) if row.meeting_path is not None else None
         )
@@ -368,10 +436,15 @@ class MacroEventStudyModel(BaseModel):
     headline: str
     summary: str
     window_label: str
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    window_start_label: str | None = None
+    window_end_label: str | None = None
     event: MacroEventModel
     reactions: list[MacroEventReactionSignalModel] = Field(default_factory=list)
     primary_reaction: MacroEventReactionSignalModel | None = None
     counter_reaction: MacroEventReactionSignalModel | None = None
+    coherence: MacroCoherenceProfileModel | None = None
     linked_markets: list[MacroLinkedPredictionMarketModel] = Field(default_factory=list)
     research_focus: str | None = None
     source_provider: str
@@ -390,8 +463,27 @@ class MacroEventStudyModel(BaseModel):
         payload["counter_reaction"] = (
             MacroEventReactionSignalModel.from_domain(row.counter_reaction) if row.counter_reaction is not None else None
         )
+        payload["coherence"] = MacroCoherenceProfileModel.from_domain(row.coherence) if row.coherence is not None else None
         payload["linked_markets"] = [MacroLinkedPredictionMarketModel.from_domain(item) for item in row.linked_markets]
         return cls(**payload)
+
+
+class MacroSnapshotFocusItemModel(BaseModel):
+    focus_id: str
+    title: str
+    summary: str
+    why_now: str
+    mode_target: str
+    target_theme: str | None = None
+    signal_label: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroSnapshotFocusItem) -> "MacroSnapshotFocusItemModel":
+        return cls(**row.__dict__)
 
 
 class MacroSnapshotResponseModel(BaseModel):
@@ -402,6 +494,7 @@ class MacroSnapshotResponseModel(BaseModel):
     available_regions: list[str] = Field(default_factory=list)
     available_timeframes: list[str] = Field(default_factory=list)
     available_themes: list[str] = Field(default_factory=list)
+    focus_items: list[MacroSnapshotFocusItemModel] = Field(default_factory=list)
     snapshot_cards: list[MacroSnapshotCardModel] = Field(default_factory=list)
     rates_policy: MacroRatesPolicySummaryModel | None = None
     cross_asset: list[MacroThemeComparisonModel] = Field(default_factory=list)
@@ -417,6 +510,7 @@ class MacroSnapshotResponseModel(BaseModel):
     @classmethod
     def from_domain(cls, row: MacroSnapshotPayload) -> "MacroSnapshotResponseModel":
         payload = dict(row.__dict__)
+        payload["focus_items"] = [MacroSnapshotFocusItemModel.from_domain(item) for item in row.focus_items]
         payload["snapshot_cards"] = [MacroSnapshotCardModel.from_domain(card) for card in row.snapshot_cards]
         payload["rates_policy"] = (
             MacroRatesPolicySummaryModel.from_domain(row.rates_policy) if row.rates_policy is not None else None

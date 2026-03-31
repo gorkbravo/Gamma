@@ -1,9 +1,12 @@
 <script lang="ts">
+  import MacroCoherencePanel from "../components/MacroCoherencePanel.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
     MacroContextState,
     MacroDivergenceListResponse,
+    MacroEventReactionSignal,
     MacroEventsResponse,
+    MacroLinkedPredictionMarket,
     MacroMode,
     MacroSeriesHistory,
     MacroSnapshot,
@@ -148,6 +151,45 @@
 
   function linkedMarketScore(value: number | null | undefined): string | null {
     return value == null ? null : value.toFixed(1);
+  }
+
+  function signalBadgeTone(label: string | null | undefined): string {
+    if (label === "aligned" || label === "coherent") return "positive";
+    if (label === "diverging" || label === "fractured") return "negative";
+    if (label === "mixed" || label === "narrow") return "warning";
+    return "";
+  }
+
+  function modeLabel(mode: string | null | undefined): string {
+    if (!mode) return "Macro";
+    return mode.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function stanceLabel(stance: string | null | undefined): string | null {
+    if (!stance) return null;
+    if (stance === "policy-easier") return "Easier";
+    if (stance === "policy-tighter") return "Tighter";
+    return stance.replace(/_/g, " ");
+  }
+
+  function studyWindowText(study: { window_start_label?: string | null; window_end_label?: string | null }): string | null {
+    if (!study.window_start_label || !study.window_end_label) return null;
+    return `${study.window_start_label} to ${study.window_end_label}`;
+  }
+
+  function reactionTimingText(reaction: MacroEventReactionSignal | null | undefined): string | null {
+    if (!reaction) return null;
+    return [reaction.observed_label, reaction.lag_label].filter(Boolean).join(" | ") || null;
+  }
+
+  function focusTargetText(modeTarget: string, targetTheme: string | null | undefined): string {
+    const themeLabel = targetTheme ? themeLabels[targetTheme as MacroTheme] ?? targetTheme.replace(/_/g, " ") : null;
+    return themeLabel ? `${modeLabel(modeTarget)} | ${themeLabel}` : modeLabel(modeTarget);
+  }
+
+  function linkedMarketContext(market: MacroLinkedPredictionMarket): string | null {
+    const stance = stanceLabel(market.macro_stance);
+    return [stance ? `${stance} bias` : null, market.macro_alignment].filter(Boolean).join(" | ") || null;
   }
 
   function historyKey(
@@ -318,6 +360,7 @@
   $: recentEventStudies = (snapshot?.event_studies ?? []).filter((study) => study.timing === "recent");
   $: upcomingEventStudies = (snapshot?.event_studies ?? []).filter((study) => study.timing === "upcoming");
   $: maxSnapshotMetrics = Math.max(...(snapshot?.snapshot_cards ?? []).map((c) => c.metrics.length), 0);
+  $: snapshotFocusItems = snapshot?.focus_items ?? [];
 
   /* ── Headline KPI strip (persistent context) ── */
   const headlineSeriesUS = ["us-cpi-yoy", "us-fed-funds", "us-2s10s-slope", "us-dollar-broad"];
@@ -451,6 +494,32 @@
   {/if}
 
   {#if $macroContext.mode === "snapshot"}
+    {#if snapshotFocusItems.length}
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">What Matters Now</p>
+            <h3>Actionable macro questions</h3>
+          </div>
+        </div>
+        <div class="focus-grid">
+          {#each snapshotFocusItems as item}
+            <button class="focus-card" type="button" on:click={() => drillTo(item.mode_target as MacroMode, item.target_theme)}>
+              <div class="focus-card-head">
+                <strong>{item.title}</strong>
+                {#if item.signal_label}
+                  <span class="tag {signalBadgeTone(item.signal_label)}">{item.signal_label}</span>
+                {/if}
+              </div>
+              <p class="focus-summary">{item.summary}</p>
+              <p class="focus-why">{item.why_now}</p>
+              <span class="focus-target">{focusTargetText(item.mode_target, item.target_theme)}</span>
+            </button>
+          {/each}
+        </div>
+      </article>
+    {/if}
+
     {#if (snapshot?.snapshot_cards ?? []).length}
       <article class="panel snapshot-table-panel">
         <div class="table-wrap">
@@ -468,8 +537,16 @@
               {#each snapshot?.snapshot_cards ?? [] as card}
                 <tr class="snapshot-row" tabindex="0" role="button" on:click={() => drillTo(card.mode_target as MacroMode, card.target_theme)} on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drillTo(card.mode_target as MacroMode, card.target_theme); } }}>
                   <td class="col-theme">
-                    <span class="row-theme">{card.title}</span>
+                    <span class="row-theme">
+                      {card.title}
+                      {#if card.signal_label}
+                        <span class="tag inline-tag {signalBadgeTone(card.signal_label)}">{card.signal_label}</span>
+                      {/if}
+                    </span>
                     <span class="row-summary">{card.summary}</span>
+                    {#if card.why_now}
+                      <span class="row-why">{card.why_now}</span>
+                    {/if}
                     {#if card.linked_markets?.length}
                       <span class="linked-hint">
                         <span class="linked-dot {linkedMarketTone(card.linked_markets[0].macro_alignment)}"></span>
@@ -487,7 +564,7 @@
                     {/if}
                   </td>
                   <td class="col-drill">
-                    <span class="tag">{card.mode_target.replace("_", " ")}</span>
+                    <span class="tag">{card.drilldown_label ?? modeLabel(card.mode_target)}</span>
                   </td>
                   {#each card.metrics as metric}
                     <td class="col-metric">
@@ -569,6 +646,7 @@
                   <span class="score-badge {row.label ?? ''}">{row.score?.toFixed(1) ?? '—'}</span>
                 </div>
                 <span class="list-detail">{row.summary}</span>
+                <MacroCoherencePanel coherence={row.coherence} compact />
               </button>
             {/each}
           </div>
@@ -594,6 +672,7 @@
                   <span class="list-detail">
                     <span class="event-date">{shortDate(event.scheduled_at)}</span>
                     <span class="event-category">{event.category}</span>
+                    <span class="event-category">{event.importance}</span>
                   </span>
                 </div>
               {/each}
@@ -624,7 +703,12 @@
               <article class="linked-market-card">
                 <div class="linked-market-head">
                   <strong>{market.title}</strong>
-                  <span class="tag">{market.venue}</span>
+                  <div class="linked-market-meta">
+                    <span class="tag">{market.venue}</span>
+                    {#if stanceLabel(market.macro_stance)}
+                      <span class="tag {signalBadgeTone(market.macro_alignment)}">{stanceLabel(market.macro_stance)}</span>
+                    {/if}
+                  </div>
                 </div>
                 <div class="linked-market-stats">
                   {#if market.probability_label}
@@ -635,6 +719,9 @@
                   {/if}
                   {#if linkedMarketScore(market.research_score)}
                     <span>rank {linkedMarketScore(market.research_score)}</span>
+                  {/if}
+                  {#if linkedMarketContext(market)}
+                    <span class={linkedMarketTone(market.macro_alignment)}>{linkedMarketContext(market)}</span>
                   {/if}
                 </div>
                 <p class="linked-market-summary {linkedMarketTone(market.macro_alignment)}">{market.macro_alignment_summary}</p>
@@ -691,6 +778,33 @@
         </div>
         {#if snapshot?.rates_policy?.path_research_focus}
           <p class="research-focus">{snapshot.rates_policy.path_research_focus}</p>
+        {/if}
+        {#if snapshot?.rates_policy?.expectation_summary || (snapshot?.rates_policy?.expectation_metrics ?? []).length}
+          <div class="subsection-block">
+            <div class="subsection-head">
+              <span class="eyebrow">Expectation Overlay</span>
+              {#if snapshot?.rates_policy?.market_alignment_label}
+                <span class="tag {signalBadgeTone(snapshot.rates_policy.market_alignment_label)}">{snapshot.rates_policy.market_alignment_label}</span>
+              {/if}
+            </div>
+            {#if snapshot?.rates_policy?.expectation_summary}
+              <p class="section-summary">{snapshot.rates_policy.expectation_summary}</p>
+            {/if}
+            <div class="metric-row compact">
+              {#each snapshot?.rates_policy?.expectation_metrics ?? [] as metric}
+                <div class="metric">
+                  <span class="metric-label">{metric.label}</span>
+                  <strong class="metric-value">{metric.display_value}</strong>
+                  {#if metric.delta_display}
+                    <small class="metric-delta {deltaClass(metric.delta_display)}">{metric.delta_display}</small>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+            {#if snapshot?.rates_policy?.expectation_caveat}
+              <p class="methodology-inline">{snapshot.rates_policy.expectation_caveat}</p>
+            {/if}
+          </div>
         {/if}
       </article>
 
@@ -814,11 +928,12 @@
               {#each group.events as event}
                 <div class="list-row">
                   <strong>{event.title}</strong>
-                  <span class="list-detail">
-                    <span class="event-date">{shortDate(event.scheduled_at)}</span>
-                    <span class="event-category">{event.category}</span>
-                  </span>
-                </div>
+                    <span class="list-detail">
+                      <span class="event-date">{shortDate(event.scheduled_at)}</span>
+                      <span class="event-category">{event.category}</span>
+                      <span class="event-category">{event.importance}</span>
+                    </span>
+                  </div>
               {/each}
             {/each}
           </div>
@@ -851,6 +966,7 @@
                   </div>
                 </div>
                 <p class="card-summary">{row.summary}</p>
+                <MacroCoherencePanel coherence={row.coherence} />
                 {#if row.primary_driver || row.counter_signal}
                   <div class="divergence-detail-grid list-embedded">
                     {#if row.primary_driver}
@@ -904,8 +1020,12 @@
                 <span class="list-detail">
                   <span class="event-date">{shortDate(study.event.scheduled_at)}</span>
                   <span class="event-category">{study.window_label}</span>
+                  {#if studyWindowText(study)}
+                    <span class="event-category">{studyWindowText(study)}</span>
+                  {/if}
                 </span>
                 <p class="card-summary">{study.summary}</p>
+                <MacroCoherencePanel coherence={study.coherence} compact />
                 {#if study.primary_reaction || study.counter_reaction}
                   <div class="divergence-detail-grid list-embedded">
                     {#if study.primary_reaction}
@@ -915,6 +1035,9 @@
                           <span class="signal-score {study.primary_reaction.tone}">{study.primary_reaction.signal_score_display}</span>
                         </div>
                         <strong>{study.primary_reaction.metric.label}</strong>
+                        {#if reactionTimingText(study.primary_reaction)}
+                          <p class="signal-meta">{reactionTimingText(study.primary_reaction)}</p>
+                        {/if}
                         <p class="signal-summary {eventStudyTone(study.primary_reaction.tone)}">{study.primary_reaction.interpretation}</p>
                       </article>
                     {/if}
@@ -925,6 +1048,9 @@
                           <span class="signal-score {study.counter_reaction.tone}">{study.counter_reaction.signal_score_display}</span>
                         </div>
                         <strong>{study.counter_reaction.metric.label}</strong>
+                        {#if reactionTimingText(study.counter_reaction)}
+                          <p class="signal-meta">{reactionTimingText(study.counter_reaction)}</p>
+                        {/if}
                         <p class="signal-summary {eventStudyTone(study.counter_reaction.tone)}">{study.counter_reaction.interpretation}</p>
                       </article>
                     {/if}
@@ -959,8 +1085,12 @@
                 <span class="list-detail">
                   <span class="event-date">{shortDate(study.event.scheduled_at)}</span>
                   <span class="event-category">{study.window_label}</span>
+                  {#if studyWindowText(study)}
+                    <span class="event-category">{studyWindowText(study)}</span>
+                  {/if}
                 </span>
                 <p class="card-summary">{study.summary}</p>
+                <MacroCoherencePanel coherence={study.coherence} compact />
                 {#if study.primary_reaction || study.counter_reaction}
                   <div class="divergence-detail-grid list-embedded">
                     {#if study.primary_reaction}
@@ -970,6 +1100,9 @@
                           <span class="signal-score {study.primary_reaction.tone}">{study.primary_reaction.signal_score_display}</span>
                         </div>
                         <strong>{study.primary_reaction.metric.label}</strong>
+                        {#if reactionTimingText(study.primary_reaction)}
+                          <p class="signal-meta">{reactionTimingText(study.primary_reaction)}</p>
+                        {/if}
                         <p class="signal-summary {eventStudyTone(study.primary_reaction.tone)}">{study.primary_reaction.interpretation}</p>
                       </article>
                     {/if}
@@ -980,6 +1113,9 @@
                           <span class="signal-score {study.counter_reaction.tone}">{study.counter_reaction.signal_score_display}</span>
                         </div>
                         <strong>{study.counter_reaction.metric.label}</strong>
+                        {#if reactionTimingText(study.counter_reaction)}
+                          <p class="signal-meta">{reactionTimingText(study.counter_reaction)}</p>
+                        {/if}
                         <p class="signal-summary {eventStudyTone(study.counter_reaction.tone)}">{study.counter_reaction.interpretation}</p>
                       </article>
                     {/if}
@@ -991,7 +1127,12 @@
                       <article class="linked-market-card compact">
                         <div class="linked-market-head">
                           <strong>{market.title}</strong>
-                          <span class="tag">{market.venue}</span>
+                          <div class="linked-market-meta">
+                            <span class="tag">{market.venue}</span>
+                            {#if stanceLabel(market.macro_stance)}
+                              <span class="tag {signalBadgeTone(market.macro_alignment)}">{stanceLabel(market.macro_stance)}</span>
+                            {/if}
+                          </div>
                         </div>
                         <div class="linked-market-stats">
                           {#if market.probability_label}
@@ -1000,7 +1141,9 @@
                           {#if market.change_display}
                             <span class={linkedMarketTone(market.macro_alignment)}>{market.change_display}</span>
                           {/if}
-                          <span class={linkedMarketTone(market.macro_alignment)}>{market.macro_alignment}</span>
+                          {#if linkedMarketContext(market)}
+                            <span class={linkedMarketTone(market.macro_alignment)}>{linkedMarketContext(market)}</span>
+                          {/if}
                         </div>
                         <p class="linked-market-summary {linkedMarketTone(market.macro_alignment)}">{market.macro_alignment_summary}</p>
                       </article>
@@ -1035,6 +1178,7 @@
                   <span class="list-detail">
                     <span class="event-date">{shortDate(event.scheduled_at)}</span>
                     <span class="event-category">{event.category}</span>
+                    <span class="event-category">{event.importance}</span>
                   </span>
                 </div>
               {/each}
@@ -1074,6 +1218,7 @@
                 {#if card.comparison_summary}
                   <p class="comparison-summary">{card.comparison_summary}</p>
                 {/if}
+                <MacroCoherencePanel coherence={card.coherence} />
                 {#if card.primary_driver || card.counter_signal}
                   <div class="divergence-detail-grid">
                     {#if card.primary_driver}
@@ -1107,7 +1252,12 @@
                       <article class="linked-market-card compact">
                         <div class="linked-market-head">
                           <strong>{market.title}</strong>
-                          <span class="tag">{market.venue}</span>
+                          <div class="linked-market-meta">
+                            <span class="tag">{market.venue}</span>
+                            {#if stanceLabel(market.macro_stance)}
+                              <span class="tag {signalBadgeTone(market.macro_alignment)}">{stanceLabel(market.macro_stance)}</span>
+                            {/if}
+                          </div>
                         </div>
                         <div class="linked-market-stats">
                           {#if market.probability_label}
@@ -1116,7 +1266,9 @@
                           {#if market.change_display}
                             <span class={linkedMarketTone(market.macro_alignment)}>{market.change_display}</span>
                           {/if}
-                          <span class={linkedMarketTone(market.macro_alignment)}>{market.macro_alignment}</span>
+                          {#if linkedMarketContext(market)}
+                            <span class={linkedMarketTone(market.macro_alignment)}>{linkedMarketContext(market)}</span>
+                          {/if}
                         </div>
                         <p class="linked-market-summary {linkedMarketTone(market.macro_alignment)}">{market.macro_alignment_summary}</p>
                       </article>
@@ -1161,6 +1313,7 @@
                   <span class="score-badge {row.label}">{row.score.toFixed(1)}</span>
                 </div>
                 <span class="list-detail">{row.summary}</span>
+                <MacroCoherencePanel coherence={row.coherence} compact />
                 {#if row.primary_driver || row.counter_signal}
                   <div class="divergence-detail-grid list-embedded">
                     {#if row.primary_driver}
@@ -1216,6 +1369,70 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.5rem;
+  }
+
+  .focus-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .focus-card {
+    border: 1px solid rgba(46, 60, 74, 0.35);
+    background: rgba(8, 13, 18, 0.5);
+    color: inherit;
+    font: inherit;
+    padding: 0.7rem;
+    display: grid;
+    gap: 0.3rem;
+    text-align: left;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+
+  .focus-card:hover {
+    background: rgba(122, 166, 200, 0.05);
+    border-color: rgba(122, 166, 200, 0.28);
+  }
+
+  .focus-card:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .focus-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.4rem;
+    align-items: center;
+  }
+
+  .focus-card-head strong {
+    font-size: 0.82rem;
+    line-height: 1.3;
+  }
+
+  .focus-summary,
+  .focus-why,
+  .focus-target {
+    margin: 0;
+    color: var(--text-2);
+    line-height: 1.4;
+  }
+
+  .focus-summary {
+    color: var(--text-1);
+    font-size: 0.76rem;
+  }
+
+  .focus-why {
+    font-size: 0.72rem;
+  }
+
+  .focus-target {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   /* ── Panels ── */
@@ -1581,6 +1798,11 @@
     line-height: 1.3;
   }
 
+  .inline-tag {
+    margin-left: 0.35rem;
+    vertical-align: middle;
+  }
+
   .row-summary {
     display: block;
     color: var(--text-2);
@@ -1591,6 +1813,14 @@
     -webkit-line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  .row-why {
+    display: block;
+    margin-top: 0.22rem;
+    color: var(--text-1);
+    font-size: 0.68rem;
+    line-height: 1.35;
   }
 
   .col-drill {
@@ -1722,6 +1952,30 @@
     line-height: 1.4;
   }
 
+  .subsection-block {
+    display: grid;
+    gap: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(46, 60, 74, 0.26);
+  }
+
+  .subsection-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .methodology-inline {
+    margin: 0;
+    padding-left: 0.55rem;
+    border-left: 2px solid rgba(46, 60, 74, 0.35);
+    color: var(--text-2);
+    font-size: 0.72rem;
+    line-height: 1.4;
+  }
+
   .comparison-summary {
     color: var(--text-2);
     margin: 0;
@@ -1801,6 +2055,14 @@
     line-height: 1.4;
   }
 
+  .signal-meta {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
   .research-focus {
     margin: 0.35rem 0 0;
     padding: 0.15rem 0 0.15rem 0.55rem;
@@ -1827,6 +2089,24 @@
   .tag.agreement {
     border-color: rgba(196, 154, 90, 0.24);
     background: rgba(196, 154, 90, 0.06);
+    color: var(--accent-2);
+  }
+
+  .tag.positive {
+    border-color: rgba(75, 180, 116, 0.25);
+    background: rgba(75, 180, 116, 0.06);
+    color: var(--positive);
+  }
+
+  .tag.negative {
+    border-color: rgba(198, 107, 97, 0.32);
+    background: rgba(198, 107, 97, 0.08);
+    color: var(--negative);
+  }
+
+  .tag.warning {
+    border-color: rgba(196, 154, 90, 0.3);
+    background: rgba(196, 154, 90, 0.08);
     color: var(--accent-2);
   }
 
@@ -2162,6 +2442,10 @@
     color: var(--negative);
   }
 
+  .warning {
+    color: var(--accent-2);
+  }
+
   /* ── Shared typography ── */
   .eyebrow {
     color: var(--text-2);
@@ -2185,6 +2469,10 @@
   /* ── Responsive ── */
   @media (max-width: 1080px) {
     .detail-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .focus-grid {
       grid-template-columns: 1fr;
     }
 

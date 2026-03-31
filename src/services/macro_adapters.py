@@ -202,7 +202,11 @@ class USMacroEventsAdapter:
     provider = "macro_calendar"
     FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
     CPI_URL = "https://www.bls.gov/schedule/news_release/cpi.htm"
+    PPI_URL = "https://www.bls.gov/schedule/news_release/ppi.htm"
     EMPSIT_URL = "https://www.bls.gov/schedule/news_release/empsit.htm"
+    JOLTS_URL = "https://www.bls.gov/schedule/news_release/jolts.htm"
+    BEA_SCHEDULE_URL = "https://www.bea.gov/news/schedule"
+    ECB_CALENDAR_URL = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
 
     def __init__(self, cache: CacheService, fetch_text: TextFetcher | None = None) -> None:
         self.cache = cache
@@ -214,22 +218,32 @@ class USMacroEventsAdapter:
         region: str,
         as_of: datetime,
         force_refresh: bool = False,
-        limit: int = 8,
-        ) -> list[MacroEventRecord]:
-        if region not in {"US", "Global"}:
+        limit: int = 12,
+    ) -> list[MacroEventRecord]:
+        if region not in {"US", "EU", "Global"}:
             return []
         normalized_as_of = _as_utc_naive(as_of)
         ttl = timedelta(hours=12)
         events: list[MacroEventRecord] = []
-        for source_name, url, parser in (
-            ("fomc", self.FOMC_URL, self._parse_fomc_page),
-            ("cpi", self.CPI_URL, lambda html, ts: self._parse_bls_schedule(html, ts, title="CPI Release", category="inflation")),
-            (
-                "employment",
-                self.EMPSIT_URL,
-                lambda html, ts: self._parse_bls_schedule(html, ts, title="Employment Situation", category="growth"),
-            ),
-        ):
+        sources = (
+            [
+                ("ecb", self.ECB_CALENDAR_URL, self._parse_ecb_calendar),
+            ]
+            if region == "EU"
+            else [
+                ("fomc", self.FOMC_URL, self._parse_fomc_page),
+                ("cpi", self.CPI_URL, lambda html, ts: self._parse_bls_schedule(html, ts, title="CPI Release", category="inflation")),
+                ("ppi", self.PPI_URL, lambda html, ts: self._parse_bls_schedule(html, ts, title="PPI Release", category="inflation")),
+                (
+                    "employment",
+                    self.EMPSIT_URL,
+                    lambda html, ts: self._parse_bls_schedule(html, ts, title="Employment Situation", category="growth", importance="high"),
+                ),
+                ("jolts", self.JOLTS_URL, lambda html, ts: self._parse_bls_schedule(html, ts, title="JOLTS", category="growth")),
+                ("bea_schedule", self.BEA_SCHEDULE_URL, self._parse_bea_schedule),
+            ]
+        )
+        for source_name, url, parser in sources:
             cache_key = self.cache.make_key("macro", "events", source_name)
             cached: Any = None
             if not force_refresh:
@@ -315,6 +329,7 @@ class USMacroEventsAdapter:
         *,
         title: str,
         category: str,
+        importance: str = "medium",
     ) -> list[MacroEventRecord]:
         row_pattern = re.compile(
             r"<tr[^>]*>\s*<td[^>]*>(?P<period>[^<]+)</td>\s*<td[^>]*>(?P<release_date>[^<]+)</td>\s*<td[^>]*>(?P<release_time>[^<]+)</td>",
@@ -336,10 +351,82 @@ class USMacroEventsAdapter:
                     region="US",
                     scheduled_at=scheduled_at,
                     relative_label=_clean_html(match.group("period")),
-                    importance="medium",
+                    importance=importance,
                     source_provider="bls",
                     retrieved_at=retrieved_at,
                     origin="macro.events.bls_schedule",
+                )
+            )
+        return rows
+
+    def _parse_bea_schedule(self, html: str, retrieved_at: datetime) -> list[MacroEventRecord]:
+        block_pattern = re.compile(
+            r'<div class="release-date">(?P<date>[^<]+)</div>(?P<body>.*?)(?=<div class="release-date">|$)',
+            re.IGNORECASE | re.DOTALL,
+        )
+        title_patterns = [
+            re.compile(r"<h3[^>]*>(?P<title>.*?)</h3>", re.IGNORECASE | re.DOTALL),
+            re.compile(r'<a[^>]*class="[^"]*news-title[^"]*"[^>]*>(?P<title>.*?)</a>', re.IGNORECASE | re.DOTALL),
+            re.compile(r'<a[^>]*href="[^"]*/news/[^"]*"[^>]*>(?P<title>.*?)</a>', re.IGNORECASE | re.DOTALL),
+        ]
+        time_pattern = re.compile(r"<small[^>]*class=\"[^\"]*text-muted[^\"]*\"[^>]*>(?P<time>[^<]+)</small>", re.IGNORECASE)
+        rows: list[MacroEventRecord] = []
+        for match in block_pattern.finditer(html):
+            date_text = _clean_html(match.group("date"))
+            body = match.group("body")
+            title = next((_clean_html(found.group("title")) for pattern in title_patterns for found in [pattern.search(body)] if found), "")
+            if not title:
+                continue
+            time_match = time_pattern.search(body)
+            time_text = _clean_html(time_match.group("time")) if time_match else ""
+            scheduled_at = _parse_schedule_month_day(date_text, retrieved_at=retrieved_at, title_hint=title, time_text=time_text)
+            if scheduled_at is None:
+                continue
+            category = _categorize_bea_title(title)
+            rows.append(
+                MacroEventRecord(
+                    event_id=f"bea:{_slugify(title)}:{scheduled_at.date().isoformat()}",
+                    title=title,
+                    category=category,
+                    region="US",
+                    scheduled_at=scheduled_at,
+                    relative_label=None,
+                    importance=_bea_importance(title),
+                    source_provider="bea",
+                    retrieved_at=retrieved_at,
+                    origin="macro.events.bea_schedule",
+                    transformation_note=(
+                        "BEA events are parsed from the official release schedule. Macro theme category and importance are inferred heuristically from the release title."
+                    ),
+                )
+            )
+        return rows
+
+    def _parse_ecb_calendar(self, html: str, retrieved_at: datetime) -> list[MacroEventRecord]:
+        pair_pattern = re.compile(r"<dt[^>]*>(?P<date>.*?)</dt>\s*<dd[^>]*>(?P<title>.*?)</dd>", re.IGNORECASE | re.DOTALL)
+        rows: list[MacroEventRecord] = []
+        for match in pair_pattern.finditer(html):
+            title = _clean_html(match.group("title"))
+            if not title:
+                continue
+            lowered = title.lower()
+            if "monetary policy meeting" not in lowered and "press conference" not in lowered:
+                continue
+            scheduled_at = _parse_day_month_year(_clean_html(match.group("date")))
+            if scheduled_at is None:
+                continue
+            rows.append(
+                MacroEventRecord(
+                    event_id=f"ecb:{_slugify(title)}:{scheduled_at.date().isoformat()}",
+                    title=title,
+                    category="policy",
+                    region="EU",
+                    scheduled_at=scheduled_at,
+                    relative_label=None,
+                    importance="high",
+                    source_provider="ecb",
+                    retrieved_at=retrieved_at,
+                    origin="macro.events.ecb_calendar",
                 )
             )
         return rows
@@ -420,6 +507,58 @@ def _parse_bls_release_datetime(date_value: str, time_value: str) -> datetime | 
         except ValueError:
             continue
     return release_date
+
+
+def _parse_schedule_month_day(
+    value: str,
+    *,
+    retrieved_at: datetime,
+    title_hint: str | None = None,
+    time_text: str | None = None,
+) -> datetime | None:
+    cleaned = _clean_html(value).replace(".", "").strip()
+    title_year_match = re.search(r"\b(20\d{2})\b", title_hint or "")
+    candidate_year = int(title_year_match.group(1)) if title_year_match else retrieved_at.year
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            parsed_date = datetime.strptime(f"{cleaned} {candidate_year}", fmt)
+            if time_text:
+                parsed_with_time = _parse_bls_release_datetime(parsed_date.strftime("%B %d, %Y"), time_text)
+                if parsed_with_time is not None:
+                    return parsed_with_time
+            return parsed_date
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_day_month_year(value: str) -> datetime | None:
+    cleaned = _clean_html(value).replace(".", "").strip()
+    for fmt in ("%d %B %Y", "%d %b %Y"):
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _categorize_bea_title(title: str) -> str:
+    lowered = title.lower()
+    if any(keyword in lowered for keyword in ("price index", "prices", "personal income and outlays", "pce")):
+        return "inflation"
+    return "growth"
+
+
+def _bea_importance(title: str) -> str:
+    lowered = title.lower()
+    if any(keyword in lowered for keyword in ("gross domestic product", "gdp", "personal income and outlays", "employment")):
+        return "high"
+    return "medium"
+
+
+def _slugify(value: str) -> str:
+    text = re.sub(r"[^a-z0-9]+", "-", _clean_html(value).lower()).strip("-")
+    return text or "event"
 
 
 def _as_utc_naive(value: datetime) -> datetime:

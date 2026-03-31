@@ -54,6 +54,60 @@ describe("MacroView", () => {
     expect(body).toContain('option value="usdjpy"');
   });
 
+  it("renders snapshot focus items and why-now drilldowns", () => {
+    const { body } = render(MacroView, {
+      props: {
+        snapshot: makeSnapshot({
+          focus_items: [
+            {
+              focus_id: "top-divergence",
+              title: "Biggest disagreement",
+              summary: "Breakevens and the dollar are still disagreeing on the inflation read.",
+              why_now: "Gamma's lead-lag heuristic shows breakevens moved first and the dollar still has not cleanly confirmed.",
+              mode_target: "cross_asset",
+              target_theme: "inflation",
+              signal_label: "coherent",
+              source_provider: "fred",
+              retrieved_at: "2026-03-20T11:00:00Z",
+              origin: "macro_service.snapshot_focus",
+              transformation_note: "Snapshot focus."
+            }
+          ],
+          snapshot_cards: [
+            {
+              card_id: "inflation",
+              title: "Inflation Context",
+              subtitle: null,
+              summary: "Inflation context compares CPI with breakevens.",
+              why_now: "Recent catalyst: CPI Release. Breakevens moved first while the dollar lagged.",
+              mode_target: "cross_asset",
+              target_theme: "inflation",
+              signal_label: "coherent",
+              drilldown_label: "Open Cross-Asset (inflation)",
+              metrics: [],
+              linked_markets: [],
+              source_provider: "fred",
+              retrieved_at: "2026-03-20T11:00:00Z",
+              origin: "macro_service.snapshot_cards",
+              transformation_note: "Snapshot cards summarize macro conditions."
+            }
+          ]
+        }),
+        divergences: null,
+        events: makeEvents(),
+        histories: {},
+        loading: false,
+        onLoadWorkspace: vi.fn(),
+        onLoadSeries: vi.fn()
+      }
+    });
+
+    expect(body).toContain("What Matters Now");
+    expect(body).toContain("Gamma's lead-lag heuristic shows breakevens moved first");
+    expect(body).toContain("coherent");
+    expect(body).toContain("Open Cross-Asset (inflation)");
+  });
+
   it("renders linked prediction-market context inside macro cards", () => {
     const { body } = render(MacroView, {
       props: {
@@ -155,6 +209,58 @@ describe("MacroView", () => {
                 origin: "macro_service.divergence_signal",
                 transformation_note: "Signal annotation."
               },
+              coherence: {
+                theme: "inflation",
+                direction_label: "firming inflation",
+                coherence_label: "coherent",
+                supporting_signals: 3,
+                opposing_signals: 1,
+                neutral_signals: 0,
+                lead_signal: {
+                  label: "US 5Y Breakeven Inflation",
+                  series_id: "us-5y-breakeven",
+                  role: "leader",
+                  tone: "reinforcing",
+                  signal_score: 1.8,
+                  signal_score_display: "+1.80",
+                  move_value: 0.22,
+                  move_display: "+0.22 pp",
+                  observed_at: "2026-03-04T00:00:00Z",
+                  observed_label: "2026-03-04",
+                  lag_days: 0,
+                  lag_label: "at window start",
+                  source_provider: "fred",
+                  retrieved_at: "2026-03-20T11:00:00Z",
+                  origin: "macro_service.lead_lag",
+                  transformation_note: "Lead-lag heuristic."
+                },
+                lag_signal: {
+                  label: "Broad Dollar Index",
+                  series_id: "us-dollar-broad",
+                  role: "laggard",
+                  tone: "opposing",
+                  signal_score: -0.9,
+                  signal_score_display: "-0.90",
+                  move_value: -1.2,
+                  move_display: "-1.20",
+                  observed_at: "2026-03-18T00:00:00Z",
+                  observed_label: "2026-03-18",
+                  lag_days: 14,
+                  lag_label: "14d from window start",
+                  source_provider: "fred",
+                  retrieved_at: "2026-03-20T11:00:00Z",
+                  origin: "macro_service.lead_lag",
+                  transformation_note: "Lead-lag heuristic."
+                },
+                lag_span_days: 14,
+                lag_span_display: "14d",
+                summary: "US 5Y Breakeven Inflation moved first on the current firming inflation read; Broad Dollar Index only aligned roughly 14d later.",
+                methodology: "Lead-lag is a first-pass heuristic.",
+                source_provider: "fred",
+                retrieved_at: "2026-03-20T11:00:00Z",
+                origin: "macro_service.coherence",
+                transformation_note: "Lead-lag heuristic."
+              },
               divergence_score: 2.7,
               research_focus: "Test whether breakevens or the dollar is more likely to reset first.",
               source_provider: "fred",
@@ -177,6 +283,8 @@ describe("MacroView", () => {
 
     expect(body).toContain("Lead driver");
     expect(body).toContain("Counter-signal");
+    expect(body).toContain("US 5Y Breakeven Inflation moved first");
+    expect(body).toContain("Leader");
     expect(body).toContain("Test whether breakevens or the dollar is more likely to reset first.");
   });
 
@@ -199,7 +307,28 @@ describe("MacroView", () => {
             curve_nodes: [],
             real_yield_metrics: [],
             events: [],
-            linked_markets: [],
+            linked_markets: [
+              {
+                market_id: "kalshi:fed-cut",
+                venue: "kalshi",
+                title: "Will the Fed cut by September?",
+                status: "open",
+                category: "Economy",
+                end_time: "2026-09-18T00:00:00Z",
+                current_probability: 0.58,
+                probability_label: "58%",
+                recent_price_change: 0.03,
+                change_display: "+3.0 pts",
+                research_score: 76.2,
+                macro_stance: "policy-easier",
+                macro_alignment: "mixed",
+                macro_alignment_summary: "Contracts lean easier than the hold proxy but the overall linked set is mixed.",
+                source_provider: "kalshi",
+                retrieved_at: "2026-03-20T11:00:00Z",
+                origin: "macro_service.linked_prediction_markets",
+                transformation_note: "Linked prediction context."
+              }
+            ],
             path_headline: "2Y Treasury is within 15 bps of Fed Funds; hold remains the cleanest path proxy.",
             path_summary: "This is a front-end path proxy rather than a full meeting curve: compare the 2Y, Fed Funds, and the active curve slope to judge whether easing or tightening is actually being priced.",
             path_metrics: [
@@ -230,6 +359,19 @@ describe("MacroView", () => {
               }
             ],
             path_research_focus: "Watch whether 2Y Treasury breaks away from Fed Funds before the next policy event.",
+            expectation_metrics: [
+              {
+                ...makeMetric("policy-linked-bias", "Market bias"),
+                value: -1,
+                display_value: "Easier",
+                unit: null,
+                delta_value: null,
+                delta_display: null,
+                series_id: null
+              }
+            ],
+            expectation_summary: "Linked policy contracts skew easier while the front-end path proxy is still close to hold. Use the contract set as a challenge case rather than as an implied curve.",
+            expectation_caveat: "Prediction-market contracts are mapped by text and topic rather than by exact policy-meeting payoff.",
             meeting_path: {
               headline: "Next 3 meetings keep policy near 4.35% if the hold proxy persists.",
               summary: "The ladder spreads the current 2Y Treasury versus Fed Funds gap evenly across the next 3 scheduled policy meetings.",
@@ -301,6 +443,10 @@ describe("MacroView", () => {
     expect(body).toContain("hold remains the cleanest path proxy");
     expect(body).toContain("2Y Treasury minus Fed Funds");
     expect(body).toContain("Linked policy contracts are mixed relative to the rates-path proxy.");
+    expect(body).toContain("Expectation Overlay");
+    expect(body).toContain("Linked policy contracts skew easier");
+    expect(body).toContain("Prediction-market contracts are mapped by text and topic");
+    expect(body).toContain("Easier");
     expect(body).toContain("Meeting Ladder");
     expect(body).toContain("Next 3 policy meetings");
     expect(body).toContain("FOMC Meeting (April 29-30)");
@@ -372,6 +518,10 @@ describe("MacroView", () => {
               headline: "CPI Release: how inflation proxies absorbed the release",
               summary: "After the event, breakevens absorbed the clearest inflation move while the dollar pushed the other way.",
               window_label: "Post-event window",
+              window_start: "2026-03-01T00:00:00Z",
+              window_end: "2026-03-19T00:00:00Z",
+              window_start_label: "2026-03-01",
+              window_end_label: "2026-03-19",
               event: {
                 event_id: "bls:cpi_release:2026-03-12",
                 title: "CPI Release",
@@ -395,6 +545,10 @@ describe("MacroView", () => {
                 move_display: "+0.18 pp",
                 before_display_value: "2.22%",
                 after_display_value: "2.40%",
+                observed_at: "2026-03-12T00:00:00Z",
+                observed_label: "2026-03-12",
+                lag_days: 0,
+                lag_label: "same-day follow-through",
                 interpretation: "After CPI Release, US 5Y Breakeven Inflation moved +0.18 pp and points to firmer inflation pressure.",
                 metric: makeMetric("us-5y-breakeven", "US 5Y Breakeven Inflation"),
                 source_provider: "fred",
@@ -411,12 +565,68 @@ describe("MacroView", () => {
                 move_display: "-1.4",
                 before_display_value: "121.5",
                 after_display_value: "120.1",
+                observed_at: "2026-03-14T00:00:00Z",
+                observed_label: "2026-03-14",
+                lag_days: 2,
+                lag_label: "2d after event",
                 interpretation: "After CPI Release, Broad Dollar Index moved -1.4 and points to cooling inflation pressure.",
                 metric: makeMetric("us-dollar-broad", "Broad Dollar Index"),
                 source_provider: "fred",
                 retrieved_at: "2026-03-20T11:00:00Z",
                 origin: "macro_service.event_reaction_signal",
                 transformation_note: "Event reaction."
+              },
+              coherence: {
+                theme: "inflation",
+                direction_label: "firming inflation",
+                coherence_label: "narrow",
+                supporting_signals: 2,
+                opposing_signals: 1,
+                neutral_signals: 0,
+                lead_signal: {
+                  label: "US 5Y Breakeven Inflation",
+                  series_id: "us-5y-breakeven",
+                  role: "leader",
+                  tone: "reinforcing",
+                  signal_score: 1.2,
+                  signal_score_display: "+1.20",
+                  move_value: 0.18,
+                  move_display: "+0.18 pp",
+                  observed_at: "2026-03-12T00:00:00Z",
+                  observed_label: "2026-03-12",
+                  lag_days: 0,
+                  lag_label: "same-day follow-through",
+                  source_provider: "fred",
+                  retrieved_at: "2026-03-20T11:00:00Z",
+                  origin: "macro_service.lead_lag",
+                  transformation_note: "Lead-lag heuristic."
+                },
+                lag_signal: {
+                  label: "Broad Dollar Index",
+                  series_id: "us-dollar-broad",
+                  role: "laggard",
+                  tone: "opposing",
+                  signal_score: -0.7,
+                  signal_score_display: "-0.70",
+                  move_value: -1.4,
+                  move_display: "-1.4",
+                  observed_at: "2026-03-14T00:00:00Z",
+                  observed_label: "2026-03-14",
+                  lag_days: 2,
+                  lag_label: "2d after event",
+                  source_provider: "fred",
+                  retrieved_at: "2026-03-20T11:00:00Z",
+                  origin: "macro_service.lead_lag",
+                  transformation_note: "Lead-lag heuristic."
+                },
+                lag_span_days: 2,
+                lag_span_display: "2d",
+                summary: "US 5Y Breakeven Inflation reacted first after CPI Release; Broad Dollar Index only confirmed roughly 2d later.",
+                methodology: "Event lead-lag is a first-pass heuristic.",
+                source_provider: "bls",
+                retrieved_at: "2026-03-20T11:00:00Z",
+                origin: "macro_service.event_coherence",
+                transformation_note: "Lead-lag heuristic."
               },
               linked_markets: [],
               research_focus: "Test whether the post-event move broadens into the rest of the inflation complex.",
@@ -457,6 +667,9 @@ describe("MacroView", () => {
     expect(body).toContain("Post-event absorption");
     expect(body).toContain("CPI Release");
     expect(body).toContain("Lead reaction");
+    expect(body).toContain("2026-03-01 to 2026-03-19");
+    expect(body).toContain("same-day follow-through");
+    expect(body).toContain("reacted first after CPI Release");
     expect(body).toContain("Scheduled catalysts");
   });
 });

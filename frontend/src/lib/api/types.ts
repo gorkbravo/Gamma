@@ -552,6 +552,7 @@ export interface MacroLinkedPredictionMarket {
   recent_price_change: number | null;
   change_display: string | null;
   research_score: number | null;
+  macro_stance?: string | null;
   macro_alignment: string;
   macro_alignment_summary: string | null;
   source_provider: string;
@@ -569,6 +570,10 @@ export interface MacroEventReactionSignal {
   move_display: string | null;
   before_display_value: string | null;
   after_display_value: string | null;
+  observed_at?: string | null;
+  observed_label?: string | null;
+  lag_days?: number | null;
+  lag_label?: string | null;
   interpretation: string;
   metric: MacroMetric;
   source_provider: string;
@@ -597,8 +602,11 @@ export interface MacroSnapshotCard {
   title: string;
   subtitle: string | null;
   summary: string;
+  why_now?: string | null;
   mode_target: string;
   target_theme: string | null;
+  signal_label?: string | null;
+  drilldown_label?: string | null;
   metrics: MacroMetric[];
   linked_markets: MacroLinkedPredictionMarket[];
   source_provider: string;
@@ -620,6 +628,44 @@ export interface MacroDivergenceSignal {
   transformation_note: string | null;
 }
 
+export interface MacroLeadLagSignal {
+  label: string;
+  series_id?: string | null;
+  role: string;
+  tone: string;
+  signal_score: number;
+  signal_score_display?: string | null;
+  move_value?: number | null;
+  move_display?: string | null;
+  observed_at?: string | null;
+  observed_label?: string | null;
+  lag_days?: number | null;
+  lag_label?: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroCoherenceProfile {
+  theme: string;
+  direction_label: string;
+  coherence_label: string;
+  supporting_signals: number;
+  opposing_signals: number;
+  neutral_signals: number;
+  lead_signal?: MacroLeadLagSignal | null;
+  lag_signal?: MacroLeadLagSignal | null;
+  lag_span_days?: number | null;
+  lag_span_display?: string | null;
+  summary: string;
+  methodology?: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface MacroDivergence {
   divergence_id: string;
   theme: string;
@@ -632,6 +678,7 @@ export interface MacroDivergence {
   series_ids: string[];
   primary_driver: MacroDivergenceSignal | null;
   counter_signal: MacroDivergenceSignal | null;
+  coherence?: MacroCoherenceProfile | null;
   research_focus: string | null;
   source_provider: string;
   retrieved_at: string | null;
@@ -652,6 +699,7 @@ export interface MacroThemeComparison {
   linked_markets: MacroLinkedPredictionMarket[];
   primary_driver: MacroDivergenceSignal | null;
   counter_signal: MacroDivergenceSignal | null;
+  coherence?: MacroCoherenceProfile | null;
   divergence_score: number | null;
   research_focus: string | null;
   source_provider: string;
@@ -704,6 +752,9 @@ export interface MacroRatesPolicySummary {
   path_summary: string | null;
   path_metrics: MacroMetric[];
   path_research_focus: string | null;
+  expectation_metrics?: MacroMetric[];
+  expectation_summary?: string | null;
+  expectation_caveat?: string | null;
   meeting_path: MacroPolicyMeetingPathSummary | null;
   market_alignment_label: string | null;
   market_alignment_summary: string | null;
@@ -722,12 +773,31 @@ export interface MacroEventStudy {
   headline: string;
   summary: string;
   window_label: string;
+  window_start?: string | null;
+  window_end?: string | null;
+  window_start_label?: string | null;
+  window_end_label?: string | null;
   event: MacroEvent;
   reactions: MacroEventReactionSignal[];
   primary_reaction: MacroEventReactionSignal | null;
   counter_reaction: MacroEventReactionSignal | null;
+  coherence?: MacroCoherenceProfile | null;
   linked_markets: MacroLinkedPredictionMarket[];
   research_focus: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroSnapshotFocusItem {
+  focus_id: string;
+  title: string;
+  summary: string;
+  why_now: string;
+  mode_target: string;
+  target_theme?: string | null;
+  signal_label?: string | null;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
@@ -742,6 +812,7 @@ export interface MacroSnapshot {
   available_regions: string[];
   available_timeframes: string[];
   available_themes: string[];
+  focus_items?: MacroSnapshotFocusItem[];
   snapshot_cards: MacroSnapshotCard[];
   rates_policy: MacroRatesPolicySummary | null;
   cross_asset: MacroThemeComparison[];

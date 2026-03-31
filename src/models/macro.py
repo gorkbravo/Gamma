@@ -74,6 +74,9 @@ class MacroSnapshotCard:
     summary: str
     mode_target: str
     target_theme: str | None
+    why_now: str | None = None
+    signal_label: str | None = None
+    drilldown_label: str | None = None
     metrics: list[MacroMetricRecord] = field(default_factory=list)
     linked_markets: list["MacroLinkedPredictionMarket"] = field(default_factory=list)
     source_provider: str = ""
@@ -109,6 +112,10 @@ class MacroEventReactionSignal:
     after_display_value: str | None
     interpretation: str
     metric: MacroMetricRecord
+    observed_at: datetime | None = None
+    observed_label: str | None = None
+    lag_days: float | None = None
+    lag_label: str | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
@@ -124,9 +131,14 @@ class MacroEventStudy:
     summary: str
     window_label: str
     event: MacroEventRecord
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    window_start_label: str | None = None
+    window_end_label: str | None = None
     reactions: list[MacroEventReactionSignal] = field(default_factory=list)
     primary_reaction: MacroEventReactionSignal | None = None
     counter_reaction: MacroEventReactionSignal | None = None
+    coherence: "MacroCoherenceProfile" | None = None
     linked_markets: list["MacroLinkedPredictionMarket"] = field(default_factory=list)
     research_focus: str | None = None
     source_provider: str = ""
@@ -148,6 +160,7 @@ class MacroDivergenceRecord:
     series_ids: list[str] = field(default_factory=list)
     primary_driver: "MacroDivergenceSignal" | None = None
     counter_signal: "MacroDivergenceSignal" | None = None
+    coherence: "MacroCoherenceProfile" | None = None
     research_focus: str | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None
@@ -172,6 +185,7 @@ class MacroLinkedPredictionMarket:
     recent_price_change: float | None = None
     change_display: str | None = None
     research_score: float | None = None
+    macro_stance: str | None = None
     macro_alignment: str = "mixed"
     macro_alignment_summary: str | None = None
     source_provider: str = ""
@@ -195,6 +209,46 @@ class MacroDivergenceSignal:
 
 
 @dataclass(frozen=True)
+class MacroLeadLagSignal:
+    label: str
+    series_id: str | None = None
+    role: str = ""
+    tone: str = "mixed"
+    signal_score: float = 0.0
+    signal_score_display: str | None = None
+    move_value: float | None = None
+    move_display: str | None = None
+    observed_at: datetime | None = None
+    observed_label: str | None = None
+    lag_days: float | None = None
+    lag_label: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroCoherenceProfile:
+    theme: str
+    direction_label: str
+    coherence_label: str
+    supporting_signals: int
+    opposing_signals: int
+    neutral_signals: int
+    lead_signal: MacroLeadLagSignal | None = None
+    lag_signal: MacroLeadLagSignal | None = None
+    lag_span_days: float | None = None
+    lag_span_display: str | None = None
+    summary: str = ""
+    methodology: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class MacroThemeComparison:
     theme: str
     headline: str
@@ -204,6 +258,7 @@ class MacroThemeComparison:
     linked_markets: list[MacroLinkedPredictionMarket] = field(default_factory=list)
     primary_driver: MacroDivergenceSignal | None = None
     counter_signal: MacroDivergenceSignal | None = None
+    coherence: MacroCoherenceProfile | None = None
     divergence_score: float | None = None
     research_focus: str | None = None
     source_provider: str = ""
@@ -259,6 +314,9 @@ class MacroRatesPolicySummary:
     path_summary: str | None = None
     path_metrics: list[MacroMetricRecord] = field(default_factory=list)
     path_research_focus: str | None = None
+    expectation_metrics: list[MacroMetricRecord] = field(default_factory=list)
+    expectation_summary: str | None = None
+    expectation_caveat: str | None = None
     meeting_path: MacroPolicyMeetingPathSummary | None = None
     market_alignment_label: str | None = None
     market_alignment_summary: str | None = None
@@ -279,6 +337,7 @@ class MacroSnapshotPayload:
     available_regions: list[str] = field(default_factory=list)
     available_timeframes: list[str] = field(default_factory=list)
     available_themes: list[str] = field(default_factory=list)
+    focus_items: list["MacroSnapshotFocusItem"] = field(default_factory=list)
     snapshot_cards: list[MacroSnapshotCard] = field(default_factory=list)
     rates_policy: MacroRatesPolicySummary | None = None
     cross_asset: list[MacroThemeComparison] = field(default_factory=list)
@@ -286,6 +345,21 @@ class MacroSnapshotPayload:
     event_studies: list[MacroEventStudy] = field(default_factory=list)
     upcoming_events: list[MacroEventRecord] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroSnapshotFocusItem:
+    focus_id: str
+    title: str
+    summary: str
+    why_now: str
+    mode_target: str
+    target_theme: str | None = None
+    signal_label: str | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""
