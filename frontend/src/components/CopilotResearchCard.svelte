@@ -29,17 +29,6 @@
     }
   }
 
-  function compactArgumentList(args: Record<string, unknown>) {
-    const entries = Object.entries(args);
-    if (!entries.length) {
-      return "No arguments";
-    }
-    return entries
-      .slice(0, 4)
-      .map(([key, value]) => `${key}: ${String(value)}`)
-      .join(" | ");
-  }
-
   $: providerLabel = result?.model ? `${result.provider} | ${result.model}` : result?.provider ?? null;
 </script>
 
@@ -50,13 +39,11 @@
 <div class="drawer" class:open aria-hidden={!open} aria-label="Gamma Copilot" aria-modal="true" role="dialog">
   <header class="drawer-header">
     <div class="header-copy">
-      <p class="eyebrow">Read-Only Research Assistant</p>
       <div class="title-row">
         <h2>Copilot</h2>
         <span class="context-pill" class:active={available}>{domainLabel}</span>
       </div>
       <p class="context-summary">{contextLabel}</p>
-      <small>{guidance}</small>
     </div>
 
     <button class="close-btn" type="button" on:click={onClose} aria-label="Close Copilot">
@@ -68,15 +55,9 @@
 
   <div class="drawer-body">
     <div class="thread">
-      <section class="note-card">
-        <span>Operating Mode</span>
-        <p>Gamma Copilot is grounded in the current app state, uses read-only tools, and should expose provenance instead of hiding it.</p>
-      </section>
-
       {#if !available}
         <section class="message-card neutral">
-          <span>Availability</span>
-          <p>Open Macro or Prediction Markets to generate a context-aware research card.</p>
+          <p>Open Macro or Prediction Markets to get started.</p>
         </section>
       {:else}
         {#if result?.message}
@@ -175,21 +156,7 @@
           </article>
         {:else if !result?.message}
           <section class="message-card neutral">
-            <span>Start Here</span>
-            <p>Ask Copilot to frame a structured research card from the current Gamma context.</p>
-          </section>
-        {/if}
-
-        {#if result?.tool_traces?.length}
-          <section class="meta-block">
-            <span>Tool Trace</span>
-            {#each result.tool_traces as trace}
-              <div class="meta-row">
-                <strong>{trace.tool_name}</strong>
-                <small>{trace.summary}</small>
-                <small>{compactArgumentList(trace.arguments)}</small>
-              </div>
-            {/each}
+            <p>Generate a research card from the current context, or add an angle below.</p>
           </section>
         {/if}
 
@@ -220,21 +187,18 @@
   </div>
 
   <footer class="composer">
-    <label class="composer-label">
-      <span>Prompt</span>
-      <textarea
-        bind:value={promptText}
-        rows={4}
-        placeholder={available ? placeholder : "Open Macro or Prediction Markets to use Copilot."}
-        disabled={!available || loading}
-        on:keydown={handleComposerKeydown}
-      ></textarea>
-    </label>
+    <textarea
+      bind:value={promptText}
+      rows={2}
+      placeholder={available ? placeholder : "Open Macro or Prediction Markets to use Copilot."}
+      disabled={!available || loading}
+      on:keydown={handleComposerKeydown}
+    ></textarea>
 
     <div class="composer-footer">
-      <small>{available ? "Grounded in the current view only. Press Ctrl+Enter to generate." : "Macro and Prediction Markets are the current rollout scope."}</small>
-      <button type="button" disabled={!available || loading} on:click={handleGenerate}>
-        {loading ? "Generating..." : "Generate research card"}
+      <small>{available ? "Ctrl+Enter to generate" : ""}</small>
+      <button class="generate-btn" type="button" disabled={!available || loading} on:click={handleGenerate}>
+        {loading ? "Generating..." : "Generate"}
       </button>
     </div>
   </footer>
@@ -245,8 +209,7 @@
   .summary-grid,
   .list-grid,
   .claims-grid,
-  .meta-block,
-  .composer-label {
+  .meta-block {
     display: grid;
     gap: 0.85rem;
   }
@@ -300,6 +263,8 @@
 
   .composer {
     border-top: 1px solid rgba(46, 60, 74, 0.52);
+    display: grid;
+    gap: 0.5rem;
   }
 
   .header-copy {
@@ -323,15 +288,12 @@
     padding: 1rem;
   }
 
-  .eyebrow,
   .section-label,
-  .note-card span,
   .message-card span,
   .section-block span,
   .list-block span,
   .claim-block span,
-  .meta-block > span,
-  .composer-label > span {
+  .meta-block > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
@@ -446,8 +408,9 @@
 
   textarea {
     resize: vertical;
-    min-height: 8rem;
-    padding: 0.8rem 0.85rem;
+    min-height: 3.2rem;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.82rem;
   }
 
   button {
@@ -470,10 +433,24 @@
     border-color: rgba(122, 166, 200, 0.32);
   }
 
-  .composer-footer button {
-    min-width: 12rem;
-    min-height: 3rem;
-    padding: 0.75rem 1rem;
+  .generate-btn {
+    padding: 0.38rem 0.9rem;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-color: rgba(122, 166, 200, 0.28);
+    background: rgba(122, 166, 200, 0.08);
+    color: var(--accent);
+  }
+
+  .generate-btn:hover:not(:disabled) {
+    background: rgba(122, 166, 200, 0.14);
+    border-color: rgba(122, 166, 200, 0.42);
+  }
+
+  .generate-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .claim-row,
@@ -493,7 +470,7 @@
   }
 
   .composer-footer {
-    align-items: flex-end;
+    align-items: center;
   }
 
   .composer-footer small,
@@ -515,15 +492,10 @@
       grid-template-columns: 1fr;
     }
 
-    .composer-footer,
     .title-row,
     .assistant-header {
       align-items: flex-start;
       flex-direction: column;
-    }
-
-    .composer-footer button {
-      width: 100%;
     }
   }
 </style>

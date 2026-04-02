@@ -375,8 +375,8 @@
     font-weight: 500;
   }
 
-  .snapshot-table .col-theme { width: 24%; }
-  .snapshot-table .col-drill { width: 7%; }
+  .snapshot-table .col-theme { width: 21%; }
+  .snapshot-table .col-drill { width: 17%; }
   .snapshot-table .col-metric { width: auto; }
 
   .snapshot-row {
