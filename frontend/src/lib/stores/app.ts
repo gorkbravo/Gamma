@@ -124,8 +124,12 @@ export const predictionMarketWallet = writable<PredictionWalletSummary | null>(n
 export const predictionMarketRelated = writable<RelatedPredictionMarketListResponse | null>(null);
 export const predictionMarketCalibration = writable<PredictionCalibrationSummary | null>(null);
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
+  portfolio: null,
+  research: null,
   macro: null,
-  prediction_markets: null
+  prediction_markets: null,
+  risk: null,
+  iv: null
 });
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
@@ -136,6 +140,8 @@ export const researchDraft = writable<ResearchDraftState>({
   selectedPreset: "index-core"
 });
 export const riskResult = writable<RiskResult | null>(null);
+export const riskSnapshotBasis = writable<PortfolioSnapshot | null>(null);
+export const riskWorkspaceBasis = writable<WorkspaceMode | null>(null);
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
 export const lastError = writable<string>("");
@@ -198,13 +204,17 @@ function setLoading(key: string, value: boolean) {
   loading.update((current) => ({ ...current, [key]: value }));
 }
 
+function resetCopilotCard(domain: CopilotDomain) {
+  copilotCards.update((current) => ({ ...current, [domain]: null }));
+}
+
 export function setResearchDraft(nextDraft: ResearchDraftState) {
   researchDraft.set(nextDraft);
 }
 
 export function setMacroContext(nextContext: Partial<MacroContextState>) {
   macroContext.update((current) => normalizeMacroContextState({ ...current, ...nextContext }));
-  copilotCards.update((current) => ({ ...current, macro: null }));
+  resetCopilotCard("macro");
 }
 
 function setError(error: unknown) {
@@ -216,6 +226,15 @@ function hasRenderableIvSurface(surface: IvSurface | null | undefined) {
     return false;
   }
   return Boolean(surface.snapshot_available || surface.points > 0 || surface.expiries.length > 0 || surface.strikes.length > 0);
+}
+
+function resolvedIvSurface() {
+  const directSurface = get(ivSurface);
+  if (hasRenderableIvSurface(directSurface)) {
+    return directSurface;
+  }
+  const sessionSurface = get(ivSession)?.surface ?? null;
+  return hasRenderableIvSurface(sessionSurface) ? sessionSurface : directSurface ?? sessionSurface;
 }
 
 function appendDiagnosticsLog(lines: string[], heading?: string) {
@@ -332,6 +351,11 @@ export async function setBaseCurrency(currency: string) {
       portfolioPerformance.set(null);
       researchResult.set(null);
       riskResult.set(null);
+      riskSnapshotBasis.set(null);
+      riskWorkspaceBasis.set(null);
+      resetCopilotCard("portfolio");
+      resetCopilotCard("research");
+      resetCopilotCard("risk");
     }
     appendDiagnosticsLog(response.lines, "[Settings]");
     lastError.set("");
@@ -380,6 +404,7 @@ export async function loadPortfolioSnapshot() {
     }
 
     if (errors.length === 0) {
+      resetCopilotCard("portfolio");
       lastError.set("");
     } else {
       setError(errors[0]);
@@ -410,6 +435,7 @@ export async function loadPortfolioPerformance(options?: {
         lookback_days: options?.lookbackDays ?? 252
       })
     );
+    resetCopilotCard("portfolio");
     lastError.set("");
   } catch (error) {
     setError(error);
@@ -432,6 +458,10 @@ export async function runResearch(options: ResearchRunOptions) {
     researchResult.set(nextResearchResult);
     // Downstream analysis must be recomputed from the latest executed research scope.
     riskResult.set(null);
+    riskSnapshotBasis.set(null);
+    riskWorkspaceBasis.set(null);
+    resetCopilotCard("research");
+    resetCopilotCard("risk");
     lastError.set("");
   } catch (error) {
     setError(error);
@@ -505,6 +535,7 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
     ...(options.comparisonRegion !== undefined ? { comparisonRegion: options.comparisonRegion } : {})
   });
   macroContext.set(nextContext);
+  resetCopilotCard("macro");
   const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
   const requestKey = JSON.stringify(payload);
   const existingRequest = macroWorkspaceInflight.get(requestKey);
@@ -626,7 +657,7 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
       predictionMarketWallet.set(null);
       predictionMarketRelated.set(null);
       predictionMarketCalibration.set(null);
-      copilotCards.update((current) => ({ ...current, prediction_markets: null }));
+      resetCopilotCard("prediction_markets");
     }
     lastError.set("");
     return response;
@@ -640,7 +671,7 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
 
 export async function selectPredictionMarket(marketId: string) {
   selectedPredictionMarketId.set(marketId);
-  copilotCards.update((current) => ({ ...current, prediction_markets: null }));
+  resetCopilotCard("prediction_markets");
   setLoading("predictionDetail", true);
   try {
     const [detailResult, historyResult, walletResult, relatedResult, calibrationResult] = await Promise.allSettled([
@@ -697,6 +728,10 @@ export async function computeRisk(options: RiskComputeOptions) {
     lastError.set("Load or build a snapshot before computing risk.");
     return;
   }
+  const snapshotWorkspace: WorkspaceMode =
+    snapshot === get(researchResult)?.snapshot
+      ? "research"
+      : "portfolio";
   setLoading("risk", true);
   try {
     riskResult.set(
@@ -713,6 +748,9 @@ export async function computeRisk(options: RiskComputeOptions) {
         include_monte_carlo: options.includeMonteCarlo ?? true
       })
     );
+    riskSnapshotBasis.set(snapshot);
+    riskWorkspaceBasis.set(snapshotWorkspace);
+    resetCopilotCard("risk");
     lastError.set("");
   } catch (error) {
     setError(error);
@@ -737,40 +775,112 @@ function getCopilotSessionId() {
   return nextId;
 }
 
-export async function loadCopilotResearchCard(domain: CopilotDomain, prompt = "") {
+function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode | null | undefined) {
+  switch (domain) {
+    case "portfolio":
+      return {
+        current_tab: "portfolio",
+        workspace_mode: workspaceMode,
+        portfolio_state: {
+          snapshot: get(portfolioSnapshot),
+          history: get(portfolioHistory),
+          performance: get(portfolioPerformance)
+        }
+      };
+    case "research":
+      return {
+        current_tab: "research",
+        workspace_mode: workspaceMode,
+        research_state: {
+          result: get(researchResult)
+        }
+      };
+    case "macro":
+      return {
+        current_tab: "macro",
+        workspace_mode: workspaceMode,
+        macro: {
+          mode: get(macroContext).mode,
+          region: get(macroContext).region,
+          timeframe: get(macroContext).timeframe,
+          theme: get(macroContext).theme,
+          comparison_region: get(macroContext).comparisonRegion
+        }
+      };
+    case "prediction_markets":
+      return {
+        current_tab: "prediction_markets",
+        workspace_mode: workspaceMode,
+        prediction_market_id: get(selectedPredictionMarketId)
+      };
+    case "risk":
+      return {
+        current_tab: "risk",
+        workspace_mode: get(riskWorkspaceBasis) ?? workspaceMode,
+        risk_state: {
+          snapshot: get(riskSnapshotBasis),
+          result: get(riskResult)
+        }
+      };
+    case "iv":
+      return {
+        current_tab: "iv",
+        workspace_mode: workspaceMode,
+        iv_state: {
+          surface: resolvedIvSurface(),
+          session: get(ivSession)
+        }
+      };
+  }
+}
+
+function validateCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode | null | undefined) {
+  if (domain === "portfolio" && !get(portfolioSnapshot)) {
+    return "Load a portfolio snapshot before generating a research card.";
+  }
+  if (domain === "research" && !get(researchResult)) {
+    return "Run a research analysis before generating a research card.";
+  }
+  if (domain === "prediction_markets" && !get(selectedPredictionMarketId)) {
+    return "Select a prediction market before generating a research card.";
+  }
+  if (domain === "risk" && !get(riskResult)) {
+    return "Run a risk computation before generating a research card.";
+  }
+  if (domain === "iv" && !hasRenderableIvSurface(resolvedIvSurface())) {
+    return "Load an IV surface before generating a research card.";
+  }
+  if (domain === "portfolio" || domain === "research" || domain === "risk" || domain === "iv") {
+    const context = buildCopilotContext(domain, workspaceMode);
+    return context ? null : "The active Copilot context is unavailable.";
+  }
+  return null;
+}
+
+export async function loadCopilotResearchCard(
+  domain: CopilotDomain,
+  prompt = "",
+  options: { workspaceMode?: WorkspaceMode | null } = {}
+) {
   setLoading("copilot", true);
   try {
-    if (domain === "prediction_markets" && !get(selectedPredictionMarketId)) {
-      lastError.set("Select a prediction market before generating a research card.");
+    const validationError = validateCopilotContext(domain, options.workspaceMode);
+    if (validationError) {
+      lastError.set(validationError);
+      return null;
+    }
+    const context = buildCopilotContext(domain, options.workspaceMode);
+    if (!context) {
+      lastError.set("The active Copilot context is unavailable.");
       return null;
     }
 
-    const payload =
-      domain === "macro"
-        ? {
-            domain,
-            prompt,
-            user_session_id: getCopilotSessionId(),
-            context: {
-              current_tab: "macro",
-              macro: {
-                mode: get(macroContext).mode,
-                region: get(macroContext).region,
-                timeframe: get(macroContext).timeframe,
-                theme: get(macroContext).theme,
-                comparison_region: get(macroContext).comparisonRegion
-              }
-            }
-          }
-        : {
-            domain,
-            prompt,
-            user_session_id: getCopilotSessionId(),
-            context: {
-              current_tab: "prediction_markets",
-              prediction_market_id: get(selectedPredictionMarketId)
-            }
-          };
+    const payload = {
+      domain,
+      prompt,
+      user_session_id: getCopilotSessionId(),
+      context
+    };
 
     const result = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
     copilotCards.update((current) => ({ ...current, [domain]: result }));
@@ -803,6 +913,7 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
     const surface = await getJson<IvSurface>(`/iv/surface?${params.toString()}`);
     ivSurface.set(surface);
     ivSession.update((current) => (current == null ? current : { ...current, surface }));
+    resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {
     setError(error);
@@ -845,6 +956,7 @@ export async function loadIvSession() {
       }
       return current;
     });
+    resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {
     setError(error);
@@ -862,6 +974,7 @@ export async function startIvSession(options: IvLoadOptions) {
     });
     ivSession.set(session);
     ivSurface.set(session.surface);
+    resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {
     setError(error);
@@ -876,6 +989,7 @@ export async function stopIvSession() {
     const session = await postJson<IvSessionStatus>("/iv/session/stop", {});
     ivSession.set(session);
     ivSurface.set(session.surface);
+    resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {
     setError(error);

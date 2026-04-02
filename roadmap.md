@@ -603,9 +603,18 @@ At the end of Phase 3, Gamma should support full keyboard-driven navigation acro
 
 ## Phase 4 - AI Copilot Layer
 
-_Status: In progress (~32%)_
-_Active focus: harden the first read-only copilot slice around provider boundaries, context assembly, structured research-card generation, provenance, and a shell-level interaction surface before expanding into richer multi-turn behavior._
-_Recent progress: Gamma now has a real Phase 4 foundation: an OpenAI-backed provider/service boundary, modular context assembly for Macro and Prediction Markets, read-only internal copilot tools, structured research-card outputs with provenance/tool traces, and a shell-level Copilot surface that sits above the tab content rather than inside individual views._
+_Status: In progress (~48%)_
+_Active focus: extend the read-only copilot slice across every current shell tab while preserving provider boundaries, modular context assembly, structured research-card generation, provenance, transparency, and the shell-level interaction surface before expanding into richer cross-tab synthesis and multi-turn behavior._
+_Recent progress: Gamma's Phase 4 foundation now spans the full current tab set: the OpenAI-backed provider/service boundary remains intact, the shell-level Copilot drawer is still the primary interaction surface, and modular context builders plus read-only internal tools now ground structured research-card outputs for Portfolio, Research, Macro, Prediction Markets, Risk, and IV with source refs, warnings, and tool traces._
+
+#### Completion snapshot
+- `Provider and model boundary`: ~78% complete. Gamma now has a real OpenAI-backed provider/service split, request/response shaping, and tool-calling integration behind a swappable boundary, but broader provider optionality and richer model-runtime controls are still open.
+- `Shell-level copilot surface`: ~72% complete. The Copilot lives at the shell level rather than inside individual tabs, understands the active tab, adapts drawer labeling and guidance per tab, and only disables generation when grounding context is actually missing, but the interaction model is still essentially single-turn and card-oriented.
+- `Context assembly across current tabs`: ~64% complete. Modular context builders now cover Portfolio, Research, Macro, Prediction Markets, Risk, and IV with tab-specific summaries and shared helpers, but later tabs such as Crypto and Fundamentals are still future work and some thinner tabs still rely on first-pass context slices.
+- `Read-only internal tool layer`: ~58% complete. Gamma now exposes tab-specific read-only helpers for portfolio state, research scope and coverage, macro drilldowns, prediction-market history and flow, risk coverage and contributions, and IV surface/session context, but cross-tab synthesis tools and deeper analytics helpers remain limited.
+- `Structured research-card outputs`: ~74% complete. Structured research cards remain the primary user-facing Copilot output and are now reusable across the full current tab set, but richer output families such as saved memos, comparative briefs, and more explicit reusable schema extensions are still open.
+- `Provenance and transparency`: ~69% complete. The current implementation preserves source refs, warnings, and tool traces and keeps source-backed claims distinct from inferred claims, but provenance depth is still uneven across domains and not every tab yet exposes equally rich source metadata.
+- `Cross-tab synthesis and multi-turn workflows`: ~18% complete. The Copilot now has broad tab coverage, which is the prerequisite for later synthesis, but it still lacks robust cross-tab reasoning flows, streaming, persistent multi-turn sessions, and saved research-workflow handoffs.
 
 ### Why this phase comes here
 
@@ -743,7 +752,7 @@ At the end of Phase 4, Gamma should have an AI-assisted research workflow that c
 
 This phase does not replace the data tabs. It multiplies the value of every other phase.
 
-For roadmap purposes, the current implementation should be treated as a first foundation rather than a completed AI phase: Gamma can already generate context-aware structured research cards for Macro and Prediction Markets, but broader cross-tab synthesis, streaming, persistent multi-turn workflows, and later-domain expansion remain open Phase 4 work.
+For roadmap purposes, the current implementation should still be treated as an intermediate foundation rather than a completed AI phase: Gamma can now generate context-aware structured research cards across every current tab in the shell-level workspace, but broader cross-tab synthesis, streaming, persistent multi-turn workflows, saved memo flows, and later-domain expansion remain open Phase 4 work.
 
 ---
 

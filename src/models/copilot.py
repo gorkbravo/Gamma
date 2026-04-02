@@ -16,9 +16,14 @@ class MacroCopilotContext:
 
 @dataclass(frozen=True)
 class CopilotRequestContext:
-    current_tab: str = "macro"
+    current_tab: str = "portfolio"
+    workspace_mode: str | None = None
     macro: MacroCopilotContext | None = None
     prediction_market_id: str | None = None
+    portfolio_state: dict[str, Any] | None = None
+    research_state: dict[str, Any] | None = None
+    risk_state: dict[str, Any] | None = None
+    iv_state: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,7 @@ class CopilotContextBundle:
     domain: str
     current_tab: str
     summary_data: dict[str, Any]
+    tool_state: dict[str, Any] = field(default_factory=dict)
     sources: list[CopilotSourceRef] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 

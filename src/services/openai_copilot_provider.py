@@ -104,7 +104,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 },
                 "store": self.store_responses,
                 "safety_identifier": self._safety_identifier(request),
-                "prompt_cache_key": f"gamma-copilot:{request.domain}:research-card:v1",
+                "prompt_cache_key": f"gamma-copilot:{request.domain}:research-card:v2",
                 "metadata": {
                     "app": "gamma",
                     "domain": request.domain,
@@ -209,11 +209,14 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         request: CopilotResearchCardRequest,
         context: CopilotContextBundle,
     ) -> dict[str, Any]:
-        default_prompt = (
-            "Generate a concise research card for the current Gamma workspace."
-            if request.domain == "macro"
-            else "Generate a concise research card for the selected Gamma prediction market."
-        )
+        default_prompt = {
+            "portfolio": "Generate a concise research card for the active Gamma portfolio workspace.",
+            "research": "Generate a concise research card for the active Gamma research scope.",
+            "macro": "Generate a concise research card for the current Gamma macro workspace.",
+            "prediction_markets": "Generate a concise research card for the selected Gamma prediction market.",
+            "risk": "Generate a concise research card for the active Gamma risk workspace.",
+            "iv": "Generate a concise research card for the active Gamma IV workspace.",
+        }.get(request.domain, "Generate a concise research card for the current Gamma workspace.")
         requested_prompt = (request.prompt or "").strip() or default_prompt
         body = {
             "task": requested_prompt,

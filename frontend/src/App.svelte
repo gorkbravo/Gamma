@@ -57,6 +57,7 @@
     refreshSystemStatus,
     researchResult,
     riskResult,
+    riskWorkspaceBasis,
     loadPredictionMarketScreener,
     runDiagnosticsAction,
     runResearch,
@@ -77,8 +78,15 @@
   import type {
     CopilotDomain,
     CopilotResearchCardResult,
+    IvSessionStatus,
+    IvSurface,
     MacroContextState,
+    PortfolioPerformanceResponse,
+    PortfolioSnapshot,
     PredictionMarket,
+    ResearchResult,
+    RiskResult,
+    SystemStatus,
     TabId,
     WorkspaceMode
   } from "./lib/api/types";
@@ -112,7 +120,21 @@
     label: tab.label,
     pinned: tab.pinned,
   }));
-  $: copilotSurface = buildCopilotSurface($activeTab, $copilotCards, $macroContext, $predictionMarketDetail);
+  $: copilotSurface = buildCopilotSurface({
+    tab: $activeTab,
+    workspaceMode,
+    cards: $copilotCards,
+    system: $systemStatus,
+    portfolio: $portfolioSnapshot,
+    portfolioPerformance: $portfolioPerformance,
+    research: $researchResult,
+    risk: $riskResult,
+    riskWorkspace: $riskWorkspaceBasis,
+    ivSurface: $ivSurface,
+    ivSession: $ivSession,
+    macro: $macroContext,
+    prediction: $predictionMarketDetail,
+  });
 
   type CopilotSurfaceState = {
     supported: boolean;
@@ -136,6 +158,33 @@
     return `Macro | ${context.region} | ${context.timeframe} | ${macroModeLabels[context.mode]}`;
   }
 
+  function describePortfolioCopilotContext(
+    snapshot: PortfolioSnapshot | null,
+    performance: PortfolioPerformanceResponse | null,
+    system: SystemStatus | null
+  ) {
+    if (!snapshot) {
+      return "Portfolio | Load a portfolio snapshot to ground the Copilot";
+    }
+    const baseCurrency = snapshot.base_currency || system?.base_currency || "Base";
+    const liquidity =
+      snapshot.net_liquidation == null
+        ? "No net liq"
+        : `${snapshot.net_liquidation.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${baseCurrency}`;
+    const benchmark = performance?.benchmark_symbol ? ` | ${performance.benchmark_symbol}` : "";
+    return `Portfolio | ${liquidity}${benchmark}`;
+  }
+
+  function describeResearchCopilotContext(result: ResearchResult | null) {
+    if (!result) {
+      return "Research | Run analysis to ground the Copilot";
+    }
+    if (result.scope_type === "single_ticker") {
+      return `Research | Single Ticker | ${result.primary_symbol ?? "Unknown"}`;
+    }
+    return `Research | Synthetic Portfolio | ${result.weights.length} symbols`;
+  }
+
   function describePredictionCopilotContext(detail: PredictionMarket | null) {
     if (!detail) {
       return "Prediction Markets | Select a contract to ground the Copilot";
@@ -143,12 +192,104 @@
     return `Prediction Markets | ${detail.venue} | ${detail.title}`;
   }
 
-  function buildCopilotSurface(
-    tab: TabId,
-    cards: Record<CopilotDomain, CopilotResearchCardResult | null>,
-    macro: MacroContextState,
-    prediction: PredictionMarket | null
-  ): CopilotSurfaceState {
+  function describeRiskCopilotContext(result: RiskResult | null, mode: WorkspaceMode | null) {
+    if (!result) {
+      return "Risk | Run a risk pass to ground the Copilot";
+    }
+    const coverage = result.metrics.risk_coverage_ratio;
+    const coverageLabel =
+      coverage == null ? "coverage unknown" : `${(coverage * 100).toFixed(1)}% coverage`;
+    return `Risk | ${mode === "research" ? "Research" : "Portfolio"} | ${coverageLabel}`;
+  }
+
+  function resolveIvCopilotSurface(
+    surface: IvSurface | null,
+    session: IvSessionStatus | null
+  ) {
+    if (surface && (surface.snapshot_available || surface.points > 0 || surface.expiries.length > 0)) {
+      return surface;
+    }
+    const sessionSurface = session?.surface ?? null;
+    if (sessionSurface && (sessionSurface.snapshot_available || sessionSurface.points > 0 || sessionSurface.expiries.length > 0)) {
+      return sessionSurface;
+    }
+    return surface ?? sessionSurface;
+  }
+
+  function describeIvCopilotContext(
+    surface: IvSurface | null,
+    session: IvSessionStatus | null
+  ) {
+    const activeSurface = resolveIvCopilotSurface(surface, session);
+    if (!activeSurface || (!activeSurface.snapshot_available && activeSurface.points === 0)) {
+      return "IV | Load a surface snapshot to ground the Copilot";
+    }
+    return `IV | ${activeSurface.symbol} | ${activeSurface.expiries.length} expiries x ${activeSurface.strikes.length} strikes`;
+  }
+
+  function buildCopilotSurface({
+    tab,
+    workspaceMode,
+    cards,
+    system,
+    portfolio,
+    portfolioPerformance,
+    research,
+    risk,
+    riskWorkspace,
+    ivSurface,
+    ivSession,
+    macro,
+    prediction,
+  }: {
+    tab: TabId;
+    workspaceMode: WorkspaceMode | null;
+    cards: Record<CopilotDomain, CopilotResearchCardResult | null>;
+    system: SystemStatus | null;
+    portfolio: PortfolioSnapshot | null;
+    portfolioPerformance: PortfolioPerformanceResponse | null;
+    research: ResearchResult | null;
+    risk: RiskResult | null;
+    riskWorkspace: WorkspaceMode | null;
+    ivSurface: IvSurface | null;
+    ivSession: IvSessionStatus | null;
+    macro: MacroContextState;
+    prediction: PredictionMarket | null;
+  }): CopilotSurfaceState {
+    if (tab === "portfolio") {
+      return {
+        supported: portfolio != null,
+        domain: "portfolio",
+        triggerLabel: portfolio ? "Portfolio context" : "Load portfolio",
+        contextLabel: describePortfolioCopilotContext(portfolio, portfolioPerformance, system),
+        domainLabel: "Portfolio",
+        guidance:
+          portfolio != null
+            ? "Grounded in the active portfolio snapshot, local history, and performance overlay. Gamma stays read-only and the Copilot should stay attached to the live book context."
+            : "Load a portfolio snapshot before generating a research card from the portfolio workspace.",
+        placeholder:
+          "Frame concentration risk, benchmark slippage, capital deployment, or the next diagnostic angle.",
+        result: cards.portfolio,
+      };
+    }
+
+    if (tab === "research") {
+      return {
+        supported: research != null,
+        domain: "research",
+        triggerLabel: research ? "Research scope" : "Run analysis",
+        contextLabel: describeResearchCopilotContext(research),
+        domainLabel: "Research",
+        guidance:
+          research != null
+            ? "Grounded in the active research run, including weights, coverage, benchmark overlap, and forwarded snapshot context."
+            : "Run a research analysis before generating a research card from the research workspace.",
+        placeholder:
+          "Stress-test the active scope, sharpen the hypothesis, or identify the cleanest next comparison.",
+        result: cards.research,
+      };
+    }
+
     if (tab === "macro") {
       return {
         supported: true,
@@ -179,15 +320,52 @@
       };
     }
 
+    if (tab === "risk") {
+      return {
+        supported: risk != null,
+        domain: "risk",
+        triggerLabel: risk ? "Risk context" : "Run risk",
+        contextLabel: describeRiskCopilotContext(risk, riskWorkspace ?? workspaceMode),
+        domainLabel: "Risk",
+        guidance:
+          risk != null
+            ? "Grounded in the active risk result, including coverage, benchmark overlap, contribution-to-risk, exclusions, and Monte Carlo output."
+            : "Run a core or Monte Carlo risk pass before generating a research card from the risk workspace.",
+        placeholder:
+          "Explain the main VaR driver, isolate the cleanest hedge question, or challenge the current coverage assumptions.",
+        result: cards.risk,
+      };
+    }
+
+    if (tab === "iv") {
+      const activeIvSurface = resolveIvCopilotSurface(ivSurface, ivSession);
+      const ivAvailable =
+        activeIvSurface != null &&
+        (activeIvSurface.snapshot_available || activeIvSurface.points > 0 || activeIvSurface.expiries.length > 0);
+      return {
+        supported: ivAvailable,
+        domain: "iv",
+        triggerLabel: ivAvailable ? "IV context" : "Load surface",
+        contextLabel: describeIvCopilotContext(ivSurface, ivSession),
+        domainLabel: "IV",
+        guidance:
+          ivAvailable
+            ? "Grounded in the active IV surface and session state. Gamma remains read-only, so the Copilot should focus on surface interpretation, term structure, and caveats."
+            : "Load an IV surface snapshot before generating a research card from the IV workspace.",
+        placeholder:
+          "Interpret the term structure, flag skew caveats, or frame the cleanest surface-comparison question.",
+        result: cards.iv,
+      };
+    }
+
     return {
       supported: false,
       domain: null,
-      triggerLabel: "Research tabs only",
-      contextLabel: "Copilot generation is currently wired into Macro and Prediction Markets only.",
-      domainLabel: "Limited rollout",
-      guidance:
-        "The Copilot surface lives at the shell level, but context-aware generation is only enabled for Macro and Prediction Markets right now.",
-      placeholder: "Open Macro or Prediction Markets to use Copilot.",
+      triggerLabel: "Unavailable",
+      contextLabel: "Copilot context is unavailable for the active tab.",
+      domainLabel: "Copilot",
+      guidance: "The Copilot needs an active Gamma tab context before it can generate a research card.",
+      placeholder: "Load the required Gamma context to use Copilot.",
       result: null,
     };
   }
@@ -508,7 +686,7 @@
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
-    return loadCopilotResearchCard(copilotSurface.domain, prompt);
+    return loadCopilotResearchCard(copilotSurface.domain, prompt, { workspaceMode });
   }
 
   async function handleOpenKeyBindings() {

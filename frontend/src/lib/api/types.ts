@@ -839,7 +839,7 @@ export interface MacroEventsResponse {
   events: MacroEvent[];
 }
 
-export type CopilotDomain = "macro" | "prediction_markets";
+export type CopilotDomain = TabId;
 
 export interface CopilotSourceRef {
   source_id: string;

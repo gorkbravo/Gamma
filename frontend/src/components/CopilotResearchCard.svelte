@@ -57,7 +57,7 @@
     <div class="thread">
       {#if !available}
         <section class="message-card neutral">
-          <p>Open Macro or Prediction Markets to get started.</p>
+          <p>{guidance}</p>
         </section>
       {:else}
         {#if result?.message}
@@ -172,6 +172,21 @@
           </section>
         {/if}
 
+        {#if result?.tool_traces?.length}
+          <section class="meta-block">
+            <span>Tools Used</span>
+            {#each result.tool_traces as trace}
+              <div class="meta-row">
+                <strong>{trace.tool_name}</strong>
+                <small>{trace.summary}</small>
+                {#if trace.source_ids.length}
+                  <small>{trace.source_ids.join(" | ")}</small>
+                {/if}
+              </div>
+            {/each}
+          </section>
+        {/if}
+
         {#if result?.warnings?.length}
           <section class="meta-block">
             <span>Warnings</span>
@@ -190,7 +205,7 @@
     <textarea
       bind:value={promptText}
       rows={2}
-      placeholder={available ? placeholder : "Open Macro or Prediction Markets to use Copilot."}
+      placeholder={available ? placeholder : guidance}
       disabled={!available || loading}
       on:keydown={handleComposerKeydown}
     ></textarea>
@@ -324,7 +339,6 @@
     overflow-wrap: anywhere;
   }
 
-  .header-copy small,
   .message-card p,
   .note-card p,
   .section-block p,
@@ -475,8 +489,7 @@
 
   .composer-footer small,
   .context-summary,
-  .meta-row small,
-  .header-copy small {
+  .meta-row small {
     overflow-wrap: anywhere;
   }
 
