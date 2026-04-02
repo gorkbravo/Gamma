@@ -603,8 +603,9 @@ At the end of Phase 3, Gamma should support full keyboard-driven navigation acro
 
 ## Phase 4 - AI Copilot Layer
 
-_Status: Not started (0%)_
-_Remaining focus: full phase scope._
+_Status: In progress (~32%)_
+_Active focus: harden the first read-only copilot slice around provider boundaries, context assembly, structured research-card generation, provenance, and a shell-level interaction surface before expanding into richer multi-turn behavior._
+_Recent progress: Gamma now has a real Phase 4 foundation: an OpenAI-backed provider/service boundary, modular context assembly for Macro and Prediction Markets, read-only internal copilot tools, structured research-card outputs with provenance/tool traces, and a shell-level Copilot surface that sits above the tab content rather than inside individual views._
 
 ### Why this phase comes here
 
@@ -711,9 +712,10 @@ It does not need to own a unique market dataset; it needs deep integration with 
 ### APIs / model layer
 
 Potential sources / infrastructure include:
-- **OpenAI API** for the model layer
+- **OpenAI Responses API** for the model / agent loop
 - function/tool calling to access internal Gamma tools
 - structured-output schemas for predictable research responses
+- a provider/service boundary so OpenAI-specific code remains swappable as Gamma expands
 
 Internally, the AI should call functions such as:
 - fetching current context,
@@ -724,9 +726,15 @@ Internally, the AI should call functions such as:
 - retrieving token/company data,
 - triggering internal analytics.
 
+The current implementation path should prefer:
+- read-only internal tools only,
+- app-side context injection from the active Gamma workspace,
+- structured research-card outputs before broader memo-generation polish,
+- clear separation between source-backed claims and inferred claims.
+
 ### Deliverable of the phase
 
-At the end of Phase 3, Gamma should have an AI-assisted research workflow that can:
+At the end of Phase 4, Gamma should have an AI-assisted research workflow that can:
 - understand current context,
 - suggest hypotheses,
 - propose tests,
@@ -734,6 +742,8 @@ At the end of Phase 3, Gamma should have an AI-assisted research workflow that c
 - generate structured research outputs.
 
 This phase does not replace the data tabs. It multiplies the value of every other phase.
+
+For roadmap purposes, the current implementation should be treated as a first foundation rather than a completed AI phase: Gamma can already generate context-aware structured research cards for Macro and Prediction Markets, but broader cross-tab synthesis, streaming, persistent multi-turn workflows, and later-domain expansion remain open Phase 4 work.
 
 ---
 
@@ -1094,14 +1104,14 @@ This becomes increasingly important as fundamentals and AI-assisted outputs are 
 ### Phase 1 - Prediction Markets (`Complete`)
 Build the most differentiated and accessible research tab first.
 
-### Phase 2 - Macro (`In progress ~55%`)
+### Phase 2 - Macro (`In progress ~72%`)
 Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
 
 ### Phase 3 - Keyboard Navigation & Workspace Customization (`Complete`)
 Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
 
-### Phase 4 - AI Copilot (`Not started`)
-Add a context-aware research assistant that sits on top of the data architecture already built.
+### Phase 4 - AI Copilot (`In progress ~32%`)
+Add a context-aware research assistant that sits on top of the data architecture already built, starting with read-only tool-backed research cards and provenance-aware context injection.
 
 ### Phase 5 - Crypto (`Not started`)
 Expand into a broader public-data market research environment with token, wallet, and on-chain analytics.

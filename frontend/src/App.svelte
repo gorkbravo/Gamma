@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import CopilotResearchCard from "./components/CopilotResearchCard.svelte";
   import LandingPage from "./components/LandingPage.svelte";
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
@@ -15,7 +16,6 @@
   import {
     getOrderedWorkspaceTabs,
     getTabByShortcutIndex,
-    getTabLabel,
     getWorkspaceHomeTab,
     isWorkspaceTab,
   } from "./lib/navigation";
@@ -25,6 +25,7 @@
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
+    copilotCards,
     computeRisk,
     forceAccountSubscribe,
     ivSurface,
@@ -33,11 +34,13 @@
     loadDiagnostics,
     loadIvSession,
     loadIvSurface,
+    macroContext,
     loadMacroSeriesHistory,
     loadMacroWorkspace,
     loadPortfolioPerformance,
     loading,
     loadPortfolioSnapshot,
+    loadCopilotResearchCard,
     macroDivergences,
     macroEvents,
     macroSeriesHistories,
@@ -71,7 +74,14 @@
     restoreWorkspaceTabOrders,
     workspaceTabOrders,
   } from "./lib/stores/navigation";
-  import type { TabId, WorkspaceMode } from "./lib/api/types";
+  import type {
+    CopilotDomain,
+    CopilotResearchCardResult,
+    MacroContextState,
+    PredictionMarket,
+    TabId,
+    WorkspaceMode
+  } from "./lib/api/types";
 
   type ConsoleEntry = {
     label: string;
@@ -87,12 +97,12 @@
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
   let sidebarOpen = false;
+  let copilotOpen = false;
   let settingsOpen = false;
-  let activeViewLabel = "";
   let orderedTabs: ReturnType<typeof getOrderedWorkspaceTabs> = [];
   let tabBarTabs: TabBarItem[] = [];
+  let copilotSurface: CopilotSurfaceState;
 
-  $: activeViewLabel = getTabLabel($activeTab);
   $: orderedTabs =
     workspaceMode == null
       ? []
@@ -102,6 +112,85 @@
     label: tab.label,
     pinned: tab.pinned,
   }));
+  $: copilotSurface = buildCopilotSurface($activeTab, $copilotCards, $macroContext, $predictionMarketDetail);
+
+  type CopilotSurfaceState = {
+    supported: boolean;
+    domain: CopilotDomain | null;
+    triggerLabel: string;
+    contextLabel: string;
+    domainLabel: string;
+    guidance: string;
+    placeholder: string;
+    result: CopilotResearchCardResult | null;
+  };
+
+  const macroModeLabels: Record<MacroContextState["mode"], string> = {
+    snapshot: "Snapshot",
+    cross_asset: "Cross-Asset",
+    rates_policy: "Rates & Policy",
+    events_regimes: "Events / Regimes",
+  };
+
+  function describeMacroCopilotContext(context: MacroContextState) {
+    return `Macro | ${context.region} | ${context.timeframe} | ${macroModeLabels[context.mode]}`;
+  }
+
+  function describePredictionCopilotContext(detail: PredictionMarket | null) {
+    if (!detail) {
+      return "Prediction Markets | Select a contract to ground the Copilot";
+    }
+    return `Prediction Markets | ${detail.venue} | ${detail.title}`;
+  }
+
+  function buildCopilotSurface(
+    tab: TabId,
+    cards: Record<CopilotDomain, CopilotResearchCardResult | null>,
+    macro: MacroContextState,
+    prediction: PredictionMarket | null
+  ): CopilotSurfaceState {
+    if (tab === "macro") {
+      return {
+        supported: true,
+        domain: "macro",
+        triggerLabel: "Macro context",
+        contextLabel: describeMacroCopilotContext(macro),
+        domainLabel: "Macro",
+        guidance:
+          "Grounded in the current Macro workspace. Gamma stays read-only and the Copilot should separate evidence-backed claims from inference.",
+        placeholder:
+          "Map the active regime, stress-test the leading divergence, or frame the catalyst path.",
+        result: cards.macro,
+      };
+    }
+
+    if (tab === "prediction_markets") {
+      return {
+        supported: prediction != null,
+        domain: "prediction_markets",
+        triggerLabel: prediction ? "Market context" : "Select a market",
+        contextLabel: describePredictionCopilotContext(prediction),
+        domainLabel: "Prediction Markets",
+        guidance:
+          "Grounded in the selected market, its history, related contracts, flow, and calibration panels. Gamma remains a read-only research environment.",
+        placeholder:
+          "Test the repricing thesis, compare probability against flow, or frame the cleanest consistency check.",
+        result: cards.prediction_markets,
+      };
+    }
+
+    return {
+      supported: false,
+      domain: null,
+      triggerLabel: "Research tabs only",
+      contextLabel: "Copilot generation is currently wired into Macro and Prediction Markets only.",
+      domainLabel: "Limited rollout",
+      guidance:
+        "The Copilot surface lives at the shell level, but context-aware generation is only enabled for Macro and Prediction Markets right now.",
+      placeholder: "Open Macro or Prediction Markets to use Copilot.",
+      result: null,
+    };
+  }
 
   onMount(() => {
     restoreWorkspaceTabOrders();
@@ -200,6 +289,7 @@
   async function enterWorkspace(mode: WorkspaceMode) {
     workspaceMode = mode;
     sidebarOpen = false;
+    copilotOpen = false;
     settingsOpen = false;
     activeTab.set(getWorkspaceHomeTab(mode));
     const tasks: Array<Promise<unknown>> = [loadDiagnostics()];
@@ -333,6 +423,7 @@
     workspaceMode = null;
     diagnosticsOpen = false;
     sidebarOpen = false;
+    copilotOpen = false;
     settingsOpen = false;
   }
 
@@ -378,22 +469,46 @@
     if (workspaceMode == null) {
       return;
     }
-    sidebarOpen = !sidebarOpen;
-    if (sidebarOpen) {
+    const nextOpen = !sidebarOpen;
+    sidebarOpen = nextOpen;
+    if (nextOpen) {
+      copilotOpen = false;
       settingsOpen = false;
     }
   }
 
   function handleToggleSettings() {
-    settingsOpen = !settingsOpen;
-    if (settingsOpen) {
+    const nextOpen = !settingsOpen;
+    settingsOpen = nextOpen;
+    if (nextOpen) {
       sidebarOpen = false;
+      copilotOpen = false;
+    }
+  }
+
+  function handleToggleCopilot() {
+    if (workspaceMode == null) {
+      return;
+    }
+    const nextOpen = !copilotOpen;
+    copilotOpen = nextOpen;
+    if (nextOpen) {
+      sidebarOpen = false;
+      settingsOpen = false;
     }
   }
 
   function dismissSurfaces() {
     sidebarOpen = false;
+    copilotOpen = false;
     settingsOpen = false;
+  }
+
+  async function handleGenerateCopilot(prompt = "") {
+    if (!copilotSurface.supported || !copilotSurface.domain) {
+      return null;
+    }
+    return loadCopilotResearchCard(copilotSurface.domain, prompt);
   }
 
   async function handleOpenKeyBindings() {
@@ -420,7 +535,7 @@
       return;
     }
 
-    const hasDismissibleSurface = sidebarOpen || settingsOpen;
+    const hasDismissibleSurface = sidebarOpen || copilotOpen || settingsOpen;
     const editableTarget = isEditableEventTarget(event.target);
 
     if (matchesActionKeybinding(event, "dismiss_surface")) {
@@ -442,6 +557,7 @@
         event.preventDefault();
         settingsOpen = true;
         sidebarOpen = false;
+        copilotOpen = false;
       }
       return;
     }
@@ -496,7 +612,11 @@
     onEnterResearch={() => enterWorkspace("research")}
   />
 {:else}
-  <Shell activeViewLabel={activeViewLabel} onToggleSidebar={handleToggleSidebar}>
+  <Shell
+    copilotOpen={copilotOpen}
+    onToggleCopilot={handleToggleCopilot}
+    onToggleSidebar={handleToggleSidebar}
+  >
     <svelte:fragment slot="status">
       <StatusRail
         status={$systemStatus}
@@ -599,6 +719,19 @@
         {/if}
       </section>
     </section>
+
+    <CopilotResearchCard
+      open={copilotOpen}
+      available={copilotSurface.supported}
+      contextLabel={copilotSurface.contextLabel}
+      domainLabel={copilotSurface.domainLabel}
+      guidance={copilotSurface.guidance}
+      result={copilotSurface.result}
+      loading={$loading.copilot}
+      placeholder={copilotSurface.placeholder}
+      onGenerate={handleGenerateCopilot}
+      onClose={() => copilotOpen = false}
+    />
   </Shell>
 {/if}
 

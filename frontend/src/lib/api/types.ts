@@ -839,6 +839,57 @@ export interface MacroEventsResponse {
   events: MacroEvent[];
 }
 
+export type CopilotDomain = "macro" | "prediction_markets";
+
+export interface CopilotSourceRef {
+  source_id: string;
+  label: string;
+  kind: string;
+  provider: string;
+  origin: string;
+  description: string | null;
+  retrieved_at: string | null;
+}
+
+export interface CopilotToolTrace {
+  tool_name: string;
+  summary: string;
+  arguments: Record<string, unknown>;
+  source_ids: string[];
+}
+
+export interface ResearchClaim {
+  claim: string;
+  evidence_refs: string[];
+}
+
+export interface ResearchCard {
+  title: string;
+  hypothesis: string;
+  rationale: string;
+  required_data: string[];
+  proposed_test: string;
+  confounders: string[];
+  next_steps: string[];
+  caveats: string[];
+  source_backed_claims: ResearchClaim[];
+  inferred_claims: string[];
+}
+
+export interface CopilotResearchCardResult {
+  domain: CopilotDomain;
+  current_tab: string;
+  status: string;
+  provider: string;
+  model: string | null;
+  response_id: string | null;
+  message: string | null;
+  card: ResearchCard | null;
+  sources: CopilotSourceRef[];
+  tool_traces: CopilotToolTrace[];
+  warnings: string[];
+}
+
 export interface IvSurface {
   symbol: string;
   timestamp: string;

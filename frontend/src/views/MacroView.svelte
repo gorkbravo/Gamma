@@ -521,7 +521,7 @@
     margin: 0;
   }
 
-  h2, h3, p, small { margin: 0; }
+  h2, p, small { margin: 0; }
 
   /* ── Responsive ── */
   @media (max-width: 640px) {
