@@ -3,6 +3,8 @@ import { getJson, postJson } from "../api/client";
 import type {
   ActionResponse,
   BaseCurrencyResponse,
+  CopilotDomain,
+  CopilotResearchCardResult,
   DiagnosticsResponse,
   IvSessionStatus,
   IvSurface,
@@ -121,6 +123,10 @@ export const predictionMarketHistory = writable<PredictionProbabilityHistoryResp
 export const predictionMarketWallet = writable<PredictionWalletSummary | null>(null);
 export const predictionMarketRelated = writable<RelatedPredictionMarketListResponse | null>(null);
 export const predictionMarketCalibration = writable<PredictionCalibrationSummary | null>(null);
+export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
+  macro: null,
+  prediction_markets: null
+});
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -158,6 +164,7 @@ export const loading = writable<Record<string, boolean>>({
   macroHistory: false,
   prediction: false,
   predictionDetail: false,
+  copilot: false,
   risk: false,
   iv: false,
   ivSession: false
@@ -197,6 +204,7 @@ export function setResearchDraft(nextDraft: ResearchDraftState) {
 
 export function setMacroContext(nextContext: Partial<MacroContextState>) {
   macroContext.update((current) => normalizeMacroContextState({ ...current, ...nextContext }));
+  copilotCards.update((current) => ({ ...current, macro: null }));
 }
 
 function setError(error: unknown) {
@@ -618,6 +626,7 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
       predictionMarketWallet.set(null);
       predictionMarketRelated.set(null);
       predictionMarketCalibration.set(null);
+      copilotCards.update((current) => ({ ...current, prediction_markets: null }));
     }
     lastError.set("");
     return response;
@@ -631,6 +640,7 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
 
 export async function selectPredictionMarket(marketId: string) {
   selectedPredictionMarketId.set(marketId);
+  copilotCards.update((current) => ({ ...current, prediction_markets: null }));
   setLoading("predictionDetail", true);
   try {
     const [detailResult, historyResult, walletResult, relatedResult, calibrationResult] = await Promise.allSettled([
@@ -708,6 +718,69 @@ export async function computeRisk(options: RiskComputeOptions) {
     setError(error);
   } finally {
     setLoading("risk", false);
+  }
+}
+
+function getCopilotSessionId() {
+  if (typeof localStorage === "undefined") {
+    return "gamma-copilot-session";
+  }
+  const existing = localStorage.getItem("gamma.copilot.session");
+  if (existing) {
+    return existing;
+  }
+  const nextId =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `gamma-${Date.now()}`;
+  localStorage.setItem("gamma.copilot.session", nextId);
+  return nextId;
+}
+
+export async function loadCopilotResearchCard(domain: CopilotDomain, prompt = "") {
+  setLoading("copilot", true);
+  try {
+    if (domain === "prediction_markets" && !get(selectedPredictionMarketId)) {
+      lastError.set("Select a prediction market before generating a research card.");
+      return null;
+    }
+
+    const payload =
+      domain === "macro"
+        ? {
+            domain,
+            prompt,
+            user_session_id: getCopilotSessionId(),
+            context: {
+              current_tab: "macro",
+              macro: {
+                mode: get(macroContext).mode,
+                region: get(macroContext).region,
+                timeframe: get(macroContext).timeframe,
+                theme: get(macroContext).theme,
+                comparison_region: get(macroContext).comparisonRegion
+              }
+            }
+          }
+        : {
+            domain,
+            prompt,
+            user_session_id: getCopilotSessionId(),
+            context: {
+              current_tab: "prediction_markets",
+              prediction_market_id: get(selectedPredictionMarketId)
+            }
+          };
+
+    const result = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
+    copilotCards.update((current) => ({ ...current, [domain]: result }));
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("copilot", false);
   }
 }
 

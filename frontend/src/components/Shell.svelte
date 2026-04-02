@@ -1,7 +1,8 @@
 <script lang="ts">
   export let title = "Gamma";
-  export let activeViewLabel = "";
+  export let copilotOpen = false;
   export let onToggleSidebar: () => void = () => {};
+  export let onToggleCopilot: () => void = () => {};
 </script>
 
 <div class="shell">
@@ -14,10 +15,15 @@
       </button>
       <img class="mark" src="/gamma-mark.svg" alt="" aria-hidden="true" />
       <h1>{title}</h1>
-      {#if activeViewLabel}
-        <span class="separator">/</span>
-        <button class="view-label" on:click={onToggleSidebar}>{activeViewLabel}</button>
-      {/if}
+      <button
+        class="copilot-trigger"
+        class:open={copilotOpen}
+        on:click={onToggleCopilot}
+        aria-expanded={copilotOpen}
+        aria-haspopup="dialog"
+      >
+        Copilot
+      </button>
     </div>
     <div class="status-slot">
       <slot name="status" />
@@ -49,6 +55,7 @@
   .brand {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.45rem;
     min-width: 0;
   }
@@ -86,14 +93,7 @@
     text-transform: uppercase;
   }
 
-  .separator {
-    color: var(--text-2);
-    font-size: 0.72rem;
-    opacity: 0.5;
-    user-select: none;
-  }
-
-  .view-label {
+  .copilot-trigger {
     background: transparent;
     border: 1px solid transparent;
     color: var(--accent);
@@ -106,8 +106,13 @@
     transition: border-color 120ms ease, color 120ms ease;
   }
 
-  .view-label:hover {
+  .copilot-trigger:hover {
     border-color: rgba(122, 166, 200, 0.32);
+    color: var(--text-0);
+  }
+
+  .copilot-trigger.open {
+    border-color: rgba(122, 166, 200, 0.42);
     color: var(--text-0);
   }
 

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import (
+    copilot_router,
     iv_router,
     macro_router,
     portfolio_router,
@@ -52,6 +53,7 @@ def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(system_router)
+    app.include_router(copilot_router)
     app.include_router(portfolio_router)
     app.include_router(research_router)
     app.include_router(macro_router)

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
+from src.application.copilot_service import CopilotService
 from src.application.iv_service import IVService
 from src.application.macro_service import MacroService
 from src.application.portfolio_service import PortfolioService
@@ -17,7 +18,9 @@ from src.application.risk_service import RiskService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
+from src.services.copilot_provider import UnavailableCopilotProvider
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
@@ -60,6 +63,7 @@ class ApplicationRuntime:
     research_service: ResearchService
     prediction_market_service: PredictionMarketService
     macro_service: MacroService
+    copilot_service: CopilotService
     risk_service: RiskService
     iv_service: IVService
     desktop: DesktopRuntimeState | None = None
@@ -202,6 +206,11 @@ def build_runtime(
         fx_adapter=IBKRMacroFXAdapter(market_data),
         prediction_market_service=prediction_market_service,
     )
+    copilot_service = CopilotService(
+        macro_service=macro_service,
+        prediction_market_service=prediction_market_service,
+        provider=_build_copilot_provider(),
+    )
     risk_service = RiskService(
         client,
         market_data,
@@ -233,6 +242,7 @@ def build_runtime(
         research_service=research_service,
         prediction_market_service=prediction_market_service,
         macro_service=macro_service,
+        copilot_service=copilot_service,
         risk_service=risk_service,
         iv_service=iv_service,
         desktop=desktop,
@@ -273,3 +283,34 @@ def _build_desktop_state(research_provider: ResearchDataProvider) -> DesktopRunt
     app_context = AppDataContext()
     research_provider.context = app_context
     return DesktopRuntimeState(app_context=app_context)
+
+
+def _build_copilot_provider():
+    provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
+    if provider in {"disabled", "none", "off"}:
+        return UnavailableCopilotProvider(message="Gamma Copilot is disabled by configuration.")
+    if provider != "openai":
+        return UnavailableCopilotProvider(message=f"Unsupported copilot provider: {provider}")
+
+    api_key = (os.getenv("OPENAI_API_KEY", "") or "").strip()
+    if not api_key:
+        return UnavailableCopilotProvider(
+            message="Gamma Copilot is unavailable until OPENAI_API_KEY is configured."
+        )
+
+    store_flag = (os.getenv("GAMMA_COPILOT_STORE_RESPONSES", "false") or "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    return OpenAIResponsesCopilotProvider(
+        api_key=api_key,
+        model=(os.getenv("GAMMA_COPILOT_MODEL", "gpt-5.4") or "gpt-5.4").strip(),
+        reasoning_effort=(os.getenv("GAMMA_COPILOT_REASONING_EFFORT", "medium") or "medium").strip(),
+        api_url=(
+            os.getenv("GAMMA_COPILOT_API_URL", "https://api.openai.com/v1/responses")
+            or "https://api.openai.com/v1/responses"
+        ).strip(),
+        store_responses=store_flag,
+    )
