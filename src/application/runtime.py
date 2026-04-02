@@ -20,6 +20,7 @@ from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
@@ -289,6 +290,8 @@ def _build_copilot_provider():
     provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
     if provider in {"disabled", "none", "off"}:
         return UnavailableCopilotProvider(message="Gamma Copilot is disabled by configuration.")
+    if provider in {"mock", "demo", "offline"}:
+        return MockCopilotProvider()
     if provider != "openai":
         return UnavailableCopilotProvider(message=f"Unsupported copilot provider: {provider}")
 

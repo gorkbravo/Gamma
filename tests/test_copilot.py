@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from src.api.main import create_app
 from src.application.runtime import build_runtime
 from src.models.copilot import CopilotResearchCardResult, ResearchCard, ResearchClaim
+from src.services.mock_copilot_provider import MockCopilotProvider
 
 
 class _StubCopilotProvider:
@@ -513,5 +514,66 @@ def test_current_tab_is_primary_copilot_routing_key(tmp_path):
         payload = response.json()
         assert payload["domain"] == "portfolio"
         assert payload["card"]["title"] == "Portfolio test card"
+    finally:
+        runtime.shutdown()
+
+
+def test_runtime_uses_mock_copilot_provider_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        assert isinstance(runtime.copilot_service.provider, MockCopilotProvider)
+        assert runtime.copilot_service.provider.provider_name == "mock"
+    finally:
+        runtime.shutdown()
+
+
+def test_mock_provider_generates_offline_macro_card(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Map the active macro setup.",
+                "context": {
+                    "current_tab": "macro",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["provider"] == "mock"
+        assert payload["model"] == "gamma-mock-research-card-v1"
+        assert payload["response_id"].startswith("mock_macro_")
+        assert payload["card"]["title"].startswith("Macro:")
+        assert payload["card"]["source_backed_claims"][0]["evidence_refs"]
+        assert any(trace["tool_name"] == "get_macro_workspace_drilldown" for trace in payload["tool_traces"])
+        assert any(
+            "local mock Copilot provider" in warning
+            for warning in payload["warnings"]
+        )
     finally:
         runtime.shutdown()

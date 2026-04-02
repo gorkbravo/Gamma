@@ -1119,7 +1119,7 @@ Build a multi-mode macro workspace for snapshot monitoring, rates and policy ana
 ### Phase 3 - Keyboard Navigation & Workspace Customization (`Complete`)
 Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
 
-### Phase 4 - AI Copilot (`In progress ~32%`)
+### Phase 4 - AI Copilot (`In progress ~48%`)
 Add a context-aware research assistant that sits on top of the data architecture already built, starting with read-only tool-backed research cards and provenance-aware context injection.
 
 ### Phase 5 - Crypto (`Not started`)
