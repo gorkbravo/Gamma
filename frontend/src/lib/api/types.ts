@@ -890,6 +890,21 @@ export interface CopilotResearchCardResult {
   warnings: string[];
 }
 
+export interface CopilotThreadEntry {
+  entryId: string;
+  turnIndex: number;
+  prompt: string;
+  continuedFromResponseId: string | null;
+  result: CopilotResearchCardResult;
+}
+
+export interface CopilotThreadState {
+  domain: CopilotDomain;
+  contextFingerprint: string | null;
+  latestResponseId: string | null;
+  entries: CopilotThreadEntry[];
+}
+
 export interface IvSurface {
   symbol: string;
   timestamp: string;

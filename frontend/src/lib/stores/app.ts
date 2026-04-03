@@ -5,6 +5,8 @@ import type {
   BaseCurrencyResponse,
   CopilotDomain,
   CopilotResearchCardResult,
+  CopilotThreadEntry,
+  CopilotThreadState,
   DiagnosticsResponse,
   IvSessionStatus,
   IvSurface,
@@ -25,7 +27,8 @@ import type {
   ResearchResult,
   RiskResult,
   SystemStatus,
-  TabId
+  TabId,
+  WorkspaceMode
 } from "../api/types";
 
 export interface SyntheticPositionInput {
@@ -97,6 +100,26 @@ export interface MacroLoadOptions {
   forceRefresh?: boolean;
 }
 
+function createEmptyCopilotThread(domain: CopilotDomain): CopilotThreadState {
+  return {
+    domain,
+    contextFingerprint: null,
+    latestResponseId: null,
+    entries: []
+  };
+}
+
+function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> {
+  return {
+    portfolio: createEmptyCopilotThread("portfolio"),
+    research: createEmptyCopilotThread("research"),
+    macro: createEmptyCopilotThread("macro"),
+    prediction_markets: createEmptyCopilotThread("prediction_markets"),
+    risk: createEmptyCopilotThread("risk"),
+    iv: createEmptyCopilotThread("iv")
+  };
+}
+
 export const activeTab = writable<TabId>("portfolio");
 export const systemStatus = writable<SystemStatus | null>(null);
 export const diagnostics = writable<DiagnosticsResponse | null>(null);
@@ -131,6 +154,7 @@ export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardRe
   risk: null,
   iv: null
 });
+export const copilotThreads = writable<Record<CopilotDomain, CopilotThreadState>>(createEmptyCopilotThreads());
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -206,6 +230,7 @@ function setLoading(key: string, value: boolean) {
 
 function resetCopilotCard(domain: CopilotDomain) {
   copilotCards.update((current) => ({ ...current, [domain]: null }));
+  copilotThreads.update((current) => ({ ...current, [domain]: createEmptyCopilotThread(domain) }));
 }
 
 export function setResearchDraft(nextDraft: ResearchDraftState) {
@@ -249,6 +274,119 @@ function appendDiagnosticsLog(lines: string[], heading?: string) {
     next.push(...lines);
     return [...next, ...current].slice(0, 120);
   });
+}
+
+function lastItem<T>(items: readonly T[]) {
+  return items.length ? items[items.length - 1] : undefined;
+}
+
+function serializePositionSignature(snapshot: PortfolioSnapshot | null | undefined) {
+  return (snapshot?.positions ?? []).map((position) => ({
+    symbol: position.symbol,
+    quantity: position.quantity,
+    weight: position.weight ?? null,
+    baseMarketValue: position.base_market_value ?? null
+  }));
+}
+
+function buildCopilotContextFingerprint(
+  domain: CopilotDomain,
+  workspaceMode: WorkspaceMode | null | undefined
+) {
+  if (domain === "portfolio") {
+    const snapshot = get(portfolioSnapshot);
+    const performance = get(portfolioPerformance);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      baseCurrency: snapshot?.base_currency ?? null,
+      snapshotTimestamp: snapshot?.timestamp ?? null,
+      netLiquidation: snapshot?.net_liquidation ?? null,
+      positions: serializePositionSignature(snapshot),
+      benchmarkSymbol: performance?.benchmark_symbol ?? null,
+      performancePoints: performance?.performance_points.length ?? 0,
+      performanceTimestamp: lastItem(performance?.performance_points ?? [])?.timestamp ?? null
+    });
+  }
+
+  if (domain === "research") {
+    const result = get(researchResult);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      scopeType: result?.scope_type ?? null,
+      primarySymbol: result?.primary_symbol ?? null,
+      benchmarkSymbol: result?.benchmark_symbol ?? null,
+      snapshotTimestamp: result?.snapshot?.timestamp ?? null,
+      weights: (result?.weights ?? []).map((weight) => ({
+        symbol: weight.symbol,
+        weight: weight.weight
+      }))
+    });
+  }
+
+  if (domain === "macro") {
+    const macro = get(macroContext);
+    return JSON.stringify({
+      domain,
+      mode: macro.mode,
+      region: macro.region,
+      timeframe: macro.timeframe,
+      theme: macro.theme,
+      comparisonRegion: macro.comparisonRegion
+    });
+  }
+
+  if (domain === "prediction_markets") {
+    return JSON.stringify({
+      domain,
+      marketId: get(selectedPredictionMarketId)
+    });
+  }
+
+  if (domain === "risk") {
+    const snapshot = get(riskSnapshotBasis);
+    const result = get(riskResult);
+    return JSON.stringify({
+      domain,
+      workspaceMode: get(riskWorkspaceBasis) ?? workspaceMode ?? null,
+      snapshotTimestamp: snapshot?.timestamp ?? null,
+      positions: serializePositionSignature(snapshot),
+      alpha: result?.metrics.alpha ?? null,
+      lookbackDays: result?.metrics.lookback_days ?? null,
+      horizonDays: result?.metrics.horizon_days ?? null,
+      monteCarloModel: result?.metrics.monte_carlo_model ?? null
+    });
+  }
+
+  const surface = resolvedIvSurface();
+  const session = get(ivSession);
+  return JSON.stringify({
+    domain,
+    workspaceMode,
+    symbol: surface?.symbol ?? session?.active_symbol ?? null,
+    expiries: surface?.expiries ?? [],
+    strikeCount: surface?.strikes.length ?? 0,
+    marketDataMode: session?.market_data_mode ?? null
+  });
+}
+
+function buildCopilotThreadEntry(
+  domain: CopilotDomain,
+  result: CopilotResearchCardResult,
+  prompt: string,
+  previousResponseId: string | null,
+  turnIndex: number
+): CopilotThreadEntry {
+  return {
+    entryId:
+      result.response_id ??
+      `${domain}-${turnIndex}-${Date.now().toString(36)}`,
+    turnIndex,
+    prompt: prompt.trim(),
+    continuedFromResponseId: previousResponseId,
+    result
+  };
 }
 
 export async function refreshSystemStatus() {
@@ -526,8 +664,9 @@ function comparisonSeriesForContext(context: MacroContextState, seriesIds: reado
 }
 
 export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
+  const previousContext = get(macroContext);
   const nextContext = normalizeMacroContextState({
-    ...get(macroContext),
+    ...previousContext,
     ...(options.mode ? { mode: options.mode } : {}),
     ...(options.region ? { region: options.region } : {}),
     ...(options.timeframe ? { timeframe: options.timeframe } : {}),
@@ -535,7 +674,9 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
     ...(options.comparisonRegion !== undefined ? { comparisonRegion: options.comparisonRegion } : {})
   });
   macroContext.set(nextContext);
-  resetCopilotCard("macro");
+  if (JSON.stringify(previousContext) !== JSON.stringify(nextContext)) {
+    resetCopilotCard("macro");
+  }
   const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
   const requestKey = JSON.stringify(payload);
   const existingRequest = macroWorkspaceInflight.get(requestKey);
@@ -649,7 +790,9 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
     const selectedStillVisible = response.markets.some((market) => market.market_id === currentSelection);
     const nextSelection = selectedStillVisible ? currentSelection : (response.markets[0]?.market_id ?? null);
     if (nextSelection) {
-      await selectPredictionMarket(nextSelection);
+      await selectPredictionMarket(nextSelection, {
+        resetThread: nextSelection !== currentSelection || get(predictionMarketDetail) == null
+      });
     } else {
       selectedPredictionMarketId.set(null);
       predictionMarketDetail.set(null);
@@ -669,9 +812,14 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
   }
 }
 
-export async function selectPredictionMarket(marketId: string) {
+export async function selectPredictionMarket(
+  marketId: string,
+  options: { resetThread?: boolean } = {}
+) {
   selectedPredictionMarketId.set(marketId);
-  resetCopilotCard("prediction_markets");
+  if (options.resetThread ?? true) {
+    resetCopilotCard("prediction_markets");
+  }
   setLoading("predictionDetail", true);
   try {
     const [detailResult, historyResult, walletResult, relatedResult, calibrationResult] = await Promise.allSettled([
@@ -875,15 +1023,52 @@ export async function loadCopilotResearchCard(
       return null;
     }
 
+    const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode);
+    const activeThread = get(copilotThreads)[domain];
+    const continuingThread =
+      activeThread.contextFingerprint != null &&
+      activeThread.contextFingerprint === contextFingerprint &&
+      activeThread.latestResponseId != null;
+    const previousResponseId = continuingThread ? activeThread.latestResponseId : null;
+
+    if (!continuingThread && activeThread.entries.length) {
+      resetCopilotCard(domain);
+    }
+
     const payload = {
       domain,
       prompt,
       user_session_id: getCopilotSessionId(),
+      ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
       context
     };
 
     const result = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
     copilotCards.update((current) => ({ ...current, [domain]: result }));
+    const baseThread =
+      continuingThread
+        ? activeThread
+        : createEmptyCopilotThread(domain);
+    const nextEntry = buildCopilotThreadEntry(
+      domain,
+      result,
+      prompt,
+      previousResponseId,
+      baseThread.entries.length + 1
+    );
+    const latestResponseId =
+      result.status === "ready" && result.response_id
+        ? result.response_id
+        : baseThread.latestResponseId;
+    copilotThreads.update((current) => ({
+      ...current,
+      [domain]: {
+        domain,
+        contextFingerprint,
+        latestResponseId,
+        entries: [...baseThread.entries, nextEntry]
+      }
+    }));
     lastError.set("");
     return result;
   } catch (error) {
@@ -956,7 +1141,6 @@ export async function loadIvSession() {
       }
       return current;
     });
-    resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {
     setError(error);

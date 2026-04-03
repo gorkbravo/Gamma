@@ -1,25 +1,37 @@
 <script lang="ts">
-  import type { CopilotResearchCardResult } from "../lib/api/types";
+  import type {
+    CopilotResearchCardResult,
+    CopilotThreadEntry,
+    CopilotThreadState
+  } from "../lib/api/types";
 
   export let open = false;
   export let available = false;
   export let contextLabel = "Macro";
   export let domainLabel = "Copilot";
   export let guidance = "Grounded in the current Gamma context.";
-  export let result: CopilotResearchCardResult | null = null;
+  export let thread: CopilotThreadState | null = null;
   export let loading = false;
   export let placeholder = "Optional angle or research question...";
   export let onClose: () => void = () => {};
   export let onGenerate: (prompt?: string) => Promise<unknown> | void;
 
   let promptText = "";
-  let providerLabel: string | null = null;
+  let threadEntries: CopilotThreadEntry[] = [];
+  let latestEntry: CopilotThreadEntry | null = null;
+  let hasThread = false;
+  let composerHint = "";
+  let composerPlaceholder = "";
+  let composerButtonLabel = "Generate";
 
   async function handleGenerate() {
     if (!available || loading) {
       return;
     }
-    await onGenerate(promptText.trim());
+    const result = await onGenerate(promptText.trim());
+    if (result != null) {
+      promptText = "";
+    }
   }
 
   function handleComposerKeydown(event: KeyboardEvent) {
@@ -29,7 +41,36 @@
     }
   }
 
-  $: providerLabel = result?.model ? `${result.provider} | ${result.model}` : result?.provider ?? null;
+  function providerLabelFor(result: CopilotResearchCardResult) {
+    return result.model ? `${result.provider} | ${result.model}` : result.provider ?? null;
+  }
+
+  function turnLabel(entry: CopilotThreadEntry) {
+    return entry.turnIndex === 1 ? "Initial Brief" : `Follow-up ${entry.turnIndex}`;
+  }
+
+  function promptLabel(entry: CopilotThreadEntry) {
+    return entry.turnIndex === 1 ? "Prompt" : "Follow-up Prompt";
+  }
+
+  function promptTextFor(entry: CopilotThreadEntry) {
+    return entry.prompt || "Used the active Gamma context without an extra prompt.";
+  }
+
+  $: threadEntries = [...(thread?.entries ?? [])].reverse();
+  $: latestEntry = threadEntries[0] ?? null;
+  $: hasThread = threadEntries.length > 0;
+  $: composerHint = !available
+    ? ""
+    : hasThread
+      ? "Ctrl+Enter to follow up in this domain thread"
+      : "Ctrl+Enter to start a research thread";
+  $: composerPlaceholder = available
+    ? hasThread
+      ? "Ask a follow-up grounded in this thread..."
+      : placeholder
+    : guidance;
+  $: composerButtonLabel = loading ? "Generating..." : hasThread ? "Follow Up" : "Generate";
 </script>
 
 {#if open}
@@ -59,144 +100,170 @@
         <section class="message-card neutral">
           <p>{guidance}</p>
         </section>
+      {:else if !hasThread}
+        <section class="message-card neutral">
+          <span>Fresh Thread</span>
+          <p>Generate a research card from the current context. Follow-up prompts stay inside this tab until the grounding context changes.</p>
+        </section>
       {:else}
-        {#if result?.message}
-          <section class="message-card {result.status}">
-            <span>Status</span>
-            <p>{result.message}</p>
-          </section>
-        {/if}
+        <section class="thread-summary">
+          <div class="summary-copy">
+            <span class="section-label">Active Thread</span>
+            <p>{threadEntries.length === 1 ? "1 research card in this thread." : `${threadEntries.length} turns in this thread.`}</p>
+          </div>
+          <small>{latestEntry?.turnIndex === 1 ? "Latest result is the initial brief." : "Latest result is a follow-up."}</small>
+        </section>
 
-        {#if result?.card}
-          <article class="assistant-card">
-            <div class="assistant-header">
-              <div>
-                <span class="section-label">Research Card</span>
-                <h3>{result.card.title}</h3>
-              </div>
-              {#if providerLabel}
-                <small>{providerLabel}</small>
+        {#each threadEntries as entry, index (entry.entryId)}
+          <article class="thread-turn" class:latest={index === 0}>
+            <div class="turn-head">
+              <span class="turn-pill" class:follow-up={entry.turnIndex > 1}>{turnLabel(entry)}</span>
+              {#if providerLabelFor(entry.result)}
+                <small>{providerLabelFor(entry.result)}</small>
               {/if}
             </div>
 
-            <div class="hero-block">
-              <span class="section-label">Hypothesis</span>
-              <p>{result.card.hypothesis}</p>
-            </div>
+            <section class="message-card neutral prompt-card">
+              <span>{promptLabel(entry)}</span>
+              <p>{promptTextFor(entry)}</p>
+            </section>
 
-            <div class="summary-grid">
-              <div class="section-block">
-                <span>Rationale</span>
-                <p>{result.card.rationale}</p>
-              </div>
-              <div class="section-block">
-                <span>Proposed Test</span>
-                <p>{result.card.proposed_test}</p>
-              </div>
-            </div>
+            {#if entry.result.message}
+              <section class="message-card {entry.result.status}">
+                <span>Status</span>
+                <p>{entry.result.message}</p>
+              </section>
+            {/if}
 
-            <div class="list-grid">
-              <div class="list-block">
-                <span>Required Data</span>
-                {#if result.card.required_data.length}
-                  <ul>{#each result.card.required_data as item}<li>{item}</li>{/each}</ul>
-                {:else}
-                  <p>None specified.</p>
-                {/if}
-              </div>
-              <div class="list-block">
-                <span>Confounders</span>
-                {#if result.card.confounders.length}
-                  <ul>{#each result.card.confounders as item}<li>{item}</li>{/each}</ul>
-                {:else}
-                  <p>None specified.</p>
-                {/if}
-              </div>
-              <div class="list-block">
-                <span>Next Steps</span>
-                {#if result.card.next_steps.length}
-                  <ul>{#each result.card.next_steps as item}<li>{item}</li>{/each}</ul>
-                {:else}
-                  <p>None specified.</p>
-                {/if}
-              </div>
-              <div class="list-block">
-                <span>Caveats</span>
-                {#if result.card.caveats.length}
-                  <ul>{#each result.card.caveats as item}<li>{item}</li>{/each}</ul>
-                {:else}
-                  <p>None specified.</p>
-                {/if}
-              </div>
-            </div>
+            {#if entry.result.card}
+              <article class="assistant-card">
+                <div class="assistant-header">
+                  <div>
+                    <span class="section-label">Research Card</span>
+                    <h3>{entry.result.card.title}</h3>
+                  </div>
+                </div>
 
-            <div class="claims-grid">
-              <div class="claim-block">
-                <span>Source-Backed</span>
-                {#if result.card.source_backed_claims.length}
-                  {#each result.card.source_backed_claims as claim}
-                    <div class="claim-row">
-                      <p>{claim.claim}</p>
-                      <small>{claim.evidence_refs.join(" | ")}</small>
-                    </div>
-                  {/each}
-                {:else}
-                  <p>No explicit source-backed claims returned.</p>
-                {/if}
-              </div>
-              <div class="claim-block">
-                <span>Inferred</span>
-                {#if result.card.inferred_claims.length}
-                  <ul>{#each result.card.inferred_claims as item}<li>{item}</li>{/each}</ul>
-                {:else}
-                  <p>No explicit inference block returned.</p>
-                {/if}
-              </div>
-            </div>
+                <div class="hero-block">
+                  <span class="section-label">Hypothesis</span>
+                  <p>{entry.result.card.hypothesis}</p>
+                </div>
+
+                <div class="summary-grid">
+                  <div class="section-block">
+                    <span>Rationale</span>
+                    <p>{entry.result.card.rationale}</p>
+                  </div>
+                  <div class="section-block">
+                    <span>Proposed Test</span>
+                    <p>{entry.result.card.proposed_test}</p>
+                  </div>
+                </div>
+
+                <div class="list-grid">
+                  <div class="list-block">
+                    <span>Required Data</span>
+                    {#if entry.result.card.required_data.length}
+                      <ul>{#each entry.result.card.required_data as item}<li>{item}</li>{/each}</ul>
+                    {:else}
+                      <p>None specified.</p>
+                    {/if}
+                  </div>
+                  <div class="list-block">
+                    <span>Confounders</span>
+                    {#if entry.result.card.confounders.length}
+                      <ul>{#each entry.result.card.confounders as item}<li>{item}</li>{/each}</ul>
+                    {:else}
+                      <p>None specified.</p>
+                    {/if}
+                  </div>
+                  <div class="list-block">
+                    <span>Next Steps</span>
+                    {#if entry.result.card.next_steps.length}
+                      <ul>{#each entry.result.card.next_steps as item}<li>{item}</li>{/each}</ul>
+                    {:else}
+                      <p>None specified.</p>
+                    {/if}
+                  </div>
+                  <div class="list-block">
+                    <span>Caveats</span>
+                    {#if entry.result.card.caveats.length}
+                      <ul>{#each entry.result.card.caveats as item}<li>{item}</li>{/each}</ul>
+                    {:else}
+                      <p>None specified.</p>
+                    {/if}
+                  </div>
+                </div>
+
+                <div class="claims-grid">
+                  <div class="claim-block">
+                    <span>Source-Backed</span>
+                    {#if entry.result.card.source_backed_claims.length}
+                      {#each entry.result.card.source_backed_claims as claim}
+                        <div class="claim-row">
+                          <p>{claim.claim}</p>
+                          <small>{claim.evidence_refs.join(" | ")}</small>
+                        </div>
+                      {/each}
+                    {:else}
+                      <p>No explicit source-backed claims returned.</p>
+                    {/if}
+                  </div>
+                  <div class="claim-block">
+                    <span>Inferred</span>
+                    {#if entry.result.card.inferred_claims.length}
+                      <ul>{#each entry.result.card.inferred_claims as item}<li>{item}</li>{/each}</ul>
+                    {:else}
+                      <p>No explicit inference block returned.</p>
+                    {/if}
+                  </div>
+                </div>
+              </article>
+            {:else if !entry.result.message}
+              <section class="message-card neutral">
+                <p>No structured research card was returned for this turn.</p>
+              </section>
+            {/if}
+
+            {#if entry.result.sources?.length}
+              <section class="meta-block">
+                <span>Sources</span>
+                {#each entry.result.sources as source}
+                  <div class="meta-row">
+                    <strong>{source.source_id}</strong>
+                    <small>{source.label} | {source.provider}</small>
+                  </div>
+                {/each}
+              </section>
+            {/if}
+
+            {#if entry.result.tool_traces?.length}
+              <section class="meta-block">
+                <span>Tools Used</span>
+                {#each entry.result.tool_traces as trace}
+                  <div class="meta-row">
+                    <strong>{trace.tool_name}</strong>
+                    <small>{trace.summary}</small>
+                    {#if trace.source_ids.length}
+                      <small>{trace.source_ids.join(" | ")}</small>
+                    {/if}
+                  </div>
+                {/each}
+              </section>
+            {/if}
+
+            {#if entry.result.warnings?.length}
+              <section class="meta-block">
+                <span>Warnings</span>
+                {#each entry.result.warnings as warning}
+                  <div class="meta-row">
+                    <small>{warning}</small>
+                  </div>
+                {/each}
+              </section>
+            {/if}
           </article>
-        {:else if !result?.message}
-          <section class="message-card neutral">
-            <p>Generate a research card from the current context, or add an angle below.</p>
-          </section>
-        {/if}
-
-        {#if result?.sources?.length}
-          <section class="meta-block">
-            <span>Sources</span>
-            {#each result.sources as source}
-              <div class="meta-row">
-                <strong>{source.source_id}</strong>
-                <small>{source.label} | {source.provider}</small>
-              </div>
-            {/each}
-          </section>
-        {/if}
-
-        {#if result?.tool_traces?.length}
-          <section class="meta-block">
-            <span>Tools Used</span>
-            {#each result.tool_traces as trace}
-              <div class="meta-row">
-                <strong>{trace.tool_name}</strong>
-                <small>{trace.summary}</small>
-                {#if trace.source_ids.length}
-                  <small>{trace.source_ids.join(" | ")}</small>
-                {/if}
-              </div>
-            {/each}
-          </section>
-        {/if}
-
-        {#if result?.warnings?.length}
-          <section class="meta-block">
-            <span>Warnings</span>
-            {#each result.warnings as warning}
-              <div class="meta-row">
-                <small>{warning}</small>
-              </div>
-            {/each}
-          </section>
-        {/if}
+        {/each}
       {/if}
     </div>
   </div>
@@ -205,15 +272,15 @@
     <textarea
       bind:value={promptText}
       rows={2}
-      placeholder={available ? placeholder : guidance}
+      placeholder={composerPlaceholder}
       disabled={!available || loading}
       on:keydown={handleComposerKeydown}
     ></textarea>
 
     <div class="composer-footer">
-      <small>{available ? "Ctrl+Enter to generate" : ""}</small>
+      <small>{composerHint}</small>
       <button class="generate-btn" type="button" disabled={!available || loading} on:click={handleGenerate}>
-        {loading ? "Generating..." : "Generate"}
+        {composerButtonLabel}
       </button>
     </div>
   </footer>
@@ -221,6 +288,7 @@
 
 <style>
   .thread,
+  .thread-turn,
   .summary-grid,
   .list-grid,
   .claims-grid,
@@ -290,7 +358,8 @@
 
   .title-row,
   .assistant-header,
-  .composer-footer {
+  .composer-footer,
+  .turn-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -303,18 +372,53 @@
     padding: 1rem;
   }
 
+  .thread-summary,
+  .thread-turn,
+  .note-card,
+  .message-card,
+  .assistant-card,
+  .section-block,
+  .list-block,
+  .claim-block,
+  .meta-row {
+    border: 1px solid rgba(46, 60, 74, 0.52);
+    background: rgba(8, 13, 18, 0.6);
+    padding: 0.75rem;
+  }
+
+  .thread-summary,
+  .assistant-card,
+  .meta-block {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .thread-turn.latest {
+    border-color: rgba(122, 166, 200, 0.32);
+    background: rgba(8, 13, 18, 0.72);
+  }
+
+  .summary-copy,
+  .claim-row,
+  .meta-row {
+    display: grid;
+    gap: 0.25rem;
+  }
+
   .section-label,
   .message-card span,
   .section-block span,
   .list-block span,
   .claim-block span,
-  .meta-block > span {
+  .meta-block > span,
+  .thread-summary .section-label {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 0.64rem;
   }
 
+  .turn-pill,
   .context-pill {
     border: 1px solid rgba(46, 60, 74, 0.52);
     background: rgba(8, 13, 18, 0.7);
@@ -326,6 +430,7 @@
     white-space: nowrap;
   }
 
+  .turn-pill.follow-up,
   .context-pill.active {
     border-color: rgba(122, 166, 200, 0.36);
     background: rgba(122, 166, 200, 0.08);
@@ -339,6 +444,8 @@
     overflow-wrap: anywhere;
   }
 
+  .thread-summary p,
+  .thread-summary small,
   .message-card p,
   .note-card p,
   .section-block p,
@@ -347,26 +454,6 @@
   .meta-row small,
   .composer-footer small {
     color: var(--text-2);
-  }
-
-  .note-card,
-  .message-card,
-  .assistant-card,
-  .section-block,
-  .list-block,
-  .claim-block,
-  .meta-row {
-    border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.6);
-    padding: 0.75rem;
-  }
-
-  .note-card,
-  .message-card,
-  .assistant-card,
-  .meta-block {
-    display: grid;
-    gap: 0.65rem;
   }
 
   .message-card.error {
@@ -379,6 +466,10 @@
 
   .message-card.neutral {
     border-color: rgba(122, 166, 200, 0.18);
+  }
+
+  .prompt-card {
+    background: rgba(15, 19, 25, 0.85);
   }
 
   .hero-block {
@@ -467,27 +558,12 @@
     cursor: default;
   }
 
-  .claim-row,
-  .meta-row {
-    display: grid;
-    gap: 0.25rem;
-  }
-
   .meta-row strong {
     color: var(--text-1);
     font-size: 0.82rem;
   }
 
-  .assistant-header small {
-    color: var(--text-2);
-    text-align: right;
-  }
-
-  .composer-footer {
-    align-items: center;
-  }
-
-  .composer-footer small,
+  .turn-head small,
   .context-summary,
   .meta-row small {
     overflow-wrap: anywhere;
@@ -506,7 +582,9 @@
     }
 
     .title-row,
-    .assistant-header {
+    .assistant-header,
+    .turn-head,
+    .composer-footer {
       align-items: flex-start;
       flex-direction: column;
     }

@@ -208,6 +208,45 @@ class _StubCopilotProvider:
         )
 
 
+class _FollowupCaptureProvider:
+    provider_name = "followup_capture"
+
+    def __init__(self):
+        self.previous_response_ids: list[str | None] = []
+
+    def generate_research_card(self, *, request, context, tool_specs, execute_tool):
+        self.previous_response_ids.append(request.previous_response_id)
+        turn = len(self.previous_response_ids)
+        return CopilotResearchCardResult(
+            domain=request.domain,
+            current_tab=context.current_tab,
+            status="ready",
+            provider=self.provider_name,
+            model="stub-model",
+            response_id=f"resp_followup_{turn}",
+            card=ResearchCard(
+                title=f"Follow-up test card {turn}",
+                hypothesis="Continuation should preserve the previous response id at the route boundary.",
+                rationale="This fixture only captures the forwarded request metadata.",
+                required_data=["previous_response_id"],
+                proposed_test="Assert that the second request forwards the first response id.",
+                confounders=["None for this fixture."],
+                next_steps=["Verify the captured request metadata."],
+                caveats=["This is a test fixture."],
+                source_backed_claims=[
+                    ResearchClaim(
+                        claim="The route forwarded the request metadata into the provider boundary.",
+                        evidence_refs=[],
+                    )
+                ],
+                inferred_claims=[],
+            ),
+            sources=list(context.sources),
+            tool_traces=[],
+            warnings=list(context.warnings),
+        )
+
+
 def _build_test_client(tmp_path):
     runtime = build_runtime(
         mock_mode=True,
@@ -530,6 +569,56 @@ def test_runtime_uses_mock_copilot_provider_when_configured(tmp_path, monkeypatc
     try:
         assert isinstance(runtime.copilot_service.provider, MockCopilotProvider)
         assert runtime.copilot_service.provider.provider_name == "mock"
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_route_forwards_previous_response_id_on_follow_up(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    capture_provider = _FollowupCaptureProvider()
+    runtime.copilot_service.provider = capture_provider
+    try:
+        first_response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Map the active macro setup.",
+                "context": {
+                    "current_tab": "macro",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+        assert first_response.status_code == 200
+        first_payload = first_response.json()
+
+        second_response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Pressure-test the lead divergence.",
+                "previous_response_id": first_payload["response_id"],
+                "context": {
+                    "current_tab": "macro",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+        assert second_response.status_code == 200
+        assert capture_provider.previous_response_ids == [None, first_payload["response_id"]]
+        assert second_response.json()["response_id"] == "resp_followup_2"
     finally:
         runtime.shutdown()
 

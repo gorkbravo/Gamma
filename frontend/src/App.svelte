@@ -25,7 +25,7 @@
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
-    copilotCards,
+    copilotThreads,
     computeRisk,
     forceAccountSubscribe,
     ivSurface,
@@ -77,7 +77,7 @@
   } from "./lib/stores/navigation";
   import type {
     CopilotDomain,
-    CopilotResearchCardResult,
+    CopilotThreadState,
     IvSessionStatus,
     IvSurface,
     MacroContextState,
@@ -123,7 +123,7 @@
   $: copilotSurface = buildCopilotSurface({
     tab: $activeTab,
     workspaceMode,
-    cards: $copilotCards,
+    threads: $copilotThreads,
     system: $systemStatus,
     portfolio: $portfolioSnapshot,
     portfolioPerformance: $portfolioPerformance,
@@ -144,7 +144,7 @@
     domainLabel: string;
     guidance: string;
     placeholder: string;
-    result: CopilotResearchCardResult | null;
+    thread: CopilotThreadState | null;
   };
 
   const macroModeLabels: Record<MacroContextState["mode"], string> = {
@@ -230,7 +230,7 @@
   function buildCopilotSurface({
     tab,
     workspaceMode,
-    cards,
+    threads,
     system,
     portfolio,
     portfolioPerformance,
@@ -244,7 +244,7 @@
   }: {
     tab: TabId;
     workspaceMode: WorkspaceMode | null;
-    cards: Record<CopilotDomain, CopilotResearchCardResult | null>;
+    threads: Record<CopilotDomain, CopilotThreadState>;
     system: SystemStatus | null;
     portfolio: PortfolioSnapshot | null;
     portfolioPerformance: PortfolioPerformanceResponse | null;
@@ -269,7 +269,7 @@
             : "Load a portfolio snapshot before generating a research card from the portfolio workspace.",
         placeholder:
           "Frame concentration risk, benchmark slippage, capital deployment, or the next diagnostic angle.",
-        result: cards.portfolio,
+        thread: threads.portfolio,
       };
     }
 
@@ -286,7 +286,7 @@
             : "Run a research analysis before generating a research card from the research workspace.",
         placeholder:
           "Stress-test the active scope, sharpen the hypothesis, or identify the cleanest next comparison.",
-        result: cards.research,
+        thread: threads.research,
       };
     }
 
@@ -301,7 +301,7 @@
           "Grounded in the current Macro workspace. Gamma stays read-only and the Copilot should separate evidence-backed claims from inference.",
         placeholder:
           "Map the active regime, stress-test the leading divergence, or frame the catalyst path.",
-        result: cards.macro,
+        thread: threads.macro,
       };
     }
 
@@ -316,7 +316,7 @@
           "Grounded in the selected market, its history, related contracts, flow, and calibration panels. Gamma remains a read-only research environment.",
         placeholder:
           "Test the repricing thesis, compare probability against flow, or frame the cleanest consistency check.",
-        result: cards.prediction_markets,
+        thread: threads.prediction_markets,
       };
     }
 
@@ -333,7 +333,7 @@
             : "Run a core or Monte Carlo risk pass before generating a research card from the risk workspace.",
         placeholder:
           "Explain the main VaR driver, isolate the cleanest hedge question, or challenge the current coverage assumptions.",
-        result: cards.risk,
+        thread: threads.risk,
       };
     }
 
@@ -354,7 +354,7 @@
             : "Load an IV surface snapshot before generating a research card from the IV workspace.",
         placeholder:
           "Interpret the term structure, flag skew caveats, or frame the cleanest surface-comparison question.",
-        result: cards.iv,
+        thread: threads.iv,
       };
     }
 
@@ -366,7 +366,7 @@
       domainLabel: "Copilot",
       guidance: "The Copilot needs an active Gamma tab context before it can generate a research card.",
       placeholder: "Load the required Gamma context to use Copilot.",
-      result: null,
+      thread: null,
     };
   }
 
@@ -904,7 +904,7 @@
       contextLabel={copilotSurface.contextLabel}
       domainLabel={copilotSurface.domainLabel}
       guidance={copilotSurface.guidance}
-      result={copilotSurface.result}
+      thread={copilotSurface.thread}
       loading={$loading.copilot}
       placeholder={copilotSurface.placeholder}
       onGenerate={handleGenerateCopilot}

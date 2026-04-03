@@ -1,6 +1,7 @@
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  CopilotResearchCardResult,
   DiagnosticsResponse,
   IvSessionStatus,
   MacroDivergenceListResponse,
@@ -21,11 +22,14 @@ import type {
   SystemStatus
 } from "../api/types";
 import {
+  copilotCards,
+  copilotThreads,
   computeRisk,
   diagnostics,
   ivSession,
   ivSurface,
   lastError,
+  loadCopilotResearchCard,
   loadIvSession,
   loadMacroWorkspace,
   loadPortfolioSnapshot,
@@ -50,6 +54,8 @@ import {
   runResearch,
   setBaseCurrency,
   setMarketDataMode,
+  setMacroContext,
+  selectedPredictionMarketId,
   systemStatus
 } from "./app";
 
@@ -62,12 +68,15 @@ describe("app store orchestration", () => {
     portfolioHistory.set(null);
     portfolioPerformance.set(null);
     researchResult.set(null);
+    selectedPredictionMarketId.set(null);
     predictionMarketScreener.set(null);
     predictionMarketDetail.set(null);
     predictionMarketHistory.set(null);
     predictionMarketWallet.set(null);
     predictionMarketRelated.set(null);
     predictionMarketCalibration.set(null);
+    copilotCards.set(emptyCopilotCards());
+    copilotThreads.set(emptyCopilotThreads());
     riskResult.set(null);
     ivSurface.set(null);
     ivSession.set(null);
@@ -94,6 +103,7 @@ describe("app store orchestration", () => {
       macroHistory: false,
       prediction: false,
       predictionDetail: false,
+      copilot: false,
       risk: false,
       iv: false,
       ivSession: false
@@ -862,7 +872,73 @@ describe("app store orchestration", () => {
     expect(get(ivSurface)?.symbol).toBe("AAPL");
     expect(get(ivSurface)?.points).toBe(3);
   });
+
+  it("threads previous_response_id through follow-up copilot generations in the same macro context", async () => {
+    const firstResult = makeCopilotResult("macro", "resp_macro_1", "Macro Thread 1");
+    const secondResult = makeCopilotResult("macro", "resp_macro_2", "Macro Thread 2");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(firstResult))
+      .mockResolvedValueOnce(ok(secondResult));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCopilotResearchCard("macro", "Map the active macro setup.");
+    await loadCopilotResearchCard("macro", "Pressure-test the lead divergence.");
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}"));
+
+    expect(firstBody.previous_response_id).toBeUndefined();
+    expect(secondBody.previous_response_id).toBe("resp_macro_1");
+    expect(get(copilotThreads).macro.entries.map((entry) => entry.result.response_id)).toEqual([
+      "resp_macro_1",
+      "resp_macro_2"
+    ]);
+    expect(get(copilotThreads).macro.latestResponseId).toBe("resp_macro_2");
+  });
+
+  it("starts a fresh copilot thread when the macro grounding lens changes", async () => {
+    const firstResult = makeCopilotResult("macro", "resp_macro_1", "Macro Thread 1");
+    const secondResult = makeCopilotResult("macro", "resp_macro_2", "Macro Thread 2");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(firstResult))
+      .mockResolvedValueOnce(ok(secondResult));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCopilotResearchCard("macro", "Map the active macro setup.");
+    setMacroContext({ region: "EU" });
+    await loadCopilotResearchCard("macro", "Reframe the EU setup.");
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}"));
+    expect(secondBody.context.macro.region).toBe("EU");
+    expect(secondBody.previous_response_id).toBeUndefined();
+    expect(get(copilotThreads).macro.entries).toHaveLength(1);
+    expect(get(copilotThreads).macro.entries[0]?.result.response_id).toBe("resp_macro_2");
+  });
 });
+
+function emptyCopilotCards() {
+  return {
+    portfolio: null,
+    research: null,
+    macro: null,
+    prediction_markets: null,
+    risk: null,
+    iv: null
+  };
+}
+
+function emptyCopilotThreads() {
+  return {
+    portfolio: { domain: "portfolio" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    research: { domain: "research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    macro: { domain: "macro" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    prediction_markets: { domain: "prediction_markets" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    risk: { domain: "risk" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    iv: { domain: "iv" as const, contextFingerprint: null, latestResponseId: null, entries: [] }
+  };
+}
 
 function makeSnapshot(): PortfolioSnapshot {
   return {
@@ -1029,5 +1105,58 @@ function makePredictionMarket(marketId: string): PredictionMarket {
     retrieved_at: "2026-03-01T00:05:00Z",
     origin: "polymarket.seed",
     transformation_note: "Seed market."
+  };
+}
+
+function makeCopilotResult(
+  domain: "portfolio" | "research" | "macro" | "prediction_markets" | "risk" | "iv",
+  responseId: string,
+  title: string
+): CopilotResearchCardResult {
+  return {
+    domain,
+    current_tab: domain,
+    status: "ready",
+    provider: "mock",
+    model: "gamma-mock-research-card-v1",
+    response_id: responseId,
+    message: null,
+    card: {
+      title,
+      hypothesis: "Follow the strongest grounded thread.",
+      rationale: "This result is a test fixture.",
+      required_data: ["Current Gamma context"],
+      proposed_test: "Check whether continuation state is preserved.",
+      confounders: ["Fixture data"],
+      next_steps: ["Issue a follow-up prompt"],
+      caveats: ["Test fixture only."],
+      source_backed_claims: [
+        {
+          claim: "This card is sourced from a mocked response.",
+          evidence_refs: ["fixture.source"]
+        }
+      ],
+      inferred_claims: ["Thread handling is frontend stateful."]
+    },
+    sources: [
+      {
+        source_id: "fixture.source",
+        label: "Fixture Source",
+        kind: "fixture",
+        provider: "mock",
+        origin: "vitest",
+        description: "Static fixture source",
+        retrieved_at: "2026-03-01T00:00:00Z"
+      }
+    ],
+    tool_traces: [
+      {
+        tool_name: "fixture_tool",
+        summary: "Mock tool trace",
+        arguments: {},
+        source_ids: ["fixture.source"]
+      }
+    ],
+    warnings: []
   };
 }
