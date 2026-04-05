@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError
 
 from fastapi.testclient import TestClient
@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from src.api.main import create_app
 from src.application.macro_service import MacroService, MacroSnapshotRequest
 from src.application.runtime import build_runtime
-from src.models.macro import MacroEventRecord, MacroSeriesPoint
+from src.models.macro import MacroEventRecord, MacroLinkedPredictionMarket, MacroSeriesPoint
 from src.models.prediction_markets import PredictionMarketRecord, PredictionMarketScreenerResult
 from src.services.cache import CacheService
 from src.services.fred import FredObservation
@@ -480,6 +480,51 @@ def test_macro_service_builds_meeting_ladder_proxy(monkeypatch):
     assert [meeting.incremental_change_display for meeting in ladder.meetings] == ["-5 bps", "-5 bps", "-5 bps"]
     assert [meeting.cumulative_change_display for meeting in ladder.meetings] == ["-5 bps", "-10 bps", "-15 bps"]
     assert ladder.meetings[-1].implied_policy_rate_display == "4.35%"
+
+
+def test_macro_service_snapshot_normalizes_aware_prediction_market_timestamps(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+    histories = service._load_histories(service._snapshot_series_ids("US", "policy"), timeframe="3M", force_refresh=False)
+    events = service.get_events(region="US", force_refresh=False)
+    linked_markets = [
+        MacroLinkedPredictionMarket(
+            market_id="kalshi:fed-cut",
+            venue="kalshi",
+            title="Will the Fed cut rates by September?",
+            status="open",
+            category="Economy",
+            end_time=datetime(2026, 9, 30, 0, 0, 0),
+            current_probability=0.58,
+            probability_label="58%",
+            recent_price_change=-0.02,
+            change_display="-2.0 pts",
+            research_score=88.0,
+            macro_stance="policy-easier",
+            macro_alignment="aligned",
+            macro_alignment_summary="Fixture market aligned with the policy path proxy.",
+            source_provider="kalshi",
+            retrieved_at=datetime(2026, 3, 20, 12, 30, 0, tzinfo=timezone.utc),
+            origin="test.prediction_market",
+            transformation_note="Aware-timestamp fixture.",
+        )
+    ]
+
+    rates_policy = service._build_rates_policy(
+        region="US",
+        histories=histories,
+        comparison_histories={},
+        comparison_region=None,
+        events=events,
+        linked_markets=linked_markets,
+        timeframe="3M",
+        force_refresh=False,
+    )
+
+    assert rates_policy.retrieved_at == datetime(2026, 3, 20, 12, 30, 0)
+    assert rates_policy.expectation_metrics
+    assert rates_policy.expectation_metrics[0].retrieved_at == datetime(2026, 3, 20, 12, 30, 0)
 
 
 def test_macro_service_uses_frequency_aware_yoy_lag_for_quarterly_series(monkeypatch):

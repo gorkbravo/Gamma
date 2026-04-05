@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
@@ -743,14 +743,13 @@ class MacroService:
             timeframe=timeframe,
             force_refresh=request.force_refresh,
         )
-        retrieved_at = max(
-            [row.retrieved_at for row in histories.values() if row.retrieved_at is not None]
-            + [row.retrieved_at for row in comparison_histories.values() if row.retrieved_at is not None]
-            + [row.retrieved_at for row in events if row.retrieved_at is not None]
-            + [row.retrieved_at for row in event_studies if row.retrieved_at is not None]
-            + [row.retrieved_at for row in divergences if row.retrieved_at is not None]
-            + ([rates_policy.retrieved_at] if rates_policy.retrieved_at is not None else []),
-            default=now_utc(),
+        retrieved_at = _max_timestamp(
+            [row.retrieved_at for row in histories.values()]
+            + [row.retrieved_at for row in comparison_histories.values()]
+            + [row.retrieved_at for row in events]
+            + [row.retrieved_at for row in event_studies]
+            + [row.retrieved_at for row in divergences]
+            + [rates_policy.retrieved_at],
         )
         return MacroSnapshotPayload(
             region=region,
@@ -1022,10 +1021,8 @@ class MacroService:
                 coherence=coherence,
             ),
             source_provider=event.source_provider,
-            retrieved_at=max(
-                [event.retrieved_at] if event.retrieved_at is not None else []
-                + [row.retrieved_at for row in reactions if row.retrieved_at is not None],
-                default=now_utc(),
+            retrieved_at=_max_timestamp(
+                [event.retrieved_at] + [row.retrieved_at for row in reactions],
             ),
             origin="macro_service.event_studies",
             transformation_note="Event studies compare curated proxies across explicit pre-event and post-event observation windows, highlight the strongest confirming and opposing reactions, and attach a transparent first-pass lead-lag/coherence summary.",
@@ -1810,9 +1807,8 @@ class MacroService:
                     cumulative_change_bps=cumulative_bps,
                     cumulative_change_display=_format_delta(cumulative_bps, "bps"),
                     source_provider=policy_history.source_provider,
-                    retrieved_at=max(
-                        filter(None, [policy_history.retrieved_at, front_history.retrieved_at, event.retrieved_at]),
-                        default=now_utc(),
+                    retrieved_at=_max_timestamp(
+                        [policy_history.retrieved_at, front_history.retrieved_at, event.retrieved_at],
                     ),
                     origin="macro_service.policy_meeting_path",
                     transformation_note=note,
@@ -1889,10 +1885,9 @@ class MacroService:
                 alignment_label=alignment_label,
             ),
             source_provider=policy_history.source_provider,
-            retrieved_at=max(
-                [metric.retrieved_at for metric in metrics if metric.retrieved_at is not None]
-                + [meeting.retrieved_at for meeting in meetings if meeting.retrieved_at is not None],
-                default=now_utc(),
+            retrieved_at=_max_timestamp(
+                [metric.retrieved_at for metric in metrics]
+                + [meeting.retrieved_at for meeting in meetings],
             ),
             origin="macro_service.policy_meeting_path",
             transformation_note=note,
@@ -1918,7 +1913,7 @@ class MacroService:
     ) -> tuple[list[MacroMetricRecord], str | None, str | None]:
         if not linked_markets:
             return [], None, None
-        retrieved_at = max((market.retrieved_at for market in linked_markets if market.retrieved_at is not None), default=now_utc())
+        retrieved_at = _max_timestamp([market.retrieved_at for market in linked_markets])
         easier_contracts = [market for market in linked_markets if market.macro_stance == "policy-easier"]
         tighter_contracts = [market for market in linked_markets if market.macro_stance == "policy-tighter"]
         average_probability = (
@@ -2086,7 +2081,7 @@ class MacroService:
             front_label=path_config["front_label"],
             alignment_label=market_alignment_label,
         )
-        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, linked_markets=list(linked_markets), path_headline=path_headline, path_summary=path_summary, path_metrics=path_metrics, path_research_focus=path_research_focus, expectation_metrics=expectation_metrics, expectation_summary=expectation_summary, expectation_caveat=expectation_caveat, meeting_path=meeting_path, market_alignment_label=market_alignment_label, market_alignment_summary=market_alignment_summary, source_provider="treasury" if data_region == "US" else "fred", retrieved_at=max([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in real_yield_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in path_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in expectation_metrics if row.retrieved_at is not None] + [row.retrieved_at for row in visible_events if row.retrieved_at is not None] + ([meeting_path.retrieved_at] if meeting_path is not None and meeting_path.retrieved_at is not None else []), default=now_utc()), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, optional cross-region comparison overlays for matched concepts, linked prediction-market context, a front-end policy-path proxy, a transparent policy-expectation interpretation layer, and a meeting-ladder proxy derived from scheduled policy events.", comparison_region=comparison_region, comparison_summary=comparison_summary)
+        return MacroRatesPolicySummary(headline=headline, summary=summary, policy_metrics=policy_metrics, curve_nodes=curve_nodes, real_yield_metrics=real_yield_metrics, events=visible_events, linked_markets=list(linked_markets), path_headline=path_headline, path_summary=path_summary, path_metrics=path_metrics, path_research_focus=path_research_focus, expectation_metrics=expectation_metrics, expectation_summary=expectation_summary, expectation_caveat=expectation_caveat, meeting_path=meeting_path, market_alignment_label=market_alignment_label, market_alignment_summary=market_alignment_summary, source_provider="treasury" if data_region == "US" else "fred", retrieved_at=_max_timestamp([curve_retrieved_at] + [row.retrieved_at for row in policy_metrics] + [row.retrieved_at for row in real_yield_metrics] + [row.retrieved_at for row in path_metrics] + [row.retrieved_at for row in expectation_metrics] + [row.retrieved_at for row in visible_events] + ([meeting_path.retrieved_at] if meeting_path is not None else [])), origin="macro_service.rates_policy", transformation_note="Rates & Policy combines region-specific series histories, Treasury XML curve snapshots where available, optional cross-region comparison overlays for matched concepts, linked prediction-market context, a front-end policy-path proxy, a transparent policy-expectation interpretation layer, and a meeting-ladder proxy derived from scheduled policy events.", comparison_region=comparison_region, comparison_summary=comparison_summary)
 
     def _build_cross_asset(self, *, region: str, histories: dict[str, MacroSeriesHistory], comparison_histories: dict[str, MacroSeriesHistory], comparison_region: str | None, divergences: list[MacroDivergenceRecord], linked_markets: dict[str, list[MacroLinkedPredictionMarket]], timeframe: str) -> list[MacroThemeComparison]:
         data_region = self._data_region(region)
@@ -2738,6 +2733,24 @@ def _earliest_point_at_or_after(points: list[MacroSeriesPoint], anchor: datetime
             return point
         break
     return None
+
+
+def _utc_naive_timestamp(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _max_timestamp(values: list[datetime | None], *, default: datetime | None = None) -> datetime:
+    normalized = [
+        normalized_value
+        for value in values
+        if (normalized_value := _utc_naive_timestamp(value)) is not None
+    ]
+    fallback = _utc_naive_timestamp(default) or now_utc()
+    return max(normalized, default=fallback)
 
 
 def _format_metric(value: float | None, unit: str | None) -> str:
