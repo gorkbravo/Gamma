@@ -1,5 +1,6 @@
 import { get, writable } from "svelte/store";
 import { getJson, postJson } from "../api/client";
+import { normalizeCopilotResearchCardResult } from "../copilot-result";
 import type {
   ActionResponse,
   BaseCurrencyResponse,
@@ -421,9 +422,13 @@ function buildCopilotThreadEntry(
   previousResponseId: string | null,
   turnIndex: number
 ): CopilotThreadEntry {
+  const stableResponseId =
+    typeof result.response_id === "string" && result.response_id.trim().length > 0
+      ? result.response_id
+      : null;
   return {
     entryId:
-      result.response_id ??
+      stableResponseId ??
       `${domain}-${turnIndex}-${Date.now().toString(36)}`,
     turnIndex,
     prompt: prompt.trim(),
@@ -1195,7 +1200,8 @@ export async function loadCopilotResearchCard(
       ...(synthesis ? { synthesis } : {})
     };
 
-    const result = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
+    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
+    const result = normalizeCopilotResearchCardResult(domain, rawResult);
     copilotCards.update((current) => ({ ...current, [domain]: result }));
     const baseThread =
       continuingThread

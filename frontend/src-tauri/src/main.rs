@@ -322,8 +322,15 @@ fn spawn_backend(launch: &BackendLaunch, api_port: u16) -> Result<Child, String>
         "IB_PORT",
         "IB_CLIENT_ID",
         "IB_ACCOUNT",
+        "OPENAI_API_KEY",
     ] {
         if let Ok(value) = env::var(key) {
+            command.env(key, value);
+        }
+    }
+
+    for (key, value) in env::vars() {
+        if key.starts_with("GAMMA_COPILOT_") {
             command.env(key, value);
         }
     }
