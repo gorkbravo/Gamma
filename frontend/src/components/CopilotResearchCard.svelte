@@ -1,25 +1,44 @@
 <script lang="ts">
   import type {
+    CopilotBaseDomain,
     CopilotResearchCardResult,
     CopilotThreadEntry,
     CopilotThreadState
   } from "../lib/api/types";
 
+  type CopilotDrawerMode = "active_tab" | "synthesis";
+  type CopilotGroundingScopeOption = {
+    domain: CopilotBaseDomain;
+    label: string;
+    contextLabel: string;
+    fingerprintLabel: string;
+    freshnessLabel: string | null;
+    warningLabel: string | null;
+  };
+
   export let open = false;
   export let available = false;
+  export let mode: CopilotDrawerMode = "active_tab";
   export let contextLabel = "Macro";
   export let domainLabel = "Copilot";
   export let guidance = "Grounded in the current Gamma context.";
   export let thread: CopilotThreadState | null = null;
   export let loading = false;
   export let placeholder = "Optional angle or research question...";
+  export let scopeOptions: CopilotGroundingScopeOption[] = [];
+  export let selectedScopeDomains: CopilotBaseDomain[] = [];
+  export let selectionMessage: string | null = null;
   export let onClose: () => void = () => {};
+  export let onSetMode: (mode: CopilotDrawerMode) => void = () => {};
+  export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
   export let onGenerate: (prompt?: string) => Promise<unknown> | void;
 
   let promptText = "";
   let threadEntries: CopilotThreadEntry[] = [];
   let latestEntry: CopilotThreadEntry | null = null;
   let hasThread = false;
+  let selectedScopeOptions: CopilotGroundingScopeOption[] = [];
+  let isSynthesisMode = false;
   let composerHint = "";
   let composerPlaceholder = "";
   let composerButtonLabel = "Generate";
@@ -57,17 +76,29 @@
     return entry.prompt || "Used the active Gamma context without an extra prompt.";
   }
 
+  function cardLabelFor(entry: CopilotThreadEntry) {
+    return entry.result.domain === "synthesis" ? "Research Synthesis" : "Research Card";
+  }
+
   $: threadEntries = [...(thread?.entries ?? [])].reverse();
   $: latestEntry = threadEntries[0] ?? null;
   $: hasThread = threadEntries.length > 0;
+  $: isSynthesisMode = mode === "synthesis";
+  $: selectedScopeOptions = scopeOptions.filter((option) => selectedScopeDomains.includes(option.domain));
   $: composerHint = !available
     ? ""
     : hasThread
-      ? "Ctrl+Enter to follow up in this domain thread"
-      : "Ctrl+Enter to start a research thread";
+      ? isSynthesisMode
+        ? "Ctrl+Enter to follow up in this synthesis thread"
+        : "Ctrl+Enter to follow up in this domain thread"
+      : isSynthesisMode
+        ? "Ctrl+Enter to start a synthesis thread"
+        : "Ctrl+Enter to start a research thread";
   $: composerPlaceholder = available
     ? hasThread
-      ? "Ask a follow-up grounded in this thread..."
+      ? isSynthesisMode
+        ? "Ask a follow-up grounded in this synthesis scope..."
+        : "Ask a follow-up grounded in this thread..."
       : placeholder
     : guidance;
   $: composerButtonLabel = loading ? "Generating..." : hasThread ? "Follow Up" : "Generate";
@@ -94,7 +125,66 @@
     </button>
   </header>
 
+  <section class="mode-bar">
+    <button
+      class="mode-btn"
+      class:active={mode === "active_tab"}
+      type="button"
+      on:click={() => onSetMode("active_tab")}
+    >
+      Active Tab
+    </button>
+    <button
+      class="mode-btn"
+      class:active={mode === "synthesis"}
+      type="button"
+      on:click={() => onSetMode("synthesis")}
+    >
+      Synthesis
+    </button>
+  </section>
+
   <div class="drawer-body">
+    {#if isSynthesisMode}
+      <section class="scope-panel">
+        <div class="scope-copy">
+          <span class="section-label">Grounding Scope</span>
+          <p>{selectionMessage ?? "Select the loaded Gamma contexts to include in this synthesis."}</p>
+        </div>
+
+        {#if scopeOptions.length}
+          <div class="scope-grid">
+            {#each scopeOptions as option (option.domain)}
+              <button
+                class="scope-option"
+                class:selected={selectedScopeDomains.includes(option.domain)}
+                type="button"
+                on:click={() => onToggleScope(option.domain)}
+              >
+                <div class="scope-head">
+                  <strong>{option.label}</strong>
+                  <small>{option.fingerprintLabel}</small>
+                </div>
+                <p>{option.contextLabel}</p>
+                <div class="scope-meta">
+                  {#if option.freshnessLabel}
+                    <small>{option.freshnessLabel}</small>
+                  {/if}
+                  {#if option.warningLabel}
+                    <small>{option.warningLabel}</small>
+                  {/if}
+                </div>
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <section class="message-card neutral">
+            <p>Load at least two Gamma contexts in the workspace before starting a synthesis thread.</p>
+          </section>
+        {/if}
+      </section>
+    {/if}
+
     <div class="thread">
       {#if !available}
         <section class="message-card neutral">
@@ -102,8 +192,14 @@
         </section>
       {:else if !hasThread}
         <section class="message-card neutral">
-          <span>Fresh Thread</span>
-          <p>Generate a research card from the current context. Follow-up prompts stay inside this tab until the grounding context changes.</p>
+          <span>{isSynthesisMode ? "Fresh Synthesis" : "Fresh Thread"}</span>
+          <p>
+            {#if isSynthesisMode}
+              Generate a synthesis card from the selected Gamma contexts. Follow-up prompts stay inside this scope until the grounding set changes.
+            {:else}
+              Generate a research card from the current context. Follow-up prompts stay inside this tab until the grounding context changes.
+            {/if}
+          </p>
         </section>
       {:else}
         <section class="thread-summary">
@@ -135,14 +231,14 @@
               </section>
             {/if}
 
-            {#if entry.result.card}
-              <article class="assistant-card">
-                <div class="assistant-header">
-                  <div>
-                    <span class="section-label">Research Card</span>
-                    <h3>{entry.result.card.title}</h3>
+              {#if entry.result.card}
+                <article class="assistant-card">
+                  <div class="assistant-header">
+                    <div>
+                      <span class="section-label">{cardLabelFor(entry)}</span>
+                      <h3>{entry.result.card.title}</h3>
+                    </div>
                   </div>
-                </div>
 
                 <div class="hero-block">
                   <span class="section-label">Hypothesis</span>
@@ -292,7 +388,8 @@
   .summary-grid,
   .list-grid,
   .claims-grid,
-  .meta-block {
+  .meta-block,
+  .scope-panel {
     display: grid;
     gap: 0.85rem;
   }
@@ -332,6 +429,7 @@
   }
 
   .drawer-header,
+  .mode-bar,
   .composer {
     padding: 1rem 1rem 0.95rem;
     background: rgba(8, 13, 18, 0.98);
@@ -341,6 +439,15 @@
     display: flex;
     justify-content: space-between;
     gap: 0.9rem;
+    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
+  }
+
+  .mode-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+    padding-top: 0.7rem;
+    padding-bottom: 0.7rem;
     border-bottom: 1px solid rgba(46, 60, 74, 0.52);
   }
 
@@ -377,6 +484,7 @@
   .note-card,
   .message-card,
   .assistant-card,
+  .scope-option,
   .section-block,
   .list-block,
   .claim-block,
@@ -388,7 +496,8 @@
 
   .thread-summary,
   .assistant-card,
-  .meta-block {
+  .meta-block,
+  .scope-panel {
     display: grid;
     gap: 0.65rem;
   }
@@ -400,7 +509,8 @@
 
   .summary-copy,
   .claim-row,
-  .meta-row {
+  .meta-row,
+  .scope-copy {
     display: grid;
     gap: 0.25rem;
   }
@@ -448,6 +558,7 @@
   .thread-summary small,
   .message-card p,
   .note-card p,
+  .scope-copy p,
   .section-block p,
   .list-block p,
   .claim-block p,
@@ -485,8 +596,46 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .scope-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
   .list-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .scope-option {
+    display: grid;
+    gap: 0.45rem;
+    text-align: left;
+    cursor: pointer;
+    background: rgba(8, 13, 18, 0.68);
+  }
+
+  .scope-option.selected {
+    border-color: rgba(122, 166, 200, 0.42);
+    background: rgba(122, 166, 200, 0.08);
+  }
+
+  .scope-head,
+  .scope-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .scope-head strong {
+    color: var(--text-0);
+    font-size: 0.82rem;
+  }
+
+  .scope-head small,
+  .scope-meta small,
+  .scope-option p {
+    color: var(--text-2);
   }
 
   h2,
@@ -516,6 +665,21 @@
     min-height: 3.2rem;
     padding: 0.55rem 0.7rem;
     font-size: 0.82rem;
+  }
+
+  .mode-btn {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+    background: rgba(8, 13, 18, 0.82);
+  }
+
+  .mode-btn.active {
+    color: var(--accent);
+    border-color: rgba(122, 166, 200, 0.38);
+    background: rgba(122, 166, 200, 0.08);
   }
 
   button {
@@ -577,14 +741,17 @@
 
     .summary-grid,
     .list-grid,
-    .claims-grid {
+    .claims-grid,
+    .scope-grid {
       grid-template-columns: 1fr;
     }
 
     .title-row,
     .assistant-header,
     .turn-head,
-    .composer-footer {
+    .composer-footer,
+    .scope-head,
+    .scope-meta {
       align-items: flex-start;
       flex-direction: column;
     }

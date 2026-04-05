@@ -916,6 +916,109 @@ describe("app store orchestration", () => {
     expect(get(copilotThreads).macro.entries).toHaveLength(1);
     expect(get(copilotThreads).macro.entries[0]?.result.response_id).toBe("resp_macro_2");
   });
+
+  it("threads previous_response_id through synthesis follow-ups when the grounding scope is unchanged", async () => {
+    const snapshot = makeSnapshot();
+    portfolioSnapshot.set(snapshot);
+    portfolioHistory.set({
+      source: "local_history_store",
+      points: [
+        {
+          timestamp: "2026-03-01T00:00:00Z",
+          portfolio_value: 110,
+          net_liquidation: 110,
+          market_value: 110,
+          cash: 0,
+          base_currency: "USD"
+        }
+      ]
+    });
+    portfolioPerformance.set({
+      benchmark_symbol: "SPY",
+      benchmark_source: "history_SPY",
+      performance_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 1 }],
+      benchmark_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 1 }],
+      portfolio_base_value: 110,
+      missing_symbols: [],
+      day_pnl: 1,
+      day_pnl_pct: 0.01,
+      day_pnl_source: "account_summary",
+      message: null,
+      warnings: []
+    });
+    macroSnapshot.set(makeMacroSnapshot());
+
+    const firstResult = makeCopilotResult("synthesis", "resp_synthesis_1", "Synthesis Thread 1");
+    const secondResult = makeCopilotResult("synthesis", "resp_synthesis_2", "Synthesis Thread 2");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(firstResult))
+      .mockResolvedValueOnce(ok(secondResult));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCopilotResearchCard("synthesis", "Connect the loaded portfolio and macro context.", {
+      workspaceMode: "research",
+      synthesisDomains: ["portfolio", "macro"],
+      activeTabId: "macro"
+    });
+    await loadCopilotResearchCard("synthesis", "Pressure-test the cross-context disagreement.", {
+      workspaceMode: "research",
+      synthesisDomains: ["portfolio", "macro"],
+      activeTabId: "macro"
+    });
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}"));
+
+    expect(firstBody.context.current_tab).toBe("synthesis");
+    expect(firstBody.synthesis.active_tab).toBe("macro");
+    expect(firstBody.synthesis.included_scopes.map((item: { domain: string }) => item.domain)).toEqual([
+      "portfolio",
+      "macro"
+    ]);
+    expect(firstBody.previous_response_id).toBeUndefined();
+    expect(secondBody.previous_response_id).toBe("resp_synthesis_1");
+    expect(get(copilotThreads).synthesis.entries.map((entry) => entry.result.response_id)).toEqual([
+      "resp_synthesis_1",
+      "resp_synthesis_2"
+    ]);
+    expect(get(copilotThreads).synthesis.latestResponseId).toBe("resp_synthesis_2");
+  });
+
+  it("starts a fresh synthesis thread when the selected grounding scope changes materially", async () => {
+    const snapshot = makeSnapshot();
+    portfolioSnapshot.set(snapshot);
+    researchResult.set(makeResearchResult("single_ticker", snapshot));
+    macroSnapshot.set(makeMacroSnapshot());
+
+    const firstResult = makeCopilotResult("synthesis", "resp_synthesis_1", "Synthesis Thread 1");
+    const secondResult = makeCopilotResult("synthesis", "resp_synthesis_2", "Synthesis Thread 2");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(firstResult))
+      .mockResolvedValueOnce(ok(secondResult));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCopilotResearchCard("synthesis", "Connect the loaded portfolio and macro context.", {
+      workspaceMode: "research",
+      synthesisDomains: ["portfolio", "macro"],
+      activeTabId: "macro"
+    });
+    await loadCopilotResearchCard("synthesis", "Reframe the scope around portfolio and research instead.", {
+      workspaceMode: "research",
+      synthesisDomains: ["portfolio", "research"],
+      activeTabId: "research"
+    });
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}"));
+    expect(secondBody.synthesis.included_scopes.map((item: { domain: string }) => item.domain)).toEqual([
+      "portfolio",
+      "research"
+    ]);
+    expect(secondBody.previous_response_id).toBeUndefined();
+    expect(get(copilotThreads).synthesis.entries).toHaveLength(1);
+    expect(get(copilotThreads).synthesis.entries[0]?.result.response_id).toBe("resp_synthesis_2");
+  });
 });
 
 function emptyCopilotCards() {
@@ -925,7 +1028,8 @@ function emptyCopilotCards() {
     macro: null,
     prediction_markets: null,
     risk: null,
-    iv: null
+    iv: null,
+    synthesis: null
   };
 }
 
@@ -936,7 +1040,8 @@ function emptyCopilotThreads() {
     macro: { domain: "macro" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     prediction_markets: { domain: "prediction_markets" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     risk: { domain: "risk" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
-    iv: { domain: "iv" as const, contextFingerprint: null, latestResponseId: null, entries: [] }
+    iv: { domain: "iv" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    synthesis: { domain: "synthesis" as const, contextFingerprint: null, latestResponseId: null, entries: [] }
   };
 }
 
@@ -1109,7 +1214,14 @@ function makePredictionMarket(marketId: string): PredictionMarket {
 }
 
 function makeCopilotResult(
-  domain: "portfolio" | "research" | "macro" | "prediction_markets" | "risk" | "iv",
+  domain:
+    | "portfolio"
+    | "research"
+    | "macro"
+    | "prediction_markets"
+    | "risk"
+    | "iv"
+    | "synthesis",
   responseId: string,
   title: string
 ): CopilotResearchCardResult {
@@ -1158,5 +1270,29 @@ function makeCopilotResult(
       }
     ],
     warnings: []
+  };
+}
+
+function makeMacroSnapshot(): MacroSnapshot {
+  return {
+    region: "US",
+    timeframe: "3M",
+    theme: "all",
+    comparison_region: null,
+    available_regions: ["US", "EU", "Global"],
+    available_timeframes: ["1M", "3M", "6M", "1Y"],
+    available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],
+    focus_items: [],
+    snapshot_cards: [],
+    rates_policy: null,
+    cross_asset: [],
+    top_divergences: [],
+    event_studies: [],
+    upcoming_events: [],
+    warnings: [],
+    source_provider: "mock",
+    retrieved_at: "2026-03-01T00:00:00Z",
+    origin: "vitest",
+    transformation_note: null
   };
 }

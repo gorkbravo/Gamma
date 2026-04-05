@@ -301,7 +301,8 @@ def _build_copilot_provider():
             message="Gamma Copilot is unavailable until OPENAI_API_KEY is configured."
         )
 
-    store_flag = (os.getenv("GAMMA_COPILOT_STORE_RESPONSES", "false") or "false").strip().lower() in {
+    # Stored responses are required for previous_response_id-based continuation.
+    store_flag = (os.getenv("GAMMA_COPILOT_STORE_RESPONSES", "true") or "true").strip().lower() in {
         "1",
         "true",
         "yes",

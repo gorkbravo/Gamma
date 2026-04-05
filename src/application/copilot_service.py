@@ -17,6 +17,7 @@ from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.prediction_market_service import PredictionMarketService
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
     CopilotSourceRef,
@@ -65,6 +66,7 @@ class CopilotService:
             "prediction_markets": self._build_prediction_market_context,
             "risk": self._build_risk_context,
             "iv": self._build_iv_context,
+            "synthesis": self._build_synthesis_context,
         }
         self._tools = {
             definition.name: definition
@@ -222,6 +224,35 @@ class CopilotService:
                     },
                     handler=self._tool_get_iv_session_status,
                 ),
+                _CopilotToolDefinition(
+                    name="get_synthesis_scope_summary",
+                    description="Return the active cross-context Gamma synthesis scope, including included domains, context fingerprints, warnings, and source references.",
+                    domains=("synthesis",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_synthesis_scope_summary,
+                ),
+                _CopilotToolDefinition(
+                    name="get_synthesis_domain_context",
+                    description="Return a read-only detailed context package for one included Gamma domain inside the active synthesis scope.",
+                    domains=("synthesis",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "domain": {
+                                "type": "string",
+                                "description": "Included Gamma domain id, e.g. macro, prediction_markets, research, risk, portfolio, or iv.",
+                            }
+                        },
+                        "required": ["domain"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_synthesis_domain_context,
+                ),
             )
         }
 
@@ -298,6 +329,92 @@ class CopilotService:
         if requested_domain in self._context_builders:
             return requested_domain
         return current_tab or requested_domain
+
+    def _build_context_for_domain(
+        self,
+        domain: str,
+        context: CopilotRequestContext,
+    ) -> CopilotContextBundle:
+        if domain == "synthesis":
+            raise ValueError("Nested synthesis scopes are not supported.")
+        builder = self._context_builders.get(domain)
+        if builder is None:
+            raise ValueError(f"Unsupported synthesis domain: {domain}")
+        nested_context = context
+        if not str(nested_context.current_tab or "").strip():
+            nested_context = replace(nested_context, current_tab=domain)
+        nested_request = CopilotResearchCardRequest(
+            domain=domain,
+            context=nested_context,
+        )
+        return builder(nested_request)
+
+    def _build_synthesis_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        synthesis = request.synthesis
+        if synthesis is None:
+            raise ValueError("Copilot synthesis requires an explicit synthesis scope.")
+
+        included_contexts: list[dict[str, Any]] = []
+        included_bundles: dict[str, CopilotContextBundle] = {}
+        sources: dict[str, CopilotSourceRef] = {
+            "synthesis.scope": CopilotSourceRef(
+                source_id="synthesis.scope",
+                label="Cross-context synthesis scope",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.copilot.synthesis",
+                description="Shell-level Gamma synthesis scope assembled from included loaded contexts.",
+                retrieved_at=None,
+            )
+        }
+        warnings: list[str] = []
+
+        for scope in synthesis.included_scopes:
+            domain = str(scope.domain or "").strip()
+            if not domain:
+                continue
+            if domain in included_bundles:
+                continue
+            bundle = self._build_context_for_domain(domain, scope.context)
+            included_bundles[domain] = bundle
+            for source in bundle.sources:
+                sources[source.source_id] = source
+            warnings.extend(bundle.warnings)
+            included_contexts.append(
+                {
+                    "domain": domain,
+                    "label": scope.label or domain.replace("_", " ").title(),
+                    "context_fingerprint": scope.context_fingerprint,
+                    "current_tab": bundle.current_tab,
+                    "summary": bundle.summary_data,
+                    "source_ids": [source.source_id for source in bundle.sources],
+                    "source_count": len(bundle.sources),
+                    "warnings": list(bundle.warnings),
+                    "warning_count": len(bundle.warnings),
+                }
+            )
+
+        if len(included_contexts) < 2:
+            raise ValueError("Copilot synthesis requires at least two distinct loaded Gamma contexts.")
+
+        return CopilotContextBundle(
+            domain="synthesis",
+            current_tab=request.context.current_tab or "synthesis",
+            summary_data={
+                "workspace_mode": request.context.workspace_mode,
+                "active_tab": synthesis.active_tab,
+                "scope_size": len(included_contexts),
+                "included_domains": [item["domain"] for item in included_contexts],
+                "included_contexts": included_contexts,
+            },
+            tool_state={
+                "included_bundles": included_bundles,
+                "included_contexts": included_contexts,
+                "active_tab": synthesis.active_tab,
+            },
+            sources=list(sources.values()),
+            warnings=dedupe_warnings(warnings),
+        )
 
     def _build_portfolio_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
         state = request.context.portfolio_state or {}
@@ -1270,6 +1387,129 @@ class CopilotService:
             ),
             sources=[source],
         )
+
+    def _tool_get_synthesis_scope_summary(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        source = CopilotSourceRef(
+            source_id="synthesis.scope.drilldown",
+            label="Synthesis scope drilldown",
+            kind="workspace",
+            provider="gamma",
+            origin="gamma.copilot.synthesis",
+            description="Expanded included-domain scope for the active Gamma cross-context synthesis.",
+            retrieved_at=None,
+        )
+        output = {
+            "active_tab": context.summary_data.get("active_tab"),
+            "scope_size": context.summary_data.get("scope_size"),
+            "included_domains": list(context.summary_data.get("included_domains", []) or []),
+            "included_contexts": list(context.summary_data.get("included_contexts", []) or []),
+            "warnings": list(context.warnings),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_synthesis_scope_summary",
+                summary="Expanded the current Gamma cross-context synthesis scope into included domains, fingerprints, warnings, and source references.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_synthesis_domain_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        domain = str(arguments.get("domain") or "").strip()
+        if not domain:
+            raise ValueError("domain is required.")
+
+        included_bundles = self._synthesis_bundles_from_bundle(context)
+        bundle = included_bundles.get(domain)
+        if bundle is None:
+            raise ValueError(f"Synthesis scope does not include domain: {domain}")
+
+        drilldown: dict[str, Any] = {}
+        sources: dict[str, CopilotSourceRef] = {
+            source.source_id: source
+            for source in bundle.sources
+        }
+        source_ids = [source.source_id for source in bundle.sources]
+
+        for tool_name in self._synthesis_drilldown_tools_for_domain(domain):
+            execution = self._execute_tool(tool_name, {}, bundle)
+            drilldown[tool_name] = execution.output
+            for source in execution.sources:
+                sources[source.source_id] = source
+            for source_id in execution.trace.source_ids:
+                if source_id not in source_ids:
+                    source_ids.append(source_id)
+
+        domain_source = CopilotSourceRef(
+            source_id=f"synthesis.domain.{domain}.drilldown",
+            label=f"{domain.replace('_', ' ').title()} synthesis drilldown",
+            kind="workspace",
+            provider="gamma",
+            origin="gamma.copilot.synthesis",
+            description="Expanded one included Gamma domain inside the active synthesis scope.",
+            retrieved_at=None,
+        )
+        sources[domain_source.source_id] = domain_source
+        source_ids.append(domain_source.source_id)
+
+        return CopilotToolExecution(
+            output={
+                "domain": domain,
+                "summary": bundle.summary_data,
+                "drilldown": drilldown,
+                "warnings": list(bundle.warnings),
+                "source_ids": [source.source_id for source in sources.values()],
+            },
+            trace=CopilotToolTrace(
+                tool_name="get_synthesis_domain_context",
+                summary=f"Expanded the included `{domain}` Gamma context inside the current synthesis scope.",
+                arguments={"domain": domain},
+                source_ids=source_ids,
+            ),
+            sources=list(sources.values()),
+        )
+
+    @staticmethod
+    def _synthesis_bundles_from_bundle(context: CopilotContextBundle) -> dict[str, CopilotContextBundle]:
+        bundles = context.tool_state.get("included_bundles")
+        return bundles if isinstance(bundles, dict) else {}
+
+    @staticmethod
+    def _synthesis_drilldown_tools_for_domain(domain: str) -> tuple[str, ...]:
+        return {
+            "portfolio": (
+                "get_portfolio_positions_summary",
+                "get_portfolio_performance_context",
+            ),
+            "research": (
+                "get_research_scope_summary",
+                "get_research_coverage_context",
+            ),
+            "macro": ("get_macro_workspace_drilldown",),
+            "prediction_markets": (
+                "get_prediction_market_history_summary",
+                "get_prediction_market_flow_context",
+            ),
+            "risk": (
+                "get_risk_coverage_summary",
+                "get_risk_contribution_summary",
+            ),
+            "iv": (
+                "get_iv_surface_context",
+                "get_iv_session_status",
+            ),
+        }.get(domain, ())
 
     @staticmethod
     def _portfolio_snapshot_from_bundle(context: CopilotContextBundle) -> dict[str, Any]:

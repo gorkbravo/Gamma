@@ -3,6 +3,7 @@ import { getJson, postJson } from "../api/client";
 import type {
   ActionResponse,
   BaseCurrencyResponse,
+  CopilotBaseDomain,
   CopilotDomain,
   CopilotResearchCardResult,
   CopilotThreadEntry,
@@ -116,7 +117,8 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
     macro: createEmptyCopilotThread("macro"),
     prediction_markets: createEmptyCopilotThread("prediction_markets"),
     risk: createEmptyCopilotThread("risk"),
-    iv: createEmptyCopilotThread("iv")
+    iv: createEmptyCopilotThread("iv"),
+    synthesis: createEmptyCopilotThread("synthesis")
   };
 }
 
@@ -152,7 +154,8 @@ export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardRe
   macro: null,
   prediction_markets: null,
   risk: null,
-  iv: null
+  iv: null,
+  synthesis: null
 });
 export const copilotThreads = writable<Record<CopilotDomain, CopilotThreadState>>(createEmptyCopilotThreads());
 export const researchDraft = writable<ResearchDraftState>({
@@ -289,10 +292,33 @@ function serializePositionSignature(snapshot: PortfolioSnapshot | null | undefin
   }));
 }
 
+const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
+  portfolio: "Portfolio",
+  research: "Research",
+  macro: "Macro",
+  prediction_markets: "Prediction Markets",
+  risk: "Risk",
+  iv: "IV"
+};
+
 function buildCopilotContextFingerprint(
   domain: CopilotDomain,
-  workspaceMode: WorkspaceMode | null | undefined
+  workspaceMode: WorkspaceMode | null | undefined,
+  options: { synthesisDomains?: CopilotBaseDomain[]; activeTabId?: TabId } = {}
 ) {
+  if (domain === "synthesis") {
+    const includedDomains = normalizeSynthesisDomains(options.synthesisDomains);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      activeTab: options.activeTabId ?? get(activeTab),
+      includedContexts: includedDomains.map((includedDomain) => ({
+        domain: includedDomain,
+        fingerprint: buildCopilotContextFingerprint(includedDomain, workspaceMode)
+      }))
+    });
+  }
+
   if (domain === "portfolio") {
     const snapshot = get(portfolioSnapshot);
     const performance = get(portfolioPerformance);
@@ -368,6 +394,23 @@ function buildCopilotContextFingerprint(
     expiries: surface?.expiries ?? [],
     strikeCount: surface?.strikes.length ?? 0,
     marketDataMode: session?.market_data_mode ?? null
+  });
+}
+
+export function previewCopilotContextFingerprint(
+  domain: CopilotBaseDomain,
+  options: { workspaceMode?: WorkspaceMode | null } = {}
+) {
+  return buildCopilotContextFingerprint(domain, options.workspaceMode);
+}
+
+export function previewCopilotThreadFingerprint(
+  domain: CopilotDomain,
+  options: CopilotLoadOptions = {}
+) {
+  return buildCopilotContextFingerprint(domain, options.workspaceMode, {
+    synthesisDomains: options.synthesisDomains,
+    activeTabId: options.activeTabId
   });
 }
 
@@ -923,6 +966,25 @@ function getCopilotSessionId() {
   return nextId;
 }
 
+type CopilotLoadOptions = {
+  workspaceMode?: WorkspaceMode | null;
+  synthesisDomains?: CopilotBaseDomain[];
+  activeTabId?: TabId;
+};
+
+function normalizeSynthesisDomains(domains: CopilotBaseDomain[] | undefined) {
+  const seen = new Set<CopilotBaseDomain>();
+  const ordered: CopilotBaseDomain[] = [];
+  for (const domain of domains ?? []) {
+    if (seen.has(domain)) {
+      continue;
+    }
+    seen.add(domain);
+    ordered.push(domain);
+  }
+  return ordered;
+}
+
 function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode | null | undefined) {
   switch (domain) {
     case "portfolio":
@@ -979,10 +1041,87 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
           session: get(ivSession)
         }
       };
+    case "synthesis":
+      return {
+        current_tab: "synthesis",
+        workspace_mode: workspaceMode
+      };
   }
 }
 
-function validateCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode | null | undefined) {
+function buildCopilotSynthesisPayload(
+  domains: CopilotBaseDomain[] | undefined,
+  workspaceMode: WorkspaceMode | null | undefined,
+  activeTabId: TabId | undefined
+) {
+  const includedScopes = normalizeSynthesisDomains(domains)
+    .map((domain) => {
+      const context = buildCopilotContext(domain, workspaceMode);
+      if (!context) {
+        return null;
+      }
+      return {
+        domain,
+        label: COPILOT_DOMAIN_LABELS[domain],
+        context_fingerprint: buildCopilotContextFingerprint(domain, workspaceMode),
+        context
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item != null);
+
+  if (!includedScopes.length) {
+    return null;
+  }
+
+  return {
+    active_tab: activeTabId ?? get(activeTab),
+    included_scopes: includedScopes
+  };
+}
+
+function validateSynthesisScopeDomain(
+  domain: CopilotBaseDomain,
+  workspaceMode: WorkspaceMode | null | undefined
+) {
+  if (domain === "portfolio" && !get(portfolioSnapshot)) {
+    return "Load the Portfolio context before including it in a synthesis card.";
+  }
+  if (domain === "research" && !get(researchResult)) {
+    return "Run a Research analysis before including it in a synthesis card.";
+  }
+  if (domain === "macro" && !get(macroSnapshot)) {
+    return "Load the Macro workspace before including it in a synthesis card.";
+  }
+  if (domain === "prediction_markets" && !get(predictionMarketDetail)) {
+    return "Select and load a Prediction Markets contract before including it in a synthesis card.";
+  }
+  if (domain === "risk" && !get(riskResult)) {
+    return "Run a Risk computation before including it in a synthesis card.";
+  }
+  if (domain === "iv" && !hasRenderableIvSurface(resolvedIvSurface())) {
+    return "Load an IV surface before including it in a synthesis card.";
+  }
+  const context = buildCopilotContext(domain, workspaceMode);
+  return context ? null : `The ${COPILOT_DOMAIN_LABELS[domain]} context is unavailable.`;
+}
+
+function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptions = {}) {
+  if (domain === "synthesis") {
+    const synthesisDomains = normalizeSynthesisDomains(options.synthesisDomains);
+    if (synthesisDomains.length < 2) {
+      return "Select at least two loaded Gamma contexts before generating a synthesis card.";
+    }
+    for (const synthesisDomain of synthesisDomains) {
+      const validationError = validateSynthesisScopeDomain(synthesisDomain, options.workspaceMode);
+      if (validationError) {
+        return validationError;
+      }
+    }
+    return buildCopilotSynthesisPayload(synthesisDomains, options.workspaceMode, options.activeTabId)
+      ? null
+      : "The active synthesis scope is unavailable.";
+  }
+
   if (domain === "portfolio" && !get(portfolioSnapshot)) {
     return "Load a portfolio snapshot before generating a research card.";
   }
@@ -999,7 +1138,7 @@ function validateCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceM
     return "Load an IV surface before generating a research card.";
   }
   if (domain === "portfolio" || domain === "research" || domain === "risk" || domain === "iv") {
-    const context = buildCopilotContext(domain, workspaceMode);
+    const context = buildCopilotContext(domain, options.workspaceMode);
     return context ? null : "The active Copilot context is unavailable.";
   }
   return null;
@@ -1008,11 +1147,11 @@ function validateCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceM
 export async function loadCopilotResearchCard(
   domain: CopilotDomain,
   prompt = "",
-  options: { workspaceMode?: WorkspaceMode | null } = {}
+  options: CopilotLoadOptions = {}
 ) {
   setLoading("copilot", true);
   try {
-    const validationError = validateCopilotContext(domain, options.workspaceMode);
+    const validationError = validateCopilotContext(domain, options);
     if (validationError) {
       lastError.set(validationError);
       return null;
@@ -1023,7 +1162,19 @@ export async function loadCopilotResearchCard(
       return null;
     }
 
-    const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode);
+    const synthesis =
+      domain === "synthesis"
+        ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
+        : null;
+    if (domain === "synthesis" && !synthesis) {
+      lastError.set("The active synthesis scope is unavailable.");
+      return null;
+    }
+
+    const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
+      synthesisDomains: options.synthesisDomains,
+      activeTabId: options.activeTabId
+    });
     const activeThread = get(copilotThreads)[domain];
     const continuingThread =
       activeThread.contextFingerprint != null &&
@@ -1040,7 +1191,8 @@ export async function loadCopilotResearchCard(
       prompt,
       user_session_id: getCopilotSessionId(),
       ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-      context
+      context,
+      ...(synthesis ? { synthesis } : {})
     };
 
     const result = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);

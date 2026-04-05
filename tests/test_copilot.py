@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
 from src.application.runtime import build_runtime
-from src.models.copilot import CopilotResearchCardResult, ResearchCard, ResearchClaim
+from src.models.copilot import (
+    CopilotContextBundle,
+    CopilotResearchCardRequest,
+    CopilotResearchCardResult,
+    ResearchCard,
+    ResearchClaim,
+)
 from src.services.mock_copilot_provider import MockCopilotProvider
+from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 
 
 class _StubCopilotProvider:
@@ -13,6 +23,54 @@ class _StubCopilotProvider:
 
     def generate_research_card(self, *, request, context, tool_specs, execute_tool):
         assert tool_specs
+        if request.domain == "synthesis":
+            scope_execution = execute_tool("get_synthesis_scope_summary", {}, context)
+            included_contexts = scope_execution.output.get("included_contexts", [])
+            drilldown_executions = [
+                execute_tool("get_synthesis_domain_context", {"domain": item["domain"]}, context)
+                for item in included_contexts[:2]
+                if isinstance(item, dict) and item.get("domain")
+            ]
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="ready",
+                provider=self.provider_name,
+                model="stub-model",
+                response_id="resp_stub_synthesis",
+                card=ResearchCard(
+                    title="Synthesis test card",
+                    hypothesis="The loaded Gamma contexts should be read together rather than as isolated tab answers.",
+                    rationale="The synthesis scope exposes multiple included Gamma domains plus synthesis drilldowns.",
+                    required_data=["Included Gamma domains", "Attached source references"],
+                    proposed_test="Compare the strongest agreement and disagreement across the included contexts before narrowing the scope.",
+                    confounders=["Uneven freshness", "Domain-specific warnings"],
+                    next_steps=["Inspect the synthesis scope", "Review the domain drilldowns"],
+                    caveats=["This is a test fixture."],
+                    source_backed_claims=[
+                        ResearchClaim(
+                            claim="The synthesis scope and domain drilldowns were available to the copilot.",
+                            evidence_refs=[
+                                scope_execution.sources[0].source_id,
+                                *[
+                                    execution.sources[0].source_id
+                                    for execution in drilldown_executions
+                                    if execution.sources
+                                ],
+                            ],
+                        )
+                    ],
+                    inferred_claims=["The best synthesis thesis remains interpretive."],
+                ),
+                sources=[
+                    *context.sources,
+                    *scope_execution.sources,
+                    *[source for execution in drilldown_executions for source in execution.sources],
+                ],
+                tool_traces=[scope_execution.trace, *[execution.trace for execution in drilldown_executions]],
+                warnings=list(context.warnings),
+            )
+
         if request.domain == "portfolio":
             positions_execution = execute_tool("get_portfolio_positions_summary", {}, context)
             performance_execution = execute_tool("get_portfolio_performance_context", {}, context)
@@ -287,6 +345,81 @@ def test_macro_copilot_route_returns_structured_research_card(tmp_path):
         assert any(source["source_id"] == "macro.snapshot" for source in payload["sources"])
         assert any(source["source_id"].startswith("macro.series.us-cpi-yoy") for source in payload["sources"])
         assert payload["card"]["source_backed_claims"][0]["evidence_refs"]
+    finally:
+        runtime.shutdown()
+
+
+def test_synthesis_copilot_route_returns_cross_context_research_card(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        history = client.get("/portfolio/history").json()
+        performance = client.post(
+            "/portfolio/performance",
+            json={
+                "snapshot": snapshot,
+                "benchmark_symbol": "SPY",
+                "lookback_days": 252,
+            },
+        ).json()
+
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "synthesis",
+                "context": {
+                    "current_tab": "synthesis",
+                    "workspace_mode": "research",
+                },
+                "synthesis": {
+                    "active_tab": "macro",
+                    "included_scopes": [
+                        {
+                            "domain": "portfolio",
+                            "label": "Portfolio",
+                            "context_fingerprint": "fp_portfolio_fixture",
+                            "context": {
+                                "current_tab": "portfolio",
+                                "workspace_mode": "portfolio",
+                                "portfolio_state": {
+                                    "snapshot": snapshot,
+                                    "history": history,
+                                    "performance": performance,
+                                },
+                            },
+                        },
+                        {
+                            "domain": "macro",
+                            "label": "Macro",
+                            "context_fingerprint": "fp_macro_fixture",
+                            "context": {
+                                "current_tab": "macro",
+                                "workspace_mode": "research",
+                                "macro": {
+                                    "mode": "snapshot",
+                                    "region": "US",
+                                    "timeframe": "3M",
+                                    "theme": "all",
+                                    "comparison_region": None,
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["domain"] == "synthesis"
+        assert payload["card"]["title"] == "Synthesis test card"
+        assert {trace["tool_name"] for trace in payload["tool_traces"]} == {
+            "get_synthesis_scope_summary",
+            "get_synthesis_domain_context",
+        }
+        assert any(source["source_id"] == "synthesis.scope" for source in payload["sources"])
+        assert any(source["source_id"] == "portfolio.snapshot" for source in payload["sources"])
+        assert any(source["source_id"] == "macro.snapshot" for source in payload["sources"])
     finally:
         runtime.shutdown()
 
@@ -664,5 +797,140 @@ def test_mock_provider_generates_offline_macro_card(tmp_path, monkeypatch):
             "local mock Copilot provider" in warning
             for warning in payload["warnings"]
         )
+    finally:
+        runtime.shutdown()
+
+
+def test_mock_provider_generates_offline_synthesis_card(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        history = client.get("/portfolio/history").json()
+        performance = client.post(
+            "/portfolio/performance",
+            json={
+                "snapshot": snapshot,
+                "benchmark_symbol": "SPY",
+                "lookback_days": 252,
+            },
+        ).json()
+
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "synthesis",
+                "prompt": "Connect the loaded portfolio and macro context.",
+                "context": {
+                    "current_tab": "synthesis",
+                    "workspace_mode": "research",
+                },
+                "synthesis": {
+                    "active_tab": "macro",
+                    "included_scopes": [
+                        {
+                            "domain": "portfolio",
+                            "label": "Portfolio",
+                            "context_fingerprint": "fp_portfolio_fixture",
+                            "context": {
+                                "current_tab": "portfolio",
+                                "workspace_mode": "portfolio",
+                                "portfolio_state": {
+                                    "snapshot": snapshot,
+                                    "history": history,
+                                    "performance": performance,
+                                },
+                            },
+                        },
+                        {
+                            "domain": "macro",
+                            "label": "Macro",
+                            "context_fingerprint": "fp_macro_fixture",
+                            "context": {
+                                "current_tab": "macro",
+                                "workspace_mode": "research",
+                                "macro": {
+                                    "mode": "snapshot",
+                                    "region": "US",
+                                    "timeframe": "3M",
+                                    "theme": "all",
+                                    "comparison_region": None,
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["provider"] == "mock"
+        assert payload["model"] == "gamma-mock-research-card-v1"
+        assert payload["response_id"].startswith("mock_synthesis_")
+        assert payload["card"]["title"].startswith("Synthesis:")
+        assert any(trace["tool_name"] == "get_synthesis_scope_summary" for trace in payload["tool_traces"])
+        assert any(trace["tool_name"] == "get_synthesis_domain_context" for trace in payload["tool_traces"])
+        assert any(source["source_id"] == "synthesis.scope" for source in payload["sources"])
+    finally:
+        runtime.shutdown()
+
+
+def test_openai_provider_serializes_datetime_workspace_context():
+    provider = OpenAIResponsesCopilotProvider(
+        api_key="test-key",
+        model="gpt-test",
+        reasoning_effort="low",
+    )
+    request = CopilotResearchCardRequest(domain="synthesis")
+    context = CopilotContextBundle(
+        domain="synthesis",
+        current_tab="synthesis",
+        summary_data={
+            "included_contexts": [
+                {
+                    "domain": "macro",
+                    "freshness": "fresh",
+                    "retrieved_at": datetime(2026, 4, 5, 10, 52, 0),
+                }
+            ]
+        },
+    )
+
+    message = provider._build_user_message(request, context)
+    payload = json.loads(message["content"][0]["text"])
+
+    assert payload["workspace_context"]["included_contexts"][0]["retrieved_at"] == "2026-04-05T10:52:00"
+
+
+def test_openai_provider_serializes_datetime_tool_outputs():
+    rendered = OpenAIResponsesCopilotProvider._format_tool_output(
+        {"retrieved_at": datetime(2026, 4, 5, 10, 52, 0)}
+    )
+
+    assert json.loads(rendered) == {"retrieved_at": "2026-04-05T10:52:00"}
+
+
+def test_runtime_enables_openai_response_storage_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GAMMA_COPILOT_STORE_RESPONSES", "true")
+
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        assert isinstance(runtime.copilot_service.provider, OpenAIResponsesCopilotProvider)
+        assert runtime.copilot_service.provider.store_responses is True
     finally:
         runtime.shutdown()

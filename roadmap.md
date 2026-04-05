@@ -603,18 +603,18 @@ At the end of Phase 3, Gamma should support full keyboard-driven navigation acro
 
 ## Phase 4 - AI Copilot Layer
 
-_Status: In progress (~55%)_
-_Active focus: harden the read-only shell-level Copilot into a genuinely multi-turn, context-aware research surface while preserving provider boundaries, modular context assembly, structured research-card generation, provenance, and transparency before expanding into richer cross-tab synthesis, streaming, and saved-workflow handoffs._
-_Recent progress: Gamma's Phase 4 foundation still spans the full current tab set, and the shell-level Copilot drawer now preserves lightweight per-domain thread history, forwards `previous_response_id` on compatible follow-up turns, and resets cleanly when the active grounding lens changes materially, while modular context builders plus read-only internal tools continue to ground structured research-card outputs with source refs, warnings, and tool traces._
+_Status: In progress (~68%)_
+_Active focus: harden the read-only shell-level Copilot into a genuinely cross-context, multi-turn research surface while preserving provider boundaries, modular context assembly, structured research-card generation, provenance, and transparency before expanding into streaming, richer session persistence, and saved-workflow handoffs._
+_Recent progress: Gamma's Phase 4 foundation still spans the full current tab set, and the shell-level Copilot drawer now preserves lightweight per-domain thread history, forwards `previous_response_id` on compatible follow-up turns, resets cleanly when the active grounding lens changes materially, and now supports explicit shell-level synthesis across multiple loaded Gamma contexts with visible scope, provenance, warnings, and context-aware follow-up resets._
 
 #### Completion snapshot
 - `Provider and model boundary`: ~78% complete. Gamma now has a real OpenAI-backed provider/service split, request/response shaping, and tool-calling integration behind a swappable boundary, but broader provider optionality and richer model-runtime controls are still open.
 - `Shell-level copilot surface`: ~82% complete. The Copilot still lives at the shell level rather than inside individual tabs, understands the active tab, adapts drawer labeling and guidance per tab, and now preserves visible per-domain follow-up history with context-aware resets, but streaming and richer thread/session controls are still open.
 - `Context assembly across current tabs`: ~64% complete. Modular context builders now cover Portfolio, Research, Macro, Prediction Markets, Risk, and IV with tab-specific summaries and shared helpers, but later tabs such as Crypto and Fundamentals are still future work and some thinner tabs still rely on first-pass context slices.
-- `Read-only internal tool layer`: ~58% complete. Gamma now exposes tab-specific read-only helpers for portfolio state, research scope and coverage, macro drilldowns, prediction-market history and flow, risk coverage and contributions, and IV surface/session context, but cross-tab synthesis tools and deeper analytics helpers remain limited.
-- `Structured research-card outputs`: ~74% complete. Structured research cards remain the primary user-facing Copilot output and are now reusable across the full current tab set, but richer output families such as saved memos, comparative briefs, and more explicit reusable schema extensions are still open.
+- `Read-only internal tool layer`: ~66% complete. Gamma now exposes tab-specific read-only helpers for portfolio state, research scope and coverage, macro drilldowns, prediction-market history and flow, risk coverage and contributions, IV surface/session context, and first-pass cross-context synthesis helpers, but deeper comparative analytics helpers remain limited.
+- `Structured research-card outputs`: ~78% complete. Structured research cards remain the primary user-facing Copilot output and are now reusable across the full current tab set plus shell-level synthesis, but richer output families such as saved memos, comparative briefs, and more explicit reusable schema extensions are still open.
 - `Provenance and transparency`: ~69% complete. The current implementation preserves source refs, warnings, and tool traces and keeps source-backed claims distinct from inferred claims, but provenance depth is still uneven across domains and not every tab yet exposes equally rich source metadata.
-- `Cross-tab synthesis and multi-turn workflows`: ~34% complete. Gamma now has real per-domain multi-turn follow-up behavior inside the shell UI, which materially improves same-context research iteration, but robust cross-tab reasoning flows, streaming, broader session persistence, and saved research-workflow handoffs remain open.
+- `Cross-tab synthesis and multi-turn workflows`: ~69% complete. Gamma now has real per-domain multi-turn follow-up behavior inside the shell UI plus a first-pass cross-context synthesis workflow with explicit included-domain scope, scope-aware follow-up continuation, and clean resets when the grounding set changes, but streaming, broader session persistence, and saved research-workflow handoffs remain open.
 
 ### Why this phase comes here
 
@@ -752,7 +752,7 @@ At the end of Phase 4, Gamma should have an AI-assisted research workflow that c
 
 This phase does not replace the data tabs. It multiplies the value of every other phase.
 
-For roadmap purposes, the current implementation should still be treated as an intermediate foundation rather than a completed AI phase: Gamma can now generate context-aware structured research cards across every current tab in the shell-level workspace and sustain lightweight same-domain follow-up threads in the shell UI, but broader cross-tab synthesis, streaming, richer session persistence, saved memo flows, and later-domain expansion remain open Phase 4 work.
+For roadmap purposes, the current implementation should still be treated as an intermediate foundation rather than a completed AI phase: Gamma can now generate context-aware structured research cards across every current tab in the shell-level workspace, sustain lightweight same-domain follow-up threads in the shell UI, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains, but streaming, richer session persistence, saved memo flows, and later-domain expansion remain open Phase 4 work.
 
 ---
 
@@ -1119,7 +1119,7 @@ Build a multi-mode macro workspace for snapshot monitoring, rates and policy ana
 ### Phase 3 - Keyboard Navigation & Workspace Customization (`Complete`)
 Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
 
-### Phase 4 - AI Copilot (`In progress ~48%`)
+### Phase 4 - AI Copilot (`In progress ~68%`)
 Add a context-aware research assistant that sits on top of the data architecture already built, starting with read-only tool-backed research cards and provenance-aware context injection.
 
 ### Phase 5 - Crypto (`Not started`)

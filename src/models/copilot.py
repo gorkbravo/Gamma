@@ -27,12 +27,27 @@ class CopilotRequestContext:
 
 
 @dataclass(frozen=True)
+class CopilotSynthesisScope:
+    domain: str
+    label: str | None = None
+    context_fingerprint: str | None = None
+    context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
+
+
+@dataclass(frozen=True)
+class CopilotSynthesisRequest:
+    active_tab: str | None = None
+    included_scopes: list[CopilotSynthesisScope] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CopilotResearchCardRequest:
     domain: str
     prompt: str | None = None
     previous_response_id: str | None = None
     user_session_id: str | None = None
     context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
+    synthesis: CopilotSynthesisRequest | None = None
 
 
 @dataclass(frozen=True)

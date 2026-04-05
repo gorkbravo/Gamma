@@ -839,7 +839,8 @@ export interface MacroEventsResponse {
   events: MacroEvent[];
 }
 
-export type CopilotDomain = TabId;
+export type CopilotBaseDomain = TabId;
+export type CopilotDomain = CopilotBaseDomain | "synthesis";
 
 export interface CopilotSourceRef {
   source_id: string;

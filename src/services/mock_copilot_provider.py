@@ -50,7 +50,14 @@ class MockCopilotProvider(CopilotProvider):
             if isinstance(execution.output, dict) and isinstance(execution.output.get("error"), str):
                 extra_warnings.append(f"{tool_name}: {execution.output['error']}")
                 continue
-            tool_outputs[tool_name] = execution.output
+            if tool_name in tool_outputs:
+                existing_output = tool_outputs[tool_name]
+                if isinstance(existing_output, list):
+                    existing_output.append(execution.output)
+                else:
+                    tool_outputs[tool_name] = [existing_output, execution.output]
+            else:
+                tool_outputs[tool_name] = execution.output
 
         card = self._build_card(request=request, context=context, tool_outputs=tool_outputs, tool_traces=tool_traces)
         response_id = self._response_id(request)
@@ -105,6 +112,13 @@ class MockCopilotProvider(CopilotProvider):
                 ("get_iv_surface_context", {}),
                 ("get_iv_session_status", {}),
             ]
+        if domain == "synthesis":
+            calls: list[tuple[str, dict[str, Any]]] = [("get_synthesis_scope_summary", {})]
+            for item in self._as_list(context.summary_data.get("included_contexts")):
+                included_domain = str(self._as_dict(item).get("domain") or "").strip()
+                if included_domain:
+                    calls.append(("get_synthesis_domain_context", {"domain": included_domain}))
+            return calls
         return []
 
     def _build_card(
@@ -128,6 +142,8 @@ class MockCopilotProvider(CopilotProvider):
             return self._build_risk_card(request, context, tool_outputs, tool_traces)
         if domain == "iv":
             return self._build_iv_card(request, context, tool_outputs, tool_traces)
+        if domain == "synthesis":
+            return self._build_synthesis_card(request, context, tool_outputs, tool_traces)
         return self._fallback_card(request, context, tool_traces)
 
     def _build_portfolio_card(
@@ -532,6 +548,104 @@ class MockCopilotProvider(CopilotProvider):
             ],
             inferred_claims=[
                 "Any options trade conclusion still requires external pricing, liquidity, and execution judgment.",
+            ],
+        )
+
+    def _build_synthesis_card(
+        self,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        tool_outputs: dict[str, Any],
+        tool_traces: list[CopilotToolTrace],
+    ) -> ResearchCard:
+        scope = self._as_dict(tool_outputs.get("get_synthesis_scope_summary")) or self._as_dict(context.summary_data)
+        included_contexts = self._as_list(scope.get("included_contexts"))
+        domain_outputs = {
+            str(self._as_dict(item).get("domain") or "").strip(): self._as_dict(item)
+            for item in self._as_list(tool_outputs.get("get_synthesis_domain_context"))
+            if str(self._as_dict(item).get("domain") or "").strip()
+        }
+        included_labels = [
+            str(self._as_dict(item).get("label") or self._as_dict(item).get("domain") or "Context")
+            for item in included_contexts
+        ]
+        included_domains = [
+            str(self._as_dict(item).get("domain") or "").strip()
+            for item in included_contexts
+            if str(self._as_dict(item).get("domain") or "").strip()
+        ]
+        lead_label = included_labels[0] if included_labels else "the active Gamma contexts"
+        compare_label = included_labels[1] if len(included_labels) > 1 else lead_label
+        active_tab = scope.get("active_tab") or "the shell"
+        scope_size = len(included_contexts)
+        warning_count = len(self._as_list(scope.get("warnings")))
+
+        domain_notes: list[str] = []
+        for domain in included_domains[:3]:
+            synthesis_domain = domain_outputs.get(domain, {})
+            summary = self._as_dict(synthesis_domain.get("summary"))
+            warnings = self._as_list(synthesis_domain.get("warnings"))
+            if summary:
+                domain_notes.append(
+                    f"{domain.replace('_', ' ').title()} contributes structured Gamma summary data with {len(warnings)} warnings."
+                )
+
+        scope_label = ", ".join(included_labels[:3]) if included_labels else "the selected Gamma scope"
+        if scope_size > 3:
+            scope_label = f"{scope_label}, and {scope_size - 3} more"
+
+        hypothesis = (
+            f"The cross-context read should be framed as a synthesis between {lead_label} and {compare_label}, "
+            "not as isolated tab-level conclusions."
+        )
+        rationale = (
+            f"Gamma assembled a read-only synthesis scope across {scope_size} loaded contexts from {active_tab}, "
+            "keeping provenance, warnings, and source references attached to each included domain."
+        )
+        confounders = [
+            "Freshness and warning depth can differ across the included Gamma contexts.",
+            "Cross-context alignment is a research framing, not a causal proof.",
+            "The synthesis only reflects contexts already loaded into Gamma at request time.",
+        ]
+        if warning_count:
+            confounders[0] = f"Freshness and warning depth are uneven across the included contexts ({warning_count} active warning(s))."
+        next_steps = [
+            f"Use the current scope ({scope_label}) to isolate the strongest agreement and the strongest contradiction.",
+            "Follow up on the domain with the weakest provenance or the heaviest warning burden before tightening the thesis.",
+            "Narrow the synthesis scope if the current cross-context brief is still too broad for a testable next step.",
+        ]
+        required_data = [
+            "Included Gamma domain summaries and fingerprints",
+            "Attached source references and warnings for each included domain",
+            "Domain-specific drilldowns for the strongest agreement or contradiction",
+        ]
+        if domain_notes:
+            required_data[2] = "Domain-specific drilldowns for the strongest agreement or contradiction, especially where warnings differ"
+        return ResearchCard(
+            title=self._title("Synthesis", request.prompt),
+            hypothesis=hypothesis,
+            rationale=rationale,
+            required_data=required_data,
+            proposed_test=(
+                "Compare the included domains side by side, identify the highest-conviction overlap, then pressure-test whether "
+                "the most constrained or warning-heavy domain changes the conclusion."
+            ),
+            confounders=confounders,
+            next_steps=next_steps,
+            caveats=[
+                "This synthesis card was generated by Gamma's deterministic mock Copilot.",
+                "It remains read-only and grounded only in the selected Gamma contexts and synthesis drilldowns.",
+            ],
+            source_backed_claims=[
+                self._claim(
+                    "Gamma assembled a multi-domain synthesis scope with attached domain-level provenance and drilldowns.",
+                    context,
+                    tool_traces,
+                )
+            ],
+            inferred_claims=[
+                "The best cross-context thesis still depends on which disagreement you choose to prioritize.",
+                *domain_notes[:2],
             ],
         )
 

@@ -59,6 +59,8 @@
     riskResult,
     riskWorkspaceBasis,
     loadPredictionMarketScreener,
+    previewCopilotContextFingerprint,
+    previewCopilotThreadFingerprint,
     runDiagnosticsAction,
     runResearch,
     selectPredictionMarket,
@@ -76,11 +78,13 @@
     workspaceTabOrders,
   } from "./lib/stores/navigation";
   import type {
+    CopilotBaseDomain,
     CopilotDomain,
     CopilotThreadState,
     IvSessionStatus,
     IvSurface,
     MacroContextState,
+    MacroSnapshot,
     PortfolioPerformanceResponse,
     PortfolioSnapshot,
     PredictionMarket,
@@ -106,9 +110,14 @@
   let diagnosticsOpen = false;
   let sidebarOpen = false;
   let copilotOpen = false;
+  let copilotMode: CopilotDrawerMode = "active_tab";
+  let selectedSynthesisDomains: CopilotBaseDomain[] = [];
   let settingsOpen = false;
   let orderedTabs: ReturnType<typeof getOrderedWorkspaceTabs> = [];
   let tabBarTabs: TabBarItem[] = [];
+  let synthesisScopeOptions: CopilotGroundingScopeOption[] = [];
+  let activeTabCopilotSurface: CopilotSurfaceState;
+  let synthesisCopilotSurface: CopilotSurfaceState;
   let copilotSurface: CopilotSurfaceState;
 
   $: orderedTabs =
@@ -120,7 +129,35 @@
     label: tab.label,
     pinned: tab.pinned,
   }));
-  $: copilotSurface = buildCopilotSurface({
+  $: synthesisScopeOptions = buildSynthesisScopeOptions({
+    activeTab: $activeTab,
+    workspaceMode,
+    system: $systemStatus,
+    portfolio: $portfolioSnapshot,
+    portfolioPerformance: $portfolioPerformance,
+    research: $researchResult,
+    macro: $macroContext,
+    macroSnapshot: $macroSnapshot,
+    prediction: $predictionMarketDetail,
+    risk: $riskResult,
+    riskWorkspace: $riskWorkspaceBasis,
+    ivSurface: $ivSurface,
+    ivSession: $ivSession,
+  });
+  $: {
+    const availableDomains = synthesisScopeOptions.map((option) => option.domain);
+    const filteredSelection = selectedSynthesisDomains.filter((domain) =>
+      availableDomains.includes(domain)
+    );
+    const nextSelection = filteredSelection.length ? filteredSelection : availableDomains;
+    const changed =
+      nextSelection.length !== selectedSynthesisDomains.length ||
+      nextSelection.some((domain, index) => domain !== selectedSynthesisDomains[index]);
+    if (changed) {
+      selectedSynthesisDomains = nextSelection;
+    }
+  }
+  $: activeTabCopilotSurface = buildActiveTabCopilotSurface({
     tab: $activeTab,
     workspaceMode,
     threads: $copilotThreads,
@@ -135,7 +172,24 @@
     macro: $macroContext,
     prediction: $predictionMarketDetail,
   });
+  $: synthesisCopilotSurface = buildSynthesisCopilotSurface({
+    activeTab: $activeTab,
+    workspaceMode,
+    threads: $copilotThreads,
+    scopeOptions: synthesisScopeOptions,
+    selectedDomains: selectedSynthesisDomains,
+  });
+  $: copilotSurface = copilotMode === "synthesis" ? synthesisCopilotSurface : activeTabCopilotSurface;
 
+  type CopilotDrawerMode = "active_tab" | "synthesis";
+  type CopilotGroundingScopeOption = {
+    domain: CopilotBaseDomain;
+    label: string;
+    contextLabel: string;
+    fingerprintLabel: string;
+    freshnessLabel: string | null;
+    warningLabel: string | null;
+  };
   type CopilotSurfaceState = {
     supported: boolean;
     domain: CopilotDomain | null;
@@ -145,6 +199,9 @@
     guidance: string;
     placeholder: string;
     thread: CopilotThreadState | null;
+    scopeOptions: CopilotGroundingScopeOption[];
+    selectedScopeDomains: CopilotBaseDomain[];
+    selectionMessage: string | null;
   };
 
   const macroModeLabels: Record<MacroContextState["mode"], string> = {
@@ -227,7 +284,178 @@
     return `IV | ${activeSurface.symbol} | ${activeSurface.expiries.length} expiries x ${activeSurface.strikes.length} strikes`;
   }
 
-  function buildCopilotSurface({
+  function formatShortTimestamp(timestamp: string | null | undefined) {
+    if (!timestamp) {
+      return null;
+    }
+    const normalized = timestamp.replace("T", " ").replace("Z", "");
+    return normalized.slice(0, 16);
+  }
+
+  function formatWarningLabel(count: number) {
+    if (count <= 0) {
+      return null;
+    }
+    return count === 1 ? "1 warning" : `${count} warnings`;
+  }
+
+  function shortFingerprint(value: string) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `FP ${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  }
+
+  function buildSynthesisScopeOptions({
+    activeTab,
+    workspaceMode,
+    system,
+    portfolio,
+    portfolioPerformance,
+    research,
+    macro,
+    macroSnapshot,
+    prediction,
+    risk,
+    riskWorkspace,
+    ivSurface,
+    ivSession,
+  }: {
+    activeTab: TabId;
+    workspaceMode: WorkspaceMode | null;
+    system: SystemStatus | null;
+    portfolio: PortfolioSnapshot | null;
+    portfolioPerformance: PortfolioPerformanceResponse | null;
+    research: ResearchResult | null;
+    macro: MacroContextState;
+    macroSnapshot: MacroSnapshot | null;
+    prediction: PredictionMarket | null;
+    risk: RiskResult | null;
+    riskWorkspace: WorkspaceMode | null;
+    ivSurface: IvSurface | null;
+    ivSession: IvSessionStatus | null;
+  }): CopilotGroundingScopeOption[] {
+    const options: CopilotGroundingScopeOption[] = [];
+    const pushOption = (
+      domain: CopilotBaseDomain,
+      contextLabel: string,
+      freshnessLabel: string | null,
+      warningLabel: string | null
+    ) => {
+      const fingerprint = previewCopilotContextFingerprint(domain, { workspaceMode });
+      options.push({
+        domain,
+        label:
+          domain === "prediction_markets"
+            ? "Prediction Markets"
+            : domain === "macro"
+              ? "Macro"
+              : domain === "iv"
+                ? "IV"
+                : domain.charAt(0).toUpperCase() + domain.slice(1),
+        contextLabel,
+        fingerprintLabel: shortFingerprint(fingerprint),
+        freshnessLabel,
+        warningLabel
+      });
+    };
+
+    if (portfolio) {
+      pushOption(
+        "portfolio",
+        describePortfolioCopilotContext(portfolio, portfolioPerformance, system),
+        formatShortTimestamp(portfolio.timestamp)
+          ? `Snapshot ${formatShortTimestamp(portfolio.timestamp)}`
+          : null,
+        formatWarningLabel(
+          portfolio.warnings.length + (portfolioPerformance?.warnings.length ?? 0)
+        )
+      );
+    }
+
+    if (research) {
+      const researchTimestamp =
+        research.snapshot?.timestamp ??
+        research.performance_points[research.performance_points.length - 1]?.timestamp ??
+        null;
+      pushOption(
+        "research",
+        describeResearchCopilotContext(research),
+        formatShortTimestamp(researchTimestamp)
+          ? `Result ${formatShortTimestamp(researchTimestamp)}`
+          : null,
+        formatWarningLabel(research.warnings.length)
+      );
+    }
+
+    if (macroSnapshot) {
+      pushOption(
+        "macro",
+        describeMacroCopilotContext(macro),
+        formatShortTimestamp(macroSnapshot.retrieved_at)
+          ? `Snapshot ${formatShortTimestamp(macroSnapshot.retrieved_at)}`
+          : null,
+        formatWarningLabel(macroSnapshot.warnings.length)
+      );
+    }
+
+    if (prediction) {
+      pushOption(
+        "prediction_markets",
+        describePredictionCopilotContext(prediction),
+        prediction.freshness?.status
+          ? `Freshness ${prediction.freshness.status}`
+          : formatShortTimestamp(prediction.retrieved_at)
+            ? `Market ${formatShortTimestamp(prediction.retrieved_at)}`
+            : null,
+        prediction.freshness?.is_stale || prediction.freshness?.is_broken
+          ? "Freshness warning"
+          : null
+      );
+    }
+
+    if (risk) {
+      pushOption(
+        "risk",
+        describeRiskCopilotContext(risk, riskWorkspace ?? workspaceMode),
+        null,
+        formatWarningLabel(risk.warnings.length)
+      );
+    }
+
+    const activeIvSurface = resolveIvCopilotSurface(ivSurface, ivSession);
+    if (
+      activeIvSurface &&
+      (activeIvSurface.snapshot_available ||
+        activeIvSurface.points > 0 ||
+        activeIvSurface.expiries.length > 0)
+    ) {
+      pushOption(
+        "iv",
+        describeIvCopilotContext(ivSurface, ivSession),
+        formatShortTimestamp(activeIvSurface.timestamp)
+          ? `${activeIvSurface.delayed ? "Delayed" : "Surface"} ${formatShortTimestamp(activeIvSurface.timestamp)}`
+          : activeIvSurface.delayed
+            ? "Delayed surface"
+            : null,
+        formatWarningLabel(activeIvSurface.warnings.length + (ivSession?.messages.length ?? 0))
+      );
+    }
+
+    return [...options].sort((left, right) => {
+      if (left.domain === activeTab) {
+        return -1;
+      }
+      if (right.domain === activeTab) {
+        return 1;
+      }
+      return left.label.localeCompare(right.label);
+    });
+  }
+
+  function buildActiveTabCopilotSurface({
     tab,
     workspaceMode,
     threads,
@@ -270,6 +498,9 @@
         placeholder:
           "Frame concentration risk, benchmark slippage, capital deployment, or the next diagnostic angle.",
         thread: threads.portfolio,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
       };
     }
 
@@ -287,6 +518,9 @@
         placeholder:
           "Stress-test the active scope, sharpen the hypothesis, or identify the cleanest next comparison.",
         thread: threads.research,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
       };
     }
 
@@ -302,6 +536,9 @@
         placeholder:
           "Map the active regime, stress-test the leading divergence, or frame the catalyst path.",
         thread: threads.macro,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
       };
     }
 
@@ -317,6 +554,9 @@
         placeholder:
           "Test the repricing thesis, compare probability against flow, or frame the cleanest consistency check.",
         thread: threads.prediction_markets,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
       };
     }
 
@@ -334,6 +574,9 @@
         placeholder:
           "Explain the main VaR driver, isolate the cleanest hedge question, or challenge the current coverage assumptions.",
         thread: threads.risk,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
       };
     }
 
@@ -355,6 +598,9 @@
         placeholder:
           "Interpret the term structure, flag skew caveats, or frame the cleanest surface-comparison question.",
         thread: threads.iv,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
       };
     }
 
@@ -367,6 +613,75 @@
       guidance: "The Copilot needs an active Gamma tab context before it can generate a research card.",
       placeholder: "Load the required Gamma context to use Copilot.",
       thread: null,
+      scopeOptions: [],
+      selectedScopeDomains: [],
+      selectionMessage: null,
+    };
+  }
+
+  function buildSynthesisCopilotSurface({
+    activeTab,
+    workspaceMode,
+    threads,
+    scopeOptions,
+    selectedDomains,
+  }: {
+    activeTab: TabId;
+    workspaceMode: WorkspaceMode | null;
+    threads: Record<CopilotDomain, CopilotThreadState>;
+    scopeOptions: CopilotGroundingScopeOption[];
+    selectedDomains: CopilotBaseDomain[];
+  }): CopilotSurfaceState {
+    const selectedScopeOptions = scopeOptions.filter((option) =>
+      selectedDomains.includes(option.domain)
+    );
+    const selectionFingerprint = previewCopilotThreadFingerprint("synthesis", {
+      workspaceMode,
+      synthesisDomains: selectedScopeOptions.map((option) => option.domain),
+      activeTabId: activeTab,
+    });
+    const storedThread = threads.synthesis;
+    const scopeChanged =
+      storedThread.entries.length > 0 &&
+      storedThread.contextFingerprint != null &&
+      storedThread.contextFingerprint !== selectionFingerprint;
+    const visibleThread =
+      storedThread.contextFingerprint == null ||
+      storedThread.contextFingerprint === selectionFingerprint
+        ? storedThread
+        : null;
+    const selectedLabels = selectedScopeOptions.map((option) => option.label);
+    const supported = selectedScopeOptions.length >= 2;
+    const scopeSummary =
+      selectedLabels.length > 0
+        ? selectedLabels.length <= 3
+          ? selectedLabels.join(" + ")
+          : `${selectedLabels.slice(0, 3).join(" + ")} + ${selectedLabels.length - 3} more`
+        : "Select loaded Gamma contexts";
+    const selectionMessage =
+      scopeChanged
+        ? "The synthesis scope changed. Generating starts a new synthesis thread."
+        : supported
+          ? `${selectedScopeOptions.length} loaded contexts included in this synthesis.`
+          : scopeOptions.length < 2
+            ? "Load at least two Gamma contexts before generating a cross-context synthesis."
+            : "Select at least two loaded Gamma contexts for synthesis.";
+
+    return {
+      supported,
+      domain: "synthesis",
+      triggerLabel: supported ? "Cross-context synthesis" : "Select scope",
+      contextLabel: `Synthesis | ${scopeSummary}`,
+      domainLabel: "Cross-Context Synthesis",
+      guidance: supported
+        ? "Grounded only in the selected Gamma contexts. Gamma remains read-only, and synthesis should preserve provenance, warnings, and domain-specific caveats."
+        : selectionMessage,
+      placeholder:
+        "Synthesize the strongest agreement, contradiction, or next research test across the selected Gamma contexts.",
+      thread: visibleThread,
+      scopeOptions,
+      selectedScopeDomains: selectedDomains,
+      selectionMessage,
     };
   }
 
@@ -466,6 +781,7 @@
 
   async function enterWorkspace(mode: WorkspaceMode) {
     workspaceMode = mode;
+    copilotMode = "active_tab";
     sidebarOpen = false;
     copilotOpen = false;
     settingsOpen = false;
@@ -599,6 +915,7 @@
 
   async function handleChangeView() {
     workspaceMode = null;
+    copilotMode = "active_tab";
     diagnosticsOpen = false;
     sidebarOpen = false;
     copilotOpen = false;
@@ -676,6 +993,18 @@
     }
   }
 
+  function handleSetCopilotMode(nextMode: CopilotDrawerMode) {
+    copilotMode = nextMode;
+  }
+
+  function handleToggleSynthesisScope(domain: CopilotBaseDomain) {
+    if (selectedSynthesisDomains.includes(domain)) {
+      selectedSynthesisDomains = selectedSynthesisDomains.filter((item) => item !== domain);
+      return;
+    }
+    selectedSynthesisDomains = [...selectedSynthesisDomains, domain];
+  }
+
   function dismissSurfaces() {
     sidebarOpen = false;
     copilotOpen = false;
@@ -686,7 +1015,12 @@
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
-    return loadCopilotResearchCard(copilotSurface.domain, prompt, { workspaceMode });
+    return loadCopilotResearchCard(copilotSurface.domain, prompt, {
+      workspaceMode,
+      synthesisDomains:
+        copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
+      activeTabId: $activeTab,
+    });
   }
 
   async function handleOpenKeyBindings() {
@@ -901,13 +1235,19 @@
     <CopilotResearchCard
       open={copilotOpen}
       available={copilotSurface.supported}
+      mode={copilotMode}
       contextLabel={copilotSurface.contextLabel}
       domainLabel={copilotSurface.domainLabel}
       guidance={copilotSurface.guidance}
       thread={copilotSurface.thread}
       loading={$loading.copilot}
       placeholder={copilotSurface.placeholder}
+      scopeOptions={copilotSurface.scopeOptions}
+      selectedScopeDomains={copilotSurface.selectedScopeDomains}
+      selectionMessage={copilotSurface.selectionMessage}
       onGenerate={handleGenerateCopilot}
+      onSetMode={handleSetCopilotMode}
+      onToggleScope={handleToggleSynthesisScope}
       onClose={() => copilotOpen = false}
     />
   </Shell>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date, datetime, time
 from hashlib import sha256
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -69,6 +70,16 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
     timeout_seconds: float = 45.0
     store_responses: bool = False
     provider_name: str = "openai_responses"
+
+    @staticmethod
+    def _json_default(value: Any) -> str:
+        if isinstance(value, (datetime, date, time)):
+            return value.isoformat()
+        return str(value)
+
+    @classmethod
+    def _json_dumps(cls, value: Any) -> str:
+        return json.dumps(value, ensure_ascii=True, default=cls._json_default)
 
     def generate_research_card(
         self,
@@ -216,6 +227,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "prediction_markets": "Generate a concise research card for the selected Gamma prediction market.",
             "risk": "Generate a concise research card for the active Gamma risk workspace.",
             "iv": "Generate a concise research card for the active Gamma IV workspace.",
+            "synthesis": "Generate a concise cross-context research synthesis for the selected Gamma domains.",
         }.get(request.domain, "Generate a concise research card for the current Gamma workspace.")
         requested_prompt = (request.prompt or "").strip() or default_prompt
         body = {
@@ -239,13 +251,18 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "content": [
                 {
                     "type": "input_text",
-                    "text": json.dumps(body, ensure_ascii=True),
+                    "text": self._json_dumps(body),
                 }
             ],
         }
 
     def _build_instructions(self, context: CopilotContextBundle) -> str:
         source_ids = ", ".join(source.source_id for source in context.sources) or "none"
+        synthesis_clause = ""
+        if context.domain == "synthesis":
+            synthesis_clause = (
+                "When the domain is `synthesis`, compare the included Gamma contexts explicitly and keep the output framed as a read-only research synthesis rather than a generic chat reply. "
+            )
         return (
             "You are Gamma Copilot inside a read-only research application. "
             "Stay anchored to the supplied Gamma workspace state and Gamma-owned tools. "
@@ -253,6 +270,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "Use tools only when the current context is insufficient. "
             "Every source-backed claim must cite one or more `source_id` values from the available sources or tool outputs. "
             "Anything that extends beyond explicit source evidence belongs in `inferred_claims` or `caveats`. "
+            f"{synthesis_clause}"
             "Keep the card analytical, concise, and research-oriented. "
             f"Initial source ids: {source_ids}."
         )
@@ -298,7 +316,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
     def _format_tool_output(output: dict[str, Any] | list[Any] | str) -> str:
         if isinstance(output, str):
             return output
-        return json.dumps(output, ensure_ascii=True)
+        return OpenAIResponsesCopilotProvider._json_dumps(output)
 
     @staticmethod
     def _extract_refusal(response: dict[str, Any]) -> str | None:

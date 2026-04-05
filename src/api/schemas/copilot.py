@@ -16,6 +16,8 @@ from src.models.copilot import (
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotSynthesisRequest,
+    CopilotSynthesisScope,
     CopilotSourceRef,
     CopilotToolTrace,
     MacroCopilotContext,
@@ -84,12 +86,39 @@ class CopilotRequestContextModel(BaseModel):
         )
 
 
+class CopilotSynthesisScopeModel(BaseModel):
+    domain: str
+    label: str | None = None
+    context_fingerprint: str | None = None
+    context: CopilotRequestContextModel = Field(default_factory=CopilotRequestContextModel)
+
+    def to_domain(self) -> CopilotSynthesisScope:
+        return CopilotSynthesisScope(
+            domain=self.domain,
+            label=self.label,
+            context_fingerprint=self.context_fingerprint,
+            context=self.context.to_domain(),
+        )
+
+
+class CopilotSynthesisRequestModel(BaseModel):
+    active_tab: str | None = None
+    included_scopes: list[CopilotSynthesisScopeModel] = Field(default_factory=list)
+
+    def to_domain(self) -> CopilotSynthesisRequest:
+        return CopilotSynthesisRequest(
+            active_tab=self.active_tab,
+            included_scopes=[item.to_domain() for item in self.included_scopes],
+        )
+
+
 class CopilotResearchCardRequestModel(BaseModel):
     domain: str
     prompt: str | None = None
     previous_response_id: str | None = None
     user_session_id: str | None = None
     context: CopilotRequestContextModel = Field(default_factory=CopilotRequestContextModel)
+    synthesis: CopilotSynthesisRequestModel | None = None
 
     def to_domain(self) -> CopilotResearchCardRequest:
         return CopilotResearchCardRequest(
@@ -98,6 +127,7 @@ class CopilotResearchCardRequestModel(BaseModel):
             previous_response_id=self.previous_response_id,
             user_session_id=self.user_session_id,
             context=self.context.to_domain(),
+            synthesis=self.synthesis.to_domain() if self.synthesis is not None else None,
         )
 
 
