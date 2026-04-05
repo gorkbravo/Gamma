@@ -35,9 +35,7 @@
 
   let promptText = "";
   let threadEntries: CopilotThreadEntry[] = [];
-  let latestEntry: CopilotThreadEntry | null = null;
   let hasThread = false;
-  let selectedScopeOptions: CopilotGroundingScopeOption[] = [];
   let isSynthesisMode = false;
   let composerHint = "";
   let composerPlaceholder = "";
@@ -60,40 +58,36 @@
     }
   }
 
+  function handleModeChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value as CopilotDrawerMode;
+    onSetMode(value);
+  }
+
   function providerLabelFor(result: CopilotResearchCardResult) {
-    return result.model ? `${result.provider} | ${result.model}` : result.provider ?? null;
-  }
-
-  function turnLabel(entry: CopilotThreadEntry) {
-    return entry.turnIndex === 1 ? "Initial Brief" : `Follow-up ${entry.turnIndex}`;
-  }
-
-  function promptLabel(entry: CopilotThreadEntry) {
-    return entry.turnIndex === 1 ? "Prompt" : "Follow-up Prompt";
-  }
-
-  function promptTextFor(entry: CopilotThreadEntry) {
-    return entry.prompt || "Used the active Gamma context without an extra prompt.";
+    return result.model ? `${result.provider} · ${result.model}` : result.provider ?? null;
   }
 
   function cardLabelFor(entry: CopilotThreadEntry) {
     return entry.result.domain === "synthesis" ? "Research Synthesis" : "Research Card";
   }
 
-  $: threadEntries = [...(thread?.entries ?? [])].reverse();
-  $: latestEntry = threadEntries[0] ?? null;
+  function scopeTooltip(option: CopilotGroundingScopeOption) {
+    const parts = [option.contextLabel, option.fingerprintLabel];
+    if (option.freshnessLabel) parts.push(option.freshnessLabel);
+    if (option.warningLabel) parts.push(option.warningLabel);
+    return parts.join(" · ");
+  }
+
+  $: threadEntries = thread?.entries ?? [];
   $: hasThread = threadEntries.length > 0;
   $: isSynthesisMode = mode === "synthesis";
-  $: selectedScopeOptions = scopeOptions.filter((option) => selectedScopeDomains.includes(option.domain));
   $: composerHint = !available
     ? ""
     : hasThread
-      ? isSynthesisMode
-        ? "Ctrl+Enter to follow up in this synthesis thread"
-        : "Ctrl+Enter to follow up in this domain thread"
+      ? "Ctrl+Enter to follow up"
       : isSynthesisMode
-        ? "Ctrl+Enter to start a synthesis thread"
-        : "Ctrl+Enter to start a research thread";
+        ? "Ctrl+Enter to start a synthesis"
+        : "Ctrl+Enter to start a thread";
   $: composerPlaceholder = available
     ? hasThread
       ? isSynthesisMode
@@ -101,7 +95,7 @@
         : "Ask a follow-up grounded in this thread..."
       : placeholder
     : guidance;
-  $: composerButtonLabel = loading ? "Generating..." : hasThread ? "Follow Up" : "Generate";
+  $: composerButtonLabel = loading ? "Generating..." : hasThread ? "Follow up" : "Generate";
 </script>
 
 {#if open}
@@ -125,246 +119,182 @@
     </button>
   </header>
 
-  <section class="mode-bar">
-    <button
-      class="mode-btn"
-      class:active={mode === "active_tab"}
-      type="button"
-      on:click={() => onSetMode("active_tab")}
-    >
-      Active Tab
-    </button>
-    <button
-      class="mode-btn"
-      class:active={mode === "synthesis"}
-      type="button"
-      on:click={() => onSetMode("synthesis")}
-    >
-      Synthesis
-    </button>
-  </section>
-
   <div class="drawer-body">
-    {#if isSynthesisMode}
-      <section class="scope-panel">
-        <div class="scope-copy">
-          <span class="section-label">Grounding Scope</span>
-          <p>{selectionMessage ?? "Select the loaded Gamma contexts to include in this synthesis."}</p>
-        </div>
-
-        {#if scopeOptions.length}
-          <div class="scope-grid">
-            {#each scopeOptions as option (option.domain)}
-              <button
-                class="scope-option"
-                class:selected={selectedScopeDomains.includes(option.domain)}
-                type="button"
-                on:click={() => onToggleScope(option.domain)}
-              >
-                <div class="scope-head">
-                  <strong>{option.label}</strong>
-                  <small>{option.fingerprintLabel}</small>
-                </div>
-                <p>{option.contextLabel}</p>
-                <div class="scope-meta">
-                  {#if option.freshnessLabel}
-                    <small>{option.freshnessLabel}</small>
-                  {/if}
-                  {#if option.warningLabel}
-                    <small>{option.warningLabel}</small>
-                  {/if}
-                </div>
-              </button>
-            {/each}
-          </div>
-        {:else}
-          <section class="message-card neutral">
-            <p>Load at least two Gamma contexts in the workspace before starting a synthesis thread.</p>
-          </section>
-        {/if}
-      </section>
-    {/if}
-
     <div class="thread">
       {#if !available}
         <section class="message-card neutral">
           <p>{guidance}</p>
         </section>
       {:else if !hasThread}
-        <section class="message-card neutral">
-          <span>{isSynthesisMode ? "Fresh Synthesis" : "Fresh Thread"}</span>
+        <section class="message-card neutral empty-state">
           <p>
             {#if isSynthesisMode}
-              Generate a synthesis card from the selected Gamma contexts. Follow-up prompts stay inside this scope until the grounding set changes.
+              Select contexts below and generate a synthesis card. Follow-ups stay in this scope until it changes.
             {:else}
-              Generate a research card from the current context. Follow-up prompts stay inside this tab until the grounding context changes.
+              Generate a research card from the current context. Follow-ups stay inside this tab until the grounding changes.
             {/if}
           </p>
         </section>
       {:else}
-        <section class="thread-summary">
-          <div class="summary-copy">
-            <span class="section-label">Active Thread</span>
-            <p>{threadEntries.length === 1 ? "1 research card in this thread." : `${threadEntries.length} turns in this thread.`}</p>
-          </div>
-          <small>{latestEntry?.turnIndex === 1 ? "Latest result is the initial brief." : "Latest result is a follow-up."}</small>
-        </section>
-
         {#each threadEntries as entry, index (entry.entryId)}
-          <article class="thread-turn" class:latest={index === 0}>
-            <div class="turn-head">
-              <span class="turn-pill" class:follow-up={entry.turnIndex > 1}>{turnLabel(entry)}</span>
-              {#if providerLabelFor(entry.result)}
-                <small>{providerLabelFor(entry.result)}</small>
-              {/if}
-            </div>
-
-            <section class="message-card neutral prompt-card">
-              <span>{promptLabel(entry)}</span>
-              <p>{promptTextFor(entry)}</p>
-            </section>
+          <div class="turn">
+            {#if entry.prompt}
+              <div class="bubble user-bubble">
+                <p>{entry.prompt}</p>
+              </div>
+            {/if}
 
             {#if entry.result.message}
-              <section class="message-card {entry.result.status}">
-                <span>Status</span>
+              <div class="bubble assistant-bubble status-bubble {entry.result.status}">
                 <p>{entry.result.message}</p>
-              </section>
+              </div>
             {/if}
 
-              {#if entry.result.card}
-                <article class="assistant-card">
-                  <div class="assistant-header">
-                    <div>
-                      <span class="section-label">{cardLabelFor(entry)}</span>
-                      <h3>{entry.result.card.title}</h3>
-                    </div>
+            {#if entry.result.card}
+              <div class="bubble assistant-bubble" class:first-turn={index === 0}>
+                {#if index === 0}
+                  <div class="bubble-head">
+                    <span class="section-label">{cardLabelFor(entry)}</span>
+                    {#if providerLabelFor(entry.result)}
+                      <small title={providerLabelFor(entry.result)}>{providerLabelFor(entry.result)}</small>
+                    {/if}
                   </div>
+                {/if}
+                <h3>{entry.result.card.title}</h3>
 
-                <div class="hero-block">
-                  <span class="section-label">Hypothesis</span>
-                  <p>{entry.result.card.hypothesis}</p>
+                <div class="field">
+                  <span class="inline-label">Hypothesis</span>
+                  <p class="emphasis">{entry.result.card.hypothesis}</p>
                 </div>
 
-                <div class="summary-grid">
-                  <div class="section-block">
-                    <span>Rationale</span>
-                    <p>{entry.result.card.rationale}</p>
-                  </div>
-                  <div class="section-block">
-                    <span>Proposed Test</span>
-                    <p>{entry.result.card.proposed_test}</p>
-                  </div>
+                <div class="field">
+                  <span class="inline-label">Rationale</span>
+                  <p>{entry.result.card.rationale}</p>
+                </div>
+                <div class="field">
+                  <span class="inline-label">Proposed test</span>
+                  <p>{entry.result.card.proposed_test}</p>
                 </div>
 
-                <div class="list-grid">
-                  <div class="list-block">
-                    <span>Required Data</span>
-                    {#if entry.result.card.required_data.length}
-                      <ul>{#each entry.result.card.required_data as item}<li>{item}</li>{/each}</ul>
-                    {:else}
-                      <p>None specified.</p>
-                    {/if}
+                {#if entry.result.card.required_data.length}
+                  <div class="field">
+                    <span class="inline-label">Required data</span>
+                    <ul>{#each entry.result.card.required_data as item}<li>{item}</li>{/each}</ul>
                   </div>
-                  <div class="list-block">
-                    <span>Confounders</span>
-                    {#if entry.result.card.confounders.length}
-                      <ul>{#each entry.result.card.confounders as item}<li>{item}</li>{/each}</ul>
-                    {:else}
-                      <p>None specified.</p>
-                    {/if}
+                {/if}
+                {#if entry.result.card.confounders.length}
+                  <div class="field">
+                    <span class="inline-label">Confounders</span>
+                    <ul>{#each entry.result.card.confounders as item}<li>{item}</li>{/each}</ul>
                   </div>
-                  <div class="list-block">
-                    <span>Next Steps</span>
-                    {#if entry.result.card.next_steps.length}
-                      <ul>{#each entry.result.card.next_steps as item}<li>{item}</li>{/each}</ul>
-                    {:else}
-                      <p>None specified.</p>
-                    {/if}
+                {/if}
+                {#if entry.result.card.next_steps.length}
+                  <div class="field">
+                    <span class="inline-label">Next steps</span>
+                    <ul>{#each entry.result.card.next_steps as item}<li>{item}</li>{/each}</ul>
                   </div>
-                  <div class="list-block">
-                    <span>Caveats</span>
-                    {#if entry.result.card.caveats.length}
-                      <ul>{#each entry.result.card.caveats as item}<li>{item}</li>{/each}</ul>
-                    {:else}
-                      <p>None specified.</p>
-                    {/if}
+                {/if}
+                {#if entry.result.card.caveats.length}
+                  <div class="field">
+                    <span class="inline-label">Caveats</span>
+                    <ul>{#each entry.result.card.caveats as item}<li>{item}</li>{/each}</ul>
                   </div>
-                </div>
+                {/if}
 
-                <div class="claims-grid">
-                  <div class="claim-block">
-                    <span>Source-Backed</span>
-                    {#if entry.result.card.source_backed_claims.length}
-                      {#each entry.result.card.source_backed_claims as claim}
-                        <div class="claim-row">
-                          <p>{claim.claim}</p>
-                          <small>{claim.evidence_refs.join(" | ")}</small>
+                {#if entry.result.card.source_backed_claims.length}
+                  <div class="field">
+                    <span class="inline-label">Source-backed</span>
+                    {#each entry.result.card.source_backed_claims as claim}
+                      <div class="claim-row">
+                        <p>{claim.claim}</p>
+                        <small>{claim.evidence_refs.join(" · ")}</small>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+                {#if entry.result.card.inferred_claims.length}
+                  <div class="field">
+                    <span class="inline-label">Inferred</span>
+                    <ul>{#each entry.result.card.inferred_claims as item}<li>{item}</li>{/each}</ul>
+                  </div>
+                {/if}
+
+                {#if entry.result.sources?.length || entry.result.tool_traces?.length || entry.result.warnings?.length}
+                  <details class="meta-details" class:warning={entry.result.warnings?.length}>
+                    <summary>
+                      {#if entry.result.sources?.length}<span>Sources ({entry.result.sources.length})</span>{/if}
+                      {#if entry.result.tool_traces?.length}<span>Tools ({entry.result.tool_traces.length})</span>{/if}
+                      {#if entry.result.warnings?.length}<span class="warning-label">Warnings ({entry.result.warnings.length})</span>{/if}
+                    </summary>
+                    <div class="meta-body">
+                      {#if entry.result.sources?.length}
+                        <div class="meta-group">
+                          <span class="inline-label">Sources</span>
+                          {#each entry.result.sources as source}
+                            <div class="meta-row">
+                              <strong>{source.source_id}</strong>
+                              <small>{source.label} · {source.provider}</small>
+                            </div>
+                          {/each}
                         </div>
-                      {/each}
-                    {:else}
-                      <p>No explicit source-backed claims returned.</p>
-                    {/if}
-                  </div>
-                  <div class="claim-block">
-                    <span>Inferred</span>
-                    {#if entry.result.card.inferred_claims.length}
-                      <ul>{#each entry.result.card.inferred_claims as item}<li>{item}</li>{/each}</ul>
-                    {:else}
-                      <p>No explicit inference block returned.</p>
-                    {/if}
-                  </div>
-                </div>
-              </article>
-            {:else if !entry.result.message}
-              <section class="message-card neutral">
-                <p>No structured research card was returned for this turn.</p>
-              </section>
+                      {/if}
+                      {#if entry.result.tool_traces?.length}
+                        <div class="meta-group">
+                          <span class="inline-label">Tools used</span>
+                          {#each entry.result.tool_traces as trace}
+                            <div class="meta-row">
+                              <strong>{trace.tool_name}</strong>
+                              <small>{trace.summary}</small>
+                              {#if trace.source_ids.length}
+                                <small>{trace.source_ids.join(" · ")}</small>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                      {#if entry.result.warnings?.length}
+                        <div class="meta-group">
+                          <span class="inline-label">Warnings</span>
+                          {#each entry.result.warnings as warning}
+                            <small>{warning}</small>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </details>
+                {/if}
+              </div>
             {/if}
-
-            {#if entry.result.sources?.length}
-              <section class="meta-block">
-                <span>Sources</span>
-                {#each entry.result.sources as source}
-                  <div class="meta-row">
-                    <strong>{source.source_id}</strong>
-                    <small>{source.label} | {source.provider}</small>
-                  </div>
-                {/each}
-              </section>
-            {/if}
-
-            {#if entry.result.tool_traces?.length}
-              <section class="meta-block">
-                <span>Tools Used</span>
-                {#each entry.result.tool_traces as trace}
-                  <div class="meta-row">
-                    <strong>{trace.tool_name}</strong>
-                    <small>{trace.summary}</small>
-                    {#if trace.source_ids.length}
-                      <small>{trace.source_ids.join(" | ")}</small>
-                    {/if}
-                  </div>
-                {/each}
-              </section>
-            {/if}
-
-            {#if entry.result.warnings?.length}
-              <section class="meta-block">
-                <span>Warnings</span>
-                {#each entry.result.warnings as warning}
-                  <div class="meta-row">
-                    <small>{warning}</small>
-                  </div>
-                {/each}
-              </section>
-            {/if}
-          </article>
+          </div>
         {/each}
       {/if}
     </div>
   </div>
 
   <footer class="composer">
+    {#if isSynthesisMode}
+      <div class="scope-row">
+        <span class="scope-row-label">Scope</span>
+        {#if scopeOptions.length}
+          <div class="scope-chips">
+            {#each scopeOptions as option (option.domain)}
+              <button
+                class="scope-chip"
+                class:selected={selectedScopeDomains.includes(option.domain)}
+                type="button"
+                title={scopeTooltip(option)}
+                on:click={() => onToggleScope(option.domain)}
+              >
+                {option.label}
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <small class="scope-empty">{selectionMessage ?? "Load two or more contexts to synthesize."}</small>
+        {/if}
+      </div>
+    {/if}
+
     <textarea
       bind:value={promptText}
       rows={2}
@@ -375,25 +305,27 @@
 
     <div class="composer-footer">
       <small>{composerHint}</small>
-      <button class="generate-btn" type="button" disabled={!available || loading} on:click={handleGenerate}>
-        {composerButtonLabel}
-      </button>
+      <div class="composer-actions">
+        <label class="mode-select">
+          <span class="visually-hidden">Copilot mode</span>
+          <select
+            value={mode}
+            on:change={handleModeChange}
+            disabled={!available || loading}
+          >
+            <option value="active_tab">Active tab</option>
+            <option value="synthesis">Synthesis</option>
+          </select>
+        </label>
+        <button class="generate-btn" type="button" disabled={!available || loading} on:click={handleGenerate}>
+          {composerButtonLabel}
+        </button>
+      </div>
     </div>
   </footer>
 </div>
 
 <style>
-  .thread,
-  .thread-turn,
-  .summary-grid,
-  .list-grid,
-  .claims-grid,
-  .meta-block,
-  .scope-panel {
-    display: grid;
-    gap: 0.85rem;
-  }
-
   .backdrop {
     position: fixed;
     inset: 0;
@@ -429,9 +361,8 @@
   }
 
   .drawer-header,
-  .mode-bar,
   .composer {
-    padding: 1rem 1rem 0.95rem;
+    padding: 0.9rem 1rem;
     background: rgba(8, 13, 18, 0.98);
   }
 
@@ -439,15 +370,6 @@
     display: flex;
     justify-content: space-between;
     gap: 0.9rem;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
-  }
-
-  .mode-bar {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.55rem;
-    padding-top: 0.7rem;
-    padding-bottom: 0.7rem;
     border-bottom: 1px solid rgba(46, 60, 74, 0.52);
   }
 
@@ -464,9 +386,7 @@
   }
 
   .title-row,
-  .assistant-header,
-  .composer-footer,
-  .turn-head {
+  .composer-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -479,68 +399,181 @@
     padding: 1rem;
   }
 
-  .thread-summary,
-  .thread-turn,
-  .note-card,
-  .message-card,
-  .assistant-card,
-  .scope-option,
-  .section-block,
-  .list-block,
-  .claim-block,
-  .meta-row {
+  .thread {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .turn {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .bubble {
     border: 1px solid rgba(46, 60, 74, 0.52);
     background: rgba(8, 13, 18, 0.6);
-    padding: 0.75rem;
-  }
-
-  .thread-summary,
-  .assistant-card,
-  .meta-block,
-  .scope-panel {
+    padding: 0.7rem 0.85rem;
     display: grid;
-    gap: 0.65rem;
+    gap: 0.55rem;
+    max-width: 92%;
   }
 
-  .thread-turn.latest {
-    border-color: rgba(122, 166, 200, 0.32);
-    background: rgba(8, 13, 18, 0.72);
+  .user-bubble {
+    justify-self: end;
+    background: rgba(122, 166, 200, 0.1);
+    border-color: rgba(122, 166, 200, 0.3);
+    border-top-right-radius: 2px;
   }
 
-  .summary-copy,
-  .claim-row,
-  .meta-row,
-  .scope-copy {
+  .user-bubble p {
+    color: var(--text-0);
+    font-size: 0.82rem;
+  }
+
+  .assistant-bubble {
+    justify-self: start;
+    border-top-left-radius: 2px;
+  }
+
+  .status-bubble p {
+    color: var(--text-2);
+    font-size: 0.82rem;
+  }
+
+  .status-bubble.error {
+    border-color: rgba(214, 104, 104, 0.35);
+  }
+
+  .status-bubble.unavailable {
+    border-color: rgba(214, 168, 83, 0.35);
+  }
+
+  .bubble-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .field {
     display: grid;
     gap: 0.25rem;
   }
 
+  .field + .field {
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(46, 60, 74, 0.42);
+  }
+
+  .bubble .field p.emphasis {
+    color: var(--text-0);
+    font-size: 0.85rem;
+  }
+
+  .meta-details {
+    margin-top: 0.4rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(46, 60, 74, 0.42);
+  }
+
+  .meta-details summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.62rem;
+  }
+
+  .meta-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .meta-details summary::before {
+    content: "▸";
+    display: inline-block;
+    width: 0.75rem;
+    transition: transform 120ms ease;
+    color: var(--text-2);
+  }
+
+  .meta-details[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  .meta-details summary:hover {
+    color: var(--text-1);
+  }
+
+  .meta-details .warning-label {
+    color: rgba(214, 168, 83, 0.85);
+  }
+
+  .meta-body {
+    display: grid;
+    gap: 0.6rem;
+    margin-top: 0.55rem;
+  }
+
+  .meta-group {
+    display: grid;
+    gap: 0.3rem;
+  }
+
+  .claim-row {
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .claim-row + .claim-row {
+    padding-top: 0.45rem;
+    margin-top: 0.25rem;
+    border-top: 1px solid rgba(46, 60, 74, 0.3);
+  }
+
+  .meta-row {
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .meta-row strong {
+    color: var(--text-1);
+    font-size: 0.78rem;
+  }
+
   .section-label,
-  .message-card span,
-  .section-block span,
-  .list-block span,
-  .claim-block span,
-  .meta-block > span,
-  .thread-summary .section-label {
+  .inline-label {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    font-size: 0.62rem;
   }
 
-  .turn-pill,
+  .message-card {
+    border: 1px solid rgba(122, 166, 200, 0.18);
+    background: rgba(8, 13, 18, 0.6);
+    padding: 0.85rem;
+  }
+
+  .empty-state p {
+    color: var(--text-2);
+    font-size: 0.82rem;
+  }
+
   .context-pill {
     border: 1px solid rgba(46, 60, 74, 0.52);
     background: rgba(8, 13, 18, 0.7);
     color: var(--text-2);
-    padding: 0.32rem 0.5rem;
+    padding: 0.28rem 0.5rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.65rem;
+    font-size: 0.64rem;
     white-space: nowrap;
   }
 
-  .turn-pill.follow-up,
   .context-pill.active {
     border-color: rgba(122, 166, 200, 0.36);
     background: rgba(122, 166, 200, 0.08);
@@ -550,92 +583,28 @@
   .context-summary {
     margin: 0;
     color: var(--text-0);
-    font-size: 0.94rem;
+    font-size: 0.88rem;
     overflow-wrap: anywhere;
   }
 
-  .thread-summary p,
-  .thread-summary small,
-  .message-card p,
-  .note-card p,
-  .scope-copy p,
-  .section-block p,
-  .list-block p,
-  .claim-block p,
+  .bubble p,
   .meta-row small,
-  .composer-footer small {
+  .composer-footer small,
+  .meta-group small {
     color: var(--text-2);
   }
 
-  .message-card.error {
-    border-color: rgba(214, 104, 104, 0.35);
-  }
-
-  .message-card.unavailable {
-    border-color: rgba(214, 168, 83, 0.35);
-  }
-
-  .message-card.neutral {
-    border-color: rgba(122, 166, 200, 0.18);
-  }
-
-  .prompt-card {
-    background: rgba(15, 19, 25, 0.85);
-  }
-
-  .hero-block {
-    display: grid;
-    gap: 0.35rem;
-    padding: 0.9rem;
-    border: 1px solid rgba(122, 166, 200, 0.18);
-    background: rgba(122, 166, 200, 0.06);
-  }
-
-  .summary-grid,
-  .claims-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .scope-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
-  }
-
-  .list-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .scope-option {
-    display: grid;
-    gap: 0.45rem;
-    text-align: left;
-    cursor: pointer;
-    background: rgba(8, 13, 18, 0.68);
-  }
-
-  .scope-option.selected {
-    border-color: rgba(122, 166, 200, 0.42);
-    background: rgba(122, 166, 200, 0.08);
-  }
-
-  .scope-head,
-  .scope-meta {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.75rem;
-    align-items: center;
-  }
-
-  .scope-head strong {
+  .bubble h3 {
     color: var(--text-0);
-    font-size: 0.82rem;
+    font-size: 0.92rem;
+    font-weight: 600;
   }
 
-  .scope-head small,
-  .scope-meta small,
-  .scope-option p {
-    color: var(--text-2);
+  .bubble .field p,
+  .bubble .field li {
+    color: var(--text-1);
+    font-size: 0.81rem;
+    line-height: 1.45;
   }
 
   h2,
@@ -648,12 +617,13 @@
   }
 
   ul {
-    padding-left: 1rem;
+    padding-left: 1.05rem;
   }
 
   textarea,
   button,
-  .close-btn {
+  .close-btn,
+  select {
     border: 1px solid var(--panel-strong);
     background: #0d0f12;
     color: var(--text-0);
@@ -667,21 +637,6 @@
     font-size: 0.82rem;
   }
 
-  .mode-btn {
-    padding: 0.45rem 0.7rem;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-2);
-    background: rgba(8, 13, 18, 0.82);
-  }
-
-  .mode-btn.active {
-    color: var(--accent);
-    border-color: rgba(122, 166, 200, 0.38);
-    background: rgba(122, 166, 200, 0.08);
-  }
-
   button {
     cursor: pointer;
   }
@@ -690,8 +645,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 2.3rem;
-    height: 2.3rem;
+    width: 2.1rem;
+    height: 2.1rem;
     padding: 0;
     border-color: transparent;
     background: transparent;
@@ -702,9 +657,40 @@
     border-color: rgba(122, 166, 200, 0.32);
   }
 
+  .composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .mode-select select {
+    padding: 0.32rem 0.5rem;
+    padding-right: 1.4rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-2);
+    background-color: #0d0f12;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%237a8a99' stroke-width='1.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.45rem center;
+    appearance: none;
+    cursor: pointer;
+  }
+
+  .mode-select select:hover:not(:disabled) {
+    border-color: rgba(122, 166, 200, 0.32);
+    color: var(--text-1);
+  }
+
+  .mode-select select:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
   .generate-btn {
-    padding: 0.38rem 0.9rem;
-    font-size: 0.76rem;
+    padding: 0.35rem 0.85rem;
+    font-size: 0.74rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     border-color: rgba(122, 166, 200, 0.28);
@@ -722,15 +708,52 @@
     cursor: default;
   }
 
-  .meta-row strong {
-    color: var(--text-1);
-    font-size: 0.82rem;
+  .scope-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
-  .turn-head small,
-  .context-summary,
-  .meta-row small {
-    overflow-wrap: anywhere;
+  .scope-row-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.6rem;
+  }
+
+  .scope-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .scope-chip {
+    padding: 0.25rem 0.55rem;
+    font-size: 0.72rem;
+    color: var(--text-2);
+    background: rgba(8, 13, 18, 0.82);
+    border: 1px solid rgba(46, 60, 74, 0.52);
+  }
+
+  .scope-chip.selected {
+    color: var(--accent);
+    border-color: rgba(122, 166, 200, 0.42);
+    background: rgba(122, 166, 200, 0.08);
+  }
+
+  .scope-empty {
+    color: var(--text-2);
+    font-size: 0.74rem;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   @media (max-width: 980px) {
@@ -739,19 +762,8 @@
       max-width: calc(100vw - 0.35rem);
     }
 
-    .summary-grid,
-    .list-grid,
-    .claims-grid,
-    .scope-grid {
-      grid-template-columns: 1fr;
-    }
-
     .title-row,
-    .assistant-header,
-    .turn-head,
-    .composer-footer,
-    .scope-head,
-    .scope-meta {
+    .composer-footer {
       align-items: flex-start;
       flex-direction: column;
     }

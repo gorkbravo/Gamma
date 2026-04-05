@@ -39,15 +39,13 @@ describe("CopilotResearchCard", () => {
       }
     });
 
-    expect(body).toContain("Active Thread");
-    expect(body).toContain("2 turns in this thread.");
-    expect(body).toContain("Follow-up 2");
-    expect(body).toContain("Initial Brief");
     expect(body).toContain("Macro Thread 2");
     expect(body).toContain("Macro Thread 1");
     expect(body).toContain("Pressure-test the lead divergence.");
     expect(body).toContain("Map the active macro setup.");
-    expect(body).toContain("Follow Up");
+    expect(body).toContain("Follow up");
+    // Research Card header is shown only on the first turn, not on follow-ups.
+    expect(body.match(/Research Card/g)?.length ?? 0).toBe(1);
   });
 
   it("renders synthesis mode with explicit grounding scope details", () => {
@@ -103,9 +101,10 @@ describe("CopilotResearchCard", () => {
     });
 
     expect(body).toContain("Synthesis");
-    expect(body).toContain("Grounding Scope");
+    expect(body).toContain("Scope");
     expect(body).toContain("Portfolio");
     expect(body).toContain("Macro");
+    // Fingerprint and warning details are surfaced via the chip tooltip.
     expect(body).toContain("FP a1b2c3d4");
     expect(body).toContain("1 warning");
     expect(body).toContain("Research Synthesis");
