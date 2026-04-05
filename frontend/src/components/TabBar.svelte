@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { TabId } from "../lib/api/types";
+  import { getDropIndexFromPointer } from "../lib/tab-reorder";
 
   export interface TabBarItem {
     id: TabId;
@@ -15,8 +16,13 @@
   export let onReset: () => void = () => {};
   export let onReorder: (draggedTabId: TabId, dropIndex: number) => void = () => {};
 
+  let tabListElement: HTMLDivElement | null = null;
   let draggingTabId: TabId | null = null;
   let dropIndex: number | null = null;
+  let dragPointerId: number | null = null;
+  let dragStartIndex: number | null = null;
+  let dragStartY: number | null = null;
+  let pointerMoved = false;
 
   function handleSelect(tab: TabId) {
     onSelect(tab);
@@ -26,56 +32,75 @@
   function clearDragState() {
     draggingTabId = null;
     dropIndex = null;
+    dragPointerId = null;
+    dragStartIndex = null;
+    dragStartY = null;
+    pointerMoved = false;
   }
 
-  function handleDragStart(event: DragEvent, tabId: TabId) {
+  function measureDropIndex(clientY: number) {
+    if (!tabListElement) {
+      return tabs.length;
+    }
+
+    const rows = Array.from(tabListElement.querySelectorAll<HTMLElement>(".tab-row")).map((row) => {
+      const rect = row.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    });
+
+    return getDropIndexFromPointer(rows, clientY, tabs.length);
+  }
+
+  function handlePointerStart(event: PointerEvent, tabId: TabId) {
+    event.preventDefault();
     draggingTabId = tabId;
-    dropIndex = tabs.findIndex((tab) => tab.id === tabId);
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.dropEffect = "move";
-      event.dataTransfer.setData("text/plain", tabId);
-    }
+    dragPointerId = event.pointerId;
+    dragStartIndex = tabs.findIndex((tab) => tab.id === tabId);
+    dragStartY = event.clientY;
+    dropIndex = dragStartIndex;
+    pointerMoved = false;
   }
 
-  function handleDragOver(event: DragEvent, index: number) {
-    if (!draggingTabId) {
+  function handlePointerMove(event: PointerEvent) {
+    if (!draggingTabId || dragPointerId !== event.pointerId) {
       return;
     }
 
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "move";
-    }
-    const row = event.currentTarget as HTMLElement;
-    const rect = row.getBoundingClientRect();
-    const nextDropIndex = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
-    dropIndex = Math.max(1, Math.min(nextDropIndex, tabs.length));
+    pointerMoved = pointerMoved || (dragStartY != null && Math.abs(event.clientY - dragStartY) > 3);
+    dropIndex = measureDropIndex(event.clientY);
   }
 
-  function handleListDragOver(event: DragEvent) {
-    if (!draggingTabId) {
-      return;
-    }
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "move";
-    }
-    if (dropIndex == null) {
-      dropIndex = tabs.length;
-    }
-  }
-
-  function handleDrop(event: DragEvent) {
+  function commitPointerReorder() {
     if (!draggingTabId || dropIndex == null) {
       clearDragState();
       return;
     }
-    event.preventDefault();
-    onReorder(draggingTabId, dropIndex);
+
+    if (pointerMoved && dropIndex !== dragStartIndex) {
+      onReorder(draggingTabId, dropIndex);
+    }
+
+    clearDragState();
+  }
+
+  function handlePointerEnd(event: PointerEvent) {
+    if (dragPointerId !== event.pointerId) {
+      return;
+    }
+
+    commitPointerReorder();
+  }
+
+  function handlePointerCancel(event: PointerEvent) {
+    if (dragPointerId !== event.pointerId) {
+      return;
+    }
+
     clearDragState();
   }
 </script>
+
+<svelte:window on:pointermove={handlePointerMove} on:pointerup={handlePointerEnd} on:pointercancel={handlePointerCancel} />
 
 {#if open}
   <div class="backdrop" on:click={onClose} on:keydown={(event) => event.key === "Escape" && onClose()} role="presentation"></div>
@@ -97,10 +122,9 @@
   </div>
 
   <div
+    bind:this={tabListElement}
     class="tab-list"
     role="list"
-    on:dragover={handleListDragOver}
-    on:drop={handleDrop}
   >
     {#if draggingTabId && dropIndex === 1}
       <div class="insertion-marker" aria-hidden="true"></div>
@@ -112,11 +136,6 @@
         class:selected={tab.id === activeTab}
         class:dragging={draggingTabId === tab.id}
         role="listitem"
-        draggable={!tab.pinned}
-        on:dragstart={(event) => !tab.pinned && handleDragStart(event, tab.id)}
-        on:dragend={clearDragState}
-        on:dragover={(event) => handleDragOver(event, index)}
-        on:drop={handleDrop}
       >
         <div class="tab-row-main">
           {#if tab.pinned}
@@ -126,11 +145,16 @@
               </svg>
             </span>
           {:else}
-            <span class="drag-handle" aria-hidden="true">
+            <button
+              class="drag-handle"
+              type="button"
+              aria-label={`Reorder ${tab.label}`}
+              on:pointerdown={(event) => handlePointerStart(event, tab.id)}
+            >
               <span></span>
               <span></span>
               <span></span>
-            </span>
+            </button>
           {/if}
 
           <button class="tab-button" class:selected={tab.id === activeTab} type="button" on:click={() => handleSelect(tab.id)}>
@@ -249,10 +273,6 @@
     gap: 0.18rem;
   }
 
-  .tab-row:not(.selected):not([draggable="false"]) {
-    cursor: grab;
-  }
-
   .tab-row-main {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -269,7 +289,12 @@
     align-content: center;
     gap: 0.14rem;
     padding: 0.45rem 0.35rem;
+    border: 1px solid transparent;
+    background: transparent;
     color: var(--text-1);
+    cursor: grab;
+    border-radius: 2px;
+    touch-action: none;
   }
 
   .drag-handle span {
@@ -279,6 +304,11 @@
     border-radius: 99px;
     background: currentColor;
     opacity: 0.45;
+  }
+
+  .tab-row.dragging .drag-handle,
+  .drag-handle:active {
+    cursor: grabbing;
   }
 
   .tab-pin {

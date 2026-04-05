@@ -15,7 +15,7 @@ from src.models.prediction_markets import (
     WalletSummary,
 )
 from src.services.prediction_market_adapters import PredictionMarketAdapter
-from src.utils.time import now_utc
+from src.utils.time import ensure_utc, now_utc
 
 ALLOWED_RESEARCH_CATEGORIES = ("Politics", "Finance", "Geopolitics", "Crypto", "Economy")
 EXACT_CATEGORY_ALIASES = {
@@ -519,10 +519,13 @@ class PredictionMarketService:
         history_points: list | None = None,
         history_error: str | None = None,
     ) -> PredictionMarketRecord:
-        current_time = now_utc()
+        current_time = ensure_utc(now_utc())
         last_history_point_at = None
         if history_points:
-            last_history_point_at = max((point.timestamp for point in history_points if point.timestamp is not None), default=None)
+            last_history_point_at = max(
+                (ensure_utc(point.timestamp) for point in history_points if point.timestamp is not None),
+                default=None,
+            )
         freshness = self._build_freshness(
             row,
             current_time=current_time,
@@ -539,20 +542,25 @@ class PredictionMarketService:
         last_history_point_at: datetime | None,
         history_error: str | None,
     ) -> PredictionMarketFreshness:
+        current_time = ensure_utc(current_time)
+        retrieved_at = ensure_utc(row.retrieved_at)
+        end_time = ensure_utc(row.end_time)
+        last_history_point_at = ensure_utc(last_history_point_at)
+
         retrieval_age_seconds = None
-        if row.retrieved_at is not None:
-            retrieval_age_seconds = max((current_time - row.retrieved_at).total_seconds(), 0.0)
+        if current_time is not None and retrieved_at is not None:
+            retrieval_age_seconds = max((current_time - retrieved_at).total_seconds(), 0.0)
 
         history_lag_seconds = None
-        if row.retrieved_at is not None and last_history_point_at is not None:
-            history_lag_seconds = max((row.retrieved_at - last_history_point_at).total_seconds(), 0.0)
+        if retrieved_at is not None and last_history_point_at is not None:
+            history_lag_seconds = max((retrieved_at - last_history_point_at).total_seconds(), 0.0)
 
-        integrity_reference_time = row.retrieved_at or current_time
-        if row.status == "open" and row.end_time is not None and row.end_time <= integrity_reference_time:
-            reason = f"Venue still marks this market open even though end_time passed at {row.end_time.isoformat()}."
-            if last_history_point_at is not None and last_history_point_at > row.end_time:
+        integrity_reference_time = retrieved_at or current_time
+        if row.status == "open" and end_time is not None and integrity_reference_time is not None and end_time <= integrity_reference_time:
+            reason = f"Venue still marks this market open even though end_time passed at {end_time.isoformat()}."
+            if last_history_point_at is not None and last_history_point_at > end_time:
                 reason = (
-                    f"Venue still marks this market open after end_time {row.end_time.isoformat()}, "
+                    f"Venue still marks this market open after end_time {end_time.isoformat()}, "
                     f"and history continued updating through {last_history_point_at.isoformat()}."
                 )
             return PredictionMarketFreshness(
@@ -784,12 +792,14 @@ class PredictionMarketService:
         return 0.18
 
     def _days_to_resolution(self, row: PredictionMarketRecord, current_time: datetime) -> float | None:
-        if row.end_time is None:
+        end_time = ensure_utc(row.end_time)
+        current_time = ensure_utc(current_time)
+        if end_time is None or current_time is None:
             return None
-        return (row.end_time - current_time).total_seconds() / 86400.0
+        return (end_time - current_time).total_seconds() / 86400.0
 
     def _reference_time(self, row: PredictionMarketRecord) -> datetime:
-        return row.retrieved_at or now_utc()
+        return ensure_utc(row.retrieved_at) or ensure_utc(now_utc())
 
     def _scaled_log(self, value: float | None, *, pivot: float) -> float:
         if value is None or value <= 0:

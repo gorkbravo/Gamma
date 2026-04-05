@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
     PredictionCalibrationSummary,
     PredictionMarket,
@@ -289,10 +290,12 @@
           label: detail?.probability_label ?? "Probability",
           color: "#7aa6c8",
           type: "area",
-          data: history.points.map((point) => ({
-            time: Math.floor(new Date(point.timestamp).getTime() / 1000),
-            value: point.probability
-          }))
+          data: history.points
+            .map((point) => ({
+              time: parseApiTimestampToUtcSeconds(point.timestamp),
+              value: point.probability
+            }))
+            .filter((point): point is { time: number; value: number } => point.time != null)
         }
       ]
     : [];

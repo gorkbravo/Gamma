@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -276,6 +276,67 @@ def test_polymarket_wallet_summary_uses_selected_outcome_probability_for_edge(tm
     assert wallet.participants[0].current_edge == pytest.approx(0.01)
 
 
+def test_polymarket_history_points_use_utc_timestamps(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        if url.endswith("/prices-history"):
+            return {
+                "history": [
+                    {"t": 1_711_958_435, "p": 0.64},
+                    {"t": 1_711_962_034, "p": 0.66},
+                ]
+            }
+        raise AssertionError(f"Unexpected request: {url} {params}")
+
+    adapter = PolymarketAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    market = PredictionMarketRecord(
+        market_id="polymarket:test-history",
+        venue="polymarket",
+        title="Will X happen?",
+        subtitle=None,
+        description=None,
+        status="open",
+        category="Politics",
+        event_id="polymarket:event:test",
+        event_title="Will X happen?",
+        series_id=None,
+        series_title=None,
+        provider_market_id="test-history",
+        provider_condition_id="condition-1",
+        provider_event_id="event-1",
+        provider_series_id=None,
+        slug="test-history",
+        end_time=datetime(2026, 3, 31, 0, 0, 0),
+        open_time=datetime(2026, 3, 1, 0, 0, 0),
+        close_time=None,
+        current_probability=0.66,
+        probability_label="Yes",
+        volume=1000.0,
+        volume_24h=50.0,
+        liquidity=500.0,
+        open_interest=200.0,
+        best_bid=0.65,
+        best_ask=0.67,
+        spread=0.02,
+        recent_price_change=0.02,
+        resolved_probability=None,
+        resolution_outcome=None,
+        image_url=None,
+        resolution_source=None,
+        outcomes=[
+            PredictionMarketOutcome(outcome_id="yes", label="Yes", probability=0.66, token_id="yes-token"),
+        ],
+        tags=["Politics"],
+        source_provider="polymarket",
+        retrieved_at=datetime(2026, 3, 18, 17, 0, 0),
+        origin="test",
+    )
+
+    history = adapter.get_history(market)
+
+    assert [point.probability for point in history] == [0.64, 0.66]
+    assert all(point.timestamp.tzinfo is not None for point in history)
+
+
 def test_kalshi_adapter_normalizes_closed_markets_and_flow_summary(tmp_path):
     calls: defaultdict[str, int] = defaultdict(int)
 
@@ -466,14 +527,14 @@ def test_kalshi_adapter_uses_historical_endpoint_for_archived_market_history(tmp
         if url.endswith("/historical/markets/KXOLD-YES/candlesticks"):
             assert params == {
                 "period_interval": 60,
-                "start_ts": int(datetime(2025, 12, 20, 0, 0, 0).timestamp()),
-                "end_ts": int(datetime(2025, 12, 31, 23, 0, 0).timestamp()),
+                "start_ts": int(datetime(2025, 12, 20, 0, 0, 0, tzinfo=timezone.utc).timestamp()),
+                "end_ts": int(datetime(2025, 12, 31, 23, 0, 0, tzinfo=timezone.utc).timestamp()),
             }
             return {
                 "ticker": "KXOLD-YES",
                 "candlesticks": [
                     {
-                        "end_period_ts": int(datetime(2025, 12, 30, 22, 0, 0).timestamp()),
+                        "end_period_ts": int(datetime(2025, 12, 30, 22, 0, 0, tzinfo=timezone.utc).timestamp()),
                         "yes_bid": {"close": "0.41"},
                         "yes_ask": {"close": "0.43"},
                         "price": {"close": "0.42"},
@@ -481,7 +542,7 @@ def test_kalshi_adapter_uses_historical_endpoint_for_archived_market_history(tmp
                         "open_interest": "100.00",
                     },
                     {
-                        "end_period_ts": int(datetime(2025, 12, 31, 23, 0, 0).timestamp()),
+                        "end_period_ts": int(datetime(2025, 12, 31, 23, 0, 0, tzinfo=timezone.utc).timestamp()),
                         "yes_bid": {"close": "0.58"},
                         "yes_ask": {"close": "0.60"},
                         "price": {"close": "0.59"},
@@ -537,6 +598,7 @@ def test_kalshi_adapter_uses_historical_endpoint_for_archived_market_history(tmp
     history = adapter.get_history(market)
 
     assert [point.probability for point in history] == [0.42, 0.59]
+    assert all(point.timestamp.tzinfo is not None for point in history)
     assert history[0].volume == 25.0
     assert history[0].open_interest == 100.0
     assert history[0].spread == pytest.approx(0.02)
@@ -544,6 +606,82 @@ def test_kalshi_adapter_uses_historical_endpoint_for_archived_market_history(tmp
     assert any(url.endswith("/historical/cutoff") for url, _ in calls)
     assert any(url.endswith("/historical/markets/KXOLD-YES/candlesticks") for url, _ in calls)
     assert not any(url.endswith("/series/KXSERIES/markets/KXOLD-YES/candlesticks") for url, _ in calls)
+
+
+def test_kalshi_adapter_caps_open_market_history_at_current_time(tmp_path, monkeypatch):
+    fixed_now = datetime(2026, 4, 5, 12, 0, 0)
+    calls: list[tuple[str, dict | None]] = []
+
+    def fake_fetch(url: str, params: dict | None = None):
+        calls.append((url, params))
+        if url.endswith("/series/KXLONG/markets/KXLONG-YES/candlesticks"):
+            assert params == {
+                "period_interval": 1440,
+                "start_ts": int(datetime(2025, 9, 24, 14, 0, 0, tzinfo=timezone.utc).timestamp()),
+                "end_ts": int(fixed_now.replace(tzinfo=timezone.utc).timestamp()),
+            }
+            return {
+                "ticker": "KXLONG-YES",
+                "candlesticks": [
+                    {
+                        "end_period_ts": int(datetime(2026, 4, 5, 0, 0, 0, tzinfo=timezone.utc).timestamp()),
+                        "yes_bid": {"close": "0.20"},
+                        "yes_ask": {"close": "0.22"},
+                        "price": {"close": "0.21"},
+                        "volume": "10.0",
+                    }
+                ],
+            }
+        raise AssertionError(f"Unexpected request: {url} {params}")
+
+    monkeypatch.setattr("src.services.prediction_market_adapters.now_utc", lambda: fixed_now)
+    adapter = KalshiAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch)
+    market = PredictionMarketRecord(
+        market_id="kalshi:KXLONG-YES",
+        venue="kalshi",
+        title="Will X happen before 2045?",
+        subtitle=None,
+        description=None,
+        status="open",
+        category="Politics",
+        event_id="kalshi:event:KXLONG-45",
+        event_title="Will X happen before 2045?",
+        series_id="kalshi:series:KXLONG",
+        series_title="KXLONG",
+        provider_market_id="KXLONG-YES",
+        provider_condition_id=None,
+        provider_event_id="KXLONG-45",
+        provider_series_id="KXLONG",
+        slug="KXLONG-YES",
+        end_time=datetime(2045, 1, 8, 15, 0, 0),
+        open_time=datetime(2025, 9, 24, 14, 0, 0),
+        close_time=datetime(2045, 1, 1, 4, 59, 0),
+        current_probability=0.21,
+        probability_label="Yes",
+        volume=1000.0,
+        volume_24h=10.0,
+        liquidity=500.0,
+        open_interest=200.0,
+        best_bid=0.20,
+        best_ask=0.22,
+        spread=0.02,
+        recent_price_change=0.01,
+        resolved_probability=None,
+        resolution_outcome=None,
+        image_url=None,
+        resolution_source=None,
+        outcomes=[],
+        tags=["Politics"],
+        source_provider="kalshi",
+        retrieved_at=fixed_now,
+        origin="test",
+    )
+
+    history = adapter.get_history(market)
+
+    assert [point.probability for point in history] == [0.21]
+    assert history[0].timestamp.tzinfo is not None
+    assert any(url.endswith("/series/KXLONG/markets/KXLONG-YES/candlesticks") for url, _ in calls)
 
 
 def test_kalshi_adapter_falls_back_to_historical_market_detail(tmp_path):
@@ -1115,6 +1253,76 @@ def test_prediction_market_service_filters_expired_open_markets_and_marks_detail
     assert detail.freshness is not None
     assert detail.freshness.status == "broken"
     assert "end_time" in str(detail.freshness.reason)
+
+
+def test_prediction_market_service_handles_mixed_naive_and_aware_history_timestamps():
+    base_time = datetime(2026, 3, 15, 12, 0, 0)
+    market = _build_market(
+        market_id="polymarket:fed-cut",
+        venue="polymarket",
+        provider_market_id="fed-cut",
+        title="Will the Fed cut rates by June?",
+        event_title="Fed policy outlook",
+        category="Economy",
+        current_probability=0.52,
+        retrieved_at=base_time,
+    )
+
+    class MixedTimeAdapter:
+        provider = "polymarket"
+
+        def list_markets(self, **kwargs):
+            return [market]
+
+        def get_market(self, provider_market_id: str):
+            return market if provider_market_id == market.provider_market_id else None
+
+        def get_history(self, market: PredictionMarketRecord):
+            return [
+                PredictionProbabilityPoint(
+                    timestamp=(base_time - timedelta(hours=1)).replace(tzinfo=timezone.utc),
+                    probability=0.5,
+                    source_provider=self.provider,
+                    retrieved_at=base_time,
+                    origin="polymarket.history",
+                )
+            ]
+
+        def get_wallet_summary(self, market: PredictionMarketRecord):
+            return WalletSummary(
+                market_id=market.market_id,
+                venue=self.provider,
+                concentration_hhi=None,
+                top_participant_share=None,
+                total_trades=0,
+                total_notional=0.0,
+                source_provider=self.provider,
+                retrieved_at=base_time,
+                origin="polymarket.wallets",
+            )
+
+        def list_event_markets(self, market: PredictionMarketRecord, *, limit: int = 12):
+            return []
+
+        def build_calibration_summary(self, *, sample_size: int = 30):
+            return CalibrationSummary(
+                venue=self.provider,
+                sample_size=0,
+                source_provider=self.provider,
+                retrieved_at=base_time,
+                origin="polymarket.calibration",
+            )
+
+    service = PredictionMarketService(adapters={"polymarket": MixedTimeAdapter()})
+
+    detail = service.get_market_detail("polymarket:fed-cut")
+    related = service.get_related_markets("polymarket:fed-cut")
+
+    assert detail is not None
+    assert detail.freshness is not None
+    assert detail.freshness.status != "broken"
+    assert detail.freshness.history_lag_seconds == pytest.approx(3600.0)
+    assert related == []
 
 
 def test_prediction_market_service_research_rank_prefers_current_liquid_contracts():

@@ -17,7 +17,7 @@ from src.models.prediction_markets import (
     WalletSummary,
 )
 from src.services.cache import CacheService
-from src.utils.time import now_utc
+from src.utils.time import ensure_utc, now_utc
 
 
 JsonFetcher = Callable[[str, dict[str, Any] | None], Any]
@@ -100,10 +100,10 @@ class BasePredictionMarketAdapter:
         if not force_refresh:
             cached = self.cache.get_json(cache_key)
             if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
-                cached_at = _parse_datetime(cached.get("retrieved_at")) or now_utc()
+                cached_at = _parse_datetime(cached.get("retrieved_at")) or ensure_utc(now_utc())
                 return cached["payload"], cached_at
         payload = self.fetch_json(url, params)
-        retrieved_at = now_utc()
+        retrieved_at = ensure_utc(now_utc())
         self.cache.set_json(
             cache_key,
             {
@@ -395,7 +395,7 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
         history = payload.get("history", []) if isinstance(payload, dict) else []
         return [
             PredictionProbabilityPoint(
-                timestamp=datetime.utcfromtimestamp(int(point["t"])),
+                timestamp=datetime.fromtimestamp(int(point["t"]), tz=timezone.utc),
                 probability=float(point["p"]),
                 source_provider=self.provider,
                 retrieved_at=retrieved_at,
@@ -646,7 +646,7 @@ class KalshiAdapter(BasePredictionMarketAdapter):
     ) -> list[PredictionMarketRecord]:
         raw_markets: list[tuple[dict[str, Any], str]] = []
         event_metadata: dict[str, dict[str, Any]] = {}
-        retrieved_at = now_utc()
+        retrieved_at = ensure_utc(now_utc())
         statuses = self._status_queries(status)
         events_limit = min(max(limit, 50), 200)
         for state in statuses:
@@ -877,7 +877,7 @@ class KalshiAdapter(BasePredictionMarketAdapter):
     ) -> tuple[list[dict[str, Any]], datetime]:
         target = min(max(limit, 1), 1000)
         markets: list[dict[str, Any]] = []
-        retrieved_at = now_utc()
+        retrieved_at = ensure_utc(now_utc())
         cursor = ""
         while len(markets) < target:
             page_limit = min(target - len(markets), 1000)
@@ -940,19 +940,20 @@ class KalshiAdapter(BasePredictionMarketAdapter):
     def _uses_historical_market_data(self, market: PredictionMarketRecord) -> bool:
         if market.status not in {"closed", "resolved"}:
             return False
-        settled_at = market.close_time or market.end_time
+        settled_at = ensure_utc(market.close_time or market.end_time)
         if settled_at is None:
             return False
-        cutoff = self._get_historical_cutoff()
+        cutoff = ensure_utc(self._get_historical_cutoff())
         if cutoff is None:
             return False
         return settled_at < cutoff
 
     @staticmethod
     def _history_window(market: PredictionMarketRecord) -> tuple[int, int]:
-        fallback_end = market.close_time or market.end_time or now_utc()
-        start_dt = market.open_time or fallback_end - timedelta(days=30)
-        end_dt = fallback_end
+        current_time = ensure_utc(now_utc())
+        market_end = ensure_utc(market.close_time or market.end_time)
+        end_dt = min(market_end, current_time) if market_end is not None else current_time
+        start_dt = ensure_utc(market.open_time) or end_dt - timedelta(days=30)
         start_ts = int(start_dt.timestamp())
         end_ts = int(end_dt.timestamp())
         return start_ts, end_ts
@@ -989,7 +990,7 @@ class KalshiAdapter(BasePredictionMarketAdapter):
                 continue
             points.append(
                 PredictionProbabilityPoint(
-                    timestamp=datetime.utcfromtimestamp(int(candle["end_period_ts"])),
+                    timestamp=datetime.fromtimestamp(int(candle["end_period_ts"]), tz=timezone.utc),
                     probability=probability,
                     volume=_first_float(candle.get("volume_fp"), candle.get("volume")),
                     open_interest=_first_float(candle.get("open_interest_fp"), candle.get("open_interest")),
@@ -1098,10 +1099,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         return None
     text = text.replace("Z", "+00:00")
     try:
-        parsed = datetime.fromisoformat(text)
-        if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-        return parsed
+        return ensure_utc(datetime.fromisoformat(text))
     except ValueError:
         return None
 
@@ -1111,7 +1109,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if numeric is None:
         return None
     try:
-        return datetime.utcfromtimestamp(int(numeric))
+        return datetime.fromtimestamp(int(numeric), tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
         return None
 

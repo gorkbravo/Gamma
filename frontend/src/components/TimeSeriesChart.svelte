@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { normalizeChartData } from "../lib/chart-data";
   import { chartTheme } from "../lib/stores/app";
   import {
     AreaSeries,
@@ -120,6 +121,7 @@
     const resolvedNegative = getComputedStyle(container).getPropertyValue("--chart-negative").trim() || "#b65d54";
 
     for (const item of series) {
+      const normalizedData = normalizeChartData(item.data);
       let resolvedColor = item.color;
       if (item.color === "#7aa6c8") resolvedColor = resolvedPrimary;
       else if (item.color === "#c49a5a") resolvedColor = resolvedSecondary;
@@ -133,8 +135,8 @@
               lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
               priceFormat: {
                 type: "price",
-                precision: inferPricePrecision(item.data),
-                minMove: 10 ** -inferPricePrecision(item.data)
+                precision: inferPricePrecision(normalizedData),
+                minMove: 10 ** -inferPricePrecision(normalizedData)
               },
               lastValueVisible: false,
               priceLineVisible: false
@@ -147,13 +149,13 @@
               lineWidth: 2,
               priceFormat: {
                 type: "price",
-                precision: inferPricePrecision(item.data),
-                minMove: 10 ** -inferPricePrecision(item.data)
+                precision: inferPricePrecision(normalizedData),
+                minMove: 10 ** -inferPricePrecision(normalizedData)
               },
               lastValueVisible: false,
               priceLineVisible: false
             });
-      api.setData(item.data);
+      api.setData(normalizedData);
       seriesMap.set(item.id, api);
     }
 
