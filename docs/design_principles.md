@@ -31,18 +31,27 @@ The primary references are **Bloomberg Terminal** and **linear.app**: the inform
 User-selectable themes (e.g. a lighter mode, an alternative accent color) are a valid future feature. If implemented, every design decision made now should be expressed as a CSS variable or equivalent token so that themes can be applied at the token level without rewriting components.
 
 ---
-
+ 
 ## 3. Elevation and Depth
-
+ 
 **This is one of the most important principles for Gamma.**
-
-Cards and containers must not appear to float above the background. The platform should feel **flat** — as in a single coherent plane, not a stack of layers. Depth should be implied through structure and contrast, not through shadows, glows, or `z`-axis effects.
-
+ 
+Gamma uses a **plane model**, not an **object model**.
+ 
+In an object model (the wrong approach), cards are raised boxes sitting on top of a darker background. The background shows through as strips of negative space between cards, reinforcing the sense that each card is a separate floating element. This is how most SaaS dashboards work. It is not how Gamma should work.
+ 
+In a plane model (the right approach), the entire interface is one flat surface. Regions within that surface are defined by borders and lines — not by color contrast between a card and the background behind it. A card's background color is the same as the root background. What makes a card a card is its border, not its elevation. The separation between two panels is a `1px` line, not a gap of darker background showing through. The result reads like a spreadsheet or a terminal — one coherent plane with internal geometry — rather than a stack of panels floating in space.
+ 
+**Bloomberg Terminal is a plane. Most SaaS dashboards are object stacks. Gamma is a plane.**
+ 
 ### Rules
-- No `box-shadow` on cards or panels unless it is truly invisible at normal viewing distance. If a shadow is necessary, it must be extremely subtle and in the dark range (never a colored or glowing shadow).
-- No `border-radius` greater than `4px` on data containers. Terminals don't round their corners. Slight rounding is acceptable on buttons and interactive elements only.
-- Elevation hierarchy should be communicated through **border color and opacity**, not shadow depth. A surface one level up from the background should use a slightly brighter border — that's it.
-- Cards within cards are not permitted. If content can be separated by a line, a rule, or whitespace — a card was not necessary. Prefer `1px` dividers (vertical or horizontal) to nested container structures.
+- Card and panel backgrounds must match the root background color. Do not use a lighter or different-toned surface color to distinguish a card from its surroundings.
+- Borders define regions. Every card or panel boundary should be expressed as a `1px solid` border at low-to-mid opacity. That border is the only thing that needs to exist.
+- No `box-shadow` on cards or panels. None. A shadow implies the element is lifted above the surface — this contradicts the plane model entirely.
+- No visible background-color gaps between adjacent panels. If two panels sit next to each other, they share a border or a divider line — not a strip of root background between them.
+- No `border-radius` greater than `4px` on data containers. Slight rounding is acceptable on buttons and small interactive elements only.
+- Cards within cards are not permitted. If content can be separated by a line — a card was not necessary in the first place.
+ 
 
 ---
 
