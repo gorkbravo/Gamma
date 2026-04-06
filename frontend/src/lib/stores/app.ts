@@ -9,6 +9,11 @@ import type {
   CopilotResearchCardResult,
   CopilotThreadEntry,
   CopilotThreadState,
+  CryptoComparison,
+  CryptoDexLiquiditySummary,
+  CryptoPriceHistoryResponse,
+  CryptoToken,
+  CryptoWorkspaceResponse,
   DiagnosticsResponse,
   IvSessionStatus,
   IvSurface,
@@ -93,6 +98,20 @@ export interface PredictionMarketScreenerOptions {
 
 export type PredictionMarketSortBy = NonNullable<PredictionMarketScreenerOptions["sortBy"]>;
 
+export interface CryptoWorkspaceLoadOptions {
+  query?: string;
+  narrative?: string;
+  chain?: string;
+  minMarketCap?: number;
+  minVolume?: number;
+  minTurnoverRatio?: number;
+  sortBy?: "market_cap_desc" | "volume_desc" | "turnover_desc" | "momentum_desc" | "screen_score_desc" | "fdv_premium_asc";
+  limit?: number;
+  forceRefresh?: boolean;
+}
+
+export type CryptoSortBy = NonNullable<CryptoWorkspaceLoadOptions["sortBy"]>;
+
 export interface MacroLoadOptions {
   region?: MacroContextState["region"];
   timeframe?: MacroContextState["timeframe"];
@@ -117,6 +136,7 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
     research: createEmptyCopilotThread("research"),
     macro: createEmptyCopilotThread("macro"),
     prediction_markets: createEmptyCopilotThread("prediction_markets"),
+    crypto: createEmptyCopilotThread("crypto"),
     risk: createEmptyCopilotThread("risk"),
     iv: createEmptyCopilotThread("iv"),
     synthesis: createEmptyCopilotThread("synthesis")
@@ -149,11 +169,18 @@ export const predictionMarketHistory = writable<PredictionProbabilityHistoryResp
 export const predictionMarketWallet = writable<PredictionWalletSummary | null>(null);
 export const predictionMarketRelated = writable<RelatedPredictionMarketListResponse | null>(null);
 export const predictionMarketCalibration = writable<PredictionCalibrationSummary | null>(null);
+export const cryptoWorkspace = writable<CryptoWorkspaceResponse | null>(null);
+export const selectedCryptoTokenId = writable<string | null>(null);
+export const cryptoTokenDetail = writable<CryptoToken | null>(null);
+export const cryptoPriceHistory = writable<CryptoPriceHistoryResponse | null>(null);
+export const cryptoLiquidity = writable<CryptoDexLiquiditySummary | null>(null);
+export const cryptoComparison = writable<CryptoComparison | null>(null);
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
   portfolio: null,
   research: null,
   macro: null,
   prediction_markets: null,
+  crypto: null,
   risk: null,
   iv: null,
   synthesis: null
@@ -198,6 +225,8 @@ export const loading = writable<Record<string, boolean>>({
   macroHistory: false,
   prediction: false,
   predictionDetail: false,
+  crypto: false,
+  cryptoDetail: false,
   copilot: false,
   risk: false,
   iv: false,
@@ -298,6 +327,7 @@ const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   research: "Research",
   macro: "Macro",
   prediction_markets: "Prediction Markets",
+  crypto: "Crypto",
   risk: "Risk",
   iv: "IV"
 };
@@ -368,6 +398,20 @@ function buildCopilotContextFingerprint(
     return JSON.stringify({
       domain,
       marketId: get(selectedPredictionMarketId)
+    });
+  }
+
+  if (domain === "crypto") {
+    const detail = get(cryptoTokenDetail);
+    const history = get(cryptoPriceHistory);
+    const comparison = get(cryptoComparison);
+    return JSON.stringify({
+      domain,
+      tokenId: get(selectedCryptoTokenId),
+      retrievedAt: detail?.retrieved_at ?? null,
+      historyPoints: history?.points.length ?? 0,
+      historyTimestamp: lastItem(history?.points ?? [])?.timestamp ?? null,
+      comparisonTarget: comparison?.target_id ?? null
     });
   }
 
@@ -918,6 +962,98 @@ export async function selectPredictionMarket(
   }
 }
 
+export async function loadCryptoWorkspace(options: CryptoWorkspaceLoadOptions = {}) {
+  setLoading("crypto", true);
+  try {
+    const response = await postJson<CryptoWorkspaceResponse>("/crypto/workspace", {
+      query: options.query ?? "",
+      narrative: options.narrative ?? null,
+      chain: options.chain ?? null,
+      min_market_cap: options.minMarketCap ?? null,
+      min_volume: options.minVolume ?? null,
+      min_turnover_ratio: options.minTurnoverRatio ?? null,
+      sort_by: options.sortBy ?? "market_cap_desc",
+      limit: options.limit ?? 40,
+      force_refresh: options.forceRefresh ?? false
+    });
+    cryptoWorkspace.set(response);
+    const currentSelection = get(selectedCryptoTokenId);
+    const selectedStillVisible = response.tokens.some((token) => token.token_id === currentSelection);
+    const nextSelection = selectedStillVisible ? currentSelection : (response.tokens[0]?.token_id ?? null);
+    if (nextSelection) {
+      await selectCryptoToken(nextSelection, {
+        resetThread: nextSelection !== currentSelection || get(cryptoTokenDetail) == null
+      });
+    } else {
+      selectedCryptoTokenId.set(null);
+      cryptoTokenDetail.set(null);
+      cryptoPriceHistory.set(null);
+      cryptoLiquidity.set(null);
+      cryptoComparison.set(null);
+      resetCopilotCard("crypto");
+    }
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("crypto", false);
+  }
+}
+
+export async function selectCryptoToken(
+  tokenId: string,
+  options: { resetThread?: boolean } = {}
+) {
+  selectedCryptoTokenId.set(tokenId);
+  if (options.resetThread ?? true) {
+    resetCopilotCard("crypto");
+  }
+  setLoading("cryptoDetail", true);
+  try {
+    const [detailResult, historyResult, liquidityResult, comparisonResult] = await Promise.allSettled([
+      getJson<CryptoToken>(`/crypto/tokens/${tokenId}`),
+      getJson<CryptoPriceHistoryResponse>(`/crypto/tokens/${tokenId}/history?days=30`),
+      getJson<CryptoDexLiquiditySummary>(`/crypto/tokens/${tokenId}/liquidity`),
+      getJson<CryptoComparison>(`/crypto/tokens/${tokenId}/comparison`)
+    ]);
+
+    const errors: unknown[] = [];
+
+    if (detailResult.status === "fulfilled") {
+      cryptoTokenDetail.set(detailResult.value);
+    } else {
+      errors.push(detailResult.reason);
+    }
+    if (historyResult.status === "fulfilled") {
+      cryptoPriceHistory.set(historyResult.value);
+    } else {
+      errors.push(historyResult.reason);
+    }
+    if (liquidityResult.status === "fulfilled") {
+      cryptoLiquidity.set(liquidityResult.value);
+    } else {
+      errors.push(liquidityResult.reason);
+    }
+    if (comparisonResult.status === "fulfilled") {
+      cryptoComparison.set(comparisonResult.value);
+    } else {
+      errors.push(comparisonResult.reason);
+    }
+
+    if (errors.length === 0) {
+      lastError.set("");
+    } else {
+      setError(errors[0]);
+    }
+  } catch (error) {
+    setError(error);
+  } finally {
+    setLoading("cryptoDetail", false);
+  }
+}
+
 export async function computeRisk(options: RiskComputeOptions) {
   const snapshot = options.snapshot ?? get(portfolioSnapshot) ?? get(researchResult)?.snapshot ?? null;
   if (!snapshot) {
@@ -1028,6 +1164,12 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         workspace_mode: workspaceMode,
         prediction_market_id: get(selectedPredictionMarketId)
       };
+    case "crypto":
+      return {
+        current_tab: "crypto",
+        workspace_mode: workspaceMode,
+        crypto_token_id: get(selectedCryptoTokenId)
+      };
     case "risk":
       return {
         current_tab: "risk",
@@ -1100,6 +1242,9 @@ function validateSynthesisScopeDomain(
   if (domain === "prediction_markets" && !get(predictionMarketDetail)) {
     return "Select and load a Prediction Markets contract before including it in a synthesis card.";
   }
+  if (domain === "crypto" && !get(cryptoTokenDetail)) {
+    return "Select and load a crypto token before including it in a synthesis card.";
+  }
   if (domain === "risk" && !get(riskResult)) {
     return "Run a Risk computation before including it in a synthesis card.";
   }
@@ -1136,13 +1281,16 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "prediction_markets" && !get(selectedPredictionMarketId)) {
     return "Select a prediction market before generating a research card.";
   }
+  if (domain === "crypto" && !get(selectedCryptoTokenId)) {
+    return "Select a crypto token before generating a research card.";
+  }
   if (domain === "risk" && !get(riskResult)) {
     return "Run a risk computation before generating a research card.";
   }
   if (domain === "iv" && !hasRenderableIvSurface(resolvedIvSurface())) {
     return "Load an IV surface before generating a research card.";
   }
-  if (domain === "portfolio" || domain === "research" || domain === "risk" || domain === "iv") {
+  if (domain === "portfolio" || domain === "research" || domain === "crypto" || domain === "risk" || domain === "iv") {
     const context = buildCopilotContext(domain, options.workspaceMode);
     return context ? null : "The active Copilot context is unavailable.";
   }

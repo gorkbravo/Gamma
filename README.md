@@ -5,7 +5,7 @@ For future product expansion work, start with [`roadmap.md`](./roadmap.md). It i
 Gamma is a read-only market research application built as a FastAPI backend, a Svelte frontend, and a Tauri desktop shell. Tauri is the primary desktop path today, while the older PySide client still exists as an explicit fallback. In practice, the product currently combines two things:
 
 - an existing IBKR-connected portfolio, risk, and implied-volatility workstation
-- a newer research workspace centered on macro and prediction-market analysis
+- a newer research workspace centered on macro, prediction-market, and crypto analysis
 
 The app is designed to help the user inspect data, compare signals, and understand the calculations behind the screens. It is not designed to place trades or to hide its analytics behind unexplained scores.
 
@@ -22,6 +22,7 @@ Gamma currently lets a user:
 - forward research scopes into Risk and IV
 - explore a multi-mode Macro workspace
 - screen and inspect prediction markets across Polymarket and Kalshi
+- screen and inspect crypto tokens with narrative baskets, DEX liquidity context, and comparative analytics
 - inspect implied-volatility surfaces through the IV explorer
 - navigate the app as a desktop product with reorderable tabs and keyboard shortcuts
 
@@ -48,7 +49,7 @@ Gamma opens on a landing screen that shows connection state and lets the user en
 Within each workspace, tabs can be reordered in the sidebar. The default layout is:
 
 - `Portfolio View`: `Portfolio`, `Risk`, `IV`
-- `Research View`: `Research`, `Macro`, `Prediction Markets`, `Risk`, `IV`
+- `Research View`: `Research`, `Macro`, `Prediction Markets`, `Crypto`, `Risk`, `IV`
 
 The current desktop navigation model is part of the product, not an afterthought:
 
@@ -85,6 +86,7 @@ The current API surface is grouped by workspace:
 - `/research/*`: single-name and synthetic-scope analysis
 - `/macro/*`: snapshot payload, divergences, event feed, series history
 - `/prediction-markets/*`: screener, detail, history, wallet summary, related markets, calibration
+- `/crypto/*`: workspace screener, token detail, price history, DEX liquidity, comparison
 - `/risk/*`: risk computation
 - `/iv/*`: IV snapshot and session loop
 
@@ -98,6 +100,8 @@ Gamma mixes broker, public-market, and public-macro data:
 - official macro event adapters: policy and macro calendar coverage used in `Events / Regimes`
 - `Polymarket`: Gamma API, Data API, and CLOB history endpoints
 - `Kalshi`: public market, event, history, and trade endpoints
+- `CoinGecko`: broad token market coverage, token metadata, categories, and price history
+- `GeckoTerminal`: DEX network metadata, pool search, token-pool lookup, and liquidity context
 - `sample_data/`: local offline development data when `MOCK_DATA=true`
 
 A lot of the app's trust model depends on provenance. Many returned entities carry:
@@ -107,7 +111,7 @@ A lot of the app's trust model depends on provenance. Many returned entities car
 - `origin`
 - `transformation_note`
 
-That metadata is especially important in Macro and Prediction Markets, where Gamma is often transforming raw public data into normalized metrics or heuristic interpretations.
+That metadata is especially important in Macro, Prediction Markets, and Crypto, where Gamma is often transforming raw public data into normalized metrics or heuristic interpretations.
 
 ## Currency, Caching, And State
 
@@ -378,6 +382,33 @@ Important caveats:
 - freshness, relatedness, and research rank are Gamma heuristics
 - calibration coverage is still thin and venue dependent
 
+#### Crypto tab
+
+Crypto is the start of Gamma's Phase 5 push. The current pass is a research-first vertical slice, not a trading terminal.
+
+Main surfaces:
+
+- token screener with query, narrative, chain, market-cap, volume, and turnover filters
+- normalized token profile with market cap, FDV, supply, category tags, and provenance
+- price history with market-cap and volume context
+- narrative and sector baskets mapped from CoinGecko categories
+- DEX liquidity summary with top matched pools from GeckoTerminal
+- default relative comparison versus a narrative basket or fallback token benchmark
+
+What Gamma normalizes:
+
+- CoinGecko token and category payloads into shared token and basket records
+- 24H turnover as `volume / market_cap`
+- a Gamma screen score across size, liquidity, turnover, momentum, and FDV premium
+- GeckoTerminal network and pool payloads into a shared liquidity view
+- token-versus-token and token-versus-basket comparisons into a common comparison record
+
+Important caveats:
+
+- screen score, narrative mapping, and basket comparisons are Gamma-defined heuristics
+- DEX lookup can fall back to heuristic pool search when exact contract lookup is unavailable
+- wallet-level or deeper on-chain analytics are not in this first pass yet
+
 ## Current Roadmap Position
 
 Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
@@ -385,11 +416,11 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 1 - Prediction Markets`: complete at a first-pass level
 - `Phase 2 - Macro`: in progress, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes already live
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
-- `Phase 4 - AI Copilot`: not started
-- `Phase 5 - Crypto`: not started
+- `Phase 4 - AI Copilot`: in progress, with a shell-level read-only Copilot that can generate structured research cards across the current tab set, sustain lightweight same-domain follow-up threads, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains
+- `Phase 5 - Crypto`: started, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: not started
 
-That means the app already has meaningful portfolio/risk/IV capabilities plus the first two roadmap-era research surfaces, but it is not yet at the intended end-state research platform described in the roadmap.
+That means the app already has meaningful portfolio/risk/IV capabilities, the first two roadmap-era research surfaces, and an intermediate Phase 4 AI layer, but it is not yet at the intended end-state research platform described in the roadmap.
 
 ## Practical Limitations
 
@@ -399,6 +430,7 @@ That means the app already has meaningful portfolio/risk/IV capabilities plus th
 - historical FX gaps can force spot-FX fallback
 - Macro interpretation is intentionally heuristic and should be read as structured research assistance, not inference certainty
 - Prediction Markets currently go deepest on discovery, normalization, and first-pass comparative analysis, not exhaustive microstructure backtesting
+- Crypto is currently strongest on token discovery, normalization, and liquidity-aware first-pass comparison, not deep wallet analytics or derivatives overlays
 - IV is an exploration surface, not a full options analytics suite
 
 ## Running Gamma

@@ -603,15 +603,15 @@ At the end of Phase 3, Gamma should support full keyboard-driven navigation acro
 
 ## Phase 4 - AI Copilot Layer
 
-_Status: In progress (~68%)_
-_Active focus: harden the read-only shell-level Copilot into a genuinely cross-context, multi-turn research surface while preserving provider boundaries, modular context assembly, structured research-card generation, provenance, and transparency before expanding into streaming, richer session persistence, and saved-workflow handoffs._
-_Recent progress: Gamma's Phase 4 foundation still spans the full current tab set, and the shell-level Copilot drawer now preserves lightweight per-domain thread history, forwards `previous_response_id` on compatible follow-up turns, resets cleanly when the active grounding lens changes materially, and now supports explicit shell-level synthesis across multiple loaded Gamma contexts with visible scope, provenance, warnings, and context-aware follow-up resets._
+_Status: In progress (~70%)_
+_Active focus: harden the read-only shell-level Copilot into a genuinely cross-context, multi-turn research surface while preserving provider boundaries, modular context assembly, structured research-card generation, provenance, and transparency before expanding into streaming, richer session persistence, saved-workflow handoffs, and later-domain depth._
+_Recent progress: Gamma's Phase 4 foundation still spans the full current tab set, and the shell-level Copilot drawer now preserves lightweight per-domain thread history, forwards `previous_response_id` on compatible follow-up turns, resets cleanly when the active grounding lens changes materially, supports explicit shell-level synthesis across multiple loaded Gamma contexts with visible scope, provenance, warnings, and context-aware follow-up resets, and now includes first-pass Crypto context and read-only crypto drilldowns._
 
 #### Completion snapshot
 - `Provider and model boundary`: ~78% complete. Gamma now has a real OpenAI-backed provider/service split, request/response shaping, and tool-calling integration behind a swappable boundary, but broader provider optionality and richer model-runtime controls are still open.
 - `Shell-level copilot surface`: ~82% complete. The Copilot still lives at the shell level rather than inside individual tabs, understands the active tab, adapts drawer labeling and guidance per tab, and now preserves visible per-domain follow-up history with context-aware resets, but streaming and richer thread/session controls are still open.
-- `Context assembly across current tabs`: ~64% complete. Modular context builders now cover Portfolio, Research, Macro, Prediction Markets, Risk, and IV with tab-specific summaries and shared helpers, but later tabs such as Crypto and Fundamentals are still future work and some thinner tabs still rely on first-pass context slices.
-- `Read-only internal tool layer`: ~66% complete. Gamma now exposes tab-specific read-only helpers for portfolio state, research scope and coverage, macro drilldowns, prediction-market history and flow, risk coverage and contributions, IV surface/session context, and first-pass cross-context synthesis helpers, but deeper comparative analytics helpers remain limited.
+- `Context assembly across current tabs`: ~68% complete. Modular context builders now cover Portfolio, Research, Macro, Prediction Markets, Crypto, Risk, and IV with tab-specific summaries and shared helpers, but later tabs such as Fundamentals are still future work and some thinner tabs still rely on first-pass context slices.
+- `Read-only internal tool layer`: ~70% complete. Gamma now exposes tab-specific read-only helpers for portfolio state, research scope and coverage, macro drilldowns, prediction-market history and flow, crypto token / screener / liquidity / comparison context, risk coverage and contributions, IV surface/session context, and first-pass cross-context synthesis helpers, but deeper comparative analytics helpers remain limited.
 - `Structured research-card outputs`: ~78% complete. Structured research cards remain the primary user-facing Copilot output and are now reusable across the full current tab set plus shell-level synthesis, but richer output families such as saved memos, comparative briefs, and more explicit reusable schema extensions are still open.
 - `Provenance and transparency`: ~69% complete. The current implementation preserves source refs, warnings, and tool traces and keeps source-backed claims distinct from inferred claims, but provenance depth is still uneven across domains and not every tab yet exposes equally rich source metadata.
 - `Cross-tab synthesis and multi-turn workflows`: ~69% complete. Gamma now has real per-domain multi-turn follow-up behavior inside the shell UI plus a first-pass cross-context synthesis workflow with explicit included-domain scope, scope-aware follow-up continuation, and clean resets when the grounding set changes, but streaming, broader session persistence, and saved research-workflow handoffs remain open.
@@ -758,8 +758,18 @@ For roadmap purposes, the current implementation should still be treated as an i
 
 ## Phase 5 - Crypto Tab
 
-_Status: Not started (0%)_
-_Remaining focus: full phase scope._
+_Status: In progress (~56%)_
+_Active focus: deepen the first-pass Crypto workspace into stronger wallet/flow and on-chain research depth while preserving provider adapters, normalized schemas, provenance, and the read-only research boundary._
+_Recent progress: Gamma now has a real Crypto tab with token search and selection, normalized token profiles, price history, CoinGecko-backed narrative baskets, a Gamma-defined cross-sectional screener, GeckoTerminal liquidity context, first-pass comparative analytics, provenance-rich API responses, and Copilot-aware crypto context._
+
+#### Completion snapshot
+- `Token explorer`: ~78% complete. A usable token profile flow now includes search/selection, metadata, chain, price history, market cap / FDV / supply context, category tags, and provenance, but deeper historical/contextual analytics are still limited.
+- `Narrative and sector baskets`: ~64% complete. CoinGecko category data now powers first-pass narrative baskets and basket summaries, but Gamma-specific narrative curation and richer basket analytics remain open.
+- `Wallet and flow analytics`: ~12% complete. The tab is structurally ready for wallet-focused expansion, but balances, transfer history, counterparty patterns, and large-holder flow analysis are still mostly unimplemented.
+- `DEX / liquidity view`: ~58% complete. GeckoTerminal-backed pool matching and liquidity context are live, but slippage proxies, liquidity concentration analysis, and deeper pool monitoring remain shallow.
+- `Cross-sectional screening`: ~76% complete. A useful screener now supports filtering, sorting, and Gamma-defined ranking across size, liquidity, turnover, momentum, and category context, but on-chain activity factors and richer factor breadth remain limited.
+- `Comparative analytics`: ~61% complete. Token-versus-basket and fallback token comparison views now exist, but richer peer selection, basket-versus-basket depth, and wallet-aware comparisons are still open.
+- `Copilot and provenance integration`: ~70% complete. The Crypto slice now participates in structured Copilot context and preserves provider / timestamp / transformation metadata in its returned entities, but provenance depth is still lighter than the longer-established domains and cached research workflows are not yet there.
 
 ### Why this phase comes here
 
@@ -769,7 +779,7 @@ Crypto remains a natural extension because:
 - it complements behavioral and flow-oriented research,
 - it opens up a large analytical surface without requiring execution infrastructure.
 
-However, "crypto" is broad, so the key to Phase 4 is restraint. It should come after prediction markets and macro because those phases establish a clearer cross-market research identity first. The tab should not attempt to become a full crypto terminal immediately.
+However, "crypto" is broad, so the key to Phase 5 is restraint. It should come after prediction markets and macro because those phases establish a clearer cross-market research identity first. The tab should not attempt to become a full crypto terminal immediately.
 
 ### Goal of the tab
 
@@ -899,6 +909,8 @@ At the end of Phase 5, Gamma should be able to:
 - run screens across a crypto universe.
 
 This phase broadens the app into a more general market-research platform while staying consistent with its data-driven, read-only identity.
+
+For roadmap purposes, Phase 5 should now be treated as meaningfully started rather than merely planned: Gamma can already research tokens and sectors, inspect price / supply / liquidity context, explore narrative baskets, run a basic screener across a token universe, compare a token against a basket or fallback benchmark, and feed provenance-aware crypto context into Copilot, but deeper wallet/flow analytics, richer on-chain interpretation, and later derivatives overlays remain open.
 
 ---
 
@@ -1119,11 +1131,11 @@ Build a multi-mode macro workspace for snapshot monitoring, rates and policy ana
 ### Phase 3 - Keyboard Navigation & Workspace Customization (`Complete`)
 Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
 
-### Phase 4 - AI Copilot (`In progress ~68%`)
+### Phase 4 - AI Copilot (`In progress ~70%`)
 Add a context-aware research assistant that sits on top of the data architecture already built, starting with read-only tool-backed research cards and provenance-aware context injection.
 
-### Phase 5 - Crypto (`Not started`)
-Expand into a broader public-data market research environment with token, wallet, and on-chain analytics.
+### Phase 5 - Crypto (`In progress ~56%`)
+Expand into a broader public-data market research environment with token, wallet, and on-chain analytics, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live.
 
 ### Phase 6 - Fundamentals (`Not started`)
 Add company financial analysis and valuation once the architecture is mature enough to handle normalization and provenance correctly.

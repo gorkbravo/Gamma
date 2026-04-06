@@ -14,6 +14,12 @@ from src.models.copilot import (
     ResearchCard,
     ResearchClaim,
 )
+from src.models.crypto import (
+    CryptoComparisonRecord,
+    CryptoDexLiquiditySummary,
+    CryptoPricePoint,
+    CryptoTokenRecord,
+)
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 
@@ -167,6 +173,43 @@ class _StubCopilotProvider:
                 ),
                 sources=[*context.sources, *series_execution.sources],
                 tool_traces=[series_execution.trace],
+                warnings=list(context.warnings),
+            )
+
+        if request.domain == "crypto":
+            history_execution = execute_tool("get_crypto_price_history_summary", {}, context)
+            liquidity_execution = execute_tool("get_crypto_liquidity_context", {}, context)
+            comparison_execution = execute_tool("get_crypto_comparison_context", {}, context)
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="ready",
+                provider=self.provider_name,
+                model="stub-model",
+                response_id="resp_stub_crypto",
+                card=ResearchCard(
+                    title="Crypto test card",
+                    hypothesis="The selected token should be framed through price path, liquidity, and relative context together.",
+                    rationale="The Gamma crypto context exposes normalized token detail, price history, DEX liquidity, and comparison context.",
+                    required_data=["Price history", "DEX liquidity", "Relative comparison"],
+                    proposed_test="Compare recent price path against the current comparison target and DEX liquidity depth.",
+                    confounders=["Category labels", "Pool-match heuristics"],
+                    next_steps=["Inspect the recent path", "Review DEX depth"],
+                    caveats=["This is a test fixture."],
+                    source_backed_claims=[
+                        ResearchClaim(
+                            claim="Crypto history, liquidity, and comparison tools were available to the copilot.",
+                            evidence_refs=[
+                                history_execution.sources[0].source_id,
+                                liquidity_execution.sources[0].source_id,
+                                comparison_execution.sources[0].source_id,
+                            ],
+                        )
+                    ],
+                    inferred_claims=["Token thesis quality still requires interpretation."],
+                ),
+                sources=[*context.sources, *history_execution.sources, *liquidity_execution.sources, *comparison_execution.sources],
+                tool_traces=[history_execution.trace, liquidity_execution.trace, comparison_execution.trace],
                 warnings=list(context.warnings),
             )
 
@@ -472,6 +515,134 @@ def test_prediction_market_copilot_requires_selection(tmp_path):
         payload = response.json()
         assert payload["status"] == "error"
         assert "requires a selected market" in payload["message"]
+    finally:
+        runtime.shutdown()
+
+
+def test_crypto_copilot_route_uses_crypto_tool_context(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+
+    class StubCryptoService:
+        def get_token_detail(self, token_id: str, *, force_refresh: bool = False):
+            del force_refresh
+            return _crypto_token_fixture() if token_id == "solana" else None
+
+        def get_price_history(self, token_id: str, *, days: int = 30, force_refresh: bool = False):
+            del days, force_refresh
+            if token_id != "solana":
+                return []
+            token = _crypto_token_fixture()
+            return [
+                CryptoPricePoint(
+                    timestamp=token.retrieved_at,
+                    price=150.0,
+                    market_cap=token.market_cap,
+                    total_volume=token.total_volume,
+                    source_provider="coingecko",
+                    retrieved_at=token.retrieved_at,
+                    origin="coingecko.market_chart",
+                )
+            ]
+
+        def get_dex_liquidity(self, token_id: str, *, force_refresh: bool = False):
+            del force_refresh
+            if token_id != "solana":
+                return None
+            token = _crypto_token_fixture()
+            return CryptoDexLiquiditySummary(
+                token_id="solana",
+                lookup_strategy="contract_lookup",
+                matched_networks=["solana"],
+                total_reserve_usd=180_000_000.0,
+                total_volume_24h=45_000_000.0,
+                total_buys_24h=9_000,
+                total_sells_24h=8_700,
+                total_buyers_24h=5_200,
+                total_sellers_24h=5_100,
+                dominant_dex="raydium",
+                warnings=[],
+                source_provider="geckoterminal",
+                retrieved_at=token.retrieved_at,
+                origin="geckoterminal.liquidity_summary",
+            )
+
+        def get_comparison(self, token_id: str, *, target_token_id=None, basket_id=None, force_refresh: bool = False):
+            del target_token_id, basket_id, force_refresh
+            if token_id != "solana":
+                return None
+            token = _crypto_token_fixture()
+            return CryptoComparisonRecord(
+                subject_token_id="solana",
+                target_kind="basket",
+                target_id="layer-1",
+                target_label="Layer 1",
+                shared_categories=["Layer 1"],
+                subject_price_change_pct_24h=token.price_change_pct_24h,
+                target_price_change_pct_24h=2.1,
+                price_gap_pct_24h=2.1,
+                subject_price_change_pct_7d=token.price_change_pct_7d,
+                target_price_change_pct_7d=5.2,
+                price_gap_pct_7d=5.3,
+                subject_price_change_pct_30d=token.price_change_pct_30d,
+                target_price_change_pct_30d=11.4,
+                price_gap_pct_30d=6.8,
+                subject_market_cap=token.market_cap,
+                target_market_cap=900_000_000_000.0,
+                market_cap_ratio=0.083,
+                subject_turnover_ratio_24h=token.turnover_ratio_24h,
+                target_turnover_ratio_24h=0.06,
+                turnover_gap=0.03,
+                summary="Solana is outperforming the Layer 1 basket with hotter turnover.",
+                source_provider="gamma",
+                retrieved_at=token.retrieved_at,
+                origin="gamma.crypto.comparison.basket",
+            )
+
+    runtime.copilot_service.crypto_service = StubCryptoService()
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "crypto",
+                "prompt": "Frame the active token setup.",
+                "context": {
+                    "current_tab": "crypto",
+                    "workspace_mode": "research",
+                    "crypto_token_id": "solana",
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["card"]["title"] == "Crypto test card"
+        assert {trace["tool_name"] for trace in payload["tool_traces"]} == {
+            "get_crypto_price_history_summary",
+            "get_crypto_liquidity_context",
+            "get_crypto_comparison_context",
+        }
+        assert any(source["source_id"] == "crypto.detail" for source in payload["sources"])
+        assert any(source["source_id"] == "crypto.liquidity.drilldown" for source in payload["sources"])
+    finally:
+        runtime.shutdown()
+
+
+def test_crypto_copilot_requires_selection(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "crypto",
+                "context": {
+                    "current_tab": "crypto",
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "error"
+        assert "requires a selected token" in payload["message"]
     finally:
         runtime.shutdown()
 
@@ -881,6 +1052,44 @@ def test_mock_provider_generates_offline_synthesis_card(tmp_path, monkeypatch):
         assert any(source["source_id"] == "synthesis.scope" for source in payload["sources"])
     finally:
         runtime.shutdown()
+
+
+def _crypto_token_fixture() -> CryptoTokenRecord:
+    return CryptoTokenRecord(
+        token_id="solana",
+        symbol="sol",
+        name="Solana",
+        image_url=None,
+        chain="Solana",
+        asset_platform_id="solana",
+        geckoterminal_network="solana",
+        contract_address=None,
+        market_cap_rank=6,
+        current_price=150.0,
+        market_cap=75_000_000_000.0,
+        fully_diluted_valuation=90_000_000_000.0,
+        total_volume=4_500_000_000.0,
+        circulating_supply=500_000_000.0,
+        total_supply=600_000_000.0,
+        max_supply=None,
+        price_change_pct_24h=4.2,
+        price_change_pct_7d=10.5,
+        price_change_pct_30d=18.2,
+        market_cap_change_pct_24h=4.0,
+        high_24h=155.0,
+        low_24h=143.0,
+        homepage_url="https://solana.com",
+        description="High-throughput smart-contract network.",
+        categories=["Layer 1"],
+        turnover_ratio_24h=0.09,
+        fdv_premium_ratio=0.2,
+        screen_score=77.4,
+        screen_rationale="turnover 0.09x | 24H volume $4.5B",
+        source_provider="coingecko",
+        retrieved_at=datetime(2026, 4, 5, 10, 0, 0),
+        origin="coingecko.markets",
+        transformation_note="Gamma screen score combines size, liquidity, turnover, momentum, and FDV premium heuristics.",
+    )
 
 
 def test_openai_provider_serializes_datetime_workspace_context():

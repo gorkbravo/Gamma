@@ -1,3 +1,11 @@
+from src.api.schemas.crypto import (
+    CryptoComparisonModel,
+    CryptoDexLiquiditySummaryModel,
+    CryptoPriceHistoryResponseModel,
+    CryptoTokenModel,
+    CryptoWorkspaceRequestModel,
+    CryptoWorkspaceResponseModel,
+)
 from src.api.schemas.iv import IVSurfaceResponseModel
 from src.api.schemas.macro import (
     MacroDivergenceListResponseModel,
@@ -45,6 +53,12 @@ from src.api.schemas.system import (
 __all__ = [
     "ConnectionStateModel",
     "CalibrationSummaryResponseModel",
+    "CryptoComparisonModel",
+    "CryptoDexLiquiditySummaryModel",
+    "CryptoPriceHistoryResponseModel",
+    "CryptoTokenModel",
+    "CryptoWorkspaceRequestModel",
+    "CryptoWorkspaceResponseModel",
     "DiagnosticsResponseModel",
     "ExcludedAssetModel",
     "HealthResponseModel",

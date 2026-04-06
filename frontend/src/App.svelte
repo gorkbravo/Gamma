@@ -7,6 +7,7 @@
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
   import MacroView from "./views/MacroView.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
+  import CryptoView from "./views/CryptoView.svelte";
   import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
   import ResearchView from "./views/ResearchView.svelte";
   import RiskView from "./views/RiskView.svelte";
@@ -26,6 +27,11 @@
     diagnosticsLog,
     clearPortfolioHistory,
     copilotThreads,
+    cryptoComparison,
+    cryptoLiquidity,
+    cryptoPriceHistory,
+    cryptoTokenDetail,
+    cryptoWorkspace,
     computeRisk,
     forceAccountSubscribe,
     ivSurface,
@@ -59,10 +65,12 @@
     riskResult,
     riskWorkspaceBasis,
     loadPredictionMarketScreener,
+    loadCryptoWorkspace,
     previewCopilotContextFingerprint,
     previewCopilotThreadFingerprint,
     runDiagnosticsAction,
     runResearch,
+    selectCryptoToken,
     selectPredictionMarket,
     setBaseCurrency,
     setMarketDataMode,
@@ -81,6 +89,11 @@
     CopilotBaseDomain,
     CopilotDomain,
     CopilotThreadState,
+    CryptoComparison,
+    CryptoDexLiquiditySummary,
+    CryptoPriceHistoryResponse,
+    CryptoToken,
+    CryptoWorkspaceResponse,
     IvSessionStatus,
     IvSurface,
     MacroContextState,
@@ -139,6 +152,7 @@
     macro: $macroContext,
     macroSnapshot: $macroSnapshot,
     prediction: $predictionMarketDetail,
+    crypto: $cryptoTokenDetail,
     risk: $riskResult,
     riskWorkspace: $riskWorkspaceBasis,
     ivSurface: $ivSurface,
@@ -171,6 +185,7 @@
     ivSession: $ivSession,
     macro: $macroContext,
     prediction: $predictionMarketDetail,
+    crypto: $cryptoTokenDetail,
   });
   $: synthesisCopilotSurface = buildSynthesisCopilotSurface({
     activeTab: $activeTab,
@@ -249,6 +264,14 @@
     return `Prediction Markets | ${detail.venue} | ${detail.title}`;
   }
 
+  function describeCryptoCopilotContext(detail: CryptoToken | null) {
+    if (!detail) {
+      return "Crypto | Select a token to ground the Copilot";
+    }
+    const chain = detail.chain ?? detail.asset_platform_id ?? "Unknown chain";
+    return `Crypto | ${detail.name} | ${chain}`;
+  }
+
   function describeRiskCopilotContext(result: RiskResult | null, mode: WorkspaceMode | null) {
     if (!result) {
       return "Risk | Run a risk pass to ground the Copilot";
@@ -318,6 +341,7 @@
     macro,
     macroSnapshot,
     prediction,
+    crypto,
     risk,
     riskWorkspace,
     ivSurface,
@@ -332,6 +356,7 @@
     macro: MacroContextState;
     macroSnapshot: MacroSnapshot | null;
     prediction: PredictionMarket | null;
+    crypto: CryptoToken | null;
     risk: RiskResult | null;
     riskWorkspace: WorkspaceMode | null;
     ivSurface: IvSurface | null;
@@ -416,6 +441,17 @@
       );
     }
 
+    if (crypto) {
+      pushOption(
+        "crypto",
+        describeCryptoCopilotContext(crypto),
+        formatShortTimestamp(crypto.retrieved_at)
+          ? `Token ${formatShortTimestamp(crypto.retrieved_at)}`
+          : null,
+        null
+      );
+    }
+
     if (risk) {
       pushOption(
         "risk",
@@ -469,6 +505,7 @@
     ivSession,
     macro,
     prediction,
+    crypto,
   }: {
     tab: TabId;
     workspaceMode: WorkspaceMode | null;
@@ -483,6 +520,7 @@
     ivSession: IvSessionStatus | null;
     macro: MacroContextState;
     prediction: PredictionMarket | null;
+    crypto: CryptoToken | null;
   }): CopilotSurfaceState {
     if (tab === "portfolio") {
       return {
@@ -554,6 +592,24 @@
         placeholder:
           "Test the repricing thesis, compare probability against flow, or frame the cleanest consistency check.",
         thread: threads.prediction_markets,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
+      };
+    }
+
+    if (tab === "crypto") {
+      return {
+        supported: crypto != null,
+        domain: "crypto",
+        triggerLabel: crypto ? "Crypto context" : "Select a token",
+        contextLabel: describeCryptoCopilotContext(crypto),
+        domainLabel: "Crypto",
+        guidance:
+          "Grounded in the selected token, its price history, liquidity summary, and default relative comparison. Gamma remains a read-only research environment.",
+        placeholder:
+          "Pressure-test the token thesis, challenge the narrative fit, or compare liquidity quality versus the current benchmark.",
+        thread: threads.crypto,
         scopeOptions: [],
         selectedScopeDomains: [],
         selectionMessage: null,
@@ -768,6 +824,9 @@
     } else if ($activeTab === "prediction_markets") {
       push("Prediction", $predictionMarketDetail ? $predictionMarketWallet?.warnings : [], "warning");
       push("Calibration", $predictionMarketCalibration?.warnings, "warning");
+    } else if ($activeTab === "crypto") {
+      push("Crypto", $cryptoWorkspace?.warnings, "warning");
+      push("Liquidity", $cryptoLiquidity?.warnings, "warning");
     } else if ($activeTab === "risk") {
       push("Risk", $riskResult?.warnings, "warning");
     } else {
@@ -817,6 +876,8 @@
       }
     } else if (nextTab === "prediction_markets") {
       await loadPredictionMarketScreener();
+    } else if (nextTab === "crypto") {
+      await loadCryptoWorkspace();
     } else if (nextTab === "iv") {
       const autoLoaded = await loadResearchIvContext();
       if (!autoLoaded) {
@@ -895,6 +956,10 @@
 
     if ($activeTab === "prediction_markets") {
       await loadPredictionMarketScreener({ forceRefresh: true });
+    }
+
+    if ($activeTab === "crypto") {
+      await loadCryptoWorkspace({ forceRefresh: true });
     }
 
     if ($activeTab === "macro") {
@@ -1205,6 +1270,17 @@
             loading={$loading.prediction || $loading.predictionDetail}
             onLoadScreener={loadPredictionMarketScreener}
             onSelectMarket={selectPredictionMarket}
+          />
+        {:else if $activeTab === "crypto"}
+          <CryptoView
+            workspace={$cryptoWorkspace}
+            detail={$cryptoTokenDetail}
+            history={$cryptoPriceHistory}
+            liquidity={$cryptoLiquidity}
+            comparison={$cryptoComparison}
+            loading={$loading.crypto || $loading.cryptoDetail}
+            onLoadWorkspace={loadCryptoWorkspace}
+            onSelectToken={selectCryptoToken}
           />
         {:else if $activeTab === "risk"}
           <RiskView

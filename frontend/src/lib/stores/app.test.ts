@@ -2,6 +2,11 @@ import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CopilotResearchCardResult,
+  CryptoComparison,
+  CryptoDexLiquiditySummary,
+  CryptoPriceHistoryResponse,
+  CryptoToken,
+  CryptoWorkspaceResponse,
   DiagnosticsResponse,
   IvSessionStatus,
   MacroDivergenceListResponse,
@@ -25,11 +30,17 @@ import {
   copilotCards,
   copilotThreads,
   computeRisk,
+  cryptoComparison,
+  cryptoLiquidity,
+  cryptoPriceHistory,
+  cryptoTokenDetail,
+  cryptoWorkspace,
   diagnostics,
   ivSession,
   ivSurface,
   lastError,
   loadCopilotResearchCard,
+  loadCryptoWorkspace,
   loadIvSession,
   loadMacroWorkspace,
   loadPortfolioSnapshot,
@@ -55,6 +66,7 @@ import {
   setBaseCurrency,
   setMarketDataMode,
   setMacroContext,
+  selectedCryptoTokenId,
   selectedPredictionMarketId,
   systemStatus
 } from "./app";
@@ -69,12 +81,18 @@ describe("app store orchestration", () => {
     portfolioPerformance.set(null);
     researchResult.set(null);
     selectedPredictionMarketId.set(null);
+    selectedCryptoTokenId.set(null);
     predictionMarketScreener.set(null);
     predictionMarketDetail.set(null);
     predictionMarketHistory.set(null);
     predictionMarketWallet.set(null);
     predictionMarketRelated.set(null);
     predictionMarketCalibration.set(null);
+    cryptoWorkspace.set(null);
+    cryptoTokenDetail.set(null);
+    cryptoPriceHistory.set(null);
+    cryptoLiquidity.set(null);
+    cryptoComparison.set(null);
     copilotCards.set(emptyCopilotCards());
     copilotThreads.set(emptyCopilotThreads());
     riskResult.set(null);
@@ -103,6 +121,8 @@ describe("app store orchestration", () => {
       macroHistory: false,
       prediction: false,
       predictionDetail: false,
+      crypto: false,
+      cryptoDetail: false,
       copilot: false,
       risk: false,
       iv: false,
@@ -557,6 +577,125 @@ describe("app store orchestration", () => {
     expect(get(predictionMarketRelated)?.related[0]?.venue).toBe("kalshi");
     expect(get(predictionMarketCalibration)?.sample_size).toBe(12);
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")).sort_by).toBe("open_interest_desc");
+  });
+
+  it("loads the crypto workspace and selected token bundle together", async () => {
+    const workspace: CryptoWorkspaceResponse = {
+      tokens: [makeCryptoToken("solana")],
+      narratives: [
+        {
+          basket_id: "layer-1",
+          label: "Layer 1",
+          description: "Base-layer networks.",
+          market_cap: 900000000000,
+          market_cap_change_pct_24h: 2.5,
+          volume_24h: 50000000000,
+          top_tokens: [
+            {
+              token_id: "bitcoin",
+              name: "Bitcoin",
+              symbol: "BTC",
+              image_url: null
+            }
+          ],
+          source_provider: "coingecko",
+          retrieved_at: "2026-03-01T00:05:00Z",
+          origin: "coingecko.categories",
+          transformation_note: "Gamma-selected narrative basket."
+        }
+      ],
+      warnings: []
+    };
+    const detail: CryptoToken = {
+      ...makeCryptoToken("solana"),
+      description: "High-throughput smart-contract network.",
+      categories: ["Layer 1", "Smart Contract Platform"],
+      contract_address: "So11111111111111111111111111111111111111112",
+      homepage_url: "https://solana.com"
+    };
+    const history: CryptoPriceHistoryResponse = {
+      token_id: "solana",
+      points: [
+        {
+          timestamp: "2026-03-01T00:00:00Z",
+          price: 150,
+          market_cap: 70000000000,
+          total_volume: 4500000000,
+          source_provider: "coingecko",
+          retrieved_at: "2026-03-01T00:05:00Z",
+          origin: "coingecko.market_chart",
+          transformation_note: null
+        }
+      ]
+    };
+    const liquidity: CryptoDexLiquiditySummary = {
+      token_id: "solana",
+      lookup_strategy: "contract_lookup",
+      matched_networks: ["solana"],
+      total_reserve_usd: 180000000,
+      total_volume_24h: 45000000,
+      total_buys_24h: 9000,
+      total_sells_24h: 8700,
+      total_buyers_24h: 5200,
+      total_sellers_24h: 5100,
+      dominant_dex: "raydium",
+      pools: [],
+      warnings: [],
+      source_provider: "geckoterminal",
+      retrieved_at: "2026-03-01T00:05:00Z",
+      origin: "geckoterminal.liquidity_summary",
+      transformation_note: "Gamma aggregates top matched pools."
+    };
+    const comparison: CryptoComparison = {
+      subject_token_id: "solana",
+      target_kind: "basket",
+      target_id: "layer-1",
+      target_label: "Layer 1",
+      shared_categories: ["Layer 1"],
+      subject_price_change_pct_24h: 4.2,
+      target_price_change_pct_24h: 2.1,
+      price_gap_pct_24h: 2.1,
+      subject_price_change_pct_7d: 10.5,
+      target_price_change_pct_7d: 5.2,
+      price_gap_pct_7d: 5.3,
+      subject_price_change_pct_30d: 18.2,
+      target_price_change_pct_30d: 11.4,
+      price_gap_pct_30d: 6.8,
+      subject_market_cap: 75000000000,
+      target_market_cap: 900000000000,
+      market_cap_ratio: 0.083,
+      subject_turnover_ratio_24h: 0.09,
+      target_turnover_ratio_24h: 0.06,
+      turnover_gap: 0.03,
+      summary: "Solana is outperforming the Layer 1 basket over 7D with hotter turnover.",
+      source_provider: "gamma",
+      retrieved_at: "2026-03-01T00:05:00Z",
+      origin: "gamma.crypto.comparison.basket",
+      transformation_note: "Basket comparison uses market-cap-weighted aggregates."
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(workspace))
+      .mockResolvedValueOnce(ok(detail))
+      .mockResolvedValueOnce(ok(history))
+      .mockResolvedValueOnce(ok(liquidity))
+      .mockResolvedValueOnce(ok(comparison));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCryptoWorkspace({
+      query: "sol",
+      narrative: "Layer 1",
+      sortBy: "screen_score_desc",
+      limit: 20
+    });
+
+    expect(get(cryptoWorkspace)?.tokens).toHaveLength(1);
+    expect(get(cryptoTokenDetail)?.token_id).toBe("solana");
+    expect(get(cryptoPriceHistory)?.points[0]?.price).toBe(150);
+    expect(get(cryptoLiquidity)?.dominant_dex).toBe("raydium");
+    expect(get(cryptoComparison)?.target_label).toBe("Layer 1");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")).sort_by).toBe("screen_score_desc");
   });
 
   it("synchronizes diagnostics when market data mode changes", async () => {
@@ -1027,6 +1166,7 @@ function emptyCopilotCards() {
     research: null,
     macro: null,
     prediction_markets: null,
+    crypto: null,
     risk: null,
     iv: null,
     synthesis: null
@@ -1039,6 +1179,7 @@ function emptyCopilotThreads() {
     research: { domain: "research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     macro: { domain: "macro" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     prediction_markets: { domain: "prediction_markets" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    crypto: { domain: "crypto" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     risk: { domain: "risk" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     iv: { domain: "iv" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     synthesis: { domain: "synthesis" as const, contextFingerprint: null, latestResponseId: null, entries: [] }
@@ -1213,12 +1354,51 @@ function makePredictionMarket(marketId: string): PredictionMarket {
   };
 }
 
+function makeCryptoToken(tokenId: string): CryptoToken {
+  return {
+    token_id: tokenId,
+    symbol: "sol",
+    name: "Solana",
+    image_url: null,
+    chain: "Solana",
+    asset_platform_id: "solana",
+    geckoterminal_network: "solana",
+    contract_address: null,
+    market_cap_rank: 6,
+    current_price: 150,
+    market_cap: 75000000000,
+    fully_diluted_valuation: 90000000000,
+    total_volume: 4500000000,
+    circulating_supply: 500000000,
+    total_supply: 600000000,
+    max_supply: null,
+    price_change_pct_24h: 4.2,
+    price_change_pct_7d: 10.5,
+    price_change_pct_30d: 18.2,
+    market_cap_change_pct_24h: 4.0,
+    high_24h: 155,
+    low_24h: 143,
+    homepage_url: null,
+    description: null,
+    categories: [],
+    turnover_ratio_24h: 0.06,
+    fdv_premium_ratio: 0.2,
+    screen_score: 77.4,
+    screen_rationale: "turnover 0.06x | 24H volume $4.5B",
+    source_provider: "coingecko",
+    retrieved_at: "2026-03-01T00:05:00Z",
+    origin: "coingecko.markets",
+    transformation_note: "Gamma screen score combines size and turnover."
+  };
+}
+
 function makeCopilotResult(
   domain:
     | "portfolio"
     | "research"
     | "macro"
     | "prediction_markets"
+    | "crypto"
     | "risk"
     | "iv"
     | "synthesis",

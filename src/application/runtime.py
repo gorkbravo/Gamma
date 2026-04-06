@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from dotenv import load_dotenv
 
 from src.application.copilot_service import CopilotService
+from src.application.crypto_service import CryptoService
 from src.application.iv_service import IVService
 from src.application.macro_service import MacroService
 from src.application.portfolio_service import PortfolioService
@@ -19,6 +20,7 @@ from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
+from src.services.crypto_adapters import CoinGeckoAdapter, GeckoTerminalAdapter
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
@@ -64,6 +66,7 @@ class ApplicationRuntime:
     research_service: ResearchService
     prediction_market_service: PredictionMarketService
     macro_service: MacroService
+    crypto_service: CryptoService
     copilot_service: CopilotService
     risk_service: RiskService
     iv_service: IVService
@@ -207,9 +210,14 @@ def build_runtime(
         fx_adapter=IBKRMacroFXAdapter(market_data),
         prediction_market_service=prediction_market_service,
     )
+    crypto_service = CryptoService(
+        market_adapter=CoinGeckoAdapter(cache),
+        dex_adapter=GeckoTerminalAdapter(cache),
+    )
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
+        crypto_service=crypto_service,
         provider=_build_copilot_provider(),
     )
     risk_service = RiskService(
@@ -243,6 +251,7 @@ def build_runtime(
         research_service=research_service,
         prediction_market_service=prediction_market_service,
         macro_service=macro_service,
+        crypto_service=crypto_service,
         copilot_service=copilot_service,
         risk_service=risk_service,
         iv_service=iv_service,

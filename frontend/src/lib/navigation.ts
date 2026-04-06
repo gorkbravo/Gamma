@@ -16,8 +16,9 @@ export const WORKSPACE_TAB_DEFINITIONS = {
     { id: "research", label: "Research", pinned: true, defaultIndex: 0 },
     { id: "macro", label: "Macro", pinned: false, defaultIndex: 1 },
     { id: "prediction_markets", label: "Prediction Markets", pinned: false, defaultIndex: 2 },
-    { id: "risk", label: "Risk", pinned: false, defaultIndex: 3 },
-    { id: "iv", label: "IV", pinned: false, defaultIndex: 4 },
+    { id: "crypto", label: "Crypto", pinned: false, defaultIndex: 3 },
+    { id: "risk", label: "Risk", pinned: false, defaultIndex: 4 },
+    { id: "iv", label: "IV", pinned: false, defaultIndex: 5 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 

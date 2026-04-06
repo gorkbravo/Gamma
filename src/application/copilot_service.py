@@ -13,6 +13,7 @@ from src.application.copilot_context_helpers import (
     summarize_research_result,
     summarize_risk_result,
 )
+from src.application.crypto_service import CryptoService
 from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.prediction_market_service import PredictionMarketService
 from src.models.copilot import (
@@ -54,16 +55,19 @@ class CopilotService:
         *,
         macro_service: MacroService,
         prediction_market_service: PredictionMarketService,
+        crypto_service: CryptoService,
         provider: CopilotProvider,
     ) -> None:
         self.macro_service = macro_service
         self.prediction_market_service = prediction_market_service
+        self.crypto_service = crypto_service
         self.provider = provider
         self._context_builders = {
             "portfolio": self._build_portfolio_context,
             "research": self._build_research_context,
             "macro": self._build_macro_context,
             "prediction_markets": self._build_prediction_market_context,
+            "crypto": self._build_crypto_context,
             "risk": self._build_risk_context,
             "iv": self._build_iv_context,
             "synthesis": self._build_synthesis_context,
@@ -175,6 +179,42 @@ class CopilotService:
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_prediction_market_flow_context,
+                ),
+                _CopilotToolDefinition(
+                    name="get_crypto_price_history_summary",
+                    description="Return a read-only price, market-cap, and volume history summary for the selected crypto token.",
+                    domains=("crypto",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_crypto_price_history_summary,
+                ),
+                _CopilotToolDefinition(
+                    name="get_crypto_liquidity_context",
+                    description="Return read-only DEX liquidity, flow, and top-pool context for the selected crypto token.",
+                    domains=("crypto",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_crypto_liquidity_context,
+                ),
+                _CopilotToolDefinition(
+                    name="get_crypto_comparison_context",
+                    description="Return a read-only comparison between the selected crypto token and Gamma's default comparison target.",
+                    domains=("crypto",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_crypto_comparison_context,
                 ),
                 _CopilotToolDefinition(
                     name="get_risk_coverage_summary",
@@ -848,6 +888,131 @@ class CopilotService:
             warnings=warnings,
         )
 
+    def _build_crypto_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        token_id = (request.context.crypto_token_id or "").strip()
+        if not token_id:
+            raise ValueError("Crypto copilot requires a selected token.")
+
+        detail = self.crypto_service.get_token_detail(token_id)
+        if detail is None:
+            raise ValueError(f"Crypto token not found: {token_id}")
+        history = self.crypto_service.get_price_history(token_id, days=30)
+        liquidity = self.crypto_service.get_dex_liquidity(token_id)
+        comparison = self.crypto_service.get_comparison(token_id)
+
+        summary_data = {
+            "token_id": detail.token_id,
+            "selected_token": {
+                "name": detail.name,
+                "symbol": detail.symbol.upper(),
+                "chain": detail.chain,
+                "asset_platform_id": detail.asset_platform_id,
+                "geckoterminal_network": detail.geckoterminal_network,
+                "contract_address": detail.contract_address,
+                "market_cap_rank": detail.market_cap_rank,
+                "current_price": detail.current_price,
+                "market_cap": detail.market_cap,
+                "fully_diluted_valuation": detail.fully_diluted_valuation,
+                "total_volume": detail.total_volume,
+                "turnover_ratio_24h": detail.turnover_ratio_24h,
+                "fdv_premium_ratio": detail.fdv_premium_ratio,
+                "price_change_pct_24h": detail.price_change_pct_24h,
+                "price_change_pct_7d": detail.price_change_pct_7d,
+                "price_change_pct_30d": detail.price_change_pct_30d,
+                "screen_score": detail.screen_score,
+                "screen_rationale": detail.screen_rationale,
+                "categories": list(detail.categories[:8]),
+            },
+            "price_history_summary": self._crypto_price_history_summary(history),
+            "liquidity_summary": {
+                "lookup_strategy": liquidity.lookup_strategy if liquidity else None,
+                "matched_networks": list(liquidity.matched_networks if liquidity else []),
+                "total_reserve_usd": liquidity.total_reserve_usd if liquidity else None,
+                "total_volume_24h": liquidity.total_volume_24h if liquidity else None,
+                "dominant_dex": liquidity.dominant_dex if liquidity else None,
+                "warnings": list(liquidity.warnings if liquidity else []),
+                "top_pools": [
+                    {
+                        "network": row.network,
+                        "dex": row.dex,
+                        "pair_name": row.pair_name,
+                        "reserve_usd": row.reserve_usd,
+                        "volume_24h": row.volume_24h,
+                        "price_change_pct_24h": row.price_change_pct_24h,
+                    }
+                    for row in (liquidity.pools[:5] if liquidity else [])
+                ],
+            },
+            "comparison_summary": (
+                {
+                    "target_kind": comparison.target_kind,
+                    "target_id": comparison.target_id,
+                    "target_label": comparison.target_label,
+                    "price_gap_pct_7d": comparison.price_gap_pct_7d,
+                    "price_gap_pct_30d": comparison.price_gap_pct_30d,
+                    "market_cap_ratio": comparison.market_cap_ratio,
+                    "turnover_gap": comparison.turnover_gap,
+                    "summary": comparison.summary,
+                }
+                if comparison is not None
+                else None
+            ),
+        }
+        sources = [
+            CopilotSourceRef(
+                source_id="crypto.detail",
+                label="Crypto token detail",
+                kind="workspace",
+                provider=detail.source_provider,
+                origin=detail.origin,
+                description="Selected crypto token detail payload.",
+                retrieved_at=detail.retrieved_at,
+            ),
+            CopilotSourceRef(
+                source_id="crypto.history",
+                label="Crypto price history",
+                kind="timeseries",
+                provider=history[-1].source_provider if history else detail.source_provider,
+                origin=history[-1].origin if history else "gamma.crypto.history",
+                description="Selected crypto token price history.",
+                retrieved_at=history[-1].retrieved_at if history else detail.retrieved_at,
+            ),
+        ]
+        if liquidity is not None:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="crypto.liquidity",
+                    label="Crypto DEX liquidity",
+                    kind="flow",
+                    provider=liquidity.source_provider,
+                    origin=liquidity.origin,
+                    description="DEX liquidity summary for the selected crypto token.",
+                    retrieved_at=liquidity.retrieved_at,
+                )
+            )
+        if comparison is not None:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="crypto.comparison",
+                    label="Crypto comparison",
+                    kind="analytics",
+                    provider=comparison.source_provider,
+                    origin=comparison.origin,
+                    description="Relative token or basket comparison for the selected crypto token.",
+                    retrieved_at=comparison.retrieved_at,
+                )
+            )
+        return CopilotContextBundle(
+            domain="crypto",
+            current_tab=request.context.current_tab or "crypto",
+            summary_data=summary_data,
+            tool_state={
+                "token_id": detail.token_id,
+            },
+            sources=sources,
+            warnings=dedupe_warnings(liquidity.warnings if liquidity is not None else []),
+        )
+
     def _tool_get_portfolio_positions_summary(
         self,
         arguments: dict[str, Any],
@@ -1257,6 +1422,132 @@ class CopilotService:
             sources=sources,
         )
 
+    def _tool_get_crypto_price_history_summary(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        token_id = self._crypto_token_id_from_bundle(context)
+        history = self.crypto_service.get_price_history(token_id, days=30)
+        source = CopilotSourceRef(
+            source_id="crypto.history.drilldown",
+            label="Crypto history drilldown",
+            kind="timeseries",
+            provider=history[-1].source_provider if history else "crypto",
+            origin=history[-1].origin if history else "gamma.crypto.history",
+            description="Expanded price, market-cap, and volume history for the selected crypto token.",
+            retrieved_at=history[-1].retrieved_at if history else None,
+        )
+        return CopilotToolExecution(
+            output=self._crypto_price_history_summary(history),
+            trace=CopilotToolTrace(
+                tool_name="get_crypto_price_history_summary",
+                summary="Expanded the selected crypto token into a 30D price and liquidity history summary.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_crypto_liquidity_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        token_id = self._crypto_token_id_from_bundle(context)
+        liquidity = self.crypto_service.get_dex_liquidity(token_id)
+        if liquidity is None:
+            raise ValueError(f"Crypto liquidity context is unavailable for: {token_id}")
+        source = CopilotSourceRef(
+            source_id="crypto.liquidity.drilldown",
+            label="Crypto liquidity drilldown",
+            kind="flow",
+            provider=liquidity.source_provider,
+            origin=liquidity.origin,
+            description="Expanded DEX liquidity and pool-flow context for the selected crypto token.",
+            retrieved_at=liquidity.retrieved_at,
+        )
+        output = {
+            "lookup_strategy": liquidity.lookup_strategy,
+            "matched_networks": list(liquidity.matched_networks),
+            "total_reserve_usd": liquidity.total_reserve_usd,
+            "total_volume_24h": liquidity.total_volume_24h,
+            "total_buys_24h": liquidity.total_buys_24h,
+            "total_sells_24h": liquidity.total_sells_24h,
+            "total_buyers_24h": liquidity.total_buyers_24h,
+            "total_sellers_24h": liquidity.total_sellers_24h,
+            "dominant_dex": liquidity.dominant_dex,
+            "warnings": list(liquidity.warnings),
+            "pools": [
+                {
+                    "network": row.network,
+                    "dex": row.dex,
+                    "pair_name": row.pair_name,
+                    "quote_token_symbol": row.quote_token_symbol,
+                    "reserve_usd": row.reserve_usd,
+                    "volume_24h": row.volume_24h,
+                    "price_change_pct_24h": row.price_change_pct_24h,
+                    "buys_24h": row.buys_24h,
+                    "sells_24h": row.sells_24h,
+                }
+                for row in liquidity.pools
+            ],
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_crypto_liquidity_context",
+                summary="Expanded the selected crypto token into DEX liquidity and pool-flow context.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_crypto_comparison_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        token_id = self._crypto_token_id_from_bundle(context)
+        comparison = self.crypto_service.get_comparison(token_id)
+        if comparison is None:
+            raise ValueError(f"Crypto comparison is unavailable for: {token_id}")
+        source = CopilotSourceRef(
+            source_id="crypto.comparison.drilldown",
+            label="Crypto comparison drilldown",
+            kind="analytics",
+            provider=comparison.source_provider,
+            origin=comparison.origin,
+            description="Expanded comparison context for the selected crypto token.",
+            retrieved_at=comparison.retrieved_at,
+        )
+        output = {
+            "target_kind": comparison.target_kind,
+            "target_id": comparison.target_id,
+            "target_label": comparison.target_label,
+            "shared_categories": list(comparison.shared_categories),
+            "price_gap_pct_24h": comparison.price_gap_pct_24h,
+            "price_gap_pct_7d": comparison.price_gap_pct_7d,
+            "price_gap_pct_30d": comparison.price_gap_pct_30d,
+            "market_cap_ratio": comparison.market_cap_ratio,
+            "turnover_gap": comparison.turnover_gap,
+            "summary": comparison.summary,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_crypto_comparison_context",
+                summary="Expanded the selected crypto token into a relative token or basket comparison.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
     def _tool_get_risk_coverage_summary(
         self,
         arguments: dict[str, Any],
@@ -1501,6 +1792,11 @@ class CopilotService:
                 "get_prediction_market_history_summary",
                 "get_prediction_market_flow_context",
             ),
+            "crypto": (
+                "get_crypto_price_history_summary",
+                "get_crypto_liquidity_context",
+                "get_crypto_comparison_context",
+            ),
             "risk": (
                 "get_risk_coverage_summary",
                 "get_risk_contribution_summary",
@@ -1568,6 +1864,13 @@ class CopilotService:
         if not market_id:
             raise ValueError("Prediction market context is missing the selected market id.")
         return market_id
+
+    @staticmethod
+    def _crypto_token_id_from_bundle(context: CopilotContextBundle) -> str:
+        token_id = str(context.summary_data.get("token_id") or "").strip()
+        if not token_id:
+            raise ValueError("Crypto context is missing the selected token id.")
+        return token_id
 
     @staticmethod
     def _macro_card_summary(card: Any) -> dict[str, Any]:
@@ -1681,6 +1984,48 @@ class CopilotService:
             "low_probability": min(probabilities),
             "points": [
                 {"timestamp": point.timestamp.isoformat(), "probability": point.probability}
+                for point in points[-24:]
+            ],
+        }
+
+    @staticmethod
+    def _crypto_price_history_summary(points: list[Any]) -> dict[str, Any]:
+        if not points:
+            return {
+                "observations": 0,
+                "latest_price": None,
+                "start_price": None,
+                "change_pct": None,
+                "high_price": None,
+                "low_price": None,
+                "latest_market_cap": None,
+                "latest_total_volume": None,
+                "points": [],
+            }
+        latest = points[-1]
+        first = points[0]
+        prices = [point.price for point in points]
+        change_pct = None
+        if first.price not in {None, 0}:
+            change_pct = ((latest.price / first.price) - 1.0) * 100.0
+        return {
+            "observations": len(points),
+            "latest_price": latest.price,
+            "latest_timestamp": latest.timestamp.isoformat(),
+            "start_price": first.price,
+            "start_timestamp": first.timestamp.isoformat(),
+            "change_pct": change_pct,
+            "high_price": max(prices),
+            "low_price": min(prices),
+            "latest_market_cap": latest.market_cap,
+            "latest_total_volume": latest.total_volume,
+            "points": [
+                {
+                    "timestamp": point.timestamp.isoformat(),
+                    "price": point.price,
+                    "market_cap": point.market_cap,
+                    "total_volume": point.total_volume,
+                }
                 for point in points[-24:]
             ],
         }

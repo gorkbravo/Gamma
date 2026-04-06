@@ -25,7 +25,7 @@ class MemoryStorage implements StorageLike {
 describe("navigation tab ordering", () => {
   it("returns the roadmap default order for each workspace", () => {
     expect(getDefaultTabOrder("portfolio")).toEqual(["portfolio", "risk", "iv"]);
-    expect(getDefaultTabOrder("research")).toEqual(["research", "macro", "prediction_markets", "risk", "iv"]);
+    expect(getDefaultTabOrder("research")).toEqual(["research", "macro", "prediction_markets", "crypto", "risk", "iv"]);
   });
 
   it("keeps the pinned first tab fixed even when restored state tries to move it", () => {
@@ -35,6 +35,7 @@ describe("navigation tab ordering", () => {
       "iv",
       "macro",
       "prediction_markets",
+      "crypto",
     ]);
   });
 
@@ -44,19 +45,20 @@ describe("navigation tab ordering", () => {
       "risk",
       "macro",
       "prediction_markets",
+      "crypto",
       "iv",
     ]);
   });
 
   it("maps Ctrl+N to the reordered visual tab order", () => {
     const reorderedState = normalizeWorkspaceTabOrderState({
-      research: ["research", "risk", "prediction_markets", "macro", "iv"],
+      research: ["research", "risk", "prediction_markets", "crypto", "macro", "iv"],
     });
 
     expect(getTabByShortcutIndex("research", reorderedState, 1)).toBe("research");
     expect(getTabByShortcutIndex("research", reorderedState, 2)).toBe("risk");
     expect(getTabByShortcutIndex("research", reorderedState, 3)).toBe("prediction_markets");
-    expect(getTabByShortcutIndex("research", reorderedState, 4)).toBe("macro");
+    expect(getTabByShortcutIndex("research", reorderedState, 4)).toBe("crypto");
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {
@@ -72,11 +74,11 @@ describe("workspace tab-order persistence", () => {
 
     store.reorder("research", "risk", 1);
 
-    expect(get(store).research).toEqual(["research", "risk", "macro", "prediction_markets", "iv"]);
+    expect(get(store).research).toEqual(["research", "risk", "macro", "prediction_markets", "crypto", "iv"]);
     expect(get(store).portfolio).toEqual(DEFAULT_WORKSPACE_TAB_ORDER.portfolio);
 
     const reloadedStore = createWorkspaceTabOrderStore(storage);
-    expect(get(reloadedStore).research).toEqual(["research", "risk", "macro", "prediction_markets", "iv"]);
+    expect(get(reloadedStore).research).toEqual(["research", "risk", "macro", "prediction_markets", "crypto", "iv"]);
     expect(get(reloadedStore).portfolio).toEqual(DEFAULT_WORKSPACE_TAB_ORDER.portfolio);
   });
 

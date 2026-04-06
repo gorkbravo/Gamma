@@ -5,6 +5,13 @@ from fastapi.testclient import TestClient
 from src.api.main import create_app
 from src.application.runtime import build_runtime
 from src.models.app_mode import ResearchScopeType
+from src.models.crypto import (
+    CryptoComparisonRecord,
+    CryptoDexLiquiditySummary,
+    CryptoPricePoint,
+    CryptoTokenRecord,
+    CryptoWorkspaceResult,
+)
 
 
 def _build_test_client(tmp_path):
@@ -302,3 +309,152 @@ def test_iv_surface_and_diagnostics_endpoints(tmp_path):
         assert subscribe_response.json()["success"] is True
     finally:
         runtime.shutdown()
+
+
+def test_crypto_workspace_and_token_endpoints(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+
+    class StubCryptoService:
+        def get_workspace(self, request):
+            del request
+            return CryptoWorkspaceResult(tokens=[_crypto_token()], narratives=[], warnings=[])
+
+        def get_token_detail(self, token_id: str, *, force_refresh: bool = False):
+            del force_refresh
+            return _crypto_token() if token_id == "solana" else None
+
+        def get_price_history(self, token_id: str, *, days: int = 30, force_refresh: bool = False):
+            del force_refresh
+            if token_id != "solana":
+                return []
+            return [
+                CryptoPricePoint(
+                    timestamp=_crypto_token().retrieved_at,
+                    price=150.0,
+                    market_cap=75_000_000_000.0,
+                    total_volume=4_500_000_000.0,
+                    source_provider="coingecko",
+                    retrieved_at=_crypto_token().retrieved_at,
+                    origin=f"coingecko.market_chart.{days}",
+                )
+            ]
+
+        def get_dex_liquidity(self, token_id: str, *, force_refresh: bool = False):
+            del force_refresh
+            if token_id != "solana":
+                return None
+            return CryptoDexLiquiditySummary(
+                token_id="solana",
+                lookup_strategy="contract_lookup",
+                matched_networks=["solana"],
+                total_reserve_usd=180_000_000.0,
+                total_volume_24h=45_000_000.0,
+                total_buys_24h=9_000,
+                total_sells_24h=8_700,
+                total_buyers_24h=5_200,
+                total_sellers_24h=5_100,
+                dominant_dex="raydium",
+                warnings=[],
+                source_provider="geckoterminal",
+                retrieved_at=_crypto_token().retrieved_at,
+                origin="geckoterminal.liquidity_summary",
+            )
+
+        def get_comparison(
+            self,
+            token_id: str,
+            *,
+            target_token_id: str | None = None,
+            basket_id: str | None = None,
+            force_refresh: bool = False,
+        ):
+            del target_token_id, basket_id, force_refresh
+            if token_id != "solana":
+                return None
+            return CryptoComparisonRecord(
+                subject_token_id="solana",
+                target_kind="basket",
+                target_id="layer-1",
+                target_label="Layer 1",
+                shared_categories=["Layer 1"],
+                subject_price_change_pct_24h=4.2,
+                target_price_change_pct_24h=2.1,
+                price_gap_pct_24h=2.1,
+                subject_price_change_pct_7d=10.5,
+                target_price_change_pct_7d=5.2,
+                price_gap_pct_7d=5.3,
+                subject_price_change_pct_30d=18.2,
+                target_price_change_pct_30d=11.4,
+                price_gap_pct_30d=6.8,
+                subject_market_cap=75_000_000_000.0,
+                target_market_cap=900_000_000_000.0,
+                market_cap_ratio=0.083,
+                subject_turnover_ratio_24h=0.09,
+                target_turnover_ratio_24h=0.06,
+                turnover_gap=0.03,
+                summary="Solana is outperforming the Layer 1 basket with hotter turnover.",
+                source_provider="gamma",
+                retrieved_at=_crypto_token().retrieved_at,
+                origin="gamma.crypto.comparison.basket",
+            )
+
+    runtime.crypto_service = StubCryptoService()
+    try:
+        workspace = client.post("/crypto/workspace", json={"query": "sol", "sort_by": "screen_score_desc"})
+        detail = client.get("/crypto/tokens/solana")
+        history = client.get("/crypto/tokens/solana/history", params={"days": 30})
+        liquidity = client.get("/crypto/tokens/solana/liquidity")
+        comparison = client.get("/crypto/tokens/solana/comparison")
+
+        assert workspace.status_code == 200
+        assert workspace.json()["tokens"][0]["token_id"] == "solana"
+        assert detail.status_code == 200
+        assert detail.json()["name"] == "Solana"
+        assert history.status_code == 200
+        assert history.json()["points"][0]["price"] == 150.0
+        assert liquidity.status_code == 200
+        assert liquidity.json()["dominant_dex"] == "raydium"
+        assert comparison.status_code == 200
+        assert comparison.json()["target_kind"] == "basket"
+    finally:
+        runtime.shutdown()
+
+
+def _crypto_token() -> CryptoTokenRecord:
+    from datetime import datetime, timezone
+
+    return CryptoTokenRecord(
+        token_id="solana",
+        symbol="sol",
+        name="Solana",
+        image_url=None,
+        chain="Solana",
+        asset_platform_id="solana",
+        geckoterminal_network="solana",
+        contract_address=None,
+        market_cap_rank=6,
+        current_price=150.0,
+        market_cap=75_000_000_000.0,
+        fully_diluted_valuation=90_000_000_000.0,
+        total_volume=4_500_000_000.0,
+        circulating_supply=500_000_000.0,
+        total_supply=600_000_000.0,
+        max_supply=None,
+        price_change_pct_24h=4.2,
+        price_change_pct_7d=10.5,
+        price_change_pct_30d=18.2,
+        market_cap_change_pct_24h=4.0,
+        high_24h=155.0,
+        low_24h=143.0,
+        homepage_url="https://solana.com",
+        description="High-throughput smart-contract network.",
+        categories=["Layer 1"],
+        turnover_ratio_24h=0.09,
+        fdv_premium_ratio=0.2,
+        screen_score=77.4,
+        screen_rationale="turnover 0.09x | 24H volume $4.5B",
+        source_provider="coingecko",
+        retrieved_at=datetime(2026, 4, 5, 10, 0, tzinfo=timezone.utc),
+        origin="coingecko.markets",
+        transformation_note="Gamma screen score combines size, liquidity, turnover, momentum, and FDV premium heuristics.",
+    )

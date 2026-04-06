@@ -1,6 +1,6 @@
 export type WorkspaceMode = "portfolio" | "research";
 
-export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "risk" | "iv";
+export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "crypto" | "risk" | "iv";
 
 export interface WorkspaceTabDefinition {
   id: TabId;
@@ -477,6 +477,156 @@ export interface PredictionCalibrationSummary {
   buckets: PredictionCalibrationBucket[];
   observations: PredictionCalibrationObservation[];
   warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoBasketConstituent {
+  token_id: string;
+  name: string | null;
+  symbol: string | null;
+  image_url: string | null;
+}
+
+export interface CryptoNarrativeBasket {
+  basket_id: string;
+  label: string;
+  description: string | null;
+  market_cap: number | null;
+  market_cap_change_pct_24h: number | null;
+  volume_24h: number | null;
+  top_tokens: CryptoBasketConstituent[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoToken {
+  token_id: string;
+  symbol: string;
+  name: string;
+  image_url: string | null;
+  chain: string | null;
+  asset_platform_id: string | null;
+  geckoterminal_network: string | null;
+  contract_address: string | null;
+  market_cap_rank: number | null;
+  current_price: number | null;
+  market_cap: number | null;
+  fully_diluted_valuation: number | null;
+  total_volume: number | null;
+  circulating_supply: number | null;
+  total_supply: number | null;
+  max_supply: number | null;
+  price_change_pct_24h: number | null;
+  price_change_pct_7d: number | null;
+  price_change_pct_30d: number | null;
+  market_cap_change_pct_24h: number | null;
+  high_24h: number | null;
+  low_24h: number | null;
+  homepage_url: string | null;
+  description: string | null;
+  categories: string[];
+  turnover_ratio_24h: number | null;
+  fdv_premium_ratio: number | null;
+  screen_score: number | null;
+  screen_rationale: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoWorkspaceResponse {
+  tokens: CryptoToken[];
+  narratives: CryptoNarrativeBasket[];
+  warnings: string[];
+}
+
+export interface CryptoPricePoint {
+  timestamp: string;
+  price: number;
+  market_cap: number | null;
+  total_volume: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoPriceHistoryResponse {
+  token_id: string;
+  points: CryptoPricePoint[];
+}
+
+export interface CryptoDexPool {
+  pool_id: string;
+  network: string;
+  dex: string;
+  pair_name: string;
+  address: string;
+  quote_token_symbol: string | null;
+  base_token_price_usd: number | null;
+  fdv_usd: number | null;
+  market_cap_usd: number | null;
+  reserve_usd: number | null;
+  volume_24h: number | null;
+  price_change_pct_24h: number | null;
+  buys_24h: number;
+  sells_24h: number;
+  buyers_24h: number;
+  sellers_24h: number;
+  pool_created_at: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoDexLiquiditySummary {
+  token_id: string;
+  lookup_strategy: string;
+  matched_networks: string[];
+  total_reserve_usd: number | null;
+  total_volume_24h: number | null;
+  total_buys_24h: number;
+  total_sells_24h: number;
+  total_buyers_24h: number;
+  total_sellers_24h: number;
+  dominant_dex: string | null;
+  pools: CryptoDexPool[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoComparison {
+  subject_token_id: string;
+  target_kind: string;
+  target_id: string;
+  target_label: string;
+  shared_categories: string[];
+  subject_price_change_pct_24h: number | null;
+  target_price_change_pct_24h: number | null;
+  price_gap_pct_24h: number | null;
+  subject_price_change_pct_7d: number | null;
+  target_price_change_pct_7d: number | null;
+  price_gap_pct_7d: number | null;
+  subject_price_change_pct_30d: number | null;
+  target_price_change_pct_30d: number | null;
+  price_gap_pct_30d: number | null;
+  subject_market_cap: number | null;
+  target_market_cap: number | null;
+  market_cap_ratio: number | null;
+  subject_turnover_ratio_24h: number | null;
+  target_turnover_ratio_24h: number | null;
+  turnover_gap: number | null;
+  summary: string | null;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
