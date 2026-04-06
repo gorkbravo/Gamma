@@ -17,15 +17,16 @@ The primary references are **Bloomberg Terminal** and **linear.app**: the inform
 ## 2. Color
 
 ### Base Palette
-- **Background**: Near-black. The root canvas of every surface.
-- **Primary accent**: Blue. Used for active states, highlights, interactive affordances, and key data signals.
-- **Secondary surfaces**: Slightly elevated grays — but elevation should be expressed through *contrast and border*, not through shadow or glow.
+- **Background**: Near-black (`--bg-0: #070809`), flat, no gradient. The root canvas of every surface. This is the single source of truth — panels inherit it, they don't override it.
+- **Primary accent**: Blue (`--accent: #7aa6c8`). Used for active states, highlights, interactive affordances, and key data signals.
+- **Secondary surfaces**: Defined by borders against the root background — not by fill color, shadow, or glow. Where a subtle background is needed inside a panel sub-section, use `var(--surface-soft)`.
 
 ### Rules
 - Do not use multiple accent colors without deliberate justification. Blue is the accent.
 - Status/signal colors (red for negative, green for positive, amber for neutral/warning) are permitted in data contexts (P&L, change indicators, alerts) but should not bleed into UI chrome.
-- No gradients on UI surfaces. Gradients are acceptable only in data visualizations (e.g. heatmaps, color scales).
-- Avoid opacity-based layering that creates "glowing" or soft blending effects. Surfaces should be defined by solid colors and crisp borders.
+- **No gradients on UI surfaces — including panels, cards, and the root canvas.** Gradients are acceptable only in data visualizations (e.g. heatmaps, color scales) and accent-colored interactive elements (progress bars, active indicators). Panel backgrounds must be flat: either `transparent` or a solid color from the token scale.
+- **All surfaces must share the same color temperature.** Do not mix warm-tinted darks (brown-blacks) with cool-tinted darks (blue-blacks). Every background in the system — root, panels, charts, inputs — must derive from the same neutral-cool base (`--bg-0` through `--bg-3`). A warm panel on a cool root reads as a separate object even when luminance is identical.
+- **No opacity-based background layering on panels.** Panels at `0.6`, `0.88`, `0.98` opacity create ambiguous depth — the brain reads translucent sheets as stacked. Use either `transparent` (letting the root show through) or a solid token color. The one exception is transient overlays (navigation shelves, modals) where the translucency is functional and intentional.
 
 ### On Themes (Future Consideration)
 User-selectable themes (e.g. a lighter mode, an alternative accent color) are a valid future feature. If implemented, every design decision made now should be expressed as a CSS variable or equivalent token so that themes can be applied at the token level without rewriting components.
@@ -45,12 +46,18 @@ In a plane model (the right approach), the entire interface is one flat surface.
 **Bloomberg Terminal is a plane. Most SaaS dashboards are object stacks. Gamma is a plane.**
  
 ### Rules
-- Card and panel backgrounds must match the root background color. Do not use a lighter or different-toned surface color to distinguish a card from its surroundings.
+- **Card and panel backgrounds must be `transparent` or `var(--bg-0)`.** The panel's background is the root's background. What makes a panel a panel is its border — never its fill. Do not use a lighter, warmer, or different-toned surface color to distinguish a card from its surroundings.
 - Borders define regions. Every card or panel boundary should be expressed as a `1px solid` border at low-to-mid opacity. That border is the only thing that needs to exist.
 - No `box-shadow` on cards or panels. None. A shadow implies the element is lifted above the surface — this contradicts the plane model entirely.
 - No visible background-color gaps between adjacent panels. If two panels sit next to each other, they share a border or a divider line — not a strip of root background between them.
 - No `border-radius` greater than `4px` on data containers. Slight rounding is acceptable on buttons and small interactive elements only.
 - Cards within cards are not permitted. If content can be separated by a line — a card was not necessary in the first place.
+
+### Implementation Reference
+The **Macro → Cross-Asset** mode is the current gold standard for how the plane model should feel: dense text, numbers, and thin borders on a single flat surface. Content is the structure — no box fill needed. All other tabs should converge toward this level of flatness.
+
+### Token Usage
+Panel backgrounds use `var(--panel-bg)` (set to `transparent`). Chart containers use `var(--bg-0)`. Sub-sections within panels that need subtle differentiation use `var(--surface-soft)`. Navigation chrome (sidebar, tab bar) is the only surface permitted to use translucent backgrounds.
  
 
 ---
@@ -169,8 +176,8 @@ Gamma is a research tool, not a marketing site. Animation should be functional, 
 
 | Principle | Direction |
 |---|---|
-| Color | Black base, blue accent, signal colors in data only |
-| Depth | Flat. Borders define surfaces, not shadows |
+| Color | Black base, blue accent, signal colors in data only. Single color temperature across all surfaces |
+| Depth | Flat. Borders define surfaces, not shadows. No gradients, no opacity layering on panels |
 | Typography | Small, dense, hierarchy by weight not size |
 | Cards | Sparingly. Dividers first, cards only when justified |
 | Nested cards | Never |

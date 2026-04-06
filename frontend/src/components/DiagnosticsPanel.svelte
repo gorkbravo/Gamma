@@ -140,7 +140,7 @@
 
   .summary article {
     border: 1px solid var(--divider);
-    background: rgba(8, 13, 18, 0.72);
+    background: var(--surface-soft);
     padding: 0.72rem 0.8rem;
   }
 

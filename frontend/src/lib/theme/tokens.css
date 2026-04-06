@@ -8,11 +8,12 @@
   --bg-2: #0f1114;
   --bg-3: #131618;
 
-  /* ── Surfaces ── */
-  --surface-0: rgba(10, 12, 15, 0.95);
-  --surface-1: rgba(9, 11, 13, 0.97);
+  /* ── Surfaces (solid, same-temperature as bg-0 — plane model) ── */
+  --surface-0: #0a0c0f;
+  --surface-1: #0b0d10;
   --surface-2: #141719;
   --surface-soft: rgba(10, 12, 14, 0.62);
+  --panel-bg: transparent;
 
   /* ── Borders & dividers ── */
   --panel-border: #1e2228;
@@ -75,9 +76,7 @@ body,
 #app {
   margin: 0;
   min-height: 100%;
-  background:
-    radial-gradient(circle at top right, rgba(255, 252, 248, 0.03), transparent 24rem),
-    linear-gradient(180deg, #070809 0%, #060708 100%);
+  background: var(--bg-0);
   color: var(--text-0);
 }
 

@@ -128,7 +128,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: rgba(8, 13, 18, 0.92);
+    background: var(--surface-0);
     padding: 1rem;
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
   }

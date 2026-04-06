@@ -694,7 +694,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
+    background: var(--panel-bg);
     padding: 1.05rem;
   }
 
@@ -886,7 +886,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: rgba(8, 13, 18, 0.82);
+    background: var(--surface-0);
   }
 
   input,

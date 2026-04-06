@@ -601,7 +601,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
+    background: var(--panel-bg);
     padding: 1.05rem;
   }
 
@@ -718,7 +718,7 @@
     align-items: center;
     gap: 0.5rem;
     border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.38);
+    background: var(--surface-soft);
     padding: 0.6rem 0.72rem;
   }
 
@@ -749,7 +749,7 @@
     display: inline-flex;
     flex-wrap: wrap;
     border: 1px solid var(--panel-strong);
-    background: rgba(8, 13, 18, 0.82);
+    background: var(--surface-0);
   }
 
   .segmented button {
@@ -863,7 +863,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: rgba(8, 13, 18, 0.82);
+    background: var(--surface-0);
   }
 
   .positive {

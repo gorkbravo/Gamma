@@ -235,7 +235,7 @@
   /* ── Panel ── */
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
+    background: var(--panel-bg);
     padding: 0.85rem;
     display: grid;
     gap: 0.5rem;
@@ -353,7 +353,7 @@
     font-size: 0.64rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: rgba(8, 13, 18, 0.82);
+    background: var(--surface-0);
     position: sticky;
     top: 0;
     z-index: 1;
@@ -407,7 +407,7 @@
     text-transform: uppercase;
     letter-spacing: 0.12em;
     padding: 0.45rem 0.65rem 0.2rem;
-    background: rgba(8, 13, 18, 0.6);
+    background: var(--surface-soft);
     border-bottom: 1px solid rgba(46, 60, 74, 0.2);
     position: sticky;
     top: 0;

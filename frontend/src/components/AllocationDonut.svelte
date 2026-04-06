@@ -267,7 +267,7 @@
     pointer-events: none;
     padding: 0.8rem 0.9rem;
     border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.94);
+    background: var(--surface-0);
     box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
   }
 
@@ -280,7 +280,7 @@
     height: 0.75rem;
     border-left: 1px solid rgba(46, 60, 74, 0.52);
     border-bottom: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.94);
+    background: var(--surface-0);
     transform: translateY(-50%) rotate(45deg);
   }
 

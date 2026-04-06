@@ -546,7 +546,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(18, 17, 12, 0.98), rgba(10, 10, 10, 0.95));
+    background: var(--panel-bg);
     padding: 1.05rem;
   }
 

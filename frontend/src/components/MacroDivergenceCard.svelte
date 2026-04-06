@@ -93,7 +93,7 @@
     display: grid;
     gap: 0.4rem;
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
+    background: var(--panel-bg);
     padding: 0.75rem;
   }
 

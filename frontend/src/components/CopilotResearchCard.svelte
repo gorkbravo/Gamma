@@ -343,7 +343,7 @@
     height: 100vh;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    background: rgba(8, 13, 18, 0.985);
+    background: var(--surface-0);
     border-right: 1px solid var(--panel-border);
     box-shadow: 28px 0 72px rgba(0, 0, 0, 0.4);
     transform: translateX(-100%);
@@ -363,7 +363,7 @@
   .drawer-header,
   .composer {
     padding: 0.9rem 1rem;
-    background: rgba(8, 13, 18, 0.98);
+    background: var(--surface-0);
   }
 
   .drawer-header {
@@ -411,7 +411,7 @@
 
   .bubble {
     border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.6);
+    background: var(--surface-soft);
     padding: 0.7rem 0.85rem;
     display: grid;
     gap: 0.55rem;
@@ -554,7 +554,7 @@
 
   .message-card {
     border: 1px solid rgba(122, 166, 200, 0.18);
-    background: rgba(8, 13, 18, 0.6);
+    background: var(--surface-soft);
     padding: 0.85rem;
   }
 
@@ -565,7 +565,7 @@
 
   .context-pill {
     border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(8, 13, 18, 0.7);
+    background: var(--surface-soft);
     color: var(--text-2);
     padding: 0.28rem 0.5rem;
     text-transform: uppercase;
@@ -732,7 +732,7 @@
     padding: 0.25rem 0.55rem;
     font-size: 0.72rem;
     color: var(--text-2);
-    background: rgba(8, 13, 18, 0.82);
+    background: var(--surface-0);
     border: 1px solid rgba(46, 60, 74, 0.52);
   }
 

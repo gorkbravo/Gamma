@@ -150,7 +150,7 @@
 <style>
   .shell {
     border: 1px solid var(--divider);
-    background: rgba(7, 11, 16, 0.88);
+    background: var(--bg-0);
     position: relative;
     overflow: hidden;
   }

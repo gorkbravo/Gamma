@@ -77,7 +77,7 @@
     gap: 0.35rem;
     padding: 0.45rem 0.55rem;
     border: 1px solid rgba(46, 60, 74, 0.3);
-    background: rgba(8, 13, 18, 0.45);
+    background: var(--surface-soft);
   }
 
   .coherence-panel.compact {

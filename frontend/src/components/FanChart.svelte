@@ -232,9 +232,7 @@
 <style>
   .shell {
     border: 1px solid var(--divider);
-    background:
-      linear-gradient(180deg, rgba(12, 14, 16, 0.96), rgba(9, 10, 12, 0.92)),
-      radial-gradient(circle at 20% 0%, rgba(138, 145, 154, 0.06), transparent 42%);
+    background: var(--panel-bg);
     position: relative;
     overflow: hidden;
   }
