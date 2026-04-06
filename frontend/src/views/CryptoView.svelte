@@ -144,7 +144,7 @@
         {
           id: "price",
           label: "Price",
-          color: "#d4a054",
+          color: "#7aa6c8",
           type: "line",
           data: history.points
             .map((point) => ({
@@ -586,7 +586,7 @@
   }
 
   .metric {
-    border-left: 1px solid rgba(84, 72, 41, 0.35);
+    border-left: 1px solid var(--divider);
     padding: 0.2rem 1rem;
     text-align: center;
   }
@@ -640,9 +640,9 @@
 
   .badge-stack span,
   .tag-chip {
-    border: 1px solid rgba(212, 160, 84, 0.24);
-    background: rgba(212, 160, 84, 0.07);
-    color: #f0d3a2;
+    border: 1px solid rgba(122, 166, 200, 0.24);
+    background: rgba(122, 166, 200, 0.07);
+    color: var(--text-1);
     padding: 0.34rem 0.5rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -657,8 +657,8 @@
   input,
   select,
   button {
-    border: 1px solid rgba(212, 160, 84, 0.24);
-    background: #12100d;
+    border: 1px solid rgba(122, 166, 200, 0.24);
+    background: var(--bg-1);
     color: var(--text-0);
     padding: 0.56rem 0.72rem;
     font: inherit;
@@ -671,7 +671,7 @@
   }
 
   .secondary {
-    background: rgba(212, 160, 84, 0.08);
+    background: rgba(122, 166, 200, 0.08);
   }
 
   .field-grid,
@@ -683,13 +683,13 @@
     display: grid;
     gap: 0.35rem;
     text-align: left;
-    border: 1px solid rgba(212, 160, 84, 0.18);
-    background: rgba(26, 23, 17, 0.8);
+    border: 1px solid rgba(122, 166, 200, 0.18);
+    background: var(--surface-soft);
     padding: 0.9rem;
   }
 
   .basket-card span {
-    color: #f0d3a2;
+    color: var(--text-1);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: 0.66rem;
@@ -701,7 +701,7 @@
 
   .table-wrap {
     overflow: auto;
-    border-top: 1px solid rgba(84, 72, 41, 0.35);
+    border-top: 1px solid var(--divider);
   }
 
   table {
@@ -712,7 +712,7 @@
   th,
   td {
     padding: 0.72rem 0.55rem;
-    border-bottom: 1px solid rgba(84, 72, 41, 0.25);
+    border-bottom: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
   }
@@ -722,7 +722,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: rgba(12, 11, 8, 0.88);
+    background: var(--surface-0);
   }
 
   td small {
@@ -735,7 +735,7 @@
   }
 
   .screener-table tbody tr.selected {
-    background: rgba(212, 160, 84, 0.08);
+    background: rgba(122, 166, 200, 0.08);
   }
 
   .notes-list,
@@ -751,7 +751,7 @@
     display: grid;
     gap: 0.75rem;
     padding: 0.7rem 0;
-    border-top: 1px solid rgba(84, 72, 41, 0.25);
+    border-top: 1px solid var(--divider);
   }
 
   .note-row:first-child,

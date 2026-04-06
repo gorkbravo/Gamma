@@ -48,8 +48,8 @@
     align-items: center;
     gap: 0.6rem;
     padding: 0.3rem 0.75rem;
-    border: 1px solid var(--panel-border);
-    background: var(--surface-1);
+    border-bottom: 1px solid var(--panel-border);
+    background: var(--bg-0);
   }
 
   .brand {
