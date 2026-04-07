@@ -547,7 +547,7 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 1.05rem;
+    padding: 0.85rem;
   }
 
   .hero-panel,
@@ -640,10 +640,10 @@
 
   .badge-stack span,
   .tag-chip {
-    border: 1px solid rgba(122, 166, 200, 0.24);
+    border: 1px solid var(--panel-strong);
     background: rgba(122, 166, 200, 0.07);
     color: var(--text-1);
-    padding: 0.34rem 0.5rem;
+    padding: 0.2rem 0.45rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.68rem;
@@ -651,19 +651,19 @@
 
   label {
     display: grid;
-    gap: 0.4rem;
+    gap: 0.25rem;
   }
 
   input,
   select,
   button {
-    border: 1px solid rgba(122, 166, 200, 0.24);
+    border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.56rem 0.72rem;
+    padding: 0.3rem 0.6rem;
     font: inherit;
     width: 100%;
-    min-height: 3rem;
+    min-height: 1.85rem;
   }
 
   button {
@@ -672,6 +672,7 @@
 
   .secondary {
     background: rgba(122, 166, 200, 0.08);
+    border-color: rgba(122, 166, 200, 0.24);
   }
 
   .field-grid,
@@ -683,9 +684,13 @@
     display: grid;
     gap: 0.35rem;
     text-align: left;
-    border: 1px solid rgba(122, 166, 200, 0.18);
-    background: var(--surface-soft);
-    padding: 0.9rem;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    padding: 0.75rem;
+  }
+
+  .basket-card:hover {
+    border-color: rgba(122, 166, 200, 0.32);
   }
 
   .basket-card span {
@@ -711,7 +716,7 @@
 
   th,
   td {
-    padding: 0.72rem 0.55rem;
+    padding: 0.4rem 0.5rem;
     border-bottom: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
@@ -734,6 +739,10 @@
     cursor: pointer;
   }
 
+  .screener-table tbody tr:hover {
+    background: rgba(122, 166, 200, 0.06);
+  }
+
   .screener-table tbody tr.selected {
     background: rgba(122, 166, 200, 0.08);
   }
@@ -749,8 +758,8 @@
   .meta-row,
   .dynamics-row {
     display: grid;
-    gap: 0.75rem;
-    padding: 0.7rem 0;
+    gap: 0.5rem;
+    padding: 0.45rem 0;
     border-top: 1px solid var(--divider);
   }
 
