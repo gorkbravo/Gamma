@@ -145,7 +145,7 @@
           id: "price",
           label: "Price",
           color: "#7aa6c8",
-          type: "line",
+          type: "area",
           data: history.points
             .map((point) => ({
               time: parseApiTimestampToUtcSeconds(point.timestamp),

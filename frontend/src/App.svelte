@@ -1190,7 +1190,10 @@
   />
 {:else}
   <Shell
+    activeTab={$activeTab}
+    tabs={tabBarTabs}
     copilotOpen={copilotOpen}
+    onSelectTab={selectTab}
     onToggleCopilot={handleToggleCopilot}
     onToggleSidebar={handleToggleSidebar}
   >
