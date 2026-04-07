@@ -882,7 +882,7 @@
   .notes-list,
   .mini-groups {
     display: grid;
-    gap: 0.95rem;
+    gap: 0.5rem;
   }
 
   .workspace-grid {
@@ -914,7 +914,7 @@
   .rail-panel,
   .subsection {
     display: grid;
-    gap: 0.95rem;
+    gap: 0.5rem;
   }
 
   .panel-header,

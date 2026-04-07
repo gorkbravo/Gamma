@@ -886,7 +886,7 @@
   .tag-list,
   .dynamics-grid {
     display: grid;
-    gap: 0.95rem;
+    gap: 0.5rem;
   }
 
   .workspace-grid {
@@ -916,7 +916,7 @@
   .control-panel,
   .rail-panel {
     display: grid;
-    gap: 0.95rem;
+    gap: 0.5rem;
   }
 
   .panel-header,
@@ -1311,7 +1311,7 @@
 
   .detail-stack {
     display: grid;
-    gap: 0.95rem;
+    gap: 0.5rem;
   }
 
   .meta-flat {
