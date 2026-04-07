@@ -679,7 +679,7 @@
   .field-grid,
   .notes-list {
     display: grid;
-    gap: 0.95rem;
+    gap: 0.5rem;
   }
 
   .workspace-grid {
@@ -703,7 +703,7 @@
   .rail-panel,
   .table-panel {
     display: grid;
-    gap: 1rem;
+    gap: 0.5rem;
   }
 
   .panel-header,

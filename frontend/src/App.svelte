@@ -1332,7 +1332,7 @@
 <style>
   .workspace-shell {
     display: grid;
-    gap: 0.65rem;
+    gap: 0.5rem;
   }
 
   .workspace-main {

@@ -401,7 +401,7 @@
 
   .thread {
     display: grid;
-    gap: 1rem;
+    gap: 0.5rem;
   }
 
   .turn {

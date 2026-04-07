@@ -99,7 +99,7 @@
   .header {
     display: flex;
     justify-content: space-between;
-    gap: 1rem;
+    gap: 0.5rem;
     align-items: start;
   }
 
