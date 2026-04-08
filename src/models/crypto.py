@@ -54,6 +54,8 @@ class CryptoTokenRecord:
     homepage_url: str | None
     description: str | None
     categories: list[str] = field(default_factory=list)
+    narrative_labels: list[str] = field(default_factory=list)
+    layer_bucket: str | None = None
     turnover_ratio_24h: float | None = None
     fdv_premium_ratio: float | None = None
     screen_score: float | None = None
@@ -144,6 +146,98 @@ class CryptoComparisonRecord:
     target_turnover_ratio_24h: float | None = None
     turnover_gap: float | None = None
     summary: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CryptoFlowSummaryRecord:
+    token_id: str
+    pool_count: int
+    matched_networks: list[str] = field(default_factory=list)
+    total_reserve_usd: float | None = None
+    total_volume_24h: float | None = None
+    dex_volume_share_of_total_volume: float | None = None
+    reserve_to_market_cap_ratio: float | None = None
+    top_pool_reserve_share: float | None = None
+    top_pool_volume_share: float | None = None
+    buy_pressure_pct: float | None = None
+    active_trader_proxy_24h: int = 0
+    buy_sell_ratio: float | None = None
+    participant_balance_ratio: float | None = None
+    reserve_volume_ratio_24h: float | None = None
+    slippage_proxy_label: str | None = None
+    liquidity_concentration_label: str = ""
+    flow_signal_label: str = ""
+    summary: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CryptoSyntheticPositionRequest:
+    identifier: str
+    weight: float
+
+
+@dataclass(frozen=True)
+class CryptoSyntheticPortfolioRequest:
+    positions: list[CryptoSyntheticPositionRequest] = field(default_factory=list)
+    benchmark_token_id: str | None = None
+    lookback_days: int = 30
+    force_refresh: bool = False
+
+
+@dataclass(frozen=True)
+class CryptoPortfolioConstituentRecord:
+    token_id: str
+    symbol: str
+    name: str
+    input_weight: float
+    normalized_weight: float
+    market_cap: float | None = None
+    turnover_ratio_24h: float | None = None
+    narrative_labels: list[str] = field(default_factory=list)
+    layer_bucket: str | None = None
+
+
+@dataclass(frozen=True)
+class CryptoPortfolioNarrativeExposureRecord:
+    label: str
+    normalized_weight: float
+    constituent_count: int
+
+
+@dataclass(frozen=True)
+class CryptoPortfolioPoint:
+    timestamp: datetime
+    value: float
+
+
+@dataclass(frozen=True)
+class CryptoSyntheticPortfolioRecord:
+    lookback_days: int
+    benchmark_token_id: str
+    benchmark_label: str
+    constituents: list[CryptoPortfolioConstituentRecord] = field(default_factory=list)
+    narrative_exposures: list[CryptoPortfolioNarrativeExposureRecord] = field(default_factory=list)
+    portfolio_points: list[CryptoPortfolioPoint] = field(default_factory=list)
+    benchmark_points: list[CryptoPortfolioPoint] = field(default_factory=list)
+    cumulative_return_pct: float | None = None
+    benchmark_return_pct: float | None = None
+    relative_return_pct: float | None = None
+    annualized_volatility_pct: float | None = None
+    weighted_turnover_ratio_24h: float | None = None
+    weighted_market_cap: float | None = None
+    concentration_hhi: float | None = None
+    effective_positions: float | None = None
+    summary: str | None = None
+    warnings: list[str] = field(default_factory=list)
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""

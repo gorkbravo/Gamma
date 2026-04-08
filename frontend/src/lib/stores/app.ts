@@ -11,7 +11,9 @@ import type {
   CopilotThreadState,
   CryptoComparison,
   CryptoDexLiquiditySummary,
+  CryptoFlowSummary,
   CryptoPriceHistoryResponse,
+  CryptoSyntheticPortfolio,
   CryptoToken,
   CryptoWorkspaceResponse,
   DiagnosticsResponse,
@@ -112,6 +114,18 @@ export interface CryptoWorkspaceLoadOptions {
 
 export type CryptoSortBy = NonNullable<CryptoWorkspaceLoadOptions["sortBy"]>;
 
+export interface CryptoSyntheticPositionInput {
+  identifier: string;
+  weight: number;
+}
+
+export interface CryptoSyntheticPortfolioRunOptions {
+  positions: CryptoSyntheticPositionInput[];
+  benchmarkTokenId?: string;
+  lookbackDays?: number;
+  forceRefresh?: boolean;
+}
+
 export interface MacroLoadOptions {
   region?: MacroContextState["region"];
   timeframe?: MacroContextState["timeframe"];
@@ -174,7 +188,9 @@ export const selectedCryptoTokenId = writable<string | null>(null);
 export const cryptoTokenDetail = writable<CryptoToken | null>(null);
 export const cryptoPriceHistory = writable<CryptoPriceHistoryResponse | null>(null);
 export const cryptoLiquidity = writable<CryptoDexLiquiditySummary | null>(null);
+export const cryptoFlowSummary = writable<CryptoFlowSummary | null>(null);
 export const cryptoComparison = writable<CryptoComparison | null>(null);
+export const cryptoSyntheticPortfolio = writable<CryptoSyntheticPortfolio | null>(null);
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
   portfolio: null,
   research: null,
@@ -227,6 +243,7 @@ export const loading = writable<Record<string, boolean>>({
   predictionDetail: false,
   crypto: false,
   cryptoDetail: false,
+  cryptoPortfolio: false,
   copilot: false,
   risk: false,
   iv: false,
@@ -989,7 +1006,9 @@ export async function loadCryptoWorkspace(options: CryptoWorkspaceLoadOptions = 
       cryptoTokenDetail.set(null);
       cryptoPriceHistory.set(null);
       cryptoLiquidity.set(null);
+      cryptoFlowSummary.set(null);
       cryptoComparison.set(null);
+      cryptoSyntheticPortfolio.set(null);
       resetCopilotCard("crypto");
     }
     lastError.set("");
@@ -1012,10 +1031,11 @@ export async function selectCryptoToken(
   }
   setLoading("cryptoDetail", true);
   try {
-    const [detailResult, historyResult, liquidityResult, comparisonResult] = await Promise.allSettled([
+    const [detailResult, historyResult, liquidityResult, flowResult, comparisonResult] = await Promise.allSettled([
       getJson<CryptoToken>(`/crypto/tokens/${tokenId}`),
       getJson<CryptoPriceHistoryResponse>(`/crypto/tokens/${tokenId}/history?days=30`),
       getJson<CryptoDexLiquiditySummary>(`/crypto/tokens/${tokenId}/liquidity`),
+      getJson<CryptoFlowSummary>(`/crypto/tokens/${tokenId}/flow`),
       getJson<CryptoComparison>(`/crypto/tokens/${tokenId}/comparison`)
     ]);
 
@@ -1024,21 +1044,31 @@ export async function selectCryptoToken(
     if (detailResult.status === "fulfilled") {
       cryptoTokenDetail.set(detailResult.value);
     } else {
+      cryptoTokenDetail.set(null);
       errors.push(detailResult.reason);
     }
     if (historyResult.status === "fulfilled") {
       cryptoPriceHistory.set(historyResult.value);
     } else {
+      cryptoPriceHistory.set(null);
       errors.push(historyResult.reason);
     }
     if (liquidityResult.status === "fulfilled") {
       cryptoLiquidity.set(liquidityResult.value);
     } else {
+      cryptoLiquidity.set(null);
       errors.push(liquidityResult.reason);
+    }
+    if (flowResult.status === "fulfilled") {
+      cryptoFlowSummary.set(flowResult.value);
+    } else {
+      cryptoFlowSummary.set(null);
+      errors.push(flowResult.reason);
     }
     if (comparisonResult.status === "fulfilled") {
       cryptoComparison.set(comparisonResult.value);
     } else {
+      cryptoComparison.set(null);
       errors.push(comparisonResult.reason);
     }
 
@@ -1051,6 +1081,36 @@ export async function selectCryptoToken(
     setError(error);
   } finally {
     setLoading("cryptoDetail", false);
+  }
+}
+
+export function clearCryptoSyntheticPortfolio() {
+  cryptoSyntheticPortfolio.set(null);
+}
+
+export async function runCryptoSyntheticPortfolio(
+  options: CryptoSyntheticPortfolioRunOptions
+) {
+  setLoading("cryptoPortfolio", true);
+  try {
+    const response = await postJson<CryptoSyntheticPortfolio>("/crypto/portfolio", {
+      positions: options.positions.map((position) => ({
+        identifier: position.identifier,
+        weight: position.weight
+      })),
+      benchmark_token_id: options.benchmarkTokenId ?? null,
+      lookback_days: options.lookbackDays ?? 30,
+      force_refresh: options.forceRefresh ?? false
+    });
+    cryptoSyntheticPortfolio.set(response);
+    lastError.set("");
+    return response;
+  } catch (error) {
+    cryptoSyntheticPortfolio.set(null);
+    setError(error);
+    return null;
+  } finally {
+    setLoading("cryptoPortfolio", false);
   }
 }
 

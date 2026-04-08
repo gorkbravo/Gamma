@@ -9,8 +9,15 @@ from src.models.crypto import (
     CryptoComparisonRecord,
     CryptoDexLiquiditySummary,
     CryptoDexPoolRecord,
+    CryptoFlowSummaryRecord,
     CryptoNarrativeBasketRecord,
+    CryptoPortfolioConstituentRecord,
+    CryptoPortfolioNarrativeExposureRecord,
+    CryptoPortfolioPoint,
     CryptoPricePoint,
+    CryptoSyntheticPortfolioRecord,
+    CryptoSyntheticPortfolioRequest,
+    CryptoSyntheticPositionRequest,
     CryptoScreenerRequest,
     CryptoTokenRecord,
     CryptoWorkspaceResult,
@@ -102,6 +109,8 @@ class CryptoTokenModel(BaseModel):
     homepage_url: str | None = None
     description: str | None = None
     categories: list[str] = Field(default_factory=list)
+    narrative_labels: list[str] = Field(default_factory=list)
+    layer_bucket: str | None = None
     turnover_ratio_24h: float | None = None
     fdv_premium_ratio: float | None = None
     screen_score: float | None = None
@@ -219,6 +228,36 @@ class CryptoComparisonModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class CryptoFlowSummaryModel(BaseModel):
+    token_id: str
+    pool_count: int
+    matched_networks: list[str] = Field(default_factory=list)
+    total_reserve_usd: float | None = None
+    total_volume_24h: float | None = None
+    dex_volume_share_of_total_volume: float | None = None
+    reserve_to_market_cap_ratio: float | None = None
+    top_pool_reserve_share: float | None = None
+    top_pool_volume_share: float | None = None
+    buy_pressure_pct: float | None = None
+    active_trader_proxy_24h: int = 0
+    buy_sell_ratio: float | None = None
+    participant_balance_ratio: float | None = None
+    reserve_volume_ratio_24h: float | None = None
+    slippage_proxy_label: str | None = None
+    liquidity_concentration_label: str
+    flow_signal_label: str
+    summary: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CryptoFlowSummaryRecord) -> "CryptoFlowSummaryModel":
+        return cls(**row.__dict__)
+
+
 class CryptoWorkspaceResponseModel(BaseModel):
     tokens: list[CryptoTokenModel] = Field(default_factory=list)
     narratives: list[CryptoNarrativeBasketModel] = Field(default_factory=list)
@@ -236,3 +275,108 @@ class CryptoWorkspaceResponseModel(BaseModel):
 class CryptoPriceHistoryResponseModel(BaseModel):
     token_id: str
     points: list[CryptoPricePointModel] = Field(default_factory=list)
+
+
+class CryptoSyntheticPositionRequestModel(BaseModel):
+    identifier: str
+    weight: float
+
+    def to_domain(self) -> CryptoSyntheticPositionRequest:
+        return CryptoSyntheticPositionRequest(
+            identifier=self.identifier,
+            weight=self.weight,
+        )
+
+
+class CryptoSyntheticPortfolioRequestModel(BaseModel):
+    positions: list[CryptoSyntheticPositionRequestModel] = Field(default_factory=list)
+    benchmark_token_id: str | None = None
+    lookback_days: int = Field(default=30, ge=7, le=365)
+    force_refresh: bool = False
+
+    def to_domain(self) -> CryptoSyntheticPortfolioRequest:
+        return CryptoSyntheticPortfolioRequest(
+            positions=[item.to_domain() for item in self.positions],
+            benchmark_token_id=self.benchmark_token_id,
+            lookback_days=self.lookback_days,
+            force_refresh=self.force_refresh,
+        )
+
+
+class CryptoPortfolioConstituentModel(BaseModel):
+    token_id: str
+    symbol: str
+    name: str
+    input_weight: float
+    normalized_weight: float
+    market_cap: float | None = None
+    turnover_ratio_24h: float | None = None
+    narrative_labels: list[str] = Field(default_factory=list)
+    layer_bucket: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CryptoPortfolioConstituentRecord) -> "CryptoPortfolioConstituentModel":
+        return cls(**row.__dict__)
+
+
+class CryptoPortfolioNarrativeExposureModel(BaseModel):
+    label: str
+    normalized_weight: float
+    constituent_count: int
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CryptoPortfolioNarrativeExposureRecord,
+    ) -> "CryptoPortfolioNarrativeExposureModel":
+        return cls(**row.__dict__)
+
+
+class CryptoPortfolioPointModel(BaseModel):
+    timestamp: datetime
+    value: float
+
+    @classmethod
+    def from_domain(cls, row: CryptoPortfolioPoint) -> "CryptoPortfolioPointModel":
+        return cls(**row.__dict__)
+
+
+class CryptoSyntheticPortfolioResponseModel(BaseModel):
+    lookback_days: int
+    benchmark_token_id: str
+    benchmark_label: str
+    constituents: list[CryptoPortfolioConstituentModel] = Field(default_factory=list)
+    narrative_exposures: list[CryptoPortfolioNarrativeExposureModel] = Field(default_factory=list)
+    portfolio_points: list[CryptoPortfolioPointModel] = Field(default_factory=list)
+    benchmark_points: list[CryptoPortfolioPointModel] = Field(default_factory=list)
+    cumulative_return_pct: float | None = None
+    benchmark_return_pct: float | None = None
+    relative_return_pct: float | None = None
+    annualized_volatility_pct: float | None = None
+    weighted_turnover_ratio_24h: float | None = None
+    weighted_market_cap: float | None = None
+    concentration_hhi: float | None = None
+    effective_positions: float | None = None
+    summary: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CryptoSyntheticPortfolioRecord,
+    ) -> "CryptoSyntheticPortfolioResponseModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "constituents": [CryptoPortfolioConstituentModel.from_domain(item) for item in row.constituents],
+                "narrative_exposures": [
+                    CryptoPortfolioNarrativeExposureModel.from_domain(item) for item in row.narrative_exposures
+                ],
+                "portfolio_points": [CryptoPortfolioPointModel.from_domain(item) for item in row.portfolio_points],
+                "benchmark_points": [CryptoPortfolioPointModel.from_domain(item) for item in row.benchmark_points],
+            }
+        )

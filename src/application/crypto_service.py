@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Iterable
 
 from src.models.crypto import (
+    CryptoBasketConstituent,
     CryptoComparisonRecord,
     CryptoDexLiquiditySummary,
+    CryptoFlowSummaryRecord,
     CryptoNarrativeBasketRecord,
+    CryptoPortfolioConstituentRecord,
+    CryptoPortfolioNarrativeExposureRecord,
+    CryptoPortfolioPoint,
+    CryptoSyntheticPortfolioRecord,
+    CryptoSyntheticPortfolioRequest,
+    CryptoSyntheticPositionRequest,
     CryptoScreenerRequest,
     CryptoTokenRecord,
     CryptoWorkspaceResult,
@@ -19,11 +27,63 @@ from src.services.crypto_adapters import CoinGeckoAdapter, GeckoTerminalAdapter
 _NARRATIVE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "layer 1": ("layer 1", "layer-1", "l1"),
     "layer 2": ("layer 2", "layer-2", "l2"),
+    "layer 3": ("layer 3", "layer-3", "l3"),
     "defi": ("defi", "decentralized finance"),
     "ai": ("ai", "artificial intelligence"),
     "depin": ("depin",),
     "gaming": ("gaming", "gamefi"),
     "meme": ("meme", "memecoin"),
+}
+
+_FALLBACK_LAYER_1_IDS = {
+    "algorand",
+    "avalanche-2",
+    "bitcoin",
+    "bitcoin-cash",
+    "cardano",
+    "ethereum",
+    "litecoin",
+    "near",
+    "polkadot",
+    "ripple",
+    "solana",
+    "stellar",
+    "sui",
+    "toncoin",
+    "tron",
+}
+
+_FALLBACK_LAYER_2_IDS = {
+    "arbitrum",
+    "immutable-x",
+    "mantle",
+    "optimism",
+    "polygon-ecosystem-token",
+    "starknet",
+    "zksync",
+}
+
+_FALLBACK_LAYER_3_IDS = {
+    "cartesi",
+    "degen-base",
+    "orbs",
+}
+
+_STABLECOIN_SYMBOLS = {
+    "dai",
+    "fdusd",
+    "frax",
+    "gusd",
+    "pyusd",
+    "rlusd",
+    "tusd",
+    "usdc",
+    "usdd",
+    "usde",
+    "usdp",
+    "usds",
+    "usdt",
+    "usd1",
 }
 
 
@@ -57,14 +117,11 @@ class CryptoService:
         enriched_rows = [self._attach_network(row, network_map) for row in rows if row.token_id]
         token_index = {row.token_id: row for row in enriched_rows}
 
-        narratives: list[CryptoNarrativeBasketRecord] = []
-        try:
-            narratives = self.market_adapter.get_narrative_baskets(
-                force_refresh=request.force_refresh,
-                token_index=token_index,
-            )
-        except Exception as exc:
-            warnings.append(f"Narrative basket lookup failed: {exc}")
+        narratives = self._load_narratives(
+            force_refresh=request.force_refresh,
+            token_index=token_index,
+            warnings=warnings,
+        )
 
         visible_rows = [
             self._annotate_token(row, request, narratives)
@@ -88,7 +145,13 @@ class CryptoService:
         if detail is None:
             return None
         network_map = self._safe_network_map(force_refresh=force_refresh, warnings=[])
-        return self._attach_network(detail, network_map)
+        attached = self._attach_network(detail, network_map)
+        narratives = self._load_narratives(
+            force_refresh=force_refresh,
+            token_index={attached.token_id: attached},
+            warnings=[],
+        )
+        return self._annotate_token(attached, CryptoScreenerRequest(), narratives)
 
     def get_price_history(
         self,
@@ -125,6 +188,20 @@ class CryptoService:
                 transformation_note="Gamma returns an empty liquidity summary when the upstream DEX lookup fails.",
             )
 
+    def get_flow_summary(
+        self,
+        token_id: str,
+        *,
+        force_refresh: bool = False,
+    ) -> CryptoFlowSummaryRecord | None:
+        detail = self.get_token_detail(token_id, force_refresh=force_refresh)
+        if detail is None:
+            return None
+        liquidity = self.get_dex_liquidity(token_id, force_refresh=force_refresh)
+        if liquidity is None:
+            return None
+        return self._build_flow_summary(detail, liquidity)
+
     def get_comparison(
         self,
         token_id: str,
@@ -158,6 +235,155 @@ class CryptoService:
                 return self._compare_tokens(subject, bitcoin)
         return None
 
+    def analyze_synthetic_portfolio(
+        self,
+        request: CryptoSyntheticPortfolioRequest,
+    ) -> CryptoSyntheticPortfolioRecord | None:
+        positions = [item for item in request.positions if item.identifier.strip() and item.weight > 0]
+        if not positions:
+            return None
+
+        warnings: list[str] = []
+        universe = self._build_token_universe(force_refresh=request.force_refresh, limit=250, warnings=warnings)
+        if not universe:
+            return None
+
+        resolved_positions: list[tuple[CryptoSyntheticPositionRequest, CryptoTokenRecord]] = []
+        for position in positions:
+            token = self._resolve_position_identifier(
+                position.identifier,
+                universe,
+                force_refresh=request.force_refresh,
+            )
+            if token is None:
+                warnings.append(f"Could not resolve crypto identifier `{position.identifier}` into a token.")
+                continue
+            resolved_positions.append((position, token))
+
+        if not resolved_positions:
+            return None
+
+        benchmark_token = self.get_token_detail(
+            request.benchmark_token_id or "bitcoin",
+            force_refresh=request.force_refresh,
+        )
+        if benchmark_token is None:
+            benchmark_token = resolved_positions[0][1]
+            warnings.append("Benchmark token lookup failed, so Gamma fell back to the first resolved basket constituent.")
+
+        normalized_weights = _normalize_weights([item.weight for item, _ in resolved_positions])
+        if not normalized_weights:
+            return None
+
+        histories: list[list] = []
+        constituents: list[CryptoPortfolioConstituentRecord] = []
+        retrieved_marks: list[datetime | None] = [benchmark_token.retrieved_at]
+        for (position, token), normalized_weight in zip(resolved_positions, normalized_weights, strict=False):
+            history = self.get_price_history(
+                token.token_id,
+                days=request.lookback_days,
+                force_refresh=request.force_refresh,
+            )
+            if len(history) < 2:
+                warnings.append(f"History coverage is too thin to include `{token.symbol.upper()}` in the synthetic basket.")
+                continue
+            histories.append(history)
+            constituents.append(
+                CryptoPortfolioConstituentRecord(
+                    token_id=token.token_id,
+                    symbol=token.symbol.upper(),
+                    name=token.name,
+                    input_weight=position.weight,
+                    normalized_weight=normalized_weight,
+                    market_cap=token.market_cap,
+                    turnover_ratio_24h=token.turnover_ratio_24h,
+                    narrative_labels=list(token.narrative_labels),
+                    layer_bucket=token.layer_bucket,
+                )
+            )
+            retrieved_marks.extend([token.retrieved_at, history[-1].retrieved_at if history else token.retrieved_at])
+
+        if not constituents:
+            return None
+
+        normalized_final_weights = _normalize_weights([item.normalized_weight for item in constituents])
+        constituents = [
+            replace(item, normalized_weight=weight)
+            for item, weight in zip(constituents, normalized_final_weights, strict=False)
+        ]
+
+        benchmark_history = self.get_price_history(
+            benchmark_token.token_id,
+            days=request.lookback_days,
+            force_refresh=request.force_refresh,
+        )
+        if len(benchmark_history) < 2:
+            warnings.append("Benchmark history coverage is thin, so Gamma could not build the synthetic portfolio chart.")
+            return None
+        retrieved_marks.append(benchmark_history[-1].retrieved_at if benchmark_history else benchmark_token.retrieved_at)
+
+        timeline = self._portfolio_timeline(
+            histories=histories[: len(constituents)],
+            weights=[item.normalized_weight for item in constituents],
+            benchmark_history=benchmark_history,
+        )
+        if timeline is None:
+            warnings.append("Gamma could not align the selected token histories onto a common daily timeline.")
+            return None
+        portfolio_points, benchmark_points = timeline
+
+        portfolio_returns = _series_returns(portfolio_points)
+        portfolio_return = ((portfolio_points[-1].value - 1.0) * 100.0) if portfolio_points else None
+        benchmark_return = ((benchmark_points[-1].value - 1.0) * 100.0) if benchmark_points else None
+        relative_return = _gap(portfolio_return, benchmark_return)
+        volatility_estimate = _annualized_volatility(portfolio_returns, periods_per_year=365) if portfolio_returns else None
+        annualized_volatility = (volatility_estimate * 100.0) if volatility_estimate is not None else None
+        weighted_turnover = _weighted_average(
+            [item.turnover_ratio_24h for item in constituents],
+            [item.normalized_weight for item in constituents],
+        )
+        weighted_market_cap = sum(
+            (item.market_cap or 0.0) * item.normalized_weight
+            for item in constituents
+        ) or None
+        concentration_hhi = sum(item.normalized_weight * item.normalized_weight for item in constituents)
+        effective_positions = (1.0 / concentration_hhi) if concentration_hhi > 0 else None
+        narrative_exposures = self._portfolio_narrative_exposures(constituents)
+        summary = self._portfolio_summary(
+            len(constituents),
+            benchmark_token.name,
+            portfolio_return,
+            benchmark_return,
+            weighted_turnover,
+            effective_positions,
+        )
+
+        return CryptoSyntheticPortfolioRecord(
+            lookback_days=request.lookback_days,
+            benchmark_token_id=benchmark_token.token_id,
+            benchmark_label=benchmark_token.name,
+            constituents=constituents,
+            narrative_exposures=narrative_exposures,
+            portfolio_points=portfolio_points,
+            benchmark_points=benchmark_points,
+            cumulative_return_pct=portfolio_return,
+            benchmark_return_pct=benchmark_return,
+            relative_return_pct=relative_return,
+            annualized_volatility_pct=annualized_volatility,
+            weighted_turnover_ratio_24h=weighted_turnover,
+            weighted_market_cap=weighted_market_cap,
+            concentration_hhi=concentration_hhi,
+            effective_positions=effective_positions,
+            summary=summary,
+            warnings=warnings,
+            source_provider="gamma",
+            retrieved_at=_max_datetime(*retrieved_marks),
+            origin="gamma.crypto.synthetic_portfolio",
+            transformation_note=(
+                "Gamma synthetic crypto baskets normalize daily CoinGecko price histories to a shared base value and combine them using user-submitted weights."
+            ),
+        )
+
     def _resolve_basket_reference(
         self,
         subject: CryptoTokenRecord,
@@ -173,12 +399,12 @@ class CryptoService:
             if row.token_id
         ]
         token_index = {row.token_id: row for row in universe}
-        try:
-            narratives = self.market_adapter.get_narrative_baskets(
-                force_refresh=force_refresh,
-                token_index=token_index,
-            )
-        except Exception:
+        narratives = self._load_narratives(
+            force_refresh=force_refresh,
+            token_index=token_index,
+            warnings=[],
+        )
+        if not narratives:
             return None
 
         basket: CryptoNarrativeBasketRecord | None = None
@@ -322,6 +548,376 @@ class CryptoService:
             transformation_note="Gamma basket comparisons use market-cap-weighted aggregates across the narrative basket's visible top tokens.",
         )
 
+    def _load_narratives(
+        self,
+        *,
+        force_refresh: bool,
+        token_index: dict[str, CryptoTokenRecord] | None,
+        warnings: list[str] | None,
+    ) -> list[CryptoNarrativeBasketRecord]:
+        try:
+            narratives = self.market_adapter.get_narrative_baskets(
+                force_refresh=force_refresh,
+                token_index=token_index,
+            )
+        except Exception as exc:
+            if warnings is not None:
+                warnings.append(f"Narrative basket lookup failed: {exc}")
+            narratives = []
+        if narratives:
+            return narratives
+        fallback = self._build_fallback_narratives(token_index)
+        if fallback and warnings is not None:
+            warnings.append("Gamma fell back to internal layer baskets because the upstream narrative lookup was unavailable.")
+        return fallback
+
+    def _build_fallback_narratives(
+        self,
+        token_index: dict[str, CryptoTokenRecord] | None,
+    ) -> list[CryptoNarrativeBasketRecord]:
+        if not token_index:
+            return []
+
+        bucket_map: dict[str, list[CryptoTokenRecord]] = {"Layer 1": [], "Layer 2": [], "Layer 3": []}
+        for token in token_index.values():
+            bucket = self._infer_layer_bucket(token, [])
+            if bucket in bucket_map:
+                bucket_map[bucket].append(token)
+
+        descriptions = {
+            "Layer 1": "Gamma fallback basket for the largest core crypto assets when upstream narrative categories are unavailable.",
+            "Layer 2": "Gamma fallback basket for secondary infrastructure and mid-cap protocol assets when upstream narrative categories are unavailable.",
+            "Layer 3": "Gamma fallback basket for smaller or more exploratory crypto assets when upstream narrative categories are unavailable.",
+        }
+
+        records: list[CryptoNarrativeBasketRecord] = []
+        for label in ("Layer 1", "Layer 2", "Layer 3"):
+            members = sorted(
+                bucket_map[label],
+                key=lambda item: (-(item.market_cap or 0.0), item.market_cap_rank or 999_999, item.name.lower()),
+            )
+            if not members:
+                continue
+            weights = [max(member.market_cap or 0.0, 0.0) for member in members]
+            if not any(weight > 0 for weight in weights):
+                weights = [1.0 for _ in members]
+            records.append(
+                CryptoNarrativeBasketRecord(
+                    basket_id=_normalize_text(label).replace(" ", "-"),
+                    label=label,
+                    description=descriptions[label],
+                    market_cap=_sum_nullable(member.market_cap for member in members),
+                    market_cap_change_pct_24h=_weighted_average(
+                        [member.market_cap_change_pct_24h for member in members],
+                        weights,
+                    ),
+                    volume_24h=_sum_nullable(member.total_volume for member in members),
+                    top_tokens=[
+                        CryptoBasketConstituent(
+                            token_id=member.token_id,
+                            name=member.name,
+                            symbol=member.symbol.upper(),
+                            image_url=member.image_url,
+                        )
+                        for member in members
+                    ],
+                    source_provider="gamma",
+                    retrieved_at=_max_datetime(*(member.retrieved_at for member in members)),
+                    origin="gamma.crypto.narratives.fallback",
+                    transformation_note="Gamma fallback layer baskets are heuristic groupings used when upstream narrative categories are unavailable.",
+                )
+            )
+        return records
+
+    def _build_token_universe(
+        self,
+        *,
+        force_refresh: bool,
+        limit: int,
+        warnings: list[str],
+    ) -> list[CryptoTokenRecord]:
+        network_map = self._safe_network_map(force_refresh=force_refresh, warnings=warnings)
+        rows = [
+            self._attach_network(row, network_map)
+            for row in self.market_adapter.list_tokens(limit=limit, force_refresh=force_refresh)
+            if row.token_id
+        ]
+        narratives = self._load_narratives(
+            force_refresh=force_refresh,
+            token_index={row.token_id: row for row in rows},
+            warnings=warnings,
+        )
+        return [self._annotate_token(row, CryptoScreenerRequest(), narratives) for row in rows]
+
+    def _resolve_position_identifier(
+        self,
+        identifier: str,
+        universe: list[CryptoTokenRecord],
+        *,
+        force_refresh: bool,
+    ) -> CryptoTokenRecord | None:
+        needle = _normalize_text(identifier)
+        if not needle:
+            return None
+
+        by_token_id = next((row for row in universe if _normalize_text(row.token_id) == needle), None)
+        if by_token_id is not None:
+            return by_token_id
+
+        by_symbol = next((row for row in universe if _normalize_text(row.symbol) == needle), None)
+        if by_symbol is not None:
+            return by_symbol
+
+        by_name = next((row for row in universe if _normalize_text(row.name) == needle), None)
+        if by_name is not None:
+            return by_name
+
+        search_rows = self.market_adapter.search_tokens(identifier, limit=8, force_refresh=force_refresh)
+        if not search_rows:
+            return None
+        network_map = self._safe_network_map(force_refresh=force_refresh, warnings=[])
+        attached = [self._attach_network(row, network_map) for row in search_rows if row.token_id]
+        narratives = self._load_narratives(
+            force_refresh=force_refresh,
+            token_index={row.token_id: row for row in attached},
+            warnings=[],
+        )
+        annotated = [self._annotate_token(row, CryptoScreenerRequest(), narratives) for row in attached]
+        return annotated[0] if annotated else None
+
+    def _build_flow_summary(
+        self,
+        token: CryptoTokenRecord,
+        liquidity: CryptoDexLiquiditySummary,
+    ) -> CryptoFlowSummaryRecord:
+        reserve_shares = _normalized_shares([pool.reserve_usd for pool in liquidity.pools])
+        volume_shares = _normalized_shares([pool.volume_24h for pool in liquidity.pools])
+        total_trades = liquidity.total_buys_24h + liquidity.total_sells_24h
+        total_participants = liquidity.total_buyers_24h + liquidity.total_sellers_24h
+        buy_pressure_pct = (
+            (liquidity.total_buys_24h / total_trades) * 100.0
+            if total_trades > 0
+            else None
+        )
+        dex_volume_share = _safe_ratio(liquidity.total_volume_24h, token.total_volume)
+        reserve_to_market_cap = _safe_ratio(liquidity.total_reserve_usd, token.market_cap)
+        reserve_volume_ratio = _safe_ratio(liquidity.total_reserve_usd, liquidity.total_volume_24h)
+        top_pool_reserve_share = reserve_shares[0] if reserve_shares else None
+        top_pool_volume_share = volume_shares[0] if volume_shares else None
+        buy_sell_ratio = _safe_ratio(float(liquidity.total_buys_24h), float(max(liquidity.total_sells_24h, 1)))
+        participant_balance_ratio = _safe_ratio(float(liquidity.total_buyers_24h), float(max(liquidity.total_sellers_24h, 1)))
+
+        if reserve_volume_ratio is None:
+            slippage_proxy_label = "unknown"
+        elif reserve_volume_ratio >= 4.0:
+            slippage_proxy_label = "deep"
+        elif reserve_volume_ratio >= 1.8:
+            slippage_proxy_label = "workable"
+        elif reserve_volume_ratio >= 0.9:
+            slippage_proxy_label = "thin"
+        else:
+            slippage_proxy_label = "fragile"
+
+        if top_pool_reserve_share is None:
+            concentration_label = "unknown"
+        elif top_pool_reserve_share >= 0.72:
+            concentration_label = "highly concentrated"
+        elif top_pool_reserve_share >= 0.48:
+            concentration_label = "moderately concentrated"
+        else:
+            concentration_label = "distributed"
+
+        if buy_pressure_pct is None:
+            flow_signal = "unavailable"
+        elif buy_pressure_pct >= 58.0:
+            flow_signal = "accumulation"
+        elif buy_pressure_pct <= 42.0:
+            flow_signal = "distribution"
+        else:
+            flow_signal = "balanced"
+
+        summary = self._flow_summary_text(
+            token=token,
+            dex_volume_share=dex_volume_share,
+            slippage_proxy_label=slippage_proxy_label,
+            concentration_label=concentration_label,
+            flow_signal=flow_signal,
+            buy_pressure_pct=buy_pressure_pct,
+        )
+        return CryptoFlowSummaryRecord(
+            token_id=token.token_id,
+            pool_count=len(liquidity.pools),
+            matched_networks=list(liquidity.matched_networks),
+            total_reserve_usd=liquidity.total_reserve_usd,
+            total_volume_24h=liquidity.total_volume_24h,
+            dex_volume_share_of_total_volume=dex_volume_share,
+            reserve_to_market_cap_ratio=reserve_to_market_cap,
+            top_pool_reserve_share=top_pool_reserve_share,
+            top_pool_volume_share=top_pool_volume_share,
+            buy_pressure_pct=buy_pressure_pct,
+            active_trader_proxy_24h=total_participants,
+            buy_sell_ratio=buy_sell_ratio,
+            participant_balance_ratio=participant_balance_ratio,
+            reserve_volume_ratio_24h=reserve_volume_ratio,
+            slippage_proxy_label=slippage_proxy_label,
+            liquidity_concentration_label=concentration_label,
+            flow_signal_label=flow_signal,
+            summary=summary,
+            warnings=list(liquidity.warnings),
+            source_provider="gamma",
+            retrieved_at=_max_datetime(token.retrieved_at, liquidity.retrieved_at),
+            origin="gamma.crypto.flow_summary",
+            transformation_note=(
+                "Gamma flow summaries are first-pass DEX and participation proxies built from GeckoTerminal pool reserve, volume, buy/sell, and buyer/seller counts layered onto normalized token metadata."
+            ),
+        )
+
+    def _flow_summary_text(
+        self,
+        *,
+        token: CryptoTokenRecord,
+        dex_volume_share: float | None,
+        slippage_proxy_label: str,
+        concentration_label: str,
+        flow_signal: str,
+        buy_pressure_pct: float | None,
+    ) -> str:
+        market_share_text = "DEX share versus headline spot volume is unclear"
+        if dex_volume_share is not None:
+            if dex_volume_share >= 0.55:
+                market_share_text = "DEX turnover is carrying a large share of the token's reported spot activity"
+            elif dex_volume_share >= 0.2:
+                market_share_text = "DEX turnover is a meaningful but not dominant slice of reported spot activity"
+            else:
+                market_share_text = "DEX turnover is only a small slice of reported spot activity"
+        pressure_text = "buy and sell counts are balanced"
+        if buy_pressure_pct is not None:
+            if buy_pressure_pct >= 58.0:
+                pressure_text = f"buy-side flow is dominant at roughly {buy_pressure_pct:.1f}% of tracked trades"
+            elif buy_pressure_pct <= 42.0:
+                pressure_text = f"sell-side flow is dominant with buys only {buy_pressure_pct:.1f}% of tracked trades"
+        return (
+            f"{token.name} shows {flow_signal} flow; liquidity looks {concentration_label} and {slippage_proxy_label}; "
+            f"{market_share_text}; {pressure_text}."
+        )
+
+    def _portfolio_timeline(
+        self,
+        *,
+        histories: list[list],
+        weights: list[float],
+        benchmark_history: list,
+    ) -> tuple[list[CryptoPortfolioPoint], list[CryptoPortfolioPoint]] | None:
+        series_maps: list[dict[date, float]] = []
+        for history in histories:
+            mapping: dict[date, float] = {}
+            for point in history:
+                mapping[point.timestamp.date()] = point.price
+            if len(mapping) < 2:
+                return None
+            series_maps.append(mapping)
+
+        benchmark_map: dict[date, float] = {}
+        for point in benchmark_history:
+            benchmark_map[point.timestamp.date()] = point.price
+        if len(benchmark_map) < 2:
+            return None
+
+        common_dates = set(benchmark_map.keys())
+        for mapping in series_maps:
+            common_dates &= set(mapping.keys())
+        ordered_dates = sorted(common_dates)
+        if len(ordered_dates) < 2:
+            return None
+
+        base_values = [mapping[ordered_dates[0]] for mapping in series_maps]
+        benchmark_base = benchmark_map[ordered_dates[0]]
+        if any(value <= 0 for value in base_values) or benchmark_base <= 0:
+            return None
+
+        portfolio_points: list[CryptoPortfolioPoint] = []
+        benchmark_points: list[CryptoPortfolioPoint] = []
+        for current_date in ordered_dates:
+            portfolio_value = 0.0
+            for mapping, base_value, weight in zip(series_maps, base_values, weights, strict=False):
+                price = mapping.get(current_date)
+                if price is None or base_value <= 0:
+                    return None
+                portfolio_value += (price / base_value) * weight
+            benchmark_value = benchmark_map[current_date] / benchmark_base
+            portfolio_points.append(
+                CryptoPortfolioPoint(
+                    timestamp=datetime.combine(current_date, time.min),
+                    value=portfolio_value,
+                )
+            )
+            benchmark_points.append(
+                CryptoPortfolioPoint(
+                    timestamp=datetime.combine(current_date, time.min),
+                    value=benchmark_value,
+                )
+            )
+        return portfolio_points, benchmark_points
+
+    def _portfolio_narrative_exposures(
+        self,
+        constituents: list[CryptoPortfolioConstituentRecord],
+    ) -> list[CryptoPortfolioNarrativeExposureRecord]:
+        exposure_map: dict[str, float] = {}
+        count_map: dict[str, int] = {}
+        for item in constituents:
+            labels = list(item.narrative_labels)
+            if not labels and item.layer_bucket:
+                labels = [item.layer_bucket]
+            labels = labels or ["Unclassified"]
+            share = item.normalized_weight / len(labels)
+            for label in labels:
+                exposure_map[label] = exposure_map.get(label, 0.0) + share
+                count_map[label] = count_map.get(label, 0) + 1
+        exposures = [
+            CryptoPortfolioNarrativeExposureRecord(
+                label=label,
+                normalized_weight=weight,
+                constituent_count=count_map[label],
+            )
+            for label, weight in exposure_map.items()
+        ]
+        exposures.sort(key=lambda item: (-item.normalized_weight, item.label.lower()))
+        return exposures
+
+    def _portfolio_summary(
+        self,
+        constituent_count: int,
+        benchmark_label: str,
+        portfolio_return: float | None,
+        benchmark_return: float | None,
+        weighted_turnover: float | None,
+        effective_positions: float | None,
+    ) -> str:
+        performance_text = "performance versus the benchmark is unclear"
+        relative_return = _gap(portfolio_return, benchmark_return)
+        if relative_return is not None:
+            if relative_return >= 3.0:
+                performance_text = f"the basket is ahead of {benchmark_label} by {relative_return:.1f} pts"
+            elif relative_return <= -3.0:
+                performance_text = f"the basket trails {benchmark_label} by {abs(relative_return):.1f} pts"
+            else:
+                performance_text = f"the basket is roughly in line with {benchmark_label}"
+        turnover_text = (
+            f"weighted 24H turnover is {weighted_turnover:.2f}x"
+            if weighted_turnover is not None
+            else "weighted turnover is unavailable"
+        )
+        structure_text = (
+            f"effective positions are {effective_positions:.1f}"
+            if effective_positions is not None
+            else "concentration could not be estimated"
+        )
+        return (
+            f"Synthetic basket spans {constituent_count} names; {performance_text}; "
+            f"{turnover_text}; {structure_text}."
+        )
+
     def _safe_network_map(self, *, force_refresh: bool, warnings: list[str]) -> dict[str, str]:
         try:
             return self.dex_adapter.get_network_map(force_refresh=force_refresh)
@@ -364,6 +960,7 @@ class CryptoService:
     ) -> CryptoTokenRecord:
         screen_score = self._screen_score(token)
         narrative_labels = self._narrative_labels_for_token(token, narratives)
+        layer_bucket = self._infer_layer_bucket(token, narrative_labels)
         rationale_parts = [
             f"turnover {(token.turnover_ratio_24h or 0.0):.2f}x",
             f"24H volume ${_compact_number(token.total_volume)}",
@@ -381,6 +978,8 @@ class CryptoService:
         )
         return replace(
             token,
+            narrative_labels=narrative_labels,
+            layer_bucket=layer_bucket,
             screen_score=screen_score,
             screen_rationale=" | ".join(rationale_parts),
             transformation_note=note,
@@ -466,6 +1065,54 @@ class CryptoService:
             if any(any(keyword in category for keyword in keywords) for category in categories):
                 labels.append(label)
         return labels
+
+    def _infer_layer_bucket(
+        self,
+        token: CryptoTokenRecord,
+        narrative_labels: list[str],
+    ) -> str | None:
+        for candidate in ("Layer 1", "Layer 2", "Layer 3"):
+            if candidate in narrative_labels:
+                return candidate
+        category_text = " ".join(token.categories)
+        normalized_categories = _normalize_text(category_text)
+        if "layer 3" in normalized_categories:
+            return "Layer 3"
+        if "layer 2" in normalized_categories:
+            return "Layer 2"
+        if "layer 1" in normalized_categories:
+            return "Layer 1"
+        if token.token_id in _FALLBACK_LAYER_1_IDS:
+            return "Layer 1"
+        if token.token_id in _FALLBACK_LAYER_2_IDS:
+            return "Layer 2"
+        if token.token_id in _FALLBACK_LAYER_3_IDS:
+            return "Layer 3"
+        if self._is_stablecoin_like(token):
+            return "Layer 2" if (token.market_cap or 0.0) >= 1_000_000_000 else "Layer 3"
+        if token.market_cap_rank is not None:
+            if token.market_cap_rank <= 15:
+                return "Layer 1"
+            if token.market_cap_rank <= 80:
+                return "Layer 2"
+            if token.market_cap_rank <= 180:
+                return "Layer 3"
+        if token.market_cap is not None:
+            if token.market_cap >= 10_000_000_000:
+                return "Layer 1"
+            if token.market_cap >= 1_000_000_000:
+                return "Layer 2"
+            if token.market_cap >= 50_000_000:
+                return "Layer 3"
+        return None
+
+    def _is_stablecoin_like(self, token: CryptoTokenRecord) -> bool:
+        if _normalize_text(token.symbol) in _STABLECOIN_SYMBOLS:
+            return True
+        name = _normalize_text(token.name)
+        category_text = _normalize_text(" ".join(token.categories))
+        stable_keywords = ("stablecoin", "stable coin", "usd", "tether")
+        return any(keyword in name or keyword in category_text for keyword in stable_keywords)
 
     def _token_comparison_summary(
         self,
@@ -576,6 +1223,39 @@ def _sum_nullable(values: Iterable[float | None]) -> float | None:
 
 def _normalize_text(value: str) -> str:
     return " ".join(str(value or "").strip().lower().replace("-", " ").replace("_", " ").split())
+
+
+def _normalize_weights(weights: list[float]) -> list[float]:
+    cleaned = [weight for weight in weights if weight > 0]
+    total = sum(cleaned)
+    if total <= 0:
+        return []
+    return [weight / total for weight in cleaned]
+
+
+def _normalized_shares(values: Iterable[float | None]) -> list[float]:
+    cleaned = [max(value or 0.0, 0.0) for value in values]
+    total = sum(cleaned)
+    if total <= 0:
+        return []
+    return sorted((value / total for value in cleaned if value > 0), reverse=True)
+
+
+def _series_returns(points: list[CryptoPortfolioPoint]) -> list[float]:
+    returns: list[float] = []
+    for previous, current in zip(points, points[1:], strict=False):
+        if previous.value <= 0:
+            continue
+        returns.append((current.value / previous.value) - 1.0)
+    return returns
+
+
+def _annualized_volatility(returns: list[float], *, periods_per_year: int) -> float | None:
+    if len(returns) < 2:
+        return None
+    mean = sum(returns) / len(returns)
+    variance = sum((value - mean) ** 2 for value in returns) / max(len(returns) - 1, 1)
+    return math.sqrt(max(variance, 0.0)) * math.sqrt(periods_per_year)
 
 
 def _compact_number(value: float | None) -> str:

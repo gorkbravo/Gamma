@@ -32,6 +32,7 @@ _NETWORK_CACHE_AGE = timedelta(days=30)
 _PREFERRED_NARRATIVES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Layer 1", ("layer 1", "layer-1", "l1")),
     ("Layer 2", ("layer 2", "layer-2", "l2")),
+    ("Layer 3", ("layer 3", "layer-3", "l3")),
     ("DeFi", ("decentralized finance", "defi")),
     ("AI", ("artificial intelligence", "ai")),
     ("DePIN", ("depin",)),

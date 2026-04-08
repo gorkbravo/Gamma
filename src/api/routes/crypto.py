@@ -5,8 +5,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from src.api.schemas.crypto import (
     CryptoComparisonModel,
     CryptoDexLiquiditySummaryModel,
+    CryptoFlowSummaryModel,
     CryptoPriceHistoryResponseModel,
     CryptoPricePointModel,
+    CryptoSyntheticPortfolioRequestModel,
+    CryptoSyntheticPortfolioResponseModel,
     CryptoTokenModel,
     CryptoWorkspaceRequestModel,
     CryptoWorkspaceResponseModel,
@@ -67,6 +70,19 @@ def crypto_token_liquidity(
     return CryptoDexLiquiditySummaryModel.from_domain(summary)
 
 
+@router.get("/crypto/tokens/{token_id}/flow", response_model=CryptoFlowSummaryModel)
+def crypto_token_flow(
+    token_id: str,
+    request: Request,
+    force_refresh: bool = Query(default=False),
+) -> CryptoFlowSummaryModel:
+    runtime = request.app.state.runtime
+    flow = runtime.crypto_service.get_flow_summary(token_id, force_refresh=force_refresh)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=f"Crypto flow summary not available for: {token_id}")
+    return CryptoFlowSummaryModel.from_domain(flow)
+
+
 @router.get("/crypto/tokens/{token_id}/comparison", response_model=CryptoComparisonModel)
 def crypto_token_comparison(
     token_id: str,
@@ -85,3 +101,15 @@ def crypto_token_comparison(
     if comparison is None:
         raise HTTPException(status_code=404, detail=f"Crypto comparison not available for: {token_id}")
     return CryptoComparisonModel.from_domain(comparison)
+
+
+@router.post("/crypto/portfolio", response_model=CryptoSyntheticPortfolioResponseModel)
+def crypto_synthetic_portfolio(
+    payload: CryptoSyntheticPortfolioRequestModel,
+    request: Request,
+) -> CryptoSyntheticPortfolioResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.crypto_service.analyze_synthetic_portfolio(payload.to_domain())
+    if result is None:
+        raise HTTPException(status_code=404, detail="Crypto synthetic portfolio could not be built from the submitted identifiers.")
+    return CryptoSyntheticPortfolioResponseModel.from_domain(result)

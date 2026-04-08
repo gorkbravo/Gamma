@@ -530,6 +530,8 @@ export interface CryptoToken {
   homepage_url: string | null;
   description: string | null;
   categories: string[];
+  narrative_labels: string[];
+  layer_bucket: string | null;
   turnover_ratio_24h: number | null;
   fdv_premium_ratio: number | null;
   screen_score: number | null;
@@ -627,6 +629,79 @@ export interface CryptoComparison {
   target_turnover_ratio_24h: number | null;
   turnover_gap: number | null;
   summary: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoFlowSummary {
+  token_id: string;
+  pool_count: number;
+  matched_networks: string[];
+  total_reserve_usd: number | null;
+  total_volume_24h: number | null;
+  dex_volume_share_of_total_volume: number | null;
+  reserve_to_market_cap_ratio: number | null;
+  top_pool_reserve_share: number | null;
+  top_pool_volume_share: number | null;
+  buy_pressure_pct: number | null;
+  active_trader_proxy_24h: number;
+  buy_sell_ratio: number | null;
+  participant_balance_ratio: number | null;
+  reserve_volume_ratio_24h: number | null;
+  slippage_proxy_label: string | null;
+  liquidity_concentration_label: string;
+  flow_signal_label: string;
+  summary: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CryptoPortfolioConstituent {
+  token_id: string;
+  symbol: string;
+  name: string;
+  input_weight: number;
+  normalized_weight: number;
+  market_cap: number | null;
+  turnover_ratio_24h: number | null;
+  narrative_labels: string[];
+  layer_bucket: string | null;
+}
+
+export interface CryptoPortfolioNarrativeExposure {
+  label: string;
+  normalized_weight: number;
+  constituent_count: number;
+}
+
+export interface CryptoPortfolioPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface CryptoSyntheticPortfolio {
+  lookback_days: number;
+  benchmark_token_id: string;
+  benchmark_label: string;
+  constituents: CryptoPortfolioConstituent[];
+  narrative_exposures: CryptoPortfolioNarrativeExposure[];
+  portfolio_points: CryptoPortfolioPoint[];
+  benchmark_points: CryptoPortfolioPoint[];
+  cumulative_return_pct: number | null;
+  benchmark_return_pct: number | null;
+  relative_return_pct: number | null;
+  annualized_volatility_pct: number | null;
+  weighted_turnover_ratio_24h: number | null;
+  weighted_market_cap: number | null;
+  concentration_hhi: number | null;
+  effective_positions: number | null;
+  summary: string | null;
+  warnings: string[];
   source_provider: string;
   retrieved_at: string | null;
   origin: string;

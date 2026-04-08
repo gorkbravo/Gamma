@@ -28,10 +28,13 @@
     clearPortfolioHistory,
     copilotThreads,
     cryptoComparison,
+    cryptoFlowSummary,
     cryptoLiquidity,
     cryptoPriceHistory,
+    cryptoSyntheticPortfolio,
     cryptoTokenDetail,
     cryptoWorkspace,
+    clearCryptoSyntheticPortfolio,
     computeRisk,
     forceAccountSubscribe,
     ivSurface,
@@ -68,6 +71,7 @@
     loadCryptoWorkspace,
     previewCopilotContextFingerprint,
     previewCopilotThreadFingerprint,
+    runCryptoSyntheticPortfolio,
     runDiagnosticsAction,
     runResearch,
     selectCryptoToken,
@@ -91,7 +95,9 @@
     CopilotThreadState,
     CryptoComparison,
     CryptoDexLiquiditySummary,
+    CryptoFlowSummary,
     CryptoPriceHistoryResponse,
+    CryptoSyntheticPortfolio,
     CryptoToken,
     CryptoWorkspaceResponse,
     IvSessionStatus,
@@ -1280,10 +1286,15 @@
             detail={$cryptoTokenDetail}
             history={$cryptoPriceHistory}
             liquidity={$cryptoLiquidity}
+            flow={$cryptoFlowSummary}
             comparison={$cryptoComparison}
+            syntheticPortfolio={$cryptoSyntheticPortfolio}
             loading={$loading.crypto || $loading.cryptoDetail}
+            portfolioLoading={$loading.cryptoPortfolio}
             onLoadWorkspace={loadCryptoWorkspace}
             onSelectToken={selectCryptoToken}
+            onRunSyntheticPortfolio={runCryptoSyntheticPortfolio}
+            onClearSyntheticPortfolio={clearCryptoSyntheticPortfolio}
           />
         {:else if $activeTab === "risk"}
           <RiskView

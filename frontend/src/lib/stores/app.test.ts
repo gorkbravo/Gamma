@@ -4,6 +4,7 @@ import type {
   CopilotResearchCardResult,
   CryptoComparison,
   CryptoDexLiquiditySummary,
+  CryptoFlowSummary,
   CryptoPriceHistoryResponse,
   CryptoToken,
   CryptoWorkspaceResponse,
@@ -31,6 +32,7 @@ import {
   copilotThreads,
   computeRisk,
   cryptoComparison,
+  cryptoFlowSummary,
   cryptoLiquidity,
   cryptoPriceHistory,
   cryptoTokenDetail,
@@ -673,6 +675,31 @@ describe("app store orchestration", () => {
       origin: "gamma.crypto.comparison.basket",
       transformation_note: "Basket comparison uses market-cap-weighted aggregates."
     };
+    const flow: CryptoFlowSummary = {
+      token_id: "solana",
+      pool_count: 2,
+      matched_networks: ["solana"],
+      total_reserve_usd: 180000000,
+      total_volume_24h: 45000000,
+      dex_volume_share_of_total_volume: 0.34,
+      reserve_to_market_cap_ratio: 0.0024,
+      top_pool_reserve_share: 0.62,
+      top_pool_volume_share: 0.58,
+      buy_pressure_pct: 57.3,
+      active_trader_proxy_24h: 10300,
+      buy_sell_ratio: 1.03,
+      participant_balance_ratio: 1.02,
+      reserve_volume_ratio_24h: 4.0,
+      slippage_proxy_label: "deep",
+      liquidity_concentration_label: "moderately concentrated",
+      flow_signal_label: "accumulation",
+      summary: "Constructive flow with deep pool support.",
+      warnings: [],
+      source_provider: "gamma",
+      retrieved_at: "2026-03-01T00:05:00Z",
+      origin: "gamma.crypto.flow_summary",
+      transformation_note: "Gamma flow summary."
+    };
 
     const fetchMock = vi
       .fn()
@@ -680,6 +707,7 @@ describe("app store orchestration", () => {
       .mockResolvedValueOnce(ok(detail))
       .mockResolvedValueOnce(ok(history))
       .mockResolvedValueOnce(ok(liquidity))
+      .mockResolvedValueOnce(ok(flow))
       .mockResolvedValueOnce(ok(comparison));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -694,6 +722,7 @@ describe("app store orchestration", () => {
     expect(get(cryptoTokenDetail)?.token_id).toBe("solana");
     expect(get(cryptoPriceHistory)?.points[0]?.price).toBe(150);
     expect(get(cryptoLiquidity)?.dominant_dex).toBe("raydium");
+    expect(get(cryptoFlowSummary)?.flow_signal_label).toBe("accumulation");
     expect(get(cryptoComparison)?.target_label).toBe("Layer 1");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")).sort_by).toBe("screen_score_desc");
   });

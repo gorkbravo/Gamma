@@ -8,7 +8,9 @@ from src.models.app_mode import ResearchScopeType
 from src.models.crypto import (
     CryptoComparisonRecord,
     CryptoDexLiquiditySummary,
+    CryptoFlowSummaryRecord,
     CryptoPricePoint,
+    CryptoSyntheticPortfolioRecord,
     CryptoTokenRecord,
     CryptoWorkspaceResult,
 )
@@ -398,13 +400,72 @@ def test_crypto_workspace_and_token_endpoints(tmp_path):
                 origin="gamma.crypto.comparison.basket",
             )
 
+        def get_flow_summary(self, token_id: str, *, force_refresh: bool = False):
+            del force_refresh
+            if token_id != "solana":
+                return None
+            return CryptoFlowSummaryRecord(
+                token_id="solana",
+                pool_count=2,
+                matched_networks=["solana"],
+                total_reserve_usd=180_000_000.0,
+                total_volume_24h=45_000_000.0,
+                dex_volume_share_of_total_volume=0.35,
+                reserve_to_market_cap_ratio=0.0024,
+                top_pool_reserve_share=0.62,
+                top_pool_volume_share=0.58,
+                buy_pressure_pct=57.3,
+                active_trader_proxy_24h=10_300,
+                buy_sell_ratio=1.03,
+                participant_balance_ratio=1.02,
+                reserve_volume_ratio_24h=4.0,
+                slippage_proxy_label="deep",
+                liquidity_concentration_label="moderately concentrated",
+                flow_signal_label="accumulation",
+                summary="Solana flow is constructive with deep pool support.",
+                warnings=[],
+                source_provider="gamma",
+                retrieved_at=_crypto_token().retrieved_at,
+                origin="gamma.crypto.flow_summary",
+            )
+
+        def analyze_synthetic_portfolio(self, request):
+            del request
+            return CryptoSyntheticPortfolioRecord(
+                lookback_days=30,
+                benchmark_token_id="bitcoin",
+                benchmark_label="Bitcoin",
+                constituents=[],
+                narrative_exposures=[],
+                portfolio_points=[],
+                benchmark_points=[],
+                cumulative_return_pct=7.5,
+                benchmark_return_pct=5.1,
+                relative_return_pct=2.4,
+                annualized_volatility_pct=62.0,
+                weighted_turnover_ratio_24h=0.08,
+                weighted_market_cap=40_000_000_000.0,
+                concentration_hhi=0.5,
+                effective_positions=2.0,
+                summary="Synthetic basket stub.",
+                warnings=[],
+                source_provider="gamma",
+                retrieved_at=_crypto_token().retrieved_at,
+                origin="gamma.crypto.synthetic_portfolio",
+            )
+
     runtime.crypto_service = StubCryptoService()
     try:
         workspace = client.post("/crypto/workspace", json={"query": "sol", "sort_by": "screen_score_desc"})
         detail = client.get("/crypto/tokens/solana")
         history = client.get("/crypto/tokens/solana/history", params={"days": 30})
         liquidity = client.get("/crypto/tokens/solana/liquidity")
+        flow = client.get("/crypto/tokens/solana/flow")
         comparison = client.get("/crypto/tokens/solana/comparison")
+        synthetic = client.post(
+            "/crypto/portfolio",
+            json={"positions": [{"identifier": "SOL", "weight": 0.6}, {"identifier": "UNI", "weight": 0.4}]},
+        )
 
         assert workspace.status_code == 200
         assert workspace.json()["tokens"][0]["token_id"] == "solana"
@@ -414,8 +475,12 @@ def test_crypto_workspace_and_token_endpoints(tmp_path):
         assert history.json()["points"][0]["price"] == 150.0
         assert liquidity.status_code == 200
         assert liquidity.json()["dominant_dex"] == "raydium"
+        assert flow.status_code == 200
+        assert flow.json()["flow_signal_label"] == "accumulation"
         assert comparison.status_code == 200
         assert comparison.json()["target_kind"] == "basket"
+        assert synthetic.status_code == 200
+        assert synthetic.json()["benchmark_token_id"] == "bitcoin"
     finally:
         runtime.shutdown()
 

@@ -247,17 +247,17 @@ For roadmap purposes, this deliverable is now treated as achieved at a first-pas
 
 ## Phase 2 - Macro Tab
 
-_Status: In progress (~72%)_
-_Active focus: deepen the current Macro workspace with denser official catalysts, clearer event-window interpretation, a transparent first-pass lead/lag engine, and stronger daily-use snapshot framing before adding any new modes._
-_Recent progress: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes now share a denser interpretation layer: snapshot focus items and why-now copy, coherence/lead-lag annotations, broader public event coverage across policy/inflation/growth catalysts, a policy-expectation overlay next to the rates-path proxy, and a meeting-ladder proxy inside Rates & Policy._
+_Status: In progress (~84%)_
+_Active focus: harden the live four-mode Macro workspace, deepen EU/global and official-event coverage, and improve the daily usefulness of the existing heuristic interpretation layers before expanding into any new Macro mode._
+_Recent progress: Macro now functions as a real four-mode research workspace: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes share persistent context, why-now framing, ranked divergences, coherence/lead-lag annotations, denser public event coverage, policy-path overlays, and deep-link navigation across modes._
 
 #### Completion snapshot
-- `Snapshot mode`: ~74% complete. A usable daily macro workspace now exists with shared context, focus items, why-now interpretation, deep-link cards, linked prediction-market context, and context-preserving navigation, but it is still constrained by the current curated series set.
-- `Cross-asset expectations mode`: ~68% complete. Theme comparisons, ranked divergences, linked contract context, driver / counter-signal framing, and a first-pass coherence / lead-lag layer are live, but the engine remains heuristic and intentionally transparent rather than statistically overfit.
-- `Rates & policy mode`: ~82% complete. Curve, breakeven, real-yield, event-calendar, linked policy-contract context, a first-pass path proxy, a qualitative policy-expectation overlay, and a meeting-ladder proxy are in place, but the path is still public-data and proxy constrained.
+- `Snapshot mode`: ~82% complete. A usable daily macro workspace now exists with shared context, focus items, why-now interpretation, deep-link cards, linked prediction-market context, and context-preserving navigation, but it is still constrained by the current curated series set and the present regional depth.
+- `Cross-asset expectations mode`: ~78% complete. Theme comparisons, ranked divergences, linked contract context, driver / counter-signal framing, and a first-pass coherence / lead-lag layer are live, but the engine remains heuristic and intentionally transparent rather than statistically overfit.
+- `Rates & policy mode`: ~88% complete. Curve, breakeven, real-yield, event-calendar, linked policy-contract context, a first-pass path proxy, a qualitative policy-expectation overlay, and a meeting-ladder proxy are in place, but the path is still public-data and proxy constrained.
 - `Optional commodities mode`: ~0% complete. Not started and not required for the first pass.
-- `Coherence and divergence engine`: ~70% complete. A structured divergence layer now includes ranked gaps, primary driver / counter-signal framing, comparison overlays, research focus text, and a first-pass lead/lag/coherence model, but it remains heuristic and should not be treated as precise causal inference.
-- `Event and regime interpretation`: ~67% complete. Events / Regimes now has denser policy/inflation/growth catalyst coverage, clearer recent/upcoming window framing, and post/pre-event coherence summaries, but EU coverage and event-source breadth are still lighter than the US lens.
+- `Coherence and divergence engine`: ~80% complete. A structured divergence layer now includes ranked gaps, primary driver / counter-signal framing, comparison overlays, research focus text, and a first-pass lead/lag/coherence model, but it remains heuristic and should not be treated as precise causal inference.
+- `Event and regime interpretation`: ~81% complete. Events / Regimes is now a real mode with denser policy/inflation/growth catalyst coverage, clearer recent/upcoming window framing, and post/pre-event coherence summaries, but EU coverage and event-source breadth are still lighter than the US lens.
 - `Research notebook hooks`: ~0% complete. Not started.
 
 ### Why this phase comes next
@@ -296,7 +296,8 @@ The Macro tab should be designed as a **multi-mode workspace** rather than a sin
 The initial modes should be:
 - **Snapshot** for fast situational awareness,
 - **Cross-Asset** for coherence and divergence analysis,
-- **Rates & Policy** for deeper term-structure and policy-expectation work.
+- **Rates & Policy** for deeper term-structure and policy-expectation work,
+- **Events / Regimes** for event-window and regime-aware interpretation.
 
 A later extension could add:
 - **Commodities** for futures-curve and inflation-sensitive market analysis,
@@ -335,7 +336,7 @@ The persistent context bar should contain compact selectors such as:
 
 This means the user should navigate in three layers:
 - **Tab**: Macro
-- **Mode**: Snapshot, Cross-Asset, Rates & Policy, later Events / Regimes
+- **Mode**: Snapshot, Cross-Asset, Rates & Policy, Events / Regimes
 - **Lens**: region, market family, timeframe, and comparison state
 
 The important distinction is:
@@ -444,7 +445,7 @@ The tab should support event-aware analysis such as:
 
 This should help the user study how different markets absorb new information rather than merely watch current levels.
 
-This may appear as a later dedicated **Events / Regimes** mode once the core Snapshot, Cross-Asset, and Rates & Policy modes are stable. It does not need to be a Day 1 requirement for the first usable Macro release.
+This now exists as a dedicated **Events / Regimes** mode inside the live Macro workspace. It should continue to mature as an interpretation layer connected to Snapshot, Cross-Asset, and Rates & Policy rather than drifting into a disconnected calendar page.
 
 #### 7. Research notebook hooks
 As with prediction markets, the Macro tab should eventually support saving:
@@ -505,8 +506,8 @@ Later additions can expand deeper commodity-curve coverage, broader cross-asset 
 The first usable Macro release should be intentionally narrow and coherent.
 
 The expected V1 bias is:
-- ship **Snapshot**, **Rates & Policy**, and **Cross-Asset** first,
-- add **Events / Regimes** as the first extension before expanding into any new macro mode,
+- ship **Snapshot**, **Rates & Policy**, **Cross-Asset**, and **Events / Regimes** as one coherent first-pass workspace,
+- deepen that shared workspace before expanding into any new macro mode,
 - support **US** most deeply first,
 - treat **EU** as a lighter second-region extension,
 - prefer a few well-normalized public datasets over a broad but inconsistent market-data surface.
@@ -758,18 +759,18 @@ For roadmap purposes, the current implementation should still be treated as an i
 
 ## Phase 5 - Crypto Tab
 
-_Status: In progress (~56%)_
-_Active focus: deepen the first-pass Crypto workspace into stronger wallet/flow and on-chain research depth while preserving provider adapters, normalized schemas, provenance, and the read-only research boundary._
-_Recent progress: Gamma now has a real Crypto tab with token search and selection, normalized token profiles, price history, CoinGecko-backed narrative baskets, a Gamma-defined cross-sectional screener, GeckoTerminal liquidity context, first-pass comparative analytics, provenance-rich API responses, and Copilot-aware crypto context._
+_Status: In progress (~73%)_
+_Active focus: deepen the live multi-mode Crypto workspace into stronger wallet/on-chain research depth, richer peer and basket analytics, and more durable provider coverage while preserving normalized schemas, provenance, and the read-only research boundary._
+_Recent progress: Crypto now operates as a real multi-mode research tab with Overview, Deep Dive, and Flows & Liquidity workflows; layer-based return mosaics, token research surfaces, synthetic baskets, DEX flow summaries, improved fallback narrative/layer classification, provenance-rich API responses, and Copilot-aware crypto context are now live._
 
 #### Completion snapshot
-- `Token explorer`: ~78% complete. A usable token profile flow now includes search/selection, metadata, chain, price history, market cap / FDV / supply context, category tags, and provenance, but deeper historical/contextual analytics are still limited.
-- `Narrative and sector baskets`: ~64% complete. CoinGecko category data now powers first-pass narrative baskets and basket summaries, but Gamma-specific narrative curation and richer basket analytics remain open.
-- `Wallet and flow analytics`: ~12% complete. The tab is structurally ready for wallet-focused expansion, but balances, transfer history, counterparty patterns, and large-holder flow analysis are still mostly unimplemented.
-- `DEX / liquidity view`: ~58% complete. GeckoTerminal-backed pool matching and liquidity context are live, but slippage proxies, liquidity concentration analysis, and deeper pool monitoring remain shallow.
-- `Cross-sectional screening`: ~76% complete. A useful screener now supports filtering, sorting, and Gamma-defined ranking across size, liquidity, turnover, momentum, and category context, but on-chain activity factors and richer factor breadth remain limited.
-- `Comparative analytics`: ~61% complete. Token-versus-basket and fallback token comparison views now exist, but richer peer selection, basket-versus-basket depth, and wallet-aware comparisons are still open.
-- `Copilot and provenance integration`: ~70% complete. The Crypto slice now participates in structured Copilot context and preserves provider / timestamp / transformation metadata in its returned entities, but provenance depth is still lighter than the longer-established domains and cached research workflows are not yet there.
+- `Token explorer`: ~86% complete. A strong token profile flow now includes search/selection, metadata, chain, price history, market cap / FDV / supply context, category tags, hero-chart deep dives, and provenance, but deeper historical/contextual analytics are still limited.
+- `Narrative and sector baskets`: ~78% complete. CoinGecko category data now powers first-pass narrative baskets, layer-aware overview surfaces, and fallback internal layer baskets when upstream coverage is thin, but Gamma-specific narrative curation and richer basket analytics remain open.
+- `Wallet and flow analytics`: ~26% complete. First-pass flow interpretation now exists through DEX-derived flow summaries, concentration reads, and cross-sectional flow boards, but actual wallet balances, transfer history, counterparty patterns, and large-holder flow analysis are still mostly unimplemented.
+- `DEX / liquidity view`: ~74% complete. GeckoTerminal-backed pool matching, liquidity context, pool tables, concentration labels, and flow/slippage-style proxy summaries are live, but deeper pool monitoring and transaction-level drilldowns remain shallow.
+- `Cross-sectional screening`: ~84% complete. The screener now supports filtering, sorting, Gamma-defined ranking, layer buckets, and overview mosaics across size, liquidity, turnover, momentum, and category context, but on-chain activity factors and richer factor breadth remain limited.
+- `Comparative analytics`: ~77% complete. Token-versus-basket and fallback benchmark comparison views now exist alongside synthetic basket analysis inside the Crypto workflow, but richer peer selection, basket-versus-basket depth, and wallet-aware comparisons are still open.
+- `Copilot and provenance integration`: ~75% complete. The Crypto slice now participates in structured Copilot context and preserves provider / timestamp / transformation metadata in its returned entities, but provenance depth is still lighter than the longer-established domains and cached research workflows are not yet there.
 
 ### Why this phase comes here
 
@@ -910,7 +911,7 @@ At the end of Phase 5, Gamma should be able to:
 
 This phase broadens the app into a more general market-research platform while staying consistent with its data-driven, read-only identity.
 
-For roadmap purposes, Phase 5 should now be treated as meaningfully started rather than merely planned: Gamma can already research tokens and sectors, inspect price / supply / liquidity context, explore narrative baskets, run a basic screener across a token universe, compare a token against a basket or fallback benchmark, and feed provenance-aware crypto context into Copilot, but deeper wallet/flow analytics, richer on-chain interpretation, and later derivatives overlays remain open.
+For roadmap purposes, Phase 5 should now be treated as a substantial first-pass research workspace rather than merely a started stub: Gamma can already research tokens and sectors, inspect price / supply / liquidity context, explore narrative baskets, run a multi-mode screener across a token universe, compare a token against a basket or fallback benchmark, build first-pass synthetic baskets, inspect DEX-derived flow proxies, and feed provenance-aware crypto context into Copilot, but deeper wallet analytics, richer on-chain interpretation, and later derivatives overlays remain open.
 
 ---
 
@@ -1125,8 +1126,8 @@ This becomes increasingly important as fundamentals and AI-assisted outputs are 
 ### Phase 1 - Prediction Markets (`Complete`)
 Build the most differentiated and accessible research tab first.
 
-### Phase 2 - Macro (`In progress ~72%`)
-Build a multi-mode macro workspace for snapshot monitoring, rates and policy analysis, and cross-asset expectations coherence.
+### Phase 2 - Macro (`In progress ~84%`)
+Build and deepen a multi-mode macro workspace for snapshot monitoring, cross-asset expectations coherence, rates and policy analysis, and event-aware regime framing.
 
 ### Phase 3 - Keyboard Navigation & Workspace Customization (`Complete`)
 Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
@@ -1134,8 +1135,8 @@ Add keyboard shortcuts for view switching, sidebar toggle, and common actions. A
 ### Phase 4 - AI Copilot (`In progress ~70%`)
 Add a context-aware research assistant that sits on top of the data architecture already built, starting with read-only tool-backed research cards and provenance-aware context injection.
 
-### Phase 5 - Crypto (`In progress ~56%`)
-Expand into a broader public-data market research environment with token, wallet, and on-chain analytics, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live.
+### Phase 5 - Crypto (`In progress ~73%`)
+Expand the live Crypto research workspace into a stronger multi-mode environment for token, basket, flow, and on-chain analysis, with overview mosaics, deep-dive token research, synthetic baskets, DEX liquidity/flow proxies, comparative context, and Copilot support now live.
 
 ### Phase 6 - Fundamentals (`Not started`)
 Add company financial analysis and valuation once the architecture is mature enough to handle normalization and provenance correctly.

@@ -5,8 +5,12 @@ from datetime import datetime, timezone
 from src.application.crypto_service import CryptoService
 from src.models.crypto import (
     CryptoBasketConstituent,
+    CryptoDexLiquiditySummary,
+    CryptoDexPoolRecord,
     CryptoNarrativeBasketRecord,
     CryptoPricePoint,
+    CryptoSyntheticPortfolioRequest,
+    CryptoSyntheticPositionRequest,
     CryptoScreenerRequest,
     CryptoTokenRecord,
 )
@@ -34,6 +38,22 @@ def test_crypto_service_filters_workspace_and_attaches_network_context():
     assert [row.label for row in result.narratives] == ["Layer 1", "DeFi"]
 
 
+def test_crypto_service_falls_back_to_internal_layer_baskets_when_narratives_fail():
+    service = CryptoService(
+        market_adapter=_FailingNarrativeMarketAdapter(),
+        dex_adapter=_FakeDexAdapter(),
+    )
+
+    result = service.get_workspace(CryptoScreenerRequest(limit=10))
+
+    layer_map = {row.token_id: row.layer_bucket for row in result.tokens}
+    assert layer_map["bitcoin"] == "Layer 1"
+    assert layer_map["solana"] == "Layer 1"
+    assert layer_map["uniswap"] == "Layer 2"
+    assert [row.label for row in result.narratives] == ["Layer 1", "Layer 2"]
+    assert any("fell back to internal layer baskets" in warning for warning in result.warnings)
+
+
 def test_crypto_service_defaults_comparison_to_matching_narrative_basket():
     service = CryptoService(
         market_adapter=_FakeMarketAdapter(),
@@ -49,6 +69,49 @@ def test_crypto_service_defaults_comparison_to_matching_narrative_basket():
     assert comparison.summary is not None
 
 
+def test_crypto_service_builds_flow_summary_from_dex_proxy_data():
+    service = CryptoService(
+        market_adapter=_FakeMarketAdapter(),
+        dex_adapter=_FakeDexAdapter(),
+    )
+
+    summary = service.get_flow_summary("solana")
+
+    assert summary is not None
+    assert summary.pool_count == 2
+    assert summary.flow_signal_label == "accumulation"
+    assert summary.liquidity_concentration_label in {"moderately concentrated", "highly concentrated"}
+    assert summary.slippage_proxy_label in {"deep", "workable", "thin", "fragile"}
+    assert summary.summary is not None
+
+
+def test_crypto_service_builds_synthetic_portfolio_from_symbol_inputs():
+    service = CryptoService(
+        market_adapter=_FakeMarketAdapter(),
+        dex_adapter=_FakeDexAdapter(),
+    )
+
+    result = service.analyze_synthetic_portfolio(
+        CryptoSyntheticPortfolioRequest(
+            positions=[
+                CryptoSyntheticPositionRequest(identifier="SOL", weight=0.6),
+                CryptoSyntheticPositionRequest(identifier="UNI", weight=0.4),
+            ],
+            benchmark_token_id="bitcoin",
+            lookback_days=30,
+        )
+    )
+
+    assert result is not None
+    assert result.benchmark_token_id == "bitcoin"
+    assert [row.token_id for row in result.constituents] == ["solana", "uniswap"]
+    assert len(result.portfolio_points) >= 2
+    assert result.relative_return_pct is not None
+    assert result.effective_positions is not None
+    assert any(exposure.label == "Layer 1" for exposure in result.narrative_exposures)
+    assert any(exposure.label == "DeFi" for exposure in result.narrative_exposures)
+
+
 class _FakeMarketAdapter:
     provider = "coingecko"
 
@@ -61,6 +124,7 @@ class _FakeMarketAdapter:
                 name="Bitcoin",
                 chain="Bitcoin",
                 asset_platform_id="bitcoin",
+                market_cap_rank=1,
                 market_cap=1_600_000_000_000,
                 total_volume=35_000_000_000,
                 price_change_pct_24h=2.0,
@@ -76,6 +140,7 @@ class _FakeMarketAdapter:
                 name="Solana",
                 chain="Solana",
                 asset_platform_id="solana",
+                market_cap_rank=5,
                 market_cap=78_000_000_000,
                 total_volume=5_200_000_000,
                 price_change_pct_24h=4.3,
@@ -91,6 +156,7 @@ class _FakeMarketAdapter:
                 name="Uniswap",
                 chain="Ethereum",
                 asset_platform_id="ethereum",
+                market_cap_rank=28,
                 market_cap=8_000_000_000,
                 total_volume=320_000_000,
                 price_change_pct_24h=1.5,
@@ -180,6 +246,12 @@ class _FakeMarketAdapter:
         return list(self._narratives)
 
 
+class _FailingNarrativeMarketAdapter(_FakeMarketAdapter):
+    def get_narrative_baskets(self, *, force_refresh: bool = False, token_index=None):
+        del force_refresh, token_index
+        raise RuntimeError("HTTP Error 429: Too Many Requests")
+
+
 class _FakeDexAdapter:
     provider = "geckoterminal"
 
@@ -191,6 +263,69 @@ class _FakeDexAdapter:
             "ethereum": "eth",
         }
 
+    def get_liquidity_summary(self, token: CryptoTokenRecord, *, force_refresh: bool = False):
+        del force_refresh
+        return CryptoDexLiquiditySummary(
+            token_id=token.token_id,
+            lookup_strategy="contract_lookup",
+            matched_networks=[token.geckoterminal_network or token.asset_platform_id or "unknown"],
+            total_reserve_usd=220_000_000.0 if token.token_id == "solana" else 42_000_000.0,
+            total_volume_24h=52_000_000.0 if token.token_id == "solana" else 8_000_000.0,
+            total_buys_24h=13_600 if token.token_id == "solana" else 2_400,
+            total_sells_24h=9_200 if token.token_id == "solana" else 2_100,
+            total_buyers_24h=6_300 if token.token_id == "solana" else 1_200,
+            total_sellers_24h=5_200 if token.token_id == "solana" else 1_100,
+            dominant_dex="raydium" if token.token_id == "solana" else "uniswap",
+            pools=[
+                CryptoDexPoolRecord(
+                    pool_id=f"{token.token_id}-pool-a",
+                    network=token.geckoterminal_network or token.asset_platform_id or "unknown",
+                    dex="raydium" if token.token_id == "solana" else "uniswap",
+                    pair_name=f"{token.symbol.upper()}/USDC",
+                    address="pool-a",
+                    quote_token_symbol="USDC",
+                    base_token_price_usd=token.current_price,
+                    fdv_usd=token.fully_diluted_valuation,
+                    market_cap_usd=token.market_cap,
+                    reserve_usd=140_000_000.0 if token.token_id == "solana" else 22_000_000.0,
+                    volume_24h=31_000_000.0 if token.token_id == "solana" else 4_800_000.0,
+                    price_change_pct_24h=token.price_change_pct_24h,
+                    buys_24h=7_000 if token.token_id == "solana" else 1_300,
+                    sells_24h=5_100 if token.token_id == "solana" else 1_000,
+                    buyers_24h=3_700 if token.token_id == "solana" else 700,
+                    sellers_24h=2_900 if token.token_id == "solana" else 520,
+                    source_provider="geckoterminal",
+                    retrieved_at=token.retrieved_at,
+                    origin="geckoterminal.pools",
+                ),
+                CryptoDexPoolRecord(
+                    pool_id=f"{token.token_id}-pool-b",
+                    network=token.geckoterminal_network or token.asset_platform_id or "unknown",
+                    dex="orca" if token.token_id == "solana" else "sushiswap",
+                    pair_name=f"{token.symbol.upper()}/USDT",
+                    address="pool-b",
+                    quote_token_symbol="USDT",
+                    base_token_price_usd=token.current_price,
+                    fdv_usd=token.fully_diluted_valuation,
+                    market_cap_usd=token.market_cap,
+                    reserve_usd=80_000_000.0 if token.token_id == "solana" else 20_000_000.0,
+                    volume_24h=21_000_000.0 if token.token_id == "solana" else 3_200_000.0,
+                    price_change_pct_24h=token.price_change_pct_24h,
+                    buys_24h=5_400 if token.token_id == "solana" else 1_100,
+                    sells_24h=4_700 if token.token_id == "solana" else 1_100,
+                    buyers_24h=2_600 if token.token_id == "solana" else 500,
+                    sellers_24h=2_300 if token.token_id == "solana" else 580,
+                    source_provider="geckoterminal",
+                    retrieved_at=token.retrieved_at,
+                    origin="geckoterminal.pools",
+                ),
+            ],
+            warnings=[],
+            source_provider="geckoterminal",
+            retrieved_at=token.retrieved_at,
+            origin="geckoterminal.liquidity_summary",
+        )
+
 
 def _token(
     *,
@@ -199,6 +334,7 @@ def _token(
     name: str,
     chain: str,
     asset_platform_id: str,
+    market_cap_rank: int,
     market_cap: float,
     total_volume: float,
     price_change_pct_24h: float,
@@ -217,7 +353,7 @@ def _token(
         asset_platform_id=asset_platform_id,
         geckoterminal_network=None,
         contract_address=None,
-        market_cap_rank=1,
+        market_cap_rank=market_cap_rank,
         current_price=1.0,
         market_cap=market_cap,
         fully_diluted_valuation=market_cap * 1.15,
