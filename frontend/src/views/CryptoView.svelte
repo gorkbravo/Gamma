@@ -15,6 +15,7 @@
   import type {
     CryptoSortBy,
     CryptoSyntheticPortfolioRunOptions,
+    CryptoTokenSelectOptions,
     CryptoWorkspaceLoadOptions
   } from "../lib/stores/app";
   import {
@@ -43,7 +44,7 @@
   export let loading = false;
   export let portfolioLoading = false;
   export let onLoadWorkspace: (options?: CryptoWorkspaceLoadOptions) => Promise<unknown> | void;
-  export let onSelectToken: (tokenId: string) => Promise<unknown> | void;
+  export let onSelectToken: (tokenId: string, options?: CryptoTokenSelectOptions) => Promise<unknown> | void;
   export let onRunSyntheticPortfolio: (options: CryptoSyntheticPortfolioRunOptions) => Promise<unknown> | void;
   export let onClearSyntheticPortfolio: () => void;
 
@@ -65,9 +66,17 @@
     { id: "token", label: "Selected Token" },
     { id: "basket", label: "Synthetic Basket" }
   ];
+  const heroLookbackOptions = [
+    { value: 7, label: "7D" },
+    { value: 30, label: "30D" },
+    { value: 90, label: "90D" },
+    { value: 180, label: "180D" },
+    { value: 365, label: "1Y" }
+  ];
 
   let mode: CryptoMode = "overview";
   let heroCanvas: HeroCanvas = "token";
+  let heroLookbackDays = 30;
   let query = "";
   let narrative = "";
   let chain = "";
@@ -137,9 +146,12 @@
     await onLoadWorkspace(buildPayload(forceRefresh));
   }
 
-  async function chooseToken(tokenId: string, nextMode?: CryptoMode) {
+  async function chooseToken(tokenId: string, nextMode?: CryptoMode, selectionOptions: CryptoTokenSelectOptions = {}) {
     if (nextMode) mode = nextMode;
-    await onSelectToken(tokenId);
+    await onSelectToken(tokenId, {
+      historyDays: selectionOptions.historyDays ?? heroLookbackDays,
+      resetThread: selectionOptions.resetThread
+    });
   }
 
   function handleSearchKeydown(event: KeyboardEvent) {
@@ -177,7 +189,7 @@
     const result = await onRunSyntheticPortfolio({
       positions: parsed.map((row) => ({ identifier: row.symbol, weight: row.weight })),
       benchmarkTokenId: syntheticBenchmarkTokenId || undefined,
-      lookbackDays: 30,
+      lookbackDays: heroLookbackDays,
       forceRefresh
     });
     if (result) {
@@ -190,6 +202,26 @@
     onClearSyntheticPortfolio();
     heroCanvas = "token";
     basketWarning = "";
+  }
+
+  async function refreshHeroCanvas() {
+    if (heroCanvas === "basket") {
+      if (syntheticPortfolio) {
+        await submitSyntheticPortfolio(false);
+      }
+      return;
+    }
+    if (detail?.token_id) {
+      await chooseToken(detail.token_id, undefined, {
+        historyDays: heroLookbackDays,
+        resetThread: false
+      });
+    }
+  }
+
+  async function handleHeroLookbackChange(event: Event) {
+    heroLookbackDays = Number((event.currentTarget as HTMLSelectElement).value);
+    await refreshHeroCanvas();
   }
 
   onMount(() => {
@@ -241,8 +273,14 @@
     { id: "benchmark", label: syntheticPortfolio.benchmark_label, color: "var(--chart-secondary)", type: "line", lineStyle: "dashed", data: syntheticPortfolio.benchmark_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) }
   ] : [];
   $: activeHeroSeries = heroCanvas === "basket" && syntheticChartSeries.length ? syntheticChartSeries : tokenChartSeries;
+  $: if (heroCanvas === "basket" && syntheticPortfolio?.lookback_days && syntheticPortfolio.lookback_days !== heroLookbackDays) {
+    heroLookbackDays = syntheticPortfolio.lookback_days;
+  }
   $: heroTitle = heroCanvas === "basket" && syntheticPortfolio ? "Synthetic Basket" : detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Select a token";
-  $: heroDescription = heroCanvas === "basket" && syntheticPortfolio ? syntheticPortfolio.summary ?? "Synthetic basket analytics will appear once Gamma can align the selected token histories." : detail?.description ?? "Use Overview to find a name, then Deep Dive to anchor a single token or promote a custom basket into the hero canvas.";
+  $: heroDescription = heroCanvas === "basket" && syntheticPortfolio
+    ? syntheticPortfolio.summary ?? "Synthetic basket analytics will appear once Gamma can align the selected token histories."
+    : detail?.screen_rationale ?? "Selected token history, market structure, and benchmark context render together inside Deep Dive.";
+  $: tokenAbout = detail?.description ?? "Profile details appear once a token is selected.";
   $: basketPresets = [{ id: "custom", label: "Custom", text: syntheticText }, ...((workspace?.narratives ?? []).filter((basket) => basket.top_tokens.length > 0).map((basket) => ({ id: basket.basket_id, label: basket.label, text: narrativePresetText(basket) })) ?? [])] satisfies BasketPreset[];
   $: benchmarkCandidates = Array.from(new Map(([detail, ...screenTokens.slice(0, 12)].filter((token): token is CryptoToken => token != null).map((token) => [token.token_id, token]))).values());
   $: parsedSynthetic = parseSyntheticText(syntheticText);
@@ -493,7 +531,9 @@
             <div class="headline-block">
               <p class="eyebrow">Deep Dive</p>
               <h3>{heroTitle}</h3>
-              <p class="muted">{heroDescription}</p>
+              {#if heroCanvas === "basket" && syntheticPortfolio}
+                <p class="muted">{heroDescription}</p>
+              {/if}
             </div>
             <div class="hero-controls">
               <div class="canvas-toggle" role="tablist" aria-label="Hero canvas">
@@ -503,57 +543,73 @@
                   </button>
                 {/each}
               </div>
-              <div class="badge-stack">
-                {#if detail?.chain}<span>{detail.chain}</span>{/if}
-                {#if detail?.market_cap_rank != null}<span>Rank {detail.market_cap_rank}</span>{/if}
-                {#if detail?.layer_bucket}<span>{detail.layer_bucket}</span>{/if}
-              </div>
+              <label class="hero-control-field">
+                <span>Time</span>
+                <select bind:value={heroLookbackDays} on:change={handleHeroLookbackChange}>
+                  {#each heroLookbackOptions as option}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              </label>
             </div>
           </div>
 
-          <div class="kpi-grid">
+          <div class="kpi-grid hero-stat-strip">
             {#if heroCanvas === "basket" && syntheticPortfolio}
-              <article class="metric">
+              <article class="metric hero-stat">
                 <span>Basket Return</span>
                 <strong>{pct(syntheticPortfolio.cumulative_return_pct)}</strong>
                 <small>{syntheticPortfolio.lookback_days}D window</small>
               </article>
-              <article class="metric">
+              <article class="metric hero-stat">
                 <span>Vs {syntheticPortfolio.benchmark_label}</span>
                 <strong class={toneClass(syntheticPortfolio.relative_return_pct)}>{pct(syntheticPortfolio.relative_return_pct)}</strong>
                 <small>{pct(syntheticPortfolio.benchmark_return_pct)}</small>
               </article>
-              <article class="metric">
-                <span>Weighted Turnover</span>
-                <strong>{ratio(syntheticPortfolio.weighted_turnover_ratio_24h)}</strong>
-                <small>Mcap {compactMoney(syntheticPortfolio.weighted_market_cap)}</small>
+              <article class="metric hero-stat">
+                <span>Weighted Mcap</span>
+                <strong>{compactMoney(syntheticPortfolio.weighted_market_cap)}</strong>
+                <small>Turnover {ratio(syntheticPortfolio.weighted_turnover_ratio_24h)}</small>
               </article>
-              <article class="metric">
+              <article class="metric hero-stat">
                 <span>Effective Positions</span>
                 <strong>{syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A"}</strong>
                 <small>Vol {pct(syntheticPortfolio.annualized_volatility_pct)}</small>
               </article>
             {:else}
-              <article class="metric">
+              <article class="metric hero-stat">
                 <span>Price</span>
                 <strong>{money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2)}</strong>
                 <small class={toneClass(detail?.price_change_pct_24h)}>{pct(detail?.price_change_pct_24h)}</small>
               </article>
-              <article class="metric">
+              <article class="metric hero-stat">
                 <span>Market Cap</span>
                 <strong>{compactMoney(detail?.market_cap)}</strong>
                 <small>FDV {compactMoney(detail?.fully_diluted_valuation)}</small>
               </article>
-              <article class="metric">
+              <article class="metric hero-stat">
                 <span>24H Volume</span>
                 <strong>{compactMoney(detail?.total_volume)}</strong>
                 <small>Turnover {ratio(detail?.turnover_ratio_24h)}</small>
               </article>
-              <article class="metric">
-                <span>Screen Score</span>
-                <strong>{detail?.screen_score?.toFixed(1) ?? "N/A"}</strong>
-                <small>{detail?.screen_rationale ?? "Gamma heuristic"}</small>
+              <article class="metric hero-stat">
+                <span>Supply Float</span>
+                <strong>{detail?.circulating_supply?.toLocaleString() ?? "N/A"}</strong>
+                <small>Total {detail?.total_supply?.toLocaleString() ?? "N/A"}</small>
               </article>
+            {/if}
+          </div>
+
+          <div class="chart-context-row">
+            <div class="chart-context-copy">
+              <span class="focus-label">Chart Context</span>
+              <p>{heroDescription}</p>
+            </div>
+            {#if heroCanvas !== "basket" && detail}
+              <div class="chart-context-copy align-right">
+                <span class="focus-label">Selected Token</span>
+                <p>{detail.chain ?? "Unknown chain"} | Rank {detail.market_cap_rank ?? "N/A"} | {detail.layer_bucket ?? "Unclassified"}</p>
+              </div>
             {/if}
           </div>
 
@@ -612,7 +668,20 @@
               <small>{detail?.homepage_url ? "Linked" : "Read-only"}</small>
             </div>
 
+            <div class="profile-about">
+              <span class="focus-label">About</span>
+              <p>{tokenAbout}</p>
+            </div>
+
             <div class="meta-flat">
+              <div class="meta-row">
+                <span>Chain / Layer</span>
+                <strong>{detail?.chain ?? "Unknown chain"} / {detail?.layer_bucket ?? "Unclassified"}</strong>
+              </div>
+              <div class="meta-row">
+                <span>Rank / Contract</span>
+                <strong>#{detail?.market_cap_rank ?? "N/A"} / {detail?.contract_address ?? "Native / unavailable"}</strong>
+              </div>
               <div class="meta-row">
                 <span>Supply</span>
                 <strong>{detail?.circulating_supply?.toLocaleString() ?? "N/A"} / {detail?.total_supply?.toLocaleString() ?? "N/A"}</strong>
@@ -620,10 +689,6 @@
               <div class="meta-row">
                 <span>Max Supply</span>
                 <strong>{detail?.max_supply?.toLocaleString() ?? "N/A"}</strong>
-              </div>
-              <div class="meta-row">
-                <span>Contract</span>
-                <strong>{detail?.contract_address ?? "Native / unavailable"}</strong>
               </div>
               <div class="meta-row">
                 <span>Retrieved</span>
@@ -1308,12 +1373,37 @@
     font-size: 0.72rem;
   }
 
+  .hero-panel {
+    gap: 0.65rem;
+  }
+
+  .hero-controls {
+    align-items: end;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .hero-control-field {
+    min-width: 5.4rem;
+    gap: 0.18rem;
+  }
+
+  .hero-control-field select {
+    min-width: 5.4rem;
+    min-height: 1.82rem;
+    padding: 0.28rem 0.55rem;
+  }
+
   .kpi-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
     border: 1px solid var(--divider);
     background: var(--bg-0);
+  }
+
+  .hero-stat-strip {
+    margin-top: 0.05rem;
   }
 
   .metric {
@@ -1338,12 +1428,43 @@
     font-size: 0.95rem;
   }
 
+  .hero-stat {
+    min-width: 0;
+  }
+
+  .hero-stat strong {
+    font-size: 0.92rem;
+    line-height: 1.2;
+  }
+
+  .hero-stat small {
+    line-height: 1.35;
+  }
+
   .metric small,
   .market-title small,
   .basket-card p,
   .focus-row p,
   .meta-row span {
     color: var(--text-2);
+  }
+
+  .headline-kpi-meta.positive,
+  .metric small.positive,
+  .hero-stat small.positive {
+    color: var(--positive);
+  }
+
+  .headline-kpi-meta.negative,
+  .metric small.negative,
+  .hero-stat small.negative {
+    color: var(--negative);
+  }
+
+  .headline-kpi-meta.warning,
+  .metric small.warning,
+  .hero-stat small.warning {
+    color: var(--warning);
   }
 
   .positive {
@@ -1396,8 +1517,52 @@
     font-size: 0.9rem;
   }
 
+  .chart-context-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.86fr);
+    gap: 0;
+    border: 1px solid var(--divider);
+    background: var(--bg-0);
+  }
+
+  .chart-context-copy {
+    min-width: 0;
+    padding: 0.52rem 0.68rem 0.58rem;
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .chart-context-copy + .chart-context-copy {
+    border-left: 1px solid var(--divider);
+  }
+
+  .chart-context-copy p {
+    color: var(--text-1);
+    line-height: 1.45;
+  }
+
+  .align-right {
+    text-align: right;
+  }
+
   .compact-focus p {
     color: var(--text-2);
+  }
+
+  .profile-about {
+    display: grid;
+    gap: 0.18rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .profile-about p {
+    color: var(--text-1);
+    line-height: 1.45;
+  }
+
+  .meta-row strong {
+    overflow-wrap: anywhere;
   }
 
   .basket-card {
@@ -1495,6 +1660,14 @@
       grid-template-columns: 1fr;
     }
 
+    .chart-context-row {
+      grid-template-columns: 1fr;
+    }
+
+    .chart-context-copy + .chart-context-copy {
+      border-left: 0;
+      border-top: 1px solid var(--divider);
+    }
   }
 
   @media (max-width: 760px) {
@@ -1530,6 +1703,10 @@
 
     .search-field input {
       min-width: 0;
+    }
+
+    .align-right {
+      text-align: left;
     }
   }
 </style>

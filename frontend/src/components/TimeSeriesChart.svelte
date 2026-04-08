@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { colorWithAlpha, resolveChartColor } from "../lib/chart-colors";
   import { normalizeChartData } from "../lib/chart-data";
   import { chartTheme } from "../lib/stores/app";
   import {
@@ -116,16 +117,11 @@
     }
     seriesMap = new Map();
 
-    const resolvedPrimary = getComputedStyle(container).getPropertyValue("--chart-primary").trim() || "#7aa6c8";
-    const resolvedSecondary = getComputedStyle(container).getPropertyValue("--chart-secondary").trim() || "#c49a5a";
-    const resolvedNegative = getComputedStyle(container).getPropertyValue("--chart-negative").trim() || "#b65d54";
+    const computedStyle = getComputedStyle(container);
 
     for (const item of series) {
       const normalizedData = normalizeChartData(item.data);
-      let resolvedColor = item.color;
-      if (item.color === "#7aa6c8") resolvedColor = resolvedPrimary;
-      else if (item.color === "#c49a5a") resolvedColor = resolvedSecondary;
-      else if (item.color === "#b65d54" || item.color === "#d1645d") resolvedColor = resolvedNegative;
+      const resolvedColor = resolveChartColor(item.color, computedStyle);
 
       const api =
         item.type === "line"
@@ -143,8 +139,8 @@
             })
           : chart.addSeries(AreaSeries, {
               lineColor: resolvedColor,
-              topColor: item.invertFilledArea ? `${resolvedColor}03` : `${resolvedColor}33`,
-              bottomColor: item.invertFilledArea ? `${resolvedColor}33` : `${resolvedColor}03`,
+              topColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.012) : colorWithAlpha(resolvedColor, 0.2),
+              bottomColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.2) : colorWithAlpha(resolvedColor, 0.012),
               invertFilledArea: item.invertFilledArea ?? false,
               lineWidth: 2,
               priceFormat: {
@@ -264,18 +260,9 @@
     display: grid;
     place-items: center;
     color: var(--text-2);
-    background:
-      linear-gradient(90deg, transparent 25%, rgba(122, 166, 200, 0.04) 50%, transparent 75%),
-      linear-gradient(180deg, rgba(5, 8, 11, 0.28), rgba(5, 8, 11, 0.5));
-    background-size: 200% 100%, 100% 100%;
-    animation: shimmer 2.4s ease-in-out infinite;
+    background: var(--bg-0);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.74rem;
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0, 0 0; }
-    100% { background-position: -200% 0, 0 0; }
   }
 </style>

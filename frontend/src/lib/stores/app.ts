@@ -119,6 +119,11 @@ export interface CryptoSyntheticPositionInput {
   weight: number;
 }
 
+export interface CryptoTokenSelectOptions {
+  resetThread?: boolean;
+  historyDays?: number;
+}
+
 export interface CryptoSyntheticPortfolioRunOptions {
   positions: CryptoSyntheticPositionInput[];
   benchmarkTokenId?: string;
@@ -1023,7 +1028,7 @@ export async function loadCryptoWorkspace(options: CryptoWorkspaceLoadOptions = 
 
 export async function selectCryptoToken(
   tokenId: string,
-  options: { resetThread?: boolean } = {}
+  options: CryptoTokenSelectOptions = {}
 ) {
   selectedCryptoTokenId.set(tokenId);
   if (options.resetThread ?? true) {
@@ -1031,9 +1036,10 @@ export async function selectCryptoToken(
   }
   setLoading("cryptoDetail", true);
   try {
+    const historyDays = Math.min(Math.max(options.historyDays ?? 30, 7), 365);
     const [detailResult, historyResult, liquidityResult, flowResult, comparisonResult] = await Promise.allSettled([
       getJson<CryptoToken>(`/crypto/tokens/${tokenId}`),
-      getJson<CryptoPriceHistoryResponse>(`/crypto/tokens/${tokenId}/history?days=30`),
+      getJson<CryptoPriceHistoryResponse>(`/crypto/tokens/${tokenId}/history?days=${historyDays}`),
       getJson<CryptoDexLiquiditySummary>(`/crypto/tokens/${tokenId}/liquidity`),
       getJson<CryptoFlowSummary>(`/crypto/tokens/${tokenId}/flow`),
       getJson<CryptoComparison>(`/crypto/tokens/${tokenId}/comparison`)
