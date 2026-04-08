@@ -11,7 +11,7 @@ import type {
 import CryptoView from "./CryptoView.svelte";
 
 describe("CryptoView", () => {
-  it("renders the new overview shell with layer mosaics and flow board", () => {
+  it("renders the overview shell with the layer treemap and flow board", () => {
     const { body } = render(CryptoView, {
       props: {
         workspace: makeWorkspace(),
@@ -39,12 +39,12 @@ describe("CryptoView", () => {
     expect(body).toContain("Overview");
     expect(body).toContain("Deep Dive");
     expect(body).toContain("Flows &amp; Liquidity");
-    expect(body).toContain("Layer Return Mosaic");
+    expect(body).toContain("Layer Treemap");
     expect(body).toContain("Layer 1");
     expect(body).toContain("Layer 2");
     expect(body).toContain("Layer 3");
     expect(body).toContain("Flow Proxy Leaders");
-    expect(body).toContain("Active Token Context");
+    expect(body).toContain("Quick Take");
   });
 });
 

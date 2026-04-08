@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import CryptoMosaicBoard from "../components/CryptoMosaicBoard.svelte";
+  import CryptoTreemapBoard from "../components/CryptoTreemapBoard.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
@@ -18,8 +18,9 @@
     CryptoWorkspaceLoadOptions
   } from "../lib/stores/app";
   import {
-    buildMosaicTiles,
+    buildLayerTreemap,
     buildSyntheticPreviewRows,
+    cryptoSortMetricLabel,
     flowLeaderboardScore,
     medianNumbers,
     narrativePresetText,
@@ -213,19 +214,18 @@
   $: btcToken = screenTokens.find((token) => token.symbol.toLowerCase() === "btc") ?? null;
   $: ethToken = screenTokens.find((token) => token.symbol.toLowerCase() === "eth") ?? null;
   $: headlineMetrics = [
-    { label: "BTC", value: btcToken ? `$${Math.round(btcToken.current_price ?? 0).toLocaleString("en-US")}` : "N/A", meta: btcToken ? pct(btcToken.price_change_pct_24h) : null },
-    { label: "ETH", value: ethToken ? `$${Math.round(ethToken.current_price ?? 0).toLocaleString("en-US")}` : "N/A", meta: ethToken ? pct(ethToken.price_change_pct_24h) : null },
+    { label: "BTC", value: btcToken ? `$${Math.round(btcToken.current_price ?? 0).toLocaleString("en-US")}` : "N/A", meta: btcToken ? pct(btcToken.price_change_pct_24h) : null, metaTone: toneClass(btcToken?.price_change_pct_24h) },
+    { label: "ETH", value: ethToken ? `$${Math.round(ethToken.current_price ?? 0).toLocaleString("en-US")}` : "N/A", meta: ethToken ? pct(ethToken.price_change_pct_24h) : null, metaTone: toneClass(ethToken?.price_change_pct_24h) },
     { label: "Screen Mcap", value: compactMoney(totalScreenMarketCap), meta: `${screenTokens.length} tokens` },
-    { label: "24H Breadth", value: `${advancers}A / ${decliners}D`, meta: pct(weightedMove) }
+    { label: "24H Breadth", value: `${advancers}A / ${decliners}D`, meta: pct(weightedMove), metaTone: toneClass(weightedMove) }
   ] satisfies HeadlineMetric[];
   $: coverageNote = mode === "overview"
-    ? "Overview tracks the current screener universe and sizes the layer mosaics by market cap."
+    ? `Overview tracks the current screener universe through a layer treemap sized by ${cryptoSortMetricLabel(sortBy)} and colored by 24H return.`
     : mode === "flows_liquidity"
       ? "Flows & Liquidity is a transparent first-pass proxy built from GeckoTerminal pool activity and normalized token metadata."
       : "Deep Dive centers the selected token, while synthetic baskets let Gamma treat a custom coin selection as a research object inside the same crypto domain.";
-  $: layer1Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 1").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "large", sortBy);
-  $: layer2Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 2").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "medium", sortBy);
-  $: layer3Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 3").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "small", sortBy);
+  $: sortMetricLabel = cryptoSortMetricLabel(sortBy);
+  $: layerTreemap = buildLayerTreemap(screenTokens, sortBy);
   $: flowLeaderboard = [...screenTokens].sort((left, right) => flowLeaderboardScore(right) - flowLeaderboardScore(left)).slice(0, 10);
   $: narrativeLeaderboard = [...(workspace?.narratives ?? [])].sort((left, right) => (right.volume_24h ?? 0) - (left.volume_24h ?? 0)).slice(0, 6);
   $: focusRows = [
@@ -279,20 +279,9 @@
           <div class="headline-kpi">
             <span class="headline-kpi-label">{metric.label}</span>
             <strong class="headline-kpi-value">{metric.value}</strong>
-            {#if metric.meta}<small class="headline-kpi-meta">{metric.meta}</small>{/if}
+            {#if metric.meta}<small class={`headline-kpi-meta ${metric.metaTone ?? ""}`}>{metric.meta}</small>{/if}
           </div>
         {/each}
-      </div>
-    </div>
-
-    <div class="context-bar">
-      <div class="context-group wide-group">
-        <label class="search-field"><span>Search</span><input bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
-        <label><span>Narrative</span><select bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
-      </div>
-      <div class="context-actions">
-        <button type="button" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
-        <button type="button" class="secondary" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
       </div>
     </div>
 
@@ -310,59 +299,36 @@
     {/if}
   </article>
 
-  <div class="workspace-grid">
+  <div class="workspace-grid" class:overview-layout={mode === "overview"}>
     <div class="primary-column">
       {#if mode === "overview"}
         <article class="panel">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Overview</p>
-              <h3>Layer Return Mosaic</h3>
+              <h3>Layer Treemap</h3>
             </div>
-            <small>Tiles size by market cap, color by 24H return</small>
+            <div class="panel-actions">
+              <button type="button" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
+              <button type="button" class="secondary" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
+            </div>
           </div>
 
           <div class="screener-strip">
-            <label><span>Chain</span><input bind:value={chain} placeholder="Ethereum, Solana..." /></label>
+            <label class="search-field filter-wide"><span>Search</span><input bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
+            <label><span>Narrative</span><select bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
             <label><span>Sort</span><select bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
             <label><span>Min Mcap</span><input bind:value={minMarketCap} placeholder="1B" /></label>
             <label><span>Min Volume</span><input bind:value={minVolume} placeholder="25M" /></label>
-            <label><span>Min Turnover</span><input bind:value={minTurnoverRatio} placeholder="0.05" /></label>
           </div>
 
-          <div class="mosaic-layout">
-            <div class="mosaic-main">
-              <CryptoMosaicBoard
-                label="Layer 1"
-                subtitle="Largest surface"
-                variant="large"
-                tiles={layer1Tiles}
-                selectedTokenId={detail?.token_id ?? null}
-                emptyMessage="No Layer 1 names in the current screen."
-                onSelectToken={(tokenId) => chooseToken(tokenId)}
-              />
-            </div>
-            <div class="mosaic-side">
-              <CryptoMosaicBoard
-                label="Layer 2"
-                subtitle="Secondary mosaic"
-                variant="medium"
-                tiles={layer2Tiles}
-                selectedTokenId={detail?.token_id ?? null}
-                emptyMessage="No Layer 2 names in the current screen."
-                onSelectToken={(tokenId) => chooseToken(tokenId)}
-              />
-              <CryptoMosaicBoard
-                label="Layer 3"
-                subtitle="Exploratory surface"
-                variant="small"
-                tiles={layer3Tiles}
-                selectedTokenId={detail?.token_id ?? null}
-                emptyMessage="Layer 3 coverage is still sparse in the current screen."
-                onSelectToken={(tokenId) => chooseToken(tokenId)}
-              />
-            </div>
-          </div>
+          <CryptoTreemapBoard
+            sections={layerTreemap}
+            {sortBy}
+            selectedTokenId={detail?.token_id ?? null}
+            emptyMessage="No treemap tiles available for the current crypto screen."
+            onSelectToken={(tokenId) => chooseToken(tokenId)}
+          />
         </article>
 
         <div class="detail-split">
@@ -457,6 +423,70 @@
             </table>
           </div>
         </article>
+
+        <div class="detail-split overview-support-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Selection</p>
+                <h3>Quick Take</h3>
+              </div>
+              <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
+            </div>
+
+            <div class="focus-list">
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Name</span>
+                <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
+                <p>{detail?.screen_rationale ?? "Select a token from the treemap or screener table to anchor the research surface."}</p>
+              </div>
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Narrative</span>
+                <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
+                <p>{comparison?.summary ?? "Comparison context appears once Gamma resolves a default target."}</p>
+              </div>
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Flow</span>
+                <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
+                <p>{flow?.summary ?? "Flow summary will appear after a token is selected and DEX context is available."}</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Universe</p>
+                <h3>Tokens</h3>
+              </div>
+              <small>{JSON.stringify({ query, narrative, chain, sortBy })}</small>
+            </div>
+
+            <div class="table-wrap compact-overview-table">
+              <table>
+                <thead>
+                  <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
+                </thead>
+                <tbody>
+                  {#if workspace?.tokens?.length}
+                    {#each workspace.tokens as token}
+                      <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
+                        <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
+                        <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
+                        <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
+                        <td>{compactMoney(token.market_cap)}</td>
+                        <td>{ratio(token.turnover_ratio_24h)}</td>
+                        <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
+                      </tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan="6">No tokens matched the current screen.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
       {:else if mode === "deep_dive"}
         <article class="panel hero-panel">
           <div class="panel-header top-line">
@@ -845,153 +875,155 @@
       {/if}
     </div>
 
-    <aside class="support-column">
-      {#if mode === "deep_dive"}
-        <article class="panel builder-panel">
+    {#if mode !== "overview"}
+      <aside class="support-column">
+        {#if mode === "deep_dive"}
+          <article class="panel builder-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Builder</p>
+                <h3>Synthetic Basket</h3>
+              </div>
+              <small>{recognizedPreviewCount}/{previewRows.length} locally recognized</small>
+            </div>
+
+            <div class="field-grid">
+              <label>
+                <span>Preset</span>
+                <select bind:value={selectedBasketPreset} on:change={(event) => applyBasketPreset((event.currentTarget as HTMLSelectElement).value)}>
+                  {#each basketPresets as preset}<option value={preset.id}>{preset.label}</option>{/each}
+                </select>
+              </label>
+              <label>
+                <span>Benchmark</span>
+                <select bind:value={syntheticBenchmarkTokenId}>
+                  <option value="bitcoin">Bitcoin</option>
+                  {#if detail}<option value={detail.token_id}>{detail.symbol.toUpperCase()} (selected)</option>{/if}
+                  {#each benchmarkCandidates as token}
+                    {#if token.token_id !== "bitcoin" && token.token_id !== detail?.token_id}
+                      <option value={token.token_id}>{token.symbol.toUpperCase()}</option>
+                    {/if}
+                  {/each}
+                </select>
+              </label>
+            </div>
+
+            <label class="textarea-field">
+              <span>Synthetic Portfolio</span>
+              <textarea bind:value={syntheticText} rows="7" placeholder="BTC 0.50&#10;ETH 0.30&#10;SOL 0.20"></textarea>
+            </label>
+
+            {#if basketWarning}
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Input</span>
+                <strong>{basketWarning}</strong>
+              </div>
+            {/if}
+
+            {#if syntheticPortfolio?.warnings?.length}
+              <div class="notes-list">
+                {#each syntheticPortfolio.warnings as warning}
+                  <div class="focus-row compact-focus">
+                    <span class="focus-label">Basket</span>
+                    <strong>{warning}</strong>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            <div class="builder-actions">
+              <button type="button" on:click={normalizeSynthetic}>Normalize</button>
+              <button type="button" class="secondary" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
+              <button type="button" class="secondary" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
+            </div>
+
+            <div class="table-wrap compact-wrap">
+              <table>
+                <thead>
+                  <tr><th>Token</th><th>Input</th><th>Norm</th><th>Layer</th></tr>
+                </thead>
+                <tbody>
+                  {#if previewRows.length}
+                    {#each previewRows as row}
+                      <tr>
+                        <td><div class="market-title"><strong>{row.symbol}</strong><small>{row.resolvedToken?.name ?? "External resolution on submit"}</small></div></td>
+                        <td>{row.inputWeight.toFixed(2)}</td>
+                        <td>{pct(row.normalizedWeight * 100, 0)}</td>
+                        <td>{row.resolvedToken?.layer_bucket ?? "N/A"}</td>
+                      </tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan="4">Basket preview appears once valid rows are entered.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        {:else}
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Selection</p>
+                <h3>Flow Signal</h3>
+              </div>
+              <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
+            </div>
+
+            <div class="focus-list">
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Name</span>
+                <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
+                <p>{detail?.screen_rationale ?? "Select a token from the treemap or screener table to anchor the research surface."}</p>
+              </div>
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Narrative</span>
+                <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
+                <p>{comparison?.summary ?? "Comparison context appears once Gamma resolves a default target."}</p>
+              </div>
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Flow</span>
+                <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
+                <p>{flow?.summary ?? "Flow summary will appear after a token is selected and DEX context is available."}</p>
+              </div>
+            </div>
+          </article>
+        {/if}
+
+        <article class="panel">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Builder</p>
-              <h3>Synthetic Basket</h3>
+              <p class="eyebrow">Universe</p>
+              <h3>Tokens</h3>
             </div>
-            <small>{recognizedPreviewCount}/{previewRows.length} locally recognized</small>
+            <small>{JSON.stringify({ query, narrative, chain, sortBy })}</small>
           </div>
 
-          <div class="field-grid">
-            <label>
-              <span>Preset</span>
-              <select bind:value={selectedBasketPreset} on:change={(event) => applyBasketPreset((event.currentTarget as HTMLSelectElement).value)}>
-                {#each basketPresets as preset}<option value={preset.id}>{preset.label}</option>{/each}
-              </select>
-            </label>
-            <label>
-              <span>Benchmark</span>
-              <select bind:value={syntheticBenchmarkTokenId}>
-                <option value="bitcoin">Bitcoin</option>
-                {#if detail}<option value={detail.token_id}>{detail.symbol.toUpperCase()} (selected)</option>{/if}
-                {#each benchmarkCandidates as token}
-                  {#if token.token_id !== "bitcoin" && token.token_id !== detail?.token_id}
-                    <option value={token.token_id}>{token.symbol.toUpperCase()}</option>
-                  {/if}
-                {/each}
-              </select>
-            </label>
-          </div>
-
-          <label class="textarea-field">
-            <span>Synthetic Portfolio</span>
-            <textarea bind:value={syntheticText} rows="7" placeholder="BTC 0.50&#10;ETH 0.30&#10;SOL 0.20"></textarea>
-          </label>
-
-          {#if basketWarning}
-            <div class="focus-row compact-focus">
-              <span class="focus-label">Input</span>
-              <strong>{basketWarning}</strong>
-            </div>
-          {/if}
-
-          {#if syntheticPortfolio?.warnings?.length}
-            <div class="notes-list">
-              {#each syntheticPortfolio.warnings as warning}
-                <div class="focus-row compact-focus">
-                  <span class="focus-label">Basket</span>
-                  <strong>{warning}</strong>
-                </div>
-              {/each}
-            </div>
-          {/if}
-
-          <div class="builder-actions">
-            <button type="button" on:click={normalizeSynthetic}>Normalize</button>
-            <button type="button" class="secondary" on:click={() => submitSyntheticPortfolio(false)} disabled={portfolioLoading}>{portfolioLoading ? "Building..." : "Build Basket"}</button>
-            <button type="button" class="secondary" on:click={clearSyntheticPortfolioSurface} disabled={!syntheticPortfolio}>Clear</button>
-          </div>
-
-          <div class="table-wrap compact-wrap">
+          <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Token</th><th>Input</th><th>Norm</th><th>Layer</th></tr>
+                <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
               </thead>
               <tbody>
-                {#if previewRows.length}
-                  {#each previewRows as row}
-                    <tr>
-                      <td><div class="market-title"><strong>{row.symbol}</strong><small>{row.resolvedToken?.name ?? "External resolution on submit"}</small></div></td>
-                      <td>{row.inputWeight.toFixed(2)}</td>
-                      <td>{pct(row.normalizedWeight * 100, 0)}</td>
-                      <td>{row.resolvedToken?.layer_bucket ?? "N/A"}</td>
+                {#if workspace?.tokens?.length}
+                  {#each workspace.tokens as token}
+                    <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
+                      <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
+                      <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
+                      <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
+                      <td>{compactMoney(token.market_cap)}</td>
+                      <td>{ratio(token.turnover_ratio_24h)}</td>
+                      <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="4">Basket preview appears once valid rows are entered.</td></tr>
+                  <tr><td colspan="6">No tokens matched the current screen.</td></tr>
                 {/if}
               </tbody>
             </table>
           </div>
         </article>
-      {:else}
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Selection</p>
-              <h3>{mode === "overview" ? "Quick Take" : "Flow Signal"}</h3>
-            </div>
-            <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
-          </div>
-
-          <div class="focus-list">
-            <div class="focus-row compact-focus">
-              <span class="focus-label">Name</span>
-              <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
-              <p>{detail?.screen_rationale ?? "Select a token from the mosaic or screener table to anchor the research surface."}</p>
-            </div>
-            <div class="focus-row compact-focus">
-              <span class="focus-label">Narrative</span>
-              <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
-              <p>{comparison?.summary ?? "Comparison context appears once Gamma resolves a default target."}</p>
-            </div>
-            <div class="focus-row compact-focus">
-              <span class="focus-label">Flow</span>
-              <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
-              <p>{flow?.summary ?? "Flow summary will appear after a token is selected and DEX context is available."}</p>
-            </div>
-          </div>
-        </article>
-      {/if}
-
-      <article class="panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Universe</p>
-            <h3>Tokens</h3>
-          </div>
-          <small>{JSON.stringify({ query, narrative, chain, sortBy })}</small>
-        </div>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
-            </thead>
-            <tbody>
-              {#if workspace?.tokens?.length}
-                {#each workspace.tokens as token}
-                  <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
-                    <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
-                    <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
-                    <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                    <td>{compactMoney(token.market_cap)}</td>
-                    <td>{ratio(token.turnover_ratio_24h)}</td>
-                    <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
-                  </tr>
-                {/each}
-              {:else}
-                <tr><td colspan="6">No tokens matched the current screen.</td></tr>
-              {/if}
-            </tbody>
-          </table>
-        </div>
-      </article>
-    </aside>
+      </aside>
+    {/if}
   </div>
 </section>
 
@@ -1020,6 +1052,10 @@
     align-items: start;
   }
 
+  .workspace-grid.overview-layout {
+    grid-template-columns: 1fr;
+  }
+
   .primary-column,
   .support-column {
     align-content: start;
@@ -1027,6 +1063,11 @@
 
   .detail-split {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-support-grid {
+    grid-template-columns: minmax(18rem, 0.88fr) minmax(0, 1.12fr);
+    align-items: start;
   }
 
   .panel {
@@ -1057,16 +1098,13 @@
   }
 
   .headline-title-row,
-  .context-bar,
-  .context-group,
-  .context-actions,
   .mode-kpi-row,
-  .mosaic-strip,
   .builder-actions,
   .hero-controls,
   .header-badges,
   .badge-stack,
-  .headline-strip {
+  .headline-strip,
+  .panel-actions {
     display: flex;
     gap: 0.5rem;
   }
@@ -1084,7 +1122,6 @@
   .header-badges,
   .badge-stack,
   .headline-strip,
-  .context-group,
   .builder-actions {
     flex-wrap: wrap;
   }
@@ -1097,19 +1134,6 @@
     padding: 0.18rem 0.45rem;
     font-size: 0.72rem;
     white-space: nowrap;
-  }
-
-  .context-bar {
-    flex-wrap: wrap;
-    align-items: end;
-  }
-
-  .wide-group {
-    flex: 1 1 24rem;
-  }
-
-  .context-actions {
-    margin-left: auto;
   }
 
   .mode-bar,
@@ -1334,10 +1358,6 @@
     color: var(--warning);
   }
 
-  .mosaic-strip {
-    align-items: stretch;
-  }
-
   .screener-strip {
     display: flex;
     gap: 0.5rem;
@@ -1352,22 +1372,8 @@
     min-width: 5rem;
   }
 
-  .mosaic-layout {
-    display: grid;
-    grid-template-columns: 1.6fr 1fr;
-    gap: 0.5rem;
-    align-items: stretch;
-  }
-
-  .mosaic-main {
-    display: grid;
-    align-content: start;
-  }
-
-  .mosaic-side {
-    display: grid;
-    gap: 0.5rem;
-    align-content: start;
+  .screener-strip .filter-wide {
+    flex: 1.8 1 16rem;
   }
 
   .focus-row,
@@ -1432,6 +1438,10 @@
     max-height: 17rem;
   }
 
+  .compact-overview-table {
+    max-height: 21rem;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -1485,19 +1495,10 @@
       grid-template-columns: 1fr;
     }
 
-    .mosaic-strip {
-      display: grid;
-      grid-template-columns: 1fr;
-    }
-
-    .mosaic-layout {
-      grid-template-columns: 1fr;
-    }
   }
 
   @media (max-width: 760px) {
     .mode-kpi-row,
-    .context-bar,
     .header-top,
     .hero-controls,
     .builder-actions {
