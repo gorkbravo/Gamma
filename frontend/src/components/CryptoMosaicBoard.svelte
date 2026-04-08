@@ -34,7 +34,7 @@
     value == null ? "N/A" : `${value.toFixed(digits)}%`;
 </script>
 
-<section class:layer-large={variant === "large"} class="mosaic-section">
+<section class="mosaic-section">
   <div class="section-head">
     <div>
       <span class="section-label">{label}</span>
@@ -67,15 +67,8 @@
 <style>
   .mosaic-section {
     display: grid;
-    gap: 0.45rem;
-    padding-left: 0.5rem;
-    border-left: 1px solid var(--divider);
+    gap: 0.35rem;
     min-width: 0;
-    flex: 1 1 0;
-  }
-
-  .layer-large {
-    flex: 1.85 1 0;
   }
 
   .section-head {
@@ -101,33 +94,36 @@
   .mosaic-grid {
     display: grid;
     grid-auto-flow: dense;
-    gap: 0.35rem;
+    gap: 0.25rem;
     min-width: 0;
+    container-type: inline-size;
   }
 
   .large-grid {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    grid-auto-rows: minmax(2.2rem, auto);
+    grid-template-columns: repeat(18, minmax(0, 1fr));
+    grid-auto-rows: calc((100cqi - 0.25rem * 17) / 18);
   }
 
   .medium-grid {
-    grid-template-columns: repeat(10, minmax(0, 1fr));
-    grid-auto-rows: minmax(1.85rem, auto);
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-auto-rows: calc((100cqi - 0.25rem * 11) / 12);
   }
 
   .small-grid {
-    grid-template-columns: repeat(8, minmax(0, 1fr));
-    grid-auto-rows: minmax(1.55rem, auto);
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    grid-auto-rows: calc((100cqi - 0.25rem * 9) / 10);
   }
 
   .mosaic-tile {
     border: 1px solid var(--divider);
-    padding: 0.45rem 0.5rem;
+    padding: 0.3rem 0.4rem;
     display: grid;
-    gap: 0.15rem;
+    gap: 0.08rem;
+    align-content: end;
     text-align: left;
     min-width: 0;
     cursor: pointer;
+    overflow: hidden;
   }
 
   .mosaic-tile.selected {
@@ -147,12 +143,12 @@
   }
 
   .mosaic-tile strong {
-    font-size: 0.88rem;
+    font-size: 0.78rem;
   }
 
   .mosaic-tile small {
     color: var(--text-1);
-    font-size: 0.68rem;
+    font-size: 0.6rem;
   }
 
   .empty-inline {
@@ -163,13 +159,9 @@
   }
 
   @media (max-width: 1180px) {
-    .mosaic-section,
-    .layer-large {
-      border-left: 0;
-      padding-left: 0;
+    .mosaic-section {
       border-top: 1px solid var(--divider);
-      padding-top: 0.5rem;
-      flex: 1 1 auto;
+      padding-top: 0.4rem;
     }
   }
 </style>

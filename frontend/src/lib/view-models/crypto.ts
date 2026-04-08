@@ -1,4 +1,5 @@
 import type { CryptoNarrativeBasket, CryptoToken } from "../api/types";
+import type { CryptoSortBy } from "../stores/app";
 
 export type CryptoMode = "overview" | "deep_dive" | "flows_liquidity";
 export type HeroCanvas = "token" | "basket";
@@ -100,31 +101,35 @@ export function buildSyntheticPreviewRows(rows: SyntheticDraftRow[], tokens: Cry
   }));
 }
 
-export function buildMosaicTiles(tokens: CryptoToken[], variant: MosaicVariant) {
-  const scoped = tokens.slice(0, variant === "large" ? 10 : 8);
-  const maxCap = Math.max(...scoped.map((token) => token.market_cap ?? 0), 1);
-  const maxLog = Math.log10(maxCap + 1);
-  return scoped.map<MosaicTile>((token) => {
-    const normalized = maxLog > 0 ? Math.log10((token.market_cap ?? 0) + 1) / maxLog : 0;
+function sortMetricValue(token: CryptoToken, sortBy: CryptoSortBy): number {
+  switch (sortBy) {
+    case "market_cap_desc": return token.market_cap ?? 0;
+    case "volume_desc": return token.total_volume ?? 0;
+    case "turnover_desc": return token.turnover_ratio_24h ?? 0;
+    case "momentum_desc": return Math.abs(token.price_change_pct_24h ?? 0);
+    case "screen_score_desc": return token.screen_score ?? 0;
+    case "fdv_premium_asc": return 1 / Math.max(token.fully_diluted_valuation ?? 1, 1);
+    default: return token.market_cap ?? 0;
+  }
+}
+
+export function buildMosaicTiles(tokens: CryptoToken[], variant: MosaicVariant, sortBy: CryptoSortBy = "market_cap_desc") {
+  const scoped = tokens.slice(0, variant === "large" ? 12 : 8);
+  const values = scoped.map((token) => sortMetricValue(token, sortBy));
+  const maxVal = Math.max(...values, 1);
+  return scoped.map<MosaicTile>((token, i) => {
+    const raw = values[i];
+    const normalized = maxVal > 0 ? Math.sqrt(raw / maxVal) : 0;
     if (variant === "large") {
-      return {
-        token,
-        colSpan: Math.max(3, Math.min(7, Math.round(3 + normalized * 4))),
-        rowSpan: Math.max(2, Math.min(4, Math.round(2 + normalized * 2)))
-      };
+      const span = Math.max(3, Math.min(5, Math.round(3 + normalized * 2)));
+      return { token, colSpan: span, rowSpan: span };
     }
     if (variant === "medium") {
-      return {
-        token,
-        colSpan: Math.max(3, Math.min(5, Math.round(2 + normalized * 3))),
-        rowSpan: Math.max(2, Math.min(3, Math.round(1 + normalized * 2)))
-      };
+      const span = Math.max(2, Math.min(4, Math.round(2 + normalized * 2)));
+      return { token, colSpan: span, rowSpan: span };
     }
-    return {
-      token,
-      colSpan: Math.max(2, Math.min(4, Math.round(2 + normalized * 2))),
-      rowSpan: Math.max(1, Math.min(3, Math.round(1 + normalized * 2)))
-    };
+    const span = Math.max(2, Math.min(3, Math.round(2 + normalized * 1)));
+    return { token, colSpan: span, rowSpan: span };
   });
 }
 

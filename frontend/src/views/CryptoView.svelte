@@ -210,20 +210,22 @@
   $: medianMove = medianNumbers(screenTokens.map((token) => token.price_change_pct_24h));
   $: topFlowToken = [...screenTokens].sort((left, right) => flowLeaderboardScore(right) - flowLeaderboardScore(left))[0] ?? null;
   $: strongestNarrative = [...(workspace?.narratives ?? [])].sort((left, right) => (right.market_cap_change_pct_24h ?? -999) - (left.market_cap_change_pct_24h ?? -999))[0] ?? null;
+  $: btcToken = screenTokens.find((token) => token.symbol.toLowerCase() === "btc") ?? null;
+  $: ethToken = screenTokens.find((token) => token.symbol.toLowerCase() === "eth") ?? null;
   $: headlineMetrics = [
-    { label: "Universe", value: String(screenTokens.length), meta: screenWarnings.length ? `${screenWarnings.length} notes` : null },
-    { label: "Breadth", value: `${advancers}/${screenTokens.length || 0}`, meta: decliners ? `${decliners} down` : "No decliners" },
-    { label: "Screen Mcap", value: compactMoney(totalScreenMarketCap), meta: `Vol ${compactMoney(totalScreenVolume)}` },
-    { label: "Weighted 24H", value: pct(weightedMove), meta: `Turnover ${ratio(weightedTurnover)}` }
+    { label: "BTC", value: btcToken ? `$${Math.round(btcToken.current_price ?? 0).toLocaleString("en-US")}` : "N/A", meta: btcToken ? pct(btcToken.price_change_pct_24h) : null },
+    { label: "ETH", value: ethToken ? `$${Math.round(ethToken.current_price ?? 0).toLocaleString("en-US")}` : "N/A", meta: ethToken ? pct(ethToken.price_change_pct_24h) : null },
+    { label: "Screen Mcap", value: compactMoney(totalScreenMarketCap), meta: `${screenTokens.length} tokens` },
+    { label: "24H Breadth", value: `${advancers}A / ${decliners}D`, meta: pct(weightedMove) }
   ] satisfies HeadlineMetric[];
   $: coverageNote = mode === "overview"
     ? "Overview tracks the current screener universe and sizes the layer mosaics by market cap."
     : mode === "flows_liquidity"
       ? "Flows & Liquidity is a transparent first-pass proxy built from GeckoTerminal pool activity and normalized token metadata."
       : "Deep Dive centers the selected token, while synthetic baskets let Gamma treat a custom coin selection as a research object inside the same crypto domain.";
-  $: layer1Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 1").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "large");
-  $: layer2Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 2").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "medium");
-  $: layer3Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 3").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "small");
+  $: layer1Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 1").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "large", sortBy);
+  $: layer2Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 2").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "medium", sortBy);
+  $: layer3Tiles = buildMosaicTiles([...screenTokens].filter((token) => token.layer_bucket === "Layer 3").sort((left, right) => (right.market_cap ?? 0) - (left.market_cap ?? 0)), "small", sortBy);
   $: flowLeaderboard = [...screenTokens].sort((left, right) => flowLeaderboardScore(right) - flowLeaderboardScore(left)).slice(0, 10);
   $: narrativeLeaderboard = [...(workspace?.narratives ?? [])].sort((left, right) => (right.volume_24h ?? 0) - (left.volume_24h ?? 0)).slice(0, 6);
   $: focusRows = [
@@ -288,18 +290,9 @@
         <label class="search-field"><span>Search</span><input bind:value={query} placeholder="bitcoin, solana, ai, defi..." on:keydown={handleSearchKeydown} /></label>
         <label><span>Narrative</span><select bind:value={narrative}>{#each narrativeOptions as option}<option value={option}>{option || "All narratives"}</option>{/each}</select></label>
       </div>
-      <div class="context-group">
-        <label><span>Chain</span><input bind:value={chain} placeholder="Ethereum, Solana, Base..." /></label>
-        <label><span>Sort</span><select bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
-      </div>
-      <div class="context-group">
-        <label><span>Min Mcap</span><input bind:value={minMarketCap} placeholder="1000000000" /></label>
-        <label><span>Min Volume</span><input bind:value={minVolume} placeholder="25000000" /></label>
-        <label><span>Min Turnover</span><input bind:value={minTurnoverRatio} placeholder="0.05" /></label>
-      </div>
       <div class="context-actions">
         <button type="button" on:click={() => runWorkspace(false)} disabled={loading}>{loading ? "Loading..." : "Run Screen"}</button>
-        <button type="button" class="secondary" on:click={() => runWorkspace(true)} disabled={loading}>Refresh Sources</button>
+        <button type="button" class="secondary" on:click={() => runWorkspace(true)} disabled={loading}>Refresh</button>
       </div>
     </div>
 
@@ -329,34 +322,46 @@
             <small>Tiles size by market cap, color by 24H return</small>
           </div>
 
-          <div class="mosaic-strip">
-            <CryptoMosaicBoard
-              label="Layer 1"
-              subtitle="Largest surface"
-              variant="large"
-              tiles={layer1Tiles}
-              selectedTokenId={detail?.token_id ?? null}
-              emptyMessage="No Layer 1 names in the current screen."
-              onSelectToken={(tokenId) => chooseToken(tokenId)}
-            />
-            <CryptoMosaicBoard
-              label="Layer 2"
-              subtitle="Secondary mosaic"
-              variant="medium"
-              tiles={layer2Tiles}
-              selectedTokenId={detail?.token_id ?? null}
-              emptyMessage="No Layer 2 names in the current screen."
-              onSelectToken={(tokenId) => chooseToken(tokenId)}
-            />
-            <CryptoMosaicBoard
-              label="Layer 3"
-              subtitle="Exploratory surface"
-              variant="small"
-              tiles={layer3Tiles}
-              selectedTokenId={detail?.token_id ?? null}
-              emptyMessage="Layer 3 coverage is still sparse in the current screen."
-              onSelectToken={(tokenId) => chooseToken(tokenId)}
-            />
+          <div class="screener-strip">
+            <label><span>Chain</span><input bind:value={chain} placeholder="Ethereum, Solana..." /></label>
+            <label><span>Sort</span><select bind:value={sortBy}>{#each sortOptions as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
+            <label><span>Min Mcap</span><input bind:value={minMarketCap} placeholder="1B" /></label>
+            <label><span>Min Volume</span><input bind:value={minVolume} placeholder="25M" /></label>
+            <label><span>Min Turnover</span><input bind:value={minTurnoverRatio} placeholder="0.05" /></label>
+          </div>
+
+          <div class="mosaic-layout">
+            <div class="mosaic-main">
+              <CryptoMosaicBoard
+                label="Layer 1"
+                subtitle="Largest surface"
+                variant="large"
+                tiles={layer1Tiles}
+                selectedTokenId={detail?.token_id ?? null}
+                emptyMessage="No Layer 1 names in the current screen."
+                onSelectToken={(tokenId) => chooseToken(tokenId)}
+              />
+            </div>
+            <div class="mosaic-side">
+              <CryptoMosaicBoard
+                label="Layer 2"
+                subtitle="Secondary mosaic"
+                variant="medium"
+                tiles={layer2Tiles}
+                selectedTokenId={detail?.token_id ?? null}
+                emptyMessage="No Layer 2 names in the current screen."
+                onSelectToken={(tokenId) => chooseToken(tokenId)}
+              />
+              <CryptoMosaicBoard
+                label="Layer 3"
+                subtitle="Exploratory surface"
+                variant="small"
+                tiles={layer3Tiles}
+                selectedTokenId={detail?.token_id ?? null}
+                emptyMessage="Layer 3 coverage is still sparse in the current screen."
+                onSelectToken={(tokenId) => chooseToken(tokenId)}
+              />
+            </div>
           </div>
         </article>
 
@@ -409,85 +414,49 @@
           </article>
         </div>
 
-        <div class="detail-split">
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Opportunity Board</p>
-                <h3>Flow Proxy Leaders</h3>
-              </div>
-              <small>Gamma turnover + move proxy</small>
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Opportunity Board</p>
+              <h3>Flow Proxy Leaders</h3>
             </div>
+            <small>Gamma turnover + move proxy</small>
+          </div>
 
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Token</th>
-                    <th>24H</th>
-                    <th>Turnover</th>
-                    <th>Volume</th>
-                    <th>Signal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#if flowLeaderboard.length}
-                    {#each flowLeaderboard.slice(0, 8) as token}
-                      <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")}>
-                        <td>
-                          <div class="market-title">
-                            <strong>{token.name}</strong>
-                            <small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? "Cross-sector"}</small>
-                          </div>
-                        </td>
-                        <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                        <td>{ratio(token.turnover_ratio_24h)}</td>
-                        <td>{compactMoney(token.total_volume)}</td>
-                        <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
-                      </tr>
-                    {/each}
-                  {:else}
-                    <tr><td colspan="5">Run a screen to populate the opportunity board.</td></tr>
-                  {/if}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Selection</p>
-                <h3>Active Token Context</h3>
-              </div>
-              <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
-            </div>
-
-            <div class="meta-flat">
-              <div class="meta-row">
-                <span>Name</span>
-                <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
-              </div>
-              <div class="meta-row">
-                <span>Narrative</span>
-                <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
-              </div>
-              <div class="meta-row">
-                <span>Comparison</span>
-                <strong>{comparison?.target_label ?? "N/A"}</strong>
-              </div>
-              <div class="meta-row">
-                <span>Flow</span>
-                <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
-              </div>
-            </div>
-
-            <div class="builder-actions">
-              <button type="button" on:click={() => detail && chooseToken(detail.token_id, "deep_dive")} disabled={!detail}>Open Deep Dive</button>
-              <button type="button" class="secondary" on:click={() => detail && chooseToken(detail.token_id, "flows_liquidity")} disabled={!detail}>Open Flows</button>
-            </div>
-          </article>
-        </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>24H</th>
+                  <th>Turnover</th>
+                  <th>Volume</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if flowLeaderboard.length}
+                  {#each flowLeaderboard.slice(0, 8) as token}
+                    <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")}>
+                      <td>
+                        <div class="market-title">
+                          <strong>{token.name}</strong>
+                          <small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? "Cross-sector"}</small>
+                        </div>
+                      </td>
+                      <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
+                      <td>{ratio(token.turnover_ratio_24h)}</td>
+                      <td>{compactMoney(token.total_volume)}</td>
+                      <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="5">Run a screen to populate the opportunity board.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
       {:else if mode === "deep_dive"}
         <article class="panel hero-panel">
           <div class="panel-header top-line">
@@ -1041,7 +1010,7 @@
   }
 
   .view {
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
 
   .workspace-grid {
@@ -1069,7 +1038,7 @@
   }
 
   .header-panel {
-    gap: 0.35rem;
+    gap: 0.3rem;
   }
 
   .panel-header,
@@ -1369,6 +1338,38 @@
     align-items: stretch;
   }
 
+  .screener-strip {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: end;
+    border-top: 1px solid var(--divider);
+    padding-top: 0.45rem;
+  }
+
+  .screener-strip label {
+    flex: 1 1 7rem;
+    min-width: 5rem;
+  }
+
+  .mosaic-layout {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+
+  .mosaic-main {
+    display: grid;
+    align-content: start;
+  }
+
+  .mosaic-side {
+    display: grid;
+    gap: 0.5rem;
+    align-content: start;
+  }
+
   .focus-row,
   .meta-row,
   .note-row {
@@ -1486,6 +1487,10 @@
 
     .mosaic-strip {
       display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    .mosaic-layout {
       grid-template-columns: 1fr;
     }
   }
