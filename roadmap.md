@@ -617,7 +617,7 @@ _Recent progress: Gamma's Phase 4 foundation still spans the full current tab se
 #### Completion snapshot
 - `Provider and model boundary`: ~78% complete. Gamma now has a real OpenAI-backed provider/service split, request/response shaping, and tool-calling integration behind a swappable boundary, but broader provider optionality and richer model-runtime controls are still open.
 - `Shell-level copilot surface`: ~82% complete. The Copilot still lives at the shell level rather than inside individual tabs, understands the active tab, adapts drawer labeling and guidance per tab, and now preserves visible per-domain follow-up history with context-aware resets, but streaming and richer thread/session controls are still open.
-- `Context assembly across current tabs`: ~68% complete. Modular context builders now cover Portfolio, Research, Macro, Prediction Markets, Crypto, Risk, and IV with tab-specific summaries and shared helpers, but later tabs such as Fundamentals are still future work and some thinner tabs still rely on first-pass context slices.
+- `Context assembly across current tabs`: ~68% complete. Modular context builders now cover Portfolio, Research, Macro, Prediction Markets, Crypto, Risk, and IV with tab-specific summaries and shared helpers; Fundamentals now exists as a live workspace, but dedicated Fundamentals grounding is still future work and some thinner tabs still rely on first-pass context slices.
 - `Read-only internal tool layer`: ~70% complete. Gamma now exposes tab-specific read-only helpers for portfolio state, research scope and coverage, macro drilldowns, prediction-market history and flow, crypto token / screener / liquidity / comparison context, risk coverage and contributions, IV surface/session context, and first-pass cross-context synthesis helpers, but deeper comparative analytics helpers remain limited.
 - `Structured research-card outputs`: ~78% complete. Structured research cards remain the primary user-facing Copilot output and are now reusable across the full current tab set plus shell-level synthesis, but richer output families such as saved memos, comparative briefs, and more explicit reusable schema extensions are still open.
 - `Provenance and transparency`: ~69% complete. The current implementation preserves source refs, warnings, and tool traces and keeps source-backed claims distinct from inferred claims, but provenance depth is still uneven across domains and not every tab yet exposes equally rich source metadata.
@@ -924,8 +924,18 @@ For roadmap purposes, Phase 5 should now be treated as a substantial first-pass 
 
 ## Phase 6 - Fundamentals Tab
 
-_Status: Not started (0%)_
-_Remaining focus: full phase scope. Phase 6 remains the final first-pass phase still intended to be executed inside this current roadmap._
+_Status: Paused (~83%)_
+_Pause note: Phase 6 is paused at the current first-pass Fundamentals workspace. All remaining incomplete Phase 6 scope now moves to Roadmap V2._
+_Future work (Roadmap V2): deeper restatement/reference handling, richer raw-vs-normalized statement inspection, more durable market-price coverage for price-aware valuation fields, reverse-valuation / implied-expectations tooling, broader company-reference depth, and dedicated Fundamentals Copilot grounding._
+_Recent progress: Fundamentals now operates as a real first-pass research tab with Overview, Financials, and DCF modes; SEC-native company and filing ingestion now runs through EdgarTools-backed adapters, annual and quarterly statement views and Gamma-owned ratio logic are live, stable peer baskets and peer heatmaps persist across the workspace, and Bear/Base/Bull DCF scenarios with sensitivity and local model state are now real._
+
+#### Completion snapshot
+- `Workspace and company-selection flow`: ~88% complete. The research workspace now includes a live Fundamentals tab with search, company selection, refresh flows, persisted peer / DCF state, and stable routing across Overview, Financials, and DCF, but shell-level polish and some deeper navigation / handoff paths remain lighter than the older domains.
+- `SEC-native ingestion and normalization`: ~82% complete. EdgarTools-backed ticker resolution, filing history, company facts acquisition, annual / quarterly normalization, and amendment-aware chronology are live behind the adapter boundary, but broader taxonomy coverage and richer restatement handling remain future work.
+- `Overview and peer context`: ~84% complete. Company profile, headline KPIs, filings / provenance summary, stable peer baskets, and peer heatmap comparisons are live, but market-dependent multiples still rely on available IBKR price context and deeper company-reference coverage remains limited.
+- `Financial statements and ratios`: ~81% complete. Income, balance sheet, cash flow, annual / quarterly toggles, provenance-rich statement cells, and Gamma-owned ratio views are live, but richer raw-vs-normalized inspection controls and more explicit trend overlays are still open.
+- `DCF workbench and scenario persistence`: ~86% complete. Bear / Base / Bull scenarios, assumption editing, override-capable projection grids, sensitivity matrices, active-scenario switching, and local persistence are all live, but reverse-DCF / market-implied expectation tooling remains later work.
+- `Provenance and market-context separation`: ~77% complete. Filing-derived, market-derived, and Gamma-derived values are separated and carried through major outputs, but some price-aware fields can still degrade when market context is unavailable and Fundamentals-specific Copilot grounding is still not wired.
 
 ### Why this phase comes later
 
@@ -1054,14 +1064,14 @@ The tab would need:
 ### Data sources / APIs
 
 Potential sources include:
-- **SEC EDGAR / data.sec.gov** for raw filings and extracted data
-- **Financial Modeling Prep** for normalized statements and related financial data
-- **Polygon / Massive fundamentals endpoints** for standardized company financials
+- **SEC EDGAR / data.sec.gov via EdgarTools** for company resolution, filing chronology, company facts, and SEC-native statement inputs
+- **IBKR** for price-aware market context and price-dependent valuation fields
+- **Optional later enrichment providers** for standardized reference or estimate data if Gamma later needs broader coverage than the SEC-first core
 
-A practical implementation path would likely use a normalized provider first for speed, while keeping open the possibility of validating or backfilling with SEC-derived data later.
+A practical implementation path now uses SEC-native ingestion through EdgarTools plus the existing IBKR market context, while keeping any later standardized-provider or estimate layers optional and additive rather than the foundation of the tab.
 
 Implementation note:
-- if `edgartools` is used before a user-configurable SEC identity setting exists, the temporary development identity should be `Gorka Bravo gorka.bravo1@gmail.com`
+- the current first-pass implementation uses `edgartools`, and before a user-configurable SEC identity setting exists the temporary development identity remains `Gorka Bravo gorka.bravo1@gmail.com`
 - this should remain a temporary development default only and must later move behind an explicit app/user configuration path rather than stay hard-coded
 
 ### Deliverable of the phase
@@ -1074,6 +1084,8 @@ At the end of Phase 6, Gamma should be able to:
 - help the user reason about market-implied expectations.
 
 This phase makes Gamma meaningfully useful for traditional equity research, but it should only be implemented once the data architecture is strong enough to support it properly.
+
+For roadmap purposes, Phase 6 should now be treated as a real first-pass fundamentals workspace rather than a future stub: Gamma can already resolve US SEC filers, load provenance-rich company / filing history, inspect annual and quarterly statements, compute Gamma-owned ratio views, compare a company against a stable peer basket, and work through a persistent Bear / Base / Bull DCF model with sensitivity, but deeper restatement / reference handling, broader market-aware valuation coverage, reverse-valuation tooling, and Copilot grounding are now explicit Roadmap V2 carry-forward work.
 
 ---
 
@@ -1149,8 +1161,8 @@ Add a context-aware research assistant that sits on top of the data architecture
 ### Phase 5 - Crypto (`Paused ~73%`)
 Expand the live Crypto research workspace into a stronger multi-mode environment for token, basket, flow, and on-chain analysis, with overview mosaics, deep-dive token research, synthetic baskets, DEX liquidity/flow proxies, comparative context, and Copilot support now live.
 
-### Phase 6 - Fundamentals (`Not started`)
-Add company financial analysis and valuation once the architecture is mature enough to handle normalization and provenance correctly.
+### Phase 6 - Fundamentals (`Paused ~83%`)
+Gamma now has a first-pass fundamentals workspace with Overview, Financials, and DCF modes built on SEC-native ingestion, Gamma-owned analytics, stable peer baskets, and persistent scenario modeling, with the remaining incomplete scope moved to Roadmap V2.
 
 ---
 
