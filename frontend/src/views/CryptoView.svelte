@@ -1418,47 +1418,39 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     gap: 0;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    padding-block: 0.15rem;
   }
 
   .hero-stat-strip {
     margin-top: 0.05rem;
   }
 
-  .hero-stat-strip .metric {
-    min-width: 0;
-  }
-
   .metric {
-    padding: 0.55rem 0.7rem;
-    border-right: 1px solid var(--divider);
+    padding: 0.2rem 1rem;
+    border: 0;
+    border-left: 1px solid rgba(50, 56, 64, 0.52);
+    background: none;
     display: grid;
     gap: 0.12rem;
   }
 
-  .metric:last-child {
-    border-right: 0;
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .metric span {
     color: var(--text-2);
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+    font-size: 0.66rem;
   }
 
   .metric strong {
-    font-size: 0.95rem;
-  }
-
-  .hero-stat {
-    min-width: 0;
-  }
-
-  .hero-stat strong {
-    font-size: 0.92rem;
-    line-height: 1.2;
+    display: block;
+    margin: 0.22rem 0;
+    font-size: 1rem;
+    color: var(--text-0);
   }
 
   .hero-stat small {
