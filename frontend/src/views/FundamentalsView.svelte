@@ -156,6 +156,7 @@
   }
 
   async function chooseCompany(ticker: string, options: FundamentalsSelectOptions = {}) {
+    searchQuery = ticker.trim().toUpperCase();
     await onSelectCompany(ticker, options);
   }
 
@@ -264,6 +265,13 @@
   $: overviewWarnings = overview?.warnings ?? [];
   $: financialWarnings = financials?.warnings ?? [];
   $: dcfWarnings = dcfModel?.warnings ?? [];
+  $: combinedWarnings = [...overviewWarnings, ...financialWarnings, ...dcfWarnings].reduce<string[]>((rows, warning) => {
+    const text = warning.trim();
+    if (!text || rows.includes(text)) {
+      return rows;
+    }
+    return [...rows, text];
+  }, []);
   $: currentStatement = statementViewForSelection(financials, statementBasis, statementKind);
   $: currentRatioView = statementViewForSelection(financials, statementBasis, "ratios");
   $: activeScenario = findDcfScenario(dcfModel, dcfDraft.activeScenarioId);
@@ -367,12 +375,12 @@
       {/if}
     </div>
 
-    {#if overviewWarnings.length || financialWarnings.length || dcfWarnings.length}
-      <div class="notes-list">
-        {#each [...overviewWarnings, ...financialWarnings, ...dcfWarnings] as warning}
-          <div class="note-row">
-            <span class="focus-label">Note</span>
-            <p>{warning}</p>
+      {#if combinedWarnings.length}
+        <div class="notes-list">
+          {#each combinedWarnings as warning}
+            <div class="note-row">
+              <span class="focus-label">Note</span>
+              <p>{warning}</p>
           </div>
         {/each}
       </div>
@@ -650,7 +658,12 @@
                     <tr>
                       <td><div class="line-label"><strong>{line.label}</strong><small>{line.origin}</small></div></td>
                       {#each line.cells as cell}
-                        <td><div class="cell-stack"><strong>{cell.display_value ?? "N/A"}</strong><small>{cell.concept_name ?? cell.form ?? "N/A"}</small></div></td>
+                        <td>
+                          <div class="cell-stack">
+                            <strong>{cell.display_value ?? "N/A"}</strong>
+                            <small>{cell.source_provider === "gamma" ? "Gamma-derived" : cell.concept_name ?? cell.form ?? "N/A"}</small>
+                          </div>
+                        </td>
                       {/each}
                     </tr>
                   {/each}

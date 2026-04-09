@@ -749,12 +749,10 @@ class FundamentalsService:
         baseline = self._create_default_dcf_payload(sec_data, market_context)
         sanitized = deepcopy(baseline)
         sanitized["active_scenario_id"] = str(payload.get("active_scenario_id") or baseline["active_scenario_id"]).lower()
-        projection_years = payload.get("projection_years")
-        if isinstance(projection_years, list) and projection_years:
-            try:
-                sanitized["projection_years"] = [int(value) for value in projection_years]
-            except (TypeError, ValueError):
-                pass
+        sanitized["projection_years"] = _normalized_projection_years(
+            sec_data.annual_income_statement,
+            payload.get("projection_years"),
+        )
         payload_scenarios = payload.get("scenarios") if isinstance(payload, dict) else None
         for scenario_id in _DCF_SCENARIO_LABELS:
             incoming = payload_scenarios.get(scenario_id, {}) if isinstance(payload_scenarios, dict) else {}
@@ -820,9 +818,10 @@ class FundamentalsService:
             for line_key, label, unit in actual_row_order
         ]
         scenarios: list[FundamentalsDcfScenarioRecord] = []
-        projection_years = [int(value) for value in raw_model.get("projection_years", [])]
-        if not projection_years:
-            projection_years = _projection_years(sec_data.annual_income_statement)
+        projection_years = _normalized_projection_years(
+            sec_data.annual_income_statement,
+            raw_model.get("projection_years"),
+        )
         for scenario_id in _DCF_SCENARIO_LABELS:
             scenario_payload = raw_model.get("scenarios", {}).get(scenario_id, {})
             assumptions = scenario_payload.get("assumptions", {})
@@ -1232,6 +1231,20 @@ def _projection_years(view: FundamentalsStatementView) -> list[int]:
     latest_period = view.periods[-1].end_date if view.periods else datetime.now(timezone.utc)
     start_year = latest_period.year + 1 if latest_period is not None else datetime.now(timezone.utc).year + 1
     return [start_year + offset for offset in range(5)]
+
+
+def _normalized_projection_years(
+    view: FundamentalsStatementView,
+    projection_years: Any,
+) -> list[int]:
+    baseline = _projection_years(view)
+    if not isinstance(projection_years, list) or not projection_years:
+        return baseline
+    try:
+        horizon = max(len([int(value) for value in projection_years]), 1)
+    except (TypeError, ValueError):
+        return baseline
+    return [baseline[0] + offset for offset in range(horizon)]
 
 
 def _median(values: list[float]) -> float | None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 
+import pandas as pd
+
 from src.application.fundamentals_service import FundamentalsService
 from src.models.fundamentals import (
     FundamentalsCompanyRecord,
@@ -14,7 +16,8 @@ from src.models.fundamentals import (
     FundamentalsStatementLine,
     FundamentalsStatementView,
 )
-from src.services.fundamentals_adapters import IbkrPriceContext, SecCompanyData
+from src.services.cache import CacheService
+from src.services.fundamentals_adapters import IbkrPriceContext, SecCompanyData, SecFundamentalsAdapter
 from src.services.fundamentals_store import FundamentalsResearchStore
 
 
@@ -112,6 +115,64 @@ def test_fundamentals_peer_basket_persists_across_overview_requests(tmp_path):
 
     selected_candidates = [candidate.ticker for candidate in overview.peer_candidates if candidate.selected]
     assert selected_candidates == ["MSFT", "GOOGL", "META"]
+
+
+def test_fundamentals_dcf_model_reanchors_stale_projection_years_from_store(tmp_path):
+    service = _build_service(tmp_path)
+
+    initial = service.get_dcf_model("AAPL")
+    assert initial is not None
+
+    stale_payload = {
+        "ticker": "AAPL",
+        "active_scenario_id": "base",
+        "projection_years": [2020, 2021, 2022, 2023, 2024],
+        "scenarios": {
+            scenario.scenario_id: {
+                "assumptions": deepcopy(scenario.assumptions),
+                "overrides": deepcopy(scenario.overrides),
+            }
+            for scenario in initial.scenarios
+        },
+    }
+    service.store.save_dcf_model("AAPL", stale_payload)
+
+    reloaded = service.get_dcf_model("AAPL")
+
+    assert reloaded is not None
+    assert reloaded.historical_year_labels[-1] == "FY 2024"
+    assert reloaded.projection_years == [2025, 2026, 2027, 2028, 2029]
+
+
+def test_sec_adapter_normalizes_quarterly_periods_and_derives_missing_quarters(tmp_path):
+    adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
+    payload = _facts_dataframe_for_quarterly_normalization()
+
+    annual_income_view = adapter._build_statement_view(payload, statement="income", basis="annual", retrieved_at=NOW)
+    income_view = adapter._build_statement_view(payload, statement="income", basis="quarterly", retrieved_at=NOW)
+    cash_view = adapter._build_statement_view(payload, statement="cashflow", basis="quarterly", retrieved_at=NOW)
+    balance_view = adapter._build_statement_view(payload, statement="balance", basis="quarterly", retrieved_at=NOW)
+
+    assert [period.label for period in annual_income_view.periods] == ["FY 2024", "FY 2025"]
+    assert annual_income_view.periods[-1].end_date == _dt("2025-09-27")
+
+    expected_labels = ["Q1 2025", "Q2 2025", "Q3 2025", "Q4 2025", "Q1 2026"]
+    assert [period.label for period in income_view.periods] == expected_labels
+    assert [period.label for period in cash_view.periods] == expected_labels
+    assert [period.label for period in balance_view.periods][-5:] == expected_labels
+    assert "FY 2025" not in [period.label for period in balance_view.periods]
+
+    revenue_row = next(line for line in income_view.lines if line.line_key == "revenue")
+    operating_cash_flow_row = next(line for line in cash_view.lines if line.line_key == "operating_cash_flow")
+    current_assets_row = next(line for line in balance_view.lines if line.line_key == "current_assets")
+
+    assert [cell.value for cell in revenue_row.cells] == [100.0, 110.0, 120.0, 130.0, 140.0]
+    assert [cell.source_provider for cell in revenue_row.cells] == ["sec", "sec", "sec", "gamma", "sec"]
+    assert [cell.value for cell in operating_cash_flow_row.cells] == [30.0, 40.0, 50.0, 50.0, 50.0]
+    assert [cell.source_provider for cell in operating_cash_flow_row.cells] == ["sec", "gamma", "gamma", "gamma", "sec"]
+    assert operating_cash_flow_row.cells[1].transformation_note is not None
+    assert [cell.value for cell in current_assets_row.cells][-5:] == [500.0, 520.0, 540.0, 560.0, 580.0]
+    assert balance_view.transformation_note is None
 
 
 class StubSecFundamentalsAdapter:
@@ -416,6 +477,64 @@ def _price_context(ticker: str, price: float, scale: float) -> IbkrPriceContext:
         origin="fundamentals.ibkr.snapshot",
         transformation_note="Fixture price context.",
     )
+
+
+def _facts_dataframe_for_quarterly_normalization() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 400.0, "USD", "2023-10-01", "2024-09-28", 2024, "FY", "10-K", "2024-11-01"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 400.0, "USD", "2023-10-01", "2024-09-28", 2025, "FY", "10-K", "2025-10-31"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 100.0, "USD", "2024-09-29", "2024-12-28", 2025, "Q1", "10-Q", "2025-01-31"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 100.0, "USD", "2024-09-29", "2024-12-28", 2026, "Q1", "10-Q", "2026-01-30"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 210.0, "USD", "2024-09-29", "2025-03-29", 2025, "Q2", "10-Q", "2025-05-02"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 110.0, "USD", "2024-12-29", "2025-03-29", 2025, "Q2", "10-Q", "2025-05-02"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 330.0, "USD", "2024-09-29", "2025-06-28", 2025, "Q3", "10-Q", "2025-08-01"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 120.0, "USD", "2025-03-30", "2025-06-28", 2025, "Q3", "10-Q", "2025-08-01"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 460.0, "USD", "2024-09-29", "2025-09-27", 2025, "FY", "10-K", "2025-10-31"),
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 140.0, "USD", "2025-09-28", "2025-12-27", 2026, "Q1", "10-Q", "2026-01-30"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivities", 150.0, "USD", "2023-10-01", "2024-09-28", 2024, "FY", "10-K", "2024-11-01"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivities", 30.0, "USD", "2024-09-29", "2024-12-28", 2025, "Q1", "10-Q", "2025-01-31"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivities", 30.0, "USD", "2024-09-29", "2024-12-28", 2026, "Q1", "10-Q", "2026-01-30"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivities", 70.0, "USD", "2024-09-29", "2025-03-29", 2025, "Q2", "10-Q", "2025-05-02"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivities", 120.0, "USD", "2024-09-29", "2025-06-28", 2025, "Q3", "10-Q", "2025-08-01"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivities", 170.0, "USD", "2024-09-29", "2025-09-27", 2025, "FY", "10-K", "2025-10-31"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivities", 50.0, "USD", "2025-09-28", "2025-12-27", 2026, "Q1", "10-Q", "2026-01-30"),
+            _fact_row("us-gaap:AssetsCurrent", 530.0, "USD", None, "2024-09-28", 2024, "FY", "10-K", "2024-11-01"),
+            _fact_row("us-gaap:AssetsCurrent", 500.0, "USD", None, "2024-12-28", 2025, "Q1", "10-Q", "2025-01-31"),
+            _fact_row("us-gaap:AssetsCurrent", 520.0, "USD", None, "2025-03-29", 2025, "Q2", "10-Q", "2025-05-02"),
+            _fact_row("us-gaap:AssetsCurrent", 540.0, "USD", None, "2025-06-28", 2025, "Q3", "10-Q", "2025-08-01"),
+            _fact_row("us-gaap:AssetsCurrent", 560.0, "USD", None, "2025-09-27", 2025, "FY", "10-K", "2025-10-31"),
+            _fact_row("us-gaap:AssetsCurrent", 560.0, "USD", None, "2025-09-27", 2026, "Q1", "10-Q", "2026-01-30"),
+            _fact_row("us-gaap:AssetsCurrent", 580.0, "USD", None, "2025-12-27", 2026, "Q1", "10-Q", "2026-01-30"),
+        ]
+    )
+
+
+def _fact_row(
+    concept: str,
+    value: float,
+    unit: str,
+    start: str | None,
+    end: str,
+    fiscal_year: int,
+    fiscal_period: str,
+    form: str,
+    filed: str,
+) -> dict:
+    return {
+        "concept": concept,
+        "label": concept.split(":", 1)[-1],
+        "numeric_value": value,
+        "unit": unit,
+        "period_start": start,
+        "period_end": end,
+        "fiscal_year": fiscal_year,
+        "fiscal_period": fiscal_period,
+        "filing_date": filed,
+        "form_type": form,
+        "accession": f"{concept}-{fiscal_year}-{fiscal_period}-{end}",
+        "statement_type": None,
+    }
 
 
 def _period(period_key: str, label: str, fiscal_year: int, fiscal_period: str, end_date: str, *, form: str) -> FundamentalsPeriodRecord:

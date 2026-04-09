@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+
+import pandas as pd
+from edgar import Company, set_identity
+from edgar.reference.tickers import get_company_tickers
 
 from src.models.fundamentals import (
     FundamentalsCompanyRecord,
@@ -23,15 +25,17 @@ from src.services.data_providers import ResearchDataProvider, contract_for_instr
 from src.services.market_data import MarketDataService
 
 
-_SEC_TICKER_INDEX_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
-_SEC_SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik}.json"
-_SEC_COMPANY_FACTS_URL_TEMPLATE = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-
 _ANNUAL_FORMS = {"10-K", "10-K/A"}
 _QUARTERLY_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A"}
 _FILING_FORMS = ("10-K", "10-K/A", "10-Q", "10-Q/A")
 
 _POPULAR_FUNDAMENTALS_TICKERS = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "ORCL", "SAP")
+
+_STATEMENT_PERIOD_ANCHORS: dict[str, tuple[str, ...]] = {
+    "income": ("revenue", "operating_income", "net_income"),
+    "balance": ("current_assets", "total_assets", "shareholders_equity"),
+    "cashflow": ("operating_cash_flow", "capital_expenditures", "depreciation_and_amortization"),
+}
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,7 @@ class StatementLineDefinition:
     unit: str
     period_kind: str
     concepts: tuple[str, ...]
+    quarterly_derivable: bool = True
 
 
 @dataclass(frozen=True)
@@ -56,7 +61,10 @@ class FactObservation:
     accession_number: str | None
     fiscal_year: int | None
     fiscal_period: str | None
+    frame: str | None
     is_amendment: bool
+    source_provider: str = "sec"
+    transformation_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +133,7 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "shares",
         "duration",
         ("us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",),
+        quarterly_derivable=False,
     ),
     StatementLineDefinition("cash_and_equivalents", "Cash & Equivalents", "balance", "currency", "instant", ("us-gaap:CashAndCashEquivalentsAtCarryingValue",)),
     StatementLineDefinition(
@@ -302,6 +311,19 @@ class SecFundamentalsAdapter:
         self.identity_email = (
             os.getenv("GAMMA_SEC_USER_EMAIL", "").strip() or "gorka.bravo1@gmail.com"
         )
+        self._reference_rows: list[dict[str, str | None]] | None = None
+        self._reference_retrieved_at: datetime | None = None
+        self._company_cache: dict[str, SecCompanyData] = {}
+        self._edgar_configured = False
+        self._configure_edgar_tools()
+
+    def _configure_edgar_tools(self) -> None:
+        if self._edgar_configured:
+            return
+        identity = f"{self.identity_name} {self.identity_email}".strip()
+        os.environ["EDGAR_IDENTITY"] = identity
+        set_identity(identity)
+        self._edgar_configured = True
 
     def search_companies(
         self,
@@ -310,11 +332,11 @@ class SecFundamentalsAdapter:
         limit: int = 12,
         force_refresh: bool = False,
     ) -> list[FundamentalsSearchResult]:
-        index_payload = self._load_ticker_index(force_refresh=force_refresh)
-        rows = index_payload["rows"]
+        rows = list(self._load_reference_rows(force_refresh=force_refresh))
         query_text = str(query or "").strip().upper()
         if query_text:
             exact_ticker = [row for row in rows if row["ticker"] == query_text]
+            exact_cik = [row for row in rows if row["cik"] == query_text.zfill(10)]
             prefix_matches = [
                 row for row in rows if row["ticker"].startswith(query_text) and row["ticker"] != query_text
             ]
@@ -322,13 +344,24 @@ class SecFundamentalsAdapter:
                 row
                 for row in rows
                 if query_text in row["name_upper"]
-                and row["ticker"] not in {item["ticker"] for item in exact_ticker}
+                and row["ticker"] not in {item["ticker"] for item in [*exact_ticker, *exact_cik]}
             ]
-            rows = exact_ticker + prefix_matches + name_matches
+            cik_prefix_matches = [
+                row
+                for row in rows
+                if row["cik"].startswith(query_text)
+                and row["ticker"] not in {item["ticker"] for item in [*exact_ticker, *exact_cik, *prefix_matches]}
+            ]
+            rows = exact_ticker + exact_cik + prefix_matches + cik_prefix_matches + name_matches
+            if not rows:
+                company = self._load_company(query_text)
+                if company is not None:
+                    rows = [self._search_row_from_company(company, requested_ticker=query_text)]
         else:
             preferred = [row for row in rows if row["ticker"] in _POPULAR_FUNDAMENTALS_TICKERS]
             preferred_tickers = {row["ticker"] for row in preferred}
             rows = preferred + [row for row in rows if row["ticker"] not in preferred_tickers]
+        retrieved_at = self._reference_retrieved_at or now_utc()
         results: list[FundamentalsSearchResult] = []
         for row in rows[: max(1, min(limit, 40))]:
             results.append(
@@ -338,8 +371,11 @@ class SecFundamentalsAdapter:
                     cik=row["cik"],
                     exchange=row.get("exchange"),
                     source_provider="sec",
-                    retrieved_at=index_payload["retrieved_at"],
-                    origin="fundamentals.sec.company_tickers_exchange",
+                    retrieved_at=retrieved_at,
+                    origin="fundamentals.sec.reference_tickers",
+                    transformation_note=(
+                        "Gamma resolves SEC filers through EdgarTools reference data, which prefers bundled ticker mappings and falls back to SEC-hosted reference data when needed."
+                    ),
                 )
             )
         return results
@@ -350,173 +386,193 @@ class SecFundamentalsAdapter:
         *,
         force_refresh: bool = False,
     ) -> SecCompanyData | None:
-        resolved = self._resolve_ticker(ticker, force_refresh=force_refresh)
-        if resolved is None or not resolved.cik:
+        requested_ticker = str(ticker or "").strip().upper()
+        if not requested_ticker:
             return None
-        submissions_payload = self._load_submissions(resolved.cik, force_refresh=force_refresh)
-        facts_payload = self._load_company_facts(resolved.cik, force_refresh=force_refresh)
-        filings = self._build_filing_history(
-            submissions_payload["payload"],
-            retrieved_at=submissions_payload["retrieved_at"],
-        )
-        retrieved_marks = [
-            mark
-            for mark in [resolved.retrieved_at, submissions_payload["retrieved_at"], facts_payload["retrieved_at"]]
-            if mark is not None
-        ]
-        company = self._build_company_record(
-            resolved,
-            submissions_payload["payload"],
-            filings,
-            retrieved_at=max(retrieved_marks) if retrieved_marks else now_utc(),
-        )
-        return SecCompanyData(
-            company=company,
+        if force_refresh:
+            self._company_cache.pop(requested_ticker, None)
+        cached = self._company_cache.get(requested_ticker)
+        if cached is not None:
+            return cached
+
+        company = self._load_company(requested_ticker)
+        if company is None:
+            return None
+
+        retrieved_at = now_utc()
+        filings = self._build_filing_history(company, retrieved_at=retrieved_at)
+        facts_df = self._load_facts_dataframe(company)
+        primary_ticker = self._primary_ticker(company, requested_ticker=requested_ticker)
+        result = SecCompanyData(
+            company=self._build_company_record(
+                company,
+                filings,
+                retrieved_at=retrieved_at,
+                primary_ticker=primary_ticker,
+            ),
             filings=filings,
             annual_income_statement=self._build_statement_view(
-                facts_payload["payload"],
+                facts_df,
                 statement="income",
                 basis="annual",
-                retrieved_at=facts_payload["retrieved_at"],
+                retrieved_at=retrieved_at,
             ),
             annual_balance_sheet=self._build_statement_view(
-                facts_payload["payload"],
+                facts_df,
                 statement="balance",
                 basis="annual",
-                retrieved_at=facts_payload["retrieved_at"],
+                retrieved_at=retrieved_at,
             ),
             annual_cash_flow_statement=self._build_statement_view(
-                facts_payload["payload"],
+                facts_df,
                 statement="cashflow",
                 basis="annual",
-                retrieved_at=facts_payload["retrieved_at"],
+                retrieved_at=retrieved_at,
             ),
             quarterly_income_statement=self._build_statement_view(
-                facts_payload["payload"],
+                facts_df,
                 statement="income",
                 basis="quarterly",
-                retrieved_at=facts_payload["retrieved_at"],
+                retrieved_at=retrieved_at,
             ),
             quarterly_balance_sheet=self._build_statement_view(
-                facts_payload["payload"],
+                facts_df,
                 statement="balance",
                 basis="quarterly",
-                retrieved_at=facts_payload["retrieved_at"],
+                retrieved_at=retrieved_at,
             ),
             quarterly_cash_flow_statement=self._build_statement_view(
-                facts_payload["payload"],
+                facts_df,
                 statement="cashflow",
                 basis="quarterly",
-                retrieved_at=facts_payload["retrieved_at"],
+                retrieved_at=retrieved_at,
             ),
         )
+        self._company_cache[requested_ticker] = result
+        return result
 
-    def _resolve_ticker(
-        self,
-        ticker: str,
-        *,
-        force_refresh: bool = False,
-    ) -> FundamentalsSearchResult | None:
-        normalized = str(ticker or "").strip().upper()
+    def _load_reference_rows(self, *, force_refresh: bool) -> list[dict[str, str | None]]:
+        if self._reference_rows is not None and not force_refresh:
+            return self._reference_rows
+        df = get_company_tickers(as_dataframe=True, clean_name=False, clean_suffix=False)
+        rows: list[dict[str, str | None]] = []
+        for record in df.to_dict(orient="records"):
+            ticker = str(record.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            name = str(record.get("company") or "").strip() or ticker
+            exchange_text = str(record.get("exchange") or "").strip() or None
+            cik_text = str(record.get("cik") or "").strip()
+            try:
+                cik_text = f"{int(cik_text):010d}"
+            except (TypeError, ValueError):
+                cik_text = cik_text.zfill(10) if cik_text else ""
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "name": name,
+                    "name_upper": name.upper(),
+                    "exchange": exchange_text,
+                    "cik": cik_text,
+                }
+            )
+        self._reference_rows = rows
+        self._reference_retrieved_at = now_utc()
+        return rows
+
+    def _load_company(self, identifier: str) -> Company | None:
+        normalized = str(identifier or "").strip()
         if not normalized:
             return None
-        matches = self.search_companies(normalized, limit=8, force_refresh=force_refresh)
-        for row in matches:
-            if row.ticker == normalized:
-                return row
-        return matches[0] if matches else None
-
-    def _load_ticker_index(self, *, force_refresh: bool) -> dict[str, Any]:
-        cache_key = self.cache.make_key("fundamentals", "sec", "ticker_index")
-        if not force_refresh:
-            cached = self.cache.get_json(cache_key, max_age=timedelta(days=30))
-            if isinstance(cached, dict) and "rows" in cached and "retrieved_at" in cached:
-                return {"rows": list(cached["rows"]), "retrieved_at": _parse_datetime(cached["retrieved_at"]) or now_utc()}
-
+        self._configure_edgar_tools()
         try:
-            payload = self._fetch_json(_SEC_TICKER_INDEX_URL)
-            fields = payload.get("fields", []) or []
-            rows: list[dict[str, str]] = []
-            for raw_row in payload.get("data", []) or []:
-                mapping = dict(zip(fields, raw_row, strict=False))
-                ticker = str(mapping.get("ticker") or "").strip().upper()
-                if not ticker:
-                    continue
-                name = str(mapping.get("name") or "").strip() or ticker
-                exchange = str(mapping.get("exchange") or "").strip() or None
-                cik_text = str(mapping.get("cik") or "").strip().zfill(10)
-                rows.append(
-                    {
-                        "ticker": ticker,
-                        "name": name,
-                        "name_upper": name.upper(),
-                        "exchange": exchange,
-                        "cik": cik_text,
-                    }
-                )
-            retrieved_at = now_utc()
-            self.cache.set_json(
-                cache_key,
-                {"rows": rows, "retrieved_at": retrieved_at.isoformat()},
-            )
-            return {"rows": rows, "retrieved_at": retrieved_at}
+            return Company(normalized)
         except Exception:
-            cached = self.cache.get_json(cache_key, max_age=None)
-            if isinstance(cached, dict) and "rows" in cached and "retrieved_at" in cached:
-                return {"rows": list(cached["rows"]), "retrieved_at": _parse_datetime(cached["retrieved_at"]) or now_utc()}
-            fallback_rows = [
-                {"ticker": ticker, "name": ticker, "name_upper": ticker, "exchange": None, "cik": ""}
-                for ticker in _POPULAR_FUNDAMENTALS_TICKERS
-            ]
-            return {"rows": fallback_rows, "retrieved_at": now_utc()}
+            return None
 
-    def _load_submissions(self, cik: str, *, force_refresh: bool) -> dict[str, Any]:
-        cache_key = self.cache.make_key("fundamentals", "sec", "submissions", cik)
-        if not force_refresh:
-            cached = self.cache.get_json(cache_key, max_age=timedelta(days=7))
-            if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
-                return {"payload": cached["payload"], "retrieved_at": _parse_datetime(cached["retrieved_at"]) or now_utc()}
-        payload = self._fetch_json(_SEC_SUBMISSIONS_URL_TEMPLATE.format(cik=cik))
-        retrieved_at = now_utc()
-        self.cache.set_json(cache_key, {"payload": payload, "retrieved_at": retrieved_at.isoformat()})
-        return {"payload": payload, "retrieved_at": retrieved_at}
+    def _search_row_from_company(
+        self,
+        company: Company,
+        *,
+        requested_ticker: str | None,
+    ) -> dict[str, str | None]:
+        data = getattr(company, "data", None)
+        tickers = [str(value or "").strip().upper() for value in getattr(company, "tickers", []) if str(value or "").strip()]
+        ticker = requested_ticker if requested_ticker in tickers else tickers[0] if tickers else str(requested_ticker or "").strip().upper()
+        exchanges = getattr(data, "exchanges", []) if data is not None else []
+        exchange = _first_string(exchanges)
+        cik = ""
+        try:
+            cik = f"{int(company.cik):010d}"
+        except (TypeError, ValueError):
+            cik = str(getattr(company, "cik", "") or "").strip().zfill(10)
+        name = _clean_text(getattr(data, "name", None) if data is not None else None) or company.name
+        return {
+            "ticker": ticker,
+            "name": name,
+            "name_upper": name.upper(),
+            "exchange": exchange,
+            "cik": cik,
+        }
 
-    def _load_company_facts(self, cik: str, *, force_refresh: bool) -> dict[str, Any]:
-        cache_key = self.cache.make_key("fundamentals", "sec", "companyfacts", cik)
-        if not force_refresh:
-            cached = self.cache.get_json(cache_key, max_age=timedelta(days=7))
-            if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
-                return {"payload": cached["payload"], "retrieved_at": _parse_datetime(cached["retrieved_at"]) or now_utc()}
-        payload = self._fetch_json(_SEC_COMPANY_FACTS_URL_TEMPLATE.format(cik=cik))
-        retrieved_at = now_utc()
-        self.cache.set_json(cache_key, {"payload": payload, "retrieved_at": retrieved_at.isoformat()})
-        return {"payload": payload, "retrieved_at": retrieved_at}
+    def _primary_ticker(self, company: Company, *, requested_ticker: str) -> str:
+        tickers = [str(value or "").strip().upper() for value in getattr(company, "tickers", []) if str(value or "").strip()]
+        if requested_ticker and requested_ticker in tickers:
+            return requested_ticker
+        return tickers[0] if tickers else requested_ticker
 
-    def _fetch_json(self, url: str) -> dict[str, Any]:
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": f"{self.identity_name} {self.identity_email}",
-                "Accept": "application/json",
-            },
+    def _load_facts_dataframe(self, company: Company) -> pd.DataFrame:
+        facts = company.get_facts()
+        if facts is None:
+            return pd.DataFrame(
+                columns=[
+                    "concept",
+                    "label",
+                    "numeric_value",
+                    "unit",
+                    "period_start",
+                    "period_end",
+                    "fiscal_year",
+                    "fiscal_period",
+                    "filing_date",
+                    "form_type",
+                    "accession",
+                    "statement_type",
+                ]
+            )
+        return facts.to_dataframe(
+            include_metadata=True,
+            columns=[
+                "concept",
+                "label",
+                "numeric_value",
+                "unit",
+                "period_start",
+                "period_end",
+                "fiscal_year",
+                "fiscal_period",
+                "filing_date",
+                "form_type",
+                "accession",
+                "statement_type",
+            ],
         )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
 
     def _build_company_record(
         self,
-        resolved: FundamentalsSearchResult,
-        submissions_payload: dict[str, Any],
+        company: Company,
         filings: list[FundamentalsFilingRecord],
         *,
         retrieved_at: datetime,
+        primary_ticker: str,
     ) -> FundamentalsCompanyRecord:
+        data = company.data
         latest_report_period = next((row.report_period for row in filings if row.report_period is not None), None)
         latest_filing_date = filings[0].filing_date if filings else None
-        sic_description = _clean_text(submissions_payload.get("sicDescription"))
-        filer_category = _clean_text(submissions_payload.get("category"))
-        exchange = resolved.exchange or _first_string(submissions_payload.get("exchanges"))
-        description_parts = [resolved.name]
+        sic_description = _clean_text(getattr(data, "sic_description", None)) or _clean_text(getattr(company, "industry", None))
+        filer_category = _clean_text(getattr(data, "category", None))
+        exchange = _first_string(getattr(data, "exchanges", []))
+        description_parts = [company.name]
         if exchange:
             description_parts.append(f"is listed on {exchange}")
         if filer_category:
@@ -527,65 +583,70 @@ class SecFundamentalsAdapter:
         if description and not description.endswith("."):
             description = f"{description}."
         return FundamentalsCompanyRecord(
-            ticker=resolved.ticker,
-            cik=resolved.cik,
-            name=_clean_text(submissions_payload.get("name")) or resolved.name,
+            ticker=primary_ticker,
+            cik=f"{int(company.cik):010d}",
+            name=_clean_text(getattr(data, "name", None)) or company.name,
             exchange=exchange,
-            sic=_clean_text(submissions_payload.get("sic")),
+            sic=_clean_text(getattr(data, "sic", None)),
             sic_description=sic_description,
             filer_category=filer_category,
-            fiscal_year_end=_clean_text(submissions_payload.get("fiscalYearEnd")),
-            state_of_incorporation=_clean_text(submissions_payload.get("stateOfIncorporation")),
-            phone=_clean_text(submissions_payload.get("phone")),
-            website=_clean_text(submissions_payload.get("website")),
-            investor_website=_clean_text(submissions_payload.get("investorWebsite")),
+            fiscal_year_end=_clean_text(getattr(data, "fiscal_year_end", None)),
+            state_of_incorporation=_clean_text(getattr(data, "state_of_incorporation", None)),
+            phone=_clean_text(getattr(data, "phone", None)),
+            website=_clean_text(getattr(data, "website", None)),
+            investor_website=_clean_text(getattr(data, "investor_website", None)),
             description=description,
             latest_report_period=latest_report_period,
             latest_filing_date=latest_filing_date,
             classification_labels=[value for value in [sic_description, filer_category, exchange] if value],
             source_provider="sec",
             retrieved_at=retrieved_at,
-            origin="fundamentals.sec.submissions",
-            transformation_note="Gamma derives the company profile summary from SEC submissions metadata until a richer company profile source is added.",
+            origin="fundamentals.sec.company",
+            transformation_note="Gamma derives the company profile summary from EdgarTools company reference data and SEC filing metadata until a richer profile source is added.",
         )
 
     def _build_filing_history(
         self,
-        submissions_payload: dict[str, Any],
+        company: Company,
         *,
         retrieved_at: datetime,
         limit: int = 12,
     ) -> list[FundamentalsFilingRecord]:
-        recent = submissions_payload.get("filings", {}).get("recent", {}) or {}
-        total = len(recent.get("form", []) or [])
         rows: list[FundamentalsFilingRecord] = []
-        for index in range(total):
-            form = _index_value(recent.get("form"), index)
+        try:
+            filings = company.get_filings(form=list(_FILING_FORMS), amendments=True)
+        except Exception:
+            filings = []
+        for filing in filings:
+            form = _clean_text(getattr(filing, "form", None))
             if form not in _FILING_FORMS:
                 continue
-            filing_date = _parse_datetime(_index_value(recent.get("filingDate"), index))
+            filing_date = _parse_datetime(getattr(filing, "filing_date", None))
             if filing_date is None:
                 continue
             rows.append(
                 FundamentalsFilingRecord(
                     form=form,
                     filing_date=filing_date,
-                    report_period=_parse_datetime(_index_value(recent.get("reportDate"), index)),
-                    acceptance_datetime=_parse_datetime(_index_value(recent.get("acceptanceDateTime"), index)),
-                    accession_number=_index_value(recent.get("accessionNumber"), index),
-                    primary_document=_index_value(recent.get("primaryDocument"), index),
+                    report_period=_parse_datetime(getattr(filing, "report_date", None)),
+                    acceptance_datetime=_parse_datetime(getattr(filing, "acceptance_datetime", None)),
+                    accession_number=_clean_text(
+                        getattr(filing, "accession_number", None) or getattr(filing, "accession_no", None)
+                    ),
+                    primary_document=_clean_text(getattr(filing, "primary_document", None)),
                     is_amendment=form.endswith("/A"),
                     source_provider="sec",
                     retrieved_at=retrieved_at,
-                    origin="fundamentals.sec.submissions.recent_filings",
+                    origin="fundamentals.sec.filings",
+                    transformation_note="Gamma preserves SEC filing chronology through EdgarTools filing objects, including amendments and report-period metadata where available.",
                 )
             )
-        rows.sort(key=lambda row: row.filing_date, reverse=True)
+        rows.sort(key=lambda row: (row.filing_date, row.acceptance_datetime or row.filing_date), reverse=True)
         return rows[:limit]
 
     def _build_statement_view(
         self,
-        company_facts_payload: dict[str, Any],
+        facts_df: pd.DataFrame,
         *,
         statement: str,
         basis: str,
@@ -593,11 +654,14 @@ class SecFundamentalsAdapter:
     ) -> FundamentalsStatementView:
         definitions = [row for row in _STATEMENT_LINE_DEFINITIONS if row.statement == statement]
         period_map: dict[str, FundamentalsPeriodRecord] = {}
+        line_periods: dict[str, list[FundamentalsPeriodRecord]] = {}
         lines: list[FundamentalsStatementLine] = []
+        statement_has_gamma_cells = False
         for definition in definitions:
-            selected = self._select_observations(company_facts_payload, definition=definition, basis=basis)
+            selected = self._select_observations(facts_df, definition=definition, basis=basis)
+            selected_periods: list[FundamentalsPeriodRecord] = []
             for period_key, observation in selected.items():
-                period_map.setdefault(
+                period = period_map.setdefault(
                     period_key,
                     FundamentalsPeriodRecord(
                         period_key=period_key,
@@ -615,6 +679,8 @@ class SecFundamentalsAdapter:
                         origin=f"fundamentals.sec.company_facts.{definition.line_key}",
                     ),
                 )
+                selected_periods.append(period)
+            line_periods[definition.line_key] = sorted(selected_periods, key=lambda row: _sortable_datetime(row.end_date))
             cells = [
                 FundamentalsStatementCell(
                     period_key=period_key,
@@ -627,13 +693,20 @@ class SecFundamentalsAdapter:
                     accession_number=observation.accession_number,
                     is_amendment=observation.is_amendment,
                     concept_name=observation.concept_name,
-                    source_provider="sec",
+                    source_provider=observation.source_provider,
                     retrieved_at=retrieved_at,
-                    origin=f"fundamentals.sec.company_facts.{definition.line_key}",
+                    origin=(
+                        f"fundamentals.analytics.quarterly.{definition.line_key}"
+                        if observation.source_provider == "gamma"
+                        else f"fundamentals.sec.company_facts.{definition.line_key}"
+                    ),
+                    transformation_note=observation.transformation_note,
                 )
                 for period_key, observation in selected.items()
             ]
             cells.sort(key=lambda cell: _sortable_datetime(cell.end_date))
+            has_gamma_cells = any(cell.source_provider == "gamma" for cell in cells)
+            statement_has_gamma_cells = statement_has_gamma_cells or has_gamma_cells
             lines.append(
                 FundamentalsStatementLine(
                     line_key=definition.line_key,
@@ -641,86 +714,113 @@ class SecFundamentalsAdapter:
                     statement=statement,
                     unit=definition.unit,
                     cells=cells,
-                    source_provider="sec",
+                    source_provider="gamma" if has_gamma_cells else "sec",
                     retrieved_at=retrieved_at,
-                    origin=f"fundamentals.sec.company_facts.{definition.line_key}",
+                    origin=(
+                        f"fundamentals.analytics.quarterly.{definition.line_key}"
+                        if has_gamma_cells
+                        else f"fundamentals.sec.company_facts.{definition.line_key}"
+                    ),
+                    transformation_note=(
+                        "Gamma preserves quarterly statement integrity by deriving missing standalone quarter values from cumulative SEC filings when the company-facts feed does not provide quarter-only observations."
+                        if has_gamma_cells
+                        else None
+                    ),
                 )
             )
         periods = sorted(period_map.values(), key=lambda row: _sortable_datetime(row.end_date))
-        keep_keys = [row.period_key for row in (periods[-6:] if basis == "annual" else periods[-8:])]
+        anchor_periods = next(
+            (
+                line_periods[line_key]
+                for line_key in _STATEMENT_PERIOD_ANCHORS.get(statement, ())
+                if line_periods.get(line_key)
+            ),
+            periods,
+        )
+        keep_keys = [row.period_key for row in (anchor_periods[-6:] if basis == "annual" else anchor_periods[-8:])]
         normalized_lines = [self._ensure_line_cells(line, keep_keys) for line in lines]
-        trimmed_periods = [row for row in periods if row.period_key in set(keep_keys)]
+        trimmed_periods = [row for row in anchor_periods if row.period_key in set(keep_keys)]
         return FundamentalsStatementView(
             statement=statement,
             basis=basis,
             periods=trimmed_periods,
             lines=normalized_lines,
-            source_provider="sec",
+            source_provider="gamma" if statement_has_gamma_cells else "sec",
             retrieved_at=retrieved_at,
-            origin=f"fundamentals.sec.company_facts.{statement}.{basis}",
+            origin=(
+                f"fundamentals.analytics.{statement}.{basis}"
+                if statement_has_gamma_cells
+                else f"fundamentals.sec.company_facts.{statement}.{basis}"
+            ),
+            transformation_note=(
+                "Gamma normalizes SEC company facts into explicit quarterly statement periods, deriving missing standalone quarter values from cumulative filings when necessary."
+                if statement_has_gamma_cells
+                else None
+            ),
         )
 
     def _select_observations(
         self,
-        company_facts_payload: dict[str, Any],
+        facts_df: pd.DataFrame,
         *,
         definition: StatementLineDefinition,
         basis: str,
     ) -> dict[str, FactObservation]:
+        if facts_df.empty:
+            return {}
         observations: list[FactObservation] = []
-        for concept_ref in definition.concepts:
-            taxonomy, concept_name = concept_ref.split(":", 1)
-            taxonomy_payload = company_facts_payload.get("facts", {}).get(taxonomy, {}) or {}
-            concept_payload = taxonomy_payload.get(concept_name)
-            if not isinstance(concept_payload, dict):
+        concept_set = set(definition.concepts)
+        selected_rows = facts_df[facts_df["concept"].isin(concept_set)]
+        for row in selected_rows.to_dict(orient="records"):
+            unit = row.get("unit")
+            if not self._matches_fact_unit(unit, definition.unit):
                 continue
-            units = concept_payload.get("units", {}) or {}
-            unit_key = self._preferred_unit_key(units, definition.unit)
-            if not unit_key:
+            observation = self._build_observation_from_fact_row(row)
+            if observation is None:
                 continue
-            for raw in units.get(unit_key, []) or []:
-                observation = self._build_observation(concept_name, raw)
-                if observation is None or not self._matches_basis(observation, definition.period_kind, basis):
+            if basis == "quarterly":
+                if not self._matches_quarterly_candidate(observation, definition.period_kind):
                     continue
-                observations.append(observation)
-        selected: dict[str, FactObservation] = {}
-        for observation in observations:
-            period_key = self._period_key(basis=basis, observation=observation)
-            winner = selected.get(period_key)
-            if winner is None or self._observation_rank(observation) > self._observation_rank(winner):
-                selected[period_key] = observation
-        return selected
+            elif not self._matches_basis(observation, definition.period_kind, basis):
+                continue
+            observations.append(observation)
+        if basis == "quarterly":
+            if definition.period_kind == "instant":
+                return self._select_quarterly_instant_observations(observations)
+            return self._select_quarterly_duration_observations(
+                observations,
+                allow_derived=definition.quarterly_derivable,
+            )
+        return self._select_annual_observations(observations)
 
-    def _preferred_unit_key(self, units: dict[str, Any], expected_unit: str) -> str | None:
-        if not isinstance(units, dict):
-            return None
+    def _matches_fact_unit(self, unit: Any, expected_unit: str) -> bool:
+        unit_text = str(unit or "").strip()
         if expected_unit == "currency":
-            for key in units:
-                if str(key).upper().startswith("USD"):
-                    return key
+            return unit_text.upper().startswith("USD")
         if expected_unit == "shares":
-            for key in units:
-                if str(key).lower().startswith("shares"):
-                    return key
-        return next(iter(units.keys()), None)
+            return unit_text.lower().startswith("shares")
+        return bool(unit_text)
 
-    def _build_observation(self, concept_name: str, raw: dict[str, Any]) -> FactObservation | None:
+    def _build_observation_from_fact_row(self, row: dict[str, Any]) -> FactObservation | None:
         try:
-            value = float(raw.get("val"))
+            value = float(row.get("numeric_value"))
         except (TypeError, ValueError):
             return None
+        concept_ref = _clean_text(row.get("concept")) or ""
+        _, _, concept_name = concept_ref.partition(":")
         return FactObservation(
             concept_name=concept_name,
             value=value,
-            start_date=_parse_datetime(raw.get("start")),
-            end_date=_parse_datetime(raw.get("end")),
-            filing_date=_parse_datetime(raw.get("filed")),
-            filing_date_text=_clean_text(raw.get("filed")),
-            form=_clean_text(raw.get("form")),
-            accession_number=_clean_text(raw.get("accn")),
-            fiscal_year=_parse_int(raw.get("fy")),
-            fiscal_period=_clean_text(raw.get("fp")),
-            is_amendment=str(raw.get("form") or "").endswith("/A"),
+            start_date=_parse_datetime(row.get("period_start")),
+            end_date=_parse_datetime(row.get("period_end")),
+            filing_date=_parse_datetime(row.get("filing_date")),
+            filing_date_text=_clean_text(row.get("filing_date")),
+            form=_clean_text(row.get("form_type")),
+            accession_number=_clean_text(row.get("accession")),
+            fiscal_year=_parse_int(row.get("fiscal_year")),
+            fiscal_period=_clean_text(row.get("fiscal_period")),
+            frame=None,
+            is_amendment=str(row.get("form_type") or "").endswith("/A"),
         )
 
     def _matches_basis(self, observation: FactObservation, period_kind: str, basis: str) -> bool:
@@ -734,11 +834,20 @@ class SecFundamentalsAdapter:
             return form in _ANNUAL_FORMS and 300 <= duration_days <= 380
         return form in _QUARTERLY_FORMS and 75 <= duration_days <= 110
 
+    def _matches_quarterly_candidate(self, observation: FactObservation, period_kind: str) -> bool:
+        form = str(observation.form or "").upper()
+        if form not in _QUARTERLY_FORMS or observation.end_date is None:
+            return False
+        if period_kind == "instant":
+            return True
+        duration_days = _duration_days(observation.start_date, observation.end_date)
+        return duration_days is not None and 75 <= duration_days <= 380
+
     def _period_key(self, *, basis: str, observation: FactObservation) -> str:
         if basis == "annual":
             return f"FY-{observation.fiscal_year or _year(observation.end_date)}"
         end_label = observation.end_date.date().isoformat() if observation.end_date else "unknown"
-        return f"{observation.fiscal_period or 'Q'}-{observation.fiscal_year or _year(observation.end_date)}-{end_label}"
+        return f"QE-{end_label}"
 
     def _period_label(self, *, basis: str, observation: FactObservation) -> str:
         fiscal_year = observation.fiscal_year or _year(observation.end_date)
@@ -751,6 +860,194 @@ class SecFundamentalsAdapter:
         form_rank = 2 if str(observation.form or "").upper() in {"10-Q", "10-K"} else 1
         amendment_rank = 1 if observation.is_amendment else 0
         return (form_rank, amendment_rank, filing_ord)
+
+    def _quarterly_observation_rank(self, observation: FactObservation) -> tuple[int, int, int, int]:
+        filing_ord = int(observation.filing_date.timestamp()) if observation.filing_date else 0
+        form_rank = 2 if str(observation.form or "").upper() in {"10-Q", "10-K"} else 1
+        amendment_rank = 1 if observation.is_amendment else 0
+        lag_days = 10_000
+        if observation.end_date is not None and observation.filing_date is not None:
+            lag_days = max((observation.filing_date.date() - observation.end_date.date()).days, 0)
+        return (-lag_days, form_rank, amendment_rank, filing_ord)
+
+    def _select_annual_observations(
+        self,
+        observations: list[FactObservation],
+    ) -> dict[str, FactObservation]:
+        grouped: dict[str, list[FactObservation]] = {}
+        for observation in observations:
+            if observation.end_date is None:
+                continue
+            grouped.setdefault(observation.end_date.date().isoformat(), []).append(observation)
+        selected: dict[str, FactObservation] = {}
+        for group in sorted(grouped.values(), key=lambda rows: _sortable_datetime(rows[0].end_date)):
+            candidates = [
+                normalized
+                for observation in group
+                if (normalized := self._normalize_annual_observation(observation)) is not None
+            ]
+            if not candidates:
+                continue
+            winner = max(candidates, key=self._quarterly_observation_rank)
+            selected[self._period_key(basis="annual", observation=winner)] = winner
+        return selected
+
+    def _normalize_annual_observation(self, observation: FactObservation) -> FactObservation | None:
+        if observation.end_date is None:
+            return None
+        fiscal_year = observation.fiscal_year or _year(observation.end_date)
+        if fiscal_year is None:
+            return None
+        return replace(observation, fiscal_year=fiscal_year, fiscal_period="FY")
+
+    def _select_quarterly_instant_observations(
+        self,
+        observations: list[FactObservation],
+    ) -> dict[str, FactObservation]:
+        grouped: dict[str, list[FactObservation]] = {}
+        for observation in observations:
+            if observation.end_date is None:
+                continue
+            grouped.setdefault(observation.end_date.date().isoformat(), []).append(observation)
+        selected: dict[str, FactObservation] = {}
+        for group in sorted(grouped.values(), key=lambda rows: _sortable_datetime(rows[0].end_date)):
+            candidates = [
+                normalized
+                for observation in group
+                if (normalized := self._normalize_quarterly_observation(observation)) is not None
+            ]
+            if not candidates:
+                continue
+            winner = max(candidates, key=self._quarterly_observation_rank)
+            selected[self._period_key(basis="quarterly", observation=winner)] = winner
+        return selected
+
+    def _select_quarterly_duration_observations(
+        self,
+        observations: list[FactObservation],
+        *,
+        allow_derived: bool,
+    ) -> dict[str, FactObservation]:
+        grouped: dict[str, list[FactObservation]] = {}
+        for observation in observations:
+            if observation.end_date is None:
+                continue
+            grouped.setdefault(observation.end_date.date().isoformat(), []).append(observation)
+        selected: dict[str, FactObservation] = {}
+        cumulative_track: dict[tuple[int, int], FactObservation] = {}
+        for group in sorted(grouped.values(), key=lambda rows: _sortable_datetime(rows[0].end_date)):
+            candidates = [
+                normalized
+                for observation in group
+                if (normalized := self._normalize_quarterly_observation(observation)) is not None
+            ]
+            if not candidates:
+                continue
+            canonical = max(candidates, key=self._quarterly_observation_rank)
+            fiscal_year = canonical.fiscal_year
+            quarter_index = self._quarter_index(canonical.fiscal_period)
+            if fiscal_year is None or quarter_index is None:
+                continue
+            direct_candidates = [
+                observation
+                for observation in candidates
+                if self._is_discrete_quarter_duration(observation)
+            ]
+            cumulative_candidates = [
+                observation
+                for observation in candidates
+                if self._is_cumulative_quarter_duration(observation)
+            ]
+            cumulative_observation = (
+                max(cumulative_candidates, key=self._quarterly_observation_rank)
+                if cumulative_candidates
+                else None
+            )
+            quarter_observation = (
+                max(direct_candidates, key=self._quarterly_observation_rank)
+                if direct_candidates
+                else None
+            )
+            if allow_derived and quarter_observation is None and cumulative_observation is not None:
+                if quarter_index == 1:
+                    quarter_observation = cumulative_observation
+                else:
+                    previous_cumulative = cumulative_track.get((fiscal_year, quarter_index - 1))
+                    if previous_cumulative is not None:
+                        quarter_observation = self._derive_quarterly_duration_observation(
+                            current=cumulative_observation,
+                            previous=previous_cumulative,
+                            fiscal_year=fiscal_year,
+                            fiscal_period=f"Q{quarter_index}",
+                        )
+            if quarter_observation is None:
+                continue
+            selected[self._period_key(basis="quarterly", observation=quarter_observation)] = quarter_observation
+            if cumulative_observation is not None:
+                cumulative_track[(fiscal_year, quarter_index)] = cumulative_observation
+                continue
+            previous_cumulative = cumulative_track.get((fiscal_year, quarter_index - 1))
+            if quarter_index == 1 or previous_cumulative is None or previous_cumulative.value is None or quarter_observation.value is None:
+                cumulative_track[(fiscal_year, quarter_index)] = quarter_observation
+                continue
+            cumulative_track[(fiscal_year, quarter_index)] = replace(
+                quarter_observation,
+                value=previous_cumulative.value + quarter_observation.value,
+                source_provider="gamma",
+                transformation_note="Gamma reconstructs a year-to-date cumulative series from explicit quarter values when the SEC company-facts feed omits a matching cumulative observation.",
+            )
+        return selected
+
+    def _normalize_quarterly_observation(self, observation: FactObservation) -> FactObservation | None:
+        if observation.end_date is None:
+            return None
+        fiscal_period = str(observation.fiscal_period or "").upper()
+        if fiscal_period == "FY":
+            fiscal_period = "Q4"
+        if fiscal_period not in {"Q1", "Q2", "Q3", "Q4"}:
+            return None
+        fiscal_year = observation.fiscal_year or _year(observation.end_date)
+        if fiscal_year is None:
+            return None
+        return replace(observation, fiscal_period=fiscal_period, fiscal_year=fiscal_year)
+
+    def _quarter_index(self, fiscal_period: str | None) -> int | None:
+        if not fiscal_period:
+            return None
+        if fiscal_period.startswith("Q"):
+            try:
+                quarter = int(fiscal_period[1:])
+            except ValueError:
+                return None
+            return quarter if 1 <= quarter <= 4 else None
+        return None
+
+    def _is_discrete_quarter_duration(self, observation: FactObservation) -> bool:
+        duration_days = _duration_days(observation.start_date, observation.end_date)
+        return duration_days is not None and 75 <= duration_days <= 110
+
+    def _is_cumulative_quarter_duration(self, observation: FactObservation) -> bool:
+        duration_days = _duration_days(observation.start_date, observation.end_date)
+        return duration_days is not None and 75 <= duration_days <= 380
+
+    def _derive_quarterly_duration_observation(
+        self,
+        *,
+        current: FactObservation,
+        previous: FactObservation,
+        fiscal_year: int,
+        fiscal_period: str,
+    ) -> FactObservation:
+        derived_start = previous.end_date + timedelta(days=1) if previous.end_date is not None else current.start_date
+        return replace(
+            current,
+            value=current.value - previous.value,
+            start_date=derived_start,
+            fiscal_year=fiscal_year,
+            fiscal_period=fiscal_period,
+            source_provider="gamma",
+            transformation_note="Gamma derives standalone quarterly values by subtracting the prior cumulative SEC filing from the current year-to-date filing so annual and quarterly views stay semantically explicit.",
+        )
 
     def _ensure_line_cells(
         self,
