@@ -1,6 +1,6 @@
 export type WorkspaceMode = "portfolio" | "research";
 
-export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "crypto" | "risk" | "iv";
+export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "crypto" | "fundamentals" | "risk" | "iv";
 
 export interface WorkspaceTabDefinition {
   id: TabId;
@@ -706,6 +706,300 @@ export interface CryptoSyntheticPortfolio {
   retrieved_at: string | null;
   origin: string;
   transformation_note: string | null;
+}
+
+export interface FundamentalsSearchResult {
+  ticker: string;
+  name: string;
+  cik: string;
+  exchange: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsSearchResponse {
+  results: FundamentalsSearchResult[];
+}
+
+export interface FundamentalsMetric {
+  metric_id: string;
+  label: string;
+  value: number | null;
+  display_value: string | null;
+  unit: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPricePoint {
+  timestamp: string;
+  price: number;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsFiling {
+  form: string;
+  filing_date: string;
+  report_period: string | null;
+  acceptance_datetime: string | null;
+  accession_number: string | null;
+  primary_document: string | null;
+  is_amendment: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsCompany {
+  ticker: string;
+  cik: string;
+  name: string;
+  exchange: string | null;
+  sic: string | null;
+  sic_description: string | null;
+  filer_category: string | null;
+  fiscal_year_end: string | null;
+  state_of_incorporation: string | null;
+  phone: string | null;
+  website: string | null;
+  investor_website: string | null;
+  description: string | null;
+  latest_report_period: string | null;
+  latest_filing_date: string | null;
+  classification_labels: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeriod {
+  period_key: string;
+  label: string;
+  fiscal_year: number | null;
+  fiscal_period: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  filing_date: string | null;
+  form: string | null;
+  accession_number: string | null;
+  is_amendment: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsStatementCell {
+  period_key: string;
+  value: number | null;
+  display_value: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  filing_date: string | null;
+  form: string | null;
+  accession_number: string | null;
+  is_amendment: boolean;
+  concept_name: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsStatementLine {
+  line_key: string;
+  label: string;
+  statement: string;
+  unit: string;
+  cells: FundamentalsStatementCell[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsStatementView {
+  statement: string;
+  basis: string;
+  periods: FundamentalsPeriod[];
+  lines: FundamentalsStatementLine[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeerCandidate {
+  ticker: string;
+  name: string;
+  reason: string | null;
+  exchange: string | null;
+  classification_label: string | null;
+  market_cap: number | null;
+  revenue: number | null;
+  selected: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeerBasket {
+  focal_ticker: string;
+  basket_label: string;
+  peer_tickers: string[];
+  display_order: string[];
+  user_edited: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeerHeatmapCell {
+  ticker: string;
+  value: number | null;
+  display_value: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeerHeatmapMetricRow {
+  metric_id: string;
+  label: string;
+  family: string;
+  cells: FundamentalsPeerHeatmapCell[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeerHeatmapView {
+  tickers: string[];
+  rows: FundamentalsPeerHeatmapMetricRow[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfRow {
+  line_key: string;
+  label: string;
+  unit: string;
+  values: Array<number | null>;
+  display_values: Array<string | null>;
+  editable: boolean;
+  overridden: boolean[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfValuationSummary {
+  scenario_id: string;
+  label: string;
+  enterprise_value: number | null;
+  equity_value: number | null;
+  implied_value_per_share: number | null;
+  upside_downside_pct: number | null;
+  terminal_value: number | null;
+  discounted_terminal_value: number | null;
+  discounted_cash_flow_value: number | null;
+  current_price: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfSensitivityCell {
+  wacc_pct: number;
+  terminal_growth_pct: number;
+  implied_value_per_share: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfSensitivityMatrix {
+  wacc_values: number[];
+  terminal_growth_values: number[];
+  rows: FundamentalsDcfSensitivityCell[][];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfScenario {
+  scenario_id: string;
+  label: string;
+  assumptions: Record<string, unknown>;
+  overrides: Record<string, Array<number | null>>;
+  assumption_rows: FundamentalsDcfRow[];
+  projection_rows: FundamentalsDcfRow[];
+  summary: FundamentalsDcfValuationSummary | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfModel {
+  ticker: string;
+  company_name: string;
+  active_scenario_id: string;
+  historical_year_labels: string[];
+  projection_years: number[];
+  actual_rows: FundamentalsDcfRow[];
+  scenarios: FundamentalsDcfScenario[];
+  sensitivity_matrix: FundamentalsDcfSensitivityMatrix | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsOverview {
+  company: FundamentalsCompany;
+  headline_metrics: FundamentalsMetric[];
+  price_history: FundamentalsPricePoint[];
+  filings: FundamentalsFiling[];
+  peer_candidates: FundamentalsPeerCandidate[];
+  peer_basket: FundamentalsPeerBasket | null;
+  peer_heatmap: FundamentalsPeerHeatmapView | null;
+  dcf_summary: FundamentalsDcfValuationSummary[];
+  warnings: string[];
+}
+
+export interface FundamentalsFinancials {
+  company: FundamentalsCompany;
+  annual_income_statement: FundamentalsStatementView;
+  annual_balance_sheet: FundamentalsStatementView;
+  annual_cash_flow_statement: FundamentalsStatementView;
+  quarterly_income_statement: FundamentalsStatementView;
+  quarterly_balance_sheet: FundamentalsStatementView;
+  quarterly_cash_flow_statement: FundamentalsStatementView;
+  annual_ratio_view: FundamentalsStatementView;
+  quarterly_ratio_view: FundamentalsStatementView;
+  filings: FundamentalsFiling[];
+  warnings: string[];
 }
 
 export interface MacroSeriesPoint {

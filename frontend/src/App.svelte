@@ -8,6 +8,7 @@
   import MacroView from "./views/MacroView.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
   import CryptoView from "./views/CryptoView.svelte";
+  import FundamentalsView from "./views/FundamentalsView.svelte";
   import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
   import ResearchView from "./views/ResearchView.svelte";
   import RiskView from "./views/RiskView.svelte";
@@ -28,6 +29,10 @@
     clearPortfolioHistory,
     copilotThreads,
     cryptoComparison,
+    fundamentalsDcfModel,
+    fundamentalsFinancials,
+    fundamentalsOverview,
+    fundamentalsSearch,
     cryptoFlowSummary,
     cryptoLiquidity,
     cryptoPriceHistory,
@@ -43,6 +48,7 @@
     loadDiagnostics,
     loadIvSession,
     loadIvSurface,
+    loadFundamentalsSearch,
     macroContext,
     loadMacroSeriesHistory,
     loadMacroWorkspace,
@@ -74,7 +80,11 @@
     runCryptoSyntheticPortfolio,
     runDiagnosticsAction,
     runResearch,
+    saveFundamentalsDcfModel,
+    saveFundamentalsPeerBasket,
+    selectedFundamentalsTicker,
     selectCryptoToken,
+    selectFundamentalsCompany,
     selectPredictionMarket,
     setBaseCurrency,
     setMarketDataMode,
@@ -100,6 +110,10 @@
     CryptoSyntheticPortfolio,
     CryptoToken,
     CryptoWorkspaceResponse,
+    FundamentalsDcfModel,
+    FundamentalsFinancials,
+    FundamentalsOverview,
+    FundamentalsSearchResponse,
     IvSessionStatus,
     IvSurface,
     MacroContextState,
@@ -192,6 +206,8 @@
     macro: $macroContext,
     prediction: $predictionMarketDetail,
     crypto: $cryptoTokenDetail,
+    fundamentals: $fundamentalsOverview,
+    fundamentalsTicker: $selectedFundamentalsTicker,
   });
   $: synthesisCopilotSurface = buildSynthesisCopilotSurface({
     activeTab: $activeTab,
@@ -276,6 +292,19 @@
     }
     const chain = detail.chain ?? detail.asset_platform_id ?? "Unknown chain";
     return `Crypto | ${detail.name} | ${chain}`;
+  }
+
+  function describeFundamentalsCopilotContext(
+    detail: FundamentalsOverview | null,
+    ticker: string | null
+  ) {
+    if (!detail) {
+      return `Fundamentals | ${ticker ?? "Load a company"} to ground the Copilot`;
+    }
+    const latestPeriod = detail.company.latest_report_period
+      ? new Date(detail.company.latest_report_period).getFullYear()
+      : "latest";
+    return `Fundamentals | ${detail.company.ticker} | FY ${latestPeriod}`;
   }
 
   function describeRiskCopilotContext(result: RiskResult | null, mode: WorkspaceMode | null) {
@@ -512,6 +541,8 @@
     macro,
     prediction,
     crypto,
+    fundamentals,
+    fundamentalsTicker,
   }: {
     tab: TabId;
     workspaceMode: WorkspaceMode | null;
@@ -527,6 +558,8 @@
     macro: MacroContextState;
     prediction: PredictionMarket | null;
     crypto: CryptoToken | null;
+    fundamentals: FundamentalsOverview | null;
+    fundamentalsTicker: string | null;
   }): CopilotSurfaceState {
     if (tab === "portfolio") {
       return {
@@ -616,6 +649,24 @@
         placeholder:
           "Pressure-test the token thesis, challenge the narrative fit, or compare liquidity quality versus the current benchmark.",
         thread: threads.crypto,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
+      };
+    }
+
+    if (tab === "fundamentals") {
+      return {
+        supported: false,
+        domain: null,
+        triggerLabel: "Coming later",
+        contextLabel: describeFundamentalsCopilotContext(fundamentals, fundamentalsTicker),
+        domainLabel: "Fundamentals",
+        guidance:
+          "The Fundamentals workspace is live, but Copilot grounding for filing-native fundamentals, peer baskets, and DCF state has not been wired yet.",
+        placeholder:
+          "Fundamentals Copilot grounding is intentionally disabled until the tab has a dedicated backend context.",
+        thread: null,
         scopeOptions: [],
         selectedScopeDomains: [],
         selectionMessage: null,
@@ -833,6 +884,10 @@
     } else if ($activeTab === "crypto") {
       push("Crypto", $cryptoWorkspace?.warnings, "warning");
       push("Liquidity", $cryptoLiquidity?.warnings, "warning");
+    } else if ($activeTab === "fundamentals") {
+      push("Fundamentals", $fundamentalsOverview?.warnings, "warning");
+      push("Financials", $fundamentalsFinancials?.warnings, "warning");
+      push("DCF", $fundamentalsDcfModel?.warnings, "warning");
     } else if ($activeTab === "risk") {
       push("Risk", $riskResult?.warnings, "warning");
     } else {
@@ -884,6 +939,10 @@
       await loadPredictionMarketScreener();
     } else if (nextTab === "crypto") {
       await loadCryptoWorkspace();
+    } else if (nextTab === "fundamentals") {
+      await loadFundamentalsSearch({
+        query: $selectedFundamentalsTicker ?? undefined
+      });
     } else if (nextTab === "iv") {
       const autoLoaded = await loadResearchIvContext();
       if (!autoLoaded) {
@@ -966,6 +1025,13 @@
 
     if ($activeTab === "crypto") {
       await loadCryptoWorkspace({ forceRefresh: true });
+    }
+
+    if ($activeTab === "fundamentals") {
+      await loadFundamentalsSearch({
+        query: $selectedFundamentalsTicker ?? undefined,
+        forceRefresh: true
+      });
     }
 
     if ($activeTab === "macro") {
@@ -1295,6 +1361,20 @@
             onSelectToken={selectCryptoToken}
             onRunSyntheticPortfolio={runCryptoSyntheticPortfolio}
             onClearSyntheticPortfolio={clearCryptoSyntheticPortfolio}
+          />
+        {:else if $activeTab === "fundamentals"}
+          <FundamentalsView
+            search={$fundamentalsSearch}
+            selectedTicker={$selectedFundamentalsTicker}
+            overview={$fundamentalsOverview}
+            financials={$fundamentalsFinancials}
+            dcfModel={$fundamentalsDcfModel}
+            loading={$loading.fundamentals}
+            saving={$loading.fundamentalsSave}
+            onSearch={loadFundamentalsSearch}
+            onSelectCompany={selectFundamentalsCompany}
+            onSavePeerBasket={saveFundamentalsPeerBasket}
+            onSaveDcfModel={saveFundamentalsDcfModel}
           />
         {:else if $activeTab === "risk"}
           <RiskView
