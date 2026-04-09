@@ -362,159 +362,163 @@
           />
         </article>
 
-        <div class="overview-context-row">
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Pulse</p>
-                <h3>Market Pulse</h3>
-              </div>
-            </div>
-
-            <div class="focus-list">
-              {#each focusRows as row}
-                <div class="focus-row">
-                  <span class="focus-label">{row.label}</span>
-                  <strong class={`focus-value ${row.tone ?? ""}`}>{row.value}</strong>
-                  <p>{row.body}</p>
+        <div class="overview-packed">
+          <div class="overview-left">
+            <div class="overview-top-pair">
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Pulse</p>
+                    <h3>Market Pulse</h3>
+                  </div>
                 </div>
-              {/each}
-            </div>
-          </article>
 
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Selection</p>
-                <h3>Quick Take</h3>
+                <div class="focus-list">
+                  {#each focusRows as row}
+                    <div class="focus-row">
+                      <span class="focus-label">{row.label}</span>
+                      <strong class={`focus-value ${row.tone ?? ""}`}>{row.value}</strong>
+                      <p>{row.body}</p>
+                    </div>
+                  {/each}
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Selection</p>
+                    <h3>Quick Take</h3>
+                  </div>
+                  <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
+                </div>
+
+                <div class="focus-list">
+                  <div class="focus-row compact-focus">
+                    <span class="focus-label">Name</span>
+                    <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
+                    <p>{detail?.screen_rationale ?? "Select a token from the treemap or table."}</p>
+                  </div>
+                  <div class="focus-row compact-focus">
+                    <span class="focus-label">Narrative</span>
+                    <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
+                    <p>{comparison?.summary ?? "Select a token to see comparison context."}</p>
+                  </div>
+                  <div class="focus-row compact-focus">
+                    <span class="focus-label">Flow</span>
+                    <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
+                    <p>{flow?.summary ?? "Flow context appears after token selection."}</p>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Universe</p>
+                  <h3>Tokens</h3>
+                </div>
+                <small>{workspace?.tokens?.length ?? 0} tokens</small>
               </div>
-              <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
-            </div>
 
-            <div class="focus-list">
-              <div class="focus-row compact-focus">
-                <span class="focus-label">Name</span>
-                <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
-                <p>{detail?.screen_rationale ?? "Select a token from the treemap or table."}</p>
+              <div class="table-wrap overview-table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
+                  </thead>
+                  <tbody>
+                    {#if workspace?.tokens?.length}
+                      {#each workspace.tokens as token}
+                        <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
+                          <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
+                          <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
+                          <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
+                          <td>{compactMoney(token.market_cap)}</td>
+                          <td>{ratio(token.turnover_ratio_24h)}</td>
+                          <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
+                        </tr>
+                      {/each}
+                    {:else}
+                      <tr><td colspan="6">No tokens matched the current screen.</td></tr>
+                    {/if}
+                  </tbody>
+                </table>
               </div>
-              <div class="focus-row compact-focus">
-                <span class="focus-label">Narrative</span>
-                <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
-                <p>{comparison?.summary ?? "Select a token to see comparison context."}</p>
+            </article>
+          </div>
+
+          <div class="overview-right">
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Narratives</p>
+                  <h3>Basket Board</h3>
+                </div>
+                <small>{workspace?.narratives.length ?? 0} baskets</small>
               </div>
-              <div class="focus-row compact-focus">
-                <span class="focus-label">Flow</span>
-                <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
-                <p>{flow?.summary ?? "Flow context appears after token selection."}</p>
+
+              <div class="basket-grid">
+                {#if workspace?.narratives?.length}
+                  {#each workspace.narratives as basket}
+                    <button type="button" class="basket-card" on:click={() => applyNarrative(basket.label)}>
+                      <span>{basket.label}</span>
+                      <strong>{compactMoney(basket.market_cap)}</strong>
+                      <small class={toneClass(basket.market_cap_change_pct_24h)}>
+                        {pct(basket.market_cap_change_pct_24h)} | {compactMoney(basket.volume_24h)} vol
+                      </small>
+                    </button>
+                  {/each}
+                {:else}
+                  <p class="muted">Narrative baskets will appear with the screener universe.</p>
+                {/if}
               </div>
-            </div>
-          </article>
+            </article>
 
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Narratives</p>
-                <h3>Basket Board</h3>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Opportunity Board</p>
+                  <h3>Flow Proxy Leaders</h3>
+                </div>
+                <small>Gamma turnover + move proxy</small>
               </div>
-              <small>{workspace?.narratives.length ?? 0} baskets</small>
-            </div>
 
-            <div class="basket-grid">
-              {#if workspace?.narratives?.length}
-                {#each workspace.narratives as basket}
-                  <button type="button" class="basket-card" on:click={() => applyNarrative(basket.label)}>
-                    <span>{basket.label}</span>
-                    <strong>{compactMoney(basket.market_cap)}</strong>
-                    <small class={toneClass(basket.market_cap_change_pct_24h)}>
-                      {pct(basket.market_cap_change_pct_24h)} | {compactMoney(basket.volume_24h)} vol
-                    </small>
-                  </button>
-                {/each}
-              {:else}
-                <p class="muted">Narrative baskets will appear with the screener universe.</p>
-              {/if}
-            </div>
-          </article>
-        </div>
-
-        <div class="detail-split">
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Opportunity Board</p>
-                <h3>Flow Proxy Leaders</h3>
+              <div class="table-wrap overview-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Token</th>
+                      <th>24H</th>
+                      <th>Turnover</th>
+                      <th>Volume</th>
+                      <th>Signal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#if flowLeaderboard.length}
+                      {#each flowLeaderboard.slice(0, 8) as token}
+                        <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")}>
+                          <td>
+                            <div class="market-title">
+                              <strong>{token.name}</strong>
+                              <small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? "Cross-sector"}</small>
+                            </div>
+                          </td>
+                          <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
+                          <td>{ratio(token.turnover_ratio_24h)}</td>
+                          <td>{compactMoney(token.total_volume)}</td>
+                          <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
+                        </tr>
+                      {/each}
+                    {:else}
+                      <tr><td colspan="5">Run a screen to populate the opportunity board.</td></tr>
+                    {/if}
+                  </tbody>
+                </table>
               </div>
-              <small>Gamma turnover + move proxy</small>
-            </div>
-
-            <div class="table-wrap overview-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Token</th>
-                    <th>24H</th>
-                    <th>Turnover</th>
-                    <th>Volume</th>
-                    <th>Signal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#if flowLeaderboard.length}
-                    {#each flowLeaderboard.slice(0, 8) as token}
-                      <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")}>
-                        <td>
-                          <div class="market-title">
-                            <strong>{token.name}</strong>
-                            <small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? "Cross-sector"}</small>
-                          </div>
-                        </td>
-                        <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                        <td>{ratio(token.turnover_ratio_24h)}</td>
-                        <td>{compactMoney(token.total_volume)}</td>
-                        <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
-                      </tr>
-                    {/each}
-                  {:else}
-                    <tr><td colspan="5">Run a screen to populate the opportunity board.</td></tr>
-                  {/if}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Universe</p>
-                <h3>Tokens</h3>
-              </div>
-              <small>{workspace?.tokens?.length ?? 0} tokens</small>
-            </div>
-
-            <div class="table-wrap overview-table-wrap">
-              <table>
-                <thead>
-                  <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
-                </thead>
-                <tbody>
-                  {#if workspace?.tokens?.length}
-                    {#each workspace.tokens as token}
-                      <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id)}>
-                        <td><div class="market-title"><strong>{token.name}</strong><small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? token.chain ?? "Unknown chain"}</small></div></td>
-                        <td>{money(token.current_price, token.current_price && token.current_price < 5 ? 4 : 2)}</td>
-                        <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                        <td>{compactMoney(token.market_cap)}</td>
-                        <td>{ratio(token.turnover_ratio_24h)}</td>
-                        <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
-                      </tr>
-                    {/each}
-                  {:else}
-                    <tr><td colspan="6">No tokens matched the current screen.</td></tr>
-                  {/if}
-                </tbody>
-              </table>
-            </div>
-          </article>
+            </article>
+          </div>
         </div>
       {:else if mode === "deep_dive"}
         <article class="panel hero-panel">
@@ -1126,11 +1130,28 @@
     grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.4fr);
   }
 
-  .overview-context-row {
+  .overview-packed {
     display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 1.3fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 0.5rem;
     align-items: start;
+  }
+
+  .overview-left,
+  .overview-right {
+    display: grid;
+    gap: 0.5rem;
+    align-content: start;
+  }
+
+  .overview-top-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .overview-top-pair > .panel {
+    align-self: stretch;
   }
 
   .overview-table-wrap {
@@ -1659,7 +1680,11 @@
   @media (max-width: 1180px) {
     .workspace-grid,
     .detail-split,
-    .overview-context-row {
+    .overview-packed {
+      grid-template-columns: 1fr;
+    }
+
+    .overview-top-pair {
       grid-template-columns: 1fr;
     }
 
