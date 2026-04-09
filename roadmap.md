@@ -22,10 +22,12 @@ The roadmap is organized into phases so that development follows the highest **r
 
 Status markers in this roadmap are lightweight implementation estimates:
 - `Not started (0%)`
-- `In progress (~X%)`
+- `Paused (~X%)`
 - `Complete (100%)`
 
-Per-task completion is tracked only for the currently active phase.
+For paused phases, the percentage is the final completion snapshot captured in this roadmap. Anything left incomplete under a paused phase is explicitly future `Roadmap V2` work.
+
+Completion snapshots in this document should therefore be read as end-of-roadmap checkpoints for paused phases, not as signals that a phase is still active inside this roadmap.
 
 ---
 
@@ -247,8 +249,9 @@ For roadmap purposes, this deliverable is now treated as achieved at a first-pas
 
 ## Phase 2 - Macro Tab
 
-_Status: In progress (~84%)_
-_Active focus: harden the live four-mode Macro workspace, deepen EU/global and official-event coverage, and improve the daily usefulness of the existing heuristic interpretation layers before expanding into any new Macro mode._
+_Status: Paused (~84%)_
+_Pause note: Phase 2 is paused at the current four-mode Macro workspace. All remaining incomplete Phase 2 scope now moves to Roadmap V2._
+_Future work (Roadmap V2): deepen EU/global and official-event coverage, improve interpretation/coherence layers, and carry forward any remaining Macro refinements beyond the current first-pass surface._
 _Recent progress: Macro now functions as a real four-mode research workspace: Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes share persistent context, why-now framing, ranked divergences, coherence/lead-lag annotations, denser public event coverage, policy-path overlays, and deep-link navigation across modes._
 
 #### Completion snapshot
@@ -526,6 +529,8 @@ At the end of Phase 2, Gamma should be able to:
 
 This phase would make Gamma much more effective as a cross-market research environment while still staying within a manageable data and normalization scope.
 
+For roadmap purposes, Phase 2 should now be treated as a substantial first-pass Macro workspace rather than an active in-progress phase: Gamma can already support Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes inside one shared research surface, but the remaining interpretation and broader coverage work is now explicit Roadmap V2 carry-forward scope.
+
 ---
 
 ## Phase 3 - Keyboard Navigation & Power-User Workspace Customization
@@ -604,8 +609,9 @@ At the end of Phase 3, Gamma should support full keyboard-driven navigation acro
 
 ## Phase 4 - AI Copilot Layer
 
-_Status: In progress (~70%)_
-_Active focus: harden the read-only shell-level Copilot into a genuinely cross-context, multi-turn research surface while preserving provider boundaries, modular context assembly, structured research-card generation, provenance, and transparency before expanding into streaming, richer session persistence, saved-workflow handoffs, and later-domain depth._
+_Status: Paused (~70%)_
+_Pause note: Phase 4 is paused at the current shell-level Copilot foundation. All remaining incomplete Phase 4 scope now moves to Roadmap V2._
+_Future work (Roadmap V2): streaming, richer session persistence, saved memo/workflow handoffs, broader provider optionality, deeper comparative/internal tools, and later-domain expansion._
 _Recent progress: Gamma's Phase 4 foundation still spans the full current tab set, and the shell-level Copilot drawer now preserves lightweight per-domain thread history, forwards `previous_response_id` on compatible follow-up turns, resets cleanly when the active grounding lens changes materially, supports explicit shell-level synthesis across multiple loaded Gamma contexts with visible scope, provenance, warnings, and context-aware follow-up resets, and now includes first-pass Crypto context and read-only crypto drilldowns._
 
 #### Completion snapshot
@@ -753,14 +759,15 @@ At the end of Phase 4, Gamma should have an AI-assisted research workflow that c
 
 This phase does not replace the data tabs. It multiplies the value of every other phase.
 
-For roadmap purposes, the current implementation should still be treated as an intermediate foundation rather than a completed AI phase: Gamma can now generate context-aware structured research cards across every current tab in the shell-level workspace, sustain lightweight same-domain follow-up threads in the shell UI, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains, but streaming, richer session persistence, saved memo flows, and later-domain expansion remain open Phase 4 work.
+For roadmap purposes, the current implementation should still be treated as an intermediate foundation rather than a completed AI phase: Gamma can now generate context-aware structured research cards across every current tab in the shell-level workspace, sustain lightweight same-domain follow-up threads in the shell UI, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains, but streaming, richer session persistence, saved memo flows, and later-domain expansion are now explicit Roadmap V2 carry-forward work.
 
 ---
 
 ## Phase 5 - Crypto Tab
 
-_Status: In progress (~73%)_
-_Active focus: deepen the live multi-mode Crypto workspace into stronger wallet/on-chain research depth, richer peer and basket analytics, and more durable provider coverage while preserving normalized schemas, provenance, and the read-only research boundary._
+_Status: Paused (~73%)_
+_Pause note: Phase 5 is paused at the current multi-mode Crypto workspace. All remaining incomplete Phase 5 scope now moves to Roadmap V2._
+_Future work (Roadmap V2): wallet and on-chain analytics, richer peer and basket comparisons, deeper on-chain-aware screening, stronger pool/transaction monitoring, more durable provider coverage, and later derivatives overlays._
 _Recent progress: Crypto now operates as a real multi-mode research tab with Overview, Deep Dive, and Flows & Liquidity workflows; layer-based return mosaics, token research surfaces, synthetic baskets, DEX flow summaries, improved fallback narrative/layer classification, provenance-rich API responses, and Copilot-aware crypto context are now live._
 
 #### Completion snapshot
@@ -911,14 +918,14 @@ At the end of Phase 5, Gamma should be able to:
 
 This phase broadens the app into a more general market-research platform while staying consistent with its data-driven, read-only identity.
 
-For roadmap purposes, Phase 5 should now be treated as a substantial first-pass research workspace rather than merely a started stub: Gamma can already research tokens and sectors, inspect price / supply / liquidity context, explore narrative baskets, run a multi-mode screener across a token universe, compare a token against a basket or fallback benchmark, build first-pass synthetic baskets, inspect DEX-derived flow proxies, and feed provenance-aware crypto context into Copilot, but deeper wallet analytics, richer on-chain interpretation, and later derivatives overlays remain open.
+For roadmap purposes, Phase 5 should now be treated as a substantial first-pass research workspace rather than merely a started stub: Gamma can already research tokens and sectors, inspect price / supply / liquidity context, explore narrative baskets, run a multi-mode screener across a token universe, compare a token against a basket or fallback benchmark, build first-pass synthetic baskets, inspect DEX-derived flow proxies, and feed provenance-aware crypto context into Copilot, but deeper wallet analytics, richer on-chain interpretation, and later derivatives overlays are now explicit Roadmap V2 carry-forward work.
 
 ---
 
 ## Phase 6 - Fundamentals Tab
 
 _Status: Not started (0%)_
-_Remaining focus: full phase scope._
+_Remaining focus: full phase scope. Phase 6 remains the final first-pass phase still intended to be executed inside this current roadmap._
 
 ### Why this phase comes later
 
@@ -1126,16 +1133,16 @@ This becomes increasingly important as fundamentals and AI-assisted outputs are 
 ### Phase 1 - Prediction Markets (`Complete`)
 Build the most differentiated and accessible research tab first.
 
-### Phase 2 - Macro (`In progress ~84%`)
+### Phase 2 - Macro (`Paused ~84%`)
 Build and deepen a multi-mode macro workspace for snapshot monitoring, cross-asset expectations coherence, rates and policy analysis, and event-aware regime framing.
 
 ### Phase 3 - Keyboard Navigation & Workspace Customization (`Complete`)
 Add keyboard shortcuts for view switching, sidebar toggle, and common actions. Add drag-and-drop tab reordering in the sidebar with per-workspace persistence. Keybindings follow the user's custom tab order.
 
-### Phase 4 - AI Copilot (`In progress ~70%`)
+### Phase 4 - AI Copilot (`Paused ~70%`)
 Add a context-aware research assistant that sits on top of the data architecture already built, starting with read-only tool-backed research cards and provenance-aware context injection.
 
-### Phase 5 - Crypto (`In progress ~73%`)
+### Phase 5 - Crypto (`Paused ~73%`)
 Expand the live Crypto research workspace into a stronger multi-mode environment for token, basket, flow, and on-chain analysis, with overview mosaics, deep-dive token research, synthetic baskets, DEX liquidity/flow proxies, comparative context, and Copilot support now live.
 
 ### Phase 6 - Fundamentals (`Not started`)
