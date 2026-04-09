@@ -251,20 +251,15 @@
     { label: "Screen Mcap", value: compactMoney(totalScreenMarketCap), meta: `${screenTokens.length} tokens` },
     { label: "24H Breadth", value: `${advancers}A / ${decliners}D`, meta: pct(weightedMove), metaTone: toneClass(weightedMove) }
   ] satisfies HeadlineMetric[];
-  $: coverageNote = mode === "overview"
-    ? `Overview tracks the current screener universe through a layer treemap sized by ${cryptoSortMetricLabel(sortBy)} and colored by 24H return.`
-    : mode === "flows_liquidity"
-      ? "Flows & Liquidity is a transparent first-pass proxy built from GeckoTerminal pool activity and normalized token metadata."
-      : "Deep Dive centers the selected token, while synthetic baskets let Gamma treat a custom coin selection as a research object inside the same crypto domain.";
   $: sortMetricLabel = cryptoSortMetricLabel(sortBy);
   $: layerTreemap = buildLayerTreemap(screenTokens, sortBy);
   $: flowLeaderboard = [...screenTokens].sort((left, right) => flowLeaderboardScore(right) - flowLeaderboardScore(left)).slice(0, 10);
   $: narrativeLeaderboard = [...(workspace?.narratives ?? [])].sort((left, right) => (right.volume_24h ?? 0) - (left.volume_24h ?? 0)).slice(0, 6);
   $: focusRows = [
-    { label: "Weighted Move", value: pct(weightedMove), body: "Market-cap weighted day return across the current crypto screen.", tone: toneClass(weightedMove) },
-    { label: "Median Tape", value: pct(medianMove), body: "Median 24H move to keep the read from being dominated by the largest names.", tone: toneClass(medianMove) },
-    { label: "Top Flow Name", value: topFlowToken ? topFlowToken.symbol.toUpperCase() : "N/A", body: topFlowToken?.screen_rationale ?? "Gamma flow board combines turnover, volume, and day move proxies." },
-    { label: "Strongest Narrative", value: strongestNarrative?.label ?? "N/A", body: strongestNarrative ? `${pct(strongestNarrative.market_cap_change_pct_24h)} | ${compactMoney(strongestNarrative.volume_24h)} volume` : "Narrative baskets will appear once the workspace loads." }
+    { label: "Weighted Move", value: pct(weightedMove), body: `${advancers} advancing, ${decliners} declining`, tone: toneClass(weightedMove) },
+    { label: "Median Tape", value: pct(medianMove), body: `${screenTokens.length} tokens in screen`, tone: toneClass(medianMove) },
+    { label: "Top Flow Name", value: topFlowToken ? topFlowToken.symbol.toUpperCase() : "N/A", body: topFlowToken ? `turnover ${ratio(topFlowToken.turnover_ratio_24h)} | vol ${compactMoney(topFlowToken.total_volume)} | 7D ${pct(topFlowToken.price_change_pct_7d)}` : "N/A" },
+    { label: "Strongest Narrative", value: strongestNarrative?.label ?? "N/A", body: strongestNarrative ? `${pct(strongestNarrative.market_cap_change_pct_24h)} | ${compactMoney(strongestNarrative.volume_24h)} volume` : "N/A" }
   ] satisfies FocusRow[];
   $: narrativeOptions = Array.from(new Set([...defaultNarrativeOptions, ...(workspace?.narratives ?? []).map((basket) => basket.label)]));
   $: tokenChartSeries = history?.points?.length ? [{ id: "price", label: detail ? `${detail.symbol.toUpperCase()} price` : "Price", color: "var(--chart-primary)", type: "area", data: history.points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.price })).filter((point): point is { time: number; value: number } => point.time != null) }] : [];
@@ -301,7 +296,7 @@
       </div>
       <div class="header-badges">
         {#if detail?.layer_bucket}<span>{detail.layer_bucket}</span>{/if}
-        {#if detail?.chain}<span>{detail.chain}</span>{/if}
+        {#if detail?.chain && !detail.chain.startsWith(detail.layer_bucket ?? "")}<span>{detail.chain}</span>{/if}
         {#if strongestNarrative}<span>{strongestNarrative.label} leads</span>{/if}
       </div>
     </div>
@@ -322,8 +317,6 @@
         {/each}
       </div>
     </div>
-
-    <p class="coverage-note">{coverageNote}</p>
 
     {#if screenWarnings.length}
       <div class="notes-list">
@@ -369,14 +362,13 @@
           />
         </article>
 
-        <div class="detail-split">
+        <div class="overview-context-row">
           <article class="panel">
             <div class="panel-header">
               <div>
                 <p class="eyebrow">Pulse</p>
                 <h3>Market Pulse</h3>
               </div>
-              <small>What matters now</small>
             </div>
 
             <div class="focus-list">
@@ -387,6 +379,34 @@
                   <p>{row.body}</p>
                 </div>
               {/each}
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Selection</p>
+                <h3>Quick Take</h3>
+              </div>
+              <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
+            </div>
+
+            <div class="focus-list">
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Name</span>
+                <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
+                <p>{detail?.screen_rationale ?? "Select a token from the treemap or table."}</p>
+              </div>
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Narrative</span>
+                <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
+                <p>{comparison?.summary ?? "Select a token to see comparison context."}</p>
+              </div>
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Flow</span>
+                <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
+                <p>{flow?.summary ?? "Flow context appears after token selection."}</p>
+              </div>
             </div>
           </article>
 
@@ -408,7 +428,6 @@
                     <small class={toneClass(basket.market_cap_change_pct_24h)}>
                       {pct(basket.market_cap_change_pct_24h)} | {compactMoney(basket.volume_24h)} vol
                     </small>
-                    <p>{basket.description ?? "Gamma-selected basket mapped from CoinGecko category coverage."}</p>
                   </button>
                 {/each}
               {:else}
@@ -418,76 +437,48 @@
           </article>
         </div>
 
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Opportunity Board</p>
-              <h3>Flow Proxy Leaders</h3>
-            </div>
-            <small>Gamma turnover + move proxy</small>
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>24H</th>
-                  <th>Turnover</th>
-                  <th>Volume</th>
-                  <th>Signal</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#if flowLeaderboard.length}
-                  {#each flowLeaderboard.slice(0, 8) as token}
-                    <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")}>
-                      <td>
-                        <div class="market-title">
-                          <strong>{token.name}</strong>
-                          <small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? "Cross-sector"}</small>
-                        </div>
-                      </td>
-                      <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
-                      <td>{ratio(token.turnover_ratio_24h)}</td>
-                      <td>{compactMoney(token.total_volume)}</td>
-                      <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
-                    </tr>
-                  {/each}
-                {:else}
-                  <tr><td colspan="5">Run a screen to populate the opportunity board.</td></tr>
-                {/if}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <div class="detail-split overview-support-grid">
+        <div class="detail-split">
           <article class="panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">Selection</p>
-                <h3>Quick Take</h3>
+                <p class="eyebrow">Opportunity Board</p>
+                <h3>Flow Proxy Leaders</h3>
               </div>
-              <small>{detail?.symbol?.toUpperCase() ?? "None"}</small>
+              <small>Gamma turnover + move proxy</small>
             </div>
 
-            <div class="focus-list">
-              <div class="focus-row compact-focus">
-                <span class="focus-label">Name</span>
-                <strong>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Pick a token"}</strong>
-                <p>{detail?.screen_rationale ?? "Select a token from the treemap or screener table to anchor the research surface."}</p>
-              </div>
-              <div class="focus-row compact-focus">
-                <span class="focus-label">Narrative</span>
-                <strong>{detail?.narrative_labels?.[0] ?? detail?.layer_bucket ?? "N/A"}</strong>
-                <p>{comparison?.summary ?? "Comparison context appears once Gamma resolves a default target."}</p>
-              </div>
-              <div class="focus-row compact-focus">
-                <span class="focus-label">Flow</span>
-                <strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong>
-                <p>{flow?.summary ?? "Flow summary will appear after a token is selected and DEX context is available."}</p>
-              </div>
+            <div class="table-wrap overview-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>24H</th>
+                    <th>Turnover</th>
+                    <th>Volume</th>
+                    <th>Signal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#if flowLeaderboard.length}
+                    {#each flowLeaderboard.slice(0, 8) as token}
+                      <tr class:selected={token.token_id === detail?.token_id} on:click={() => chooseToken(token.token_id, "deep_dive")}>
+                        <td>
+                          <div class="market-title">
+                            <strong>{token.name}</strong>
+                            <small>{token.symbol.toUpperCase()} | {token.layer_bucket ?? "Cross-sector"}</small>
+                          </div>
+                        </td>
+                        <td class={toneClass(token.price_change_pct_24h)}>{pct(token.price_change_pct_24h)}</td>
+                        <td>{ratio(token.turnover_ratio_24h)}</td>
+                        <td>{compactMoney(token.total_volume)}</td>
+                        <td>{token.screen_score?.toFixed(1) ?? "N/A"}</td>
+                      </tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan="5">Run a screen to populate the opportunity board.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
             </div>
           </article>
 
@@ -497,10 +488,10 @@
                 <p class="eyebrow">Universe</p>
                 <h3>Tokens</h3>
               </div>
-              <small>{JSON.stringify({ query, narrative, chain, sortBy })}</small>
+              <small>{workspace?.tokens?.length ?? 0} tokens</small>
             </div>
 
-            <div class="table-wrap compact-overview-table">
+            <div class="table-wrap overview-table-wrap">
               <table>
                 <thead>
                   <tr><th>Token</th><th>Price</th><th>24H</th><th>Mcap</th><th>Turnover</th><th>Score</th></tr>
@@ -620,8 +611,8 @@
           />
 
           <div class="chart-foot">
-            <span>{heroCanvas === "basket" && syntheticPortfolio ? syntheticPortfolio.transformation_note ?? "Synthetic basket history is read-only and derived from CoinGecko daily closes." : detail?.transformation_note ?? "Gamma keeps this surface read-only and provenance-rich."}</span>
-            <strong>{heroCanvas === "basket" && syntheticPortfolio ? `${syntheticPortfolio.source_provider} | ${syntheticPortfolio.origin}` : detail ? `${detail.source_provider} | ${detail.origin}` : "No active token"}</strong>
+            <span>{heroCanvas === "basket" && syntheticPortfolio ? syntheticPortfolio.transformation_note ?? "" : detail?.transformation_note ?? ""}</span>
+            <strong>{heroCanvas === "basket" && syntheticPortfolio ? `${syntheticPortfolio.source_provider} | ${syntheticPortfolio.origin}` : detail ? `${detail.source_provider} | ${detail.origin}` : ""}</strong>
           </div>
         </article>
 
@@ -644,17 +635,14 @@
               <div class="focus-row">
                 <span class="focus-label">7D Gap</span>
                 <strong class={`focus-value ${toneClass(comparison?.price_gap_pct_7d)}`}>{pct(comparison?.price_gap_pct_7d)}</strong>
-                <p>Relative 7D performance difference versus the current comparison target.</p>
               </div>
               <div class="focus-row">
                 <span class="focus-label">30D Gap</span>
                 <strong class={`focus-value ${toneClass(comparison?.price_gap_pct_30d)}`}>{pct(comparison?.price_gap_pct_30d)}</strong>
-                <p>Relative 30D performance difference versus the current comparison target.</p>
               </div>
               <div class="focus-row">
                 <span class="focus-label">Mcap Ratio</span>
                 <strong class="focus-value">{ratio(comparison?.market_cap_ratio)}</strong>
-                <p>Subject market cap divided by the target market cap.</p>
               </div>
             </div>
           </article>
@@ -707,7 +695,7 @@
           </article>
         </div>
 
-        <div class="detail-split">
+        <div class="detail-split" class:basket-empty={!syntheticPortfolio}>
           <article class="panel">
             <div class="panel-header">
               <div>
@@ -724,7 +712,6 @@
                     <span>{basket.label}</span>
                     <strong>{compactMoney(basket.market_cap)}</strong>
                     <small class={toneClass(basket.market_cap_change_pct_24h)}>{pct(basket.market_cap_change_pct_24h)} | {compactMoney(basket.volume_24h)} vol</small>
-                    <p>{basket.description ?? "Gamma-selected basket mapped from CoinGecko category coverage."}</p>
                   </button>
                 {/each}
               {:else}
@@ -784,7 +771,7 @@
             <div class="headline-block">
               <p class="eyebrow">Flows &amp; Liquidity</p>
               <h3>{detail ? `${detail.name} (${detail.symbol.toUpperCase()})` : "Select a token"}</h3>
-              <p class="muted">{flow?.summary ?? "Flow mode interprets the selected token through DEX participation, concentration, and slippage proxies."}</p>
+              {#if flow?.summary}<p class="muted">{flow.summary}</p>{/if}
             </div>
             <div class="badge-stack">
               {#if flow?.slippage_proxy_label}<span class={flowToneClass(flow.slippage_proxy_label)}>{flow.slippage_proxy_label}</span>{/if}
@@ -797,7 +784,7 @@
             <article class="metric">
               <span>DEX Share</span>
               <strong>{pct(flow?.dex_volume_share_of_total_volume != null ? flow.dex_volume_share_of_total_volume * 100 : null)}</strong>
-              <small>Share of reported spot volume</small>
+              <small>of spot volume</small>
             </article>
             <article class="metric">
               <span>Buy Pressure</span>
@@ -872,10 +859,10 @@
             </div>
 
             <div class="focus-list">
-              <div class="focus-row"><span class="focus-label">Liquidity</span><strong class={flowToneClass(flow?.liquidity_concentration_label)}>{flow?.liquidity_concentration_label ?? "N/A"}</strong><p>How dependent the token looks on one or two pools for available depth.</p></div>
-              <div class="focus-row"><span class="focus-label">Flow Regime</span><strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong><p>Gamma first-pass interpretation of buy-side versus sell-side pool activity.</p></div>
-              <div class="focus-row"><span class="focus-label">Reserve / Mcap</span><strong>{pct(flow?.reserve_to_market_cap_ratio != null ? flow.reserve_to_market_cap_ratio * 100 : null)}</strong><p>Total matched reserve as a share of market cap.</p></div>
-              <div class="focus-row"><span class="focus-label">Buyer / Seller</span><strong>{ratio(flow?.participant_balance_ratio)}</strong><p>Buyer versus seller count proxy from tracked pools.</p></div>
+              <div class="focus-row"><span class="focus-label">Liquidity</span><strong class={flowToneClass(flow?.liquidity_concentration_label)}>{flow?.liquidity_concentration_label ?? "N/A"}</strong></div>
+              <div class="focus-row"><span class="focus-label">Flow Regime</span><strong class={flowToneClass(flow?.flow_signal_label)}>{flow?.flow_signal_label ?? "N/A"}</strong></div>
+              <div class="focus-row"><span class="focus-label">Reserve / Mcap</span><strong>{pct(flow?.reserve_to_market_cap_ratio != null ? flow.reserve_to_market_cap_ratio * 100 : null)}</strong></div>
+              <div class="focus-row"><span class="focus-label">Buyer / Seller</span><strong>{ratio(flow?.participant_balance_ratio)}</strong></div>
             </div>
           </article>
         </div>
@@ -1060,7 +1047,7 @@
               <p class="eyebrow">Universe</p>
               <h3>Tokens</h3>
             </div>
-            <small>{JSON.stringify({ query, narrative, chain, sortBy })}</small>
+            <small>{workspace?.tokens?.length ?? 0} tokens</small>
           </div>
 
           <div class="table-wrap">
@@ -1133,6 +1120,21 @@
   .overview-support-grid {
     grid-template-columns: minmax(18rem, 0.88fr) minmax(0, 1.12fr);
     align-items: start;
+  }
+
+  .detail-split.basket-empty {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.4fr);
+  }
+
+  .overview-context-row {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 1.3fr);
+    gap: 0.5rem;
+    align-items: start;
+  }
+
+  .overview-table-wrap {
+    max-height: 24rem;
   }
 
   .panel {
@@ -1656,7 +1658,8 @@
 
   @media (max-width: 1180px) {
     .workspace-grid,
-    .detail-split {
+    .detail-split,
+    .overview-context-row {
       grid-template-columns: 1fr;
     }
 
