@@ -551,59 +551,56 @@
 
           <div class="kpi-grid hero-stat-strip">
             {#if heroCanvas === "basket" && syntheticPortfolio}
-              <article class="metric hero-stat">
+              <div class="metric hero-stat">
                 <span>Basket Return</span>
                 <strong>{pct(syntheticPortfolio.cumulative_return_pct)}</strong>
                 <small>{syntheticPortfolio.lookback_days}D window</small>
-              </article>
-              <article class="metric hero-stat">
+              </div>
+              <div class="metric hero-stat">
                 <span>Vs {syntheticPortfolio.benchmark_label}</span>
                 <strong class={toneClass(syntheticPortfolio.relative_return_pct)}>{pct(syntheticPortfolio.relative_return_pct)}</strong>
                 <small>{pct(syntheticPortfolio.benchmark_return_pct)}</small>
-              </article>
-              <article class="metric hero-stat">
+              </div>
+              <div class="metric hero-stat">
+                <span>Volatility</span>
+                <strong>{pct(syntheticPortfolio.annualized_volatility_pct)}</strong>
+                <small>annualized</small>
+              </div>
+              <div class="metric hero-stat">
                 <span>Weighted Mcap</span>
                 <strong>{compactMoney(syntheticPortfolio.weighted_market_cap)}</strong>
                 <small>Turnover {ratio(syntheticPortfolio.weighted_turnover_ratio_24h)}</small>
-              </article>
-              <article class="metric hero-stat">
-                <span>Effective Positions</span>
+              </div>
+              <div class="metric hero-stat">
+                <span>Positions</span>
                 <strong>{syntheticPortfolio.effective_positions?.toFixed(1) ?? "N/A"}</strong>
-                <small>Vol {pct(syntheticPortfolio.annualized_volatility_pct)}</small>
-              </article>
+                <small>effective</small>
+              </div>
             {:else}
-              <article class="metric hero-stat">
+              <div class="metric hero-stat">
                 <span>Price</span>
                 <strong>{money(detail?.current_price, detail?.current_price && detail.current_price < 5 ? 4 : 2)}</strong>
-                <small class={toneClass(detail?.price_change_pct_24h)}>{pct(detail?.price_change_pct_24h)}</small>
-              </article>
-              <article class="metric hero-stat">
+                <small class={toneClass(detail?.price_change_pct_24h)}>{pct(detail?.price_change_pct_24h)} 24H</small>
+              </div>
+              <div class="metric hero-stat">
                 <span>Market Cap</span>
                 <strong>{compactMoney(detail?.market_cap)}</strong>
                 <small>FDV {compactMoney(detail?.fully_diluted_valuation)}</small>
-              </article>
-              <article class="metric hero-stat">
+              </div>
+              <div class="metric hero-stat">
                 <span>24H Volume</span>
                 <strong>{compactMoney(detail?.total_volume)}</strong>
                 <small>Turnover {ratio(detail?.turnover_ratio_24h)}</small>
-              </article>
-              <article class="metric hero-stat">
-                <span>Supply Float</span>
-                <strong>{detail?.circulating_supply?.toLocaleString() ?? "N/A"}</strong>
-                <small>Total {detail?.total_supply?.toLocaleString() ?? "N/A"}</small>
-              </article>
-            {/if}
-          </div>
-
-          <div class="chart-context-row">
-            <div class="chart-context-copy">
-              <span class="focus-label">Chart Context</span>
-              <p>{heroDescription}</p>
-            </div>
-            {#if heroCanvas !== "basket" && detail}
-              <div class="chart-context-copy align-right">
-                <span class="focus-label">Selected Token</span>
-                <p>{detail.chain ?? "Unknown chain"} | Rank {detail.market_cap_rank ?? "N/A"} | {detail.layer_bucket ?? "Unclassified"}</p>
+              </div>
+              <div class="metric hero-stat">
+                <span>7D</span>
+                <strong class={toneClass(detail?.price_change_pct_7d)}>{pct(detail?.price_change_pct_7d)}</strong>
+                <small>30D {pct(detail?.price_change_pct_30d)}</small>
+              </div>
+              <div class="metric hero-stat">
+                <span>24H Range</span>
+                <strong>{money(detail?.low_24h, 2)}–{money(detail?.high_24h, 2)}</strong>
+                <small>Rank #{detail?.market_cap_rank ?? "N/A"}</small>
               </div>
             {/if}
           </div>
@@ -1419,7 +1416,7 @@
 
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     gap: 0;
     border: 1px solid var(--divider);
     background: var(--bg-0);
@@ -1427,6 +1424,10 @@
 
   .hero-stat-strip {
     margin-top: 0.05rem;
+  }
+
+  .hero-stat-strip .metric {
+    min-width: 0;
   }
 
   .metric {
@@ -1538,30 +1539,6 @@
 
   .focus-value {
     font-size: 0.9rem;
-  }
-
-  .chart-context-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.86fr);
-    gap: 0;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
-  }
-
-  .chart-context-copy {
-    min-width: 0;
-    padding: 0.52rem 0.68rem 0.58rem;
-    display: grid;
-    gap: 0.18rem;
-  }
-
-  .chart-context-copy + .chart-context-copy {
-    border-left: 1px solid var(--divider);
-  }
-
-  .chart-context-copy p {
-    color: var(--text-1);
-    line-height: 1.45;
   }
 
   .align-right {
@@ -1688,14 +1665,6 @@
       grid-template-columns: 1fr;
     }
 
-    .chart-context-row {
-      grid-template-columns: 1fr;
-    }
-
-    .chart-context-copy + .chart-context-copy {
-      border-left: 0;
-      border-top: 1px solid var(--divider);
-    }
   }
 
   @media (max-width: 760px) {
