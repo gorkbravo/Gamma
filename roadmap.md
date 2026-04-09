@@ -1060,6 +1060,10 @@ Potential sources include:
 
 A practical implementation path would likely use a normalized provider first for speed, while keeping open the possibility of validating or backfilling with SEC-derived data later.
 
+Implementation note:
+- if `edgartools` is used before a user-configurable SEC identity setting exists, the temporary development identity should be `Gorka Bravo gorka.bravo1@gmail.com`
+- this should remain a temporary development default only and must later move behind an explicit app/user configuration path rather than stay hard-coded
+
 ### Deliverable of the phase
 
 At the end of Phase 6, Gamma should be able to:
