@@ -12,6 +12,24 @@ The primary references are **Bloomberg Terminal** and **linear.app**: the inform
 
 **The interface serves the data. Never the reverse.**
 
+### Provenance In The UI
+
+Gamma should preserve provenance aggressively in the data model, but **must surface it selectively in the UI**.
+
+The core rule is:
+
+- primary analytical surfaces should show the research object first,
+- provenance should appear when it materially helps interpretation, trust, or debugging,
+- provenance should not dominate the main reading path of a chart, KPI strip, or statement table.
+
+In practice this means:
+
+- show provenance in dedicated provenance panels, filing chronology, drilldowns, tooltips, notes, or explicit source areas,
+- do **not** default to rendering adapter names, internal origins, concept ids, or transformation labels as secondary text inside every cell or row,
+- if provenance text reads like developer text rather than research text, keep it available in the payload but hide it from the primary surface.
+
+Gamma is a research environment, not a schema browser.
+
 ### What "Good" Looks Like
 The **Macro → Cross-Asset** mode is the current gold standard. It is dense text, numbers, signal badges, and thin borders on a single flat surface. Content is the structure. There are no filled card backgrounds, no decorative spacing, no visual chrome competing with the data. All tabs should converge toward this level of flatness and density.
 
@@ -428,6 +446,7 @@ When building a new tab, follow this exact checklist:
 | Spinner or shimmer loading states | Over-engineered, distracting | Static placeholder text in final layout position |
 | Opacity-based panel backgrounds | Ambiguous depth, glassy feel | Solid token or transparent |
 | `linear-gradient` on panel background | Implies lighting/elevation | Flat solid only |
+| Rendering provenance metadata in every table cell or KPI by default | Turns the UI into a developer/debug surface | Keep provenance in the model, but surface it only where the user is explicitly asking for source context |
 
 ---
 

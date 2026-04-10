@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { TabId } from "../lib/api/types";
   import type { TabBarItem } from "./TabBar.svelte";
+  import SearchDropdown from "./SearchDropdown.svelte";
 
   export let title = "Gamma";
   export let activeTab: TabId = "portfolio";
@@ -11,7 +12,6 @@
   export let onSelectTab: (tab: TabId) => void = () => {};
 
   let searchValue = "";
-  let searchFocused = false;
   let previousActiveTab: TabId = activeTab;
 
   function normalizeSearchTerm(value: string) {
@@ -27,30 +27,14 @@
           const id = normalizeSearchTerm(tab.id);
           return label.includes(normalizedSearchValue) || id.includes(normalizedSearchValue);
         });
-  $: showSearchResults = searchFocused && normalizedSearchValue.length > 0;
   $: if (activeTab !== previousActiveTab) {
     previousActiveTab = activeTab;
     searchValue = "";
-    searchFocused = false;
   }
 
   function handleSearchSelect(tabId: TabId) {
     onSelectTab(tabId);
     searchValue = "";
-    searchFocused = false;
-  }
-
-  function handleSearchKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && matchingTabs.length > 0) {
-      event.preventDefault();
-      handleSearchSelect(matchingTabs[0].id);
-      return;
-    }
-
-    if (event.key === "Escape") {
-      searchValue = "";
-      searchFocused = false;
-    }
   }
 </script>
 
@@ -66,49 +50,20 @@
       <h1>{title}</h1>
       <span class="topbar-divider" aria-hidden="true"></span>
       <div class="tab-search">
-        <label class="tab-search-input">
-          <span class="search-icon" aria-hidden="true">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.2" />
-              <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-            </svg>
-          </span>
-          <input
-            bind:value={searchValue}
-            type="search"
-            placeholder="Search tabs"
-            aria-label="Search tabs"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-            on:focus={() => searchFocused = true}
-            on:blur={() => setTimeout(() => searchFocused = false, 120)}
-            on:keydown={handleSearchKeydown}
-          />
-        </label>
-
-        {#if showSearchResults}
-          <div class="tab-search-results" role="listbox" aria-label="Matching tabs">
-            {#if matchingTabs.length > 0}
-              {#each matchingTabs as tab}
-                <button
-                  class="tab-search-result"
-                  class:selected={tab.id === activeTab}
-                  type="button"
-                  on:mousedown|preventDefault={() => handleSearchSelect(tab.id)}
-                >
-                  <span>{tab.label}</span>
-                  {#if tab.id === activeTab}
-                    <span class="tab-search-result-state">Current</span>
-                  {/if}
-                </button>
-              {/each}
-            {:else}
-              <div class="tab-search-empty">No matching tabs</div>
-            {/if}
-          </div>
-        {/if}
+        <SearchDropdown
+          bind:value={searchValue}
+          placeholder="Search tabs"
+          ariaLabel="Search tabs"
+          emptyLabel="No matching tabs"
+          enterBehavior="select-first"
+          results={matchingTabs.map((tab) => ({
+            id: tab.id,
+            primary: tab.label,
+            state: tab.id === activeTab ? "Current" : null,
+            selected: tab.id === activeTab
+          }))}
+          on:select={(event) => handleSearchSelect(event.detail.id as TabId)}
+        />
       </div>
       <button
         class="copilot-trigger"
@@ -162,97 +117,9 @@
   }
 
   .tab-search {
-    position: relative;
     flex: 1 1 17rem;
     min-width: 11rem;
     max-width: 24rem;
-  }
-
-  .tab-search-input {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    width: 100%;
-    padding: 0.28rem 0.55rem;
-    border: 1px solid var(--panel-border);
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--bg-0) 70%, transparent);
-    color: var(--text-1);
-  }
-
-  .tab-search-input:focus-within {
-    border-color: rgba(122, 166, 200, 0.42);
-    color: var(--text-0);
-  }
-
-  .search-icon {
-    display: flex;
-    align-items: center;
-    color: var(--text-2);
-  }
-
-  .tab-search input {
-    width: 100%;
-    min-width: 0;
-    padding: 0;
-    border: 0;
-    outline: none;
-    background: transparent;
-    color: inherit;
-  }
-
-  .tab-search input::-webkit-search-cancel-button {
-    -webkit-appearance: none;
-  }
-
-  .tab-search-results {
-    position: absolute;
-    top: calc(100% + 0.35rem);
-    left: 0;
-    right: 0;
-    z-index: 20;
-    display: grid;
-    gap: 0.2rem;
-    padding: 0.35rem;
-    border: 1px solid var(--panel-border);
-    border-radius: 4px;
-    background: rgba(8, 12, 16, 0.98);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
-  }
-
-  .tab-search-result,
-  .tab-search-empty {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    width: 100%;
-    padding: 0.45rem 0.5rem;
-    border-radius: 3px;
-    font-size: 0.73rem;
-  }
-
-  .tab-search-result {
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text-1);
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .tab-search-result:hover,
-  .tab-search-result.selected {
-    border-color: rgba(122, 166, 200, 0.28);
-    background: rgba(122, 166, 200, 0.08);
-    color: var(--text-0);
-  }
-
-  .tab-search-result-state,
-  .tab-search-empty {
-    color: var(--text-2);
-    font-size: 0.68rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
   }
 
   .hamburger {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import SearchDropdown from "../components/SearchDropdown.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
@@ -65,6 +66,9 @@
     returns: "Returns",
     balance_sheet: "Balance Sheet"
   };
+  const lowerBetterMetricIds = new Set(["ev_to_sales", "ev_to_ebit", "price_to_earnings", "net_debt_to_ebit"]);
+  const positiveOnlyLowerBetterMetricIds = new Set(["ev_to_sales", "ev_to_ebit", "price_to_earnings"]);
+  const marketContextMetricIds = ["current_price", "market_cap", "enterprise_value", "ev_to_sales", "ev_to_ebit", "net_debt", "diluted_shares"];
 
   let mode: FundamentalsMode = "overview";
   let searchQuery = "";
@@ -76,6 +80,7 @@
   let dcfDirty = false;
   let peerFingerprint = "";
   let dcfFingerprint = "";
+  let searchHydratedTicker = "";
 
   const currency = (value: number | null | undefined, digits = 0) =>
     value == null
@@ -99,6 +104,63 @@
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "N/A";
+
+  function companySummary(company: FundamentalsOverview["company"] | FundamentalsFinancials["company"] | null) {
+    if (!company) {
+      return "Select a company to load the SEC profile, filings, statements, and DCF context.";
+    }
+    const description = String(company.description ?? "").trim();
+    const syntheticDescription = [
+      description.startsWith(company.name),
+      description.includes("listed on"),
+      description.includes("files as a"),
+      description.includes(" in ")
+    ].filter(Boolean).length >= 2;
+    if (description && !syntheticDescription) {
+      return description;
+    }
+    return "A proper business summary is not available in the current SEC-native company payload yet.";
+  }
+
+  function heatmapScore(metricId: string, value: number | null | undefined, rowValues: Array<number | null | undefined>) {
+    if (value == null || !Number.isFinite(value)) {
+      return null;
+    }
+    if (positiveOnlyLowerBetterMetricIds.has(metricId) && value <= 0) {
+      return null;
+    }
+    const comparableValues = rowValues.filter((candidate): candidate is number => {
+      if (candidate == null || !Number.isFinite(candidate)) {
+        return false;
+      }
+      if (positiveOnlyLowerBetterMetricIds.has(metricId)) {
+        return candidate > 0;
+      }
+      return true;
+    });
+    if (comparableValues.length < 2) {
+      return 0.5;
+    }
+    const minimum = Math.min(...comparableValues);
+    const maximum = Math.max(...comparableValues);
+    if (minimum === maximum) {
+      return 0.5;
+    }
+    const scaled = (value - minimum) / (maximum - minimum);
+    return lowerBetterMetricIds.has(metricId) ? 1 - scaled : scaled;
+  }
+
+  function heatmapCellClass(metricId: string, value: number | null | undefined, rowValues: Array<number | null | undefined>) {
+    const score = heatmapScore(metricId, value, rowValues);
+    if (score == null) return "heat-neutral";
+    if (score >= 0.88) return "heat-positive-strong";
+    if (score >= 0.72) return "heat-positive";
+    if (score >= 0.58) return "heat-positive-soft";
+    if (score >= 0.42) return "heat-warning";
+    if (score >= 0.28) return "heat-negative-soft";
+    if (score >= 0.14) return "heat-negative";
+    return "heat-negative-strong";
+  }
 
   function toneClass(value: number | null | undefined) {
     if (value == null) return "";
@@ -158,13 +220,6 @@
   async function chooseCompany(ticker: string, options: FundamentalsSelectOptions = {}) {
     searchQuery = ticker.trim().toUpperCase();
     await onSelectCompany(ticker, options);
-  }
-
-  function handleSearchKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void runSearch(false);
-    }
   }
 
   function togglePeer(ticker: string, checked: boolean) {
@@ -231,10 +286,6 @@
     }
   });
 
-  $: if (overview?.company?.ticker && searchQuery.trim().length === 0) {
-    searchQuery = overview.company.ticker;
-  }
-
   $: {
     const nextPeerFingerprint = `${overview?.company.ticker ?? ""}:${overview?.peer_basket?.peer_tickers.join(",") ?? ""}`;
     if (nextPeerFingerprint !== peerFingerprint) {
@@ -258,10 +309,27 @@
     }
   }
 
+  $: {
+    const nextTicker = overview?.company?.ticker ?? financials?.company?.ticker ?? "";
+    if (nextTicker && nextTicker !== searchHydratedTicker && searchQuery.trim().length === 0) {
+      searchQuery = nextTicker;
+      searchHydratedTicker = nextTicker;
+    } else if (!nextTicker) {
+      searchHydratedTicker = "";
+    }
+  }
+
   $: currentCompany = overview?.company ?? financials?.company ?? null;
   $: headlineMetrics = overview?.headline_metrics ?? [];
   $: headlineStripMetrics = headlineMetrics.slice(0, 5);
   $: searchResults = search?.results ?? [];
+  $: searchDropdownResults = searchResults.map((result) => ({
+    id: result.ticker,
+    primary: `${result.ticker}${result.exchange ? ` | ${result.exchange}` : ""}`,
+    secondary: result.name,
+    state: result.ticker === selectedTicker ? "Active" : null,
+    selected: result.ticker === selectedTicker
+  }));
   $: overviewWarnings = overview?.warnings ?? [];
   $: financialWarnings = financials?.warnings ?? [];
   $: dcfWarnings = dcfModel?.warnings ?? [];
@@ -277,6 +345,21 @@
   $: activeScenario = findDcfScenario(dcfModel, dcfDraft.activeScenarioId);
   $: activeScenarioSummary = activeScenario?.summary ?? null;
   $: dcfSummaryRows = dcfModel?.scenarios.filter((scenario) => scenario.summary != null) ?? [];
+  $: filingCount = overview?.filings?.length ?? financials?.filings?.length ?? 0;
+  $: dilutedSharesMetric = headlineMetrics.find((metric) => metric.metric_id === "diluted_shares") ?? null;
+  $: companyAbout = companySummary(currentCompany);
+  $: companyInfoRows = [
+    { label: "Exchange", value: currentCompany?.exchange ?? "N/A" },
+    { label: "SIC", value: currentCompany?.sic_description ?? currentCompany?.sic ?? "N/A" },
+    { label: "Latest Reported", value: shortDate(currentCompany?.latest_report_period) },
+    { label: "Latest Filed", value: shortDate(currentCompany?.latest_filing_date) },
+    { label: "Diluted Shares", value: dilutedSharesMetric?.display_value ?? "N/A" },
+    { label: "Filings Loaded", value: filingCount ? `${filingCount}` : "N/A" }
+  ];
+  $: headerNote = combinedWarnings[0] ?? "";
+  $: marketContextMetrics = marketContextMetricIds
+    .map((metricId) => headlineMetrics.find((metric) => metric.metric_id === metricId))
+    .filter((metric): metric is NonNullable<typeof headlineMetrics[number]> => Boolean(metric));
   $: priceSeries = overview?.price_history?.length
     ? [
         {
@@ -317,14 +400,6 @@
           {/if}
         </p>
       </div>
-      <div class="header-badges">
-        {#each currentCompany?.classification_labels ?? [] as label}
-          <span>{label}</span>
-        {/each}
-        {#if currentCompany?.latest_report_period}
-          <span>Latest {shortDate(currentCompany.latest_report_period)}</span>
-        {/if}
-      </div>
     </div>
 
     <div class="mode-kpi-row">
@@ -340,51 +415,45 @@
           <div class="headline-kpi">
             <span class="headline-kpi-label">{metric.label}</span>
             <strong class="headline-kpi-value">{metric.display_value ?? "N/A"}</strong>
-            {#if metric.value != null}
-              <small class={`headline-kpi-meta ${metricTone(metric.metric_id, metric.value)}`}>{metric.source_provider}</small>
-            {/if}
           </div>
         {/each}
       </div>
     </div>
 
     <div class="search-strip">
-      <label class="search-field filter-wide">
-        <span>Company Search</span>
-        <input bind:value={searchQuery} placeholder="AAPL, Microsoft, NVDA..." on:keydown={handleSearchKeydown} />
-      </label>
-      <button type="button" on:click={() => runSearch(false)} disabled={loading}>{loading ? "Loading..." : "Run Search"}</button>
-      <button type="button" class="secondary" on:click={() => runSearch(true)} disabled={loading}>Refresh Search</button>
-      {#if currentCompany}
-        <button type="button" class="secondary" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
-          Refresh {currentCompany.ticker}
-        </button>
-      {/if}
-    </div>
-
-    <div class="results-strip">
-      {#if searchResults.length}
-        {#each searchResults as result}
-          <button type="button" class:result-chip={true} class:selected-chip={result.ticker === selectedTicker} on:click={() => chooseCompany(result.ticker)}>
-            <strong>{result.ticker}</strong>
-            <small>{result.name}</small>
+      <div class="search-actions">
+        <div class="search-control filter-wide">
+          <span class="search-label">Company Search</span>
+          <SearchDropdown
+            bind:value={searchQuery}
+            placeholder="AAPL, Microsoft, NVDA..."
+            ariaLabel="Company search"
+            emptyLabel="No SEC matches"
+            results={searchDropdownResults}
+            enterBehavior="submit"
+            on:submit={() => runSearch(false)}
+            on:select={(event) => chooseCompany(String(event.detail.id))}
+          />
+        </div>
+        <button type="button" on:click={() => runSearch(false)} disabled={loading}>{loading ? "Loading..." : "Run Search"}</button>
+        <button type="button" class="secondary" on:click={() => runSearch(true)} disabled={loading}>Refresh Search</button>
+        {#if currentCompany}
+          <button type="button" class="secondary" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
+            Refresh {currentCompany.ticker}
           </button>
-        {/each}
-      {:else}
-        <span class="muted">Search results will appear here once Gamma resolves a SEC-ticker match set.</span>
+        {/if}
+      </div>
+
+      {#if headerNote}
+        <div class="header-note" title={combinedWarnings.join(" | ")}>
+          <span class="focus-label">Note</span>
+          <p>{headerNote}</p>
+          {#if combinedWarnings.length > 1}
+            <small>+{combinedWarnings.length - 1}</small>
+          {/if}
+        </div>
       {/if}
     </div>
-
-      {#if combinedWarnings.length}
-        <div class="notes-list">
-          {#each combinedWarnings as warning}
-            <div class="note-row">
-              <span class="focus-label">Note</span>
-              <p>{warning}</p>
-          </div>
-        {/each}
-      </div>
-    {/if}
   </article>
 
   {#if mode === "overview"}
@@ -402,15 +471,15 @@
           <div class="profile-grid">
             <div class="profile-about">
               <span class="section-label">About</span>
-              <p>{currentCompany?.description ?? "Select a company to load the SEC profile, filings, statements, and DCF context."}</p>
+              <p>{companyAbout}</p>
             </div>
             <div class="meta-flat">
-              <div class="meta-row"><span>Exchange</span><strong>{currentCompany?.exchange ?? "N/A"}</strong></div>
-              <div class="meta-row"><span>SIC</span><strong>{currentCompany?.sic_description ?? currentCompany?.sic ?? "N/A"}</strong></div>
-              <div class="meta-row"><span>Filer Category</span><strong>{currentCompany?.filer_category ?? "N/A"}</strong></div>
-              <div class="meta-row"><span>Fiscal Year End</span><strong>{currentCompany?.fiscal_year_end ?? "N/A"}</strong></div>
-              <div class="meta-row"><span>Incorporation</span><strong>{currentCompany?.state_of_incorporation ?? "N/A"}</strong></div>
-              <div class="meta-row"><span>Latest Reported</span><strong>{shortDate(currentCompany?.latest_report_period)}</strong></div>
+              {#each companyInfoRows as row}
+                <div class="meta-row">
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                </div>
+              {/each}
             </div>
           </div>
         </article>
@@ -432,12 +501,11 @@
             <div class="empty-panel">Price history appears once Gamma resolves the selected ticker through the IBKR-aware valuation path.</div>
           {/if}
 
-          <div class="kpi-grid">
-            {#each headlineMetrics.slice(0, 10) as metric}
+          <div class="kpi-grid valuation-kpi-grid">
+            {#each (marketContextMetrics.length ? marketContextMetrics : headlineMetrics.slice(0, 7)) as metric}
               <div class="metric">
                 <span>{metric.label}</span>
-                <strong>{metric.display_value ?? "N/A"}</strong>
-                <small>{metric.origin}</small>
+                <strong class={metricTone(metric.metric_id, metric.value)}>{metric.display_value ?? "N/A"}</strong>
               </div>
             {/each}
           </div>
@@ -472,9 +540,8 @@
                         <td>{row.label}</td>
                         {#each row.cells as cell}
                           <td class:selected-cell={cell.ticker === currentCompany?.ticker}>
-                            <div class="heat-value">
+                            <div class={`heat-cell ${heatmapCellClass(row.metric_id, cell.value, row.cells.map((candidate) => candidate.value))}`}>
                               <strong>{cell.display_value ?? "N/A"}</strong>
-                              <small>{cell.source_provider}</small>
                             </div>
                           </td>
                         {/each}
@@ -615,68 +682,56 @@
       </aside>
     </div>
   {:else if mode === "financials"}
-    <div class="workspace-grid">
-      <div class="primary-column">
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Statement Viewer</p>
-              <h3>{statementOptions.find((option) => option.id === statementKind)?.label ?? "Statement"}</h3>
+    <div class="financials-shell">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Statement Viewer</p>
+            <h3>{statementOptions.find((option) => option.id === statementKind)?.label ?? "Statement"}</h3>
+          </div>
+          <div class="panel-actions">
+            <div class="mode-bar compact-bar">
+              {#each basisOptions as option}
+                <button type="button" class:selected={option.id === statementBasis} on:click={() => (statementBasis = option.id)}>{option.label}</button>
+              {/each}
             </div>
-            <div class="panel-actions">
-              <div class="mode-bar compact-bar">
-                {#each basisOptions as option}
-                  <button type="button" class:selected={option.id === statementBasis} on:click={() => (statementBasis = option.id)}>{option.label}</button>
-                {/each}
-              </div>
-              <div class="mode-bar compact-bar statement-bar">
-                {#each statementOptions as option}
-                  <button type="button" class:selected={option.id === statementKind} on:click={() => (statementKind = option.id)}>{option.label}</button>
-                {/each}
-              </div>
+            <div class="mode-bar compact-bar statement-bar">
+              {#each statementOptions as option}
+                <button type="button" class:selected={option.id === statementKind} on:click={() => (statementKind = option.id)}>{option.label}</button>
+              {/each}
             </div>
           </div>
+        </div>
 
-          <div class="table-wrap statement-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Line Item</th>
-                  {#each currentStatement?.periods ?? [] as period}
-                    <th>
-                      <div class="period-head">
-                        <strong>{period.label}</strong>
-                        <small>{period.form ?? "N/A"} | {shortDate(period.filing_date)}</small>
-                      </div>
-                    </th>
-                  {/each}
-                </tr>
-              </thead>
-              <tbody>
-                {#if currentStatement?.lines?.length}
-                  {#each currentStatement.lines as line}
-                    <tr>
-                      <td><div class="line-label"><strong>{line.label}</strong><small>{line.origin}</small></div></td>
-                      {#each line.cells as cell}
-                        <td>
-                          <div class="cell-stack">
-                            <strong>{cell.display_value ?? "N/A"}</strong>
-                            <small>{cell.source_provider === "gamma" ? "Gamma-derived" : cell.concept_name ?? cell.form ?? "N/A"}</small>
-                          </div>
-                        </td>
-                      {/each}
-                    </tr>
-                  {/each}
-                {:else}
-                  <tr><td colspan={(currentStatement?.periods.length ?? 0) + 1}>Statement data appears once Gamma loads a valid SEC-filer history for the selected ticker.</td></tr>
-                {/if}
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </div>
+        <div class="table-wrap statement-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Line Item</th>
+                {#each currentStatement?.periods ?? [] as period}
+                  <th>{period.label}</th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#if currentStatement?.lines?.length}
+                {#each currentStatement.lines as line}
+                  <tr>
+                    <td class="statement-label-cell"><strong>{line.label}</strong></td>
+                    {#each line.cells as cell}
+                      <td><strong>{cell.display_value ?? "N/A"}</strong></td>
+                    {/each}
+                  </tr>
+                {/each}
+              {:else}
+                <tr><td colspan={(currentStatement?.periods.length ?? 0) + 1}>Statement data appears once Gamma loads a valid SEC-filer history for the selected ticker.</td></tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      </article>
 
-      <aside class="support-column">
+      <div class="financials-support-grid">
         <article class="panel">
           <div class="panel-header">
             <div>
@@ -745,7 +800,7 @@
             </table>
           </div>
         </article>
-      </aside>
+      </div>
     </div>
   {:else}
     <div class="dcf-shell">
@@ -970,6 +1025,18 @@
     gap: 0.5rem;
   }
 
+  .financials-shell {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .financials-support-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.5rem;
+    align-items: start;
+  }
+
   .workspace-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.56fr) minmax(21rem, 0.94fr);
@@ -995,8 +1062,8 @@
   .headline-title-row,
   .builder-actions,
   .panel-actions,
+  .search-actions,
   .search-strip,
-  .header-badges,
   .headline-strip,
   .scenario-strip {
     display: flex;
@@ -1011,12 +1078,11 @@
   }
 
   .headline-title-row,
-  .header-badges,
+  .search-actions,
   .headline-strip,
   .search-strip,
   .scenario-strip,
-  .summary-strip,
-  .results-strip {
+  .summary-strip {
     flex-wrap: wrap;
   }
 
@@ -1027,16 +1093,13 @@
 
   .subtitle,
   .muted,
-  .metric small,
   .focus-row p,
   .meta-row span,
   .line-label small,
-  .cell-stack small,
-  .heat-value small {
+  .cell-stack small {
     color: var(--text-2);
   }
 
-  .header-badges span,
   .dirty-pill {
     border: 1px solid var(--panel-strong);
     background: var(--surface-0);
@@ -1068,7 +1131,6 @@
 
   .mode-bar button,
   button,
-  .result-chip,
   .scenario-card {
     border: 1px solid var(--panel-strong);
     background: var(--surface-0);
@@ -1089,15 +1151,13 @@
   }
 
   .mode-bar button.selected,
-  .scenario-card.selected-scenario,
-  .selected-chip {
+  .scenario-card.selected-scenario {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
   }
 
   .mode-bar button:hover,
   button:hover,
-  .result-chip:hover,
   .scenario-card:hover {
     border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
@@ -1112,15 +1172,13 @@
     border-color: var(--panel-border);
   }
 
-  .result-chip,
   .scenario-card {
     display: grid;
     gap: 0.12rem;
     text-align: left;
   }
 
-  .scenario-card strong,
-  .result-chip strong {
+  .scenario-card strong {
     font-size: 0.92rem;
   }
 
@@ -1142,13 +1200,52 @@
   }
 
   label,
-  .search-field {
+  .search-control {
     display: grid;
     gap: 0.2rem;
   }
 
   .filter-wide {
-    flex: 1 1 18rem;
+    flex: 0 1 16rem;
+  }
+
+  .search-control {
+    min-width: min(16rem, 100%);
+    max-width: 18rem;
+  }
+
+  .search-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.62rem;
+  }
+
+  .header-note {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.6rem;
+    align-items: baseline;
+    min-width: 0;
+    max-width: 34rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--divider);
+  }
+
+  .header-note p,
+  .header-note small {
+    color: var(--text-2);
+    margin: 0;
+  }
+
+  .header-note p {
+    font-size: 0.76rem;
+    line-height: 1.35;
+  }
+
+  .header-note small {
+    font-size: 0.7rem;
+    white-space: nowrap;
   }
 
   input {
@@ -1159,6 +1256,22 @@
     font: inherit;
     font-size: 0.82rem;
     min-height: 2rem;
+  }
+
+  .search-strip {
+    justify-content: space-between;
+    align-items: end;
+  }
+
+  .search-actions {
+    align-items: end;
+    min-width: 0;
+  }
+
+  .search-strip button {
+    min-height: 1.9rem;
+    padding: 0.28rem 0.56rem;
+    font-size: 0.74rem;
   }
 
   .grid-input {
@@ -1216,10 +1329,6 @@
     line-height: 1.2;
   }
 
-  .headline-kpi-meta {
-    color: var(--text-2);
-  }
-
   .profile-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
@@ -1248,6 +1357,11 @@
     padding-top: 0;
   }
 
+  .profile-about p {
+    color: var(--text-1);
+    line-height: 1.45;
+  }
+
   .chart-panel,
   .empty-panel {
     border: 1px solid var(--divider);
@@ -1263,14 +1377,38 @@
     text-align: center;
   }
 
-  .kpi-grid,
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.8rem, 1fr));
+    gap: 0;
+    padding-block: 0.15rem;
+  }
+
   .summary-strip {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
     gap: 0.4rem;
   }
 
-  .metric,
+  .valuation-kpi-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .metric {
+    border: 0;
+    border-left: 1px solid var(--divider);
+    background: none;
+    padding: 0.2rem 1rem;
+    display: grid;
+    gap: 0.12rem;
+    min-width: 0;
+  }
+
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+
   .summary-metric {
     border: 1px solid var(--divider);
     background: var(--bg-0);
@@ -1287,7 +1425,12 @@
     font-size: 0.62rem;
   }
 
-  .metric strong,
+  .metric strong {
+    display: block;
+    margin: 0.22rem 0;
+    font-size: 1rem;
+  }
+
   .summary-metric strong {
     font-size: 0.95rem;
   }
@@ -1338,10 +1481,20 @@
 
   .period-head,
   .line-label,
-  .cell-stack,
-  .heat-value {
+  .cell-stack {
     display: grid;
     gap: 0.12rem;
+  }
+
+  .statement-label-cell {
+    min-width: 14rem;
+  }
+
+  .statement-label-cell strong,
+  .statement-wrap tbody td strong {
+    display: block;
+    color: var(--text-0);
+    font-weight: 600;
   }
 
   .family-cell {
@@ -1354,6 +1507,55 @@
   .selected-col,
   .selected-cell {
     background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  .selected-cell .heat-cell {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+
+  .heat-cell {
+    display: grid;
+    gap: 0.1rem;
+    padding: 0.38rem 0.42rem;
+    margin: -0.18rem -0.12rem;
+    min-height: 2rem;
+    align-content: center;
+  }
+
+  .heat-cell strong {
+    font-size: 0.82rem;
+  }
+
+  .heat-positive-strong {
+    background: color-mix(in srgb, var(--positive) 28%, transparent);
+  }
+
+  .heat-positive {
+    background: color-mix(in srgb, var(--positive) 22%, transparent);
+  }
+
+  .heat-positive-soft {
+    background: color-mix(in srgb, var(--positive) 12%, transparent);
+  }
+
+  .heat-warning {
+    background: color-mix(in srgb, var(--warning) 18%, transparent);
+  }
+
+  .heat-negative-soft {
+    background: color-mix(in srgb, color-mix(in srgb, var(--negative) 58%, var(--warning)) 16%, transparent);
+  }
+
+  .heat-negative-strong {
+    background: color-mix(in srgb, var(--negative) 28%, transparent);
+  }
+
+  .heat-negative {
+    background: color-mix(in srgb, var(--negative) 20%, transparent);
+  }
+
+  .heat-neutral {
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
   }
 
   .overridden-cell {
@@ -1370,7 +1572,8 @@
 
   @media (max-width: 1180px) {
     .workspace-grid,
-    .profile-grid {
+    .profile-grid,
+    .financials-support-grid {
       grid-template-columns: 1fr;
     }
   }
@@ -1379,6 +1582,7 @@
     .header-top,
     .mode-kpi-row,
     .panel-header,
+    .search-actions,
     .search-strip {
       flex-direction: column;
       align-items: stretch;
@@ -1405,6 +1609,20 @@
     .scalar-grid,
     .summary-strip {
       grid-template-columns: 1fr;
+    }
+
+    .valuation-kpi-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .header-note {
+      grid-template-columns: 1fr;
+      gap: 0.2rem;
+      padding-left: 0;
+      border-left: 0;
+      border-top: 1px solid var(--divider);
+      padding-top: 0.45rem;
+      max-width: none;
     }
   }
 </style>
