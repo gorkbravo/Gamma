@@ -9,6 +9,8 @@ Gamma remains a read-only research environment. That means every new normalized 
 - which adapter or module produced it,
 - what transformation logic was applied before display.
 
+This is a **data contract first**, not a requirement that every provenance field be rendered in the primary UI at all times.
+
 ## Minimum Provenance Fields
 
 Every roadmap-era entity should be able to expose, directly or alongside the payload, the following fields:
@@ -32,6 +34,27 @@ Every roadmap-era entity should be able to expose, directly or alongside the pay
 - Cached payloads should retain the original `retrieved_at`; cache write time is not a substitute.
 - When multiple upstream sources contribute to one record, store the dominant provider on the entity and include the combination in `transformation_note`, or attach field-level provenance if the model needs it.
 - Compatibility shims may expose provenance as additive metadata before it becomes mandatory in every response model.
+
+## UI Presentation Rule
+
+Provenance must be available to the frontend, but it should be **presented intentionally rather than sprayed across primary analytical surfaces**.
+
+Preferred presentation patterns:
+
+- dedicated provenance or source panels,
+- filing history / chronology tables,
+- explicit source rows under hero charts or summary cards,
+- notes, caveats, or method sections,
+- tooltips, expandable drilldowns, or detail drawers when the user asks for more context.
+
+Avoid by default:
+
+- repeating `origin` strings in every line item row,
+- showing adapter/module names in every KPI tile,
+- rendering concept names or internal field labels in the main table body unless they are themselves the research object,
+- turning statement viewers or heatmaps into backend-debug surfaces.
+
+If provenance is important for trust but noisy in the core UI, the correct fix is to keep it in the payload and move it to a secondary surface, not to drop it from the model.
 
 ## Initial Normalized Shape
 
@@ -68,4 +91,5 @@ The following cases must include a non-null `transformation_note`:
 
 - Do not block current legacy responses on a big-bang provenance retrofit.
 - Do not add UI-only provenance labels without carrying the underlying metadata through the backend.
+- Do not assume that because provenance exists in the payload it must appear in the primary view.
 - Do not collapse multiple source steps into a vague string such as `computed internally`.

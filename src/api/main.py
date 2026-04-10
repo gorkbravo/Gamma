@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import (
     copilot_router,
     crypto_router,
+    fundamentals_router,
     iv_router,
     macro_router,
     portfolio_router,
@@ -56,6 +57,7 @@ def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
     app.include_router(system_router)
     app.include_router(copilot_router)
     app.include_router(crypto_router)
+    app.include_router(fundamentals_router)
     app.include_router(portfolio_router)
     app.include_router(research_router)
     app.include_router(macro_router)

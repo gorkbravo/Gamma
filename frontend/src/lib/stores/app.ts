@@ -17,6 +17,11 @@ import type {
   CryptoToken,
   CryptoWorkspaceResponse,
   DiagnosticsResponse,
+  FundamentalsDcfModel,
+  FundamentalsFinancials,
+  FundamentalsOverview,
+  FundamentalsPeerBasket,
+  FundamentalsSearchResponse,
   IvSessionStatus,
   IvSurface,
   MacroContextState,
@@ -140,6 +145,28 @@ export interface MacroLoadOptions {
   forceRefresh?: boolean;
 }
 
+export interface FundamentalsSearchOptions {
+  query?: string;
+  limit?: number;
+  forceRefresh?: boolean;
+}
+
+export interface FundamentalsSelectOptions {
+  resetThread?: boolean;
+  forceRefresh?: boolean;
+}
+
+export interface FundamentalsDcfScenarioSaveInput {
+  assumptions: Record<string, unknown>;
+  overrides: Record<string, Array<number | null>>;
+}
+
+export interface FundamentalsDcfSavePayload {
+  activeScenarioId: string;
+  projectionYears: number[];
+  scenarios: Record<string, FundamentalsDcfScenarioSaveInput>;
+}
+
 function createEmptyCopilotThread(domain: CopilotDomain): CopilotThreadState {
   return {
     domain,
@@ -156,6 +183,7 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
     macro: createEmptyCopilotThread("macro"),
     prediction_markets: createEmptyCopilotThread("prediction_markets"),
     crypto: createEmptyCopilotThread("crypto"),
+    fundamentals: createEmptyCopilotThread("fundamentals"),
     risk: createEmptyCopilotThread("risk"),
     iv: createEmptyCopilotThread("iv"),
     synthesis: createEmptyCopilotThread("synthesis")
@@ -196,12 +224,18 @@ export const cryptoLiquidity = writable<CryptoDexLiquiditySummary | null>(null);
 export const cryptoFlowSummary = writable<CryptoFlowSummary | null>(null);
 export const cryptoComparison = writable<CryptoComparison | null>(null);
 export const cryptoSyntheticPortfolio = writable<CryptoSyntheticPortfolio | null>(null);
+export const fundamentalsSearch = writable<FundamentalsSearchResponse | null>(null);
+export const selectedFundamentalsTicker = writable<string | null>(null);
+export const fundamentalsOverview = writable<FundamentalsOverview | null>(null);
+export const fundamentalsFinancials = writable<FundamentalsFinancials | null>(null);
+export const fundamentalsDcfModel = writable<FundamentalsDcfModel | null>(null);
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
   portfolio: null,
   research: null,
   macro: null,
   prediction_markets: null,
   crypto: null,
+  fundamentals: null,
   risk: null,
   iv: null,
   synthesis: null
@@ -249,6 +283,8 @@ export const loading = writable<Record<string, boolean>>({
   crypto: false,
   cryptoDetail: false,
   cryptoPortfolio: false,
+  fundamentals: false,
+  fundamentalsSave: false,
   copilot: false,
   risk: false,
   iv: false,
@@ -350,6 +386,7 @@ const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   macro: "Macro",
   prediction_markets: "Prediction Markets",
   crypto: "Crypto",
+  fundamentals: "Fundamentals",
   risk: "Risk",
   iv: "IV"
 };
@@ -434,6 +471,21 @@ function buildCopilotContextFingerprint(
       historyPoints: history?.points.length ?? 0,
       historyTimestamp: lastItem(history?.points ?? [])?.timestamp ?? null,
       comparisonTarget: comparison?.target_id ?? null
+    });
+  }
+
+  if (domain === "fundamentals") {
+    const overview = get(fundamentalsOverview);
+    const dcf = get(fundamentalsDcfModel);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      ticker: get(selectedFundamentalsTicker),
+      companyTicker: overview?.company.ticker ?? null,
+      companyName: overview?.company.name ?? null,
+      overviewRetrievedAt: overview?.company.retrieved_at ?? null,
+      dcfRetrievedAt: dcf?.retrieved_at ?? null,
+      activeScenarioId: dcf?.active_scenario_id ?? null
     });
   }
 
@@ -1120,6 +1172,162 @@ export async function runCryptoSyntheticPortfolio(
   }
 }
 
+export async function loadFundamentalsSearch(options: FundamentalsSearchOptions = {}) {
+  setLoading("fundamentals", true);
+  try {
+    const params = new URLSearchParams({
+      query: options.query ?? "",
+      limit: String(options.limit ?? 12),
+      force_refresh: options.forceRefresh ? "true" : "false"
+    });
+    const response = await getJson<FundamentalsSearchResponse>(`/fundamentals/search?${params.toString()}`);
+    fundamentalsSearch.set(response);
+    const currentSelection = get(selectedFundamentalsTicker);
+    const selectedStillVisible = response.results.some((result) => result.ticker === currentSelection);
+    const nextSelection =
+      selectedStillVisible
+        ? currentSelection
+        : (response.results[0]?.ticker ?? currentSelection);
+    if (nextSelection) {
+      await selectFundamentalsCompany(nextSelection, {
+        resetThread: nextSelection !== currentSelection || get(fundamentalsOverview) == null,
+        forceRefresh: options.forceRefresh
+      });
+    } else {
+      selectedFundamentalsTicker.set(null);
+      fundamentalsOverview.set(null);
+      fundamentalsFinancials.set(null);
+      fundamentalsDcfModel.set(null);
+      resetCopilotCard("fundamentals");
+    }
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("fundamentals", false);
+  }
+}
+
+export async function selectFundamentalsCompany(
+  ticker: string,
+  options: FundamentalsSelectOptions = {}
+) {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  if (!normalizedTicker) {
+    return null;
+  }
+  selectedFundamentalsTicker.set(normalizedTicker);
+  if (options.resetThread ?? true) {
+    resetCopilotCard("fundamentals");
+  }
+  setLoading("fundamentals", true);
+  try {
+    const querySuffix = options.forceRefresh ? "?force_refresh=true" : "";
+    const [overviewResult, financialsResult, dcfResult] = await Promise.allSettled([
+      getJson<FundamentalsOverview>(`/fundamentals/${normalizedTicker}/overview${querySuffix}`),
+      getJson<FundamentalsFinancials>(`/fundamentals/${normalizedTicker}/financials${querySuffix}`),
+      getJson<FundamentalsDcfModel>(`/fundamentals/${normalizedTicker}/dcf${querySuffix}`)
+    ]);
+
+    const errors: unknown[] = [];
+
+    if (overviewResult.status === "fulfilled") {
+      fundamentalsOverview.set(overviewResult.value);
+    } else {
+      fundamentalsOverview.set(null);
+      errors.push(overviewResult.reason);
+    }
+
+    if (financialsResult.status === "fulfilled") {
+      fundamentalsFinancials.set(financialsResult.value);
+    } else {
+      fundamentalsFinancials.set(null);
+      errors.push(financialsResult.reason);
+    }
+
+    if (dcfResult.status === "fulfilled") {
+      fundamentalsDcfModel.set(dcfResult.value);
+    } else {
+      fundamentalsDcfModel.set(null);
+      errors.push(dcfResult.reason);
+    }
+
+    if (errors.length === 0) {
+      lastError.set("");
+    } else {
+      setError(errors[0]);
+    }
+    return {
+      overview: overviewResult.status === "fulfilled" ? overviewResult.value : null,
+      financials: financialsResult.status === "fulfilled" ? financialsResult.value : null,
+      dcf: dcfResult.status === "fulfilled" ? dcfResult.value : null
+    };
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("fundamentals", false);
+  }
+}
+
+export async function saveFundamentalsPeerBasket(ticker: string, peerTickers: string[]) {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  setLoading("fundamentalsSave", true);
+  try {
+    const response = await postJson<FundamentalsPeerBasket>(`/fundamentals/${normalizedTicker}/peers`, {
+      peer_tickers: peerTickers
+    });
+    await selectFundamentalsCompany(normalizedTicker, { resetThread: false });
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("fundamentalsSave", false);
+  }
+}
+
+export async function saveFundamentalsDcfModel(ticker: string, payload: FundamentalsDcfSavePayload) {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  setLoading("fundamentalsSave", true);
+  try {
+    const response = await postJson<FundamentalsDcfModel>(`/fundamentals/${normalizedTicker}/dcf`, {
+      active_scenario_id: payload.activeScenarioId,
+      projection_years: payload.projectionYears,
+      scenarios: Object.fromEntries(
+        Object.entries(payload.scenarios).map(([scenarioId, value]) => [
+          scenarioId,
+          {
+            assumptions: value.assumptions,
+            overrides: value.overrides
+          }
+        ])
+      )
+    });
+    fundamentalsDcfModel.set(response);
+    fundamentalsOverview.update((current) =>
+      current == null
+        ? current
+        : {
+            ...current,
+            dcf_summary: response.scenarios
+              .map((scenario) => scenario.summary)
+              .filter((summary): summary is NonNullable<typeof summary> => summary != null)
+          }
+    );
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("fundamentalsSave", false);
+  }
+}
+
 export async function computeRisk(options: RiskComputeOptions) {
   const snapshot = options.snapshot ?? get(portfolioSnapshot) ?? get(researchResult)?.snapshot ?? null;
   if (!snapshot) {
@@ -1236,6 +1444,12 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         workspace_mode: workspaceMode,
         crypto_token_id: get(selectedCryptoTokenId)
       };
+    case "fundamentals":
+      return {
+        current_tab: "fundamentals",
+        workspace_mode: workspaceMode,
+        fundamentals_ticker: get(selectedFundamentalsTicker)
+      };
     case "risk":
       return {
         current_tab: "risk",
@@ -1311,6 +1525,9 @@ function validateSynthesisScopeDomain(
   if (domain === "crypto" && !get(cryptoTokenDetail)) {
     return "Select and load a crypto token before including it in a synthesis card.";
   }
+  if (domain === "fundamentals") {
+    return "Fundamentals Copilot grounding is not implemented yet.";
+  }
   if (domain === "risk" && !get(riskResult)) {
     return "Run a Risk computation before including it in a synthesis card.";
   }
@@ -1349,6 +1566,9 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   }
   if (domain === "crypto" && !get(selectedCryptoTokenId)) {
     return "Select a crypto token before generating a research card.";
+  }
+  if (domain === "fundamentals") {
+    return "Fundamentals Copilot grounding is not implemented yet.";
   }
   if (domain === "risk" && !get(riskResult)) {
     return "Run a risk computation before generating a research card.";

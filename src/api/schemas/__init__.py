@@ -6,6 +6,16 @@ from src.api.schemas.crypto import (
     CryptoWorkspaceRequestModel,
     CryptoWorkspaceResponseModel,
 )
+from src.api.schemas.fundamentals import (
+    FundamentalsDcfModelModel,
+    FundamentalsDcfSaveRequestModel,
+    FundamentalsFinancialsResponseModel,
+    FundamentalsOverviewResponseModel,
+    FundamentalsPeerBasketModel,
+    FundamentalsPeerBasketUpdateRequestModel,
+    FundamentalsSearchResponseModel,
+    FundamentalsSearchResultModel,
+)
 from src.api.schemas.iv import IVSurfaceResponseModel
 from src.api.schemas.macro import (
     MacroDivergenceListResponseModel,
@@ -61,6 +71,14 @@ __all__ = [
     "CryptoWorkspaceResponseModel",
     "DiagnosticsResponseModel",
     "ExcludedAssetModel",
+    "FundamentalsDcfModelModel",
+    "FundamentalsDcfSaveRequestModel",
+    "FundamentalsFinancialsResponseModel",
+    "FundamentalsOverviewResponseModel",
+    "FundamentalsPeerBasketModel",
+    "FundamentalsPeerBasketUpdateRequestModel",
+    "FundamentalsSearchResponseModel",
+    "FundamentalsSearchResultModel",
     "HealthResponseModel",
     "IVSurfaceResponseModel",
     "MacroDivergenceListResponseModel",

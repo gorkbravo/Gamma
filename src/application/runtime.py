@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from src.application.copilot_service import CopilotService
 from src.application.crypto_service import CryptoService
+from src.application.fundamentals_service import FundamentalsService
 from src.application.iv_service import IVService
 from src.application.macro_service import MacroService
 from src.application.portfolio_service import PortfolioService
@@ -21,6 +22,8 @@ from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
 from src.services.crypto_adapters import CoinGeckoAdapter, GeckoTerminalAdapter
+from src.services.fundamentals_adapters import IbkrValuationAdapter, SecFundamentalsAdapter
+from src.services.fundamentals_store import FundamentalsResearchStore
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
@@ -67,6 +70,7 @@ class ApplicationRuntime:
     prediction_market_service: PredictionMarketService
     macro_service: MacroService
     crypto_service: CryptoService
+    fundamentals_service: FundamentalsService
     copilot_service: CopilotService
     risk_service: RiskService
     iv_service: IVService
@@ -214,6 +218,14 @@ def build_runtime(
         market_adapter=CoinGeckoAdapter(cache),
         dex_adapter=GeckoTerminalAdapter(cache),
     )
+    fundamentals_service = FundamentalsService(
+        sec_adapter=SecFundamentalsAdapter(cache),
+        valuation_adapter=IbkrValuationAdapter(
+            research_provider=research_provider,
+            market_data=market_data,
+        ),
+        store=FundamentalsResearchStore(base_dir=resolved_history_dir / "fundamentals"),
+    )
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
@@ -252,6 +264,7 @@ def build_runtime(
         prediction_market_service=prediction_market_service,
         macro_service=macro_service,
         crypto_service=crypto_service,
+        fundamentals_service=fundamentals_service,
         copilot_service=copilot_service,
         risk_service=risk_service,
         iv_service=iv_service,
