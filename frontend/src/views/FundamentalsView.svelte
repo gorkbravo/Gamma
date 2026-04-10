@@ -175,6 +175,17 @@
     return "";
   }
 
+  function sensitivityHeatClass(value: number | null | undefined, range: { min: number; max: number }) {
+    if (value == null || !Number.isFinite(value)) return "";
+    if (range.max === range.min) return "sens-heat-mid";
+    const t = (value - range.min) / (range.max - range.min);
+    if (t >= 0.85) return "sens-heat-pos-strong";
+    if (t >= 0.6) return "sens-heat-pos";
+    if (t >= 0.4) return "sens-heat-mid";
+    if (t >= 0.15) return "sens-heat-neg";
+    return "sens-heat-neg-strong";
+  }
+
   function editableValue(value: number | null | undefined, unit: string) {
     if (value == null) return "";
     if (unit === "percent") return (value * 100).toFixed(1);
@@ -344,6 +355,18 @@
   $: currentRatioView = statementViewForSelection(financials, statementBasis, "ratios");
   $: activeScenario = findDcfScenario(dcfModel, dcfDraft.activeScenarioId);
   $: activeScenarioSummary = activeScenario?.summary ?? null;
+  $: sensitivityRange = (() => {
+    const rows = dcfModel?.sensitivity_matrix?.rows ?? [];
+    const values: number[] = [];
+    for (const row of rows) {
+      for (const cell of row) {
+        const value = cell?.implied_value_per_share;
+        if (typeof value === "number" && Number.isFinite(value)) values.push(value);
+      }
+    }
+    if (!values.length) return { min: 0, max: 0 };
+    return { min: Math.min(...values), max: Math.max(...values) };
+  })();
   $: dcfSummaryRows = dcfModel?.scenarios.filter((scenario) => scenario.summary != null) ?? [];
   $: filingCount = overview?.filings?.length ?? financials?.filings?.length ?? 0;
   $: dilutedSharesMetric = headlineMetrics.find((metric) => metric.metric_id === "diluted_shares") ?? null;
@@ -826,12 +849,27 @@
           {/each}
         </div>
 
-        <div class="summary-strip">
-          <div class="summary-metric"><span>Current Price</span><strong>{currency(activeScenarioSummary?.current_price, 2)}</strong></div>
-          <div class="summary-metric"><span>Enterprise Value</span><strong>{compactCurrency(activeScenarioSummary?.enterprise_value)}</strong></div>
-          <div class="summary-metric"><span>Equity Value</span><strong>{compactCurrency(activeScenarioSummary?.equity_value)}</strong></div>
-          <div class="summary-metric"><span>Implied / Share</span><strong>{currency(activeScenarioSummary?.implied_value_per_share, 2)}</strong></div>
-          <div class="summary-metric"><span>Upside / Downside</span><strong class={toneClass(activeScenarioSummary?.upside_downside_pct)}>{pct(activeScenarioSummary?.upside_downside_pct)}</strong></div>
+        <div class="kpi-grid scenario-kpi-grid">
+          <article class="metric">
+            <span>Current Price</span>
+            <strong>{currency(activeScenarioSummary?.current_price, 2)}</strong>
+          </article>
+          <article class="metric">
+            <span>Enterprise Value</span>
+            <strong>{compactCurrency(activeScenarioSummary?.enterprise_value)}</strong>
+          </article>
+          <article class="metric">
+            <span>Equity Value</span>
+            <strong>{compactCurrency(activeScenarioSummary?.equity_value)}</strong>
+          </article>
+          <article class="metric">
+            <span>Implied / Share</span>
+            <strong>{currency(activeScenarioSummary?.implied_value_per_share, 2)}</strong>
+          </article>
+          <article class="metric">
+            <span>Upside / Downside</span>
+            <strong class={toneClass(activeScenarioSummary?.upside_downside_pct)}>{pct(activeScenarioSummary?.upside_downside_pct)}</strong>
+          </article>
         </div>
       </article>
 
@@ -844,8 +882,8 @@
           <small>{dcfModel?.historical_year_labels.length ?? 0} periods</small>
         </div>
 
-        <div class="table-wrap">
-          <table>
+        <div class="table-wrap sheet-wrap">
+          <table class="sheet-table">
             <thead>
               <tr>
                 <th>Line</th>
@@ -858,9 +896,9 @@
               {#if dcfModel?.actual_rows?.length}
                 {#each dcfModel.actual_rows as row}
                   <tr>
-                    <td>{row.label}</td>
+                    <td class="sheet-label">{row.label}</td>
                     {#each row.display_values as value}
-                      <td>{value ?? "N/A"}</td>
+                      <td class="sheet-cell sheet-cell-fixed"><span class="sheet-fixed">{value ?? "N/A"}</span></td>
                     {/each}
                   </tr>
                 {/each}
@@ -892,8 +930,8 @@
           </label>
         </div>
 
-        <div class="table-wrap">
-          <table>
+        <div class="table-wrap sheet-wrap">
+          <table class="sheet-table">
             <thead>
               <tr>
                 <th>Driver</th>
@@ -906,10 +944,10 @@
               {#if activeScenario?.assumption_rows?.length}
                 {#each activeScenario.assumption_rows as row}
                   <tr>
-                    <td><div class="line-label"><strong>{row.label}</strong><small>{row.origin}</small></div></td>
+                    <td class="sheet-label">{row.label}</td>
                     {#each dcfModel?.projection_years ?? [] as _year, index}
-                      <td>
-                        <input class="grid-input" value={editableValue(assumptionSeriesValue(dcfDraft.activeScenarioId, row.line_key, index), row.unit)} on:change={(event) => handleAssumptionChange(row.line_key, row.unit, index, event)} />
+                      <td class="sheet-cell sheet-cell-edit">
+                        <input class="sheet-input" value={editableValue(assumptionSeriesValue(dcfDraft.activeScenarioId, row.line_key, index), row.unit)} on:change={(event) => handleAssumptionChange(row.line_key, row.unit, index, event)} />
                       </td>
                     {/each}
                   </tr>
@@ -931,8 +969,8 @@
           <small>{activeScenario?.label ?? "No scenario"} drives the visible projection sheet</small>
         </div>
 
-        <div class="table-wrap">
-          <table>
+        <div class="table-wrap sheet-wrap">
+          <table class="sheet-table">
             <thead>
               <tr>
                 <th>Line</th>
@@ -945,13 +983,13 @@
               {#if activeScenario?.projection_rows?.length}
                 {#each activeScenario.projection_rows as row}
                   <tr>
-                    <td><div class="line-label"><strong>{row.label}</strong><small>{row.editable ? "Override-capable" : "Formula output"}</small></div></td>
+                    <td class="sheet-label">{row.label}</td>
                     {#each dcfModel?.projection_years ?? [] as _year, index}
-                      <td class:overridden-cell={row.overridden[index]}>
+                      <td class="sheet-cell" class:sheet-cell-edit={row.editable} class:sheet-cell-fixed={!row.editable} class:overridden-cell={row.overridden[index]}>
                         {#if row.editable}
-                          <input class="grid-input" value={projectionEditableValue(activeScenario, row.line_key, index)} on:change={(event) => handleProjectionOverrideChange(row.line_key, index, event)} />
+                          <input class="sheet-input" value={projectionEditableValue(activeScenario, row.line_key, index)} on:change={(event) => handleProjectionOverrideChange(row.line_key, index, event)} />
                         {:else}
-                          <div class="cell-stack"><strong>{row.display_values[index] ?? "N/A"}</strong><small>{row.origin}</small></div>
+                          <span class="sheet-fixed">{row.display_values[index] ?? "N/A"}</span>
                         {/if}
                       </td>
                     {/each}
@@ -974,8 +1012,8 @@
           <small>{activeScenario?.label ?? "No scenario"}</small>
         </div>
 
-        <div class="table-wrap compact-wrap">
-          <table>
+        <div class="table-wrap compact-wrap sheet-wrap">
+          <table class="sheet-table sensitivity-table">
             <thead>
               <tr>
                 <th>Terminal \\ WACC</th>
@@ -988,9 +1026,9 @@
               {#if dcfModel?.sensitivity_matrix?.rows?.length}
                 {#each dcfModel.sensitivity_matrix.rows as row, rowIndex}
                   <tr>
-                    <td>{pct(dcfModel.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
+                    <td class="sheet-label">{pct(dcfModel.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
                     {#each row as cell}
-                      <td>{currency(cell.implied_value_per_share, 2)}</td>
+                      <td class={`sheet-cell sens-cell ${sensitivityHeatClass(cell.implied_value_per_share, sensitivityRange)}`}>{currency(cell.implied_value_per_share, 2)}</td>
                     {/each}
                   </tr>
                 {/each}
@@ -1081,8 +1119,7 @@
   .search-actions,
   .headline-strip,
   .search-strip,
-  .scenario-strip,
-  .summary-strip {
+  .scenario-strip {
     flex-wrap: wrap;
   }
 
@@ -1094,9 +1131,7 @@
   .subtitle,
   .muted,
   .focus-row p,
-  .meta-row span,
-  .line-label small,
-  .cell-stack small {
+  .meta-row span {
     color: var(--text-2);
   }
 
@@ -1280,6 +1315,112 @@
     padding-inline: 0.4rem;
   }
 
+  .sheet-table {
+    table-layout: fixed;
+  }
+
+  .table-wrap.sheet-wrap {
+    overflow-x: hidden;
+  }
+
+  .sheet-table thead th {
+    text-align: right;
+    padding: 0.35rem 0.5rem;
+  }
+
+  .sheet-table thead th:first-child {
+    text-align: left;
+  }
+
+  .sheet-table tbody td {
+    padding: 0;
+    border-top: 1px solid var(--divider);
+    border-left: 1px solid var(--divider);
+    vertical-align: middle;
+    height: 1.85rem;
+  }
+
+  .sheet-table tbody td:first-child {
+    border-left: 0;
+  }
+
+  .sheet-table .sheet-label {
+    padding: 0 0.55rem;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sheet-table .sheet-cell {
+    text-align: right;
+  }
+
+  .sheet-table .sheet-fixed {
+    display: block;
+    padding: 0 0.5rem;
+    color: var(--accent);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sheet-table .sheet-input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-0);
+    text-align: right;
+    padding: 0 0.5rem;
+    height: 1.83rem;
+    font: inherit;
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sheet-table .sheet-input:focus {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+    background: var(--bg-1);
+  }
+
+  .sheet-table .sheet-cell-edit {
+    background: var(--bg-1);
+  }
+
+  .sheet-table .sheet-cell-fixed {
+    background: var(--bg-0);
+  }
+
+  .sensitivity-table .sens-cell {
+    padding: 0 0.55rem;
+    text-align: right;
+    color: var(--text-0);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sens-heat-pos-strong {
+    background: color-mix(in srgb, var(--positive) 32%, transparent);
+  }
+
+  .sens-heat-pos {
+    background: color-mix(in srgb, var(--positive) 18%, transparent);
+  }
+
+  .sens-heat-mid {
+    background: color-mix(in srgb, var(--warning) 16%, transparent);
+  }
+
+  .sens-heat-neg {
+    background: color-mix(in srgb, var(--negative) 18%, transparent);
+  }
+
+  .sens-heat-neg-strong {
+    background: color-mix(in srgb, var(--negative) 32%, transparent);
+  }
+
   .scalar-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 12rem));
@@ -1384,14 +1525,12 @@
     padding-block: 0.15rem;
   }
 
-  .summary-strip {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-    gap: 0.4rem;
-  }
-
   .valuation-kpi-grid {
     grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .scenario-kpi-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .metric {
@@ -1409,16 +1548,7 @@
     border-left: 0;
   }
 
-  .summary-metric {
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
-    padding: 0.55rem 0.65rem;
-    display: grid;
-    gap: 0.15rem;
-  }
-
-  .metric span,
-  .summary-metric span {
+  .metric span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
@@ -1429,10 +1559,6 @@
     display: block;
     margin: 0.22rem 0;
     font-size: 1rem;
-  }
-
-  .summary-metric strong {
-    font-size: 0.95rem;
   }
 
   .table-wrap {
@@ -1479,9 +1605,7 @@
     vertical-align: top;
   }
 
-  .period-head,
-  .line-label,
-  .cell-stack {
+  .period-head {
     display: grid;
     gap: 0.12rem;
   }
@@ -1606,12 +1730,12 @@
       grid-template-columns: 1fr;
     }
 
-    .scalar-grid,
-    .summary-strip {
+    .scalar-grid {
       grid-template-columns: 1fr;
     }
 
-    .valuation-kpi-grid {
+    .valuation-kpi-grid,
+    .scenario-kpi-grid {
       grid-template-columns: 1fr;
     }
 
