@@ -3,11 +3,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-from edgar import Company, set_identity
-from edgar.reference.tickers import get_company_tickers
 
 from src.models.fundamentals import (
     FundamentalsCompanyRecord,
@@ -23,6 +21,9 @@ from src.models.instruments import InstrumentReference
 from src.services.cache import CacheService
 from src.services.data_providers import ResearchDataProvider, contract_for_instrument
 from src.services.market_data import MarketDataService
+
+if TYPE_CHECKING:
+    from edgar import Company
 
 
 _ANNUAL_FORMS = {"10-K", "10-K/A"}
@@ -303,6 +304,13 @@ def _format_statement_value(value: float | None, unit: str) -> str:
     return f"{value:,.0f}"
 
 
+def _load_edgar_tools() -> tuple[Any, Any, Any]:
+    from edgar import Company, set_identity
+    from edgar.reference.tickers import get_company_tickers
+
+    return Company, set_identity, get_company_tickers
+
+
 class SecFundamentalsAdapter:
     def __init__(self, cache: CacheService) -> None:
         self.cache = cache
@@ -315,11 +323,11 @@ class SecFundamentalsAdapter:
         self._reference_retrieved_at: datetime | None = None
         self._company_cache: dict[str, SecCompanyData] = {}
         self._edgar_configured = False
-        self._configure_edgar_tools()
 
     def _configure_edgar_tools(self) -> None:
         if self._edgar_configured:
             return
+        _, set_identity, _ = _load_edgar_tools()
         identity = f"{self.identity_name} {self.identity_email}".strip()
         os.environ["EDGAR_IDENTITY"] = identity
         set_identity(identity)
@@ -454,6 +462,7 @@ class SecFundamentalsAdapter:
     def _load_reference_rows(self, *, force_refresh: bool) -> list[dict[str, str | None]]:
         if self._reference_rows is not None and not force_refresh:
             return self._reference_rows
+        _, _, get_company_tickers = _load_edgar_tools()
         df = get_company_tickers(as_dataframe=True, clean_name=False, clean_suffix=False)
         rows: list[dict[str, str | None]] = []
         for record in df.to_dict(orient="records"):
@@ -485,6 +494,7 @@ class SecFundamentalsAdapter:
         if not normalized:
             return None
         self._configure_edgar_tools()
+        Company, _, _ = _load_edgar_tools()
         try:
             return Company(normalized)
         except Exception:

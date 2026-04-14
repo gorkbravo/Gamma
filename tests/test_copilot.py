@@ -20,6 +20,17 @@ from src.models.crypto import (
     CryptoPricePoint,
     CryptoTokenRecord,
 )
+from src.models.macro import (
+    MacroDivergenceRecord,
+    MacroEventRecord,
+    MacroMetricRecord,
+    MacroRatesPolicySummary,
+    MacroSeriesHistory,
+    MacroSeriesPoint,
+    MacroSnapshotCard,
+    MacroSnapshotFocusItem,
+    MacroSnapshotPayload,
+)
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 
@@ -348,6 +359,149 @@ class _FollowupCaptureProvider:
         )
 
 
+class _StubMacroService:
+    retrieved_at = datetime(2026, 4, 5, 10, 0, 0)
+
+    def get_snapshot(self, request):
+        metric = MacroMetricRecord(
+            metric_id="policy-rate",
+            label="Policy rate",
+            value=5.25,
+            display_value="5.25%",
+            delta_display="+25 bps",
+            series_id="us-policy-rate",
+            source_provider="fixture",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.macro_fixture",
+        )
+        event = self.get_events(region=request.region, force_refresh=False)[0]
+        return MacroSnapshotPayload(
+            region=request.region,
+            timeframe=request.timeframe,
+            theme=request.theme,
+            comparison_region=request.comparison_region,
+            available_regions=["US", "EU", "Global"],
+            available_timeframes=["3M", "1Y"],
+            available_themes=["all", "policy", "inflation"],
+            focus_items=[
+                MacroSnapshotFocusItem(
+                    focus_id="policy-focus",
+                    title="Policy repricing",
+                    summary="Front-end rates are the active macro swing factor.",
+                    why_now="The fixture marks policy as the current focus.",
+                    mode_target="rates_policy",
+                    target_theme="policy",
+                    source_provider="fixture",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.macro_fixture",
+                )
+            ],
+            snapshot_cards=[
+                MacroSnapshotCard(
+                    card_id="rates",
+                    title="Rates",
+                    subtitle="Policy",
+                    summary="Rates remain restrictive in the fixture context.",
+                    mode_target="rates_policy",
+                    target_theme="policy",
+                    why_now="Policy context is loaded for Copilot tests.",
+                    metrics=[metric],
+                    source_provider="fixture",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.macro_fixture",
+                )
+            ],
+            rates_policy=MacroRatesPolicySummary(
+                headline="Policy remains restrictive",
+                summary="Fixture policy summary for Copilot route tests.",
+                policy_metrics=[metric],
+                events=[event],
+                path_headline="Hold path",
+                path_summary="The fixture path is stable.",
+                market_alignment_label="mixed",
+                market_alignment_summary="Fixture markets are mixed.",
+                source_provider="fixture",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.macro_fixture",
+            ),
+            top_divergences=self.get_divergences(request),
+            upcoming_events=[event],
+            warnings=[],
+            source_provider="fixture",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.macro_fixture",
+        )
+
+    def get_divergences(self, request, *, histories=None, comparison_histories=None):
+        del histories, comparison_histories
+        return [
+            MacroDivergenceRecord(
+                divergence_id="policy-gap",
+                theme=request.theme,
+                region=request.region,
+                headline="Policy gap",
+                summary="Fixture divergence keeps Copilot route tests offline.",
+                score=0.72,
+                label="elevated",
+                series_ids=["us-cpi-yoy", "us-policy-rate"],
+                research_focus="Check whether inflation confirms the policy signal.",
+                source_provider="fixture",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.macro_fixture",
+                comparison_region=request.comparison_region,
+            )
+        ]
+
+    def get_events(self, *, region="US", force_refresh=False):
+        del force_refresh
+        return [
+            MacroEventRecord(
+                event_id="fixture-cpi",
+                title="CPI Release",
+                category="inflation",
+                region=region,
+                scheduled_at=datetime(2026, 4, 15, 12, 30, 0),
+                relative_label="next",
+                importance="high",
+                source_provider="fixture",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.macro_fixture",
+            )
+        ]
+
+    def get_series_history(self, series_id, *, region="US", timeframe="3M", force_refresh=False):
+        del force_refresh
+        return MacroSeriesHistory(
+            series_id=series_id,
+            title="US CPI YoY",
+            region=region,
+            unit="percent",
+            frequency="monthly",
+            theme="inflation",
+            mode_tags=["snapshot", "rates_policy"],
+            points=[
+                MacroSeriesPoint(
+                    timestamp=datetime(2026, 1, 1, 0, 0, 0),
+                    value=3.1,
+                    source_provider="fixture",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.macro_fixture",
+                ),
+                MacroSeriesPoint(
+                    timestamp=datetime(2026, 4, 1, 0, 0, 0),
+                    value=3.4,
+                    source_provider="fixture",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.macro_fixture",
+                ),
+            ],
+            source_provider="fixture",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.macro_fixture",
+            transformation_note=f"Fixture {timeframe} macro history keeps Copilot route tests hermetic.",
+        )
+
+
 def _build_test_client(tmp_path):
     runtime = build_runtime(
         mock_mode=True,
@@ -356,6 +510,7 @@ def _build_test_client(tmp_path):
         sample_data_dir="sample_data",
     )
     runtime.copilot_service.provider = _StubCopilotProvider()
+    runtime.copilot_service.macro_service = _StubMacroService()
     return TestClient(create_app(runtime)), runtime
 
 
@@ -388,6 +543,42 @@ def test_macro_copilot_route_returns_structured_research_card(tmp_path):
         assert any(source["source_id"] == "macro.snapshot" for source in payload["sources"])
         assert any(source["source_id"].startswith("macro.series.us-cpi-yoy") for source in payload["sources"])
         assert payload["card"]["source_backed_claims"][0]["evidence_refs"]
+    finally:
+        runtime.shutdown()
+
+
+def test_macro_copilot_route_degrades_when_macro_provider_fails(tmp_path):
+    class FailingMacroService:
+        def get_snapshot(self, request):
+            del request
+            raise RuntimeError("FRED returned HTTP 500")
+
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.macro_service = FailingMacroService()
+    runtime.copilot_service.provider = _FollowupCaptureProvider()
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Frame the active macro setup.",
+                "context": {
+                    "current_tab": "macro",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert any("Macro context is degraded" in warning for warning in payload["warnings"])
+        assert any(source["source_id"] == "macro.degraded" for source in payload["sources"])
     finally:
         runtime.shutdown()
 

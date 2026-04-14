@@ -672,9 +672,40 @@ class CopilotService:
             comparison_region=macro.comparison_region,
             force_refresh=False,
         )
-        snapshot = self.macro_service.get_snapshot(snapshot_request)
-        divergences = self.macro_service.get_divergences(snapshot_request)
-        events = self.macro_service.get_events(region=macro.region, force_refresh=False)
+        try:
+            snapshot = self.macro_service.get_snapshot(snapshot_request)
+            divergences = self.macro_service.get_divergences(snapshot_request)
+            events = self.macro_service.get_events(region=macro.region, force_refresh=False)
+        except Exception as exc:
+            warning = f"Macro context is degraded because a macro provider failed: {exc}"
+            return CopilotContextBundle(
+                domain="macro",
+                current_tab=request.context.current_tab or "macro",
+                summary_data={
+                    "mode": macro.mode,
+                    "region": macro.region,
+                    "timeframe": macro.timeframe,
+                    "theme": macro.theme,
+                    "comparison_region": macro.comparison_region,
+                    "focus_items": [],
+                    "snapshot_cards": [],
+                    "top_divergences": [],
+                    "rates_policy": None,
+                    "upcoming_events": [],
+                    "warnings": [warning],
+                },
+                sources=[
+                    CopilotSourceRef(
+                        source_id="macro.degraded",
+                        label="Macro workspace unavailable",
+                        kind="warning",
+                        provider="gamma",
+                        origin="gamma.macro.degraded_context",
+                        description="Macro context could not be fully assembled because an upstream macro provider failed.",
+                    )
+                ],
+                warnings=[warning],
+            )
         summary_data = {
             "mode": macro.mode,
             "region": macro.region,

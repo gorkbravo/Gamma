@@ -42,6 +42,8 @@ function buildBackend() {
     repoRoot,
     "--add-data",
     `${path.join(repoRoot, "sample_data")}${dataSeparator}sample_data`,
+    "--collect-data",
+    "edgar",
     "--hidden-import",
     "uvicorn.logging",
     "--hidden-import",

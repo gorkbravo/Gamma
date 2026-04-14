@@ -264,7 +264,7 @@ Important caveats:
 
 #### Macro tab
 
-Macro is Gamma's current active roadmap phase and the densest research workspace in the app. It is a multi-mode surface with shared context:
+Macro is paused at the roadmap's first-pass checkpoint and is the densest research workspace in the app. It is a multi-mode surface with shared context:
 
 - `Snapshot`
 - `Cross-Asset`
@@ -384,7 +384,7 @@ Important caveats:
 
 #### Crypto tab
 
-Crypto is the start of Gamma's Phase 5 push. The current pass is a research-first vertical slice, not a trading terminal.
+Crypto is paused at the roadmap's first-pass checkpoint. The current pass is a research-first vertical slice, not a trading terminal.
 
 Main surfaces:
 
@@ -414,13 +414,13 @@ Important caveats:
 Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 
 - `Phase 1 - Prediction Markets`: complete at a first-pass level
-- `Phase 2 - Macro`: in progress, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes already live
+- `Phase 2 - Macro`: paused around 84%, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes already live
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
-- `Phase 4 - AI Copilot`: in progress, with a shell-level read-only Copilot that can generate structured research cards across the current tab set, sustain lightweight same-domain follow-up threads, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains
-- `Phase 5 - Crypto`: started, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
-- `Phase 6 - Fundamentals`: not started
+- `Phase 4 - AI Copilot`: paused around 70%, with a shell-level read-only Copilot that can generate structured research cards across the current tab set, sustain lightweight same-domain follow-up threads, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains
+- `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
+- `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
 
-That means the app already has meaningful portfolio/risk/IV capabilities, the first two roadmap-era research surfaces, and an intermediate Phase 4 AI layer, but it is not yet at the intended end-state research platform described in the roadmap.
+That means the app already has meaningful portfolio/risk/IV capabilities, first-pass research surfaces across Prediction Markets, Macro, Crypto, and Fundamentals, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
 
 ## Practical Limitations
 

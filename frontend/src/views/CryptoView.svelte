@@ -1459,7 +1459,6 @@
 
   .metric small,
   .market-title small,
-  .basket-card p,
   .focus-row p,
   .meta-row span {
     color: var(--text-2);

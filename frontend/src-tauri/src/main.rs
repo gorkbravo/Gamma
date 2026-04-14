@@ -245,11 +245,14 @@ fn resolve_backend_launch(app: &AppHandle) -> Result<BackendLaunch, String> {
 }
 
 fn app_data_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Failed to resolve the Gamma app-data directory: {error}"))?
-        .join("runtime");
+    let root = match env::var("GAMMA_APP_DATA_DIR") {
+        Ok(value) if !value.trim().is_empty() => PathBuf::from(value.trim()),
+        _ => app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("Failed to resolve the Gamma app-data directory: {error}"))?
+            .join("runtime"),
+    };
     fs::create_dir_all(&root).map_err(|error| {
         format!(
             "Failed to create app-data directory {}: {error}",

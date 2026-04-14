@@ -14,12 +14,18 @@ const python = resolvePython();
 await main();
 
 async function main() {
+  const apiPort = await freePort();
   const child = spawn(python, ["-m", "src.desktop_launcher"], {
     cwd: repoRoot,
     env: {
       ...process.env,
       MOCK_DATA: "true",
-      GAMMA_DESKTOP_SMOKE_FILE: smokeFile
+      GAMMA_API_PORT: String(apiPort),
+      GAMMA_DESKTOP_SMOKE_FILE: smokeFile,
+      GAMMA_APP_DATA_DIR: path.join(markerRoot, "app-data"),
+      CACHE_DIR: path.join(markerRoot, "cache"),
+      PORTFOLIO_HISTORY_DIR: path.join(markerRoot, "data"),
+      GAMMA_LOG_DIR: path.join(markerRoot, "logs")
     },
     stdio: "inherit"
   });
@@ -77,6 +83,26 @@ function waitForExit(child) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function freePort() {
+  const net = await import("node:net");
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
 }
 
 function resolvePython() {
