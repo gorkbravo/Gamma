@@ -1,5 +1,7 @@
 # Gamma Roadmap
 
+For the detailed next-stage planning document, see [`roadmap_v2.md`](./roadmap_v2.md). This original roadmap remains the source of truth for the first roadmap's completed and paused phase scope, product boundaries, and deferred work that informed Roadmap V2.
+
 ## Purpose
 
 This roadmap defines the planned expansion of **Gamma** from a portfolio/risk-oriented research app into a broader **read-only research environment** for prediction markets, macro and cross-asset expectations, valuation, on-chain analytics, and AI-assisted idea generation.

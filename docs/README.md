@@ -4,8 +4,9 @@ This directory is split into active documentation and archived project history.
 
 ## Active Documents
 
-- [`../README.md`](../README.md): setup, run commands, validation commands, and current product status
-- [`../roadmap.md`](../roadmap.md): source of truth for future product direction and expansion order
+- [`../README.md`](../README.md): setup, run commands, validation commands, current product status, Roadmap V2 direction, and provider stance
+- [`../roadmap.md`](../roadmap.md): source of truth for current roadmap-era product direction, completed/paused phase scope, and constraints
+- [`../roadmap_v2.md`](../roadmap_v2.md): detailed Roadmap V2 workstreams for existing-tab hardening, new research surfaces, platform foundation, provider strategy, and beta readiness
 - [`design_principles.md`](./design_principles.md): UI and interaction principles for roadmap-era product work
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
@@ -19,7 +20,8 @@ These files are kept for traceability, not as current operating guidance.
 
 ## Documentation Rules
 
-- Keep `README.md` operational and current.
+- Keep `README.md` operational, current, and concise about near-future planning context.
 - Keep `roadmap.md` focused on future direction, not audit history.
+- Keep `roadmap_v2.md` as the detailed V2 planning document and keep the README as the short summary.
 - Put dated audit logs, handoff notes, and completed transition records in `docs/archive/`.
 - Prefer updating an existing live document over creating a new one for one-off status notes.

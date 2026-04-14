@@ -1,11 +1,11 @@
 # Gamma
 
-For future product expansion work, start with [`roadmap.md`](./roadmap.md). It is the source of truth for what Gamma is meant to become, what order new work should land in, and which constraints should not be crossed.
+For future product expansion work, start with [`roadmap.md`](./roadmap.md) and [`roadmap_v2.md`](./roadmap_v2.md). The original roadmap is the source of truth for the first roadmap's completed and paused phase scope; Roadmap V2 is the detailed planning document for the next hardening, extension, and new-domain work.
 
 Gamma is a read-only market research application built as a FastAPI backend, a Svelte frontend, and a Tauri desktop shell. Tauri is the primary desktop path today, while the older PySide client still exists as an explicit fallback. In practice, the product currently combines two things:
 
 - an existing IBKR-connected portfolio, risk, and implied-volatility workstation
-- a newer research workspace centered on macro, prediction-market, and crypto analysis
+- a newer research workspace centered on macro, prediction-market, crypto, fundamentals, and AI-assisted analysis
 
 The app is designed to help the user inspect data, compare signals, and understand the calculations behind the screens. It is not designed to place trades or to hide its analytics behind unexplained scores.
 
@@ -23,7 +23,9 @@ Gamma currently lets a user:
 - explore a multi-mode Macro workspace
 - screen and inspect prediction markets across Polymarket and Kalshi
 - screen and inspect crypto tokens with narrative baskets, DEX liquidity context, and comparative analytics
+- inspect company fundamentals, financial statements, peer context, and persistent DCF scenarios
 - inspect implied-volatility surfaces through the IV explorer
+- generate shell-level Copilot research cards and cross-context synthesis from loaded Gamma state
 - navigate the app as a desktop product with reorderable tabs and keyboard shortcuts
 
 ## What Gamma Does Not Do
@@ -32,6 +34,7 @@ Gamma does not:
 
 - place orders or execute strategies
 - act as a trading bot or portfolio rebalancer
+- run arbitrary user strategy code inside the app
 - support IB Gateway yet; the live path is Trader Workstation
 - treat heuristic macro interpretation layers as causal models
 - treat incomplete risk coverage as exact portfolio-wide truth
@@ -49,7 +52,7 @@ Gamma opens on a landing screen that shows connection state and lets the user en
 Within each workspace, tabs can be reordered in the sidebar. The default layout is:
 
 - `Portfolio View`: `Portfolio`, `Risk`, `IV`
-- `Research View`: `Research`, `Macro`, `Prediction Markets`, `Crypto`, `Risk`, `IV`
+- `Research View`: `Research`, `Macro`, `Prediction Markets`, `Crypto`, `Fundamentals`, `Risk`, `IV`
 
 The current desktop navigation model is part of the product, not an afterthought:
 
@@ -87,14 +90,16 @@ The current API surface is grouped by workspace:
 - `/macro/*`: snapshot payload, divergences, event feed, series history
 - `/prediction-markets/*`: screener, detail, history, wallet summary, related markets, calibration
 - `/crypto/*`: workspace screener, token detail, price history, DEX liquidity, comparison
+- `/fundamentals/*`: company search, overview, financials, DCF model, peer baskets
+- `/copilot/*`: structured research-card generation from app context
 - `/risk/*`: risk computation
 - `/iv/*`: IV snapshot and session loop
 
 ## Data Sources And Provenance
 
-Gamma mixes broker, public-market, and public-macro data:
+Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 
-- `IBKR`: portfolio snapshots, security history, FX spot/history, IV surfaces
+- `IBKR`: portfolio snapshots, security history, FX spot/history, IV surfaces, and listed-market data where the user has entitlements
 - `FRED`: macro time series
 - `US Treasury`: Treasury curve snapshots for the US rates view
 - official macro event adapters: policy and macro calendar coverage used in `Events / Regimes`
@@ -102,6 +107,8 @@ Gamma mixes broker, public-market, and public-macro data:
 - `Kalshi`: public market, event, history, and trade endpoints
 - `CoinGecko`: broad token market coverage, token metadata, categories, and price history
 - `GeckoTerminal`: DEX network metadata, pool search, token-pool lookup, and liquidity context
+- `SEC EDGAR / data.sec.gov via EdgarTools`: company resolution, filing chronology, company facts, and statement inputs
+- `OpenAI`: optional Copilot model provider behind Gamma's AI service boundary
 - `sample_data/`: local offline development data when `MOCK_DATA=true`
 
 A lot of the app's trust model depends on provenance. Many returned entities carry:
@@ -112,6 +119,14 @@ A lot of the app's trust model depends on provenance. Many returned entities car
 - `transformation_note`
 
 That metadata is especially important in Macro, Prediction Markets, and Crypto, where Gamma is often transforming raw public data into normalized metrics or heuristic interpretations.
+
+For Roadmap V2 planning, the intended provider stance is:
+
+- keep `IBKR / TWS` first-class for Portfolio, IV, live listed-market context, options, and futures where subscriptions make sense
+- keep Research-side market data behind provider adapters so TWS can be used as a strong source without becoming the whole research architecture
+- use official/free sources such as `FRED`, `BLS`, `BEA`, `EIA`, `ECB`, `Eurostat`, `US Treasury`, and `SEC EDGAR` for macro, energy, economic, and filing-backed datasets
+- consider specialist providers only where they add a structurally different surface, such as AIS/maritime data, deeper futures history, or on-chain analytics
+- keep every provider path read-only; market-data access must not imply order placement or execution features
 
 ## Currency, Caching, And State
 
@@ -409,6 +424,49 @@ Important caveats:
 - DEX lookup can fall back to heuristic pool search when exact contract lookup is unavailable
 - wallet-level or deeper on-chain analytics are not in this first pass yet
 
+#### Fundamentals tab
+
+Fundamentals is paused at the roadmap's first-pass checkpoint. It is a company-analysis workspace built around SEC-native data, Gamma-owned calculations, and local model state.
+
+Main surfaces:
+
+- company search and selection
+- overview with company profile, headline KPIs, filing provenance, peer basket, and peer heatmap
+- financial statement views across income statement, balance sheet, and cash flow
+- annual and quarterly statement basis toggles
+- Gamma-owned ratio and operating metric views
+- DCF workbench with Bear / Base / Bull scenarios, sensitivity, and local persistence
+
+What Gamma normalizes:
+
+- SEC company facts and filing chronology into a company workspace record
+- annual and quarterly statement rows into a shared financial-statement structure
+- ratio and valuation fields into Gamma-derived metrics with source/provenance separation
+- peer baskets and DCF assumptions into local workspace state
+
+Important caveats:
+
+- Fundamentals is currently strongest for US SEC filers
+- market-price-aware fields depend on available market context
+- raw-vs-normalized inspection, reverse valuation, deeper restatement handling, and broader regional coverage are V2 work
+
+#### Copilot layer
+
+Copilot is currently a shell-level research assistant rather than a normal tab. It generates structured research cards from the active Gamma context and can synthesize across multiple loaded domains.
+
+Current behavior:
+
+- adapts its grounding to the active tab and selected entity
+- preserves lightweight per-domain thread history
+- forwards compatible follow-up turns through the provider boundary
+- exposes scope, provenance, warnings, and tool traces in generated outputs
+- supports first-pass cross-context synthesis across loaded Gamma domains
+
+Important caveats:
+
+- Copilot is read-only and should remain grounded in Gamma state, not external execution
+- streaming, richer session persistence, saved memos, dedicated workspace flows, and voice interaction are V2 work
+
 ## Current Roadmap Position
 
 Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
@@ -422,15 +480,41 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 
 That means the app already has meaningful portfolio/risk/IV capabilities, first-pass research surfaces across Prediction Markets, Macro, Crypto, and Fundamentals, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
 
+## Roadmap V2 Direction
+
+For the detailed V2 plan, see [`roadmap_v2.md`](./roadmap_v2.md). Roadmap V2 is organized as parallel workstreams rather than a strict sequence. The intent is to distinguish real dependencies from work that can proceed independently.
+
+The main V2 buckets are:
+
+- cross-cutting platform work: provider adapters, read-only market-data boundaries, mode-level keybindings, shared cache/provenance behavior, and stronger cross-tab handoffs
+- existing-tab V2 passes: Research, Macro, IV, Crypto, Fundamentals, and Copilot hardening / extension work
+- new research surfaces: a deep Commodities workspace and a Maritime Intelligence workspace if the data-provider path is viable
+- beta readiness: installer, tutorial, first-run setup, mock/demo flows, diagnostics, and friend/family testing polish
+
+The likely V2 feature direction is:
+
+- `Research`: evolve into a multi-mode workspace with current scope analysis, market overview / tree-map style views, imported strategy-return analysis, and comparison workflows
+- `Macro`: finish EU/global depth, official-event breadth, policy-path interpretation, and coherence / lead-lag refinement
+- `IV`: deepen into a volatility lab with 3D surfaces, skew / term views, Greeks context, realized-vs-implied overlays, and RND-style implied-distribution work
+- `Crypto`: add real wallet analytics, stronger pool / transaction monitoring, richer peer and basket comparisons, and later derivatives overlays
+- `Fundamentals`: add reverse valuation, implied expectations, richer raw-vs-normalized inspection, better peer/reference depth, and eventually broader non-US coverage
+- `Copilot`: keep the shell shelf for quick context, but add a dedicated workspace for persistent sessions, saved memos, streaming, workflow handoffs, synthesis, and later voice interaction
+- `Commodities`: treat as a full research tab if it includes futures curves, calendar spreads, inter-commodity spreads, inventories, seasonal overlays, and macro / geopolitical links
+- `Maritime Intelligence`: treat AIS and shipping data as a trade-flow intelligence surface, with live map, chokepoints, route shifts, event replay, commodity-flow links, and possible later shadow-fleet analytics
+
+The important boundary does not change: Gamma can study strategies, market data, vessels, commodities, wallets, options, and companies, but it should remain a read-only research environment.
+
 ## Practical Limitations
 
 - IB Gateway is not supported yet
 - some live IBKR data paths still depend on entitlements and symbol availability
+- TWS market data is useful but session-based, entitlement-dependent, and not a bulk historical warehouse
 - portfolio and research analytics depend on overlapping daily histories
 - historical FX gaps can force spot-FX fallback
 - Macro interpretation is intentionally heuristic and should be read as structured research assistance, not inference certainty
 - Prediction Markets currently go deepest on discovery, normalization, and first-pass comparative analysis, not exhaustive microstructure backtesting
 - Crypto is currently strongest on token discovery, normalization, and liquidity-aware first-pass comparison, not deep wallet analytics or derivatives overlays
+- Fundamentals is strongest on US SEC-native coverage; broader international equities remain future work
 - IV is an exploration surface, not a full options analytics suite
 
 ## Running Gamma
