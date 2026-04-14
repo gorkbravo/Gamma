@@ -223,6 +223,8 @@ class FundamentalsDcfValuationSummary:
     enterprise_value: float | None = None
     equity_value: float | None = None
     implied_value_per_share: float | None = None
+    implied_value_low: float | None = None
+    implied_value_high: float | None = None
     upside_downside_pct: float | None = None
     terminal_value: float | None = None
     discounted_terminal_value: float | None = None

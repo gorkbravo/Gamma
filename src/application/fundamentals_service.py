@@ -833,6 +833,21 @@ class FundamentalsService:
                 overrides=overrides,
                 market_context=market_context,
             )
+            scenario_sensitivity_cells = self._sweep_scenario_sensitivity_cells(
+                assumptions=assumptions,
+                overrides=overrides,
+                actuals=actuals,
+                projection_years=projection_years,
+                market_context=market_context,
+            )
+            scenario_implied_values = [
+                cell.implied_value_per_share
+                for row in scenario_sensitivity_cells
+                for cell in row
+                if cell.implied_value_per_share is not None
+            ]
+            scenario_value_low = min(scenario_implied_values) if scenario_implied_values else None
+            scenario_value_high = max(scenario_implied_values) if scenario_implied_values else None
             assumption_rows = [
                 FundamentalsDcfRowRecord(
                     line_key=key,
@@ -884,6 +899,8 @@ class FundamentalsService:
                 enterprise_value=computed["summary"]["enterprise_value"],
                 equity_value=computed["summary"]["equity_value"],
                 implied_value_per_share=computed["summary"]["implied_value_per_share"],
+                implied_value_low=scenario_value_low,
+                implied_value_high=scenario_value_high,
                 upside_downside_pct=computed["summary"]["upside_downside_pct"],
                 terminal_value=computed["summary"]["terminal_value"],
                 discounted_terminal_value=computed["summary"]["discounted_terminal_value"],
@@ -930,31 +947,30 @@ class FundamentalsService:
             transformation_note="Gamma builds the DCF model from normalized annual fundamentals, current market context, and locally persisted scenario inputs.",
         )
 
-    def _build_sensitivity_matrix(
+    def _sweep_scenario_sensitivity_cells(
         self,
-        scenarios: list[FundamentalsDcfScenarioRecord],
-        active_scenario_id: str,
+        assumptions: dict[str, Any],
+        overrides: dict[str, list[float | None]],
         actuals: dict[str, list[float | None] | list[str]],
         projection_years: list[int],
         market_context: dict[str, Any],
-    ) -> FundamentalsDcfSensitivityMatrix:
-        active = next((scenario for scenario in scenarios if scenario.scenario_id == active_scenario_id), scenarios[1] if len(scenarios) > 1 else scenarios[0])
-        base_wacc = float(active.assumptions.get("wacc_pct", 0.10))
-        base_terminal = float(active.assumptions.get("terminal_growth_pct", 0.025))
+    ) -> list[list[FundamentalsDcfSensitivityCell]]:
+        base_wacc = float(assumptions.get("wacc_pct", 0.10))
+        base_terminal = float(assumptions.get("terminal_growth_pct", 0.025))
         wacc_values = [round(base_wacc + offset, 4) for offset in (-0.02, -0.01, 0.0, 0.01, 0.02)]
         terminal_values = [round(base_terminal + offset, 4) for offset in (-0.01, -0.005, 0.0, 0.005, 0.01)]
         rows: list[list[FundamentalsDcfSensitivityCell]] = []
         for terminal_growth in terminal_values:
             row: list[FundamentalsDcfSensitivityCell] = []
             for wacc in wacc_values:
-                assumptions = deepcopy(active.assumptions)
-                assumptions["wacc_pct"] = wacc
-                assumptions["terminal_growth_pct"] = terminal_growth
+                swept_assumptions = deepcopy(assumptions)
+                swept_assumptions["wacc_pct"] = wacc
+                swept_assumptions["terminal_growth_pct"] = terminal_growth
                 computed = _compute_dcf_projection(
                     actuals=actuals,
                     projection_years=projection_years,
-                    assumptions=assumptions,
-                    overrides=active.overrides,
+                    assumptions=swept_assumptions,
+                    overrides=overrides,
                     market_context=market_context,
                 )
                 row.append(
@@ -969,6 +985,28 @@ class FundamentalsService:
                     )
                 )
             rows.append(row)
+        return rows
+
+    def _build_sensitivity_matrix(
+        self,
+        scenarios: list[FundamentalsDcfScenarioRecord],
+        active_scenario_id: str,
+        actuals: dict[str, list[float | None] | list[str]],
+        projection_years: list[int],
+        market_context: dict[str, Any],
+    ) -> FundamentalsDcfSensitivityMatrix:
+        active = next((scenario for scenario in scenarios if scenario.scenario_id == active_scenario_id), scenarios[1] if len(scenarios) > 1 else scenarios[0])
+        base_wacc = float(active.assumptions.get("wacc_pct", 0.10))
+        base_terminal = float(active.assumptions.get("terminal_growth_pct", 0.025))
+        wacc_values = [round(base_wacc + offset, 4) for offset in (-0.02, -0.01, 0.0, 0.01, 0.02)]
+        terminal_values = [round(base_terminal + offset, 4) for offset in (-0.01, -0.005, 0.0, 0.005, 0.01)]
+        rows = self._sweep_scenario_sensitivity_cells(
+            assumptions=active.assumptions,
+            overrides=active.overrides,
+            actuals=actuals,
+            projection_years=projection_years,
+            market_context=market_context,
+        )
         return FundamentalsDcfSensitivityMatrix(
             wacc_values=wacc_values,
             terminal_growth_values=terminal_values,

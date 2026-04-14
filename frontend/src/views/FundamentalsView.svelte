@@ -368,6 +368,29 @@
     return { min: Math.min(...values), max: Math.max(...values) };
   })();
   $: dcfSummaryRows = dcfModel?.scenarios.filter((scenario) => scenario.summary != null) ?? [];
+  $: dcfScenarioValueScale = (() => {
+    const values: number[] = [];
+    for (const scenario of dcfSummaryRows) {
+      const low = scenario.summary?.implied_value_low;
+      const high = scenario.summary?.implied_value_high;
+      const point = scenario.summary?.implied_value_per_share;
+      if (typeof low === "number" && Number.isFinite(low)) values.push(low);
+      if (typeof high === "number" && Number.isFinite(high)) values.push(high);
+      if (typeof point === "number" && Number.isFinite(point)) values.push(point);
+    }
+    const currentPrice = dcfSummaryRows[0]?.summary?.current_price;
+    if (typeof currentPrice === "number" && Number.isFinite(currentPrice)) values.push(currentPrice);
+    if (!values.length) return null;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (min === max) return null;
+    return { min, max };
+  })();
+  function scenarioRangePercent(value: number | null | undefined) {
+    if (!dcfScenarioValueScale || value == null || !Number.isFinite(value)) return null;
+    const { min, max } = dcfScenarioValueScale;
+    return ((value - min) / (max - min)) * 100;
+  }
   $: filingCount = overview?.filings?.length ?? financials?.filings?.length ?? 0;
   $: dilutedSharesMetric = headlineMetrics.find((metric) => metric.metric_id === "diluted_shares") ?? null;
   $: companyAbout = companySummary(currentCompany);
@@ -633,7 +656,11 @@
           <div class="focus-list">
             {#if dcfSummaryRows.length}
               {#each dcfSummaryRows as scenario}
-                <div class="focus-row compact-focus">
+                {@const lowPct = scenarioRangePercent(scenario.summary?.implied_value_low)}
+                {@const highPct = scenarioRangePercent(scenario.summary?.implied_value_high)}
+                {@const pointPct = scenarioRangePercent(scenario.summary?.implied_value_per_share)}
+                {@const pricePct = scenarioRangePercent(scenario.summary?.current_price)}
+                <div class="focus-row compact-focus scenario-row">
                   <span class="focus-label">{scenario.label}</span>
                   <strong class={toneClass(scenario.summary?.upside_downside_pct)}>{currency(scenario.summary?.implied_value_per_share, 2)}</strong>
                   <p>
@@ -641,6 +668,23 @@
                     | Equity {compactCurrency(scenario.summary?.equity_value)}
                     | {pct(scenario.summary?.upside_downside_pct)}
                   </p>
+                  {#if lowPct != null && highPct != null && highPct > lowPct}
+                    <div class="scenario-range" title={`WACC × terminal growth sensitivity range: ${currency(scenario.summary?.implied_value_low, 2)} – ${currency(scenario.summary?.implied_value_high, 2)}`}>
+                      <div class="range-track">
+                        <div class="range-fill {toneClass(scenario.summary?.upside_downside_pct)}" style={`left:${lowPct}%; right:${100 - highPct}%`}></div>
+                        {#if pointPct != null}
+                          <div class="range-point" style={`left:${pointPct}%`}></div>
+                        {/if}
+                        {#if pricePct != null}
+                          <div class="range-price-tick" style={`left:${pricePct}%`} title={`Current price ${currency(scenario.summary?.current_price, 2)}`}></div>
+                        {/if}
+                      </div>
+                      <div class="range-bounds">
+                        <small>{currency(scenario.summary?.implied_value_low, 0)}</small>
+                        <small>{currency(scenario.summary?.implied_value_high, 0)}</small>
+                      </div>
+                    </div>
+                  {/if}
                 </div>
               {/each}
             {:else}
@@ -1498,6 +1542,64 @@
     padding-top: 0;
   }
 
+  .scenario-range {
+    margin-top: 0.35rem;
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .scenario-range .range-track {
+    position: relative;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-2) 22%, transparent);
+  }
+
+  .scenario-range .range-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-1) 55%, transparent);
+  }
+
+  .scenario-range .range-fill.positive {
+    background: color-mix(in srgb, var(--positive) 55%, transparent);
+  }
+
+  .scenario-range .range-fill.negative {
+    background: color-mix(in srgb, var(--negative) 55%, transparent);
+  }
+
+  .scenario-range .range-point {
+    position: absolute;
+    top: 50%;
+    width: 0.55rem;
+    height: 0.55rem;
+    margin-left: -0.275rem;
+    border-radius: 50%;
+    background: var(--text-0);
+    box-shadow: 0 0 0 2px var(--bg-0);
+    transform: translateY(-50%);
+  }
+
+  .scenario-range .range-price-tick {
+    position: absolute;
+    top: -0.15rem;
+    bottom: -0.15rem;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--warning);
+    border-radius: 1px;
+  }
+
+  .scenario-range .range-bounds {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--text-2);
+  }
+
   .profile-about p {
     color: var(--text-1);
     line-height: 1.45;
@@ -1679,7 +1781,8 @@
   }
 
   .heat-neutral {
-    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    background: transparent;
+    color: var(--text-2);
   }
 
   .overridden-cell {

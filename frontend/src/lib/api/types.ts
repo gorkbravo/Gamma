@@ -915,6 +915,8 @@ export interface FundamentalsDcfValuationSummary {
   enterprise_value: number | null;
   equity_value: number | null;
   implied_value_per_share: number | null;
+  implied_value_low: number | null;
+  implied_value_high: number | null;
   upside_downside_pct: number | null;
   terminal_value: number | null;
   discounted_terminal_value: number | null;
