@@ -50,6 +50,7 @@
     loadIvSession,
     loadIvSurface,
     loadFundamentalsSearch,
+    loadResearchOverview,
     macroContext,
     loadMacroSeriesHistory,
     loadMacroWorkspace,
@@ -71,6 +72,7 @@
     predictionMarketScreener,
     predictionMarketWallet,
     refreshSystemStatus,
+    researchOverview,
     researchResult,
     riskResult,
     riskWorkspaceBasis,
@@ -130,6 +132,7 @@
   } from "./lib/api/types";
   import type { CryptoMode } from "./lib/view-models/crypto";
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
+  import type { ResearchMode } from "./lib/view-models/research";
 
   type ConsoleEntry = {
     label: string;
@@ -142,6 +145,7 @@
   let workspaceMode: WorkspaceMode | null = null;
   let ivRequestedSymbol = "SPY";
   let ivPollingActive = false;
+  let researchMode: ResearchMode = "overview";
   let cryptoMode: CryptoMode = "overview";
   let fundamentalsMode: FundamentalsMode = "overview";
   let consoleEntries: ConsoleEntry[] = [];
@@ -915,11 +919,18 @@
     if (mode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
       tasks.push(loadPortfolioSnapshot());
     }
+    if (mode === "research") {
+      researchMode = "overview";
+      tasks.push(loadResearchOverview());
+    }
     await Promise.allSettled(tasks);
   }
 
   async function switchWorkspace(mode: WorkspaceMode) {
     if (workspaceMode === mode) {
+      if (mode === "research") {
+        researchMode = "overview";
+      }
       activeTab.set(getWorkspaceHomeTab(mode));
       dismissSurfaces();
       return;
@@ -936,7 +947,12 @@
 
     activeTab.set(nextTab);
 
-    if (nextTab === "macro") {
+    if (nextTab === "research") {
+      researchMode = "overview";
+      if (!$researchOverview) {
+        await loadResearchOverview();
+      }
+    } else if (nextTab === "macro") {
       if (!$macroSnapshot) {
         await loadMacroWorkspace();
       }
@@ -1022,6 +1038,10 @@
 
     if (workspaceMode === "portfolio" && ($activeTab === "portfolio" || $activeTab === "risk")) {
       await loadPortfolioSnapshot();
+    }
+
+    if ($activeTab === "research" && researchMode === "overview") {
+      await loadResearchOverview({ forceRefresh: true });
     }
 
     if ($activeTab === "prediction_markets") {
@@ -1198,6 +1218,14 @@
       return false;
     }
 
+    if ($activeTab === "research") {
+      researchMode = nextMode.id as ResearchMode;
+      if (researchMode === "overview" && !$researchOverview) {
+        await loadResearchOverview();
+      }
+      return true;
+    }
+
     if ($activeTab === "macro") {
       await loadMacroWorkspace({ mode: nextMode.id as MacroContextState["mode"] });
       return true;
@@ -1372,8 +1400,12 @@
           />
         {:else if $activeTab === "research"}
           <ResearchView
+            bind:mode={researchMode}
+            overview={$researchOverview}
             result={$researchResult}
             loading={$loading.research}
+            overviewLoading={$loading.researchOverview}
+            onLoadOverview={loadResearchOverview}
             onRun={runResearch}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}

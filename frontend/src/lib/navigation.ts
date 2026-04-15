@@ -30,6 +30,10 @@ export interface TabModeDefinition {
 }
 
 export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinition[]>> = {
+  research: defineTabModes([
+    { id: "overview", label: "Overview", defaultIndex: 0 },
+    { id: "scope_analysis", label: "Scope Analysis", defaultIndex: 1 },
+  ]),
   macro: defineTabModes([
     { id: "snapshot", label: "Snapshot", defaultIndex: 0 },
     { id: "cross_asset", label: "Cross-Asset", defaultIndex: 1 },

@@ -1,30 +1,50 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { get } from "svelte/store";
   import BarRankChart, { type RankBarItem } from "../components/BarRankChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import { getModeShortcutHint } from "../lib/navigation";
   import type {
     ResearchConstituent,
     ResearchCoverage,
+    ResearchOverviewMetricId,
+    ResearchOverviewNode,
+    ResearchOverviewRankItem,
+    ResearchOverviewResponse,
     ResearchResult,
     ResearchStructure,
     TimeSeriesPoint
   } from "../lib/api/types";
-  import { researchDraft, setResearchDraft, type ResearchRunOptions } from "../lib/stores/app";
   import {
+    researchDraft,
+    setResearchDraft,
+    type ResearchOverviewLoadOptions,
+    type ResearchRunOptions
+  } from "../lib/stores/app";
+  import {
+    buildResearchTreemapLayout,
     buildPreviewRows,
     deriveConstituentsFromResearchResult,
     deriveCoverageFromResearchResult,
     deriveStructureFromWeights,
     doesResearchDraftMatchResult,
+    formatResearchOverviewMetricValue,
+    getResearchOverviewMetricValue,
     hasPopulatedCoverage,
     hasPopulatedStructure,
     normalizeSyntheticText,
     parseSyntheticText,
-    type ResearchPreviewRow
+    type ResearchMode,
+    type ResearchPreviewRow,
+    type ResearchTreemapRect
   } from "../lib/view-models/research";
 
+  export let mode: ResearchMode = "overview";
+  export let overview: ResearchOverviewResponse | null = null;
   export let result: ResearchResult | null = null;
   export let loading = false;
+  export let overviewLoading = false;
+  export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
   export let onRun: (options: ResearchRunOptions) => void;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
@@ -39,6 +59,10 @@
     | "rolling_corr";
   type ResearchTimeframe = "1M" | "3M" | "6M" | "1Y" | "MAX";
 
+  const researchModes: Array<{ id: ResearchMode; label: string }> = [
+    { id: "overview", label: "Overview" },
+    { id: "scope_analysis", label: "Scope Analysis" }
+  ];
   const chartModeLabels: Record<ChartMode, string> = {
     performance: "Performance",
     relative: "Relative",
@@ -65,6 +89,11 @@
   let timeframe: ResearchTimeframe = "1Y";
   let selectedPreset = initialDraft.selectedPreset;
   let inputWarning = "";
+  let overviewUniverseId = "sample_equities";
+  let overviewTimeframe = "3M";
+  let overviewMetric: ResearchOverviewMetricId = "return";
+  let overviewBenchmarkSymbol = "SPY";
+  let selectedOverviewNodeId = "";
   const emptyStructure: ResearchStructure = {
     total_weight: null,
     top_weight: null,
@@ -83,6 +112,105 @@
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: digits });
+  const shortDate = (value: string | null | undefined) =>
+    value ? new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+
+  const overviewMetricLabels: Record<ResearchOverviewMetricId, string> = {
+    return: "Return",
+    volatility: "Volatility",
+    beta: "Beta",
+    drawdown: "Drawdown",
+    relative_return: "Relative"
+  };
+
+  function overviewMetricOptions(currentOverview: ResearchOverviewResponse | null) {
+    const options = currentOverview?.metric_options?.length
+      ? currentOverview.metric_options
+      : ([
+          { metric_id: "return", label: "Return", description: "Total return." },
+          { metric_id: "volatility", label: "Volatility", description: "Annualized volatility." },
+          { metric_id: "beta", label: "Beta", description: "Benchmark beta." },
+          { metric_id: "drawdown", label: "Drawdown", description: "Maximum drawdown." },
+          { metric_id: "relative_return", label: "Relative", description: "Return minus benchmark return." }
+        ] as const);
+    return options.filter((option) => option.metric_id in overviewMetricLabels);
+  }
+
+  async function loadOverview(forceRefresh = false) {
+    await onLoadOverview({
+      universeId: overviewUniverseId,
+      timeframe: overviewTimeframe,
+      benchmarkSymbol: overviewBenchmarkSymbol.trim().toUpperCase() || "SPY",
+      forceRefresh
+    });
+  }
+
+  function selectResearchMode(nextMode: ResearchMode) {
+    mode = nextMode;
+    if (mode === "overview" && !overview) {
+      void loadOverview();
+    }
+  }
+
+  function selectOverviewNode(nodeId: string) {
+    selectedOverviewNodeId = nodeId;
+  }
+
+  function inspectOverviewNodeInScope(node: ResearchOverviewNode | null) {
+    if (!node?.symbol) {
+      return;
+    }
+    scopeType = "single_ticker";
+    primarySymbol = node.symbol;
+    benchmarkSymbol = overview?.benchmark_symbol ?? overviewBenchmarkSymbol;
+    mode = "scope_analysis";
+    inputWarning = "";
+  }
+
+  function rankingMeta(item: ResearchOverviewRankItem) {
+    return item.group ?? item.symbol ?? "";
+  }
+
+  function tileMetricAbsMax(tiles: ResearchTreemapRect[]) {
+    return Math.max(
+      ...tiles
+        .map((tile) => Math.abs(tile.metricValue ?? 0))
+        .filter((value) => Number.isFinite(value) && value > 0),
+      0.01
+    );
+  }
+
+  function overviewTileColor(value: number | null, metricId: ResearchOverviewMetricId, maxAbs: number) {
+    // RGB values below match design tokens exactly:
+    //   --accent   #7aa6c8 = 122,166,200
+    //   --warning  #c49a5a = 196,154, 90
+    //   --positive #4bb474 =  75,180,116
+    //   --negative #c66b61 = 198,107, 97
+    //   --text-2   #8a919a = 138,145,154
+    if (value == null || !Number.isFinite(value)) {
+      return "rgba(138, 145, 154, 0.14)";
+    }
+    const intensity = Math.min(0.78, 0.22 + Math.abs(value) / Math.max(maxAbs, 1e-6) * 0.56);
+    if (metricId === "volatility" || metricId === "beta") {
+      return value >= 1 && metricId === "beta"
+        ? `rgba(196, 154, 90, ${intensity})`
+        : `rgba(122, 166, 200, ${Math.max(0.24, intensity - 0.08)})`;
+    }
+    if (metricId === "drawdown") {
+      return value < 0 ? `rgba(198, 107, 97, ${intensity})` : `rgba(75, 180, 116, ${intensity})`;
+    }
+    return value >= 0 ? `rgba(75, 180, 116, ${intensity})` : `rgba(198, 107, 97, ${intensity})`;
+  }
+
+  function overviewTileStyle(tile: ResearchTreemapRect, metricId: ResearchOverviewMetricId, maxAbs: number) {
+    return [
+      `left:${tile.x}%`,
+      `top:${tile.y}%`,
+      `width:${tile.width}%`,
+      `height:${tile.height}%`,
+      `background:${overviewTileColor(tile.metricValue, metricId, maxAbs)}`
+    ].join(";");
+  }
 
   function submit() {
     if (scopeType === "single_ticker") {
@@ -330,6 +458,16 @@
   let weightedLeader: ResearchConstituent | null = null;
   let researchNotes: string[] = [];
   let draftMatchesResult = false;
+  let overviewTreemapTiles: ResearchTreemapRect[] = [];
+  let overviewMetricMaxAbs = 0.01;
+  let selectedOverviewNode: ResearchOverviewNode | null = null;
+  let overviewRankingBars: Record<string, RankBarItem[]> = {};
+
+  onMount(() => {
+    if (mode === "overview" && !overview) {
+      void loadOverview();
+    }
+  });
 
   $: parsedSynthetic = parseSyntheticText(syntheticText);
   $: setResearchDraft({
@@ -373,6 +511,55 @@
       .sort((left, right) => (right.weighted_return ?? -Infinity) - (left.weighted_return ?? -Infinity))[0] ?? null;
   }
   $: researchNotes = buildNotes(result, structureMetrics, coverageMetrics, scopeType, previewRows.length);
+  $: {
+    if (overview && overview.universe_id !== overviewUniverseId) {
+      overviewUniverseId = overview.universe_id;
+    }
+    if (overview && overview.timeframe !== overviewTimeframe) {
+      overviewTimeframe = overview.timeframe;
+    }
+    if (overview && overview.benchmark_symbol !== overviewBenchmarkSymbol) {
+      overviewBenchmarkSymbol = overview.benchmark_symbol;
+    }
+  }
+  $: overviewTreemapTiles = buildResearchTreemapLayout(overview, overviewMetric);
+  $: overviewMetricMaxAbs = tileMetricAbsMax(overviewTreemapTiles);
+  $: selectedOverviewNode =
+    overview?.nodes.find((node) => node.node_id === selectedOverviewNodeId) ??
+    overviewTreemapTiles[0]?.node ??
+    null;
+  $: overviewRankingBars = {
+    leaders: (overview?.rankings.leaders ?? []).map((item) => ({
+      label: item.symbol ?? item.label,
+      value: item.value ?? 0,
+      tone: (item.value ?? 0) >= 0 ? "positive" : "negative",
+      meta: rankingMeta(item)
+    })),
+    laggards: (overview?.rankings.laggards ?? []).map((item) => ({
+      label: item.symbol ?? item.label,
+      value: item.value ?? 0,
+      tone: (item.value ?? 0) >= 0 ? "positive" : "negative",
+      meta: rankingMeta(item)
+    })),
+    volatility: (overview?.rankings.highest_volatility ?? []).map((item) => ({
+      label: item.symbol ?? item.label,
+      value: item.value ?? 0,
+      tone: "neutral",
+      meta: rankingMeta(item)
+    })),
+    beta: (overview?.rankings.highest_beta ?? []).map((item) => ({
+      label: item.symbol ?? item.label,
+      value: item.value ?? 0,
+      tone: "neutral",
+      meta: rankingMeta(item)
+    })),
+    drawdowns: (overview?.rankings.largest_drawdowns ?? []).map((item) => ({
+      label: item.symbol ?? item.label,
+      value: item.value ?? 0,
+      tone: "negative",
+      meta: rankingMeta(item)
+    }))
+  };
   $: {
     const perf = slicePoints(result?.performance_points ?? []);
     const benchmark = slicePoints(result?.benchmark_points ?? []);
@@ -494,7 +681,208 @@
 </script>
 
 <section class="view">
-  <div class="workspace-grid">
+  <article class="panel header-panel">
+    <div class="header-top">
+      <div class="headline-block">
+        <p class="eyebrow">Research</p>
+        <div class="headline-title-row">
+          <h2>Research Workspace</h2>
+          {#if loading || overviewLoading}<span class="loading-pill">Refreshing</span>{/if}
+        </div>
+      </div>
+    </div>
+
+    <div class="mode-kpi-row">
+      <div class="mode-bar" role="tablist" aria-label="Research modes">
+        {#each researchModes as item}
+          <button
+            type="button"
+            class:selected={mode === item.id}
+            on:click={() => selectResearchMode(item.id)}
+            role="tab"
+            aria-selected={mode === item.id}
+          >
+            {item.label}
+            <small>{getModeShortcutHint("research", item.id)}</small>
+          </button>
+        {/each}
+      </div>
+    </div>
+  </article>
+
+  {#if mode === "overview"}
+      <article class="panel overview-hero">
+        <div class="panel-header top-line">
+          <div class="title-block">
+            <p class="eyebrow">Research Overview</p>
+            <h2>{overview?.universe_label ?? "Overview"}</h2>
+            <p class="muted">
+              {overview?.universe_description ?? "Map a narrow research universe by return, volatility, beta, drawdown, and relative return."}
+            </p>
+          </div>
+          <div class="overview-controls">
+            <label class="inline-field">
+              <span>Universe</span>
+              <select bind:value={overviewUniverseId} on:change={() => void loadOverview()}>
+                {#each overview?.available_universes ?? [{ universe_id: "sample_equities", label: "Sample equities" }] as item}
+                  <option value={item.universe_id}>{item.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="inline-field short-field">
+              <span>Timeframe</span>
+              <select bind:value={overviewTimeframe} on:change={() => void loadOverview()}>
+                {#each overview?.available_timeframes ?? ["1M", "3M", "6M", "1Y"] as item}
+                  <option value={item}>{item}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="inline-field short-field">
+              <span>Metric</span>
+              <select bind:value={overviewMetric}>
+                {#each overviewMetricOptions(overview) as item}
+                  <option value={item.metric_id}>{item.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="inline-field benchmark-field">
+              <span>Benchmark</span>
+              <input bind:value={overviewBenchmarkSymbol} on:change={() => void loadOverview()} placeholder="SPY" />
+            </label>
+          </div>
+        </div>
+
+        <div class="overview-context-strip">
+          <div>
+            <span>Coverage</span>
+            <strong>{overview?.coverage.priced_count ?? 0}/{overview?.coverage.instrument_count ?? 0}</strong>
+          </div>
+          <div>
+            <span>Benchmark</span>
+            <strong>{overview?.coverage.benchmark_available ? overview.benchmark_symbol : `${overviewBenchmarkSymbol || "SPY"} unavailable`}</strong>
+          </div>
+          <div>
+            <span>Source</span>
+            <strong>{overview?.source_provider ?? "pending"} / {overview?.freshness_label ?? "unknown"}</strong>
+          </div>
+          <div>
+            <span>Retrieved</span>
+            <strong>{shortDate(overview?.retrieved_at)}</strong>
+          </div>
+        </div>
+      </article>
+
+      <div class="overview-grid">
+        <article class="panel treemap-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Market Map</p>
+              <h3>{overviewMetricLabels[overviewMetric]} Treemap</h3>
+            </div>
+            <div class="builder-actions compact">
+              <button type="button" class="ghost-button" on:click={() => void loadOverview(true)} disabled={overviewLoading}>
+                {overviewLoading ? "Loading..." : "Refresh"}
+              </button>
+              <button type="button" on:click={() => inspectOverviewNodeInScope(selectedOverviewNode)} disabled={!selectedOverviewNode?.symbol}>
+                Inspect Scope
+              </button>
+            </div>
+          </div>
+
+          <div class="treemap-canvas" aria-label="Research overview treemap">
+            {#if overviewTreemapTiles.length}
+              {#each overviewTreemapTiles as tile}
+                <button
+                  type="button"
+                  class="treemap-tile"
+                  class:selected={selectedOverviewNode?.node_id === tile.node.node_id}
+                  style={overviewTileStyle(tile, overviewMetric, overviewMetricMaxAbs)}
+                  on:click={() => selectOverviewNode(tile.node.node_id)}
+                >
+                  <strong>{tile.node.symbol ?? tile.node.label}</strong>
+                  <span>{tile.node.group}</span>
+                  <em>{formatResearchOverviewMetricValue(tile.metricValue, overviewMetric)}</em>
+                </button>
+              {/each}
+            {:else}
+              <div class="treemap-empty">{overviewLoading ? "Loading overview..." : "No overview history available."}</div>
+            {/if}
+          </div>
+
+          <div class="chart-foot">
+            <span>
+              {overview?.transformation_note ?? "Overview data will carry source, freshness, and transformation notes after loading."}
+            </span>
+            <strong>{overview?.timeframe ?? overviewTimeframe}</strong>
+          </div>
+        </article>
+
+        <aside class="overview-rail">
+          <article class="panel rail-panel">
+            <div class="rail-header">
+              <div>
+                <p class="eyebrow">Selection</p>
+                <h3>{selectedOverviewNode?.symbol ?? selectedOverviewNode?.label ?? "No Selection"}</h3>
+              </div>
+            </div>
+            <div class="stack">
+              <div class="row"><span>Group</span><strong>{selectedOverviewNode?.group ?? "N/A"}</strong></div>
+              <div class="row"><span>Return</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "return") : null, "return")}</strong></div>
+              <div class="row"><span>Volatility</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "volatility") : null, "volatility")}</strong></div>
+              <div class="row"><span>Beta</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "beta") : null, "beta")}</strong></div>
+              <div class="row"><span>Drawdown</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "drawdown") : null, "drawdown")}</strong></div>
+            </div>
+          </article>
+
+          <article class="panel rail-panel">
+            <div class="rail-header">
+              <div>
+                <p class="eyebrow">Warnings</p>
+                <h3>Coverage Notes</h3>
+              </div>
+            </div>
+            {#if overview?.warnings.length || selectedOverviewNode?.warnings.length}
+              <div class="notes-list">
+                {#each overview?.warnings ?? [] as warning}
+                  <div class="note-row info">
+                    <span class="note-tag">Note</span>
+                    <p>{warning}</p>
+                  </div>
+                {/each}
+                {#each selectedOverviewNode?.warnings ?? [] as warning}
+                  <div class="note-row">
+                    <span class="note-tag">Node</span>
+                    <p>{warning}</p>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <p class="muted">No overview warnings for the loaded universe.</p>
+            {/if}
+          </article>
+        </aside>
+      </div>
+
+      <div class="ranking-grid">
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Leaders</p><h3>Leading Names</h3></div></div>
+          <BarRankChart items={overviewRankingBars.leaders ?? []} emptyMessage="No leader data." formatValue={(value) => formatResearchOverviewMetricValue(value, "return")} />
+        </article>
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Laggards</p><h3>Lagging Names</h3></div></div>
+          <BarRankChart items={overviewRankingBars.laggards ?? []} emptyMessage="No laggard data." formatValue={(value) => formatResearchOverviewMetricValue(value, "return")} />
+        </article>
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Risk</p><h3>Highest Volatility</h3></div></div>
+          <BarRankChart items={overviewRankingBars.volatility ?? []} emptyMessage="No volatility data." formatValue={(value) => formatResearchOverviewMetricValue(value, "volatility")} />
+        </article>
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Benchmark</p><h3>Highest Beta</h3></div></div>
+          <BarRankChart items={overviewRankingBars.beta ?? []} emptyMessage="No beta data." formatValue={(value) => formatResearchOverviewMetricValue(value, "beta")} />
+        </article>
+      </div>
+  {:else}
+      <div class="workspace-grid">
     <div class="primary-column">
       <article class="panel performance-panel">
         <div class="panel-header top-line">
@@ -865,12 +1253,17 @@
           <p class="muted">Run research to create the forwarded snapshot for Risk or IV.</p>
         {/if}
       </article>
-    </aside>
-  </div>
+      </aside>
+    </div>
+  {/if}
 </section>
 
 <style>
+  /* ── Layout shells ── */
   .view,
+  .overview-grid,
+  .overview-rail,
+  .ranking-grid,
   .workspace-grid,
   .primary-column,
   .support-column,
@@ -885,6 +1278,251 @@
     gap: 0.5rem;
   }
 
+  .view {
+    gap: 0.5rem;
+  }
+
+  /* ── Panels ── */
+  .panel {
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    padding: 0.85rem;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .header-panel {
+    gap: 0.35rem;
+  }
+
+  .performance-panel,
+  .overview-hero,
+  .treemap-panel,
+  .composition-panel,
+  .insight-panel,
+  .table-panel,
+  .control-panel,
+  .rail-panel,
+  .subsection {
+    align-content: start;
+  }
+
+  /* ── Header panel internals ── */
+  .header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.8rem;
+  }
+
+  .headline-block {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  .headline-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .loading-pill {
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    padding: 0.2rem 0.5rem;
+    white-space: nowrap;
+  }
+
+  .mode-kpi-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  /* ── Mode bar (segmented control, Macro pattern) ── */
+  .mode-bar {
+    display: inline-flex;
+    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+  }
+
+  .mode-bar button {
+    border: 0;
+    border-right: 1px solid var(--panel-strong);
+    background: transparent;
+    color: var(--text-1);
+    padding: 0.4rem 0.85rem;
+    font: inherit;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    white-space: nowrap;
+    cursor: pointer;
+    width: auto;
+    min-height: auto;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .mode-bar button:last-child {
+    border-right: 0;
+  }
+
+  .mode-bar button:hover {
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    color: var(--text-0);
+  }
+
+  .mode-bar button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .mode-bar button.selected {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+  }
+
+  .mode-bar button small {
+    color: var(--text-2);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+  }
+
+  /* ── Overview hero ── */
+  .overview-hero {
+    gap: 0.6rem;
+  }
+
+  .overview-controls {
+    display: grid;
+    grid-template-columns: minmax(12rem, 1.25fr) 7rem 8rem minmax(7rem, 0.7fr);
+    gap: 0.5rem;
+    align-items: end;
+  }
+
+  .overview-context-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    border-top: 1px solid var(--divider);
+    padding-top: 0.5rem;
+  }
+
+  .overview-context-strip > div {
+    min-width: 0;
+    padding-inline: 0.85rem;
+    border-left: 1px solid var(--divider);
+  }
+
+  .overview-context-strip > div:first-child {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .overview-context-strip span {
+    display: block;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.6rem;
+  }
+
+  .overview-context-strip strong {
+    display: block;
+    font-size: 0.82rem;
+    margin-top: 0.14rem;
+    overflow-wrap: anywhere;
+  }
+
+  /* ── Overview grid / treemap ── */
+  .overview-grid {
+    grid-template-columns: minmax(0, 1.65fr) minmax(19rem, 0.72fr);
+    align-items: start;
+  }
+
+  .treemap-canvas {
+    position: relative;
+    min-height: 32rem;
+    border: 1px solid var(--divider);
+    background: var(--bg-0);
+    overflow: hidden;
+  }
+
+  .treemap-tile {
+    position: absolute;
+    display: grid;
+    align-content: start;
+    gap: 0.14rem;
+    min-height: 0;
+    min-width: 0;
+    padding: 0.5rem;
+    border: 1px solid var(--bg-0);
+    color: var(--text-0);
+    text-align: left;
+    overflow: hidden;
+    width: auto;
+    transition: border-color 120ms ease, filter 120ms ease;
+  }
+
+  .treemap-tile:hover,
+  .treemap-tile.selected {
+    border-color: var(--accent);
+    filter: brightness(1.08);
+  }
+
+  .treemap-tile strong,
+  .treemap-tile span,
+  .treemap-tile em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-0);
+  }
+
+  .treemap-tile strong {
+    font-size: 0.82rem;
+  }
+
+  .treemap-tile span {
+    font-size: 0.68rem;
+    color: var(--text-1);
+  }
+
+  .treemap-tile em {
+    font-style: normal;
+    font-weight: 700;
+    font-size: 0.74rem;
+  }
+
+  .treemap-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+  }
+
+  /* ── Rankings grid ── */
+  .ranking-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  /* ── Scope-analysis workspace ── */
   .workspace-grid {
     grid-template-columns: minmax(0, 1.85fr) minmax(20rem, 0.9fr);
     align-items: start;
@@ -900,53 +1538,57 @@
     align-items: start;
   }
 
-  .panel {
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    padding: 1.05rem;
-  }
-
-  .performance-panel,
-  .composition-panel,
-  .insight-panel,
-  .table-panel,
-  .control-panel,
-  .rail-panel,
-  .subsection {
-    display: grid;
-    gap: 0.5rem;
-  }
-
+  /* ── Panel header rows ── */
   .panel-header,
   .rail-header,
-  .row,
   .chart-foot,
   .section-head {
     display: flex;
     justify-content: space-between;
-    gap: 0.85rem;
+    gap: 0.6rem;
+    align-items: flex-start;
+  }
+
+  .chart-foot {
+    align-items: center;
+    border-top: 1px solid var(--divider);
+    padding-top: 0.45rem;
+    flex-wrap: wrap;
+  }
+
+  .chart-foot span {
+    color: var(--text-2);
+    font-size: 0.72rem;
+    line-height: 1.4;
+  }
+
+  .chart-foot strong {
+    color: var(--text-1);
+    font-size: 0.72rem;
   }
 
   .top-line {
-    align-items: start;
+    align-items: flex-start;
   }
 
   .title-block {
     min-width: 0;
     max-width: 40rem;
+    display: grid;
+    gap: 0.12rem;
+  }
+
+  .title-block .muted {
+    line-height: 1.4;
+    font-size: 0.76rem;
   }
 
   .header-actions {
-    display: grid;
-    grid-template-columns: auto auto;
-    gap: 0.75rem;
+    display: flex;
+    gap: 0.5rem;
     align-items: end;
-    justify-content: end;
-  }
-
-  .header-actions select {
-    min-height: 2.6rem;
-    padding: 0.42rem 0.62rem;
+    justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
   .view-field {
@@ -954,18 +1596,22 @@
     width: 9rem;
   }
 
+  /* ── KPI strip ── */
   .kpi-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 0;
-    padding-block: 0.2rem;
+    padding-block: 0.15rem;
   }
 
   .metric {
     min-width: 0;
-    padding: 0.2rem 1rem;
-    border-left: 1px solid rgba(46, 60, 74, 0.52);
+    padding: 0.2rem 0.85rem;
+    border: 0;
+    border-left: 1px solid var(--divider);
     background: none;
-    text-align: center;
+    text-align: left;
+    display: grid;
+    gap: 0.1rem;
   }
 
   .metric:first-child {
@@ -973,13 +1619,27 @@
     border-left: 0;
   }
 
-  .metric strong {
-    display: block;
-    margin: 0.18rem 0 0.24rem;
-    font-size: 1rem;
-    line-height: 1.2;
+  .metric span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.6rem;
   }
 
+  .metric strong {
+    display: block;
+    margin: 0.1rem 0 0.05rem;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    color: var(--text-0);
+  }
+
+  .metric small {
+    color: var(--text-2);
+    font-size: 0.66rem;
+  }
+
+  /* ── Typography ── */
   .eyebrow,
   .group-label,
   .inline-field > span,
@@ -987,7 +1647,27 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.66rem;
+    font-size: 0.62rem;
+  }
+
+  h2 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-0);
+  }
+
+  h3 {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-0);
+  }
+
+  h4 {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-0);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   h2,
@@ -998,8 +1678,6 @@
     margin: 0;
   }
 
-  span,
-  small,
   .muted {
     color: var(--text-2);
   }
@@ -1015,19 +1693,47 @@
     overflow-wrap: anywhere;
   }
 
+  /* ── Rows (label/value pairs) ── */
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.6rem;
+    align-items: center;
+    border-top: 1px solid var(--divider);
+    padding-top: 0.42rem;
+  }
+
+  .row:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .row span {
+    color: var(--text-2);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .row strong {
+    font-size: 0.82rem;
+    text-align: right;
+  }
+
+  /* ── Inputs & buttons ── */
   label,
   .inline-field {
     display: grid;
-    gap: 0.4rem;
+    gap: 0.22rem;
   }
 
   .inline-field {
-    min-width: 10rem;
+    min-width: 8rem;
   }
 
   .inline-field.timeframe-field {
-    min-width: 7.75rem;
-    width: 7.75rem;
+    min-width: 6.5rem;
+    width: 6.5rem;
   }
 
   .field-grid {
@@ -1043,13 +1749,15 @@
   textarea,
   button {
     border: 1px solid var(--panel-strong);
-    background: #0d0f12;
+    background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.56rem 0.72rem;
+    padding: 0.4rem 0.6rem;
     font: inherit;
+    font-size: 0.82rem;
     display: block;
     width: 100%;
     box-sizing: border-box;
+    border-radius: 0;
   }
 
   textarea {
@@ -1060,16 +1768,42 @@
   input,
   select,
   button {
-    min-height: 3rem;
-    line-height: 1.15;
+    min-height: 2rem;
+    line-height: 1.2;
+  }
+
+  input:hover,
+  select:hover,
+  textarea:hover {
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-strong));
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   button {
     cursor: pointer;
   }
 
+  button:hover {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    color: var(--text-2);
+    border-color: var(--panel-border);
+    background: var(--bg-1);
+  }
+
   .ghost-button {
     background: transparent;
+    color: var(--text-1);
   }
 
   .builder-actions {
@@ -1077,35 +1811,26 @@
   }
 
   .builder-actions.compact {
-    grid-template-columns: repeat(2, auto);
-    justify-content: start;
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
   }
 
   .builder-actions.compact button {
     width: auto;
-    min-height: 2.5rem;
-    padding: 0.45rem 0.8rem;
+    padding: 0.35rem 0.75rem;
   }
 
-  .chart-foot,
-  .row {
-    align-items: center;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
-    padding-top: 0.72rem;
-  }
-
-  .row:first-child {
-    border-top: 0;
-    padding-top: 0;
-  }
-
+  /* ── Tables ── */
   .table-wrap {
     overflow: auto;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    border: 1px solid var(--divider);
+    background: var(--bg-0);
+    max-height: 28rem;
   }
 
   .preview-table {
-    border-top: 0;
+    max-height: 16rem;
   }
 
   table {
@@ -1113,42 +1838,59 @@
     border-collapse: collapse;
   }
 
-  th,
-  td {
-    padding: 0.72rem 0.55rem;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
+  thead th {
     text-align: left;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6rem;
+    padding: 0.42rem 0.55rem;
+    border-bottom: 1px solid var(--divider);
+    position: sticky;
+    top: 0;
+    background: var(--bg-0);
+    z-index: 1;
     white-space: nowrap;
   }
 
-  th {
-    color: var(--text-2);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    background: var(--surface-0);
+  tbody td {
+    padding: 0.45rem 0.55rem;
+    border-top: 1px solid var(--divider);
+    text-align: left;
+    white-space: nowrap;
+    font-size: 0.8rem;
   }
 
+  tbody tr:hover {
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  /* ── Pills / tags ── */
   .pill-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.45rem;
-    margin-top: 0.55rem;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
   }
 
   .pill-list span {
-    border: 1px solid rgba(122, 166, 200, 0.14);
-    background: rgba(122, 166, 200, 0.05);
+    border: 1px solid var(--divider);
+    background: var(--surface-0);
     color: var(--text-1);
-    padding: 0.34rem 0.46rem;
+    padding: 0.22rem 0.42rem;
+    font-size: 0.7rem;
+    text-transform: none;
+    letter-spacing: normal;
   }
 
+  /* ── Notes ── */
   .note-row {
     display: grid;
-    grid-template-columns: 5.75rem minmax(0, 1fr);
-    gap: 0.8rem;
-    padding: 0.72rem 0;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    grid-template-columns: 5rem minmax(0, 1fr);
+    gap: 0.6rem;
+    padding-top: 0.42rem;
+    border-top: 1px solid var(--divider);
+    align-items: baseline;
   }
 
   .note-row:first-child {
@@ -1156,11 +1898,17 @@
     padding-top: 0;
   }
 
+  .note-row p {
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: var(--text-1);
+  }
+
   .note-tag {
     color: var(--warning);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    font-size: 0.6rem;
   }
 
   .note-row.info .note-tag,
@@ -1168,18 +1916,26 @@
     color: var(--accent);
   }
 
+  /* ── Signal tints ── */
   .positive { color: var(--positive); }
   .negative { color: var(--negative); }
   .elevated { color: var(--data-warm); }
 
   .warning {
     color: var(--warning);
+    font-size: 0.76rem;
   }
 
+  /* ── Responsive ── */
   @media (max-width: 1240px) {
     .workspace-grid,
-    .detail-split {
+    .detail-split,
+    .overview-grid {
       grid-template-columns: 1fr;
+    }
+
+    .ranking-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .support-column {
@@ -1194,18 +1950,41 @@
   @media (max-width: 980px) {
     .support-column,
     .field-grid,
+    .overview-controls,
+    .overview-context-strip,
+    .ranking-grid,
     .builder-actions,
     .kpi-grid {
       grid-template-columns: 1fr;
     }
 
-    .metric {
-      padding: 0.7rem 0;
+    .mode-bar {
+      flex-wrap: wrap;
+    }
+
+    .treemap-canvas {
+      min-height: 26rem;
+    }
+
+    .overview-context-strip > div {
       border-left: 0;
+      border-top: 1px solid var(--divider);
+      padding: 0.45rem 0 0;
+    }
+
+    .overview-context-strip > div:first-child {
+      border-top: 0;
+    }
+
+    .metric {
+      padding: 0.45rem 0;
+      border-left: 0;
+      border-top: 1px solid var(--divider);
     }
 
     .metric:first-child {
       padding-top: 0;
+      border-top: 0;
     }
 
     .panel-header,
@@ -1217,7 +1996,6 @@
     }
 
     .header-actions {
-      grid-template-columns: 1fr;
       justify-content: stretch;
     }
 
@@ -1227,7 +2005,7 @@
 
     .note-row {
       grid-template-columns: 1fr;
-      gap: 0.35rem;
+      gap: 0.25rem;
     }
   }
 </style>

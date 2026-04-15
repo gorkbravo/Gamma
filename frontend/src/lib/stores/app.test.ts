@@ -23,6 +23,7 @@ import type {
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
   RelatedPredictionMarketListResponse,
+  ResearchOverviewResponse,
   ResearchResult,
   RiskResult,
   SystemStatus
@@ -47,6 +48,7 @@ import {
   loadMacroWorkspace,
   loadPortfolioSnapshot,
   loadPredictionMarketScreener,
+  loadResearchOverview,
   loading,
   macroContext,
   macroDivergences,
@@ -62,6 +64,7 @@ import {
   predictionMarketRelated,
   predictionMarketScreener,
   predictionMarketWallet,
+  researchOverview,
   researchResult,
   riskResult,
   runResearch,
@@ -81,6 +84,7 @@ describe("app store orchestration", () => {
     portfolioSnapshot.set(null);
     portfolioHistory.set(null);
     portfolioPerformance.set(null);
+    researchOverview.set(null);
     researchResult.set(null);
     selectedPredictionMarketId.set(null);
     selectedCryptoTokenId.set(null);
@@ -118,6 +122,7 @@ describe("app store orchestration", () => {
       diagnosticsAction: false,
       portfolio: false,
       portfolioAction: false,
+      researchOverview: false,
       research: false,
       macro: false,
       macroHistory: false,
@@ -453,6 +458,25 @@ describe("app store orchestration", () => {
     expect(get(researchResult)?.primary_symbol).toBeNull();
     expect(get(researchResult)?.snapshot?.positions.map((position) => position.symbol)).toEqual(["XLV", "XLP", "XLU"]);
     expect(get(riskResult)).toBeNull();
+  });
+
+  it("loads the Research Overview with universe, timeframe, and benchmark filters", async () => {
+    const overview = makeResearchOverview();
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(overview));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadResearchOverview({
+      universeId: "sample_equities",
+      timeframe: "1M",
+      benchmarkSymbol: "AAPL",
+      forceRefresh: true
+    });
+
+    expect(get(researchOverview)?.universe_id).toBe("sample_equities");
+    expect(get(researchOverview)?.nodes[0]?.source_provider).toBe("mock");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/research/overview?universe_id=sample_equities&timeframe=1M&benchmark_symbol=AAPL&force_refresh=true"
+    );
   });
 
   it("loads the prediction screener and selected market bundle together", async () => {
@@ -1289,6 +1313,92 @@ function makeResearchResult(scopeType: "single_ticker" | "synthetic_portfolio", 
       weighted_return: 0.1 * (position.weight ?? 0)
     })),
     warnings: []
+  };
+}
+
+function makeResearchOverview(): ResearchOverviewResponse {
+  return {
+    universe_id: "sample_equities",
+    universe_label: "Sample equities",
+    universe_description: "Small offline-friendly listed-equity sample.",
+    timeframe: "1M",
+    lookback_days: 21,
+    benchmark_symbol: "AAPL",
+    available_universes: [
+      {
+        universe_id: "sample_equities",
+        label: "Sample equities",
+        description: "Small offline-friendly listed-equity sample.",
+        instruments: [],
+        limitations: ["Narrow sample universe."]
+      }
+    ],
+    available_timeframes: ["1M", "3M", "6M", "1Y"],
+    metric_options: [
+      { metric_id: "return", label: "Return", description: "Total return." },
+      { metric_id: "volatility", label: "Volatility", description: "Annualized volatility." },
+      { metric_id: "beta", label: "Beta", description: "Benchmark beta." },
+      { metric_id: "drawdown", label: "Drawdown", description: "Maximum drawdown." },
+      { metric_id: "relative_return", label: "Relative", description: "Relative return." }
+    ],
+    nodes: [
+      {
+        node_id: "instrument:AAPL",
+        normalized_id: "research:AAPL:STK:SMART:USD",
+        label: "Apple",
+        level: "instrument",
+        parent_id: "group:us_mega_cap_tech",
+        group: "US Mega-Cap Tech",
+        sector: "Information Technology",
+        industry: "Consumer Electronics",
+        symbol: "AAPL",
+        instrument_id: "research:AAPL:STK:SMART:USD",
+        weight: 1,
+        size: 1,
+        metrics: {
+          total_return: 0.05,
+          annual_volatility: 0.2,
+          beta: 1,
+          max_drawdown: -0.03,
+          relative_return: 0,
+          latest_price: 100,
+          observation_count: 21
+        },
+        source_provider: "mock",
+        retrieved_at: "2026-03-01T00:00:00Z",
+        origin: "research_service.overview.instrument",
+        transformation_note: "Computed from daily close history.",
+        freshness_label: "mocked",
+        warnings: []
+      }
+    ],
+    coverage: {
+      instrument_count: 1,
+      priced_count: 1,
+      missing_symbols: [],
+      benchmark_symbol: "AAPL",
+      benchmark_available: true,
+      benchmark_observation_count: 21
+    },
+    rankings: {
+      leaders: [{ node_id: "instrument:AAPL", label: "Apple", group: "US Mega-Cap Tech", symbol: "AAPL", value: 0.05 }],
+      laggards: [{ node_id: "instrument:AAPL", label: "Apple", group: "US Mega-Cap Tech", symbol: "AAPL", value: 0.05 }],
+      highest_volatility: [{ node_id: "instrument:AAPL", label: "Apple", group: "US Mega-Cap Tech", symbol: "AAPL", value: 0.2 }],
+      highest_beta: [{ node_id: "instrument:AAPL", label: "Apple", group: "US Mega-Cap Tech", symbol: "AAPL", value: 1 }],
+      largest_drawdowns: [{ node_id: "instrument:AAPL", label: "Apple", group: "US Mega-Cap Tech", symbol: "AAPL", value: -0.03 }]
+    },
+    summary: {
+      leading_group: null,
+      lagging_group: null,
+      highest_volatility_group: null,
+      coverage_note: null
+    },
+    warnings: ["Narrow sample universe."],
+    source_provider: "mock",
+    retrieved_at: "2026-03-01T00:00:00Z",
+    origin: "research_service.overview",
+    transformation_note: "Computed from daily close histories.",
+    freshness_label: "mocked"
   };
 }
 

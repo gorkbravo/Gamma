@@ -217,6 +217,120 @@ export interface ResearchResult {
   warnings: string[];
 }
 
+export type ResearchOverviewMetricId = "return" | "volatility" | "beta" | "drawdown" | "relative_return";
+
+export interface ResearchOverviewUniverseInstrument {
+  symbol: string;
+  label: string;
+  group: string;
+  sector: string;
+  industry: string | null;
+  weight: number;
+  currency: string;
+  exchange: string;
+  sec_type: string;
+}
+
+export interface ResearchOverviewUniverse {
+  universe_id: string;
+  label: string;
+  description: string;
+  instruments: ResearchOverviewUniverseInstrument[];
+  limitations: string[];
+}
+
+export interface ResearchOverviewMetricOption {
+  metric_id: ResearchOverviewMetricId;
+  label: string;
+  description: string;
+}
+
+export interface ResearchOverviewMetrics {
+  total_return: number | null;
+  annual_volatility: number | null;
+  beta: number | null;
+  max_drawdown: number | null;
+  relative_return: number | null;
+  latest_price: number | null;
+  observation_count: number;
+}
+
+export interface ResearchOverviewNode {
+  node_id: string;
+  normalized_id: string;
+  label: string;
+  level: "group" | "instrument" | string;
+  parent_id: string | null;
+  group: string | null;
+  sector: string | null;
+  industry: string | null;
+  symbol: string | null;
+  instrument_id: string | null;
+  weight: number | null;
+  size: number;
+  metrics: ResearchOverviewMetrics;
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+  freshness_label: string;
+  warnings: string[];
+}
+
+export interface ResearchOverviewCoverage {
+  instrument_count: number;
+  priced_count: number;
+  missing_symbols: string[];
+  benchmark_symbol: string;
+  benchmark_available: boolean;
+  benchmark_observation_count: number;
+}
+
+export interface ResearchOverviewRankItem {
+  node_id: string;
+  label: string;
+  group: string | null;
+  symbol: string | null;
+  value: number | null;
+}
+
+export interface ResearchOverviewRankings {
+  leaders: ResearchOverviewRankItem[];
+  laggards: ResearchOverviewRankItem[];
+  highest_volatility: ResearchOverviewRankItem[];
+  highest_beta: ResearchOverviewRankItem[];
+  largest_drawdowns: ResearchOverviewRankItem[];
+}
+
+export interface ResearchOverviewSummary {
+  leading_group: ResearchOverviewRankItem | null;
+  lagging_group: ResearchOverviewRankItem | null;
+  highest_volatility_group: ResearchOverviewRankItem | null;
+  coverage_note: string | null;
+}
+
+export interface ResearchOverviewResponse {
+  universe_id: string;
+  universe_label: string;
+  universe_description: string;
+  timeframe: string;
+  lookback_days: number;
+  benchmark_symbol: string;
+  available_universes: ResearchOverviewUniverse[];
+  available_timeframes: string[];
+  metric_options: ResearchOverviewMetricOption[];
+  nodes: ResearchOverviewNode[];
+  coverage: ResearchOverviewCoverage;
+  rankings: ResearchOverviewRankings;
+  summary: ResearchOverviewSummary;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+  freshness_label: string;
+}
+
 export interface RiskMetrics {
   alpha: number;
   lookback_days: number;

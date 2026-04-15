@@ -437,9 +437,9 @@ At the end of this workstream, Gamma should have a clearer platform layer for pr
 
 ## Workstream 2 - Research V2
 
-_Status: Planned_
+_Status: In progress (~24%)_
 _Dependency marker: Parallelizable, but improved by provider foundation_
-_Parallelization note: The multi-mode UI can begin before all market-data providers are selected, but Strategy Lab and Market Overview need reliable data contracts._
+_Parallelization note: The multi-mode UI can begin before all market-data providers are selected, but Strategy Lab and Overview need reliable data contracts._
 
 ### Why this workstream matters
 
@@ -466,13 +466,16 @@ Research should evolve from a single page into a multi-mode workspace.
 
 Suggested modes:
 
-- `Market Overview`
+- `Overview`
 - `Scope Analysis`
 - `Strategy Lab`
 - `Compare / Scenario`
 - `Saved Research`
 
 The current Research tab should become `Scope Analysis`, not be discarded.
+
+Implementation note:
+- Research now has a first-pass mode shell: `Overview` is registered first/default with `Shift+1`, and `Scope Analysis` is registered second with `Shift+2`. The existing single-ticker and synthetic-portfolio analyzer remains available under `Scope Analysis`.
 
 #### 1. Scope Analysis mode
 
@@ -497,7 +500,7 @@ V2 improvements should focus on clearer data-source labels, better missing-data 
 
 The mode should remain explicit that research scopes are synthetic analysis contexts, not broker portfolios.
 
-#### 2. Market Overview mode
+#### 2. Overview mode
 
 This mode should provide a market-map view instead of a single-scope view.
 
@@ -528,6 +531,9 @@ The first pass can be narrow:
 - simple breadth and return metrics.
 
 Later passes can expand to European equities, global ETFs, factor baskets, style buckets, and thematic groups.
+
+Implementation note:
+- A first-pass `/research/overview` data contract now returns provider-neutral overview nodes, group nodes, rankings, coverage, freshness/source labels, warnings, and transformation notes. The frontend consumes that payload in the default `Overview` mode with a local treemap-style view and leader/laggard/risk panels. Current coverage is intentionally narrow: the default `Sample equities` universe is an offline-friendly sample/watchlist and the optional `Major ETFs` universe depends on provider history; tile size is equal-weight until market-cap or index-weight data is available.
 
 #### 3. Strategy Lab mode
 
@@ -618,7 +624,7 @@ Suggested progression:
 2. Add the multi-mode shell and mode keybindings.
 3. Add saved scopes and clearer provider diagnostics.
 4. Add CSV-based Strategy Lab.
-5. Add first-pass Market Overview with a narrow universe.
+5. Add first-pass Overview with a narrow universe.
 6. Add Compare / Scenario workflows.
 7. Add richer handoffs to Fundamentals, Risk, IV, and Copilot.
 

@@ -79,6 +79,12 @@ describe("navigation tab ordering", () => {
 
   it("maps Shift+N to registered mode order for mode-bearing tabs", () => {
     expect(getModeShortcutHintForIndex(0)).toBe("Shift+1");
+    expect(getTabModes("research").map((mode) => mode.id)).toEqual([
+      "overview",
+      "scope_analysis",
+    ]);
+    expect(getModeByShortcutIndex("research", 1)?.id).toBe("overview");
+    expect(getModeShortcutHint("research", "scope_analysis")).toBe("Shift+2");
     expect(getTabModes("macro").map((mode) => mode.id)).toEqual([
       "snapshot",
       "cross_asset",
@@ -87,16 +93,16 @@ describe("navigation tab ordering", () => {
     ]);
     expect(getModeByShortcutIndex("macro", 2)?.id).toBe("cross_asset");
     expect(getModeShortcutHint("crypto", "flows_liquidity")).toBe("Shift+3");
-    expect(getModeByShortcutIndex("research", 1)).toBeNull();
   });
 
   it("exposes a reusable mode registry snapshot for current mode-bearing tabs", () => {
     const snapshot = getModeRegistrySnapshot();
 
     expect(hasRegisteredModes("macro")).toBe(true);
-    expect(hasRegisteredModes("research")).toBe(false);
-    expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro"]);
+    expect(hasRegisteredModes("research")).toBe(true);
+    expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro", "research"]);
     expect(snapshot.fundamentals?.map((mode) => mode.id)).toEqual(["overview", "financials", "dcf"]);
+    expect(snapshot.research?.map((mode) => mode.id)).toEqual(["overview", "scope_analysis"]);
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {

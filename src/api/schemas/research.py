@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from src.analytics.risk_metrics import max_drawdown, realized_vol
@@ -7,6 +9,18 @@ from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, s
 from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.research_service import ResearchAnalysisResult
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
+from src.models.research_overview import (
+    ResearchOverviewCoverage,
+    ResearchOverviewMetricOption,
+    ResearchOverviewMetrics,
+    ResearchOverviewNode,
+    ResearchOverviewRankItem,
+    ResearchOverviewRankings,
+    ResearchOverviewResult,
+    ResearchOverviewSummary,
+    ResearchOverviewUniverse,
+    ResearchOverviewUniverseInstrument,
+)
 
 
 class SyntheticPositionModel(BaseModel):
@@ -42,6 +56,212 @@ class ResearchAnalyzeRequestModel(BaseModel):
     synthetic_positions: list[SyntheticPositionModel] = Field(default_factory=list)
     benchmark_symbol: str = "SPY"
     lookback_days: int = 252
+
+
+class ResearchOverviewUniverseInstrumentModel(BaseModel):
+    symbol: str
+    label: str
+    group: str
+    sector: str
+    industry: str | None = None
+    weight: float = 1.0
+    currency: str = "USD"
+    exchange: str = "SMART"
+    sec_type: str = "STK"
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewUniverseInstrument) -> "ResearchOverviewUniverseInstrumentModel":
+        return cls(
+            symbol=row.symbol,
+            label=row.label,
+            group=row.group,
+            sector=row.sector,
+            industry=row.industry,
+            weight=row.weight,
+            currency=row.currency,
+            exchange=row.exchange,
+            sec_type=row.sec_type,
+        )
+
+
+class ResearchOverviewUniverseModel(BaseModel):
+    universe_id: str
+    label: str
+    description: str
+    instruments: list[ResearchOverviewUniverseInstrumentModel] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewUniverse) -> "ResearchOverviewUniverseModel":
+        return cls(
+            universe_id=row.universe_id,
+            label=row.label,
+            description=row.description,
+            instruments=[ResearchOverviewUniverseInstrumentModel.from_domain(item) for item in row.instruments],
+            limitations=list(row.limitations),
+        )
+
+
+class ResearchOverviewMetricOptionModel(BaseModel):
+    metric_id: str
+    label: str
+    description: str
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewMetricOption) -> "ResearchOverviewMetricOptionModel":
+        return cls(**row.__dict__)
+
+
+class ResearchOverviewMetricsModel(BaseModel):
+    total_return: float | None = None
+    annual_volatility: float | None = None
+    beta: float | None = None
+    max_drawdown: float | None = None
+    relative_return: float | None = None
+    latest_price: float | None = None
+    observation_count: int = 0
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewMetrics) -> "ResearchOverviewMetricsModel":
+        return cls(**row.__dict__)
+
+
+class ResearchOverviewNodeModel(BaseModel):
+    node_id: str
+    normalized_id: str
+    label: str
+    level: str
+    parent_id: str | None = None
+    group: str | None = None
+    sector: str | None = None
+    industry: str | None = None
+    symbol: str | None = None
+    instrument_id: str | None = None
+    weight: float | None = None
+    size: float
+    metrics: ResearchOverviewMetricsModel
+    source_provider: str
+    retrieved_at: datetime
+    origin: str
+    transformation_note: str | None = None
+    freshness_label: str
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewNode) -> "ResearchOverviewNodeModel":
+        payload = dict(row.__dict__)
+        payload["metrics"] = ResearchOverviewMetricsModel.from_domain(row.metrics)
+        payload["freshness_label"] = row.freshness_label.value
+        return cls(**payload)
+
+
+class ResearchOverviewCoverageModel(BaseModel):
+    instrument_count: int
+    priced_count: int
+    missing_symbols: list[str] = Field(default_factory=list)
+    benchmark_symbol: str
+    benchmark_available: bool
+    benchmark_observation_count: int
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewCoverage) -> "ResearchOverviewCoverageModel":
+        return cls(**row.__dict__)
+
+
+class ResearchOverviewRankItemModel(BaseModel):
+    node_id: str
+    label: str
+    group: str | None = None
+    symbol: str | None = None
+    value: float | None = None
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewRankItem) -> "ResearchOverviewRankItemModel":
+        return cls(**row.__dict__)
+
+
+class ResearchOverviewRankingsModel(BaseModel):
+    leaders: list[ResearchOverviewRankItemModel] = Field(default_factory=list)
+    laggards: list[ResearchOverviewRankItemModel] = Field(default_factory=list)
+    highest_volatility: list[ResearchOverviewRankItemModel] = Field(default_factory=list)
+    highest_beta: list[ResearchOverviewRankItemModel] = Field(default_factory=list)
+    largest_drawdowns: list[ResearchOverviewRankItemModel] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewRankings) -> "ResearchOverviewRankingsModel":
+        return cls(
+            leaders=[ResearchOverviewRankItemModel.from_domain(item) for item in row.leaders],
+            laggards=[ResearchOverviewRankItemModel.from_domain(item) for item in row.laggards],
+            highest_volatility=[ResearchOverviewRankItemModel.from_domain(item) for item in row.highest_volatility],
+            highest_beta=[ResearchOverviewRankItemModel.from_domain(item) for item in row.highest_beta],
+            largest_drawdowns=[ResearchOverviewRankItemModel.from_domain(item) for item in row.largest_drawdowns],
+        )
+
+
+class ResearchOverviewSummaryModel(BaseModel):
+    leading_group: ResearchOverviewRankItemModel | None = None
+    lagging_group: ResearchOverviewRankItemModel | None = None
+    highest_volatility_group: ResearchOverviewRankItemModel | None = None
+    coverage_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewSummary) -> "ResearchOverviewSummaryModel":
+        return cls(
+            leading_group=ResearchOverviewRankItemModel.from_domain(row.leading_group) if row.leading_group else None,
+            lagging_group=ResearchOverviewRankItemModel.from_domain(row.lagging_group) if row.lagging_group else None,
+            highest_volatility_group=(
+                ResearchOverviewRankItemModel.from_domain(row.highest_volatility_group)
+                if row.highest_volatility_group
+                else None
+            ),
+            coverage_note=row.coverage_note,
+        )
+
+
+class ResearchOverviewResponseModel(BaseModel):
+    universe_id: str
+    universe_label: str
+    universe_description: str
+    timeframe: str
+    lookback_days: int
+    benchmark_symbol: str
+    available_universes: list[ResearchOverviewUniverseModel] = Field(default_factory=list)
+    available_timeframes: list[str] = Field(default_factory=list)
+    metric_options: list[ResearchOverviewMetricOptionModel] = Field(default_factory=list)
+    nodes: list[ResearchOverviewNodeModel] = Field(default_factory=list)
+    coverage: ResearchOverviewCoverageModel
+    rankings: ResearchOverviewRankingsModel
+    summary: ResearchOverviewSummaryModel
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime
+    origin: str
+    transformation_note: str | None = None
+    freshness_label: str
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewResult) -> "ResearchOverviewResponseModel":
+        return cls(
+            universe_id=row.universe_id,
+            universe_label=row.universe_label,
+            universe_description=row.universe_description,
+            timeframe=row.timeframe,
+            lookback_days=row.lookback_days,
+            benchmark_symbol=row.benchmark_symbol,
+            available_universes=[ResearchOverviewUniverseModel.from_domain(item) for item in row.available_universes],
+            available_timeframes=list(row.available_timeframes),
+            metric_options=[ResearchOverviewMetricOptionModel.from_domain(item) for item in row.metric_options],
+            nodes=[ResearchOverviewNodeModel.from_domain(item) for item in row.nodes],
+            coverage=ResearchOverviewCoverageModel.from_domain(row.coverage),
+            rankings=ResearchOverviewRankingsModel.from_domain(row.rankings),
+            summary=ResearchOverviewSummaryModel.from_domain(row.summary),
+            warnings=list(row.warnings),
+            source_provider=row.source_provider,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+            freshness_label=row.freshness_label.value,
+        )
 
 
 class WeightPointModel(BaseModel):

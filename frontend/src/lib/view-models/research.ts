@@ -1,10 +1,15 @@
 import type {
   ResearchConstituent,
   ResearchCoverage,
+  ResearchOverviewMetricId,
+  ResearchOverviewNode,
+  ResearchOverviewResponse,
   ResearchResult,
   ResearchStructure,
   ResearchWeightPoint
 } from "../api/types";
+
+export type ResearchMode = "overview" | "scope_analysis";
 
 export interface SyntheticPositionDraft {
   symbol: string;
@@ -23,6 +28,16 @@ export interface WeightSummary {
   top5Weight: number | null;
   concentrationHhi: number | null;
   effectivePositions: number | null;
+}
+
+export interface ResearchTreemapRect {
+  node: ResearchOverviewNode;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  size: number;
+  metricValue: number | null;
 }
 
 export function parseSyntheticText(text: string): SyntheticPositionDraft[] {
@@ -207,4 +222,125 @@ export function summarizeWeights(weights: ResearchWeightPoint[]): WeightSummary 
     concentrationHhi: hhi,
     effectivePositions: hhi > 0 ? 1 / hhi : null
   };
+}
+
+export function getResearchOverviewMetricValue(
+  node: ResearchOverviewNode,
+  metricId: ResearchOverviewMetricId
+): number | null {
+  switch (metricId) {
+    case "return":
+      return node.metrics.total_return;
+    case "volatility":
+      return node.metrics.annual_volatility;
+    case "beta":
+      return node.metrics.beta;
+    case "drawdown":
+      return node.metrics.max_drawdown;
+    case "relative_return":
+      return node.metrics.relative_return;
+  }
+}
+
+export function formatResearchOverviewMetricValue(
+  value: number | null | undefined,
+  metricId: ResearchOverviewMetricId
+) {
+  if (value == null || !Number.isFinite(value)) {
+    return "N/A";
+  }
+  if (metricId === "beta") {
+    return value.toFixed(2);
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+export function buildResearchTreemapLayout(
+  overview: ResearchOverviewResponse | null,
+  metricId: ResearchOverviewMetricId
+): ResearchTreemapRect[] {
+  const nodes = (overview?.nodes ?? [])
+    .filter((node) => node.level === "instrument")
+    .map((node) => ({
+      node,
+      size: Number.isFinite(node.size) && node.size > 0 ? node.size : 1,
+      metricValue: getResearchOverviewMetricValue(node, metricId)
+    }))
+    .sort((left, right) => {
+      const groupCompare = String(left.node.group ?? "").localeCompare(String(right.node.group ?? ""));
+      if (groupCompare !== 0) {
+        return groupCompare;
+      }
+      return right.size - left.size || left.node.label.localeCompare(right.node.label);
+    });
+
+  const rects: ResearchTreemapRect[] = [];
+  layoutTreemapItems(nodes, 0, 0, 100, 100, rects);
+  return rects;
+}
+
+function layoutTreemapItems(
+  items: Array<{ node: ResearchOverviewNode; size: number; metricValue: number | null }>,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  rects: ResearchTreemapRect[]
+) {
+  if (!items.length || width <= 0 || height <= 0) {
+    return;
+  }
+
+  if (items.length === 1) {
+    const item = items[0];
+    rects.push({
+      node: item.node,
+      x,
+      y,
+      width,
+      height,
+      size: item.size,
+      metricValue: item.metricValue
+    });
+    return;
+  }
+
+  const total = items.reduce((sum, item) => sum + item.size, 0);
+  if (total <= 0) {
+    return;
+  }
+
+  const splitIndex = findBalancedTreemapSplit(items, total);
+  const leftItems = items.slice(0, splitIndex);
+  const rightItems = items.slice(splitIndex);
+  const leftTotal = leftItems.reduce((sum, item) => sum + item.size, 0);
+  const leftRatio = leftTotal / total;
+
+  if (width >= height) {
+    const leftWidth = width * leftRatio;
+    layoutTreemapItems(leftItems, x, y, leftWidth, height, rects);
+    layoutTreemapItems(rightItems, x + leftWidth, y, width - leftWidth, height, rects);
+  } else {
+    const topHeight = height * leftRatio;
+    layoutTreemapItems(leftItems, x, y, width, topHeight, rects);
+    layoutTreemapItems(rightItems, x, y + topHeight, width, height - topHeight, rects);
+  }
+}
+
+function findBalancedTreemapSplit(
+  items: Array<{ node: ResearchOverviewNode; size: number; metricValue: number | null }>,
+  total: number
+) {
+  let bestIndex = 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let running = 0;
+  for (let index = 0; index < items.length - 1; index += 1) {
+    running += items[index].size;
+    const distance = Math.abs(total / 2 - running);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index + 1;
+    }
+  }
+  return bestIndex;
 }

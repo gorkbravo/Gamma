@@ -38,6 +38,7 @@ import type {
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
   RelatedPredictionMarketListResponse,
+  ResearchOverviewResponse,
   ResearchResult,
   RiskResult,
   SystemStatus,
@@ -56,6 +57,13 @@ export interface ResearchRunOptions {
   syntheticPositions?: SyntheticPositionInput[];
   benchmarkSymbol: string;
   lookbackDays: number;
+}
+
+export interface ResearchOverviewLoadOptions {
+  universeId?: string;
+  timeframe?: string;
+  benchmarkSymbol?: string;
+  forceRefresh?: boolean;
 }
 
 export interface ResearchDraftState {
@@ -197,6 +205,7 @@ export const diagnosticsLog = writable<string[]>([]);
 export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
 export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
 export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
+export const researchOverview = writable<ResearchOverviewResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
 export const macroContext = writable<MacroContextState>({
   mode: "snapshot",
@@ -275,6 +284,7 @@ export const loading = writable<Record<string, boolean>>({
   diagnosticsAction: false,
   portfolio: false,
   portfolioAction: false,
+  researchOverview: false,
   research: false,
   macro: false,
   macroHistory: false,
@@ -745,6 +755,29 @@ export async function loadPortfolioPerformance(options?: {
     setError(error);
   } finally {
     setLoading("portfolio", false);
+  }
+}
+
+export async function loadResearchOverview(options: ResearchOverviewLoadOptions = {}) {
+  setLoading("researchOverview", true);
+  try {
+    const params = new URLSearchParams({
+      universe_id: options.universeId ?? "sample_equities",
+      timeframe: options.timeframe ?? "3M",
+      benchmark_symbol: options.benchmarkSymbol ?? "SPY"
+    });
+    if (options.forceRefresh) {
+      params.set("force_refresh", "true");
+    }
+    const overview = await getJson<ResearchOverviewResponse>(`/research/overview?${params.toString()}`);
+    researchOverview.set(overview);
+    lastError.set("");
+    return overview;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("researchOverview", false);
   }
 }
 

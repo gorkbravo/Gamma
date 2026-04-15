@@ -1,13 +1,37 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from src.api.schemas.research import ResearchAnalyzeRequestModel, ResearchAnalyzeResponseModel
+from src.api.schemas.research import (
+    ResearchAnalyzeRequestModel,
+    ResearchAnalyzeResponseModel,
+    ResearchOverviewResponseModel,
+)
 from src.application.research_service import ResearchAnalysisRequest
 from src.application.research_validation import ResearchValidationError
+from src.models.research_overview import ResearchOverviewRequest
 
 
 router = APIRouter(tags=["research"])
+
+
+@router.get("/research/overview", response_model=ResearchOverviewResponseModel)
+def research_overview(
+    request: Request,
+    universe_id: str = Query(default="sample_equities"),
+    timeframe: str = Query(default="3M"),
+    benchmark_symbol: str = Query(default="SPY"),
+    force_refresh: bool = Query(default=False),
+) -> ResearchOverviewResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.research_service.overview(
+        ResearchOverviewRequest(
+            universe_id=universe_id,
+            timeframe=timeframe,
+            benchmark_symbol=benchmark_symbol,
+        )
+    )
+    return ResearchOverviewResponseModel.from_domain(result)
 
 
 @router.post("/research/analyze", response_model=ResearchAnalyzeResponseModel)
