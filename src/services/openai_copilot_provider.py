@@ -245,6 +245,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 for source in context.sources
             ],
             "warnings": context.warnings,
+            "read_only_safety": context.read_only_safety,
         }
         return {
             "role": "user",

@@ -27,14 +27,22 @@ def test_default_provider_registry_distinguishes_active_optional_sample_and_plan
     }.issubset(by_id)
     assert {
         "eia",
+        "alfred",
         "bls",
         "bea",
         "ecb",
         "eurostat",
+        "polygon",
+        "twelve_data",
+        "financial_modeling_prep",
+        "eodhd",
         "databento",
+        "nasdaq_data_link",
         "aisstream",
         "noaa_marinecadastre",
+        "aishub",
         "global_fishing_watch",
+        "paid_ais_vendors",
         "alchemy",
         "dune",
     }.issubset(by_id)
@@ -108,6 +116,8 @@ def test_provider_capabilities_system_api(tmp_path):
         assert providers["ibkr"]["requires_user_entitlement"] is True
         assert any("No order placement" in note for note in providers["ibkr"]["read_only_notes"])
         assert providers["eia"]["status"] == "planned"
+        assert providers["polygon"]["status"] == "planned"
+        assert providers["nasdaq_data_link"]["status"] == "planned"
         assert providers["alchemy"]["status"] == "planned"
 
         active_response = client.get("/system/provider-capabilities", params={"include_planned": False})
@@ -128,3 +138,49 @@ def test_provider_capabilities_system_api(tmp_path):
         assert missing_response.status_code == 404
     finally:
         runtime.shutdown()
+
+
+def test_provider_capability_rows_have_consistent_platform_metadata():
+    registry = build_default_provider_capability_registry()
+    rows = registry.list_capabilities()
+    valid_statuses = {"active", "optional", "sample", "planned"}
+
+    assert rows
+    for row in rows:
+        assert row.provider_id
+        assert row.display_name
+        assert row.status in valid_statuses
+        assert row.supported_domains
+        assert row.asset_classes
+        assert row.regions
+        assert row.data_types
+        assert row.freshness_levels
+        assert row.limitations
+        assert row.provenance_notes
+        assert row.read_only_notes
+        assert row.source_provider_values
+        assert row.batch_fetching
+        assert row.transformation_note
+        if row.status == "planned":
+            assert "status=planned" in row.transformation_note
+            assert any("No Gamma adapter is implemented yet" in note for note in row.limitations)
+        assert not any(
+            token in " ".join(row.data_types).lower()
+            for token in ["order_placement", "account_modification", "execution"]
+        )
+
+
+def test_planned_research_market_data_candidates_are_not_live_providers():
+    registry = build_default_provider_capability_registry()
+
+    active_research_ids = {
+        row.provider_id
+        for row in registry.providers_for_domain("research", include_planned=False)
+    }
+    all_research_ids = {
+        row.provider_id
+        for row in registry.providers_for_domain("research", include_planned=True)
+    }
+
+    assert {"polygon", "twelve_data", "financial_modeling_prep", "eodhd", "databento"}.issubset(all_research_ids)
+    assert {"polygon", "twelve_data", "financial_modeling_prep", "eodhd", "databento"}.isdisjoint(active_research_ids)

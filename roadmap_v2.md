@@ -177,9 +177,10 @@ Installer, tutorial, setup flow, mock mode, diagnostics, and clear error states 
 
 ## Workstream 1 - Cross-Cutting Platform Foundation
 
-_Status: In progress (~25%)_
+_Status: In progress (~65%)_
 _Dependency marker: Foundation_
 _Parallelization note: Some pieces are independent, but this workstream should start early because it shapes most V2 tabs._
+_Recent progress: Workstream 1 now has shared provenance/freshness primitives, provider-agnostic cache freshness policies, a generic cross-tab handoff envelope, a compact Copilot context contract, explicit read-only boundary metadata at `/system/read-only-boundary`, hardened provider capability metadata for active/optional/sample/planned providers, and a reusable frontend mode-registry helper._
 
 ### Why this workstream matters
 
@@ -227,6 +228,9 @@ For each provider, the app should know:
 
 This should help decide when Research uses TWS, when Commodities needs a dedicated futures provider, when a field should be marked unavailable, and what warnings Copilot should see.
 
+Implementation note:
+- `/system/provider-capabilities` now exposes a static read-only capability registry with active, optional, sample, and planned provider records. Existing providers remain separated from planned candidates such as Polygon, Twelve Data, Financial Modeling Prep, EODHD, ALFRED, Nasdaq Data Link, AISHub, and paid AIS vendors. Planned records document expected domains, freshness, entitlements/API-key needs, limitations, provenance notes, and read-only safety notes without making live calls or implying adapters are implemented.
+
 #### 2. Read-only IBKR / TWS market-data boundary
 
 IBKR / TWS can be a strong paid data source for live equities, ETFs, options, futures, FX, IV surfaces, and portfolio snapshots.
@@ -245,6 +249,10 @@ The V2 IBKR boundary should:
 This lets Gamma benefit from IBKR data without turning into an execution platform.
 
 First-pass boundary note: Gamma relies on TWS API read-only configuration for the hard execution lock. Gamma's app-side responsibility is to keep its own adapter, UI, and Copilot paths data-only by exposing no order-placement or account-modification capabilities.
+
+Implementation note:
+- `/system/read-only-boundary` exposes Gamma's platform-level read-only contract. It records allowed research/data actions, prohibited execution/account/wallet actions, the TWS API read-only operator lock, and app-side notes that Gamma exposes no order placement, account modification, rebalancing, wallet signing, or transaction submission path.
+- Copilot context bundles now carry default read-only safety metadata, and the OpenAI provider payload includes that metadata alongside workspace context and warnings.
 
 #### 3. Research market-data abstraction
 
@@ -269,6 +277,9 @@ Potential sources include:
 
 The first implementation does not need every provider. It needs the boundary to avoid hard-coding the research product around one source.
 
+Implementation note:
+- The provider registry now documents planned research market-data candidates and their expected provenance/freshness constraints. The actual Research V2 abstraction, provider priority engine, fallback selection, corporate-action policy, and broad adoption into Research endpoints remain future Workstream 2/Workstream 1 overlap.
+
 #### 4. Normalized V2 entity schemas
 
 V2 should extend Gamma's internal schemas to include:
@@ -291,6 +302,9 @@ V2 should extend Gamma's internal schemas to include:
 
 The schema design should preserve provider ID, normalized ID, source timestamp, retrieval timestamp, transformation note, and quality warnings where relevant.
 
+Implementation note:
+- Shared `ProvenanceRecord`, `FreshnessLabel`, `FreshnessRecord`, and `ProvenanceSummary` primitives now exist for future providers and context builders. They cover live, delayed, stale, historical, mocked, derived, model-generated, unavailable, and unknown labels without forcing a big-bang retrofit of every legacy response.
+
 #### 5. Cache and freshness policy
 
 Gamma should make cache behavior more explicit.
@@ -307,6 +321,9 @@ V2 cache records should distinguish:
 
 The UI should not need to know every provider rule, but it should be able to display a compact freshness/provenance label.
 
+Implementation note:
+- A provider-agnostic `CacheFreshnessPolicy` and `CacheFreshnessAssessment` skeleton now tracks retrieval timestamps, source timestamps, TTLs, stale behavior, refresh needs, usability, warnings, and compact freshness labels. Default internal policies cover short-lived snapshots, daily research series, historical references, and generated/mocked context.
+
 #### 6. Mode-level keybindings
 
 The first roadmap completed workspace and tab-level keyboard navigation. V2 should extend this to mode-level navigation inside tabs.
@@ -321,6 +338,9 @@ The intended model:
 This should apply to Research, Macro, IV, Crypto, Fundamentals, Commodities, Maritime Intelligence, and the dedicated Copilot workspace.
 
 First-pass implementation note: `Shift+1` through `Shift+N` now switch registered modes in the active tab for Macro, Crypto, and Fundamentals. The keybindings viewer exposes the derived mode map, and future tabs should register their modes through shared navigation metadata.
+
+Implementation note:
+- The frontend mode registry now has a small `defineTabModes` helper, duplicate validation, `hasRegisteredModes`, and `getModeRegistrySnapshot` so future mode-bearing tabs can join the existing shortcut/keybindings surface without inventing a separate metadata path.
 
 #### 7. Cross-tab context handoff layer
 
@@ -347,6 +367,9 @@ Examples:
 - a Commodities oil curve opens Maritime Intelligence with tanker/chokepoint context,
 - a Maritime chokepoint event opens Macro with geopolitical/risk context.
 
+Implementation note:
+- A shared `CrossTabHandoffEnvelope` now defines source tab/mode, selected entity, selected timeframe, provider/source, warnings, normalized IDs, timestamp, and intended target tab/mode. This is a generic serialization/validation contract only; no domain-specific Commodities, Maritime, Macro V2, or Research V2 handoff behavior has been implemented.
+
 #### 8. Copilot context contract
 
 Every V2 tab should expose a compact context builder for Copilot.
@@ -363,6 +386,9 @@ The context builder should include:
 - saved notes or session context when applicable.
 
 Copilot should not scrape UI state loosely. It should consume intentional, tab-owned context payloads.
+
+Implementation note:
+- A compact `CopilotContextContract` skeleton now defines active mode, selected entity, selected timeframe, headline metrics, provenance summaries, warnings, available read-only drilldown tools, generated timestamp, and read-only safety metadata. Existing Copilot V1 behavior is preserved; this is the contract future tab-owned builders can adopt before Copilot V2 UI/session work begins.
 
 ### Data requirements
 
@@ -399,6 +425,9 @@ This workstream should start with the smallest foundation that unblocks V2:
 5. Add Copilot context-builder expectations for new tabs.
 
 It does not need to build every provider before tab work starts. It only needs enough structure that tabs do not hard-code around a single source.
+
+Current standalone ceiling note:
+- Workstream 1 is now close to its practical standalone ceiling before other workstreams begin. The remaining foundation work is mostly adoption work: wiring the contracts into future domain builders, implementing the Research market-data abstraction with real provider selection, defining domain-specific V2 entity schemas, and retrofitting selected high-value existing endpoints as adjacent tabs are touched.
 
 ### Deliverable
 

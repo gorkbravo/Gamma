@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from src.models.platform_boundary import ReadOnlyBoundary
 from src.models.provider_capabilities import ProviderCapability
 
 
@@ -109,3 +110,22 @@ class ProviderCapabilityListResponseModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str = "provider_capability_registry.list_capabilities"
     transformation_note: str | None = None
+
+
+class ReadOnlyBoundaryModel(BaseModel):
+    boundary_id: str
+    read_only: bool
+    allows: list[str] = Field(default_factory=list)
+    prohibits: list[str] = Field(default_factory=list)
+    hard_operator_locks: list[str] = Field(default_factory=list)
+    app_boundary_notes: list[str] = Field(default_factory=list)
+    copilot_notes: list[str] = Field(default_factory=list)
+    ibkr_tws_notes: list[str] = Field(default_factory=list)
+    source_provider: str = "gamma"
+    retrieved_at: datetime | None = None
+    origin: str = "gamma.system.read_only_boundary"
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: ReadOnlyBoundary) -> "ReadOnlyBoundaryModel":
+        return cls(**row.__dict__)

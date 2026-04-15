@@ -30,22 +30,22 @@ export interface TabModeDefinition {
 }
 
 export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinition[]>> = {
-  macro: [
+  macro: defineTabModes([
     { id: "snapshot", label: "Snapshot", defaultIndex: 0 },
     { id: "cross_asset", label: "Cross-Asset", defaultIndex: 1 },
     { id: "rates_policy", label: "Rates & Policy", defaultIndex: 2 },
     { id: "events_regimes", label: "Events / Regimes", defaultIndex: 3 },
-  ],
-  crypto: [
+  ]),
+  crypto: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
     { id: "deep_dive", label: "Deep Dive", defaultIndex: 1 },
     { id: "flows_liquidity", label: "Flows & Liquidity", defaultIndex: 2 },
-  ],
-  fundamentals: [
+  ]),
+  fundamentals: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
     { id: "financials", label: "Financials", defaultIndex: 1 },
     { id: "dcf", label: "DCF", defaultIndex: 2 },
-  ],
+  ]),
 };
 
 export const DEFAULT_WORKSPACE_TAB_ORDER = {
@@ -217,4 +217,33 @@ export function getModeShortcutHint(tabId: TabId, modeId: string) {
 
 export function getModeByShortcutIndex(tabId: TabId, shortcutIndex: number): TabModeDefinition | null {
   return getTabModes(tabId)[shortcutIndex - 1] ?? null;
+}
+
+export function defineTabModes(modes: readonly TabModeDefinition[]): readonly TabModeDefinition[] {
+  const seenIds = new Set<string>();
+  const seenIndexes = new Set<number>();
+  for (const mode of modes) {
+    if (!mode.id || seenIds.has(mode.id)) {
+      throw new Error(`Duplicate or empty tab mode id: ${mode.id}`);
+    }
+    if (seenIndexes.has(mode.defaultIndex)) {
+      throw new Error(`Duplicate tab mode defaultIndex: ${mode.defaultIndex}`);
+    }
+    seenIds.add(mode.id);
+    seenIndexes.add(mode.defaultIndex);
+  }
+  return [...modes].sort((left, right) => left.defaultIndex - right.defaultIndex);
+}
+
+export function hasRegisteredModes(tabId: TabId) {
+  return getTabModes(tabId).length > 0;
+}
+
+export function getModeRegistrySnapshot() {
+  return Object.fromEntries(
+    Object.entries(TAB_MODE_DEFINITIONS).map(([tabId, modes]) => [
+      tabId,
+      [...(modes ?? [])].map((mode) => ({ ...mode })),
+    ])
+  ) as Partial<Record<TabId, TabModeDefinition[]>>;
 }

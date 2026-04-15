@@ -75,6 +75,10 @@ class ProvenanceRecord:
 
 This does not require every current response model to change immediately. It defines the contract new roadmap entities should satisfy as they are introduced.
 
+Implementation note:
+- `src.models.provenance` now carries the shared `ProvenanceRecord`, `FreshnessLabel`, `FreshnessRecord`, and `ProvenanceSummary` primitives for new provider and context-builder work.
+- `src.models.cache_policy` carries provider-agnostic cache freshness policy evaluation so future providers can label live, delayed, stale, historical, mocked, derived, model-generated, unavailable, and unknown states consistently.
+
 ## Required Cases
 
 The following cases must include a non-null `transformation_note`:

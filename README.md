@@ -120,7 +120,12 @@ A lot of the app's trust model depends on provenance. Many returned entities car
 
 That metadata is especially important in Macro, Prediction Markets, and Crypto, where Gamma is often transforming raw public data into normalized metrics or heuristic interpretations.
 
-The backend exposes the read-only provider capability registry at `/system/provider-capabilities` so future services, UI surfaces, and Copilot context builders can distinguish active, optional, sample, and planned providers without making provider calls.
+The backend exposes shared Workstream 1 metadata through `/system/*` routes:
+
+- `/system/provider-capabilities`: read-only provider capability metadata so future services, UI surfaces, and Copilot context builders can distinguish active, optional, sample, and planned providers without making provider calls
+- `/system/read-only-boundary`: Gamma's platform-level read-only contract, including the TWS API read-only operator lock note and the app-side no-execution boundary
+
+Shared backend primitives now cover provenance, freshness labels, cache freshness policy assessment, generic cross-tab handoff envelopes, and future Copilot context contracts. These are foundation contracts for new providers and V2 builders, not a big-bang retrofit requirement for every legacy response.
 
 For Roadmap V2 planning, the intended provider stance is:
 

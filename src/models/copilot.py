@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from src.models.copilot_context import default_copilot_read_only_safety
+
 
 @dataclass(frozen=True)
 class MacroCopilotContext:
@@ -98,6 +100,7 @@ class CopilotContextBundle:
     tool_state: dict[str, Any] = field(default_factory=dict)
     sources: list[CopilotSourceRef] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    read_only_safety: dict[str, Any] = field(default_factory=default_copilot_read_only_safety)
 
 
 @dataclass(frozen=True)

@@ -13,8 +13,10 @@ from src.api.schemas.system import (
     MarketDataModeRequestModel,
     ProviderCapabilityListResponseModel,
     ProviderCapabilityModel,
+    ReadOnlyBoundaryModel,
     SystemStatusResponseModel,
 )
+from src.models.platform_boundary import build_gamma_read_only_boundary
 from src.utils.time import now_utc
 
 
@@ -61,6 +63,11 @@ def provider_capability(provider_id: str, request: Request) -> ProviderCapabilit
     if provider is None:
         raise HTTPException(status_code=404, detail=f"Provider capability not found: {provider_id}")
     return ProviderCapabilityModel.from_domain(provider)
+
+
+@router.get("/system/read-only-boundary", response_model=ReadOnlyBoundaryModel)
+def read_only_boundary() -> ReadOnlyBoundaryModel:
+    return ReadOnlyBoundaryModel.from_domain(build_gamma_read_only_boundary())
 
 
 @router.post("/system/connection/toggle", response_model=SystemStatusResponseModel)

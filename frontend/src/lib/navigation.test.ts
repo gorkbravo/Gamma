@@ -4,10 +4,12 @@ import {
   DEFAULT_WORKSPACE_TAB_ORDER,
   getDefaultTabOrder,
   getModeByShortcutIndex,
+  getModeRegistrySnapshot,
   getModeShortcutHint,
   getModeShortcutHintForIndex,
   getTabModes,
   getTabByShortcutIndex,
+  hasRegisteredModes,
   moveWorkspaceTab,
   normalizeWorkspaceTabOrder,
   normalizeWorkspaceTabOrderState,
@@ -86,6 +88,15 @@ describe("navigation tab ordering", () => {
     expect(getModeByShortcutIndex("macro", 2)?.id).toBe("cross_asset");
     expect(getModeShortcutHint("crypto", "flows_liquidity")).toBe("Shift+3");
     expect(getModeByShortcutIndex("research", 1)).toBeNull();
+  });
+
+  it("exposes a reusable mode registry snapshot for current mode-bearing tabs", () => {
+    const snapshot = getModeRegistrySnapshot();
+
+    expect(hasRegisteredModes("macro")).toBe(true);
+    expect(hasRegisteredModes("research")).toBe(false);
+    expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro"]);
+    expect(snapshot.fundamentals?.map((mode) => mode.id)).toEqual(["overview", "financials", "dcf"]);
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {
