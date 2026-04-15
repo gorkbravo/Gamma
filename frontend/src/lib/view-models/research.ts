@@ -4,6 +4,7 @@ import type {
   ResearchOverviewMetricId,
   ResearchOverviewNode,
   ResearchOverviewResponse,
+  ResearchOverviewSortId,
   ResearchResult,
   ResearchStructure,
   ResearchWeightPoint
@@ -38,6 +39,29 @@ export interface ResearchTreemapRect {
   height: number;
   size: number;
   metricValue: number | null;
+}
+
+export interface ResearchTreemapTile {
+  node: ResearchOverviewNode;
+  rect: TreemapRect;
+  metricWeight: number;
+  metricValue: number | null;
+  colorValue: number | null;
+}
+
+export interface ResearchTreemapSection {
+  label: string;
+  rect: TreemapRect;
+  tiles: ResearchTreemapTile[];
+  metricWeight: number;
+  nodeCount: number;
+}
+
+export interface TreemapRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export function parseSyntheticText(text: string): SyntheticPositionDraft[] {
@@ -253,6 +277,281 @@ export function formatResearchOverviewMetricValue(
     return value.toFixed(2);
   }
   return `${(value * 100).toFixed(1)}%`;
+}
+
+interface ResearchSortMetricConfig {
+  label: string;
+  direction: "asc" | "desc";
+  extractor: (node: ResearchOverviewNode) => number | null | undefined;
+  weightTransform?: (value: number) => number;
+}
+
+const RESEARCH_SORT_METRIC_CONFIG: Record<ResearchOverviewSortId, ResearchSortMetricConfig> = {
+  market_cap_desc: {
+    label: "Market Cap",
+    direction: "desc",
+    extractor: (node) => node.market_cap_usd
+  },
+  universe_weight_desc: {
+    label: "Universe Weight",
+    direction: "desc",
+    extractor: (node) => node.weight ?? node.size
+  },
+  return_desc: {
+    label: "Return",
+    direction: "desc",
+    extractor: (node) => node.metrics.total_return
+  },
+  volatility_desc: {
+    label: "Volatility",
+    direction: "desc",
+    extractor: (node) => node.metrics.annual_volatility
+  },
+  beta_desc: {
+    label: "Beta",
+    direction: "desc",
+    extractor: (node) => node.metrics.beta
+  },
+  drawdown_desc: {
+    label: "Drawdown",
+    direction: "desc",
+    extractor: (node) => node.metrics.max_drawdown,
+    weightTransform: (value) => Math.abs(value)
+  }
+};
+
+export function researchSortMetricLabel(sortBy: ResearchOverviewSortId) {
+  return RESEARCH_SORT_METRIC_CONFIG[sortBy]?.label ?? "Market Cap";
+}
+
+export function getResearchOverviewSortValue(
+  node: ResearchOverviewNode,
+  sortBy: ResearchOverviewSortId
+): number | null {
+  const extracted = RESEARCH_SORT_METRIC_CONFIG[sortBy]?.extractor(node);
+  return extracted == null || !Number.isFinite(extracted) ? null : extracted;
+}
+
+export function formatResearchOverviewSortValue(
+  value: number | null | undefined,
+  sortBy: ResearchOverviewSortId
+) {
+  if (value == null || !Number.isFinite(value)) {
+    return "N/A";
+  }
+  switch (sortBy) {
+    case "market_cap_desc": {
+      const absolute = Math.abs(value);
+      if (absolute >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(2)}T`;
+      if (absolute >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
+      if (absolute >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+      return `$${value.toFixed(0)}`;
+    }
+    case "universe_weight_desc":
+      return value >= 1_000_000 ? formatResearchOverviewSortValue(value, "market_cap_desc") : value.toFixed(2);
+    case "beta_desc":
+      return value.toFixed(2);
+    case "return_desc":
+      return formatResearchOverviewMetricValue(value, "return");
+    case "volatility_desc":
+      return formatResearchOverviewMetricValue(value, "volatility");
+    case "drawdown_desc":
+      return formatResearchOverviewMetricValue(value, "drawdown");
+  }
+}
+
+function sortMetricWeightMap(nodes: ResearchOverviewNode[], sortBy: ResearchOverviewSortId) {
+  const config = RESEARCH_SORT_METRIC_CONFIG[sortBy] ?? RESEARCH_SORT_METRIC_CONFIG.market_cap_desc;
+  const rawValues = nodes.map((node) => {
+    const value = getResearchOverviewSortValue(node, sortBy);
+    return value == null ? null : config.weightTransform ? config.weightTransform(value) : value;
+  });
+  const validValues = rawValues.filter((value): value is number => value != null && Number.isFinite(value));
+  if (!validValues.length) {
+    return nodes.map((node) => (Number.isFinite(node.size) && node.size > 0 ? node.size : 1));
+  }
+  const allEqual = validValues.every((value) => value === validValues[0]);
+  if (allEqual) {
+    return nodes.map((_, index) => (rawValues[index] == null ? 0 : 1));
+  }
+  if (config.direction === "asc") {
+    const maxValue = Math.max(...validValues);
+    return rawValues.map((value) => (value == null ? 0 : Math.max(maxValue - value, 0) + 1));
+  }
+  const minValue = Math.min(...validValues);
+  const shift = minValue <= 0 ? Math.abs(minValue) + 1 : 0;
+  return rawValues.map((value) => (value == null ? 0 : value + shift));
+}
+
+function sumWeights(weights: number[]) {
+  return weights.reduce((sum, weight) => sum + Math.max(weight, 0), 0);
+}
+
+function chooseSplitIndex(weights: number[]) {
+  const total = sumWeights(weights);
+  if (weights.length <= 1 || total <= 0) {
+    return 1;
+  }
+  let running = 0;
+  let bestIndex = 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < weights.length - 1; index += 1) {
+    running += Math.max(weights[index], 0);
+    const distance = Math.abs(total / 2 - running);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index + 1;
+    }
+  }
+  return bestIndex;
+}
+
+function layoutWeightedRects(weights: number[], rect: TreemapRect): TreemapRect[] {
+  if (!weights.length) {
+    return [];
+  }
+  if (weights.length === 1) {
+    return [rect];
+  }
+
+  const total = sumWeights(weights);
+  if (total <= 0) {
+    const equalShare = rect.width / weights.length;
+    return weights.map((_, index) => ({
+      x: rect.x + equalShare * index,
+      y: rect.y,
+      width: equalShare,
+      height: rect.height
+    }));
+  }
+
+  const splitIndex = chooseSplitIndex(weights);
+  const firstWeights = weights.slice(0, splitIndex);
+  const secondWeights = weights.slice(splitIndex);
+  const ratio = sumWeights(firstWeights) / total;
+
+  if (rect.width >= rect.height) {
+    const firstWidth = rect.width * ratio;
+    return [
+      ...layoutWeightedRects(firstWeights, { x: rect.x, y: rect.y, width: firstWidth, height: rect.height }),
+      ...layoutWeightedRects(secondWeights, {
+        x: rect.x + firstWidth,
+        y: rect.y,
+        width: rect.width - firstWidth,
+        height: rect.height
+      })
+    ];
+  }
+
+  const firstHeight = rect.height * ratio;
+  return [
+    ...layoutWeightedRects(firstWeights, { x: rect.x, y: rect.y, width: rect.width, height: firstHeight }),
+    ...layoutWeightedRects(secondWeights, {
+      x: rect.x,
+      y: rect.y + firstHeight,
+      width: rect.width,
+      height: rect.height - firstHeight
+    })
+  ];
+}
+
+function sectionLayoutWeights(sectionWeights: number[]) {
+  const total = sumWeights(sectionWeights);
+  if (total <= 0) {
+    return sectionWeights.map(() => 1);
+  }
+  return sectionWeights.map((weight) => Math.max(weight, 0));
+}
+
+export function treemapRectStyle(rect: TreemapRect) {
+  return `left:${rect.x}%; top:${rect.y}%; width:${rect.width}%; height:${rect.height}%;`;
+}
+
+export function treemapArea(rect: TreemapRect) {
+  return rect.width * rect.height;
+}
+
+export function treemapDensityClass(rect: TreemapRect) {
+  const area = treemapArea(rect);
+  if (area >= 420) {
+    return "hero";
+  }
+  if (area >= 180) {
+    return "major";
+  }
+  if (area >= 70) {
+    return "minor";
+  }
+  return "micro";
+}
+
+export function buildResearchTreemapSections(
+  overview: ResearchOverviewResponse | null,
+  colorMetric: ResearchOverviewMetricId,
+  sortBy: ResearchOverviewSortId = "market_cap_desc"
+): ResearchTreemapSection[] {
+  const nodes = (overview?.nodes ?? []).filter((node) => node.level === "instrument");
+  const weightMap = sortMetricWeightMap(nodes, sortBy);
+  const grouped = new Map<string, Array<{ node: ResearchOverviewNode; metricWeight: number; metricValue: number | null }>>();
+
+  nodes.forEach((node, index) => {
+    const label = node.group ?? node.sector ?? "Other";
+    const rows = grouped.get(label) ?? [];
+    rows.push({
+      node,
+      metricWeight: Math.max(weightMap[index] ?? 0, 0),
+      metricValue: getResearchOverviewSortValue(node, sortBy)
+    });
+    grouped.set(label, rows);
+  });
+
+  const sections = Array.from(grouped.entries())
+    .map(([label, rows]) => {
+      const sortedRows = rows
+        .slice()
+        .sort(
+          (left, right) =>
+            right.metricWeight - left.metricWeight ||
+            (left.node.sort_rank ?? Number.POSITIVE_INFINITY) - (right.node.sort_rank ?? Number.POSITIVE_INFINITY) ||
+            left.node.label.localeCompare(right.node.label)
+        );
+      return {
+        label,
+        rows: sortedRows,
+        metricWeight: sumWeights(sortedRows.map((row) => row.metricWeight))
+      };
+    })
+    .filter((section) => section.rows.length > 0)
+    .sort((left, right) => right.metricWeight - left.metricWeight || left.label.localeCompare(right.label));
+
+  if (!sections.length) {
+    return [];
+  }
+
+  const sectionRects = layoutWeightedRects(
+    sectionLayoutWeights(sections.map((section) => (section.metricWeight > 0 ? section.metricWeight : 1))),
+    { x: 0, y: 0, width: 100, height: 100 }
+  );
+
+  return sections.map<ResearchTreemapSection>((section, sectionIndex) => {
+    const tileRects = layoutWeightedRects(
+      section.rows.map((row) => (row.metricWeight > 0 ? row.metricWeight : 1)),
+      { x: 0, y: 0, width: 100, height: 100 }
+    );
+    return {
+      label: section.label,
+      rect: sectionRects[sectionIndex],
+      metricWeight: section.metricWeight,
+      nodeCount: section.rows.length,
+      tiles: section.rows.map<ResearchTreemapTile>((row, tileIndex) => ({
+        node: row.node,
+        metricWeight: row.metricWeight,
+        metricValue: row.metricValue,
+        colorValue: getResearchOverviewMetricValue(row.node, colorMetric),
+        rect: tileRects[tileIndex]
+      }))
+    };
+  });
 }
 
 export function buildResearchTreemapLayout(

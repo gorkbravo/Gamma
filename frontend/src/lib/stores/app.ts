@@ -762,7 +762,7 @@ export async function loadResearchOverview(options: ResearchOverviewLoadOptions 
   setLoading("researchOverview", true);
   try {
     const params = new URLSearchParams({
-      universe_id: options.universeId ?? "sample_equities",
+      universe_id: options.universeId ?? "broad_us_market",
       timeframe: options.timeframe ?? "3M",
       benchmark_symbol: options.benchmarkSymbol ?? "SPY"
     });

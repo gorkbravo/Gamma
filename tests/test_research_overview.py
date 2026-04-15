@@ -57,6 +57,7 @@ def test_research_overview_builds_nodes_rankings_and_provenance():
     assert result.source_provider == "mock"
     assert result.freshness_label.value == "mocked"
     assert "not a complete market map" in " ".join(result.warnings)
+    assert result.sort_options[0].sort_id == "market_cap_desc"
 
     instrument_nodes = [node for node in result.nodes if node.level == "instrument"]
     group_nodes = [node for node in result.nodes if node.level == "group"]
@@ -70,6 +71,7 @@ def test_research_overview_builds_nodes_rankings_and_provenance():
     response = ResearchOverviewResponseModel.from_domain(result)
     assert response.nodes[0].freshness_label == "mocked"
     assert response.coverage.benchmark_symbol == "AAPL"
+    assert response.sort_options[0].sort_id == "market_cap_desc"
     assert response.transformation_note is not None
 
 
@@ -92,12 +94,11 @@ def test_research_overview_labels_partial_coverage_without_failing():
         )
     )
 
-    assert result.universe_id == "sample_equities"
+    assert result.universe_id == "broad_us_market"
     assert result.timeframe == "3M"
     assert result.coverage.priced_count == 2
-    assert result.coverage.missing_symbols == ["SAP"]
+    assert "NVDA" in result.coverage.missing_symbols
     assert result.coverage.benchmark_available is False
     assert any("Unknown Research Overview universe" in warning for warning in result.warnings)
     assert any("Unknown Research Overview timeframe" in warning for warning in result.warnings)
     assert any("Coverage is partial" in warning for warning in result.warnings)
-

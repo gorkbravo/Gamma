@@ -1341,6 +1341,10 @@ function makeResearchOverview(): ResearchOverviewResponse {
       { metric_id: "drawdown", label: "Drawdown", description: "Maximum drawdown." },
       { metric_id: "relative_return", label: "Relative", description: "Relative return." }
     ],
+    sort_options: [
+      { sort_id: "market_cap_desc", label: "Market Cap", description: "Size by market cap." },
+      { sort_id: "universe_weight_desc", label: "Universe Weight", description: "Size by universe weight." }
+    ],
     nodes: [
       {
         node_id: "instrument:AAPL",
@@ -1354,6 +1358,9 @@ function makeResearchOverview(): ResearchOverviewResponse {
         symbol: "AAPL",
         instrument_id: "research:AAPL:STK:SMART:USD",
         weight: 1,
+        market_cap_usd: 3_000_000_000_000,
+        index_weight: null,
+        sort_rank: 1,
         size: 1,
         metrics: {
           total_return: 0.05,

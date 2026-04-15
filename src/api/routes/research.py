@@ -18,7 +18,7 @@ router = APIRouter(tags=["research"])
 @router.get("/research/overview", response_model=ResearchOverviewResponseModel)
 def research_overview(
     request: Request,
-    universe_id: str = Query(default="sample_equities"),
+    universe_id: str = Query(default="broad_us_market"),
     timeframe: str = Query(default="3M"),
     benchmark_symbol: str = Query(default="SPY"),
     force_refresh: bool = Query(default=False),

@@ -218,6 +218,13 @@ export interface ResearchResult {
 }
 
 export type ResearchOverviewMetricId = "return" | "volatility" | "beta" | "drawdown" | "relative_return";
+export type ResearchOverviewSortId =
+  | "market_cap_desc"
+  | "universe_weight_desc"
+  | "return_desc"
+  | "volatility_desc"
+  | "beta_desc"
+  | "drawdown_desc";
 
 export interface ResearchOverviewUniverseInstrument {
   symbol: string;
@@ -226,6 +233,9 @@ export interface ResearchOverviewUniverseInstrument {
   sector: string;
   industry: string | null;
   weight: number;
+  market_cap_usd: number | null;
+  index_weight: number | null;
+  sort_rank: number | null;
   currency: string;
   exchange: string;
   sec_type: string;
@@ -241,6 +251,12 @@ export interface ResearchOverviewUniverse {
 
 export interface ResearchOverviewMetricOption {
   metric_id: ResearchOverviewMetricId;
+  label: string;
+  description: string;
+}
+
+export interface ResearchOverviewSortOption {
+  sort_id: ResearchOverviewSortId;
   label: string;
   description: string;
 }
@@ -267,6 +283,9 @@ export interface ResearchOverviewNode {
   symbol: string | null;
   instrument_id: string | null;
   weight: number | null;
+  market_cap_usd: number | null;
+  index_weight: number | null;
+  sort_rank: number | null;
   size: number;
   metrics: ResearchOverviewMetrics;
   source_provider: string;
@@ -319,6 +338,7 @@ export interface ResearchOverviewResponse {
   available_universes: ResearchOverviewUniverse[];
   available_timeframes: string[];
   metric_options: ResearchOverviewMetricOption[];
+  sort_options: ResearchOverviewSortOption[];
   nodes: ResearchOverviewNode[];
   coverage: ResearchOverviewCoverage;
   rankings: ResearchOverviewRankings;

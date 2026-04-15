@@ -21,6 +21,7 @@ from src.models.portfolio import PortfolioSnapshot
 from src.models.provenance import FreshnessLabel
 from src.models.research_overview import (
     RESEARCH_OVERVIEW_METRIC_OPTIONS,
+    RESEARCH_OVERVIEW_SORT_OPTIONS,
     RESEARCH_OVERVIEW_TIMEFRAMES,
     RESEARCH_OVERVIEW_UNIVERSES,
     ResearchOverviewCoverage,
@@ -159,6 +160,7 @@ class ResearchService:
             available_universes=list(RESEARCH_OVERVIEW_UNIVERSES),
             available_timeframes=list(RESEARCH_OVERVIEW_TIMEFRAMES.keys()),
             metric_options=list(RESEARCH_OVERVIEW_METRIC_OPTIONS),
+            sort_options=list(RESEARCH_OVERVIEW_SORT_OPTIONS),
             nodes=nodes,
             coverage=coverage,
             rankings=rankings,
@@ -170,7 +172,7 @@ class ResearchService:
             transformation_note=(
                 "Research Overview computes return, volatility, beta, drawdown, and relative-return metrics from "
                 "daily close histories. Group nodes are weighted return streams from available constituents; tile "
-                "size is equal-weight until market-cap or index-weight data is available."
+                "sizing uses market-cap proxy metadata when available and falls back to universe weights."
             ),
             freshness_label=freshness_label,
         )
@@ -330,11 +332,11 @@ class ResearchService:
         universe_id: str | None,
         warnings: list[str],
     ) -> ResearchOverviewUniverse:
-        normalized = str(universe_id or "").strip().lower() or "sample_equities"
+        normalized = str(universe_id or "").strip().lower() or "broad_us_market"
         for universe in RESEARCH_OVERVIEW_UNIVERSES:
             if universe.universe_id == normalized:
                 return universe
-        warnings.append(f"Unknown Research Overview universe '{universe_id}'; using sample equities.")
+        warnings.append(f"Unknown Research Overview universe '{universe_id}'; using Broad US Market.")
         return RESEARCH_OVERVIEW_UNIVERSES[0]
 
     @staticmethod
@@ -365,6 +367,13 @@ class ResearchService:
         slug = "_".join(part for part in slug.replace("/", " ").split() if part)
         return f"group:{slug or 'ungrouped'}"
 
+    @staticmethod
+    def _overview_node_size(instrument: ResearchOverviewUniverseInstrument) -> float:
+        for candidate in (instrument.market_cap_usd, instrument.index_weight, instrument.weight):
+            if candidate is not None and float(candidate) > 0:
+                return float(candidate)
+        return 1.0
+
     def _overview_instrument_node(
         self,
         instrument: ResearchOverviewUniverseInstrument,
@@ -391,14 +400,17 @@ class ResearchService:
             symbol=symbol,
             instrument_id=reference.instrument_id,
             weight=float(instrument.weight),
-            size=max(float(instrument.weight), 0.0) or 1.0,
+            market_cap_usd=instrument.market_cap_usd,
+            index_weight=instrument.index_weight,
+            sort_rank=instrument.sort_rank,
+            size=self._overview_node_size(instrument),
             metrics=metrics,
             source_provider=source_provider,
             retrieved_at=retrieved_at,
             origin="research_service.overview.instrument",
             transformation_note=(
-                f"Computed from daily close history over {timeframe}. Tile size uses equal-weight/sample "
-                "universe weights because market-cap weights are not yet available."
+                f"Computed from daily close history over {timeframe}. Tile sizing uses static market-cap proxy "
+                "metadata when present and falls back to universe weight."
             ),
             freshness_label=freshness_label,
             warnings=list(warnings),
@@ -435,6 +447,8 @@ class ResearchService:
             )
             group_id = self._overview_group_id(group)
             group_weight = sum(max(float(row.weight), 0.0) for row in rows)
+            group_market_cap = sum(float(row.market_cap_usd or 0.0) for row in rows) or None
+            group_index_weight = sum(float(row.index_weight or 0.0) for row in rows) or None
             warnings = [] if not group_returns.empty else ["No priced constituents are available for this group."]
             nodes.append(
                 ResearchOverviewNode(
@@ -449,7 +463,10 @@ class ResearchService:
                     symbol=None,
                     instrument_id=None,
                     weight=group_weight,
-                    size=group_weight or float(len(rows) or 1),
+                    market_cap_usd=group_market_cap,
+                    index_weight=group_index_weight,
+                    sort_rank=None,
+                    size=group_market_cap or group_index_weight or group_weight or float(len(rows) or 1),
                     metrics=metrics,
                     source_provider=source_provider,
                     retrieved_at=retrieved_at,

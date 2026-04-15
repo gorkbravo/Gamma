@@ -17,6 +17,7 @@ from src.models.research_overview import (
     ResearchOverviewRankItem,
     ResearchOverviewRankings,
     ResearchOverviewResult,
+    ResearchOverviewSortOption,
     ResearchOverviewSummary,
     ResearchOverviewUniverse,
     ResearchOverviewUniverseInstrument,
@@ -65,6 +66,9 @@ class ResearchOverviewUniverseInstrumentModel(BaseModel):
     sector: str
     industry: str | None = None
     weight: float = 1.0
+    market_cap_usd: float | None = None
+    index_weight: float | None = None
+    sort_rank: int | None = None
     currency: str = "USD"
     exchange: str = "SMART"
     sec_type: str = "STK"
@@ -78,6 +82,9 @@ class ResearchOverviewUniverseInstrumentModel(BaseModel):
             sector=row.sector,
             industry=row.industry,
             weight=row.weight,
+            market_cap_usd=row.market_cap_usd,
+            index_weight=row.index_weight,
+            sort_rank=row.sort_rank,
             currency=row.currency,
             exchange=row.exchange,
             sec_type=row.sec_type,
@@ -112,6 +119,16 @@ class ResearchOverviewMetricOptionModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class ResearchOverviewSortOptionModel(BaseModel):
+    sort_id: str
+    label: str
+    description: str
+
+    @classmethod
+    def from_domain(cls, row: ResearchOverviewSortOption) -> "ResearchOverviewSortOptionModel":
+        return cls(**row.__dict__)
+
+
 class ResearchOverviewMetricsModel(BaseModel):
     total_return: float | None = None
     annual_volatility: float | None = None
@@ -138,6 +155,9 @@ class ResearchOverviewNodeModel(BaseModel):
     symbol: str | None = None
     instrument_id: str | None = None
     weight: float | None = None
+    market_cap_usd: float | None = None
+    index_weight: float | None = None
+    sort_rank: int | None = None
     size: float
     metrics: ResearchOverviewMetricsModel
     source_provider: str
@@ -228,6 +248,7 @@ class ResearchOverviewResponseModel(BaseModel):
     available_universes: list[ResearchOverviewUniverseModel] = Field(default_factory=list)
     available_timeframes: list[str] = Field(default_factory=list)
     metric_options: list[ResearchOverviewMetricOptionModel] = Field(default_factory=list)
+    sort_options: list[ResearchOverviewSortOptionModel] = Field(default_factory=list)
     nodes: list[ResearchOverviewNodeModel] = Field(default_factory=list)
     coverage: ResearchOverviewCoverageModel
     rankings: ResearchOverviewRankingsModel
@@ -251,6 +272,7 @@ class ResearchOverviewResponseModel(BaseModel):
             available_universes=[ResearchOverviewUniverseModel.from_domain(item) for item in row.available_universes],
             available_timeframes=list(row.available_timeframes),
             metric_options=[ResearchOverviewMetricOptionModel.from_domain(item) for item in row.metric_options],
+            sort_options=[ResearchOverviewSortOptionModel.from_domain(item) for item in row.sort_options],
             nodes=[ResearchOverviewNodeModel.from_domain(item) for item in row.nodes],
             coverage=ResearchOverviewCoverageModel.from_domain(row.coverage),
             rankings=ResearchOverviewRankingsModel.from_domain(row.rankings),

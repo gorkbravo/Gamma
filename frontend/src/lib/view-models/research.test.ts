@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { ResearchResult } from "../api/types";
 import {
   buildResearchTreemapLayout,
+  buildResearchTreemapSections,
   buildPreviewRows,
   deriveConstituentsFromResearchResult,
   deriveCoverageFromResearchResult,
   deriveStructureFromWeights,
   doesResearchDraftMatchResult,
   formatResearchOverviewMetricValue,
+  formatResearchOverviewSortValue,
   normalizeSyntheticText,
   parseSyntheticText
 } from "./research";
@@ -96,6 +98,19 @@ describe("research view model helpers", () => {
     expect(formatResearchOverviewMetricValue(rects[0]?.metricValue ?? null, "return")).toMatch(/%$/);
     expect(formatResearchOverviewMetricValue(1.234, "beta")).toBe("1.23");
   });
+
+  it("builds grouped treemap sections sized by market cap", () => {
+    const overview = makeResearchOverview();
+    const sections = buildResearchTreemapSections(overview, "return", "market_cap_desc");
+
+    expect(sections.map((section) => section.label)).toEqual(["US Mega-Cap Tech", "International Software"]);
+    expect(sections[0]?.tiles.map((tile) => tile.node.symbol)).toEqual(["MSFT", "AAPL"]);
+    expect(sections[0]?.tiles[0]?.metricValue).toBe(2_000_000_000_000);
+    expect((sections[0]?.rect.width ?? 0) * (sections[0]?.rect.height ?? 0)).toBeGreaterThan(
+      10 * ((sections[1]?.rect.width ?? 0) * (sections[1]?.rect.height ?? 0))
+    );
+    expect(formatResearchOverviewSortValue(sections[0]?.tiles[0]?.metricValue, "market_cap_desc")).toBe("$2.00T");
+  });
 });
 
 function makeResearchResult(
@@ -156,6 +171,7 @@ function makeResearchOverview() {
     available_universes: [],
     available_timeframes: ["1M", "3M", "6M", "1Y"],
     metric_options: [],
+    sort_options: [],
     nodes: [
       makeOverviewNode("instrument:AAPL", "AAPL", "Apple", "US Mega-Cap Tech", 0.05, 0.2),
       makeOverviewNode("instrument:MSFT", "MSFT", "Microsoft", "US Mega-Cap Tech", 0.08, 0.24),
@@ -211,6 +227,9 @@ function makeOverviewNode(
     symbol,
     instrument_id: symbol,
     weight: 1,
+    market_cap_usd: symbol === "MSFT" ? 2_000_000_000_000 : symbol === "AAPL" ? 1_000_000_000_000 : 250_000_000_000,
+    index_weight: null,
+    sort_rank: null,
     size: 1,
     metrics: {
       total_return: totalReturn,

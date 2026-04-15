@@ -15,6 +15,9 @@ class ResearchOverviewUniverseInstrument:
     sector: str
     industry: str | None = None
     weight: float = 1.0
+    market_cap_usd: float | None = None
+    index_weight: float | None = None
+    sort_rank: int | None = None
     currency: str = "USD"
     exchange: str = "SMART"
     sec_type: str = "STK"
@@ -52,7 +55,7 @@ class ResearchOverviewUniverse:
 
 @dataclass(frozen=True)
 class ResearchOverviewRequest:
-    universe_id: str = "sample_equities"
+    universe_id: str = "broad_us_market"
     timeframe: str = "3M"
     benchmark_symbol: str = "SPY"
 
@@ -60,6 +63,13 @@ class ResearchOverviewRequest:
 @dataclass(frozen=True)
 class ResearchOverviewMetricOption:
     metric_id: str
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
+class ResearchOverviewSortOption:
+    sort_id: str
     label: str
     description: str
 
@@ -88,6 +98,9 @@ class ResearchOverviewNode:
     symbol: str | None
     instrument_id: str | None
     weight: float | None
+    market_cap_usd: float | None
+    index_weight: float | None
+    sort_rank: int | None
     size: float
     metrics: ResearchOverviewMetrics
     source_provider: str
@@ -145,6 +158,7 @@ class ResearchOverviewResult:
     available_universes: list[ResearchOverviewUniverse]
     available_timeframes: list[str]
     metric_options: list[ResearchOverviewMetricOption]
+    sort_options: list[ResearchOverviewSortOption]
     nodes: list[ResearchOverviewNode]
     coverage: ResearchOverviewCoverage
     rankings: ResearchOverviewRankings
@@ -186,6 +200,40 @@ RESEARCH_OVERVIEW_METRIC_OPTIONS: tuple[ResearchOverviewMetricOption, ...] = (
 )
 
 
+RESEARCH_OVERVIEW_SORT_OPTIONS: tuple[ResearchOverviewSortOption, ...] = (
+    ResearchOverviewSortOption(
+        sort_id="market_cap_desc",
+        label="Market Cap",
+        description="Tile area by static market-cap proxy where available.",
+    ),
+    ResearchOverviewSortOption(
+        sort_id="universe_weight_desc",
+        label="Universe Weight",
+        description="Tile area by universe weight or equal-weight fallback.",
+    ),
+    ResearchOverviewSortOption(
+        sort_id="return_desc",
+        label="Return",
+        description="Tile area by total return over the selected timeframe.",
+    ),
+    ResearchOverviewSortOption(
+        sort_id="volatility_desc",
+        label="Volatility",
+        description="Tile area by annualized volatility over the selected timeframe.",
+    ),
+    ResearchOverviewSortOption(
+        sort_id="beta_desc",
+        label="Beta",
+        description="Tile area by benchmark beta where available.",
+    ),
+    ResearchOverviewSortOption(
+        sort_id="drawdown_desc",
+        label="Drawdown",
+        description="Tile area by absolute maximum drawdown over the selected timeframe.",
+    ),
+)
+
+
 RESEARCH_OVERVIEW_TIMEFRAMES: dict[str, int] = {
     "1M": 21,
     "3M": 63,
@@ -194,7 +242,134 @@ RESEARCH_OVERVIEW_TIMEFRAMES: dict[str, int] = {
 }
 
 
+def _cap_usd(value: str) -> float:
+    raw = value.strip().upper()
+    if raw.endswith("T"):
+        return float(raw[:-1]) * 1_000_000_000_000
+    if raw.endswith("B"):
+        return float(raw[:-1]) * 1_000_000_000
+    if raw.endswith("M"):
+        return float(raw[:-1]) * 1_000_000
+    return float(raw)
+
+
+def _overview_equity(
+    rank: int,
+    symbol: str,
+    label: str,
+    market_cap: str,
+    sector: str,
+    industry: str,
+) -> ResearchOverviewUniverseInstrument:
+    market_cap_usd = _cap_usd(market_cap)
+    return ResearchOverviewUniverseInstrument(
+        symbol=symbol,
+        label=label,
+        group=sector,
+        sector=sector,
+        industry=industry,
+        weight=market_cap_usd,
+        market_cap_usd=market_cap_usd,
+        sort_rank=rank,
+    )
+
+
+BROAD_US_MARKET_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
+    _overview_equity(1, "NVDA", "NVIDIA", "4.85T", "Information Technology", "Semiconductors"),
+    _overview_equity(2, "GOOGL", "Alphabet Class A", "4.04T", "Communication Services", "Interactive Media & Services"),
+    _overview_equity(3, "GOOG", "Alphabet Class C", "4.01T", "Communication Services", "Interactive Media & Services"),
+    _overview_equity(4, "AAPL", "Apple", "3.89T", "Information Technology", "Technology Hardware, Storage & Peripherals"),
+    _overview_equity(5, "MSFT", "Microsoft", "3.03T", "Information Technology", "Systems Software"),
+    _overview_equity(6, "AMZN", "Amazon", "2.67T", "Consumer Discretionary", "Broadline Retail"),
+    _overview_equity(7, "AVGO", "Broadcom", "1.87T", "Information Technology", "Semiconductors"),
+    _overview_equity(8, "META", "Meta Platforms", "1.71T", "Communication Services", "Interactive Media & Services"),
+    _overview_equity(9, "TSLA", "Tesla", "1.47T", "Consumer Discretionary", "Automobile Manufacturers"),
+    _overview_equity(10, "BRK-B", "Berkshire Hathaway Class B", "1.03T", "Financials", "Multi-Sector Holdings"),
+    _overview_equity(11, "WMT", "Walmart", "986.82B", "Consumer Staples", "Consumer Staples Merchandise Retail"),
+    _overview_equity(12, "JPM", "JPMorgan Chase", "816.52B", "Financials", "Diversified Banks"),
+    _overview_equity(13, "LLY", "Eli Lilly", "801.75B", "Health Care", "Pharmaceuticals"),
+    _overview_equity(14, "XOM", "Exxon Mobil", "617.00B", "Energy", "Integrated Oil & Gas"),
+    _overview_equity(15, "V", "Visa", "598.49B", "Financials", "Transaction & Payment Processing Services"),
+    _overview_equity(16, "JNJ", "Johnson & Johnson", "572.29B", "Health Care", "Pharmaceuticals"),
+    _overview_equity(17, "MU", "Micron Technology", "504.68B", "Information Technology", "Semiconductors"),
+    _overview_equity(18, "ORCL", "Oracle", "487.09B", "Information Technology", "Application Software"),
+    _overview_equity(19, "MA", "Mastercard", "462.40B", "Financials", "Transaction & Payment Processing Services"),
+    _overview_equity(20, "NFLX", "Netflix", "448.12B", "Communication Services", "Movies & Entertainment"),
+    _overview_equity(21, "COST", "Costco Wholesale", "433.76B", "Consumer Staples", "Consumer Staples Merchandise Retail"),
+    _overview_equity(22, "AMD", "Advanced Micro Devices", "417.53B", "Information Technology", "Semiconductors"),
+    _overview_equity(23, "BAC", "Bank of America", "386.58B", "Financials", "Diversified Banks"),
+    _overview_equity(24, "CVX", "Chevron", "368.26B", "Energy", "Integrated Oil & Gas"),
+    _overview_equity(25, "ABBV", "AbbVie", "364.29B", "Health Care", "Biotechnology"),
+    _overview_equity(26, "CAT", "Caterpillar", "355.01B", "Industrials", "Construction Machinery & Heavy Transportation Equipment"),
+    _overview_equity(27, "HD", "Home Depot", "336.58B", "Consumer Discretionary", "Home Improvement Retail"),
+    _overview_equity(28, "PLTR", "Palantir Technologies", "334.50B", "Information Technology", "Application Software"),
+    _overview_equity(29, "PG", "Procter & Gamble", "332.74B", "Consumer Staples", "Personal Care Products"),
+    _overview_equity(30, "INTC", "Intel", "328.27B", "Information Technology", "Semiconductors"),
+    _overview_equity(31, "GE", "GE Aerospace", "327.67B", "Industrials", "Aerospace & Defense"),
+    _overview_equity(32, "LRCX", "Lam Research", "327.07B", "Information Technology", "Semiconductor Materials & Equipment"),
+    _overview_equity(33, "KO", "Coca-Cola", "324.02B", "Consumer Staples", "Soft Drinks & Non-alcoholic Beverages"),
+    _overview_equity(34, "CSCO", "Cisco Systems", "320.26B", "Information Technology", "Communications Equipment"),
+    _overview_equity(35, "AMAT", "Applied Materials", "306.37B", "Information Technology", "Semiconductor Materials & Equipment"),
+    _overview_equity(36, "MS", "Morgan Stanley", "302.04B", "Financials", "Investment Banking & Brokerage"),
+    _overview_equity(37, "MRK", "Merck", "289.87B", "Health Care", "Pharmaceuticals"),
+    _overview_equity(38, "UNH", "UnitedHealth Group", "283.43B", "Health Care", "Managed Health Care"),
+    _overview_equity(39, "GS", "Goldman Sachs", "276.88B", "Financials", "Investment Banking & Brokerage"),
+    _overview_equity(40, "RTX", "RTX", "266.76B", "Industrials", "Aerospace & Defense"),
+    _overview_equity(41, "GEV", "GE Vernova", "266.71B", "Industrials", "Heavy Electrical Equipment"),
+    _overview_equity(42, "WFC", "Wells Fargo", "248.64B", "Financials", "Diversified Banks"),
+    _overview_equity(43, "PM", "Philip Morris International", "245.62B", "Consumer Staples", "Tobacco"),
+    _overview_equity(44, "LIN", "Linde", "229.43B", "Materials", "Industrial Gases"),
+    _overview_equity(45, "IBM", "IBM", "229.18B", "Information Technology", "IT Consulting & Other Services"),
+    _overview_equity(46, "AXP", "American Express", "226.18B", "Financials", "Consumer Finance"),
+    _overview_equity(47, "KLAC", "KLA", "225.01B", "Information Technology", "Semiconductor Materials & Equipment"),
+    _overview_equity(48, "C", "Citigroup", "224.73B", "Financials", "Diversified Banks"),
+    _overview_equity(49, "MCD", "McDonald's", "217.19B", "Consumer Discretionary", "Restaurants"),
+    _overview_equity(50, "PEP", "PepsiCo", "210.92B", "Consumer Staples", "Soft Drinks & Non-alcoholic Beverages"),
+    _overview_equity(51, "TMUS", "T-Mobile US", "210.21B", "Communication Services", "Wireless Telecommunication Services"),
+    _overview_equity(52, "TMO", "Thermo Fisher Scientific", "195.76B", "Health Care", "Life Sciences Tools & Services"),
+    _overview_equity(53, "TXN", "Texas Instruments", "194.69B", "Information Technology", "Semiconductors"),
+    _overview_equity(54, "ANET", "Arista Networks", "191.12B", "Information Technology", "Communications Equipment"),
+    _overview_equity(55, "VZ", "Verizon", "188.29B", "Communication Services", "Integrated Telecommunication Services"),
+    _overview_equity(56, "NEE", "NextEra Energy", "188.26B", "Utilities", "Multi-Utilities"),
+    _overview_equity(57, "AMGN", "Amgen", "186.60B", "Health Care", "Biotechnology"),
+    _overview_equity(58, "DIS", "Walt Disney", "181.94B", "Communication Services", "Movies & Entertainment"),
+    _overview_equity(59, "APH", "Amphenol", "179.13B", "Information Technology", "Electronic Components"),
+    _overview_equity(60, "T", "AT&T", "178.43B", "Communication Services", "Integrated Telecommunication Services"),
+    _overview_equity(61, "TJX", "TJX Companies", "177.26B", "Consumer Discretionary", "Apparel Retail"),
+    _overview_equity(62, "ABT", "Abbott Laboratories", "176.55B", "Health Care", "Health Care Equipment"),
+    _overview_equity(63, "BA", "Boeing", "175.19B", "Industrials", "Aerospace & Defense"),
+    _overview_equity(64, "SCHW", "Charles Schwab", "172.71B", "Financials", "Investment Banking & Brokerage"),
+    _overview_equity(65, "GILD", "Gilead Sciences", "172.07B", "Health Care", "Biotechnology"),
+    _overview_equity(66, "BLK", "BlackRock", "170.63B", "Financials", "Asset Management & Custody Banks"),
+    _overview_equity(67, "ADI", "Analog Devices", "168.24B", "Information Technology", "Semiconductors"),
+    _overview_equity(68, "ISRG", "Intuitive Surgical", "166.71B", "Health Care", "Health Care Equipment"),
+    _overview_equity(69, "CRM", "Salesforce", "163.27B", "Information Technology", "Application Software"),
+    _overview_equity(70, "BX", "Blackstone", "159.60B", "Financials", "Asset Management & Custody Banks"),
+    _overview_equity(71, "UBER", "Uber Technologies", "156.41B", "Industrials", "Passenger Ground Transportation"),
+    _overview_equity(72, "DE", "Deere", "155.22B", "Industrials", "Agricultural & Farm Machinery"),
+    _overview_equity(73, "PFE", "Pfizer", "153.87B", "Health Care", "Pharmaceuticals"),
+    _overview_equity(74, "APP", "AppLovin", "153.45B", "Information Technology", "Application Software"),
+    _overview_equity(75, "ETN", "Eaton", "151.64B", "Industrials", "Electrical Components & Equipment"),
+    _overview_equity(76, "WELL", "Welltower", "147.73B", "Real Estate", "Health Care REITs"),
+    _overview_equity(77, "BKNG", "Booking Holdings", "147.45B", "Consumer Discretionary", "Hotels, Resorts & Cruise Lines"),
+    _overview_equity(78, "UNP", "Union Pacific", "146.98B", "Industrials", "Rail Transportation"),
+    _overview_equity(79, "HON", "Honeywell", "145.80B", "Industrials", "Industrial Conglomerates"),
+    _overview_equity(80, "COP", "ConocoPhillips", "144.98B", "Energy", "Oil & Gas Exploration & Production"),
+)
+
+
 RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
+    ResearchOverviewUniverse(
+        universe_id="broad_us_market",
+        label="Broad US Market",
+        description="Large-cap US equity map seeded from a broad S&P 500-derived universe.",
+        instruments=BROAD_US_MARKET_INSTRUMENTS,
+        limitations=(
+            "This first pass uses the largest available S&P 500 constituents by static market-cap proxy, not the complete index.",
+            "Market-cap tile sizing is static proxy metadata and may drift until a live constituent/weight provider is added.",
+            "IBKR/TWS history coverage is entitlement, symbol, session, and pacing dependent.",
+        ),
+    ),
     ResearchOverviewUniverse(
         universe_id="sample_equities",
         label="Sample equities",
