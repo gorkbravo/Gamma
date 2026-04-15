@@ -18,6 +18,9 @@ describe("KeyBindingsWindow", () => {
     expect(body).toContain("Ctrl+B or `");
     expect(body).toContain("Portfolio Workspace");
     expect(body).toContain("Research Workspace");
+    expect(body).toContain("Mode Shortcuts");
+    expect(body).toContain("Shift+1");
+    expect(body).toContain("Flows &amp; Liquidity");
     expect(body).toContain("Derived / pinned");
     expect(body).toContain("Explicit");
   });

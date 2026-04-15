@@ -177,7 +177,7 @@ Installer, tutorial, setup flow, mock mode, diagnostics, and clear error states 
 
 ## Workstream 1 - Cross-Cutting Platform Foundation
 
-_Status: Planned_
+_Status: In progress (~25%)_
 _Dependency marker: Foundation_
 _Parallelization note: Some pieces are independent, but this workstream should start early because it shapes most V2 tabs._
 
@@ -243,6 +243,8 @@ The V2 IBKR boundary should:
 - avoid any feature path where Copilot can call execution-related functions.
 
 This lets Gamma benefit from IBKR data without turning into an execution platform.
+
+First-pass boundary note: Gamma relies on TWS API read-only configuration for the hard execution lock. Gamma's app-side responsibility is to keep its own adapter, UI, and Copilot paths data-only by exposing no order-placement or account-modification capabilities.
 
 #### 3. Research market-data abstraction
 
@@ -317,6 +319,8 @@ The intended model:
 - The active mode should be visible and stable across refreshes when reasonable.
 
 This should apply to Research, Macro, IV, Crypto, Fundamentals, Commodities, Maritime Intelligence, and the dedicated Copilot workspace.
+
+First-pass implementation note: `Shift+1` through `Shift+N` now switch registered modes in the active tab for Macro, Crypto, and Fundamentals. The keybindings viewer exposes the derived mode map, and future tabs should register their modes through shared navigation metadata.
 
 #### 7. Cross-tab context handoff layer
 

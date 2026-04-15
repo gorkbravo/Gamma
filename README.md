@@ -84,7 +84,7 @@ The architecture follows a fairly clean pattern:
 
 The current API surface is grouped by workspace:
 
-- `/system/*`: runtime status, connection state, diagnostics, settings
+- `/system/*`: runtime status, connection state, diagnostics, settings, provider capability metadata
 - `/portfolio/*`: snapshot, local history, performance
 - `/research/*`: single-name and synthetic-scope analysis
 - `/macro/*`: snapshot payload, divergences, event feed, series history
@@ -119,6 +119,8 @@ A lot of the app's trust model depends on provenance. Many returned entities car
 - `transformation_note`
 
 That metadata is especially important in Macro, Prediction Markets, and Crypto, where Gamma is often transforming raw public data into normalized metrics or heuristic interpretations.
+
+The backend exposes the read-only provider capability registry at `/system/provider-capabilities` so future services, UI surfaces, and Copilot context builders can distinguish active, optional, sample, and planned providers without making provider calls.
 
 For Roadmap V2 planning, the intended provider stance is:
 

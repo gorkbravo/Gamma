@@ -16,6 +16,7 @@
   import { matchesActionKeybinding, isEditableEventTarget } from "./lib/keybindings";
   import { openKeyBindingsWindow } from "./lib/keybindings-window";
   import {
+    getModeByShortcutIndex,
     getOrderedWorkspaceTabs,
     getTabByShortcutIndex,
     getWorkspaceHomeTab,
@@ -127,6 +128,8 @@
     TabId,
     WorkspaceMode
   } from "./lib/api/types";
+  import type { CryptoMode } from "./lib/view-models/crypto";
+  import type { FundamentalsMode } from "./lib/view-models/fundamentals";
 
   type ConsoleEntry = {
     label: string;
@@ -139,6 +142,8 @@
   let workspaceMode: WorkspaceMode | null = null;
   let ivRequestedSymbol = "SPY";
   let ivPollingActive = false;
+  let cryptoMode: CryptoMode = "overview";
+  let fundamentalsMode: FundamentalsMode = "overview";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
   let sidebarOpen = false;
@@ -1179,6 +1184,38 @@
     resetWorkspaceTabOrder(workspaceMode);
   }
 
+  function getNumberShortcutIndex(event: KeyboardEvent) {
+    if (/^[1-9]$/.test(event.key)) {
+      return Number(event.key);
+    }
+    const codeMatch = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
+    return codeMatch ? Number(codeMatch[1]) : null;
+  }
+
+  async function selectModeByShortcutIndex(shortcutIndex: number) {
+    const nextMode = getModeByShortcutIndex($activeTab, shortcutIndex);
+    if (!nextMode) {
+      return false;
+    }
+
+    if ($activeTab === "macro") {
+      await loadMacroWorkspace({ mode: nextMode.id as MacroContextState["mode"] });
+      return true;
+    }
+
+    if ($activeTab === "crypto") {
+      cryptoMode = nextMode.id as CryptoMode;
+      return true;
+    }
+
+    if ($activeTab === "fundamentals") {
+      fundamentalsMode = nextMode.id as FundamentalsMode;
+      return true;
+    }
+
+    return false;
+  }
+
   async function handleAppKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) {
       return;
@@ -1235,15 +1272,32 @@
       return;
     }
 
+    const numberShortcutIndex = getNumberShortcutIndex(event);
+
+    if (
+      workspaceMode != null &&
+      event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      numberShortcutIndex != null
+    ) {
+      if (getModeByShortcutIndex($activeTab, numberShortcutIndex)) {
+        event.preventDefault();
+        await selectModeByShortcutIndex(numberShortcutIndex);
+      }
+      return;
+    }
+
     if (
       workspaceMode != null &&
       event.ctrlKey &&
       !event.shiftKey &&
       !event.altKey &&
       !event.metaKey &&
-      /^[1-9]$/.test(event.key)
+      numberShortcutIndex != null
     ) {
-      const nextTab = getTabByShortcutIndex(workspaceMode, $workspaceTabOrders, Number(event.key));
+      const nextTab = getTabByShortcutIndex(workspaceMode, $workspaceTabOrders, numberShortcutIndex);
       if (nextTab) {
         event.preventDefault();
         await selectTab(nextTab);
@@ -1348,6 +1402,7 @@
           />
         {:else if $activeTab === "crypto"}
           <CryptoView
+            bind:mode={cryptoMode}
             workspace={$cryptoWorkspace}
             detail={$cryptoTokenDetail}
             history={$cryptoPriceHistory}
@@ -1364,6 +1419,7 @@
           />
         {:else if $activeTab === "fundamentals"}
           <FundamentalsView
+            bind:mode={fundamentalsMode}
             search={$fundamentalsSearch}
             selectedTicker={$selectedFundamentalsTicker}
             overview={$fundamentalsOverview}

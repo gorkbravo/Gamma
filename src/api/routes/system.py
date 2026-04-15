@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi import HTTPException
 
 from src.api.schemas.system import (
@@ -11,6 +11,8 @@ from src.api.schemas.system import (
     DiagnosticsResponseModel,
     HealthResponseModel,
     MarketDataModeRequestModel,
+    ProviderCapabilityListResponseModel,
+    ProviderCapabilityModel,
     SystemStatusResponseModel,
 )
 from src.utils.time import now_utc
@@ -28,6 +30,37 @@ def health() -> HealthResponseModel:
 def system_status(request: Request) -> SystemStatusResponseModel:
     runtime = request.app.state.runtime
     return _system_status_response(runtime)
+
+
+@router.get("/system/provider-capabilities", response_model=ProviderCapabilityListResponseModel)
+def provider_capabilities(
+    request: Request,
+    status: str | None = Query(default=None),
+    include_planned: bool = Query(default=True),
+) -> ProviderCapabilityListResponseModel:
+    runtime = request.app.state.runtime
+    providers = runtime.provider_capabilities.list_capabilities(
+        status=status,
+        include_planned=include_planned,
+    )
+    generated_at = next((provider.retrieved_at for provider in providers if provider.retrieved_at is not None), now_utc())
+    return ProviderCapabilityListResponseModel(
+        generated_at=generated_at,
+        providers=[ProviderCapabilityModel.from_domain(provider) for provider in providers],
+        retrieved_at=generated_at,
+        transformation_note=(
+            "Static Roadmap V2 provider metadata; this endpoint does not perform provider health, entitlement, or credential checks."
+        ),
+    )
+
+
+@router.get("/system/provider-capabilities/{provider_id}", response_model=ProviderCapabilityModel)
+def provider_capability(provider_id: str, request: Request) -> ProviderCapabilityModel:
+    runtime = request.app.state.runtime
+    provider = runtime.provider_capabilities.get_provider(provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"Provider capability not found: {provider_id}")
+    return ProviderCapabilityModel.from_domain(provider)
 
 
 @router.post("/system/connection/toggle", response_model=SystemStatusResponseModel)

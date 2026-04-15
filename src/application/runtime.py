@@ -15,6 +15,10 @@ from src.application.iv_service import IVService
 from src.application.macro_service import MacroService
 from src.application.portfolio_service import PortfolioService
 from src.application.prediction_market_service import PredictionMarketService
+from src.application.provider_capability_registry import (
+    ProviderCapabilityRegistry,
+    build_default_provider_capability_registry,
+)
 from src.application.research_service import ResearchService
 from src.application.risk_service import RiskService
 from src.application.system_service import normalize_market_data_mode
@@ -59,6 +63,7 @@ class ApplicationRuntime:
     mock_service: MockDataService
     client: IBKRClient
     cache: CacheService
+    provider_capabilities: ProviderCapabilityRegistry
     market_data: MarketDataService
     fx_service: FXService
     portfolio_history: PortfolioHistoryStore
@@ -164,6 +169,7 @@ def build_runtime(
     client = IBKRClient(host, port, client_id, account, bool(mock_mode), mock_service)
     client.set_market_data_mode(market_data_mode)
     cache = CacheService(base_dir=resolved_cache_dir, ttl_hours=24)
+    provider_capabilities = build_default_provider_capability_registry()
     market_data = MarketDataService(
         client.ib,
         cache,
@@ -253,6 +259,7 @@ def build_runtime(
         mock_service=mock_service,
         client=client,
         cache=cache,
+        provider_capabilities=provider_capabilities,
         market_data=market_data,
         fx_service=fx_service,
         portfolio_history=portfolio_history,

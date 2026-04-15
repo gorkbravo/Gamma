@@ -70,7 +70,7 @@
   const positiveOnlyLowerBetterMetricIds = new Set(["ev_to_sales", "ev_to_ebit", "price_to_earnings"]);
   const marketContextMetricIds = ["current_price", "market_cap", "enterprise_value", "ev_to_sales", "ev_to_ebit", "net_debt", "diluted_shares"];
 
-  let mode: FundamentalsMode = "overview";
+  export let mode: FundamentalsMode = "overview";
   let searchQuery = "";
   let statementBasis: FundamentalsStatementBasis = "annual";
   let statementKind: FundamentalsStatementKind = "income";

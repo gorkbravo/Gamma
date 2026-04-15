@@ -23,6 +23,31 @@ export const WORKSPACE_TAB_DEFINITIONS = {
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 
+export interface TabModeDefinition {
+  id: string;
+  label: string;
+  defaultIndex: number;
+}
+
+export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinition[]>> = {
+  macro: [
+    { id: "snapshot", label: "Snapshot", defaultIndex: 0 },
+    { id: "cross_asset", label: "Cross-Asset", defaultIndex: 1 },
+    { id: "rates_policy", label: "Rates & Policy", defaultIndex: 2 },
+    { id: "events_regimes", label: "Events / Regimes", defaultIndex: 3 },
+  ],
+  crypto: [
+    { id: "overview", label: "Overview", defaultIndex: 0 },
+    { id: "deep_dive", label: "Deep Dive", defaultIndex: 1 },
+    { id: "flows_liquidity", label: "Flows & Liquidity", defaultIndex: 2 },
+  ],
+  fundamentals: [
+    { id: "overview", label: "Overview", defaultIndex: 0 },
+    { id: "financials", label: "Financials", defaultIndex: 1 },
+    { id: "dcf", label: "DCF", defaultIndex: 2 },
+  ],
+};
+
 export const DEFAULT_WORKSPACE_TAB_ORDER = {
   portfolio: WORKSPACE_TAB_DEFINITIONS.portfolio.map((tab) => tab.id),
   research: WORKSPACE_TAB_DEFINITIONS.research.map((tab) => tab.id),
@@ -165,6 +190,10 @@ export function getShortcutHintForIndex(index: number) {
   return `Ctrl+${index + 1}`;
 }
 
+export function getModeShortcutHintForIndex(index: number) {
+  return `Shift+${index + 1}`;
+}
+
 export function getTabShortcutHint(mode: WorkspaceMode, orders: WorkspaceTabOrderState, tabId: TabId) {
   const orderedTabs = normalizeWorkspaceTabOrder(mode, orders[mode]);
   const index = orderedTabs.indexOf(tabId);
@@ -174,4 +203,18 @@ export function getTabShortcutHint(mode: WorkspaceMode, orders: WorkspaceTabOrde
 export function getTabByShortcutIndex(mode: WorkspaceMode, orders: WorkspaceTabOrderState, shortcutIndex: number): TabId | null {
   const orderedTabs = normalizeWorkspaceTabOrder(mode, orders[mode]);
   return orderedTabs[shortcutIndex - 1] ?? null;
+}
+
+export function getTabModes(tabId: TabId): TabModeDefinition[] {
+  return [...(TAB_MODE_DEFINITIONS[tabId] ?? [])].sort((left, right) => left.defaultIndex - right.defaultIndex);
+}
+
+export function getModeShortcutHint(tabId: TabId, modeId: string) {
+  const modes = getTabModes(tabId);
+  const index = modes.findIndex((mode) => mode.id === modeId);
+  return index >= 0 ? getModeShortcutHintForIndex(index) : "";
+}
+
+export function getModeByShortcutIndex(tabId: TabId, shortcutIndex: number): TabModeDefinition | null {
+  return getTabModes(tabId)[shortcutIndex - 1] ?? null;
 }

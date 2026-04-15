@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_WORKSPACE_TAB_ORDER,
   getDefaultTabOrder,
+  getModeByShortcutIndex,
+  getModeShortcutHint,
+  getModeShortcutHintForIndex,
+  getTabModes,
   getTabByShortcutIndex,
   moveWorkspaceTab,
   normalizeWorkspaceTabOrder,
@@ -69,6 +73,19 @@ describe("navigation tab ordering", () => {
     expect(getTabByShortcutIndex("research", reorderedState, 2)).toBe("risk");
     expect(getTabByShortcutIndex("research", reorderedState, 3)).toBe("prediction_markets");
     expect(getTabByShortcutIndex("research", reorderedState, 4)).toBe("crypto");
+  });
+
+  it("maps Shift+N to registered mode order for mode-bearing tabs", () => {
+    expect(getModeShortcutHintForIndex(0)).toBe("Shift+1");
+    expect(getTabModes("macro").map((mode) => mode.id)).toEqual([
+      "snapshot",
+      "cross_asset",
+      "rates_policy",
+      "events_regimes",
+    ]);
+    expect(getModeByShortcutIndex("macro", 2)?.id).toBe("cross_asset");
+    expect(getModeShortcutHint("crypto", "flows_liquidity")).toBe("Shift+3");
+    expect(getModeByShortcutIndex("research", 1)).toBeNull();
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {

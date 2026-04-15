@@ -2,8 +2,10 @@
   import { workspaceTabOrders } from "./lib/stores/navigation";
   import {
     ACTION_KEYBINDINGS,
+    getModeShortcutHintForIndex,
     getOrderedWorkspaceTabs,
     getShortcutHintForIndex,
+    getTabModes,
   } from "./lib/navigation";
   import type { WorkspaceMode } from "./lib/api/types";
 
@@ -22,6 +24,17 @@
       shortcut: getShortcutHintForIndex(index),
     })),
   }));
+  $: modeSections = workspaceModes.flatMap((workspaceMode) =>
+    getOrderedWorkspaceTabs(workspaceMode, $workspaceTabOrders)
+      .map((tab) => ({
+        ...tab,
+        modes: getTabModes(tab.id).map((mode, index) => ({
+          ...mode,
+          shortcut: getModeShortcutHintForIndex(index),
+        })),
+      }))
+      .filter((tab) => tab.modes.length > 0)
+  );
 </script>
 
 <svelte:head>
@@ -99,6 +112,43 @@
                 </div>
                 <span>{tab.shortcut}</span>
                 <span>{tab.pinned ? "Derived / pinned" : "Derived"}</span>
+              </div>
+            {/each}
+          </div>
+        </article>
+      {/each}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Mode Shortcuts</p>
+        <h2>Active Tab Modes</h2>
+      </div>
+      <p class="annotation">`Shift+1` through `Shift+N` follow the active tab's mode bar when modes are registered.</p>
+    </div>
+
+    <div class="workspace-grid">
+      {#each modeSections as tab}
+        <article class="workspace-card">
+          <div class="workspace-card-head">
+            <h3>{tab.label}</h3>
+            <small>{tab.modes.length} modes</small>
+          </div>
+          <div class="table compact">
+            <div class="row header">
+              <span>Mode</span>
+              <span>Effective</span>
+              <span>Source</span>
+            </div>
+            {#each tab.modes as mode}
+              <div class="row">
+                <div>
+                  <strong>{mode.label}</strong>
+                </div>
+                <span>{mode.shortcut}</span>
+                <span>Derived</span>
               </div>
             {/each}
           </div>

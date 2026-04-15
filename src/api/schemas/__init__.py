@@ -57,6 +57,8 @@ from src.api.schemas.system import (
     ConnectionStateModel,
     DiagnosticsResponseModel,
     HealthResponseModel,
+    ProviderCapabilityListResponseModel,
+    ProviderCapabilityModel,
     SystemStatusResponseModel,
 )
 
@@ -88,6 +90,8 @@ __all__ = [
     "MacroSnapshotResponseModel",
     "PortfolioHistoryPointModel",
     "PortfolioHistoryResponseModel",
+    "ProviderCapabilityListResponseModel",
+    "ProviderCapabilityModel",
     "PredictionMarketListResponseModel",
     "PredictionMarketModel",
     "PredictionMarketScreenerRequestModel",

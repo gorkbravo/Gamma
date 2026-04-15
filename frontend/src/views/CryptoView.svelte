@@ -74,7 +74,7 @@
     { value: 365, label: "1Y" }
   ];
 
-  let mode: CryptoMode = "overview";
+  export let mode: CryptoMode = "overview";
   let heroCanvas: HeroCanvas = "token";
   let heroLookbackDays = 30;
   let query = "";
