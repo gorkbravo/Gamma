@@ -351,6 +351,112 @@ export interface ResearchOverviewResponse {
   freshness_label: string;
 }
 
+export interface ResearchReturnMetrics {
+  total_return: number | null;
+  annual_return: number | null;
+  annual_volatility: number | null;
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+  max_drawdown: number | null;
+  max_drawdown_duration: number | null;
+  observation_count: number;
+  frequency: string;
+  periods_per_year: number;
+  start_date: string | null;
+  end_date: string | null;
+  benchmark_beta: number | null;
+  benchmark_correlation: number | null;
+  upside_capture: number | null;
+  downside_capture: number | null;
+}
+
+export interface ResearchRollingPoint {
+  timestamp: string;
+  rolling_return: number | null;
+  rolling_volatility: number | null;
+  rolling_beta: number | null;
+  rolling_correlation: number | null;
+}
+
+export interface ResearchPeriodReturn {
+  period: string;
+  value: number | null;
+}
+
+export interface StrategyLabResult {
+  name: string;
+  value_kind: "return" | "level" | string;
+  benchmark_column: string | null;
+  benchmark_value_kind: "return" | "level" | string;
+  metrics: ResearchReturnMetrics;
+  returns_points: TimeSeriesPoint[];
+  equity_curve_points: TimeSeriesPoint[];
+  drawdown_points: TimeSeriesPoint[];
+  benchmark_points: TimeSeriesPoint[];
+  benchmark_equity_curve_points: TimeSeriesPoint[];
+  rolling_points: ResearchRollingPoint[];
+  monthly_returns: ResearchPeriodReturn[];
+  annual_returns: ResearchPeriodReturn[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+  freshness_label: string;
+}
+
+export interface ResearchComparisonLegResult {
+  label: string;
+  object_type: string;
+  metrics: ResearchReturnMetrics;
+  returns_points: TimeSeriesPoint[];
+  normalized_nav_points: TimeSeriesPoint[];
+  drawdown_points: TimeSeriesPoint[];
+}
+
+export interface ResearchCompareResult {
+  left: ResearchComparisonLegResult;
+  right: ResearchComparisonLegResult;
+  aligned_observation_count: number;
+  relative_return: number | null;
+  volatility_difference: number | null;
+  max_drawdown_difference: number | null;
+  correlation: number | null;
+  beta: number | null;
+  relative_nav_points: TimeSeriesPoint[];
+  relative_drawdown_points: TimeSeriesPoint[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+  freshness_label: string;
+}
+
+export interface SavedResearchItem {
+  id: string;
+  schema_version: number;
+  object_type: string;
+  title: string;
+  notes: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface SavedResearchListResponse {
+  items: SavedResearchItem[];
+}
+
+export interface SavedResearchDeleteResponse {
+  success: boolean;
+}
+
 export interface RiskMetrics {
   alpha: number;
   lookback_days: number;

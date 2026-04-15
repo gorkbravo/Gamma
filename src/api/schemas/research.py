@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, Literal
 
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from src.analytics.risk_metrics import max_drawdown, realized_vol
@@ -9,6 +11,15 @@ from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, s
 from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.research_service import ResearchAnalysisResult
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
+from src.models.research_lab import (
+    ImportedReturnStreamRequest,
+    ResearchComparisonLeg,
+    ResearchComparisonRequest,
+    ResearchComparisonResult,
+    SavedResearchCreateRequest,
+    SavedResearchItem,
+    StrategyLabAnalysisResult,
+)
 from src.models.research_overview import (
     ResearchOverviewCoverage,
     ResearchOverviewMetricOption,
@@ -57,6 +68,261 @@ class ResearchAnalyzeRequestModel(BaseModel):
     synthetic_positions: list[SyntheticPositionModel] = Field(default_factory=list)
     benchmark_symbol: str = "SPY"
     lookback_days: int = 252
+
+
+class StrategyLabAnalyzeRequestModel(BaseModel):
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    date_column: str = "date"
+    value_column: str = "return"
+    value_kind: Literal["return", "level"] = "return"
+    name: str = "Imported Strategy"
+    benchmark_column: str | None = None
+    benchmark_value_kind: Literal["return", "level"] = "return"
+    min_observations: int = 5
+
+    def to_domain(self) -> ImportedReturnStreamRequest:
+        return ImportedReturnStreamRequest(
+            rows=[dict(row) for row in self.rows],
+            date_column=self.date_column,
+            value_column=self.value_column,
+            value_kind=self.value_kind,
+            name=self.name,
+            benchmark_column=self.benchmark_column,
+            benchmark_value_kind=self.benchmark_value_kind,
+            min_observations=max(int(self.min_observations), 2),
+        )
+
+
+class ResearchReturnMetricsModel(BaseModel):
+    total_return: float | None = None
+    annual_return: float | None = None
+    annual_volatility: float | None = None
+    sharpe_ratio: float | None = None
+    sortino_ratio: float | None = None
+    max_drawdown: float | None = None
+    max_drawdown_duration: int | None = None
+    observation_count: int = 0
+    frequency: str = "unknown"
+    periods_per_year: float = 252.0
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    benchmark_beta: float | None = None
+    benchmark_correlation: float | None = None
+    upside_capture: float | None = None
+    downside_capture: float | None = None
+
+    @classmethod
+    def from_domain(cls, row) -> "ResearchReturnMetricsModel":
+        return cls(**row.__dict__)
+
+
+class ResearchRollingPointModel(BaseModel):
+    timestamp: datetime
+    rolling_return: float | None = None
+    rolling_volatility: float | None = None
+    rolling_beta: float | None = None
+    rolling_correlation: float | None = None
+
+    @classmethod
+    def from_domain(cls, row) -> "ResearchRollingPointModel":
+        return cls(**row.__dict__)
+
+
+class ResearchPeriodReturnModel(BaseModel):
+    period: str
+    value: float | None = None
+
+    @classmethod
+    def from_domain(cls, row) -> "ResearchPeriodReturnModel":
+        return cls(**row.__dict__)
+
+
+class StrategyLabAnalyzeResponseModel(BaseModel):
+    name: str
+    value_kind: str
+    benchmark_column: str | None = None
+    benchmark_value_kind: str
+    metrics: ResearchReturnMetricsModel
+    returns_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    equity_curve_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    drawdown_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    benchmark_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    benchmark_equity_curve_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    rolling_points: list[ResearchRollingPointModel] = Field(default_factory=list)
+    monthly_returns: list[ResearchPeriodReturnModel] = Field(default_factory=list)
+    annual_returns: list[ResearchPeriodReturnModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime
+    origin: str
+    transformation_note: str | None = None
+    freshness_label: str
+
+    @classmethod
+    def from_domain(cls, row: StrategyLabAnalysisResult) -> "StrategyLabAnalyzeResponseModel":
+        return cls(
+            name=row.name,
+            value_kind=row.value_kind,
+            benchmark_column=row.benchmark_column,
+            benchmark_value_kind=row.benchmark_value_kind,
+            metrics=ResearchReturnMetricsModel.from_domain(row.metrics),
+            returns_points=series_to_points(row.returns),
+            equity_curve_points=series_to_points(row.equity_curve),
+            drawdown_points=series_to_points(row.drawdowns),
+            benchmark_points=series_to_points(row.benchmark_returns),
+            benchmark_equity_curve_points=series_to_points(row.benchmark_equity_curve),
+            rolling_points=[ResearchRollingPointModel.from_domain(item) for item in row.rolling_points],
+            monthly_returns=[ResearchPeriodReturnModel.from_domain(item) for item in row.monthly_returns],
+            annual_returns=[ResearchPeriodReturnModel.from_domain(item) for item in row.annual_returns],
+            warnings=list(row.warnings),
+            source_provider=row.source_provider,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+            freshness_label=row.freshness_label,
+        )
+
+
+class ResearchComparisonLegRequestModel(BaseModel):
+    label: str = ""
+    object_type: str = "research_object"
+    return_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    saved_research_id: str | None = None
+
+    def to_domain(self) -> ResearchComparisonLeg:
+        return ResearchComparisonLeg(
+            label=self.label,
+            object_type=self.object_type,
+            returns=_points_to_series(self.return_points),
+            saved_research_id=self.saved_research_id,
+        )
+
+
+class ResearchCompareRequestModel(BaseModel):
+    left: ResearchComparisonLegRequestModel
+    right: ResearchComparisonLegRequestModel
+
+    def to_domain(self) -> ResearchComparisonRequest:
+        return ResearchComparisonRequest(left=self.left.to_domain(), right=self.right.to_domain())
+
+
+class ResearchComparisonLegModel(BaseModel):
+    label: str
+    object_type: str
+    metrics: ResearchReturnMetricsModel
+    returns_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    normalized_nav_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    drawdown_points: list[TimeSeriesPoint] = Field(default_factory=list)
+
+
+class ResearchCompareResponseModel(BaseModel):
+    left: ResearchComparisonLegModel
+    right: ResearchComparisonLegModel
+    aligned_observation_count: int
+    relative_return: float | None = None
+    volatility_difference: float | None = None
+    max_drawdown_difference: float | None = None
+    correlation: float | None = None
+    beta: float | None = None
+    relative_nav_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    relative_drawdown_points: list[TimeSeriesPoint] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime
+    origin: str
+    transformation_note: str | None = None
+    freshness_label: str
+
+    @classmethod
+    def from_domain(cls, row: ResearchComparisonResult) -> "ResearchCompareResponseModel":
+        comparison = row.comparison
+        return cls(
+            left=ResearchComparisonLegModel(
+                label=comparison.left.label,
+                object_type=comparison.left.object_type,
+                metrics=ResearchReturnMetricsModel.from_domain(comparison.left.metrics),
+                returns_points=series_to_points(comparison.left.returns),
+                normalized_nav_points=series_to_points(comparison.left.normalized_nav),
+                drawdown_points=series_to_points(comparison.left.drawdowns),
+            ),
+            right=ResearchComparisonLegModel(
+                label=comparison.right.label,
+                object_type=comparison.right.object_type,
+                metrics=ResearchReturnMetricsModel.from_domain(comparison.right.metrics),
+                returns_points=series_to_points(comparison.right.returns),
+                normalized_nav_points=series_to_points(comparison.right.normalized_nav),
+                drawdown_points=series_to_points(comparison.right.drawdowns),
+            ),
+            aligned_observation_count=comparison.aligned_observation_count,
+            relative_return=comparison.relative_return,
+            volatility_difference=comparison.volatility_difference,
+            max_drawdown_difference=comparison.max_drawdown_difference,
+            correlation=comparison.correlation,
+            beta=comparison.beta,
+            relative_nav_points=series_to_points(comparison.relative_nav),
+            relative_drawdown_points=series_to_points(comparison.relative_drawdown),
+            warnings=list(row.warnings),
+            source_provider=row.source_provider,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+            freshness_label=row.freshness_label,
+        )
+
+
+class SavedResearchCreateRequestModel(BaseModel):
+    object_type: str
+    title: str
+    notes: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str = "gamma_saved_research"
+    origin: str = "research_service.saved_research.create"
+    transformation_note: str | None = None
+
+    def to_domain(self) -> SavedResearchCreateRequest:
+        return SavedResearchCreateRequest(
+            object_type=self.object_type,
+            title=self.title,
+            notes=self.notes,
+            payload=dict(self.payload or {}),
+            warnings=list(self.warnings or []),
+            source_provider=self.source_provider,
+            origin=self.origin,
+            transformation_note=self.transformation_note,
+        )
+
+
+class SavedResearchItemModel(BaseModel):
+    id: str
+    schema_version: int
+    object_type: str
+    title: str
+    notes: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: SavedResearchItem) -> "SavedResearchItemModel":
+        return cls(**row.__dict__)
+
+
+class SavedResearchListResponseModel(BaseModel):
+    items: list[SavedResearchItemModel] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, rows: list[SavedResearchItem]) -> "SavedResearchListResponseModel":
+        return cls(items=[SavedResearchItemModel.from_domain(row) for row in rows])
+
+
+class SavedResearchDeleteResponseModel(BaseModel):
+    success: bool
 
 
 class ResearchOverviewUniverseInstrumentModel(BaseModel):
@@ -390,6 +656,19 @@ class ResearchAnalyzeResponseModel(BaseModel):
             constituents=_constituents_from_result(result),
             warnings=list(result.warnings),
         )
+
+
+def _points_to_series(points: list[TimeSeriesPoint]) -> pd.Series:
+    if not points:
+        return pd.Series(dtype=float)
+    values = {
+        pd.Timestamp(point.timestamp).to_pydatetime(): float(point.value)
+        for point in points
+        if point.value is not None
+    }
+    if not values:
+        return pd.Series(dtype=float)
+    return pd.Series(values).sort_index().astype(float)
 
 
 def _annualized_return(perf):

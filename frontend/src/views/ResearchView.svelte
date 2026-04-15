@@ -11,7 +11,10 @@
     ResearchOverviewRankItem,
     ResearchOverviewResponse,
     ResearchOverviewSortId,
+    ResearchCompareResult,
     ResearchResult,
+    SavedResearchItem,
+    StrategyLabResult,
     ResearchStructure,
     TimeSeriesPoint
   } from "../lib/api/types";
@@ -19,9 +22,13 @@
     researchDraft,
     setResearchDraft,
     type ResearchOverviewLoadOptions,
-    type ResearchRunOptions
+    type ResearchRunOptions,
+    type ResearchCompareOptions,
+    type SavedResearchCreateOptions,
+    type StrategyLabAnalyzeOptions
   } from "../lib/stores/app";
   import {
+    buildResearchCompareOptions,
     buildResearchTreemapSections,
     buildPreviewRows,
     deriveConstituentsFromResearchResult,
@@ -34,10 +41,13 @@
     hasPopulatedCoverage,
     hasPopulatedStructure,
     normalizeSyntheticText,
+    parseResearchCsvText,
     parseSyntheticText,
     researchSortMetricLabel,
+    savedResearchHasReturnStream,
     treemapDensityClass,
     treemapRectStyle,
+    type ResearchCompareOption,
     type ResearchMode,
     type ResearchPreviewRow,
     type ResearchTreemapSection,
@@ -47,10 +57,21 @@
   export let mode: ResearchMode = "overview";
   export let overview: ResearchOverviewResponse | null = null;
   export let result: ResearchResult | null = null;
+  export let strategyResult: StrategyLabResult | null = null;
+  export let compareResult: ResearchCompareResult | null = null;
+  export let savedItems: SavedResearchItem[] = [];
   export let loading = false;
   export let overviewLoading = false;
+  export let strategyLoading = false;
+  export let compareLoading = false;
+  export let savedLoading = false;
   export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
   export let onRun: (options: ResearchRunOptions) => void;
+  export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
+  export let onCompare: (options: ResearchCompareOptions) => Promise<ResearchCompareResult | null> | void;
+  export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
+  export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
+  export let onDeleteSaved: (itemId: string) => Promise<boolean> | void;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
 
@@ -66,7 +87,10 @@
 
   const researchModes: Array<{ id: ResearchMode; label: string }> = [
     { id: "overview", label: "Overview" },
-    { id: "scope_analysis", label: "Scope Analysis" }
+    { id: "scope_analysis", label: "Scope Analysis" },
+    { id: "strategy_lab", label: "Strategy Lab" },
+    { id: "compare_scenario", label: "Compare / Scenario" },
+    { id: "saved_research", label: "Saved Research" }
   ];
   const chartModeLabels: Record<ChartMode, string> = {
     performance: "Performance",
@@ -100,6 +124,28 @@
   let overviewMetric: ResearchOverviewMetricId = "return";
   let overviewBenchmarkSymbol = "SPY";
   let selectedOverviewNodeId = "";
+  let strategyName = "Imported Strategy";
+  let strategyCsvText = `date,return,benchmark
+2026-01-02,0.010,0.004
+2026-01-05,-0.004,-0.002
+2026-01-06,0.006,0.003
+2026-01-07,0.002,0.001
+2026-01-08,-0.003,-0.004
+2026-01-09,0.008,0.005
+2026-01-12,0.004,0.002
+2026-01-13,0.001,-0.001`;
+  let strategyDateColumn = "date";
+  let strategyValueColumn = "return";
+  let strategyValueKind: "return" | "level" = "return";
+  let strategyBenchmarkColumn = "benchmark";
+  let strategyBenchmarkValueKind: "return" | "level" = "return";
+  let strategyInputWarning = "";
+  let compareLeftSource = "";
+  let compareRightSource = "";
+  let compareWarning = "";
+  let savedScopeTitle = "Scope Analysis Run";
+  let savedStrategyTitle = "Strategy Lab Run";
+  let savedNotes = "";
   const emptyStructure: ResearchStructure = {
     total_weight: null,
     top_weight: null,
@@ -202,6 +248,9 @@
     if (mode === "overview" && !overview) {
       void loadOverview();
     }
+    if (mode === "saved_research") {
+      void onLoadSaved();
+    }
   }
 
   function selectOverviewNode(nodeId: string) {
@@ -217,6 +266,121 @@
     benchmarkSymbol = overview?.benchmark_symbol ?? overviewBenchmarkSymbol;
     mode = "scope_analysis";
     inputWarning = "";
+  }
+
+  async function analyzeStrategy() {
+    const parsed = parseResearchCsvText(strategyCsvText);
+    if (!parsed.rows.length) {
+      strategyInputWarning = parsed.warnings[0] ?? "CSV rows are required.";
+      return;
+    }
+    if (!parsed.columns.includes(strategyDateColumn) || !parsed.columns.includes(strategyValueColumn)) {
+      strategyInputWarning = "Select valid date and return/NAV columns before analyzing.";
+      return;
+    }
+    strategyInputWarning = parsed.warnings.length ? parsed.warnings.join(" ") : "";
+    await onAnalyzeStrategy({
+      name: strategyName.trim() || "Imported Strategy",
+      rows: parsed.rows,
+      dateColumn: strategyDateColumn,
+      valueColumn: strategyValueColumn,
+      valueKind: strategyValueKind,
+      benchmarkColumn: strategyBenchmarkColumn && parsed.columns.includes(strategyBenchmarkColumn) ? strategyBenchmarkColumn : null,
+      benchmarkValueKind: strategyBenchmarkValueKind,
+      minObservations: 5
+    });
+  }
+
+  function compareLegForSource(sourceId: string) {
+    const option = compareOptions.find((item) => item.id === sourceId);
+    if (!option) {
+      return null;
+    }
+    if (option.source === "scope" && result?.performance_points?.length) {
+      return {
+        label: option.label,
+        objectType: option.objectType,
+        returnPoints: result.performance_points
+      };
+    }
+    if (option.source === "strategy" && strategyResult?.returns_points?.length) {
+      return {
+        label: option.label,
+        objectType: option.objectType,
+        returnPoints: strategyResult.returns_points
+      };
+    }
+    if (option.source === "saved") {
+      return {
+        label: option.label,
+        objectType: option.objectType,
+        savedResearchId: sourceId.replace(/^saved:/, "")
+      };
+    }
+    return null;
+  }
+
+  async function runComparison() {
+    compareWarning = "";
+    if (!compareLeftSource || !compareRightSource) {
+      compareWarning = "Select two research objects with return streams.";
+      return;
+    }
+    if (compareLeftSource === compareRightSource) {
+      compareWarning = "Select two different objects for comparison.";
+      return;
+    }
+    const left = compareLegForSource(compareLeftSource);
+    const right = compareLegForSource(compareRightSource);
+    if (!left || !right) {
+      compareWarning = "Selected objects do not have reusable return streams.";
+      return;
+    }
+    await onCompare({ left, right });
+  }
+
+  async function saveScopeRun() {
+    if (!result) {
+      return;
+    }
+    await onSaveResearch({
+      objectType: "scope_analysis",
+      title: savedScopeTitle.trim() || "Scope Analysis Run",
+      notes: savedNotes,
+      payload: { ...result, saved_from_mode: "scope_analysis" },
+      warnings: result.warnings,
+      sourceProvider: "gamma_research",
+      origin: "frontend.research.scope_analysis.save",
+      transformationNote: "Saved normalized Scope Analysis result for reuse in Research Compare / Scenario."
+    });
+    void onLoadSaved();
+  }
+
+  async function saveStrategyRun() {
+    if (!strategyResult) {
+      return;
+    }
+    await onSaveResearch({
+      objectType: "strategy_lab",
+      title: savedStrategyTitle.trim() || strategyResult.name,
+      notes: savedNotes,
+      payload: { ...strategyResult, saved_from_mode: "strategy_lab" },
+      warnings: strategyResult.warnings,
+      sourceProvider: "uploaded_csv",
+      origin: "frontend.research.strategy_lab.save",
+      transformationNote: "Saved normalized uploaded return stream; raw uploaded file is not persisted."
+    });
+    void onLoadSaved();
+  }
+
+  function useSavedInCompare(item: SavedResearchItem) {
+    const sourceId = `saved:${item.id}`;
+    if (!compareLeftSource) {
+      compareLeftSource = sourceId;
+    } else {
+      compareRightSource = sourceId;
+    }
+    mode = "compare_scenario";
   }
 
   function rankingMeta(item: ResearchOverviewRankItem) {
@@ -494,8 +658,13 @@
   }
 
   let parsedSynthetic = parseSyntheticText(syntheticText);
+  let parsedStrategyCsv = parseResearchCsvText(strategyCsvText);
   let previewRows: ResearchPreviewRow[] = [];
   let chartSeries: ChartSeries[] = [];
+  let strategyChartSeries: ChartSeries[] = [];
+  let compareChartSeries: ChartSeries[] = [];
+  let compareOptions: ResearchCompareOption[] = [];
+  let compareMetricRows: Array<{ label: string; left: number | null | undefined; right: number | null | undefined }> = [];
   let weightBars: RankBarItem[] = [];
   let structureMetrics: ResearchStructure = emptyStructure;
   let coverageMetrics: ResearchCoverage = emptyCoverage;
@@ -584,6 +753,20 @@
   });
 
   $: parsedSynthetic = parseSyntheticText(syntheticText);
+  $: parsedStrategyCsv = parseResearchCsvText(strategyCsvText);
+  $: {
+    if (parsedStrategyCsv.columns.length) {
+      if (!parsedStrategyCsv.columns.includes(strategyDateColumn)) {
+        strategyDateColumn = parsedStrategyCsv.columns[0] ?? "date";
+      }
+      if (!parsedStrategyCsv.columns.includes(strategyValueColumn)) {
+        strategyValueColumn = parsedStrategyCsv.columns.find((column) => /ret|return|nav|level|equity/i.test(column)) ?? parsedStrategyCsv.columns[1] ?? parsedStrategyCsv.columns[0] ?? "return";
+      }
+      if (strategyBenchmarkColumn && !parsedStrategyCsv.columns.includes(strategyBenchmarkColumn)) {
+        strategyBenchmarkColumn = "";
+      }
+    }
+  }
   $: setResearchDraft({
     scopeType,
     primarySymbol,
@@ -592,6 +775,21 @@
     syntheticText,
     selectedPreset
   });
+  $: compareOptions = buildResearchCompareOptions(result, strategyResult, savedItems);
+  $: compareMetricRows = [
+    { label: "Total Return", left: compareResult?.left.metrics.total_return, right: compareResult?.right.metrics.total_return },
+    { label: "Annual Return", left: compareResult?.left.metrics.annual_return, right: compareResult?.right.metrics.annual_return },
+    { label: "Annual Vol", left: compareResult?.left.metrics.annual_volatility, right: compareResult?.right.metrics.annual_volatility },
+    { label: "Max Drawdown", left: compareResult?.left.metrics.max_drawdown, right: compareResult?.right.metrics.max_drawdown }
+  ];
+  $: {
+    if (!compareLeftSource && compareOptions[0]) {
+      compareLeftSource = compareOptions[0].id;
+    }
+    if ((!compareRightSource || compareRightSource === compareLeftSource) && compareOptions.length > 1) {
+      compareRightSource = compareOptions.find((item) => item.id !== compareLeftSource)?.id ?? "";
+    }
+  }
   $: previewRows = buildPreviewRows(scopeType, primarySymbol, parsedSynthetic);
   $: draftMatchesResult = doesResearchDraftMatchResult(
     result,
@@ -794,6 +992,52 @@
       chartSeries = series;
     }
   }
+  $: strategyChartSeries = strategyResult
+    ? [
+        ...(strategyResult.equity_curve_points.length
+          ? [
+              {
+                id: "strategy",
+                label: strategyResult.name,
+                color: "#7aa6c8",
+                type: "area" as const,
+                data: strategyResult.equity_curve_points.map(toChartPoint)
+              }
+            ]
+          : []),
+        ...(strategyResult.benchmark_equity_curve_points.length
+          ? [
+              {
+                id: "benchmark",
+                label: strategyResult.benchmark_column ?? "Benchmark",
+                color: "#c49a5a",
+                type: "line" as const,
+                lineStyle: "dashed" as const,
+                data: strategyResult.benchmark_equity_curve_points.map(toChartPoint)
+              }
+            ]
+          : [])
+      ]
+    : [];
+  $: compareChartSeries = compareResult
+    ? [
+        {
+          id: "left",
+          label: compareResult.left.label,
+          color: "#7aa6c8",
+          type: "area" as const,
+          data: compareResult.left.normalized_nav_points.map(toChartPoint)
+        },
+        {
+          id: "right",
+          label: compareResult.right.label,
+          color: "#c49a5a",
+          type: "line" as const,
+          lineStyle: "dashed" as const,
+          data: compareResult.right.normalized_nav_points.map(toChartPoint)
+        }
+      ]
+    : [];
 </script>
 
 <section class="view">
@@ -803,7 +1047,7 @@
         <p class="eyebrow">Research</p>
         <div class="headline-title-row">
           <h2>Research Workspace</h2>
-          {#if loading || overviewLoading}<span class="loading-pill">Refreshing</span>{/if}
+          {#if loading || overviewLoading || strategyLoading || compareLoading || savedLoading}<span class="loading-pill">Refreshing</span>{/if}
         </div>
       </div>
     </div>
@@ -1030,7 +1274,7 @@
           {/if}
         </article>
       </div>
-  {:else}
+  {:else if mode === "scope_analysis"}
       <div class="workspace-grid">
     <div class="primary-column">
       <article class="panel performance-panel">
@@ -1404,6 +1648,244 @@
       </article>
       </aside>
     </div>
+  {:else if mode === "strategy_lab"}
+    <div class="workspace-grid">
+      <div class="primary-column">
+        <article class="panel performance-panel">
+          <div class="panel-header top-line">
+            <div class="title-block">
+              <p class="eyebrow">Strategy Lab</p>
+              <h2>{strategyResult?.name ?? "Imported Return Stream"}</h2>
+              <p class="muted">CSV rows are normalized into returns for analysis only. Gamma does not run strategy code or connect this stream to execution.</p>
+            </div>
+            <div class="builder-actions compact">
+              <button type="button" on:click={saveStrategyRun} disabled={!strategyResult || savedLoading}>Save Strategy</button>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <article class="metric"><span>Total Return</span><strong>{pct(strategyResult?.metrics.total_return)}</strong><small>{strategyResult?.metrics.observation_count ?? 0} observations</small></article>
+            <article class="metric"><span>Annual Return</span><strong>{pct(strategyResult?.metrics.annual_return)}</strong><small>{strategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
+            <article class="metric"><span>Annual Vol</span><strong>{pct(strategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(strategyResult?.metrics.periods_per_year, 0)}</small></article>
+            <article class="metric"><span>Sharpe</span><strong>{fmt(strategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
+            <article class="metric"><span>Sortino</span><strong>{fmt(strategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
+            <article class="metric"><span>Max Drawdown</span><strong class:negative={(strategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(strategyResult?.metrics.max_drawdown)}</strong><small>{strategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
+          </div>
+
+          <TimeSeriesChart series={strategyChartSeries} height={360} emptyMessage="Import CSV returns to populate Strategy Lab." />
+          <div class="chart-foot">
+            <span>{strategyResult ? `Source ${strategyResult.source_provider} / ${strategyResult.freshness_label}` : "Paste CSV text or map parsed rows from a file outside Gamma."}</span>
+            <strong>{strategyResult ? shortDate(strategyResult.retrieved_at) : "No import analyzed"}</strong>
+          </div>
+        </article>
+
+        <div class="detail-split">
+          <article class="panel table-panel">
+            <div class="panel-header"><div><p class="eyebrow">Monthly</p><h3>Monthly Returns</h3></div><small>{strategyResult?.monthly_returns.length ?? 0} periods</small></div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th>Period</th><th>Return</th></tr></thead>
+                <tbody>
+                  {#if strategyResult?.monthly_returns.length}
+                    {#each strategyResult.monthly_returns.slice(-18) as row}
+                      <tr><td>{row.period}</td><td>{pct(row.value)}</td></tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan="2">No monthly table yet.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel table-panel">
+            <div class="panel-header"><div><p class="eyebrow">Annual</p><h3>Annual Returns</h3></div><small>{strategyResult?.annual_returns.length ?? 0} periods</small></div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th>Period</th><th>Return</th></tr></thead>
+                <tbody>
+                  {#if strategyResult?.annual_returns.length}
+                    {#each strategyResult.annual_returns as row}
+                      <tr><td>{row.period}</td><td>{pct(row.value)}</td></tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan="2">No annual table yet.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <aside class="support-column">
+        <article class="panel control-panel">
+          <div class="rail-header">
+            <div><p class="eyebrow">CSV Import</p><h3>Return Stream Mapping</h3></div>
+            <strong>{parsedStrategyCsv.rows.length} rows</strong>
+          </div>
+
+          <label><span>Name</span><input bind:value={strategyName} /></label>
+          <label><span>CSV Text</span><textarea bind:value={strategyCsvText} rows="10" spellcheck="false"></textarea></label>
+
+          <div class="field-grid">
+            <label><span>Date</span><select bind:value={strategyDateColumn}>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
+            <label><span>Value</span><select bind:value={strategyValueColumn}>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
+            <label><span>Kind</span><select bind:value={strategyValueKind}><option value="return">Return</option><option value="level">NAV / Level</option></select></label>
+          </div>
+
+          <div class="field-grid">
+            <label><span>Benchmark</span><select bind:value={strategyBenchmarkColumn}><option value="">None</option>{#each parsedStrategyCsv.columns as column}<option value={column}>{column}</option>{/each}</select></label>
+            <label><span>Bench Kind</span><select bind:value={strategyBenchmarkValueKind}><option value="return">Return</option><option value="level">NAV / Level</option></select></label>
+            <div class="builder-actions compact"><button type="button" on:click={analyzeStrategy} disabled={strategyLoading}>{strategyLoading ? "Analyzing..." : "Analyze"}</button></div>
+          </div>
+
+          {#if strategyInputWarning || parsedStrategyCsv.warnings.length}
+            <div class="notes-list">
+              {#if strategyInputWarning}<div class="note-row"><span class="note-tag">CSV</span><p>{strategyInputWarning}</p></div>{/if}
+              {#each parsedStrategyCsv.warnings as warning}
+                <div class="note-row info"><span class="note-tag">Parse</span><p>{warning}</p></div>
+              {/each}
+            </div>
+          {/if}
+        </article>
+
+        <article class="panel rail-panel">
+          <div class="rail-header"><div><p class="eyebrow">Source</p><h3>Warnings &amp; Provenance</h3></div></div>
+          {#if strategyResult?.warnings.length}
+            <div class="notes-list">
+              {#each strategyResult.warnings as warning}
+                <div class="note-row info"><span class="note-tag">Note</span><p>{warning}</p></div>
+              {/each}
+            </div>
+          {:else}
+            <p class="muted">No uploaded return stream has been analyzed yet.</p>
+          {/if}
+        </article>
+      </aside>
+    </div>
+  {:else if mode === "compare_scenario"}
+    <div class="workspace-grid">
+      <div class="primary-column">
+        <article class="panel performance-panel">
+          <div class="panel-header top-line">
+            <div class="title-block">
+              <p class="eyebrow">Compare / Scenario</p>
+              <h2>{compareResult ? `${compareResult.left.label} vs ${compareResult.right.label}` : "Return Stream Comparison"}</h2>
+              <p class="muted">Scenario output is normalized historical analytics only. It does not change broker portfolios or rebalance anything.</p>
+            </div>
+          </div>
+
+          <div class="kpi-grid">
+            <article class="metric"><span>Aligned Obs</span><strong>{compareResult?.aligned_observation_count ?? 0}</strong><small>Common return calendar</small></article>
+            <article class="metric"><span>Relative Return</span><strong>{pct(compareResult?.relative_return)}</strong><small>Left minus right</small></article>
+            <article class="metric"><span>Vol Difference</span><strong>{pct(compareResult?.volatility_difference)}</strong><small>Annualized</small></article>
+            <article class="metric"><span>Drawdown Gap</span><strong>{pct(compareResult?.max_drawdown_difference)}</strong><small>Max drawdown delta</small></article>
+            <article class="metric"><span>Correlation</span><strong>{fmt(compareResult?.correlation, 3)}</strong><small>Left vs right</small></article>
+            <article class="metric"><span>Beta</span><strong>{fmt(compareResult?.beta, 3)}</strong><small>Left to right</small></article>
+          </div>
+
+          <TimeSeriesChart series={compareChartSeries} height={380} emptyMessage="Select two loaded or saved return streams to compare." />
+        </article>
+
+        <article class="panel table-panel">
+          <div class="panel-header"><div><p class="eyebrow">Metrics</p><h3>Side-by-Side</h3></div></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Metric</th><th>{compareResult?.left.label ?? "Left"}</th><th>{compareResult?.right.label ?? "Right"}</th></tr></thead>
+              <tbody>
+                {#each compareMetricRows as row}
+                  <tr><td>{row.label}</td><td>{pct(row.left)}</td><td>{pct(row.right)}</td></tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+
+      <aside class="support-column">
+        <article class="panel control-panel">
+          <div class="rail-header"><div><p class="eyebrow">Objects</p><h3>Select Streams</h3></div><strong>{compareOptions.length} available</strong></div>
+          <label><span>Left</span><select bind:value={compareLeftSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
+          <label><span>Right</span><select bind:value={compareRightSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
+          <div class="builder-actions"><button type="button" on:click={runComparison} disabled={compareLoading || compareOptions.length < 2}>{compareLoading ? "Comparing..." : "Run Compare"}</button></div>
+          {#if compareWarning}<p class="warning">{compareWarning}</p>{/if}
+        </article>
+
+        <article class="panel rail-panel">
+          <div class="rail-header"><div><p class="eyebrow">Warnings</p><h3>Scenario Notes</h3></div></div>
+          {#if compareResult?.warnings.length}
+            <div class="notes-list">
+              {#each compareResult.warnings as warning}
+                <div class="note-row info"><span class="note-tag">Note</span><p>{warning}</p></div>
+              {/each}
+            </div>
+          {:else}
+            <p class="muted">Run a comparison to see alignment and scenario warnings.</p>
+          {/if}
+        </article>
+      </aside>
+    </div>
+  {:else if mode === "saved_research"}
+    <div class="workspace-grid">
+      <div class="primary-column">
+        <article class="panel table-panel">
+          <div class="panel-header top-line">
+            <div class="title-block">
+              <p class="eyebrow">Saved Research</p>
+              <h2>Reusable Research Objects</h2>
+              <p class="muted">Saved items store normalized results and metadata. Uploaded raw files are not persisted by default.</p>
+            </div>
+            <div class="builder-actions compact"><button type="button" class="ghost-button" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Title</th><th>Type</th><th>Updated</th><th>Warnings</th><th>Actions</th></tr></thead>
+              <tbody>
+                {#if savedItems.length}
+                  {#each savedItems as item}
+                    <tr>
+                      <td>{item.title}</td>
+                      <td>{item.object_type}</td>
+                      <td>{shortDate(item.updated_at)}</td>
+                      <td>{item.warnings.length}</td>
+                      <td>
+                        <div class="table-actions">
+                          <button type="button" class="ghost-button" on:click={() => useSavedInCompare(item)} disabled={!savedResearchHasReturnStream(item)}>Compare</button>
+                          <button type="button" class="ghost-button" on:click={() => void onDeleteSaved(item.id)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="5">No saved research yet.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+
+      <aside class="support-column">
+        <article class="panel control-panel">
+          <div class="rail-header"><div><p class="eyebrow">Save Current</p><h3>Scope / Strategy</h3></div></div>
+          <label><span>Scope Title</span><input bind:value={savedScopeTitle} /></label>
+          <div class="builder-actions"><button type="button" on:click={saveScopeRun} disabled={!result || savedLoading}>Save Scope</button></div>
+          <label><span>Strategy Title</span><input bind:value={savedStrategyTitle} /></label>
+          <div class="builder-actions"><button type="button" on:click={saveStrategyRun} disabled={!strategyResult || savedLoading}>Save Strategy</button></div>
+          <label><span>Notes</span><textarea bind:value={savedNotes} rows="5"></textarea></label>
+        </article>
+
+        <article class="panel rail-panel">
+          <div class="rail-header"><div><p class="eyebrow">Storage</p><h3>Local JSON Layer</h3></div></div>
+          <div class="stack">
+            <div class="row"><span>Items</span><strong>{savedItems.length}</strong></div>
+            <div class="row"><span>Reusable Streams</span><strong>{savedItems.filter(savedResearchHasReturnStream).length}</strong></div>
+          </div>
+          <p class="muted">Saved Research is a first-pass structured layer, not a notebook. It preserves normalized outputs, warnings, timestamps, and provenance fields for reuse.</p>
+        </article>
+      </aside>
+    </div>
   {/if}
 </section>
 
@@ -1649,9 +2131,7 @@
     min-height: 42rem;
     aspect-ratio: 16 / 9;
     border: 1px solid var(--divider);
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--surface-0) 84%, transparent), transparent 44%),
-      var(--bg-0);
+    background: var(--bg-0);
     overflow: hidden;
   }
 
@@ -2142,6 +2622,10 @@
     max-height: 16rem;
   }
 
+  .compact-table {
+    max-height: 20rem;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -2172,6 +2656,19 @@
 
   tbody tr:hover {
     background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  .table-actions {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .table-actions button {
+    width: auto;
+    min-height: 1.65rem;
+    padding: 0.25rem 0.45rem;
+    font-size: 0.72rem;
   }
 
   /* ── Pills / tags ── */

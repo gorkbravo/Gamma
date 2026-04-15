@@ -23,14 +23,19 @@ import type {
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
   RelatedPredictionMarketListResponse,
+  ResearchCompareResult,
   ResearchOverviewResponse,
   ResearchResult,
   RiskResult,
+  SavedResearchItem,
+  StrategyLabResult,
   SystemStatus
 } from "../api/types";
 import {
+  analyzeStrategyLab,
   copilotCards,
   copilotThreads,
+  compareResearch,
   computeRisk,
   cryptoComparison,
   cryptoFlowSummary,
@@ -49,6 +54,7 @@ import {
   loadPortfolioSnapshot,
   loadPredictionMarketScreener,
   loadResearchOverview,
+  loadSavedResearch,
   loading,
   macroContext,
   macroDivergences,
@@ -65,14 +71,19 @@ import {
   predictionMarketScreener,
   predictionMarketWallet,
   researchOverview,
+  researchCompareResult,
   researchResult,
   riskResult,
+  savedResearchItems,
+  saveResearchItem,
+  deleteSavedResearchItem,
   runResearch,
   setBaseCurrency,
   setMarketDataMode,
   setMacroContext,
   selectedCryptoTokenId,
   selectedPredictionMarketId,
+  strategyLabResult,
   systemStatus
 } from "./app";
 
@@ -86,6 +97,9 @@ describe("app store orchestration", () => {
     portfolioPerformance.set(null);
     researchOverview.set(null);
     researchResult.set(null);
+    strategyLabResult.set(null);
+    researchCompareResult.set(null);
+    savedResearchItems.set([]);
     selectedPredictionMarketId.set(null);
     selectedCryptoTokenId.set(null);
     predictionMarketScreener.set(null);
@@ -124,12 +138,18 @@ describe("app store orchestration", () => {
       portfolioAction: false,
       researchOverview: false,
       research: false,
+      strategyLab: false,
+      compareScenario: false,
+      savedResearch: false,
       macro: false,
       macroHistory: false,
       prediction: false,
       predictionDetail: false,
       crypto: false,
       cryptoDetail: false,
+      cryptoPortfolio: false,
+      fundamentals: false,
+      fundamentalsSave: false,
       copilot: false,
       risk: false,
       iv: false,
@@ -477,6 +497,72 @@ describe("app store orchestration", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
       "/research/overview?universe_id=sample_equities&timeframe=1M&benchmark_symbol=AAPL&force_refresh=true"
     );
+  });
+
+  it("analyzes Strategy Lab returns and stores the latest result", async () => {
+    const strategy = makeStrategyLabResult();
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(strategy));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeStrategyLab({
+      name: "CSV Strategy",
+      rows: [{ date: "2026-03-01", return: "1%" }],
+      dateColumn: "date",
+      valueColumn: "return",
+      valueKind: "return",
+      benchmarkColumn: null
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(body.value_kind).toBe("return");
+    expect(get(strategyLabResult)?.name).toBe("CSV Strategy");
+    expect(get(researchCompareResult)).toBeNull();
+  });
+
+  it("compares research return streams through the scenario endpoint", async () => {
+    const comparison = makeResearchCompareResult();
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(comparison));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await compareResearch({
+      left: {
+        label: "Scope",
+        objectType: "scope_analysis",
+        returnPoints: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }]
+      },
+      right: {
+        label: "Strategy",
+        objectType: "strategy_lab",
+        returnPoints: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.02 }]
+      }
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(body.left.object_type).toBe("scope_analysis");
+    expect(get(researchCompareResult)?.aligned_observation_count).toBe(12);
+  });
+
+  it("loads, saves, and deletes Saved Research items", async () => {
+    const item = makeSavedResearchItem("saved-1");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok({ items: [item] }))
+      .mockResolvedValueOnce(ok(item))
+      .mockResolvedValueOnce(ok({ success: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadSavedResearch();
+    expect(get(savedResearchItems).map((saved) => saved.id)).toEqual(["saved-1"]);
+
+    await saveResearchItem({
+      objectType: "strategy_lab",
+      title: "Saved Strategy",
+      payload: { returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }] }
+    });
+    expect(get(savedResearchItems)[0]?.title).toBe("Saved Strategy");
+
+    await deleteSavedResearchItem("saved-1");
+    expect(get(savedResearchItems).some((saved) => saved.id === "saved-1")).toBe(false);
   });
 
   it("loads the prediction screener and selected market bundle together", async () => {
@@ -1406,6 +1492,104 @@ function makeResearchOverview(): ResearchOverviewResponse {
     origin: "research_service.overview",
     transformation_note: "Computed from daily close histories.",
     freshness_label: "mocked"
+  };
+}
+
+function makeStrategyLabResult(): StrategyLabResult {
+  return {
+    name: "CSV Strategy",
+    value_kind: "return",
+    benchmark_column: null,
+    benchmark_value_kind: "return",
+    metrics: makeResearchReturnMetrics(),
+    returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }],
+    equity_curve_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 1.01 }],
+    drawdown_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0 }],
+    benchmark_points: [],
+    benchmark_equity_curve_points: [],
+    rolling_points: [],
+    monthly_returns: [{ period: "2026-03", value: 0.01 }],
+    annual_returns: [{ period: "2026", value: 0.01 }],
+    warnings: ["Uploaded strategy returns are data inputs only."],
+    source_provider: "uploaded_csv",
+    retrieved_at: "2026-03-01T00:00:00Z",
+    origin: "research_service.strategy_lab.analyze",
+    transformation_note: "CSV rows parsed as returns.",
+    freshness_label: "derived"
+  };
+}
+
+function makeResearchCompareResult(): ResearchCompareResult {
+  return {
+    left: {
+      label: "Scope",
+      object_type: "scope_analysis",
+      metrics: makeResearchReturnMetrics(),
+      returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }],
+      normalized_nav_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 1.01 }],
+      drawdown_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0 }]
+    },
+    right: {
+      label: "Strategy",
+      object_type: "strategy_lab",
+      metrics: makeResearchReturnMetrics(),
+      returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.02 }],
+      normalized_nav_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 1.02 }],
+      drawdown_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0 }]
+    },
+    aligned_observation_count: 12,
+    relative_return: -0.01,
+    volatility_difference: 0.01,
+    max_drawdown_difference: 0,
+    correlation: 0.8,
+    beta: 0.9,
+    relative_nav_points: [{ timestamp: "2026-03-01T00:00:00Z", value: -0.01 }],
+    relative_drawdown_points: [],
+    warnings: ["Scenario output is read-only."],
+    source_provider: "gamma_research",
+    retrieved_at: "2026-03-01T00:00:00Z",
+    origin: "research_service.compare_scenario.analyze",
+    transformation_note: "Aligned comparison.",
+    freshness_label: "derived"
+  };
+}
+
+function makeResearchReturnMetrics() {
+  return {
+    total_return: 0.01,
+    annual_return: 0.1,
+    annual_volatility: 0.2,
+    sharpe_ratio: 0.5,
+    sortino_ratio: 0.6,
+    max_drawdown: -0.02,
+    max_drawdown_duration: 2,
+    observation_count: 12,
+    frequency: "daily",
+    periods_per_year: 252,
+    start_date: "2026-03-01T00:00:00Z",
+    end_date: "2026-03-12T00:00:00Z",
+    benchmark_beta: 1,
+    benchmark_correlation: 0.8,
+    upside_capture: 1.1,
+    downside_capture: 0.9
+  };
+}
+
+function makeSavedResearchItem(id: string): SavedResearchItem {
+  return {
+    id,
+    schema_version: 1,
+    object_type: "strategy_lab",
+    title: "Saved Strategy",
+    notes: "",
+    payload: { returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }] },
+    created_at: "2026-03-01T00:00:00Z",
+    updated_at: "2026-03-01T00:00:00Z",
+    warnings: [],
+    source_provider: "gamma_saved_research",
+    retrieved_at: "2026-03-01T00:00:00Z",
+    origin: "test",
+    transformation_note: null
   };
 }
 

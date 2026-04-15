@@ -1,5 +1,5 @@
 import { get, writable } from "svelte/store";
-import { getJson, postJson } from "../api/client";
+import { deleteJson, getJson, postJson } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
 import type {
   ActionResponse,
@@ -38,9 +38,14 @@ import type {
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
   RelatedPredictionMarketListResponse,
+  ResearchCompareResult,
   ResearchOverviewResponse,
   ResearchResult,
   RiskResult,
+  SavedResearchDeleteResponse,
+  SavedResearchItem,
+  SavedResearchListResponse,
+  StrategyLabResult,
   SystemStatus,
   TabId,
   WorkspaceMode
@@ -64,6 +69,40 @@ export interface ResearchOverviewLoadOptions {
   timeframe?: string;
   benchmarkSymbol?: string;
   forceRefresh?: boolean;
+}
+
+export interface StrategyLabAnalyzeOptions {
+  name: string;
+  rows: Array<Record<string, string | number | null>>;
+  dateColumn: string;
+  valueColumn: string;
+  valueKind: "return" | "level";
+  benchmarkColumn?: string | null;
+  benchmarkValueKind?: "return" | "level";
+  minObservations?: number;
+}
+
+export interface ResearchCompareLegInput {
+  label: string;
+  objectType: string;
+  returnPoints?: Array<{ timestamp: string; value: number }>;
+  savedResearchId?: string | null;
+}
+
+export interface ResearchCompareOptions {
+  left: ResearchCompareLegInput;
+  right: ResearchCompareLegInput;
+}
+
+export interface SavedResearchCreateOptions {
+  objectType: string;
+  title: string;
+  notes?: string;
+  payload: Record<string, unknown>;
+  warnings?: string[];
+  sourceProvider?: string;
+  origin?: string;
+  transformationNote?: string | null;
 }
 
 export interface ResearchDraftState {
@@ -207,6 +246,9 @@ export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
 export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
 export const researchOverview = writable<ResearchOverviewResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
+export const strategyLabResult = writable<StrategyLabResult | null>(null);
+export const researchCompareResult = writable<ResearchCompareResult | null>(null);
+export const savedResearchItems = writable<SavedResearchItem[]>([]);
 export const macroContext = writable<MacroContextState>({
   mode: "snapshot",
   region: "US",
@@ -286,6 +328,9 @@ export const loading = writable<Record<string, boolean>>({
   portfolioAction: false,
   researchOverview: false,
   research: false,
+  strategyLab: false,
+  compareScenario: false,
+  savedResearch: false,
   macro: false,
   macroHistory: false,
   prediction: false,
@@ -664,6 +709,8 @@ export async function setBaseCurrency(currency: string) {
       });
       portfolioPerformance.set(null);
       researchResult.set(null);
+      strategyLabResult.set(null);
+      researchCompareResult.set(null);
       riskResult.set(null);
       riskSnapshotBasis.set(null);
       riskWorkspaceBasis.set(null);
@@ -793,6 +840,7 @@ export async function runResearch(options: ResearchRunOptions) {
     };
     const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload);
     researchResult.set(nextResearchResult);
+    researchCompareResult.set(null);
     // Downstream analysis must be recomputed from the latest executed research scope.
     riskResult.set(null);
     riskSnapshotBasis.set(null);
@@ -804,6 +852,116 @@ export async function runResearch(options: ResearchRunOptions) {
     setError(error);
   } finally {
     setLoading("research", false);
+  }
+}
+
+export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
+  setLoading("strategyLab", true);
+  try {
+    const result = await postJson<StrategyLabResult>("/research/strategy-lab/analyze", {
+      name: options.name,
+      rows: options.rows,
+      date_column: options.dateColumn,
+      value_column: options.valueColumn,
+      value_kind: options.valueKind,
+      benchmark_column: options.benchmarkColumn || null,
+      benchmark_value_kind: options.benchmarkValueKind ?? "return",
+      min_observations: options.minObservations ?? 5
+    });
+    strategyLabResult.set(result);
+    researchCompareResult.set(null);
+    resetCopilotCard("research");
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("strategyLab", false);
+  }
+}
+
+export async function compareResearch(options: ResearchCompareOptions) {
+  setLoading("compareScenario", true);
+  try {
+    const payload = {
+      left: serializeCompareLeg(options.left),
+      right: serializeCompareLeg(options.right)
+    };
+    const result = await postJson<ResearchCompareResult>("/research/compare-scenario/analyze", payload);
+    researchCompareResult.set(result);
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("compareScenario", false);
+  }
+}
+
+function serializeCompareLeg(leg: ResearchCompareLegInput) {
+  return {
+    label: leg.label,
+    object_type: leg.objectType,
+    return_points: leg.returnPoints ?? [],
+    saved_research_id: leg.savedResearchId ?? null
+  };
+}
+
+export async function loadSavedResearch() {
+  setLoading("savedResearch", true);
+  try {
+    const response = await getJson<SavedResearchListResponse>("/research/saved");
+    savedResearchItems.set(response.items);
+    lastError.set("");
+    return response.items;
+  } catch (error) {
+    setError(error);
+    return [];
+  } finally {
+    setLoading("savedResearch", false);
+  }
+}
+
+export async function saveResearchItem(options: SavedResearchCreateOptions) {
+  setLoading("savedResearch", true);
+  try {
+    const item = await postJson<SavedResearchItem>("/research/saved", {
+      object_type: options.objectType,
+      title: options.title,
+      notes: options.notes ?? "",
+      payload: options.payload,
+      warnings: options.warnings ?? [],
+      source_provider: options.sourceProvider ?? "gamma_saved_research",
+      origin: options.origin ?? "frontend.research.saved",
+      transformation_note: options.transformationNote ?? null
+    });
+    savedResearchItems.update((current) => [item, ...current.filter((existing) => existing.id !== item.id)]);
+    lastError.set("");
+    return item;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("savedResearch", false);
+  }
+}
+
+export async function deleteSavedResearchItem(itemId: string) {
+  setLoading("savedResearch", true);
+  try {
+    const response = await deleteJson<SavedResearchDeleteResponse>(`/research/saved/${encodeURIComponent(itemId)}`);
+    if (response.success) {
+      savedResearchItems.update((current) => current.filter((item) => item.id !== itemId));
+    }
+    lastError.set("");
+    return response.success;
+  } catch (error) {
+    setError(error);
+    return false;
+  } finally {
+    setLoading("savedResearch", false);
   }
 }
 

@@ -437,7 +437,7 @@ At the end of this workstream, Gamma should have a clearer platform layer for pr
 
 ## Workstream 2 - Research V2
 
-_Status: In progress (~24%)_
+_Status: In progress (~68%)_
 _Dependency marker: Parallelizable, but improved by provider foundation_
 _Parallelization note: The multi-mode UI can begin before all market-data providers are selected, but Strategy Lab and Overview need reliable data contracts._
 
@@ -475,7 +475,7 @@ Suggested modes:
 The current Research tab should become `Scope Analysis`, not be discarded.
 
 Implementation note:
-- Research now has a first-pass mode shell: `Overview` is registered first/default with `Shift+1`, and `Scope Analysis` is registered second with `Shift+2`. The existing single-ticker and synthetic-portfolio analyzer remains available under `Scope Analysis`.
+- Research now has the intended V2 mode set registered in order: `Overview` (`Shift+1`), `Scope Analysis` (`Shift+2`), `Strategy Lab` (`Shift+3`), `Compare / Scenario` (`Shift+4`), and `Saved Research` (`Shift+5`). `Overview` remains first/default, and the existing single-ticker and synthetic-portfolio analyzer remains available under `Scope Analysis`.
 
 #### 1. Scope Analysis mode
 
@@ -533,7 +533,7 @@ The first pass can be narrow:
 Later passes can expand to European equities, global ETFs, factor baskets, style buckets, and thematic groups.
 
 Implementation note:
-- A first-pass `/research/overview` data contract now returns provider-neutral overview nodes, group nodes, rankings, coverage, freshness/source labels, warnings, and transformation notes. The frontend consumes that payload in the default `Overview` mode with a local treemap-style view and leader/laggard/risk panels. Current coverage is intentionally narrow: the default `Sample equities` universe is an offline-friendly sample/watchlist and the optional `Major ETFs` universe depends on provider history; tile size is equal-weight until market-cap or index-weight data is available.
+- A first-pass `/research/overview` data contract now returns provider-neutral overview nodes, group nodes, rankings, coverage, freshness/source labels, warnings, and transformation notes. The frontend consumes that payload in the default `Overview` mode with a local treemap-style view and leader/laggard/risk panels. Current coverage is intentionally narrow: `Sample equities` is an offline-friendly sample/watchlist, `Major ETFs` depends on provider history, and `Broad US Market` uses static S&P 500-derived proxy metadata for first-pass sector/industry and market-cap sizing. It is not live index membership or complete market coverage, and nodes fall back to limited/equal sizing when market-cap data is unavailable.
 
 #### 3. Strategy Lab mode
 
@@ -567,6 +567,9 @@ Strategy Lab should compute:
 
 This mode should not run arbitrary Python, call broker execution APIs, send orders, or treat uploaded returns as a live strategy.
 
+Implementation note:
+- A first-pass `POST /research/strategy-lab/analyze` flow accepts JSON rows parsed from pasted CSV, maps date/value/optional benchmark columns, supports return or NAV/level interpretation, validates duplicate dates, missing values, minimum observations, frequency, outliers, and benchmark alignment, and returns cumulative/annualized return, annualized volatility, Sharpe-style and Sortino-style metrics, max drawdown and duration, rolling statistics, monthly/annual tables, capture ratios when benchmark data is present, warnings, and uploaded-CSV provenance. The frontend exposes this as a dense data-only Strategy Lab mode; no strategy code execution or broker actions are introduced.
+
 #### 4. Compare / Scenario mode
 
 This mode should compare multiple research objects.
@@ -585,6 +588,9 @@ The mode should support aligned return windows, normalized starting NAV, rolling
 
 The word "scenario" should remain research-oriented. It means "what would the historical analytics look like under this hypothetical scope," not "rebalance the portfolio."
 
+Implementation note:
+- A first-pass `POST /research/compare-scenario/analyze` flow compares normalized return streams from the latest Scope Analysis result, latest Strategy Lab result, or saved return-stream objects. It aligns observations, normalizes starting NAV, reports relative return, volatility gap, max-drawdown gap, rolling correlation and beta where available, warnings, and per-leg metrics. The frontend renders comparison selection, normalized charting, and side-by-side metrics without portfolio modification or rebalance behavior.
+
 #### 5. Saved Research mode
 
 This mode should make research reusable.
@@ -601,6 +607,9 @@ It can store:
 - follow-up tasks.
 
 This is not a full notebook initially. It is a structured saved-research layer that later Copilot and beta workflows can use.
+
+Implementation note:
+- A first-pass local JSON saved-research layer now supports list, create, load, and delete routes under `/research/saved`. It stores typed items with schema version, object type, normalized payload, notes, warnings, source/provenance fields, and timestamps. The frontend can save current Scope Analysis and Strategy Lab results, list saved items in a dense table, delete them, and reuse saved return streams in Compare / Scenario. Raw uploaded CSV files are not persisted by default.
 
 ### Data requirements
 
@@ -627,6 +636,9 @@ Suggested progression:
 5. Add first-pass Overview with a narrow universe.
 6. Add Compare / Scenario workflows.
 7. Add richer handoffs to Fundamentals, Risk, IV, and Copilot.
+
+Implementation note:
+- Items 1-6 now have first-pass implementations. Remaining Research V2 work is mainly depth and coverage: provider-backed full index/reference data, broader non-US coverage, stronger saved-scope reload semantics, richer Fundamentals/Risk/IV/Copilot handoffs, regime slicing, and more complete provider diagnostics.
 
 ### Deliverable
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ResearchResult } from "../api/types";
 import {
+  buildResearchCompareOptions,
   buildResearchTreemapLayout,
   buildResearchTreemapSections,
   buildPreviewRows,
@@ -11,6 +12,7 @@ import {
   formatResearchOverviewMetricValue,
   formatResearchOverviewSortValue,
   normalizeSyntheticText,
+  parseResearchCsvText,
   parseSyntheticText
 } from "./research";
 
@@ -110,6 +112,39 @@ describe("research view model helpers", () => {
       10 * ((sections[1]?.rect.width ?? 0) * (sections[1]?.rect.height ?? 0))
     );
     expect(formatResearchOverviewSortValue(sections[0]?.tiles[0]?.metricValue, "market_cap_desc")).toBe("$2.00T");
+  });
+
+  it("parses CSV text with quoted cells and row diagnostics", () => {
+    const parsed = parseResearchCsvText('date,name,return\n2026-01-02,"Strategy, A",1%\n2026-01-03,Strategy B');
+
+    expect(parsed.columns).toEqual(["date", "name", "return"]);
+    expect(parsed.rows[0]).toEqual({ date: "2026-01-02", name: "Strategy, A", return: "1%" });
+    expect(parsed.rows[1]?.return).toBe("");
+    expect(parsed.warnings[0]).toContain("Row 3");
+  });
+
+  it("builds compare options from active scope, strategy, and saved streams", () => {
+    const scope = makeResearchResult("single_ticker", [{ symbol: "AAPL", weight: 1 }]);
+    scope.performance_points = [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }];
+    const strategy = {
+      name: "CSV Strategy",
+      returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.02 }]
+    } as any;
+    const saved = [
+      {
+        id: "saved-1",
+        title: "Saved Strategy",
+        object_type: "strategy_lab",
+        payload: { returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.03 }] },
+        warnings: []
+      }
+    ] as any;
+
+    expect(buildResearchCompareOptions(scope, strategy, saved).map((option) => option.id)).toEqual([
+      "scope:latest",
+      "strategy:latest",
+      "saved:saved-1"
+    ]);
   });
 });
 

@@ -26,6 +26,16 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function deleteJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw await httpError(response);
+  }
+  return (await response.json()) as T;
+}
+
 async function httpError(response: Response): Promise<Error> {
   const fallback = `${response.status} ${response.statusText}`;
   const detail = await readErrorDetail(response);

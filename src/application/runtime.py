@@ -39,6 +39,7 @@ from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.services.portfolio_history_store import PortfolioHistoryStore
 from src.services.research_cache import ResearchHistoryCache
+from src.services.saved_research_store import SavedResearchStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.logging_config import setup_logging
 
@@ -67,6 +68,7 @@ class ApplicationRuntime:
     market_data: MarketDataService
     fx_service: FXService
     portfolio_history: PortfolioHistoryStore
+    saved_research_store: SavedResearchStore
     risk_free_service: RiskFreeRateService
     portfolio_provider: PortfolioDataProvider
     research_provider: ResearchDataProvider
@@ -183,6 +185,7 @@ def build_runtime(
         ib_runner=client.ib_runner,
     )
     portfolio_history = PortfolioHistoryStore(base_dir=resolved_history_dir, mock=bool(mock_mode))
+    saved_research_store = SavedResearchStore(base_dir=resolved_history_dir / "research")
     risk_free_service = RiskFreeRateService(cache=cache)
 
     portfolio_provider = PortfolioDataProvider(client, market_data, mock_service)
@@ -206,7 +209,7 @@ def build_runtime(
         mock_service=mock_service,
         benchmark_defaults=benchmark_defaults,
     )
-    research_service = ResearchService(research_provider)
+    research_service = ResearchService(research_provider, saved_store=saved_research_store)
     prediction_market_service = PredictionMarketService(
         adapters={
             "polymarket": PolymarketAdapter(cache),
@@ -263,6 +266,7 @@ def build_runtime(
         market_data=market_data,
         fx_service=fx_service,
         portfolio_history=portfolio_history,
+        saved_research_store=saved_research_store,
         risk_free_service=risk_free_service,
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,

@@ -33,6 +33,9 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
   research: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
     { id: "scope_analysis", label: "Scope Analysis", defaultIndex: 1 },
+    { id: "strategy_lab", label: "Strategy Lab", defaultIndex: 2 },
+    { id: "compare_scenario", label: "Compare / Scenario", defaultIndex: 3 },
+    { id: "saved_research", label: "Saved Research", defaultIndex: 4 },
   ]),
   macro: defineTabModes([
     { id: "snapshot", label: "Snapshot", defaultIndex: 0 },

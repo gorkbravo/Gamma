@@ -25,6 +25,7 @@
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
   import {
     activeTab,
+    analyzeStrategyLab,
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
@@ -51,6 +52,7 @@
     loadIvSurface,
     loadFundamentalsSearch,
     loadResearchOverview,
+    loadSavedResearch,
     macroContext,
     loadMacroSeriesHistory,
     loadMacroWorkspace,
@@ -73,6 +75,7 @@
     predictionMarketWallet,
     refreshSystemStatus,
     researchOverview,
+    researchCompareResult,
     researchResult,
     riskResult,
     riskWorkspaceBasis,
@@ -82,9 +85,13 @@
     previewCopilotThreadFingerprint,
     runCryptoSyntheticPortfolio,
     runDiagnosticsAction,
+    compareResearch,
     runResearch,
+    saveResearchItem,
+    deleteSavedResearchItem,
     saveFundamentalsDcfModel,
     saveFundamentalsPeerBasket,
+    savedResearchItems,
     selectedFundamentalsTicker,
     selectCryptoToken,
     selectFundamentalsCompany,
@@ -92,6 +99,7 @@
     setBaseCurrency,
     setMarketDataMode,
     startIvSession,
+    strategyLabResult,
     stopIvSession,
     systemStatus,
     toggleConnection
@@ -922,6 +930,7 @@
     if (mode === "research") {
       researchMode = "overview";
       tasks.push(loadResearchOverview());
+      tasks.push(loadSavedResearch());
     }
     await Promise.allSettled(tasks);
   }
@@ -951,6 +960,9 @@
       researchMode = "overview";
       if (!$researchOverview) {
         await loadResearchOverview();
+      }
+      if (!$savedResearchItems.length) {
+        await loadSavedResearch();
       }
     } else if (nextTab === "macro") {
       if (!$macroSnapshot) {
@@ -1223,6 +1235,9 @@
       if (researchMode === "overview" && !$researchOverview) {
         await loadResearchOverview();
       }
+      if (researchMode === "saved_research") {
+        await loadSavedResearch();
+      }
       return true;
     }
 
@@ -1403,10 +1418,21 @@
             bind:mode={researchMode}
             overview={$researchOverview}
             result={$researchResult}
+            strategyResult={$strategyLabResult}
+            compareResult={$researchCompareResult}
+            savedItems={$savedResearchItems}
             loading={$loading.research}
             overviewLoading={$loading.researchOverview}
+            strategyLoading={$loading.strategyLab}
+            compareLoading={$loading.compareScenario}
+            savedLoading={$loading.savedResearch}
             onLoadOverview={loadResearchOverview}
             onRun={runResearch}
+            onAnalyzeStrategy={analyzeStrategyLab}
+            onCompare={compareResearch}
+            onLoadSaved={loadSavedResearch}
+            onSaveResearch={saveResearchItem}
+            onDeleteSaved={deleteSavedResearchItem}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
           />

@@ -123,6 +123,85 @@ def test_research_analyze_endpoint(tmp_path):
         runtime.shutdown()
 
 
+def test_research_v2_strategy_saved_and_compare_endpoints(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        strategy_response = client.post(
+            "/research/strategy-lab/analyze",
+            json={
+                "name": "API Strategy",
+                "date_column": "date",
+                "value_column": "strategy",
+                "benchmark_column": "benchmark",
+                "rows": [
+                    {"date": "2026-01-02", "strategy": 0.010, "benchmark": 0.004},
+                    {"date": "2026-01-05", "strategy": -0.004, "benchmark": -0.002},
+                    {"date": "2026-01-06", "strategy": 0.006, "benchmark": 0.003},
+                    {"date": "2026-01-07", "strategy": 0.002, "benchmark": 0.001},
+                    {"date": "2026-01-08", "strategy": -0.003, "benchmark": -0.004},
+                    {"date": "2026-01-09", "strategy": 0.008, "benchmark": 0.005},
+                    {"date": "2026-01-12", "strategy": 0.004, "benchmark": 0.002},
+                    {"date": "2026-01-13", "strategy": 0.001, "benchmark": -0.001},
+                ],
+            },
+        )
+        assert strategy_response.status_code == 200
+        strategy_payload = strategy_response.json()
+        assert strategy_payload["source_provider"] == "uploaded_csv"
+        assert strategy_payload["metrics"]["observation_count"] == 8
+        assert strategy_payload["benchmark_points"]
+
+        saved_response = client.post(
+            "/research/saved",
+            json={
+                "object_type": "strategy_lab",
+                "title": "Saved API Strategy",
+                "payload": strategy_payload,
+                "warnings": strategy_payload["warnings"],
+                "source_provider": "uploaded_csv",
+            },
+        )
+        assert saved_response.status_code == 200
+        saved_payload = saved_response.json()
+        saved_id = saved_payload["id"]
+
+        list_response = client.get("/research/saved")
+        assert list_response.status_code == 200
+        assert [item["id"] for item in list_response.json()["items"]] == [saved_id]
+
+        load_response = client.get(f"/research/saved/{saved_id}")
+        assert load_response.status_code == 200
+        assert load_response.json()["title"] == "Saved API Strategy"
+
+        compare_response = client.post(
+            "/research/compare-scenario/analyze",
+            json={
+                "left": {
+                    "label": "Saved API Strategy",
+                    "object_type": "strategy_lab",
+                    "saved_research_id": saved_id,
+                },
+                "right": {
+                    "label": "Benchmark",
+                    "object_type": "benchmark",
+                    "return_points": strategy_payload["benchmark_points"],
+                },
+            },
+        )
+        assert compare_response.status_code == 200
+        compare_payload = compare_response.json()
+        assert compare_payload["aligned_observation_count"] == 8
+        assert compare_payload["relative_return"] is not None
+        assert "historical analytics only" in " ".join(compare_payload["warnings"])
+
+        delete_response = client.delete(f"/research/saved/{saved_id}")
+        assert delete_response.status_code == 200
+        assert delete_response.json()["success"] is True
+        assert client.get(f"/research/saved/{saved_id}").status_code == 404
+    finally:
+        runtime.shutdown()
+
+
 def test_research_context_replaces_scope_after_mode_switch(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

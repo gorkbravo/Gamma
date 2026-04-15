@@ -6,15 +6,30 @@ import type {
   ResearchOverviewResponse,
   ResearchOverviewSortId,
   ResearchResult,
+  SavedResearchItem,
+  StrategyLabResult,
   ResearchStructure,
   ResearchWeightPoint
 } from "../api/types";
 
-export type ResearchMode = "overview" | "scope_analysis";
+export type ResearchMode = "overview" | "scope_analysis" | "strategy_lab" | "compare_scenario" | "saved_research";
 
 export interface SyntheticPositionDraft {
   symbol: string;
   weight: number;
+}
+
+export interface ParsedResearchCsv {
+  columns: string[];
+  rows: Array<Record<string, string>>;
+  warnings: string[];
+}
+
+export interface ResearchCompareOption {
+  id: string;
+  label: string;
+  objectType: string;
+  source: "scope" | "strategy" | "saved";
 }
 
 export interface ResearchPreviewRow {
@@ -77,6 +92,105 @@ export function parseSyntheticText(text: string): SyntheticPositionDraft[] {
       };
     })
     .filter((item) => item.symbol);
+}
+
+export function parseResearchCsvText(text: string): ParsedResearchCsv {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return { columns: [], rows: [], warnings: ["Paste CSV rows before analyzing a strategy."] };
+  }
+
+  const columns = parseCsvLine(lines[0] ?? "").map((column) => column.trim()).filter(Boolean);
+  if (!columns.length) {
+    return { columns: [], rows: [], warnings: ["CSV header row is empty."] };
+  }
+
+  const warnings: string[] = [];
+  const rows = lines.slice(1).map((line, index) => {
+    const values = parseCsvLine(line);
+    if (values.length !== columns.length) {
+      warnings.push(`Row ${index + 2} has ${values.length} cells; expected ${columns.length}.`);
+    }
+    return Object.fromEntries(columns.map((column, columnIndex) => [column, values[columnIndex] ?? ""]));
+  });
+
+  if (!rows.length) {
+    warnings.push("CSV has a header but no data rows.");
+  }
+  return { columns, rows, warnings };
+}
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+export function buildResearchCompareOptions(
+  scopeResult: ResearchResult | null,
+  strategyResult: StrategyLabResult | null,
+  savedItems: SavedResearchItem[]
+): ResearchCompareOption[] {
+  const options: ResearchCompareOption[] = [];
+  if (scopeResult?.performance_points?.length) {
+    options.push({
+      id: "scope:latest",
+      label: scopeResult.scope_type === "single_ticker" ? `Scope: ${scopeResult.primary_symbol ?? "Single Ticker"}` : "Scope: Synthetic Basket",
+      objectType: "scope_analysis",
+      source: "scope"
+    });
+  }
+  if (strategyResult?.returns_points?.length) {
+    options.push({
+      id: "strategy:latest",
+      label: `Strategy: ${strategyResult.name}`,
+      objectType: "strategy_lab",
+      source: "strategy"
+    });
+  }
+  for (const item of savedItems) {
+    if (!savedResearchHasReturnStream(item)) {
+      continue;
+    }
+    options.push({
+      id: `saved:${item.id}`,
+      label: `Saved: ${item.title}`,
+      objectType: item.object_type,
+      source: "saved"
+    });
+  }
+  return options;
+}
+
+export function savedResearchHasReturnStream(item: SavedResearchItem) {
+  const payload = item.payload ?? {};
+  return ["returns_points", "return_points", "performance_points", "portfolio_return_points"].some((key) =>
+    Array.isArray((payload as Record<string, unknown>)[key])
+  );
 }
 
 export function normalizeSyntheticText(text: string): string {

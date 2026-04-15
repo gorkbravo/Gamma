@@ -82,9 +82,13 @@ describe("navigation tab ordering", () => {
     expect(getTabModes("research").map((mode) => mode.id)).toEqual([
       "overview",
       "scope_analysis",
+      "strategy_lab",
+      "compare_scenario",
+      "saved_research",
     ]);
     expect(getModeByShortcutIndex("research", 1)?.id).toBe("overview");
     expect(getModeShortcutHint("research", "scope_analysis")).toBe("Shift+2");
+    expect(getModeShortcutHint("research", "saved_research")).toBe("Shift+5");
     expect(getTabModes("macro").map((mode) => mode.id)).toEqual([
       "snapshot",
       "cross_asset",
@@ -102,7 +106,13 @@ describe("navigation tab ordering", () => {
     expect(hasRegisteredModes("research")).toBe(true);
     expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro", "research"]);
     expect(snapshot.fundamentals?.map((mode) => mode.id)).toEqual(["overview", "financials", "dcf"]);
-    expect(snapshot.research?.map((mode) => mode.id)).toEqual(["overview", "scope_analysis"]);
+    expect(snapshot.research?.map((mode) => mode.id)).toEqual([
+      "overview",
+      "scope_analysis",
+      "strategy_lab",
+      "compare_scenario",
+      "saved_research",
+    ]);
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {
