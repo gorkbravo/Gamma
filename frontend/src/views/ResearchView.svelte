@@ -3,7 +3,6 @@
   import { get } from "svelte/store";
   import BarRankChart, { type RankBarItem } from "../components/BarRankChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
-  import { getModeShortcutHint } from "../lib/navigation";
   import type {
     ResearchConstituent,
     ResearchCoverage,
@@ -96,9 +95,9 @@
   let selectedPreset = initialDraft.selectedPreset;
   let inputWarning = "";
   let overviewUniverseId = "broad_us_market";
-  let overviewTimeframe = "3M";
-  let overviewMetric: ResearchOverviewMetricId = "return";
+  let overviewTimeframe = "DoD";
   let overviewSortBy: ResearchOverviewSortId = "market_cap_desc";
+  let overviewMetric: ResearchOverviewMetricId = "return";
   let overviewBenchmarkSymbol = "SPY";
   let selectedOverviewNodeId = "";
   const emptyStructure: ResearchStructure = {
@@ -137,19 +136,22 @@
     beta_desc: "Beta",
     drawdown_desc: "Drawdown"
   };
-
-  function overviewMetricOptions(currentOverview: ResearchOverviewResponse | null) {
-    const options = currentOverview?.metric_options?.length
-      ? currentOverview.metric_options
-      : ([
-          { metric_id: "return", label: "Return", description: "Total return." },
-          { metric_id: "volatility", label: "Volatility", description: "Annualized volatility." },
-          { metric_id: "beta", label: "Beta", description: "Benchmark beta." },
-          { metric_id: "drawdown", label: "Drawdown", description: "Maximum drawdown." },
-          { metric_id: "relative_return", label: "Relative", description: "Return minus benchmark return." }
-        ] as const);
-    return options.filter((option) => option.metric_id in overviewMetricLabels);
-  }
+  const overviewSortToMetric: Record<ResearchOverviewSortId, ResearchOverviewMetricId> = {
+    market_cap_desc: "return",
+    universe_weight_desc: "return",
+    return_desc: "return",
+    volatility_desc: "volatility",
+    beta_desc: "beta",
+    drawdown_desc: "drawdown"
+  };
+  const overviewTimeframeLabels: Record<string, string> = {
+    DoD: "Day over day",
+    "1M": "1M",
+    "3M": "3M",
+    "6M": "6M",
+    "1Y": "1Y"
+  };
+  const hiddenOverviewUniverseIds = new Set<string>(["sample_equities"]);
 
   function overviewSortOptions(currentOverview: ResearchOverviewResponse | null) {
     const options = currentOverview?.sort_options?.length
@@ -507,6 +509,73 @@
   let overviewMetricMaxAbs = 0.01;
   let selectedOverviewNode: ResearchOverviewNode | null = null;
   let overviewRankingBars: Record<string, RankBarItem[]> = {};
+  let researchHeadlineKPIs: Array<{
+    label: string;
+    value: string;
+    delta?: string;
+    tone?: "positive" | "negative";
+  }> = [];
+
+  function formatSignedPct(value: number | null | undefined, digits = 1) {
+    if (value == null || !Number.isFinite(value)) {
+      return "";
+    }
+    const scaled = value * 100;
+    const sign = scaled > 0 ? "+" : "";
+    return `${sign}${scaled.toFixed(digits)}%`;
+  }
+
+  function buildResearchHeadlineKPIs(currentOverview: ResearchOverviewResponse | null) {
+    if (!currentOverview) {
+      return [];
+    }
+    const kpis: Array<{ label: string; value: string; delta?: string; tone?: "positive" | "negative" }> = [];
+
+    const leader = currentOverview.rankings?.leaders?.[0];
+    if (leader && leader.value != null) {
+      kpis.push({
+        label: "Leader",
+        value: leader.symbol ?? leader.label ?? "-",
+        delta: formatSignedPct(leader.value),
+        tone: leader.value >= 0 ? "positive" : "negative"
+      });
+    }
+
+    const laggard = currentOverview.rankings?.laggards?.[0];
+    if (laggard && laggard.value != null) {
+      kpis.push({
+        label: "Laggard",
+        value: laggard.symbol ?? laggard.label ?? "-",
+        delta: formatSignedPct(laggard.value),
+        tone: laggard.value >= 0 ? "positive" : "negative"
+      });
+    }
+
+    const leadingGroup = currentOverview.summary?.leading_group;
+    if (leadingGroup && leadingGroup.value != null) {
+      kpis.push({
+        label: "Leading Group",
+        value: leadingGroup.label ?? leadingGroup.group ?? "-",
+        delta: formatSignedPct(leadingGroup.value),
+        tone: leadingGroup.value >= 0 ? "positive" : "negative"
+      });
+    }
+
+    const instrumentNodes = (currentOverview.nodes ?? []).filter((node) => node.level === "instrument");
+    const pricedNodes = instrumentNodes.filter((node) => node.metrics?.total_return != null);
+    if (pricedNodes.length) {
+      const upCount = pricedNodes.filter((node) => (node.metrics?.total_return ?? 0) > 0).length;
+      const ratio = upCount / pricedNodes.length;
+      kpis.push({
+        label: "Breadth",
+        value: `${upCount}/${pricedNodes.length}`,
+        delta: `${(ratio * 100).toFixed(0)}% up`,
+        tone: ratio >= 0.5 ? "positive" : "negative"
+      });
+    }
+
+    return kpis;
+  }
 
   onMount(() => {
     if (mode === "overview" && !overview) {
@@ -567,6 +636,8 @@
       overviewBenchmarkSymbol = overview.benchmark_symbol;
     }
   }
+  $: overviewMetric = overviewSortToMetric[overviewSortBy] ?? "return";
+  $: researchHeadlineKPIs = buildResearchHeadlineKPIs(overview);
   $: overviewTreemapSections = buildResearchTreemapSections(overview, overviewMetric, overviewSortBy);
   $: overviewMetricMaxAbs = tileMetricAbsMax(overviewTreemapSections);
   $: selectedOverviewNode =
@@ -748,10 +819,20 @@
             aria-selected={mode === item.id}
           >
             {item.label}
-            <small>{getModeShortcutHint("research", item.id)}</small>
           </button>
         {/each}
       </div>
+      {#if researchHeadlineKPIs.length}
+        <div class="headline-strip">
+          {#each researchHeadlineKPIs as kpi}
+            <div class="headline-kpi">
+              <span class="headline-kpi-label">{kpi.label}</span>
+              <strong class="headline-kpi-value">{kpi.value}</strong>
+              {#if kpi.delta}<small class={`headline-kpi-delta ${kpi.tone ?? ""}`}>{kpi.delta}</small>{/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </article>
 
@@ -769,7 +850,7 @@
             <label class="inline-field">
               <span>Universe</span>
               <select bind:value={overviewUniverseId} on:change={handleOverviewUniverseChange}>
-                {#each overview?.available_universes ?? [{ universe_id: "broad_us_market", label: "Broad US Market" }] as item}
+                {#each (overview?.available_universes ?? [{ universe_id: "broad_us_market", label: "Broad US Market" }]).filter((item) => !hiddenOverviewUniverseIds.has(item.universe_id)) as item}
                   <option value={item.universe_id}>{item.label}</option>
                 {/each}
               </select>
@@ -785,16 +866,8 @@
             <label class="inline-field short-field">
               <span>Timeframe</span>
               <select bind:value={overviewTimeframe} on:change={handleOverviewTimeframeChange}>
-                {#each overview?.available_timeframes ?? ["1M", "3M", "6M", "1Y"] as item}
-                  <option value={item}>{item}</option>
-                {/each}
-              </select>
-            </label>
-            <label class="inline-field short-field">
-              <span>Color by</span>
-              <select bind:value={overviewMetric}>
-                {#each overviewMetricOptions(overview) as item}
-                  <option value={item.metric_id}>{item.label}</option>
+                {#each overview?.available_timeframes ?? ["DoD", "1M", "3M", "6M", "1Y"] as item}
+                  <option value={item}>{overviewTimeframeLabels[item] ?? item}</option>
                 {/each}
               </select>
             </label>
@@ -1469,10 +1542,54 @@
     color: var(--accent);
   }
 
-  .mode-bar button small {
+  /* ── Headline KPI strip (situational awareness in the mode bar) ── */
+  .headline-strip {
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+  }
+
+  .headline-kpi {
+    padding: 0.2rem 0.75rem;
+    border-left: 1px solid rgba(46, 60, 74, 0.42);
+    text-align: right;
+  }
+
+  .headline-kpi:first-child {
+    border-left: 0;
+  }
+
+  .headline-kpi-label {
+    display: block;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.52rem;
+    white-space: nowrap;
+  }
+
+  .headline-kpi-value {
+    display: block;
+    font-size: 0.9rem;
+    line-height: 1.2;
+    margin-top: 0.06rem;
+    white-space: nowrap;
+  }
+
+  .headline-kpi-delta {
+    display: block;
     color: var(--text-2);
     font-size: 0.62rem;
-    letter-spacing: 0.08em;
+    margin-top: 0.02rem;
+    white-space: nowrap;
+  }
+
+  .headline-kpi-delta.positive {
+    color: var(--positive);
+  }
+
+  .headline-kpi-delta.negative {
+    color: var(--negative);
   }
 
   /* ── Overview hero ── */
@@ -2154,6 +2271,10 @@
 
     .mode-bar {
       flex-wrap: wrap;
+    }
+
+    .headline-strip {
+      display: none;
     }
 
     .treemap-canvas {

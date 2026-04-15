@@ -341,11 +341,16 @@ class ResearchService:
 
     @staticmethod
     def _overview_timeframe(timeframe: str | None, warnings: list[str]) -> str:
-        normalized = str(timeframe or "").strip().upper() or "3M"
+        raw = str(timeframe or "").strip()
+        if not raw:
+            return "DoD"
+        if raw in RESEARCH_OVERVIEW_TIMEFRAMES:
+            return raw
+        normalized = raw.upper()
         if normalized in RESEARCH_OVERVIEW_TIMEFRAMES:
             return normalized
-        warnings.append(f"Unknown Research Overview timeframe '{timeframe}'; using 3M.")
-        return "3M"
+        warnings.append(f"Unknown Research Overview timeframe '{timeframe}'; using Day over day.")
+        return "DoD"
 
     def _overview_reference(self, instrument: ResearchOverviewUniverseInstrument) -> InstrumentReference:
         defaults = getattr(

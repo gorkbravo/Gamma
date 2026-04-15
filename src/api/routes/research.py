@@ -19,7 +19,7 @@ router = APIRouter(tags=["research"])
 def research_overview(
     request: Request,
     universe_id: str = Query(default="broad_us_market"),
-    timeframe: str = Query(default="3M"),
+    timeframe: str = Query(default="DoD"),
     benchmark_symbol: str = Query(default="SPY"),
     force_refresh: bool = Query(default=False),
 ) -> ResearchOverviewResponseModel:

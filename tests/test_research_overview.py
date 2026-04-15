@@ -95,7 +95,7 @@ def test_research_overview_labels_partial_coverage_without_failing():
     )
 
     assert result.universe_id == "broad_us_market"
-    assert result.timeframe == "3M"
+    assert result.timeframe == "DoD"
     assert result.coverage.priced_count == 2
     assert "NVDA" in result.coverage.missing_symbols
     assert result.coverage.benchmark_available is False

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from src.models.instruments import InstrumentReference, normalize_symbol
@@ -56,7 +56,7 @@ class ResearchOverviewUniverse:
 @dataclass(frozen=True)
 class ResearchOverviewRequest:
     universe_id: str = "broad_us_market"
-    timeframe: str = "3M"
+    timeframe: str = "DoD"
     benchmark_symbol: str = "SPY"
 
 
@@ -235,6 +235,7 @@ RESEARCH_OVERVIEW_SORT_OPTIONS: tuple[ResearchOverviewSortOption, ...] = (
 
 
 RESEARCH_OVERVIEW_TIMEFRAMES: dict[str, int] = {
+    "DoD": 1,
     "1M": 21,
     "3M": 63,
     "6M": 126,
@@ -358,6 +359,40 @@ BROAD_US_MARKET_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
 )
 
 
+def _sector_slug(sector: str) -> str:
+    return sector.strip().lower().replace("&", "and").replace(" ", "_")
+
+
+def _sector_universe(sector: str) -> ResearchOverviewUniverse:
+    instruments = tuple(
+        replace(instrument, group=instrument.industry or sector)
+        for instrument in BROAD_US_MARKET_INSTRUMENTS
+        if instrument.sector == sector
+    )
+    return ResearchOverviewUniverse(
+        universe_id=f"sector_{_sector_slug(sector)}",
+        label=sector,
+        description=(
+            f"Zoomed view of {sector} constituents from the Broad US Market universe, "
+            "grouped by industry."
+        ),
+        instruments=instruments,
+        limitations=(
+            f"This is a sector slice of the Broad US Market seeds, not a complete {sector} aggregate.",
+            "Market-cap tile sizing is static proxy metadata and may drift until a live constituent/weight provider is added.",
+            "IBKR/TWS history coverage is entitlement, symbol, session, and pacing dependent.",
+        ),
+    )
+
+
+_BROAD_US_SECTORS: tuple[str, ...] = tuple(
+    dict.fromkeys(instrument.sector for instrument in BROAD_US_MARKET_INSTRUMENTS)
+)
+_SECTOR_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = tuple(
+    _sector_universe(sector) for sector in _BROAD_US_SECTORS
+)
+
+
 RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
     ResearchOverviewUniverse(
         universe_id="broad_us_market",
@@ -370,6 +405,7 @@ RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
             "IBKR/TWS history coverage is entitlement, symbol, session, and pacing dependent.",
         ),
     ),
+    *_SECTOR_UNIVERSES,
     ResearchOverviewUniverse(
         universe_id="sample_equities",
         label="Sample equities",
