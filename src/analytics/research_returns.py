@@ -81,7 +81,11 @@ class ComparisonLegAnalysis:
 class ReturnStreamComparison:
     left: ComparisonLegAnalysis
     right: ComparisonLegAnalysis
+    left_observation_count: int
+    right_observation_count: int
     aligned_observation_count: int
+    overlap_start: datetime | None
+    overlap_end: datetime | None
     relative_return: float | None
     volatility_difference: float | None
     max_drawdown_difference: float | None
@@ -368,6 +372,15 @@ def compare_return_streams(
         warnings.append(
             f"Comparison uses {len(aligned)} aligned observations after intersecting both return calendars."
         )
+    alignment_ratio = len(aligned) / max(min(len(left_clean), len(right_clean)), 1)
+    if alignment_ratio < 0.75:
+        warnings.append(
+            f"Thin overlap: {len(aligned)} aligned observations cover {alignment_ratio:.0%} of the smaller stream."
+        )
+    if len(aligned) < 20:
+        warnings.append(
+            f"Short comparison window: {len(aligned)} aligned observations; rolling beta/correlation may be unstable."
+        )
 
     left_series = aligned["left"]
     right_series = aligned["right"]
@@ -409,7 +422,11 @@ def compare_return_streams(
             drawdowns=right_drawdowns,
             metrics=right_metrics,
         ),
+        left_observation_count=int(len(left_clean)),
+        right_observation_count=int(len(right_clean)),
         aligned_observation_count=int(len(aligned)),
+        overlap_start=pd.Timestamp(aligned.index[0]).to_pydatetime() if not aligned.empty else None,
+        overlap_end=pd.Timestamp(aligned.index[-1]).to_pydatetime() if not aligned.empty else None,
         relative_return=(
             left_metrics.total_return - right_metrics.total_return
             if left_metrics.total_return is not None and right_metrics.total_return is not None

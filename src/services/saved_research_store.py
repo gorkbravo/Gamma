@@ -11,6 +11,10 @@ from src.models.research_lab import SavedResearchCreateRequest, SavedResearchIte
 from src.utils.time import now_utc
 
 
+CURRENT_SAVED_RESEARCH_SCHEMA_VERSION = 1
+SUPPORTED_SAVED_RESEARCH_SCHEMA_VERSIONS = {1}
+
+
 class SavedResearchStore:
     def __init__(self, base_dir: str | Path = "data/research") -> None:
         self.base_dir = Path(base_dir)
@@ -34,7 +38,7 @@ class SavedResearchStore:
         created_at = now_utc()
         item = SavedResearchItem(
             id=uuid4().hex,
-            schema_version=1,
+            schema_version=CURRENT_SAVED_RESEARCH_SCHEMA_VERSION,
             object_type=str(request.object_type or "").strip() or "research_object",
             title=str(request.title or "").strip() or "Untitled Research",
             notes=str(request.notes or "").strip(),
@@ -67,16 +71,23 @@ class SavedResearchStore:
             return None
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
+            schema_version = int(payload.get("schema_version") or CURRENT_SAVED_RESEARCH_SCHEMA_VERSION)
+            warnings = list(payload.get("warnings") or [])
+            if schema_version not in SUPPORTED_SAVED_RESEARCH_SCHEMA_VERSIONS:
+                warnings.append(
+                    f"Saved research schema v{schema_version} is outside the supported set "
+                    f"{sorted(SUPPORTED_SAVED_RESEARCH_SCHEMA_VERSIONS)}; loaded best-effort."
+                )
             return SavedResearchItem(
                 id=str(payload.get("id") or path.stem),
-                schema_version=int(payload.get("schema_version") or 1),
+                schema_version=schema_version,
                 object_type=str(payload.get("object_type") or "research_object"),
                 title=str(payload.get("title") or "Untitled Research"),
                 notes=str(payload.get("notes") or ""),
                 payload=dict(payload.get("payload") or {}),
                 created_at=self._parse_datetime(payload.get("created_at")) or now_utc(),
                 updated_at=self._parse_datetime(payload.get("updated_at")) or now_utc(),
-                warnings=list(payload.get("warnings") or []),
+                warnings=list(dict.fromkeys(warnings)),
                 source_provider=str(payload.get("source_provider") or "gamma_saved_research"),
                 retrieved_at=self._parse_datetime(payload.get("retrieved_at")),
                 origin=str(payload.get("origin") or "saved_research_store"),

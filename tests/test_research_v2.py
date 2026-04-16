@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pandas as pd
@@ -107,6 +108,25 @@ def test_strategy_lab_warns_on_duplicates_missing_values_and_outliers(tmp_path):
     assert result.metrics.observation_count == 7
 
 
+def test_strategy_lab_warns_on_whole_percent_decimal_mistake(tmp_path):
+    service = _service(tmp_path)
+    rows = [
+        {"date": "2026-01-02", "return": 1.0},
+        {"date": "2026-01-05", "return": -0.5},
+        {"date": "2026-01-06", "return": 0.75},
+        {"date": "2026-01-07", "return": 0.4},
+        {"date": "2026-01-08", "return": -0.3},
+        {"date": "2026-01-09", "return": 0.2},
+    ]
+
+    result = service.analyze_strategy_lab(
+        ImportedReturnStreamRequest(rows=rows, date_column="date", value_column="return")
+    )
+
+    joined_warnings = " ".join(result.warnings).lower()
+    assert "whole percentages" in joined_warnings
+
+
 def test_strategy_lab_rejects_too_few_observations(tmp_path):
     service = _service(tmp_path)
 
@@ -160,6 +180,10 @@ def test_compare_scenario_aligns_direct_and_saved_return_streams(tmp_path):
     )
 
     assert result.comparison.aligned_observation_count == 8
+    assert result.comparison.left_observation_count == 8
+    assert result.comparison.right_observation_count == 8
+    assert result.comparison.overlap_start is not None
+    assert result.comparison.overlap_end is not None
     assert result.comparison.left.label == "Saved Strategy"
     assert result.comparison.relative_return is not None
     assert result.comparison.correlation is not None
@@ -186,3 +210,34 @@ def test_saved_research_create_list_load_and_delete(tmp_path):
     assert loaded.title == "AAPL Scope"
     assert service.delete_saved_research(saved.id) is True
     assert service.load_saved_research(saved.id) is None
+
+
+def test_saved_research_loads_future_schema_best_effort(tmp_path):
+    store = SavedResearchStore(tmp_path / "research")
+    item_path = store.items_dir / "future-schema.json"
+    item_path.write_text(
+        json.dumps(
+            {
+                "id": "future-schema",
+                "schema_version": 99,
+                "object_type": "strategy_lab",
+                "title": "Future Schema",
+                "notes": "",
+                "payload": {"returns_points": [{"timestamp": "2026-01-02T00:00:00", "value": 0.01}]},
+                "created_at": "2026-01-02T00:00:00",
+                "updated_at": "2026-01-02T00:00:00",
+                "warnings": [],
+                "source_provider": "uploaded_csv",
+                "retrieved_at": "2026-01-02T00:00:00",
+                "origin": "test",
+                "transformation_note": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = store.load_item("future-schema")
+
+    assert loaded is not None
+    assert loaded.schema_version == 99
+    assert any("loaded best-effort" in warning for warning in loaded.warnings)

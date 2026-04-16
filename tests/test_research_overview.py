@@ -53,6 +53,10 @@ def test_research_overview_builds_nodes_rankings_and_provenance():
     assert result.timeframe == "1M"
     assert result.coverage.instrument_count == 3
     assert result.coverage.priced_count == 3
+    assert result.coverage.coverage_ratio == 1
+    assert result.coverage.thin_history_symbols == ["AAPL", "MSFT", "SAP"]
+    assert result.coverage.history_source_label == "Mock sample-data daily history"
+    assert result.metadata_source_label == "Local sample/watchlist metadata"
     assert result.coverage.benchmark_available is True
     assert result.source_provider == "mock"
     assert result.freshness_label.value == "mocked"
@@ -71,6 +75,8 @@ def test_research_overview_builds_nodes_rankings_and_provenance():
     response = ResearchOverviewResponseModel.from_domain(result)
     assert response.nodes[0].freshness_label == "mocked"
     assert response.coverage.benchmark_symbol == "AAPL"
+    assert response.coverage.thin_history_symbols == ["AAPL", "MSFT", "SAP"]
+    assert response.history_source_label == "Mock sample-data daily history"
     assert response.sort_options[0].sort_id == "market_cap_desc"
     assert response.transformation_note is not None
 
@@ -97,6 +103,9 @@ def test_research_overview_labels_partial_coverage_without_failing():
     assert result.universe_id == "broad_us_market"
     assert result.timeframe == "DoD"
     assert result.coverage.priced_count == 2
+    assert result.coverage.missing_count == 78
+    assert result.coverage.coverage_label == "Static large-cap US seed, partial coverage"
+    assert result.metadata_source_label == "Static S&P 500-derived proxy metadata"
     assert "NVDA" in result.coverage.missing_symbols
     assert result.coverage.benchmark_available is False
     assert any("Unknown Research Overview universe" in warning for warning in result.warnings)

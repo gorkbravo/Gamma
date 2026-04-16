@@ -247,6 +247,9 @@ export interface ResearchOverviewUniverse {
   description: string;
   instruments: ResearchOverviewUniverseInstrument[];
   limitations: string[];
+  metadata_source_label: string;
+  coverage_label: string;
+  is_complete_universe: boolean;
 }
 
 export interface ResearchOverviewMetricOption {
@@ -303,6 +306,14 @@ export interface ResearchOverviewCoverage {
   benchmark_symbol: string;
   benchmark_available: boolean;
   benchmark_observation_count: number;
+  coverage_ratio: number;
+  missing_count: number;
+  thin_history_symbols: string[];
+  min_observation_count: number;
+  max_observation_count: number;
+  coverage_label: string;
+  history_source_label: string;
+  metadata_source_label: string;
 }
 
 export interface ResearchOverviewRankItem {
@@ -349,6 +360,9 @@ export interface ResearchOverviewResponse {
   origin: string;
   transformation_note: string | null;
   freshness_label: string;
+  history_source_label: string;
+  metadata_source_label: string;
+  coverage_label: string;
 }
 
 export interface ResearchReturnMetrics {
@@ -417,7 +431,11 @@ export interface ResearchComparisonLegResult {
 export interface ResearchCompareResult {
   left: ResearchComparisonLegResult;
   right: ResearchComparisonLegResult;
+  left_observation_count: number;
+  right_observation_count: number;
   aligned_observation_count: number;
+  overlap_start: string | null;
+  overlap_end: string | null;
   relative_return: number | null;
   volatility_difference: number | null;
   max_drawdown_difference: number | null;

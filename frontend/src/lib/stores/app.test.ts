@@ -73,6 +73,7 @@ import {
   researchOverview,
   researchCompareResult,
   researchResult,
+  restoreStrategyLabResult,
   riskResult,
   savedResearchItems,
   saveResearchItem,
@@ -519,6 +520,17 @@ describe("app store orchestration", () => {
     expect(get(researchCompareResult)).toBeNull();
   });
 
+  it("restores a normalized saved Strategy Lab result without an API call", () => {
+    const strategy = makeStrategyLabResult();
+    researchCompareResult.set(makeResearchCompareResult());
+
+    restoreStrategyLabResult(strategy);
+
+    expect(get(strategyLabResult)?.name).toBe("CSV Strategy");
+    expect(get(researchCompareResult)).toBeNull();
+    expect(get(lastError)).toBe("");
+  });
+
   it("compares research return streams through the scenario endpoint", async () => {
     const comparison = makeResearchCompareResult();
     const fetchMock = vi.fn().mockResolvedValueOnce(ok(comparison));
@@ -563,6 +575,17 @@ describe("app store orchestration", () => {
 
     await deleteSavedResearchItem("saved-1");
     expect(get(savedResearchItems).some((saved) => saved.id === "saved-1")).toBe(false);
+  });
+
+  it("clears saved research items when the saved endpoint is unavailable", async () => {
+    savedResearchItems.set([makeSavedResearchItem("stale-saved")]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(notFound({ detail: "Not Found" })));
+
+    const items = await loadSavedResearch();
+
+    expect(items).toEqual([]);
+    expect(get(savedResearchItems)).toEqual([]);
+    expect(get(lastError)).toContain("404");
   });
 
   it("loads the prediction screener and selected market bundle together", async () => {
@@ -1416,7 +1439,10 @@ function makeResearchOverview(): ResearchOverviewResponse {
         label: "Sample equities",
         description: "Small offline-friendly listed-equity sample.",
         instruments: [],
-        limitations: ["Narrow sample universe."]
+        limitations: ["Narrow sample universe."],
+        metadata_source_label: "Local sample/watchlist metadata",
+        coverage_label: "Sample watchlist, partial coverage",
+        is_complete_universe: false
       }
     ],
     available_timeframes: ["1M", "3M", "6M", "1Y"],
@@ -1471,7 +1497,15 @@ function makeResearchOverview(): ResearchOverviewResponse {
       missing_symbols: [],
       benchmark_symbol: "AAPL",
       benchmark_available: true,
-      benchmark_observation_count: 21
+      benchmark_observation_count: 21,
+      coverage_ratio: 1,
+      missing_count: 0,
+      thin_history_symbols: [],
+      min_observation_count: 21,
+      max_observation_count: 21,
+      coverage_label: "Sample watchlist, partial coverage",
+      history_source_label: "Mock sample-data daily history",
+      metadata_source_label: "Local sample/watchlist metadata"
     },
     rankings: {
       leaders: [{ node_id: "instrument:AAPL", label: "Apple", group: "US Mega-Cap Tech", symbol: "AAPL", value: 0.05 }],
@@ -1491,7 +1525,10 @@ function makeResearchOverview(): ResearchOverviewResponse {
     retrieved_at: "2026-03-01T00:00:00Z",
     origin: "research_service.overview",
     transformation_note: "Computed from daily close histories.",
-    freshness_label: "mocked"
+    freshness_label: "mocked",
+    history_source_label: "Mock sample-data daily history",
+    metadata_source_label: "Local sample/watchlist metadata",
+    coverage_label: "Sample watchlist, partial coverage"
   };
 }
 
@@ -1537,7 +1574,11 @@ function makeResearchCompareResult(): ResearchCompareResult {
       normalized_nav_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 1.02 }],
       drawdown_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0 }]
     },
+    left_observation_count: 12,
+    right_observation_count: 12,
     aligned_observation_count: 12,
+    overlap_start: "2026-03-01T00:00:00Z",
+    overlap_end: "2026-03-12T00:00:00Z",
     relative_return: -0.01,
     volatility_difference: 0.01,
     max_drawdown_difference: 0,
@@ -1600,6 +1641,21 @@ function ok(body: unknown) {
     statusText: "OK",
     async json() {
       return body;
+    }
+  };
+}
+
+function notFound(body: unknown) {
+  return {
+    ok: false,
+    status: 404,
+    statusText: "Not Found",
+    headers: new Headers({ "content-type": "application/json" }),
+    async json() {
+      return body;
+    },
+    async text() {
+      return JSON.stringify(body);
     }
   };
 }

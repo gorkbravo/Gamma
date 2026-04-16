@@ -44,7 +44,11 @@
     parseResearchCsvText,
     parseSyntheticText,
     researchSortMetricLabel,
+    hydrateStrategyLabResultFromSaved,
+    savedResearchCanReloadScope,
+    savedResearchCanReloadStrategy,
     savedResearchHasReturnStream,
+    savedResearchScopeDraft,
     treemapDensityClass,
     treemapRectStyle,
     type ResearchCompareOption,
@@ -72,6 +76,7 @@
   export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
   export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
   export let onDeleteSaved: (itemId: string) => Promise<boolean> | void;
+  export let onRestoreStrategy: ((result: StrategyLabResult) => void) | undefined = undefined;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
 
@@ -347,7 +352,17 @@
       objectType: "scope_analysis",
       title: savedScopeTitle.trim() || "Scope Analysis Run",
       notes: savedNotes,
-      payload: { ...result, saved_from_mode: "scope_analysis" },
+      payload: {
+        ...result,
+        saved_from_mode: "scope_analysis",
+        builder_state: {
+          scope_type: scopeType,
+          primary_symbol: primarySymbol.trim().toUpperCase(),
+          benchmark_symbol: benchmarkSymbol.trim().toUpperCase() || "SPY",
+          lookback_days: lookbackDays,
+          synthetic_text: syntheticText
+        }
+      },
       warnings: result.warnings,
       sourceProvider: "gamma_research",
       origin: "frontend.research.scope_analysis.save",
@@ -381,6 +396,33 @@
       compareRightSource = sourceId;
     }
     mode = "compare_scenario";
+  }
+
+  function loadSavedScope(item: SavedResearchItem) {
+    const draft = savedResearchScopeDraft(item);
+    if (!draft) {
+      return;
+    }
+    scopeType = draft.scopeType;
+    primarySymbol = draft.scopeType === "single_ticker" ? draft.primarySymbol : "";
+    benchmarkSymbol = draft.benchmarkSymbol;
+    lookbackDays = draft.lookbackDays;
+    if (draft.scopeType === "synthetic_portfolio") {
+      syntheticText = draft.syntheticText;
+    }
+    inputWarning = "Loaded saved scope into the builder. Run analysis to refresh provider-backed history.";
+    mode = "scope_analysis";
+  }
+
+  function loadSavedStrategy(item: SavedResearchItem) {
+    const hydrated = hydrateStrategyLabResultFromSaved(item);
+    if (!hydrated) {
+      return;
+    }
+    onRestoreStrategy?.(hydrated);
+    strategyName = hydrated.name;
+    strategyInputWarning = "Loaded normalized saved strategy result. Raw CSV rows were not persisted.";
+    mode = "strategy_lab";
   }
 
   function rankingMeta(item: ResearchOverviewRankItem) {
@@ -663,6 +705,7 @@
   let chartSeries: ChartSeries[] = [];
   let strategyChartSeries: ChartSeries[] = [];
   let compareChartSeries: ChartSeries[] = [];
+  let compareRelativeDrawdownSeries: ChartSeries[] = [];
   let compareOptions: ResearchCompareOption[] = [];
   let compareMetricRows: Array<{ label: string; left: number | null | undefined; right: number | null | undefined }> = [];
   let weightBars: RankBarItem[] = [];
@@ -775,7 +818,8 @@
     syntheticText,
     selectedPreset
   });
-  $: compareOptions = buildResearchCompareOptions(result, strategyResult, savedItems);
+  $: savedResearchList = Array.isArray(savedItems) ? savedItems : [];
+  $: compareOptions = buildResearchCompareOptions(result, strategyResult, savedResearchList);
   $: compareMetricRows = [
     { label: "Total Return", left: compareResult?.left.metrics.total_return, right: compareResult?.right.metrics.total_return },
     { label: "Annual Return", left: compareResult?.left.metrics.annual_return, right: compareResult?.right.metrics.annual_return },
@@ -1038,6 +1082,18 @@
         }
       ]
     : [];
+  $: compareRelativeDrawdownSeries = compareResult?.relative_drawdown_points?.length
+    ? [
+        {
+          id: "relative_drawdown",
+          label: "Relative Drawdown",
+          color: "#c66b61",
+          type: "area" as const,
+          invertFilledArea: true,
+          data: compareResult.relative_drawdown_points.map(toChartPoint)
+        }
+      ]
+    : [];
 </script>
 
 <section class="view">
@@ -1094,7 +1150,16 @@
             <label class="inline-field">
               <span>Universe</span>
               <select bind:value={overviewUniverseId} on:change={handleOverviewUniverseChange}>
-                {#each (overview?.available_universes ?? [{ universe_id: "broad_us_market", label: "Broad US Market" }]).filter((item) => !hiddenOverviewUniverseIds.has(item.universe_id)) as item}
+                {#each (overview?.available_universes ?? [{
+                  universe_id: "broad_us_market",
+                  label: "Broad US Market",
+                  description: "Static proxy universe.",
+                  instruments: [],
+                  limitations: [],
+                  metadata_source_label: "Static S&P 500-derived proxy metadata",
+                  coverage_label: "Static large-cap US seed, partial coverage",
+                  is_complete_universe: false
+                }]).filter((item) => !hiddenOverviewUniverseIds.has(item.universe_id)) as item}
                   <option value={item.universe_id}>{item.label}</option>
                 {/each}
               </select>
@@ -1125,15 +1190,19 @@
         <div class="overview-context-strip">
           <div>
             <span>Coverage</span>
-            <strong>{overview?.coverage.priced_count ?? 0}/{overview?.coverage.instrument_count ?? 0}</strong>
+            <strong>{overview?.coverage.priced_count ?? 0}/{overview?.coverage.instrument_count ?? 0} priced</strong>
           </div>
           <div>
             <span>Benchmark</span>
             <strong>{overview?.coverage.benchmark_available ? overview.benchmark_symbol : `${overviewBenchmarkSymbol || "SPY"} unavailable`}</strong>
           </div>
           <div>
-            <span>Source</span>
-            <strong>{overview?.source_provider ?? "pending"} / {overview?.freshness_label ?? "unknown"}</strong>
+            <span>History</span>
+            <strong>{overview?.history_source_label ?? "pending"} / {overview?.freshness_label ?? "unknown"}</strong>
+          </div>
+          <div>
+            <span>Reference</span>
+            <strong>{overview?.metadata_source_label ?? "pending"}</strong>
           </div>
           <div>
             <span>Retrieved</span>
@@ -1240,6 +1309,7 @@
           <div class="selection-grid">
             <div class="row"><span>Group</span><strong>{selectedOverviewNode?.group ?? "N/A"}</strong></div>
             <div class="row"><span>Market Cap</span><strong>{formatResearchOverviewSortValue(selectedOverviewNode?.market_cap_usd, "market_cap_desc")}</strong></div>
+            <div class="row"><span>History Obs</span><strong>{selectedOverviewNode?.metrics.observation_count ?? 0}</strong></div>
             <div class="row"><span>Return</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "return") : null, "return")}</strong></div>
             <div class="row"><span>Volatility</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "volatility") : null, "volatility")}</strong></div>
             <div class="row"><span>Beta</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "beta") : null, "beta")}</strong></div>
@@ -1253,6 +1323,11 @@
               <p class="eyebrow">Warnings</p>
               <h3>Coverage Notes</h3>
             </div>
+          </div>
+          <div class="stack">
+            <div class="row"><span>Coverage Type</span><strong>{overview?.coverage_label ?? "N/A"}</strong></div>
+            <div class="row"><span>Missing / Thin</span><strong>{overview?.coverage?.missing_count ?? 0} / {overview?.coverage?.thin_history_symbols?.length ?? 0}</strong></div>
+            <div class="row"><span>Observation Range</span><strong>{overview?.coverage?.min_observation_count ?? 0}-{overview?.coverage?.max_observation_count ?? 0}</strong></div>
           </div>
           {#if overview?.warnings.length || selectedOverviewNode?.warnings.length}
             <div class="notes-list">
@@ -1788,6 +1863,23 @@
           <TimeSeriesChart series={compareChartSeries} height={380} emptyMessage="Select two loaded or saved return streams to compare." />
         </article>
 
+        <div class="detail-split">
+          <article class="panel rail-panel">
+            <div class="rail-header"><div><p class="eyebrow">Alignment</p><h3>Common Window</h3></div></div>
+            <div class="stack">
+              <div class="row"><span>Left Obs</span><strong>{compareResult?.left_observation_count ?? 0}</strong></div>
+              <div class="row"><span>Right Obs</span><strong>{compareResult?.right_observation_count ?? 0}</strong></div>
+              <div class="row"><span>Overlap</span><strong>{compareResult ? `${shortDate(compareResult.overlap_start)} - ${shortDate(compareResult.overlap_end)}` : "N/A"}</strong></div>
+              <div class="row"><span>Relative DD Points</span><strong>{compareResult?.relative_drawdown_points.length ?? 0}</strong></div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header"><div><p class="eyebrow">Relative Risk</p><h3>Relative Drawdown</h3></div></div>
+            <TimeSeriesChart series={compareRelativeDrawdownSeries} height={210} emptyMessage="Relative drawdown appears after comparison." />
+          </article>
+        </div>
+
         <article class="panel table-panel">
           <div class="panel-header"><div><p class="eyebrow">Metrics</p><h3>Side-by-Side</h3></div></div>
           <div class="table-wrap">
@@ -1842,8 +1934,8 @@
             <table>
               <thead><tr><th>Title</th><th>Type</th><th>Updated</th><th>Warnings</th><th>Actions</th></tr></thead>
               <tbody>
-                {#if savedItems.length}
-                  {#each savedItems as item}
+                {#if savedResearchList.length}
+                  {#each savedResearchList as item}
                     <tr>
                       <td>{item.title}</td>
                       <td>{item.object_type}</td>
@@ -1851,6 +1943,12 @@
                       <td>{item.warnings.length}</td>
                       <td>
                         <div class="table-actions">
+                          {#if savedResearchCanReloadScope(item)}
+                            <button type="button" class="ghost-button" on:click={() => loadSavedScope(item)}>Load Scope</button>
+                          {/if}
+                          {#if savedResearchCanReloadStrategy(item)}
+                            <button type="button" class="ghost-button" on:click={() => loadSavedStrategy(item)}>Load Strategy</button>
+                          {/if}
                           <button type="button" class="ghost-button" on:click={() => useSavedInCompare(item)} disabled={!savedResearchHasReturnStream(item)}>Compare</button>
                           <button type="button" class="ghost-button" on:click={() => void onDeleteSaved(item.id)}>Delete</button>
                         </div>
@@ -1879,8 +1977,8 @@
         <article class="panel rail-panel">
           <div class="rail-header"><div><p class="eyebrow">Storage</p><h3>Local JSON Layer</h3></div></div>
           <div class="stack">
-            <div class="row"><span>Items</span><strong>{savedItems.length}</strong></div>
-            <div class="row"><span>Reusable Streams</span><strong>{savedItems.filter(savedResearchHasReturnStream).length}</strong></div>
+            <div class="row"><span>Items</span><strong>{savedResearchList.length}</strong></div>
+            <div class="row"><span>Reusable Streams</span><strong>{savedResearchList.filter(savedResearchHasReturnStream).length}</strong></div>
           </div>
           <p class="muted">Saved Research is a first-pass structured layer, not a notebook. It preserves normalized outputs, warnings, timestamps, and provenance fields for reuse.</p>
         </article>
@@ -2088,7 +2186,7 @@
 
   .overview-context-strip {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0;
     border-top: 1px solid var(--divider);
     padding-top: 0.5rem;
@@ -2660,6 +2758,7 @@
 
   .table-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.35rem;
     align-items: center;
   }

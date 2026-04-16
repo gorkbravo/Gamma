@@ -218,7 +218,11 @@ class ResearchComparisonLegModel(BaseModel):
 class ResearchCompareResponseModel(BaseModel):
     left: ResearchComparisonLegModel
     right: ResearchComparisonLegModel
+    left_observation_count: int
+    right_observation_count: int
     aligned_observation_count: int
+    overlap_start: datetime | None = None
+    overlap_end: datetime | None = None
     relative_return: float | None = None
     volatility_difference: float | None = None
     max_drawdown_difference: float | None = None
@@ -253,7 +257,11 @@ class ResearchCompareResponseModel(BaseModel):
                 normalized_nav_points=series_to_points(comparison.right.normalized_nav),
                 drawdown_points=series_to_points(comparison.right.drawdowns),
             ),
+            left_observation_count=comparison.left_observation_count,
+            right_observation_count=comparison.right_observation_count,
             aligned_observation_count=comparison.aligned_observation_count,
+            overlap_start=comparison.overlap_start,
+            overlap_end=comparison.overlap_end,
             relative_return=comparison.relative_return,
             volatility_difference=comparison.volatility_difference,
             max_drawdown_difference=comparison.max_drawdown_difference,
@@ -363,6 +371,9 @@ class ResearchOverviewUniverseModel(BaseModel):
     description: str
     instruments: list[ResearchOverviewUniverseInstrumentModel] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+    metadata_source_label: str = "Static Gamma reference list"
+    coverage_label: str = "Partial research universe"
+    is_complete_universe: bool = False
 
     @classmethod
     def from_domain(cls, row: ResearchOverviewUniverse) -> "ResearchOverviewUniverseModel":
@@ -372,6 +383,9 @@ class ResearchOverviewUniverseModel(BaseModel):
             description=row.description,
             instruments=[ResearchOverviewUniverseInstrumentModel.from_domain(item) for item in row.instruments],
             limitations=list(row.limitations),
+            metadata_source_label=row.metadata_source_label,
+            coverage_label=row.coverage_label,
+            is_complete_universe=row.is_complete_universe,
         )
 
 
@@ -448,6 +462,14 @@ class ResearchOverviewCoverageModel(BaseModel):
     benchmark_symbol: str
     benchmark_available: bool
     benchmark_observation_count: int
+    coverage_ratio: float = 0.0
+    missing_count: int = 0
+    thin_history_symbols: list[str] = Field(default_factory=list)
+    min_observation_count: int = 0
+    max_observation_count: int = 0
+    coverage_label: str = "Partial research universe"
+    history_source_label: str = "Unknown history source"
+    metadata_source_label: str = "Static Gamma reference list"
 
     @classmethod
     def from_domain(cls, row: ResearchOverviewCoverage) -> "ResearchOverviewCoverageModel":
@@ -525,6 +547,9 @@ class ResearchOverviewResponseModel(BaseModel):
     origin: str
     transformation_note: str | None = None
     freshness_label: str
+    history_source_label: str = "Unknown history source"
+    metadata_source_label: str = "Static Gamma reference list"
+    coverage_label: str = "Partial research universe"
 
     @classmethod
     def from_domain(cls, row: ResearchOverviewResult) -> "ResearchOverviewResponseModel":
@@ -549,6 +574,9 @@ class ResearchOverviewResponseModel(BaseModel):
             origin=row.origin,
             transformation_note=row.transformation_note,
             freshness_label=row.freshness_label.value,
+            history_source_label=row.history_source_label,
+            metadata_source_label=row.metadata_source_label,
+            coverage_label=row.coverage_label,
         )
 
 

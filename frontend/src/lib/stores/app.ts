@@ -881,6 +881,13 @@ export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
   }
 }
 
+export function restoreStrategyLabResult(result: StrategyLabResult) {
+  strategyLabResult.set(result);
+  researchCompareResult.set(null);
+  resetCopilotCard("research");
+  lastError.set("");
+}
+
 export async function compareResearch(options: ResearchCompareOptions) {
   setLoading("compareScenario", true);
   try {
@@ -913,10 +920,12 @@ export async function loadSavedResearch() {
   setLoading("savedResearch", true);
   try {
     const response = await getJson<SavedResearchListResponse>("/research/saved");
-    savedResearchItems.set(response.items);
+    const items = Array.isArray(response.items) ? response.items : [];
+    savedResearchItems.set(items);
     lastError.set("");
-    return response.items;
+    return items;
   } catch (error) {
+    savedResearchItems.set([]);
     setError(error);
     return [];
   } finally {

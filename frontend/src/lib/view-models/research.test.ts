@@ -11,9 +11,13 @@ import {
   doesResearchDraftMatchResult,
   formatResearchOverviewMetricValue,
   formatResearchOverviewSortValue,
+  hydrateStrategyLabResultFromSaved,
   normalizeSyntheticText,
   parseResearchCsvText,
-  parseSyntheticText
+  parseSyntheticText,
+  savedResearchCanReloadScope,
+  savedResearchCanReloadStrategy,
+  savedResearchScopeDraft
 } from "./research";
 
 describe("research view model helpers", () => {
@@ -146,6 +150,47 @@ describe("research view model helpers", () => {
       "saved:saved-1"
     ]);
   });
+
+  it("hydrates safe saved scope and strategy objects for reload", () => {
+    const savedScope = {
+      id: "scope-1",
+      title: "Saved Scope",
+      object_type: "scope_analysis",
+      payload: {
+        scope_type: "synthetic_portfolio",
+        benchmark_symbol: "SPY",
+        weights: [
+          { symbol: "XLV", weight: 0.35 },
+          { symbol: "XLP", weight: 0.35 },
+          { symbol: "XLU", weight: 0.3 }
+        ]
+      },
+      warnings: []
+    } as any;
+    const savedStrategy = {
+      id: "strategy-1",
+      title: "Saved Strategy",
+      object_type: "strategy_lab",
+      payload: {
+        name: "Saved Strategy",
+        value_kind: "return",
+        benchmark_value_kind: "return",
+        metrics: { total_return: 0.01, observation_count: 2, frequency: "daily", periods_per_year: 252 },
+        returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }]
+      },
+      warnings: [],
+      source_provider: "uploaded_csv",
+      retrieved_at: "2026-03-01T00:00:00Z",
+      updated_at: "2026-03-01T00:00:00Z",
+      origin: "test",
+      transformation_note: null
+    } as any;
+
+    expect(savedResearchCanReloadScope(savedScope)).toBe(true);
+    expect(savedResearchScopeDraft(savedScope)?.syntheticText).toContain("XLV 0.3500");
+    expect(savedResearchCanReloadStrategy(savedStrategy)).toBe(true);
+    expect(hydrateStrategyLabResultFromSaved(savedStrategy)?.name).toBe("Saved Strategy");
+  });
 });
 
 function makeResearchResult(
@@ -218,7 +263,15 @@ function makeResearchOverview() {
       missing_symbols: [],
       benchmark_symbol: "SPY",
       benchmark_available: false,
-      benchmark_observation_count: 0
+      benchmark_observation_count: 0,
+      coverage_ratio: 1,
+      missing_count: 0,
+      thin_history_symbols: [],
+      min_observation_count: 21,
+      max_observation_count: 21,
+      coverage_label: "Sample watchlist, partial coverage",
+      history_source_label: "Mock sample-data daily history",
+      metadata_source_label: "Local sample/watchlist metadata"
     },
     rankings: {
       leaders: [],
@@ -238,7 +291,10 @@ function makeResearchOverview() {
     retrieved_at: "2026-03-01T00:00:00Z",
     origin: "test",
     transformation_note: null,
-    freshness_label: "mocked"
+    freshness_label: "mocked",
+    history_source_label: "Mock sample-data daily history",
+    metadata_source_label: "Local sample/watchlist metadata",
+    coverage_label: "Sample watchlist, partial coverage"
   };
 }
 

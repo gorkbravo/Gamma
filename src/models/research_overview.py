@@ -51,6 +51,9 @@ class ResearchOverviewUniverse:
     description: str
     instruments: tuple[ResearchOverviewUniverseInstrument, ...]
     limitations: tuple[str, ...] = ()
+    metadata_source_label: str = "Static Gamma reference list"
+    coverage_label: str = "Partial research universe"
+    is_complete_universe: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,14 @@ class ResearchOverviewCoverage:
     benchmark_symbol: str
     benchmark_available: bool
     benchmark_observation_count: int
+    coverage_ratio: float = 0.0
+    missing_count: int = 0
+    thin_history_symbols: list[str] = field(default_factory=list)
+    min_observation_count: int = 0
+    max_observation_count: int = 0
+    coverage_label: str = "Partial research universe"
+    history_source_label: str = "Unknown history source"
+    metadata_source_label: str = "Static Gamma reference list"
 
 
 @dataclass(frozen=True)
@@ -169,6 +180,9 @@ class ResearchOverviewResult:
     origin: str
     transformation_note: str | None = None
     freshness_label: FreshnessLabel = FreshnessLabel.UNKNOWN
+    history_source_label: str = "Unknown history source"
+    metadata_source_label: str = "Static Gamma reference list"
+    coverage_label: str = "Partial research universe"
 
 
 RESEARCH_OVERVIEW_METRIC_OPTIONS: tuple[ResearchOverviewMetricOption, ...] = (
@@ -378,10 +392,13 @@ def _sector_universe(sector: str) -> ResearchOverviewUniverse:
         ),
         instruments=instruments,
         limitations=(
-            f"This is a sector slice of the Broad US Market seeds, not a complete {sector} aggregate.",
-            "Market-cap tile sizing is static proxy metadata and may drift until a live constituent/weight provider is added.",
+            f"This is a sector slice of the Broad US Market seed list, not complete {sector} index coverage.",
+            "Sector membership and market-cap tile sizing are static proxy metadata and may drift until a live reference provider is added.",
             "IBKR/TWS history coverage is entitlement, symbol, session, and pacing dependent.",
         ),
+        metadata_source_label="Static S&P 500-derived proxy metadata",
+        coverage_label="Sector slice of static Broad US Market seed",
+        is_complete_universe=False,
     )
 
 
@@ -397,13 +414,20 @@ RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
     ResearchOverviewUniverse(
         universe_id="broad_us_market",
         label="Broad US Market",
-        description="Large-cap US equity map seeded from a broad S&P 500-derived universe.",
+        description=(
+            "Large-cap US equity map seeded from static S&P 500-derived proxy metadata; "
+            "not live index membership or complete market coverage."
+        ),
         instruments=BROAD_US_MARKET_INSTRUMENTS,
         limitations=(
-            "This first pass uses the largest available S&P 500 constituents by static market-cap proxy, not the complete index.",
-            "Market-cap tile sizing is static proxy metadata and may drift until a live constituent/weight provider is added.",
+            "This first pass uses a static seed of large S&P 500-derived names, not complete or live index membership.",
+            "Sector, industry, and market-cap tile sizing are static proxy metadata and may drift until a live reference provider is added.",
+            "Breadth and leadership statistics only cover the loaded seed list and must not be read as whole-market breadth.",
             "IBKR/TWS history coverage is entitlement, symbol, session, and pacing dependent.",
         ),
+        metadata_source_label="Static S&P 500-derived proxy metadata",
+        coverage_label="Static large-cap US seed, partial coverage",
+        is_complete_universe=False,
     ),
     *_SECTOR_UNIVERSES,
     ResearchOverviewUniverse(
@@ -441,6 +465,9 @@ RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
             "This is a narrow sample/watchlist universe, not a complete market map.",
             "Tile size is equal-weight because market-cap weights are not available in this first pass.",
         ),
+        metadata_source_label="Local sample/watchlist metadata",
+        coverage_label="Sample watchlist, partial coverage",
+        is_complete_universe=False,
     ),
     ResearchOverviewUniverse(
         universe_id="major_etfs",
@@ -465,5 +492,8 @@ RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
             "This is a curated ETF basket, not a complete exchange universe.",
             "Tile size is equal-weight until market-cap or index-weight data is available.",
         ),
+        metadata_source_label="Curated Gamma ETF basket",
+        coverage_label="Curated ETF basket, partial coverage",
+        is_complete_universe=False,
     ),
 )

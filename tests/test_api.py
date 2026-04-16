@@ -191,6 +191,10 @@ def test_research_v2_strategy_saved_and_compare_endpoints(tmp_path):
         assert compare_response.status_code == 200
         compare_payload = compare_response.json()
         assert compare_payload["aligned_observation_count"] == 8
+        assert compare_payload["left_observation_count"] == 8
+        assert compare_payload["right_observation_count"] == 8
+        assert compare_payload["overlap_start"]
+        assert compare_payload["overlap_end"]
         assert compare_payload["relative_return"] is not None
         assert "historical analytics only" in " ".join(compare_payload["warnings"])
 

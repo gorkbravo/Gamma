@@ -437,7 +437,7 @@ At the end of this workstream, Gamma should have a clearer platform layer for pr
 
 ## Workstream 2 - Research V2
 
-_Status: In progress (~68%)_
+_Status: In progress (~76%)_
 _Dependency marker: Parallelizable, but improved by provider foundation_
 _Parallelization note: The multi-mode UI can begin before all market-data providers are selected, but Strategy Lab and Overview need reliable data contracts._
 
@@ -500,6 +500,9 @@ V2 improvements should focus on clearer data-source labels, better missing-data 
 
 The mode should remain explicit that research scopes are synthetic analysis contexts, not broker portfolios.
 
+Implementation note:
+- Scope Analysis now emits clearer missing-history diagnostics that include the requested lookback and explicitly state that unavailable symbols are excluded from the aligned return stream. Saved scope payloads include compact builder metadata so safe saved scopes can be reloaded into the Scope Analysis builder without persisting raw uploads or introducing execution behavior.
+
 #### 2. Overview mode
 
 This mode should provide a market-map view instead of a single-scope view.
@@ -534,6 +537,7 @@ Later passes can expand to European equities, global ETFs, factor baskets, style
 
 Implementation note:
 - A first-pass `/research/overview` data contract now returns provider-neutral overview nodes, group nodes, rankings, coverage, freshness/source labels, warnings, and transformation notes. The frontend consumes that payload in the default `Overview` mode with a local treemap-style view and leader/laggard/risk panels. Current coverage is intentionally narrow: `Sample equities` is an offline-friendly sample/watchlist, `Major ETFs` depends on provider history, and `Broad US Market` uses static S&P 500-derived proxy metadata for first-pass sector/industry and market-cap sizing. It is not live index membership or complete market coverage, and nodes fall back to limited/equal sizing when market-cap data is unavailable.
+- A follow-up pass made the static/proxy boundary more explicit in both payloads and UI: overview coverage now carries priced ratios, missing/thin-history counts, observation ranges, history-source labels, reference-metadata labels, and universe coverage labels. `Broad US Market` remains a static large-cap seed, not a complete or live S&P 500 membership model.
 
 #### 3. Strategy Lab mode
 
@@ -569,6 +573,7 @@ This mode should not run arbitrary Python, call broker execution APIs, send orde
 
 Implementation note:
 - A first-pass `POST /research/strategy-lab/analyze` flow accepts JSON rows parsed from pasted CSV, maps date/value/optional benchmark columns, supports return or NAV/level interpretation, validates duplicate dates, missing values, minimum observations, frequency, outliers, and benchmark alignment, and returns cumulative/annualized return, annualized volatility, Sharpe-style and Sortino-style metrics, max drawdown and duration, rolling statistics, monthly/annual tables, capture ratios when benchmark data is present, warnings, and uploaded-CSV provenance. The frontend exposes this as a dense data-only Strategy Lab mode; no strategy code execution or broker actions are introduced.
+- Validation now also warns on likely whole-percent versus decimal mistakes, keeps benchmark overlap failures non-fatal when the strategy stream is otherwise valid, and supports restoring a saved normalized Strategy Lab result into the Strategy Lab result state. Raw uploaded CSV rows are still not persisted by default.
 
 #### 4. Compare / Scenario mode
 
@@ -590,6 +595,7 @@ The word "scenario" should remain research-oriented. It means "what would the hi
 
 Implementation note:
 - A first-pass `POST /research/compare-scenario/analyze` flow compares normalized return streams from the latest Scope Analysis result, latest Strategy Lab result, or saved return-stream objects. It aligns observations, normalizes starting NAV, reports relative return, volatility gap, max-drawdown gap, rolling correlation and beta where available, warnings, and per-leg metrics. The frontend renders comparison selection, normalized charting, and side-by-side metrics without portfolio modification or rebalance behavior.
+- Compare now returns explicit left/right observation counts plus overlap start/end diagnostics, warns on thin or short common windows, and surfaces relative drawdown as a dedicated read-only visualization. Scenario remains historical analytics only.
 
 #### 5. Saved Research mode
 
@@ -610,6 +616,7 @@ This is not a full notebook initially. It is a structured saved-research layer t
 
 Implementation note:
 - A first-pass local JSON saved-research layer now supports list, create, load, and delete routes under `/research/saved`. It stores typed items with schema version, object type, normalized payload, notes, warnings, source/provenance fields, and timestamps. The frontend can save current Scope Analysis and Strategy Lab results, list saved items in a dense table, delete them, and reuse saved return streams in Compare / Scenario. Raw uploaded CSV files are not persisted by default.
+- Saved Research now supports safer reuse: saved Scope Analysis objects can reload compatible builder inputs, saved Strategy Lab objects can restore normalized result state, saved return streams remain available to Compare / Scenario, and future/unknown schema versions are loaded best-effort with explicit warnings. It is still a compact structured store, not a full notebook.
 
 ### Data requirements
 
@@ -638,7 +645,7 @@ Suggested progression:
 7. Add richer handoffs to Fundamentals, Risk, IV, and Copilot.
 
 Implementation note:
-- Items 1-6 now have first-pass implementations. Remaining Research V2 work is mainly depth and coverage: provider-backed full index/reference data, broader non-US coverage, stronger saved-scope reload semantics, richer Fundamentals/Risk/IV/Copilot handoffs, regime slicing, and more complete provider diagnostics.
+- Items 1-6 now have first-pass implementations plus a second hardening pass for coverage diagnostics, saved-object reload/reuse, Strategy Lab validation, and Compare alignment/relative-drawdown diagnostics. Remaining Research V2 work is mainly provider-backed depth and cross-domain breadth: full index/reference data, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, regime slicing, and a true provider-selection layer beyond the current IBKR/mock/static-reference setup.
 
 ### Deliverable
 

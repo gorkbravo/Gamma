@@ -86,6 +86,7 @@
     runCryptoSyntheticPortfolio,
     runDiagnosticsAction,
     compareResearch,
+    restoreStrategyLabResult,
     runResearch,
     saveResearchItem,
     deleteSavedResearchItem,
@@ -1433,6 +1434,7 @@
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}
             onDeleteSaved={deleteSavedResearchItem}
+            onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
           />

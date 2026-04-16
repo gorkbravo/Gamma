@@ -98,6 +98,7 @@ class ResearchService:
         lookback_days = RESEARCH_OVERVIEW_TIMEFRAMES[timeframe]
         benchmark_symbol = str(request.benchmark_symbol or "").strip().upper() or "SPY"
         source_provider = self._overview_source_provider()
+        history_source_label = self._overview_history_source_label(source_provider)
         freshness_label = FreshnessLabel.MOCKED if source_provider == "mock" else FreshnessLabel.HISTORICAL
 
         warnings.extend(universe.limitations)
@@ -111,6 +112,8 @@ class ResearchService:
         weights_by_symbol: dict[str, float] = {}
         instrument_nodes: list[ResearchOverviewNode] = []
         missing_symbols: list[str] = []
+        thin_history_symbols: list[str] = []
+        observation_counts: dict[str, int] = {}
 
         for instrument in universe.instruments:
             reference = self._overview_reference(instrument)
@@ -118,11 +121,19 @@ class ResearchService:
             series = self.provider.load_instrument_history(reference, lookback_days)
             returns = returns_from_price_series(series, lookback_days)
             node_warnings: list[str] = []
+            observation_counts[symbol] = int(len(returns))
             if returns.empty:
                 missing_symbols.append(symbol)
-                node_warnings.append("Price history is unavailable for this overview timeframe.")
+                node_warnings.append(
+                    f"Price history is unavailable for {timeframe}; the node is excluded from returns, beta, and breadth."
+                )
             else:
                 returns_by_symbol[symbol] = returns
+                if len(returns) < lookback_days:
+                    thin_history_symbols.append(symbol)
+                    node_warnings.append(
+                        f"Thin history: {len(returns)}/{lookback_days} return observations available for {timeframe}."
+                    )
             weights_by_symbol[symbol] = max(float(instrument.weight), 0.0)
             metrics = compute_overview_metrics(
                 returns,
@@ -155,6 +166,7 @@ class ResearchService:
             freshness_label=freshness_label,
         )
         nodes = [*group_nodes, *instrument_nodes]
+        min_observations, max_observations = self._overview_observation_range(observation_counts)
         coverage = ResearchOverviewCoverage(
             instrument_count=len(universe.instruments),
             priced_count=len(returns_by_symbol),
@@ -162,12 +174,26 @@ class ResearchService:
             benchmark_symbol=benchmark_symbol,
             benchmark_available=not benchmark_returns.empty,
             benchmark_observation_count=int(len(benchmark_returns)),
+            coverage_ratio=(len(returns_by_symbol) / len(universe.instruments)) if universe.instruments else 0.0,
+            missing_count=len(missing_symbols),
+            thin_history_symbols=thin_history_symbols,
+            min_observation_count=min_observations,
+            max_observation_count=max_observations,
+            coverage_label=universe.coverage_label,
+            history_source_label=history_source_label,
+            metadata_source_label=universe.metadata_source_label,
         )
         rankings = self._overview_rankings(instrument_nodes)
         summary = self._overview_summary(group_nodes, coverage)
         coverage_note = summary.coverage_note
         if coverage_note:
             warnings.append(coverage_note)
+        if thin_history_symbols:
+            preview = ", ".join(thin_history_symbols[:8])
+            suffix = f", +{len(thin_history_symbols) - 8} more" if len(thin_history_symbols) > 8 else ""
+            warnings.append(
+                f"Thin overview history for {len(thin_history_symbols)} instruments over {timeframe}: {preview}{suffix}."
+            )
 
         return ResearchOverviewResult(
             universe_id=universe.universe_id,
@@ -191,9 +217,12 @@ class ResearchService:
             transformation_note=(
                 "Research Overview computes return, volatility, beta, drawdown, and relative-return metrics from "
                 "daily close histories. Group nodes are weighted return streams from available constituents; tile "
-                "sizing uses market-cap proxy metadata when available and falls back to universe weights."
+                "sizing uses static/reference proxy metadata when available and falls back to universe weights."
             ),
             freshness_label=freshness_label,
+            history_source_label=history_source_label,
+            metadata_source_label=universe.metadata_source_label,
+            coverage_label=universe.coverage_label,
         )
 
     def analyze(self, request: ResearchAnalysisRequest) -> ResearchAnalysisResult:
@@ -222,7 +251,10 @@ class ResearchService:
         identity_map = snapshot_identity_map(snapshot)
         raw_prices, missing = self.provider.load_prices(snapshot, lookback_days=request.lookback_days)
         if missing:
-            warnings.append(f"Missing history for: {', '.join(missing)}")
+            warnings.append(
+                f"Missing history for {len(missing)} symbol(s) over {request.lookback_days} days: {', '.join(missing)}. "
+                "Missing symbols are excluded from the aligned research return stream."
+            )
         normalized_prices = normalize_snapshot_price_histories(
             snapshot,
             raw_prices,
@@ -587,6 +619,17 @@ class ResearchService:
         if len(returns) < min_observations:
             raise ResearchValidationError([f"{label} needs at least {min_observations} return observations."])
 
+        if kind == "return":
+            whole_percent_like = int((returns.abs() > 1.0).sum())
+            if whole_percent_like:
+                warnings.append(
+                    f"{label}: {whole_percent_like} return observations exceed +/-100%; if the CSV uses whole percentages, append % or divide by 100."
+                )
+            elif float(returns.abs().median()) > 0.20:
+                warnings.append(
+                    f"{label}: median absolute return exceeds 20%; inspect whether whole percentages were supplied as decimals."
+                )
+
         outlier_count = int((returns.abs() > OUTLIER_ABS_RETURN_THRESHOLD).sum())
         if outlier_count:
             warnings.append(
@@ -654,6 +697,21 @@ class ResearchService:
         if bool(getattr(client, "mock", False)):
             return "mock"
         return "ibkr"
+
+    @staticmethod
+    def _overview_history_source_label(source_provider: str) -> str:
+        if source_provider == "mock":
+            return "Mock sample-data daily history"
+        if source_provider == "ibkr":
+            return "IBKR/TWS daily historical bars"
+        return f"{source_provider} daily history"
+
+    @staticmethod
+    def _overview_observation_range(observation_counts: dict[str, int]) -> tuple[int, int]:
+        if not observation_counts:
+            return 0, 0
+        values = list(observation_counts.values())
+        return int(min(values)), int(max(values))
 
     @staticmethod
     def _overview_group_id(group: str) -> str:
@@ -743,7 +801,16 @@ class ResearchService:
             group_weight = sum(max(float(row.weight), 0.0) for row in rows)
             group_market_cap = sum(float(row.market_cap_usd or 0.0) for row in rows) or None
             group_index_weight = sum(float(row.index_weight or 0.0) for row in rows) or None
-            warnings = [] if not group_returns.empty else ["No priced constituents are available for this group."]
+            priced_count = sum(1 for symbol in symbols if symbol in returns_by_symbol)
+            if group_returns.empty:
+                warnings = ["No priced constituents are available for this group."]
+            elif priced_count < len(rows):
+                missing_count = len(rows) - priced_count
+                warnings = [
+                    f"Group uses {priced_count}/{len(rows)} priced constituents; {missing_count} constituent(s) lack usable history."
+                ]
+            else:
+                warnings = []
             nodes.append(
                 ResearchOverviewNode(
                     node_id=group_id,
@@ -767,7 +834,7 @@ class ResearchService:
                     origin="research_service.overview.group",
                     transformation_note=(
                         f"Computed as a weighted return stream from available {group} constituents over {timeframe}. "
-                        "This is a sample/watchlist group, not a complete sector aggregate."
+                        "This is a seed/watchlist group, not complete market or sector coverage."
                     ),
                     freshness_label=freshness_label,
                     warnings=warnings,

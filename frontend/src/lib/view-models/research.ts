@@ -32,6 +32,14 @@ export interface ResearchCompareOption {
   source: "scope" | "strategy" | "saved";
 }
 
+export interface SavedScopeDraft {
+  scopeType: "single_ticker" | "synthetic_portfolio";
+  primarySymbol: string;
+  benchmarkSymbol: string;
+  lookbackDays: number;
+  syntheticText: string;
+}
+
 export interface ResearchPreviewRow {
   symbol: string;
   inputWeight: number;
@@ -188,9 +196,127 @@ export function buildResearchCompareOptions(
 
 export function savedResearchHasReturnStream(item: SavedResearchItem) {
   const payload = item.payload ?? {};
-  return ["returns_points", "return_points", "performance_points", "portfolio_return_points"].some((key) =>
-    Array.isArray((payload as Record<string, unknown>)[key])
+  const candidates = [payload];
+  for (const key of ["result", "strategy_result", "analysis", "payload"]) {
+    const nested = (payload as Record<string, unknown>)[key];
+    if (isPlainRecord(nested)) {
+      candidates.push(nested);
+    }
+  }
+  return candidates.some((candidate) =>
+    ["returns_points", "return_points", "performance_points", "portfolio_return_points"].some((key) =>
+      Array.isArray((candidate as Record<string, unknown>)[key])
+    )
   );
+}
+
+export function savedResearchScopeDraft(item: SavedResearchItem): SavedScopeDraft | null {
+  if (item.object_type !== "scope_analysis") {
+    return null;
+  }
+  const payload = item.payload ?? {};
+  const builder = isPlainRecord(payload.builder_state) ? payload.builder_state : {};
+  const rawScopeType = String(builder.scope_type ?? payload.scope_type ?? "");
+  const scopeType = rawScopeType === "synthetic_portfolio" ? "synthetic_portfolio" : "single_ticker";
+  const benchmarkSymbol = String(builder.benchmark_symbol ?? payload.benchmark_symbol ?? "SPY").trim().toUpperCase() || "SPY";
+  const lookbackDays = Number(builder.lookback_days ?? payload.lookback_days ?? 252);
+
+  if (scopeType === "single_ticker") {
+    const primarySymbol = String(builder.primary_symbol ?? payload.primary_symbol ?? firstWeightSymbol(payload)).trim().toUpperCase();
+    return primarySymbol
+      ? {
+          scopeType,
+          primarySymbol,
+          benchmarkSymbol,
+          lookbackDays: Number.isFinite(lookbackDays) && lookbackDays > 0 ? lookbackDays : 252,
+          syntheticText: ""
+        }
+      : null;
+  }
+
+  const syntheticText =
+    typeof builder.synthetic_text === "string" && builder.synthetic_text.trim()
+      ? builder.synthetic_text.trim()
+      : weightsToSyntheticText(payload.weights);
+  return syntheticText
+    ? {
+        scopeType,
+        primarySymbol: "",
+        benchmarkSymbol,
+        lookbackDays: Number.isFinite(lookbackDays) && lookbackDays > 0 ? lookbackDays : 252,
+        syntheticText
+      }
+    : null;
+}
+
+export function savedResearchCanReloadScope(item: SavedResearchItem) {
+  return savedResearchScopeDraft(item) !== null;
+}
+
+export function hydrateStrategyLabResultFromSaved(item: SavedResearchItem): StrategyLabResult | null {
+  if (item.object_type !== "strategy_lab") {
+    return null;
+  }
+  const payload = item.payload ?? {};
+  if (!isPlainRecord(payload.metrics) || !Array.isArray(payload.returns_points)) {
+    return null;
+  }
+  return {
+    name: String(payload.name ?? item.title ?? "Saved Strategy"),
+    value_kind: String(payload.value_kind ?? "return"),
+    benchmark_column: typeof payload.benchmark_column === "string" ? payload.benchmark_column : null,
+    benchmark_value_kind: String(payload.benchmark_value_kind ?? "return"),
+    metrics: payload.metrics as StrategyLabResult["metrics"],
+    returns_points: payload.returns_points as StrategyLabResult["returns_points"],
+    equity_curve_points: Array.isArray(payload.equity_curve_points) ? (payload.equity_curve_points as StrategyLabResult["equity_curve_points"]) : [],
+    drawdown_points: Array.isArray(payload.drawdown_points) ? (payload.drawdown_points as StrategyLabResult["drawdown_points"]) : [],
+    benchmark_points: Array.isArray(payload.benchmark_points) ? (payload.benchmark_points as StrategyLabResult["benchmark_points"]) : [],
+    benchmark_equity_curve_points: Array.isArray(payload.benchmark_equity_curve_points)
+      ? (payload.benchmark_equity_curve_points as StrategyLabResult["benchmark_equity_curve_points"])
+      : [],
+    rolling_points: Array.isArray(payload.rolling_points) ? (payload.rolling_points as StrategyLabResult["rolling_points"]) : [],
+    monthly_returns: Array.isArray(payload.monthly_returns) ? (payload.monthly_returns as StrategyLabResult["monthly_returns"]) : [],
+    annual_returns: Array.isArray(payload.annual_returns) ? (payload.annual_returns as StrategyLabResult["annual_returns"]) : [],
+    warnings: Array.isArray(payload.warnings) ? (payload.warnings as string[]) : item.warnings,
+    source_provider: String(payload.source_provider ?? item.source_provider ?? "uploaded_csv"),
+    retrieved_at: String(payload.retrieved_at ?? item.retrieved_at ?? item.updated_at),
+    origin: String(payload.origin ?? item.origin ?? "saved_research_store"),
+    transformation_note:
+      typeof payload.transformation_note === "string" ? payload.transformation_note : item.transformation_note,
+    freshness_label: String(payload.freshness_label ?? "derived")
+  };
+}
+
+export function savedResearchCanReloadStrategy(item: SavedResearchItem) {
+  return hydrateStrategyLabResultFromSaved(item) !== null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function firstWeightSymbol(payload: Record<string, unknown>) {
+  const weights = payload.weights;
+  if (!Array.isArray(weights)) {
+    return "";
+  }
+  const first = weights.find(isPlainRecord);
+  return first ? String(first.symbol ?? "") : "";
+}
+
+function weightsToSyntheticText(weights: unknown) {
+  if (!Array.isArray(weights)) {
+    return "";
+  }
+  return weights
+    .filter(isPlainRecord)
+    .map((weight) => {
+      const symbol = String(weight.symbol ?? "").trim().toUpperCase();
+      const value = Number(weight.weight);
+      return symbol && Number.isFinite(value) && value > 0 ? `${symbol} ${value.toFixed(4)}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function normalizeSyntheticText(text: string): string {
