@@ -14,6 +14,7 @@ from src.application.copilot_context_helpers import (
     summarize_risk_result,
 )
 from src.application.crypto_service import CryptoService
+from src.application.fundamentals_service import FundamentalsService
 from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.prediction_market_service import PredictionMarketService
 from src.models.copilot import (
@@ -56,11 +57,13 @@ class CopilotService:
         macro_service: MacroService,
         prediction_market_service: PredictionMarketService,
         crypto_service: CryptoService,
+        fundamentals_service: FundamentalsService,
         provider: CopilotProvider,
     ) -> None:
         self.macro_service = macro_service
         self.prediction_market_service = prediction_market_service
         self.crypto_service = crypto_service
+        self.fundamentals_service = fundamentals_service
         self.provider = provider
         self._context_builders = {
             "portfolio": self._build_portfolio_context,
@@ -68,6 +71,7 @@ class CopilotService:
             "macro": self._build_macro_context,
             "prediction_markets": self._build_prediction_market_context,
             "crypto": self._build_crypto_context,
+            "fundamentals": self._build_fundamentals_context,
             "risk": self._build_risk_context,
             "iv": self._build_iv_context,
             "synthesis": self._build_synthesis_context,
@@ -215,6 +219,66 @@ class CopilotService:
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_crypto_comparison_context,
+                ),
+                _CopilotToolDefinition(
+                    name="get_fundamentals_company_context",
+                    description="Return read-only company, filing, headline metric, and warning context for the selected Fundamentals ticker.",
+                    domains=("fundamentals",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_fundamentals_company_context,
+                ),
+                _CopilotToolDefinition(
+                    name="get_fundamentals_statement_context",
+                    description="Return read-only normalized statement and raw-versus-normalized source trace context for the selected Fundamentals ticker.",
+                    domains=("fundamentals",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_fundamentals_statement_context,
+                ),
+                _CopilotToolDefinition(
+                    name="get_fundamentals_peer_context",
+                    description="Return read-only peer basket, peer heatmap, comparison, and missing-data diagnostics for the selected Fundamentals ticker.",
+                    domains=("fundamentals",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_fundamentals_peer_context,
+                ),
+                _CopilotToolDefinition(
+                    name="get_fundamentals_dcf_context",
+                    description="Return read-only DCF scenario, sensitivity, and snapshot context for the selected Fundamentals ticker.",
+                    domains=("fundamentals",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_fundamentals_dcf_context,
+                ),
+                _CopilotToolDefinition(
+                    name="get_fundamentals_reverse_valuation_context",
+                    description="Return read-only reverse-valuation and implied-expectation context for the selected Fundamentals ticker.",
+                    domains=("fundamentals",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_fundamentals_reverse_valuation_context,
                 ),
                 _CopilotToolDefinition(
                     name="get_risk_coverage_summary",
@@ -1044,6 +1108,140 @@ class CopilotService:
             warnings=dedupe_warnings(liquidity.warnings if liquidity is not None else []),
         )
 
+    def _build_fundamentals_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        ticker = self._fundamentals_ticker_from_request(request)
+        overview = self.fundamentals_service.get_overview(ticker)
+        if overview is None:
+            raise ValueError(f"Fundamentals company not found: {ticker}")
+        peers = self.fundamentals_service.get_peers(ticker)
+        dcf = self.fundamentals_service.get_dcf_model(ticker)
+        reverse = self.fundamentals_service.get_reverse_valuation(ticker)
+        reference = self.fundamentals_service.get_reference(ticker)
+        headline_metrics = [
+            {
+                "metric_id": metric.metric_id,
+                "label": metric.label,
+                "display_value": metric.display_value,
+                "value": metric.value,
+                "source_provider": metric.source_provider,
+                "origin": metric.origin,
+                "transformation_note": metric.transformation_note,
+            }
+            for metric in overview.headline_metrics[:10]
+        ]
+        dcf_summaries = [
+            self._fundamentals_dcf_summary(scenario.summary)
+            for scenario in (dcf.scenarios if dcf else [])
+            if scenario.summary is not None
+        ]
+        reverse_drivers = [
+            {
+                "driver_id": driver.driver_id,
+                "label": driver.label,
+                "implied_value": driver.implied_value,
+                "display_value": driver.display_value,
+                "base_display_value": driver.base_display_value,
+                "gap_display_value": driver.gap_display_value,
+                "success": driver.success,
+                "warnings": list(driver.warnings),
+            }
+            for driver in (reverse.drivers[:5] if reverse else [])
+        ]
+        summary_data = {
+            "workspace_mode": request.context.workspace_mode or "research",
+            "ticker": overview.company.ticker,
+            "company": {
+                "name": overview.company.name,
+                "exchange": overview.company.exchange,
+                "sic_description": overview.company.sic_description,
+                "latest_report_period": overview.company.latest_report_period.isoformat() if overview.company.latest_report_period else None,
+                "latest_filing_date": overview.company.latest_filing_date.isoformat() if overview.company.latest_filing_date else None,
+            },
+            "headline_metrics": headline_metrics,
+            "peer_basket": {
+                "label": peers.peer_basket.basket_label if peers else overview.peer_basket.basket_label if overview.peer_basket else None,
+                "tickers": list(peers.peer_basket.display_order if peers else overview.peer_basket.display_order if overview.peer_basket else []),
+                "user_edited": peers.peer_basket.user_edited if peers else overview.peer_basket.user_edited if overview.peer_basket else False,
+            },
+            "dcf": {
+                "active_scenario_id": dcf.active_scenario_id if dcf else None,
+                "summaries": dcf_summaries,
+                "warnings": list(dcf.warnings if dcf else []),
+            },
+            "reverse_valuation": {
+                "current_price": reverse.current_price if reverse else None,
+                "target_enterprise_value": reverse.target_enterprise_value if reverse else None,
+                "drivers": reverse_drivers,
+                "warnings": list(reverse.warnings if reverse else []),
+            },
+            "reference": {
+                "filings": len(reference.filings) if reference else len(overview.filings),
+                "trace_rows": len(reference.inspection.traces) if reference and reference.inspection else 0,
+                "coverage_warnings": len(reference.inspection.warnings) if reference and reference.inspection else 0,
+            },
+        }
+        sources = [
+            CopilotSourceRef(
+                source_id="fundamentals.company",
+                label="Fundamentals company context",
+                kind="workspace",
+                provider=overview.company.source_provider,
+                origin=overview.company.origin,
+                description="Selected company profile, filing metadata, headline metrics, and warnings.",
+                retrieved_at=overview.company.retrieved_at,
+            )
+        ]
+        if dcf is not None:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="fundamentals.dcf",
+                    label="Fundamentals DCF model",
+                    kind="analytics",
+                    provider=dcf.source_provider,
+                    origin=dcf.origin,
+                    description="Bear/Base/Bull DCF model and sensitivity context.",
+                    retrieved_at=dcf.retrieved_at,
+                )
+            )
+        if reverse is not None:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="fundamentals.reverse_valuation",
+                    label="Fundamentals reverse valuation",
+                    kind="analytics",
+                    provider=reverse.source_provider,
+                    origin=reverse.origin,
+                    description="Market-implied expectation outputs derived by Gamma.",
+                    retrieved_at=reverse.retrieved_at,
+                )
+            )
+        if reference is not None:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="fundamentals.reference",
+                    label="Fundamentals reference and filings",
+                    kind="filing",
+                    provider=reference.source_provider,
+                    origin=reference.origin,
+                    description="SEC filing chronology and raw-versus-normalized source trace.",
+                    retrieved_at=reference.retrieved_at,
+                )
+            )
+        return CopilotContextBundle(
+            domain="fundamentals",
+            current_tab=request.context.current_tab or "fundamentals",
+            summary_data=summary_data,
+            tool_state={"ticker": overview.company.ticker},
+            sources=sources,
+            warnings=dedupe_warnings(
+                overview.warnings,
+                peers.warnings if peers else [],
+                dcf.warnings if dcf else [],
+                reverse.warnings if reverse else [],
+                reference.warnings if reference else [],
+            ),
+        )
+
     def _tool_get_portfolio_positions_summary(
         self,
         arguments: dict[str, Any],
@@ -1579,6 +1777,304 @@ class CopilotService:
             sources=[source],
         )
 
+    def _tool_get_fundamentals_company_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        ticker = self._fundamentals_ticker_from_bundle(context)
+        overview = self.fundamentals_service.get_overview(ticker)
+        if overview is None:
+            raise ValueError(f"Fundamentals company not found: {ticker}")
+        source = CopilotSourceRef(
+            source_id="fundamentals.company.drilldown",
+            label="Fundamentals company drilldown",
+            kind="workspace",
+            provider=overview.company.source_provider,
+            origin=overview.company.origin,
+            description="Expanded company, headline metric, filing, and warning context.",
+            retrieved_at=overview.company.retrieved_at,
+        )
+        output = {
+            "company": {
+                "ticker": overview.company.ticker,
+                "name": overview.company.name,
+                "exchange": overview.company.exchange,
+                "sic": overview.company.sic,
+                "sic_description": overview.company.sic_description,
+                "filer_category": overview.company.filer_category,
+                "latest_report_period": overview.company.latest_report_period.isoformat() if overview.company.latest_report_period else None,
+                "latest_filing_date": overview.company.latest_filing_date.isoformat() if overview.company.latest_filing_date else None,
+                "description": overview.company.description,
+            },
+            "headline_metrics": [
+                {
+                    "metric_id": metric.metric_id,
+                    "label": metric.label,
+                    "value": metric.value,
+                    "display_value": metric.display_value,
+                    "source_provider": metric.source_provider,
+                    "origin": metric.origin,
+                    "transformation_note": metric.transformation_note,
+                }
+                for metric in overview.headline_metrics
+            ],
+            "filings": [
+                {
+                    "form": filing.form,
+                    "filing_date": filing.filing_date.isoformat(),
+                    "report_period": filing.report_period.isoformat() if filing.report_period else None,
+                    "accession_number": filing.accession_number,
+                    "is_amendment": filing.is_amendment,
+                }
+                for filing in overview.filings[:8]
+            ],
+            "warnings": list(overview.warnings),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_fundamentals_company_context",
+                summary=f"Expanded Fundamentals company context for {ticker}.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_fundamentals_statement_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        ticker = self._fundamentals_ticker_from_bundle(context)
+        financials = self.fundamentals_service.get_financials(ticker)
+        reference = self.fundamentals_service.get_reference(ticker)
+        if financials is None or reference is None:
+            raise ValueError(f"Fundamentals statements not found: {ticker}")
+        source = CopilotSourceRef(
+            source_id="fundamentals.statements.drilldown",
+            label="Fundamentals statement drilldown",
+            kind="filing",
+            provider=financials.annual_income_statement.source_provider,
+            origin=financials.annual_income_statement.origin,
+            description="Expanded normalized statement rows and source trace coverage.",
+            retrieved_at=financials.annual_income_statement.retrieved_at,
+        )
+        output = {
+            "annual_income": self._statement_summary(financials.annual_income_statement),
+            "annual_balance": self._statement_summary(financials.annual_balance_sheet),
+            "annual_cash_flow": self._statement_summary(financials.annual_cash_flow_statement),
+            "annual_ratios": self._statement_summary(financials.annual_ratio_view),
+            "trace_sample": [
+                {
+                    "statement": row.statement,
+                    "basis": row.basis,
+                    "line_key": row.line_key,
+                    "period_label": row.period_label,
+                    "display_value": row.display_value,
+                    "concept_name": row.concept_name,
+                    "accession_number": row.accession_number,
+                    "filing_form": row.filing_form,
+                    "is_amendment": row.is_amendment,
+                    "source_provider": row.source_provider,
+                    "transformation_note": row.transformation_note,
+                }
+                for row in (reference.inspection.traces[:24] if reference.inspection else [])
+            ],
+            "coverage_warnings": list(reference.inspection.warnings[:10] if reference.inspection else []),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_fundamentals_statement_context",
+                summary=f"Expanded normalized statements and raw-versus-normalized trace for {ticker}.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_fundamentals_peer_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        ticker = self._fundamentals_ticker_from_bundle(context)
+        peers = self.fundamentals_service.get_peers(ticker)
+        if peers is None:
+            raise ValueError(f"Fundamentals peers not found: {ticker}")
+        source = CopilotSourceRef(
+            source_id="fundamentals.peers.drilldown",
+            label="Fundamentals peer drilldown",
+            kind="analytics",
+            provider=peers.source_provider,
+            origin=peers.origin,
+            description="Expanded peer basket, heatmap, comparisons, and missing-data diagnostics.",
+            retrieved_at=peers.retrieved_at,
+        )
+        output = {
+            "peer_basket": {
+                "label": peers.peer_basket.basket_label,
+                "display_order": list(peers.peer_basket.display_order),
+                "user_edited": peers.peer_basket.user_edited,
+            },
+            "metric_families": sorted({row.family for row in peers.peer_heatmap.rows}) if peers.peer_heatmap else [],
+            "comparisons": [
+                {
+                    "ticker": row.ticker,
+                    "name": row.name,
+                    "selected": row.selected,
+                    "metrics": [
+                        {
+                            "metric_id": metric.metric_id,
+                            "label": metric.label,
+                            "display_value": metric.display_value,
+                        }
+                        for metric in row.metrics[:10]
+                    ],
+                    "warnings": list(row.warnings),
+                }
+                for row in peers.comparisons
+            ],
+            "diagnostics": [
+                {
+                    "ticker": row.ticker,
+                    "missing_metric_ids": list(row.missing_metric_ids),
+                    "warning": row.warning,
+                }
+                for row in peers.diagnostics
+            ],
+            "warnings": list(peers.warnings),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_fundamentals_peer_context",
+                summary=f"Expanded peer comparison context for {ticker}.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_fundamentals_dcf_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        ticker = self._fundamentals_ticker_from_bundle(context)
+        dcf = self.fundamentals_service.get_dcf_model(ticker)
+        snapshots = self.fundamentals_service.list_dcf_snapshots(ticker) or []
+        if dcf is None:
+            raise ValueError(f"Fundamentals DCF model not found: {ticker}")
+        source = CopilotSourceRef(
+            source_id="fundamentals.dcf.drilldown",
+            label="Fundamentals DCF drilldown",
+            kind="analytics",
+            provider=dcf.source_provider,
+            origin=dcf.origin,
+            description="Expanded Bear/Base/Bull DCF scenario context and saved snapshots.",
+            retrieved_at=dcf.retrieved_at,
+        )
+        output = {
+            "active_scenario_id": dcf.active_scenario_id,
+            "projection_years": list(dcf.projection_years),
+            "scenario_summaries": [
+                self._fundamentals_dcf_summary(scenario.summary)
+                for scenario in dcf.scenarios
+                if scenario.summary is not None
+            ],
+            "active_assumptions": next(
+                (
+                    scenario.assumptions
+                    for scenario in dcf.scenarios
+                    if scenario.scenario_id == dcf.active_scenario_id
+                ),
+                {},
+            ),
+            "snapshots": [
+                {
+                    "snapshot_id": snapshot.snapshot_id,
+                    "name": snapshot.name,
+                    "created_at": snapshot.created_at.isoformat(),
+                    "active_scenario_id": snapshot.active_scenario_id,
+                }
+                for snapshot in snapshots[:8]
+            ],
+            "warnings": list(dcf.warnings),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_fundamentals_dcf_context",
+                summary=f"Expanded DCF scenario and snapshot context for {ticker}.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_fundamentals_reverse_valuation_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        ticker = self._fundamentals_ticker_from_bundle(context)
+        reverse = self.fundamentals_service.get_reverse_valuation(ticker)
+        if reverse is None:
+            raise ValueError(f"Fundamentals reverse valuation not found: {ticker}")
+        source = CopilotSourceRef(
+            source_id="fundamentals.reverse_valuation.drilldown",
+            label="Fundamentals reverse valuation drilldown",
+            kind="analytics",
+            provider=reverse.source_provider,
+            origin=reverse.origin,
+            description="Expanded market-implied expectation and reverse-valuation context.",
+            retrieved_at=reverse.retrieved_at,
+        )
+        output = {
+            "current_price": reverse.current_price,
+            "target_equity_value": reverse.target_equity_value,
+            "target_enterprise_value": reverse.target_enterprise_value,
+            "scenario_gap_metrics": [
+                {
+                    "metric_id": metric.metric_id,
+                    "label": metric.label,
+                    "display_value": metric.display_value,
+                }
+                for metric in reverse.scenario_gap_metrics
+            ],
+            "drivers": [
+                {
+                    "driver_id": driver.driver_id,
+                    "label": driver.label,
+                    "display_value": driver.display_value,
+                    "base_display_value": driver.base_display_value,
+                    "gap_display_value": driver.gap_display_value,
+                    "success": driver.success,
+                    "warnings": list(driver.warnings),
+                }
+                for driver in reverse.drivers
+            ],
+            "warnings": list(reverse.warnings),
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_fundamentals_reverse_valuation_context",
+                summary=f"Expanded reverse-valuation context for {ticker}.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
     def _tool_get_risk_coverage_summary(
         self,
         arguments: dict[str, Any],
@@ -1828,6 +2324,13 @@ class CopilotService:
                 "get_crypto_liquidity_context",
                 "get_crypto_comparison_context",
             ),
+            "fundamentals": (
+                "get_fundamentals_company_context",
+                "get_fundamentals_statement_context",
+                "get_fundamentals_peer_context",
+                "get_fundamentals_dcf_context",
+                "get_fundamentals_reverse_valuation_context",
+            ),
             "risk": (
                 "get_risk_coverage_summary",
                 "get_risk_contribution_summary",
@@ -1902,6 +2405,66 @@ class CopilotService:
         if not token_id:
             raise ValueError("Crypto context is missing the selected token id.")
         return token_id
+
+    @staticmethod
+    def _fundamentals_ticker_from_request(request: CopilotResearchCardRequest) -> str:
+        ticker = str(request.context.fundamentals_ticker or "").strip().upper()
+        if not ticker and isinstance(request.context.fundamentals_state, dict):
+            ticker = str(
+                request.context.fundamentals_state.get("ticker")
+                or request.context.fundamentals_state.get("selected_ticker")
+                or ""
+            ).strip().upper()
+        if not ticker:
+            raise ValueError("Fundamentals copilot requires a selected ticker.")
+        return ticker
+
+    @staticmethod
+    def _fundamentals_ticker_from_bundle(context: CopilotContextBundle) -> str:
+        ticker = str(context.tool_state.get("ticker") or context.summary_data.get("ticker") or "").strip().upper()
+        if not ticker:
+            raise ValueError("Fundamentals context is missing the selected ticker.")
+        return ticker
+
+    @staticmethod
+    def _fundamentals_dcf_summary(summary: Any) -> dict[str, Any]:
+        if summary is None:
+            return {}
+        return {
+            "scenario_id": summary.scenario_id,
+            "label": summary.label,
+            "enterprise_value": summary.enterprise_value,
+            "equity_value": summary.equity_value,
+            "implied_value_per_share": summary.implied_value_per_share,
+            "upside_downside_pct": summary.upside_downside_pct,
+            "current_price": summary.current_price,
+            "source_provider": summary.source_provider,
+            "origin": summary.origin,
+            "retrieved_at": summary.retrieved_at.isoformat() if summary.retrieved_at else None,
+            "transformation_note": summary.transformation_note,
+        }
+
+    @staticmethod
+    def _statement_summary(statement: Any) -> dict[str, Any]:
+        return {
+            "statement": statement.statement,
+            "basis": statement.basis,
+            "periods": [period.label for period in statement.periods],
+            "rows": [
+                {
+                    "line_key": line.line_key,
+                    "label": line.label,
+                    "latest": line.cells[-1].display_value if line.cells else None,
+                    "source_provider": line.source_provider,
+                    "origin": line.origin,
+                    "transformation_note": line.transformation_note,
+                }
+                for line in statement.lines
+            ],
+            "source_provider": statement.source_provider,
+            "origin": statement.origin,
+            "transformation_note": statement.transformation_note,
+        }
 
     @staticmethod
     def _macro_card_summary(card: Any) -> dict[str, Any]:

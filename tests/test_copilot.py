@@ -20,6 +20,36 @@ from src.models.crypto import (
     CryptoPricePoint,
     CryptoTokenRecord,
 )
+from src.models.fundamentals import (
+    FundamentalsCompanyRecord,
+    FundamentalsCoverageRecord,
+    FundamentalsDcfModelRecord,
+    FundamentalsDcfScenarioRecord,
+    FundamentalsDcfSnapshotRecord,
+    FundamentalsDcfValuationSummary,
+    FundamentalsFilingRecord,
+    FundamentalsFinancialsResult,
+    FundamentalsMetricRecord,
+    FundamentalsOverviewResult,
+    FundamentalsPeerBasketRecord,
+    FundamentalsPeerComparisonRecord,
+    FundamentalsPeerDiagnosticsRecord,
+    FundamentalsPeerHeatmapCell,
+    FundamentalsPeerHeatmapMetricRow,
+    FundamentalsPeerHeatmapView,
+    FundamentalsPeersResult,
+    FundamentalsPeriodRecord,
+    FundamentalsRawNormalizedInspectionResult,
+    FundamentalsReferenceResult,
+    FundamentalsReverseValuationDriverRecord,
+    FundamentalsReverseValuationResult,
+    FundamentalsReverseValuationSensitivityCell,
+    FundamentalsReverseValuationSensitivityMatrix,
+    FundamentalsSourceTraceRecord,
+    FundamentalsStatementCell,
+    FundamentalsStatementLine,
+    FundamentalsStatementView,
+)
 from src.models.macro import (
     MacroDivergenceRecord,
     MacroEventRecord,
@@ -221,6 +251,60 @@ class _StubCopilotProvider:
                 ),
                 sources=[*context.sources, *history_execution.sources, *liquidity_execution.sources, *comparison_execution.sources],
                 tool_traces=[history_execution.trace, liquidity_execution.trace, comparison_execution.trace],
+                warnings=list(context.warnings),
+            )
+
+        if request.domain == "fundamentals":
+            company_execution = execute_tool("get_fundamentals_company_context", {}, context)
+            statement_execution = execute_tool("get_fundamentals_statement_context", {}, context)
+            peer_execution = execute_tool("get_fundamentals_peer_context", {}, context)
+            dcf_execution = execute_tool("get_fundamentals_dcf_context", {}, context)
+            reverse_execution = execute_tool("get_fundamentals_reverse_valuation_context", {}, context)
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="ready",
+                provider=self.provider_name,
+                model="stub-model",
+                response_id="resp_stub_fundamentals",
+                card=ResearchCard(
+                    title="Fundamentals test card",
+                    hypothesis="The selected company should be framed through filings, normalized statements, peers, DCF, and implied expectations together.",
+                    rationale="The Gamma fundamentals context exposes company facts, traceable statements, peer diagnostics, DCF summaries, and reverse valuation.",
+                    required_data=["Company filings", "Peer comparison", "Reverse valuation"],
+                    proposed_test="Compare market-implied growth and margin requirements against the base DCF and peer basket.",
+                    confounders=["Sparse taxonomy coverage", "Market-data freshness"],
+                    next_steps=["Inspect source trace", "Review implied expectations"],
+                    caveats=["This is a test fixture."],
+                    source_backed_claims=[
+                        ResearchClaim(
+                            claim="Fundamentals company, statement, peer, DCF, and reverse-valuation tools were available to the copilot.",
+                            evidence_refs=[
+                                company_execution.sources[0].source_id,
+                                statement_execution.sources[0].source_id,
+                                peer_execution.sources[0].source_id,
+                                dcf_execution.sources[0].source_id,
+                                reverse_execution.sources[0].source_id,
+                            ],
+                        )
+                    ],
+                    inferred_claims=["Company thesis quality still requires interpretation."],
+                ),
+                sources=[
+                    *context.sources,
+                    *company_execution.sources,
+                    *statement_execution.sources,
+                    *peer_execution.sources,
+                    *dcf_execution.sources,
+                    *reverse_execution.sources,
+                ],
+                tool_traces=[
+                    company_execution.trace,
+                    statement_execution.trace,
+                    peer_execution.trace,
+                    dcf_execution.trace,
+                    reverse_execution.trace,
+                ],
                 warnings=list(context.warnings),
             )
 
@@ -499,6 +583,440 @@ class _StubMacroService:
             retrieved_at=self.retrieved_at,
             origin="tests.copilot.macro_fixture",
             transformation_note=f"Fixture {timeframe} macro history keeps Copilot route tests hermetic.",
+        )
+
+
+class _StubFundamentalsService:
+    retrieved_at = datetime(2026, 4, 5, 10, 0, 0)
+
+    def __init__(self) -> None:
+        self.company = FundamentalsCompanyRecord(
+            ticker="AAPL",
+            cik="0000320193",
+            name="Apple Inc.",
+            exchange="NASDAQ",
+            sic="3571",
+            sic_description="Electronic Computers",
+            latest_report_period=datetime(2025, 9, 27),
+            latest_filing_date=datetime(2025, 10, 31),
+            source_provider="sec",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.company",
+            transformation_note="Fixture company record for Fundamentals Copilot grounding.",
+        )
+        self.filing = FundamentalsFilingRecord(
+            form="10-K",
+            filing_date=datetime(2025, 10, 31),
+            report_period=datetime(2025, 9, 27),
+            accession_number="0000320193-25-000079",
+            is_amendment=False,
+            source_provider="sec",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.filing",
+            transformation_note="Fixture filing record for source-backed Copilot tests.",
+        )
+        self.period = FundamentalsPeriodRecord(
+            period_key="FY-2025",
+            label="FY 2025",
+            fiscal_year=2025,
+            fiscal_period="FY",
+            filing_date=self.filing.filing_date,
+            form=self.filing.form,
+            accession_number=self.filing.accession_number,
+            source_provider="sec",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.period",
+            transformation_note="Fixture fiscal period from SEC filing metadata.",
+        )
+        self.revenue_line = FundamentalsStatementLine(
+            line_key="revenue",
+            label="Revenue",
+            statement="income",
+            unit="usd",
+            cells=[
+                FundamentalsStatementCell(
+                    period_key="FY-2025",
+                    value=391_000_000_000.0,
+                    display_value="$391.0B",
+                    filing_date=self.filing.filing_date,
+                    form=self.filing.form,
+                    accession_number=self.filing.accession_number,
+                    concept_name="us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+                    source_provider="sec",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.statement_cell",
+                    transformation_note="Normalized SEC revenue concept into Gamma statement row.",
+                )
+            ],
+            source_provider="sec",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.statement_line",
+            transformation_note="Fixture normalized income statement line.",
+        )
+
+    def get_overview(self, ticker: str, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        return FundamentalsOverviewResult(
+            company=self.company,
+            headline_metrics=[
+                FundamentalsMetricRecord(
+                    metric_id="ev_to_sales",
+                    label="EV / Sales",
+                    value=7.2,
+                    display_value="7.2x",
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.metric",
+                    transformation_note="Fixture valuation metric combines price context and normalized SEC revenue.",
+                )
+            ],
+            filings=[self.filing],
+            peer_basket=self._peer_basket(),
+            dcf_summary=[self._dcf_summary()],
+            warnings=[],
+        )
+
+    def get_financials(self, ticker: str, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        income = FundamentalsStatementView(
+            statement="income",
+            basis="annual",
+            periods=[self.period],
+            lines=[self.revenue_line],
+            source_provider="sec",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.income",
+            transformation_note="Fixture annual income statement normalized from SEC facts.",
+        )
+        empty = FundamentalsStatementView(
+            statement="balance",
+            basis="annual",
+            periods=[self.period],
+            lines=[],
+            source_provider="sec",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.empty_statement",
+            transformation_note="Fixture statement shell for Copilot tests.",
+        )
+        ratios = FundamentalsStatementView(
+            statement="ratios",
+            basis="annual",
+            periods=[self.period],
+            lines=[],
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.ratios",
+            transformation_note="Fixture ratio statement derived by Gamma.",
+        )
+        return FundamentalsFinancialsResult(
+            company=self.company,
+            annual_income_statement=income,
+            annual_balance_sheet=empty,
+            annual_cash_flow_statement=empty,
+            quarterly_income_statement=income,
+            quarterly_balance_sheet=empty,
+            quarterly_cash_flow_statement=empty,
+            annual_ratio_view=ratios,
+            quarterly_ratio_view=ratios,
+            filings=[self.filing],
+            warnings=[],
+        )
+
+    def get_peers(self, ticker: str, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        heatmap = FundamentalsPeerHeatmapView(
+            tickers=["AAPL", "MSFT"],
+            rows=[
+                FundamentalsPeerHeatmapMetricRow(
+                    metric_id="ev_to_sales",
+                    label="EV / Sales",
+                    family="valuation",
+                    cells=[
+                        FundamentalsPeerHeatmapCell(
+                            ticker="AAPL",
+                            value=7.2,
+                            display_value="7.2x",
+                            source_provider="gamma",
+                            retrieved_at=self.retrieved_at,
+                            origin="tests.copilot.fundamentals.peer_cell",
+                            transformation_note="Fixture peer metric from normalized fundamentals and price context.",
+                        )
+                    ],
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.peer_row",
+                    transformation_note="Fixture peer heatmap row.",
+                )
+            ],
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.peer_heatmap",
+            transformation_note="Fixture peer heatmap assembled by Gamma.",
+        )
+        return FundamentalsPeersResult(
+            company=self.company,
+            peer_basket=self._peer_basket(),
+            peer_heatmap=heatmap,
+            comparisons=[
+                FundamentalsPeerComparisonRecord(
+                    ticker="AAPL",
+                    name="Apple Inc.",
+                    selected=True,
+                    candidate_reason="focal",
+                    metrics=[
+                        FundamentalsMetricRecord(
+                            metric_id="implied_revenue_cagr",
+                            label="Implied revenue CAGR",
+                            value=0.07,
+                            display_value="7.0%",
+                            source_provider="gamma",
+                            retrieved_at=self.retrieved_at,
+                            origin="tests.copilot.fundamentals.peer_implied",
+                            transformation_note="Fixture implied expectation comparison from reverse valuation.",
+                        )
+                    ],
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.peer_comparison",
+                    transformation_note="Fixture peer comparison record.",
+                )
+            ],
+            diagnostics=[
+                FundamentalsPeerDiagnosticsRecord(
+                    ticker="MSFT",
+                    missing_metric_ids=["net_debt_to_ebit"],
+                    warning="Some leverage metrics are missing in the fixture.",
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.peer_diagnostics",
+                    transformation_note="Fixture peer missing-data diagnostic.",
+                )
+            ],
+            warnings=[],
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.peers",
+            transformation_note="Fixture peer payload for Fundamentals Copilot tests.",
+        )
+
+    def get_dcf_model(self, ticker: str, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        return FundamentalsDcfModelRecord(
+            ticker="AAPL",
+            company_name="Apple Inc.",
+            active_scenario_id="base",
+            projection_years=[2026, 2027, 2028],
+            scenarios=[
+                FundamentalsDcfScenarioRecord(
+                    scenario_id="base",
+                    label="Base",
+                    assumptions={"revenue_growth": [0.05, 0.05, 0.04]},
+                    summary=self._dcf_summary(),
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.dcf_scenario",
+                    transformation_note="Fixture Base DCF scenario.",
+                )
+            ],
+            warnings=[],
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.dcf",
+            transformation_note="Fixture DCF model derived from normalized SEC statements.",
+        )
+
+    def list_dcf_snapshots(self, ticker: str, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return []
+        return [
+            FundamentalsDcfSnapshotRecord(
+                snapshot_id="fixture-base",
+                ticker="AAPL",
+                name="Base checkpoint",
+                created_at=self.retrieved_at,
+                active_scenario_id="base",
+                projection_years=[2026, 2027, 2028],
+                scenario_summaries=[self._dcf_summary()],
+                source_provider="gamma",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.fundamentals.dcf_snapshot",
+                transformation_note="Fixture saved DCF snapshot for Copilot grounding.",
+            )
+        ]
+
+    def get_reverse_valuation(self, ticker: str, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        return FundamentalsReverseValuationResult(
+            company=self.company,
+            current_price=190.0,
+            shares_outstanding=15_500_000_000.0,
+            net_debt=37_000_000_000.0,
+            target_equity_value=2_945_000_000_000.0,
+            target_enterprise_value=2_982_000_000_000.0,
+            base_case_summary=self._dcf_summary(),
+            scenario_gap_metrics=[
+                FundamentalsMetricRecord(
+                    metric_id="base_gap",
+                    label="Base gap",
+                    value=0.04,
+                    display_value="+4.0%",
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.reverse_gap",
+                    transformation_note="Fixture gap between market EV and Base DCF enterprise value.",
+                )
+            ],
+            drivers=[
+                FundamentalsReverseValuationDriverRecord(
+                    driver_id="implied_revenue_cagr",
+                    label="Implied revenue CAGR",
+                    implied_value=0.07,
+                    display_value="7.0%",
+                    base_value=0.05,
+                    base_display_value="5.0%",
+                    gap_to_base=0.02,
+                    gap_display_value="+2.0 pts",
+                    target_enterprise_value=2_982_000_000_000.0,
+                    solved_enterprise_value=2_982_000_000_000.0,
+                    success=True,
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.reverse_driver",
+                    transformation_note="Fixture reverse valuation driver solved by Gamma.",
+                )
+            ],
+            sensitivity_matrix=FundamentalsReverseValuationSensitivityMatrix(
+                wacc_values=[0.08],
+                terminal_growth_values=[0.025],
+                rows=[
+                    [
+                        FundamentalsReverseValuationSensitivityCell(
+                            wacc_pct=0.08,
+                            terminal_growth_pct=0.025,
+                            implied_revenue_growth_pct=0.07,
+                            implied_ebit_margin_pct=0.32,
+                            implied_fcf_cagr_pct=0.06,
+                            source_provider="gamma",
+                            retrieved_at=self.retrieved_at,
+                            origin="tests.copilot.fundamentals.reverse_sensitivity",
+                            transformation_note="Fixture reverse-valuation sensitivity cell.",
+                        )
+                    ]
+                ],
+                source_provider="gamma",
+                retrieved_at=self.retrieved_at,
+                origin="tests.copilot.fundamentals.reverse_matrix",
+                transformation_note="Fixture WACC and terminal-growth reverse-valuation sensitivity.",
+            ),
+            warnings=[],
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.reverse",
+            transformation_note="Fixture reverse valuation result for Copilot grounding.",
+        )
+
+    def get_reference(self, ticker: str, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        inspection = FundamentalsRawNormalizedInspectionResult(
+            company=self.company,
+            traces=[
+                FundamentalsSourceTraceRecord(
+                    statement="income",
+                    basis="annual",
+                    line_key="revenue",
+                    line_label="Revenue",
+                    period_key="FY-2025",
+                    period_label="FY 2025",
+                    normalized_value=391_000_000_000.0,
+                    display_value="$391.0B",
+                    unit="usd",
+                    concept_name="us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+                    accession_number=self.filing.accession_number,
+                    filing_form=self.filing.form,
+                    fiscal_year=2025,
+                    fiscal_period="FY",
+                    filing_date=self.filing.filing_date,
+                    report_period=self.filing.report_period,
+                    is_amendment=False,
+                    source_provider="sec",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.source_trace",
+                    transformation_note="Fixture raw-versus-normalized source trace.",
+                )
+            ],
+            coverage=[
+                FundamentalsCoverageRecord(
+                    statement="income",
+                    basis="annual",
+                    line_key="revenue",
+                    line_label="Revenue",
+                    concept_names=["us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"],
+                    observed_periods=1,
+                    missing_periods=0,
+                    derived_observations=0,
+                    coverage_ratio=1.0,
+                    source_provider="gamma",
+                    retrieved_at=self.retrieved_at,
+                    origin="tests.copilot.fundamentals.coverage",
+                    transformation_note="Fixture taxonomy coverage record.",
+                )
+            ],
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.inspection",
+            transformation_note="Fixture inspection payload comparing normalized rows against source concepts.",
+        )
+        return FundamentalsReferenceResult(
+            company=self.company,
+            filings=[self.filing],
+            inspection=inspection,
+            provider_warnings=[],
+            warnings=[],
+            source_provider="sec",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.reference",
+            transformation_note="Fixture reference payload for filings and source trace.",
+        )
+
+    def _peer_basket(self) -> FundamentalsPeerBasketRecord:
+        return FundamentalsPeerBasketRecord(
+            focal_ticker="AAPL",
+            basket_label="Technology hardware peers",
+            peer_tickers=["MSFT"],
+            display_order=["AAPL", "MSFT"],
+            user_edited=True,
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.peer_basket",
+            transformation_note="Fixture persistent peer basket.",
+        )
+
+    def _dcf_summary(self) -> FundamentalsDcfValuationSummary:
+        return FundamentalsDcfValuationSummary(
+            scenario_id="base",
+            label="Base",
+            enterprise_value=2_860_000_000_000.0,
+            equity_value=2_823_000_000_000.0,
+            implied_value_per_share=182.13,
+            upside_downside_pct=-0.04,
+            current_price=190.0,
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.dcf_summary",
+            transformation_note="Fixture DCF summary derived from normalized statements and price context.",
         )
 
 
@@ -838,6 +1356,46 @@ def test_crypto_copilot_requires_selection(tmp_path):
         runtime.shutdown()
 
 
+def test_fundamentals_copilot_route_uses_fundamentals_tool_context(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "fundamentals",
+                "prompt": "Frame the active company setup.",
+                "context": {
+                    "current_tab": "fundamentals",
+                    "workspace_mode": "research",
+                    "fundamentals_ticker": "AAPL",
+                    "fundamentals_state": {
+                        "ticker": "AAPL",
+                        "active_scenario_id": "base",
+                        "peer_tickers": ["MSFT"],
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["card"]["title"] == "Fundamentals test card"
+        assert {trace["tool_name"] for trace in payload["tool_traces"]} == {
+            "get_fundamentals_company_context",
+            "get_fundamentals_statement_context",
+            "get_fundamentals_peer_context",
+            "get_fundamentals_dcf_context",
+            "get_fundamentals_reverse_valuation_context",
+        }
+        assert any(source["source_id"] == "fundamentals.company" for source in payload["sources"])
+        assert any(source["source_id"] == "fundamentals.reference" for source in payload["sources"])
+        assert any(source["source_id"] == "fundamentals.reverse_valuation.drilldown" for source in payload["sources"])
+        assert payload["card"]["source_backed_claims"][0]["evidence_refs"]
+    finally:
+        runtime.shutdown()
+
+
 def test_portfolio_copilot_route_uses_portfolio_context_tools(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
@@ -1159,6 +1717,58 @@ def test_mock_provider_generates_offline_macro_card(tmp_path, monkeypatch):
             "local mock Copilot provider" in warning
             for warning in payload["warnings"]
         )
+    finally:
+        runtime.shutdown()
+
+
+def test_mock_provider_generates_offline_fundamentals_card(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "fundamentals",
+                "prompt": "Frame the active company setup.",
+                "context": {
+                    "current_tab": "fundamentals",
+                    "workspace_mode": "research",
+                    "fundamentals_ticker": "AAPL",
+                    "fundamentals_state": {
+                        "ticker": "AAPL",
+                        "active_scenario_id": "base",
+                        "peer_tickers": ["MSFT"],
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["provider"] == "mock"
+        assert payload["response_id"].startswith("mock_fundamentals_")
+        assert payload["card"]["title"].startswith("Fundamentals:")
+        assert "read-only fundamentals" in payload["card"]["rationale"]
+        tool_names = {trace["tool_name"] for trace in payload["tool_traces"]}
+        assert tool_names == {
+            "get_fundamentals_company_context",
+            "get_fundamentals_statement_context",
+            "get_fundamentals_peer_context",
+            "get_fundamentals_dcf_context",
+            "get_fundamentals_reverse_valuation_context",
+        }
+        assert any(source["source_id"] == "fundamentals.company" for source in payload["sources"])
+        assert any(source["source_id"] == "fundamentals.reverse_valuation.drilldown" for source in payload["sources"])
+        assert payload["card"]["source_backed_claims"][0]["evidence_refs"]
+        assert any("local mock Copilot provider" in warning for warning in payload["warnings"])
     finally:
         runtime.shutdown()
 

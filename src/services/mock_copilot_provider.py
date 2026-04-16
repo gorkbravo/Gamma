@@ -108,6 +108,14 @@ class MockCopilotProvider(CopilotProvider):
                 ("get_crypto_liquidity_context", {}),
                 ("get_crypto_comparison_context", {}),
             ]
+        if domain == "fundamentals":
+            return [
+                ("get_fundamentals_company_context", {}),
+                ("get_fundamentals_statement_context", {}),
+                ("get_fundamentals_peer_context", {}),
+                ("get_fundamentals_dcf_context", {}),
+                ("get_fundamentals_reverse_valuation_context", {}),
+            ]
         if domain == "risk":
             return [
                 ("get_risk_coverage_summary", {}),
@@ -146,6 +154,8 @@ class MockCopilotProvider(CopilotProvider):
             return self._build_prediction_card(request, context, tool_outputs, tool_traces)
         if domain == "crypto":
             return self._build_crypto_card(request, context, tool_outputs, tool_traces)
+        if domain == "fundamentals":
+            return self._build_fundamentals_card(request, context, tool_outputs, tool_traces)
         if domain == "risk":
             return self._build_risk_card(request, context, tool_outputs, tool_traces)
         if domain == "iv":
@@ -507,6 +517,109 @@ class MockCopilotProvider(CopilotProvider):
             ],
             inferred_claims=[
                 "Any narrative conclusion still depends on whether the comparison target matches the thesis you want to test.",
+            ],
+        )
+
+    def _build_fundamentals_card(
+        self,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        tool_outputs: dict[str, Any],
+        tool_traces: list[CopilotToolTrace],
+    ) -> ResearchCard:
+        summary = context.summary_data
+        company_context = self._as_dict(tool_outputs.get("get_fundamentals_company_context"))
+        statement_context = self._as_dict(tool_outputs.get("get_fundamentals_statement_context"))
+        peer_context = self._as_dict(tool_outputs.get("get_fundamentals_peer_context"))
+        dcf_context = self._as_dict(tool_outputs.get("get_fundamentals_dcf_context"))
+        reverse_context = self._as_dict(tool_outputs.get("get_fundamentals_reverse_valuation_context"))
+
+        company = self._as_dict(company_context.get("company")) or self._as_dict(summary.get("company"))
+        ticker = company.get("ticker") or summary.get("ticker") or "the selected company"
+        name = company.get("name") or ticker
+        peer_basket = self._as_dict(peer_context.get("peer_basket")) or self._as_dict(summary.get("peer_basket"))
+        peer_order = self._as_list(peer_basket.get("display_order")) or self._as_list(peer_basket.get("tickers"))
+        metric_families = self._as_list(peer_context.get("metric_families"))
+        dcf = self._as_dict(summary.get("dcf"))
+        active_scenario = dcf_context.get("active_scenario_id") or dcf.get("active_scenario_id") or "Base"
+        snapshots = self._as_list(dcf_context.get("snapshots"))
+        drivers = self._as_list(reverse_context.get("drivers")) or self._as_list(
+            self._as_dict(summary.get("reverse_valuation")).get("drivers")
+        )
+        first_driver = self._as_dict(drivers[0]) if drivers else {}
+        driver_label = first_driver.get("label") or "market-implied expectations"
+        driver_value = first_driver.get("display_value") or "unavailable"
+        gap_metrics = self._as_list(reverse_context.get("scenario_gap_metrics"))
+        gap_label = self._as_dict(gap_metrics[0]).get("display_value") if gap_metrics else None
+        trace_sample = self._as_list(statement_context.get("trace_sample"))
+        coverage_warnings = self._as_list(statement_context.get("coverage_warnings"))
+
+        if first_driver.get("success") is False:
+            hypothesis = f"{name} needs a fundamentals review because the current market price is outside at least one bounded reverse-valuation solve."
+        elif gap_label:
+            hypothesis = f"{name}'s market price should be tested against the {active_scenario} DCF and the implied {driver_label} of {driver_value}."
+        else:
+            hypothesis = f"{name} should be framed through normalized filings, peer context, DCF assumptions, and reverse valuation together."
+
+        peer_count = len(peer_order)
+        family_label = ", ".join(str(item) for item in metric_families[:4]) or "valuation and operating"
+        rationale = (
+            f"Gamma has a read-only fundamentals bundle for {ticker}: normalized SEC statements, "
+            f"{peer_count} peer basket entries, a {active_scenario} DCF case, and reverse-valuation outputs."
+        )
+        proposed_test = (
+            f"Compare the implied {driver_label} ({driver_value}) against the {active_scenario} DCF assumptions, "
+            f"then check whether peer {family_label} metrics support or challenge that setup."
+        )
+        if snapshots:
+            proposed_test += " Use the saved DCF snapshots as the audit trail for prior assumptions."
+
+        required_data = [
+            "Company filings and raw-versus-normalized source trace",
+            "Normalized annual statements with coverage warnings",
+            "Persistent peer basket and comparison diagnostics",
+            "Bear/Base/Bull DCF summaries and saved snapshots",
+            "Reverse valuation drivers and WACC/terminal-growth sensitivity",
+        ]
+        if not trace_sample:
+            required_data[0] = "Company filings and source trace, noting any unavailable trace rows"
+
+        confounders = [
+            "Sparse SEC taxonomy coverage can make normalized statement comparisons incomplete.",
+            "IBKR or mock market context affects price, share-count, and net-debt framing.",
+            "Peer baskets are research scaffolding; business-model comparability still needs judgment.",
+        ]
+        if coverage_warnings:
+            confounders.insert(0, "Coverage warnings are present in the raw-versus-normalized inspection payload.")
+
+        next_steps = [
+            "Open Reference / Filings to inspect filing chronology, amendment markers, and source trace rows.",
+            "Use Peers to review missing-data diagnostics before leaning on a relative valuation read.",
+            f"Use Reverse Valuation to compare implied expectations against the {active_scenario} DCF case.",
+        ]
+        caveats = [
+            "This card was generated by Gamma's deterministic mock Copilot.",
+            "It uses only Gamma's read-only fundamentals context and drilldowns.",
+            "It is research framing, not a recommendation or execution signal.",
+        ]
+        return ResearchCard(
+            title=self._title("Fundamentals", request.prompt),
+            hypothesis=hypothesis,
+            rationale=rationale,
+            required_data=required_data,
+            proposed_test=proposed_test,
+            confounders=confounders,
+            next_steps=next_steps,
+            caveats=caveats,
+            source_backed_claims=[
+                self._claim(
+                    "Gamma has company, statement, peer, DCF, and reverse-valuation drilldowns available for this Fundamentals card.",
+                    context,
+                    tool_traces,
+                )
+            ],
+            inferred_claims=[
+                "Any valuation conclusion still depends on whether the normalized filing history and peer set match the thesis under review.",
             ],
         )
 

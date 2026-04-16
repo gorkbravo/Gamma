@@ -5,10 +5,16 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from src.api.schemas.fundamentals import (
     FundamentalsDcfModelModel,
     FundamentalsDcfSaveRequestModel,
+    FundamentalsDcfSnapshotListResponseModel,
+    FundamentalsDcfSnapshotModel,
+    FundamentalsDcfSnapshotSaveRequestModel,
     FundamentalsFinancialsResponseModel,
     FundamentalsOverviewResponseModel,
     FundamentalsPeerBasketModel,
     FundamentalsPeerBasketUpdateRequestModel,
+    FundamentalsPeersResponseModel,
+    FundamentalsReferenceResponseModel,
+    FundamentalsReverseValuationResponseModel,
     FundamentalsSearchResponseModel,
     FundamentalsSearchResultModel,
 )
@@ -61,6 +67,45 @@ def fundamentals_financials(
     return FundamentalsFinancialsResponseModel.from_domain(result)
 
 
+@router.get("/fundamentals/{ticker}/peers", response_model=FundamentalsPeersResponseModel)
+def fundamentals_peers(
+    ticker: str,
+    request: Request,
+    force_refresh: bool = Query(default=False),
+) -> FundamentalsPeersResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.fundamentals_service.get_peers(ticker, force_refresh=force_refresh)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Fundamentals peers not found: {ticker}")
+    return FundamentalsPeersResponseModel.from_domain(result)
+
+
+@router.get("/fundamentals/{ticker}/reverse-valuation", response_model=FundamentalsReverseValuationResponseModel)
+def fundamentals_reverse_valuation(
+    ticker: str,
+    request: Request,
+    force_refresh: bool = Query(default=False),
+) -> FundamentalsReverseValuationResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.fundamentals_service.get_reverse_valuation(ticker, force_refresh=force_refresh)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Fundamentals reverse valuation not found: {ticker}")
+    return FundamentalsReverseValuationResponseModel.from_domain(result)
+
+
+@router.get("/fundamentals/{ticker}/reference", response_model=FundamentalsReferenceResponseModel)
+def fundamentals_reference(
+    ticker: str,
+    request: Request,
+    force_refresh: bool = Query(default=False),
+) -> FundamentalsReferenceResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.fundamentals_service.get_reference(ticker, force_refresh=force_refresh)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Fundamentals reference not found: {ticker}")
+    return FundamentalsReferenceResponseModel.from_domain(result)
+
+
 @router.get("/fundamentals/{ticker}/dcf", response_model=FundamentalsDcfModelModel)
 def fundamentals_dcf(
     ticker: str,
@@ -71,6 +116,52 @@ def fundamentals_dcf(
     model = runtime.fundamentals_service.get_dcf_model(ticker, force_refresh=force_refresh)
     if model is None:
         raise HTTPException(status_code=404, detail=f"Fundamentals DCF model not found: {ticker}")
+    return FundamentalsDcfModelModel.from_domain(model)
+
+
+@router.get("/fundamentals/{ticker}/dcf/snapshots", response_model=FundamentalsDcfSnapshotListResponseModel)
+def fundamentals_dcf_snapshots(
+    ticker: str,
+    request: Request,
+    force_refresh: bool = Query(default=False),
+) -> FundamentalsDcfSnapshotListResponseModel:
+    runtime = request.app.state.runtime
+    snapshots = runtime.fundamentals_service.list_dcf_snapshots(ticker, force_refresh=force_refresh)
+    if snapshots is None:
+        raise HTTPException(status_code=404, detail=f"Fundamentals DCF snapshots not found: {ticker}")
+    return FundamentalsDcfSnapshotListResponseModel(
+        snapshots=[FundamentalsDcfSnapshotModel.from_domain(item) for item in snapshots]
+    )
+
+
+@router.post("/fundamentals/{ticker}/dcf/snapshots", response_model=FundamentalsDcfSnapshotModel)
+def fundamentals_save_dcf_snapshot(
+    ticker: str,
+    payload: FundamentalsDcfSnapshotSaveRequestModel,
+    request: Request,
+) -> FundamentalsDcfSnapshotModel:
+    runtime = request.app.state.runtime
+    snapshot = runtime.fundamentals_service.save_dcf_snapshot(ticker, name=payload.name)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail=f"Fundamentals DCF snapshot could not be saved: {ticker}")
+    return FundamentalsDcfSnapshotModel.from_domain(snapshot)
+
+
+@router.get("/fundamentals/{ticker}/dcf/snapshots/{snapshot_id}", response_model=FundamentalsDcfModelModel)
+def fundamentals_load_dcf_snapshot(
+    ticker: str,
+    snapshot_id: str,
+    request: Request,
+    force_refresh: bool = Query(default=False),
+) -> FundamentalsDcfModelModel:
+    runtime = request.app.state.runtime
+    model = runtime.fundamentals_service.load_dcf_snapshot_model(
+        ticker,
+        snapshot_id,
+        force_refresh=force_refresh,
+    )
+    if model is None:
+        raise HTTPException(status_code=404, detail=f"Fundamentals DCF snapshot not found: {ticker}/{snapshot_id}")
     return FundamentalsDcfModelModel.from_domain(model)
 
 

@@ -6,8 +6,12 @@
   import type {
     FundamentalsDcfModel,
     FundamentalsDcfScenario,
+    FundamentalsDcfSnapshotList,
     FundamentalsFinancials,
     FundamentalsOverview,
+    FundamentalsPeers,
+    FundamentalsReference,
+    FundamentalsReverseValuation,
     FundamentalsSearchResponse
   } from "../lib/api/types";
   import type {
@@ -18,11 +22,15 @@
   import {
     buildDcfSavePayload,
     createDcfDraft,
+    driverTone,
     findDcfScenario,
+    fundamentalsModes,
     normalizePeerTickers,
     parseEditableNumber,
     setDraftActiveScenario,
+    snapshotDisplayName,
     statementViewForSelection,
+    sourceTracesForStatement,
     updateDraftAssumptionSeriesValue,
     updateDraftOverride,
     updateDraftScalarAssumption,
@@ -37,18 +45,20 @@
   export let overview: FundamentalsOverview | null = null;
   export let financials: FundamentalsFinancials | null = null;
   export let dcfModel: FundamentalsDcfModel | null = null;
+  export let peers: FundamentalsPeers | null = null;
+  export let reverseValuation: FundamentalsReverseValuation | null = null;
+  export let reference: FundamentalsReference | null = null;
+  export let dcfSnapshots: FundamentalsDcfSnapshotList | null = null;
   export let loading = false;
   export let saving = false;
   export let onSearch: (options?: FundamentalsSearchOptions) => Promise<unknown> | void;
   export let onSelectCompany: (ticker: string, options?: FundamentalsSelectOptions) => Promise<unknown> | void;
   export let onSavePeerBasket: (ticker: string, peerTickers: string[]) => Promise<unknown> | void;
   export let onSaveDcfModel: (ticker: string, payload: FundamentalsDcfSavePayload) => Promise<unknown> | void;
+  export let onSaveDcfSnapshot: (ticker: string, name?: string) => Promise<unknown> | void;
+  export let onLoadDcfSnapshot: (ticker: string, snapshotId: string) => Promise<unknown> | void;
 
-  const modeOptions: Array<{ id: FundamentalsMode; label: string }> = [
-    { id: "overview", label: "Overview" },
-    { id: "financials", label: "Financials" },
-    { id: "dcf", label: "DCF" }
-  ];
+  const modeOptions = fundamentalsModes;
   const statementOptions: Array<{ id: FundamentalsStatementKind; label: string }> = [
     { id: "income", label: "Income" },
     { id: "balance", label: "Balance Sheet" },
@@ -64,7 +74,10 @@
     profitability: "Profitability",
     growth: "Growth",
     returns: "Returns",
-    balance_sheet: "Balance Sheet"
+    balance_sheet: "Balance Sheet",
+    efficiency: "Efficiency",
+    leverage: "Leverage",
+    liquidity: "Liquidity"
   };
   const lowerBetterMetricIds = new Set(["ev_to_sales", "ev_to_ebit", "price_to_earnings", "net_debt_to_ebit"]);
   const positiveOnlyLowerBetterMetricIds = new Set(["ev_to_sales", "ev_to_ebit", "price_to_earnings"]);
@@ -78,6 +91,7 @@
   let peerDirty = false;
   let dcfDraft: FundamentalsDcfDraft = createDcfDraft(null);
   let dcfDirty = false;
+  let snapshotName = "";
   let peerFingerprint = "";
   let dcfFingerprint = "";
   let searchHydratedTicker = "";
@@ -186,6 +200,15 @@
     return "sens-heat-neg-strong";
   }
 
+  function reverseSensitivityHeatClass(value: number | null | undefined) {
+    if (value == null || !Number.isFinite(value)) return "";
+    if (value >= 0.18) return "sens-heat-neg-strong";
+    if (value >= 0.12) return "sens-heat-neg";
+    if (value >= 0.06) return "sens-heat-mid";
+    if (value >= 0) return "sens-heat-pos";
+    return "sens-heat-pos-strong";
+  }
+
   function editableValue(value: number | null | undefined, unit: string) {
     if (value == null) return "";
     if (unit === "percent") return (value * 100).toFixed(1);
@@ -291,6 +314,17 @@
     dcfDirty = false;
   }
 
+  async function saveSnapshot() {
+    if (!dcfModel) return;
+    await onSaveDcfSnapshot(dcfModel.ticker, snapshotName.trim() || undefined);
+    snapshotName = "";
+  }
+
+  async function loadSnapshot(snapshotId: string) {
+    if (!dcfModel) return;
+    await onLoadDcfSnapshot(dcfModel.ticker, snapshotId);
+  }
+
   onMount(() => {
     if (!search?.results?.length && !overview && !financials && !dcfModel) {
       void runSearch(false);
@@ -344,7 +378,10 @@
   $: overviewWarnings = overview?.warnings ?? [];
   $: financialWarnings = financials?.warnings ?? [];
   $: dcfWarnings = dcfModel?.warnings ?? [];
-  $: combinedWarnings = [...overviewWarnings, ...financialWarnings, ...dcfWarnings].reduce<string[]>((rows, warning) => {
+  $: peerWarnings = peers?.warnings ?? [];
+  $: reverseWarnings = reverseValuation?.warnings ?? [];
+  $: referenceWarnings = [...(reference?.warnings ?? []), ...(reference?.provider_warnings ?? []), ...(reference?.inspection?.warnings ?? [])];
+  $: combinedWarnings = [...overviewWarnings, ...financialWarnings, ...dcfWarnings, ...peerWarnings, ...reverseWarnings, ...referenceWarnings].reduce<string[]>((rows, warning) => {
     const text = warning.trim();
     if (!text || rows.includes(text)) {
       return rows;
@@ -353,6 +390,7 @@
   }, []);
   $: currentStatement = statementViewForSelection(financials, statementBasis, statementKind);
   $: currentRatioView = statementViewForSelection(financials, statementBasis, "ratios");
+  $: currentSourceTraces = sourceTracesForStatement(reference, statementBasis, statementKind).slice(0, 24);
   $: activeScenario = findDcfScenario(dcfModel, dcfDraft.activeScenarioId);
   $: activeScenarioSummary = activeScenario?.summary ?? null;
   $: sensitivityRange = (() => {
@@ -426,6 +464,20 @@
       return groups;
     }, {})
   );
+  $: peerHeatmap = peers?.peer_heatmap ?? overview?.peer_heatmap ?? null;
+  $: groupedPeerHeatmapRows = Object.entries(
+    (peerHeatmap?.rows ?? []).reduce<Record<string, NonNullable<FundamentalsOverview["peer_heatmap"]>["rows"]>>((groups, row) => {
+      const family = row.family ?? "other";
+      groups[family] = [...(groups[family] ?? []), row];
+      return groups;
+    }, {})
+  );
+  $: peerComparisons = peers?.comparisons ?? [];
+  $: reverseDrivers = reverseValuation?.drivers ?? [];
+  $: reverseGapMetrics = reverseValuation?.scenario_gap_metrics ?? [];
+  $: referenceFilings = reference?.filings ?? overview?.filings ?? financials?.filings ?? [];
+  $: referenceInspection = reference?.inspection ?? null;
+  $: dcfSnapshotRows = dcfSnapshots?.snapshots ?? [];
 </script>
 
 <section class="view">
@@ -748,6 +800,151 @@
         </article>
       </aside>
     </div>
+  {:else if mode === "peers"}
+    <div class="peers-shell">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Peer Basket</p>
+            <h3>{peers?.peer_basket.basket_label ?? overview?.peer_basket?.basket_label ?? "Selected Peers"}</h3>
+          </div>
+          <div class="panel-actions">
+            <small>{peers?.peer_basket.display_order.length ?? overview?.peer_basket?.display_order.length ?? 0} companies</small>
+            <button type="button" class="secondary" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
+              {saving ? "Saving..." : "Save Basket"}
+            </button>
+          </div>
+        </div>
+
+        <div class="peer-layout">
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead>
+                <tr><th>Use</th><th>Ticker</th><th>Reason</th><th>Market Cap</th><th>Revenue</th></tr>
+              </thead>
+              <tbody>
+                {#if (peers?.peer_candidates ?? overview?.peer_candidates ?? []).length}
+                  {#each peers?.peer_candidates ?? overview?.peer_candidates ?? [] as candidate}
+                    <tr>
+                      <td>
+                        <input type="checkbox" checked={peerDraftTickers.includes(candidate.ticker)} on:change={(event) => togglePeer(candidate.ticker, (event.currentTarget as HTMLInputElement).checked)} />
+                      </td>
+                      <td><strong>{candidate.ticker}</strong><small>{candidate.name}</small></td>
+                      <td>{candidate.reason ?? "N/A"}</td>
+                      <td>{compactCurrency(candidate.market_cap)}</td>
+                      <td>{compactCurrency(candidate.revenue)}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="5">Peer candidates appear once Gamma loads the focal company classification and peer universe.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="focus-list peer-diagnostics">
+            <div class="focus-row compact-focus">
+              <span class="focus-label">Stable Order</span>
+              <strong>{(peers?.peer_basket.display_order ?? overview?.peer_basket?.display_order ?? []).join(" | ") || "N/A"}</strong>
+              <p>{peers?.peer_basket.transformation_note ?? overview?.peer_basket?.transformation_note ?? "Saved peer baskets reuse Gamma's persistent peer concept."}</p>
+            </div>
+            {#each peers?.diagnostics ?? [] as diagnostic}
+              <div class="focus-row compact-focus">
+                <span class="focus-label">{diagnostic.ticker}</span>
+                <strong>{diagnostic.missing_metric_ids.length} missing metrics</strong>
+                <p>{diagnostic.warning ?? diagnostic.missing_metric_ids.join(", ")}</p>
+              </div>
+            {/each}
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Comparison</p>
+            <h3>Valuation, Profitability, Growth, Efficiency, Leverage</h3>
+          </div>
+          <small>{peerComparisons.length} rows</small>
+        </div>
+
+        <div class="table-wrap peer-comparison-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Reason</th>
+                {#each peerComparisons[0]?.metrics ?? [] as metric}
+                  <th>{metric.label}</th>
+                {/each}
+                <th>Warnings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#if peerComparisons.length}
+                {#each peerComparisons as row}
+                  <tr>
+                    <td class:selected-cell={row.ticker === currentCompany?.ticker}><strong>{row.ticker}</strong><small>{row.name}</small></td>
+                    <td>{row.candidate_reason ?? (row.selected ? "selected" : "candidate")}</td>
+                    {#each row.metrics as metric}
+                      <td class={metricTone(metric.metric_id, metric.value)}>{metric.display_value ?? "N/A"}</td>
+                    {/each}
+                    <td>{row.warnings.join(" | ") || "None"}</td>
+                  </tr>
+                {/each}
+              {:else}
+                <tr><td colspan="4">Peer comparisons appear once Gamma can build the V2 peer payload.</td></tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Heatmap</p>
+            <h3>Metric Families</h3>
+          </div>
+          <small>{peerHeatmap?.rows.length ?? 0} metrics</small>
+        </div>
+
+        <div class="table-wrap heatmap-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Family</th>
+                <th>Metric</th>
+                {#each peerHeatmap?.tickers ?? [] as ticker}
+                  <th class:selected-col={ticker === currentCompany?.ticker}>{ticker}</th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#if groupedPeerHeatmapRows.length}
+                {#each groupedPeerHeatmapRows as [family, rows]}
+                  {#each rows as row, rowIndex}
+                    <tr>
+                      <td class="family-cell">{rowIndex === 0 ? (familyLabels[family] ?? family) : ""}</td>
+                      <td>{row.label}</td>
+                      {#each row.cells as cell}
+                        <td class:selected-cell={cell.ticker === currentCompany?.ticker}>
+                          <div class={`heat-cell ${heatmapCellClass(row.metric_id, cell.value, row.cells.map((candidate) => candidate.value))}`}>
+                            <strong>{cell.display_value ?? "N/A"}</strong>
+                          </div>
+                        </td>
+                      {/each}
+                    </tr>
+                  {/each}
+                {/each}
+              {:else}
+                <tr><td colspan={(peerHeatmap?.tickers.length ?? 0) + 2}>Peer heatmap appears once Gamma has comparable metrics.</td></tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
   {:else if mode === "financials"}
     <div class="financials-shell">
       <article class="panel">
@@ -839,6 +1036,40 @@
         <article class="panel">
           <div class="panel-header">
             <div>
+              <p class="eyebrow">Raw vs Normalized</p>
+              <h3>Source Trace</h3>
+            </div>
+            <small>{currentSourceTraces.length} rows</small>
+          </div>
+
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead>
+                <tr><th>Line</th><th>Period</th><th>Value</th><th>Concept</th><th>Filing</th><th>Note</th></tr>
+              </thead>
+              <tbody>
+                {#if currentSourceTraces.length}
+                  {#each currentSourceTraces as trace}
+                    <tr>
+                      <td>{trace.line_label}</td>
+                      <td>{trace.period_label ?? trace.period_key}</td>
+                      <td>{trace.display_value ?? "N/A"}</td>
+                      <td>{trace.concept_name ?? "Derived"}</td>
+                      <td>{trace.filing_form ?? "N/A"} {trace.is_amendment ? "A" : ""}<small>{trace.accession_number ?? ""}</small></td>
+                      <td>{trace.transformation_note ?? "N/A"}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="6">Source trace appears once the Reference payload loads the matching statement and basis.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
               <p class="eyebrow">Chronology</p>
               <h3>Filing History</h3>
             </div>
@@ -869,7 +1100,7 @@
         </article>
       </div>
     </div>
-  {:else}
+  {:else if mode === "dcf"}
     <div class="dcf-shell">
       <article class="panel">
         <div class="panel-header">
@@ -914,6 +1145,43 @@
             <span>Upside / Downside</span>
             <strong class={toneClass(activeScenarioSummary?.upside_downside_pct)}>{pct(activeScenarioSummary?.upside_downside_pct)}</strong>
           </article>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Persistence</p>
+            <h3>DCF Snapshots</h3>
+          </div>
+          <div class="panel-actions snapshot-actions">
+            <input bind:value={snapshotName} placeholder="Snapshot name" aria-label="DCF snapshot name" />
+            <button type="button" class="secondary" on:click={saveSnapshot} disabled={!dcfModel || saving}>{saving ? "Saving..." : "Save Snapshot"}</button>
+          </div>
+        </div>
+
+        <div class="table-wrap compact-wrap">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Created</th><th>Active</th><th>Value / Share</th><th>Load</th></tr>
+            </thead>
+            <tbody>
+              {#if dcfSnapshotRows.length}
+                {#each dcfSnapshotRows as snapshot}
+                  {@const activeSummary = snapshot.scenario_summaries.find((summary) => summary.scenario_id === snapshot.active_scenario_id) ?? snapshot.scenario_summaries[0]}
+                  <tr>
+                    <td><strong>{snapshotDisplayName(snapshot.name, snapshot.created_at)}</strong><small>{snapshot.snapshot_id}</small></td>
+                    <td>{shortDate(snapshot.created_at)}</td>
+                    <td>{snapshot.active_scenario_id}</td>
+                    <td>{currency(activeSummary?.implied_value_per_share, 2)}</td>
+                    <td><button type="button" class="secondary compact-button" on:click={() => loadSnapshot(snapshot.snapshot_id)} disabled={saving}>Load</button></td>
+                  </tr>
+                {/each}
+              {:else}
+                <tr><td colspan="5">Saved DCF snapshots appear here after the first checkpoint.</td></tr>
+              {/if}
+            </tbody>
+          </table>
         </div>
       </article>
 
@@ -1084,6 +1352,271 @@
         </div>
       </article>
     </div>
+  {:else if mode === "reverse_valuation"}
+    <div class="reverse-shell">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Market-Implied Expectations</p>
+            <h3>Reverse Valuation</h3>
+          </div>
+          <small>{reverseValuation?.source_provider ?? "No provider"}</small>
+        </div>
+
+        <div class="kpi-grid scenario-kpi-grid">
+          <article class="metric">
+            <span>Current Price</span>
+            <strong>{currency(reverseValuation?.current_price, 2)}</strong>
+          </article>
+          <article class="metric">
+            <span>Target Equity Value</span>
+            <strong>{compactCurrency(reverseValuation?.target_equity_value)}</strong>
+          </article>
+          <article class="metric">
+            <span>Target EV</span>
+            <strong>{compactCurrency(reverseValuation?.target_enterprise_value)}</strong>
+          </article>
+          <article class="metric">
+            <span>Base Value / Share</span>
+            <strong>{currency(reverseValuation?.base_case_summary?.implied_value_per_share, 2)}</strong>
+          </article>
+          <article class="metric">
+            <span>Base Gap</span>
+            <strong class={toneClass(reverseValuation?.base_case_summary?.upside_downside_pct)}>{pct(reverseValuation?.base_case_summary?.upside_downside_pct)}</strong>
+          </article>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Drivers</p>
+            <h3>Implied Inputs</h3>
+          </div>
+          <small>{reverseDrivers.length} solved paths</small>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Driver</th><th>Implied</th><th>Base</th><th>Gap</th><th>Solved EV</th><th>Status</th><th>Note</th></tr>
+            </thead>
+            <tbody>
+              {#if reverseDrivers.length}
+                {#each reverseDrivers as driver}
+                  <tr>
+                    <td><strong>{driver.label}</strong><small>{driver.driver_id}</small></td>
+                    <td class={driverTone(driver)}>{driver.display_value ?? "N/A"}</td>
+                    <td>{driver.base_display_value ?? "N/A"}</td>
+                    <td class={driverTone(driver)}>{driver.gap_display_value ?? "N/A"}</td>
+                    <td>{compactCurrency(driver.solved_enterprise_value)}</td>
+                    <td>{driver.success ? "Solved" : "Bounded"}</td>
+                    <td>{driver.warnings.join(" | ") || driver.transformation_note || "N/A"}</td>
+                  </tr>
+                {/each}
+              {:else}
+                <tr><td colspan="7">Reverse valuation appears once Gamma has current price, shares, net debt, statements, and a Base DCF case.</td></tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <div class="financials-support-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Base Gap</p>
+              <h3>Scenario Gap Metrics</h3>
+            </div>
+            <small>{reverseGapMetrics.length} metrics</small>
+          </div>
+          <div class="kpi-grid valuation-kpi-grid">
+            {#each reverseGapMetrics as metric}
+              <article class="metric">
+                <span>{metric.label}</span>
+                <strong class={metricTone(metric.metric_id, metric.value)}>{metric.display_value ?? "N/A"}</strong>
+              </article>
+            {:else}
+              <div class="empty-panel">Scenario gap metrics appear with the reverse valuation payload.</div>
+            {/each}
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Sensitivity</p>
+              <h3>WACC / Terminal Growth</h3>
+            </div>
+            <small>{reverseValuation?.sensitivity_matrix?.rows.length ?? 0} rows</small>
+          </div>
+          <div class="table-wrap compact-wrap sheet-wrap">
+            <table class="sheet-table sensitivity-table">
+              <thead>
+                <tr>
+                  <th>Terminal \\ WACC</th>
+                  {#each reverseValuation?.sensitivity_matrix?.wacc_values ?? [] as wacc}
+                    <th>{pct(wacc)}</th>
+                  {/each}
+                </tr>
+              </thead>
+              <tbody>
+                {#if reverseValuation?.sensitivity_matrix?.rows?.length}
+                  {#each reverseValuation.sensitivity_matrix.rows as row, rowIndex}
+                    <tr>
+                      <td class="sheet-label">{pct(reverseValuation.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
+                      {#each row as cell}
+                        <td class={`sheet-cell sens-cell ${reverseSensitivityHeatClass(cell.implied_revenue_growth_pct)}`}>
+                          <strong>{pct(cell.implied_revenue_growth_pct)}</strong>
+                          <small>EBIT {pct(cell.implied_ebit_margin_pct)} | FCF {pct(cell.implied_fcf_cagr_pct)}</small>
+                        </td>
+                      {/each}
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan={(reverseValuation?.sensitivity_matrix?.wacc_values.length ?? 0) + 1}>Reverse sensitivity appears once Gamma solves the implied expectation grid.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </div>
+  {:else}
+    <div class="reference-shell">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Reference</p>
+            <h3>Filing Chronology</h3>
+          </div>
+          <small>{referenceFilings.length} filings</small>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Form</th><th>Report Period</th><th>Filed</th><th>Accession</th><th>Amendment</th><th>Provider</th></tr>
+            </thead>
+            <tbody>
+              {#if referenceFilings.length}
+                {#each referenceFilings as filing}
+                  <tr>
+                    <td>{filing.form}</td>
+                    <td>{shortDate(filing.report_period)}</td>
+                    <td>{shortDate(filing.filing_date)}</td>
+                    <td>{filing.accession_number ?? "N/A"}</td>
+                    <td>{filing.is_amendment ? "Yes" : "No"}</td>
+                    <td>{filing.source_provider}</td>
+                  </tr>
+                {/each}
+              {:else}
+                <tr><td colspan="6">SEC filing chronology appears once the selected company loads.</td></tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <div class="financials-support-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Coverage</p>
+              <h3>Taxonomy Mapping</h3>
+            </div>
+            <small>{referenceInspection?.coverage.length ?? 0} rows</small>
+          </div>
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead>
+                <tr><th>Statement</th><th>Line</th><th>Concepts</th><th>Observed</th><th>Derived</th><th>Warning</th></tr>
+              </thead>
+              <tbody>
+                {#if referenceInspection?.coverage.length}
+                  {#each referenceInspection.coverage as row}
+                    <tr>
+                      <td>{row.basis} {row.statement}</td>
+                      <td>{row.line_label}</td>
+                      <td>{row.concept_names.join(", ") || "N/A"}</td>
+                      <td>{row.observed_periods} / {row.observed_periods + row.missing_periods}</td>
+                      <td>{row.derived_observations}</td>
+                      <td>{row.warning ?? "None"}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="6">Coverage diagnostics appear once Gamma maps normalized rows to SEC concepts.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Provider</p>
+              <h3>Identity and Config</h3>
+            </div>
+            <small>{reference?.provider_warnings.length ?? 0} warnings</small>
+          </div>
+          <div class="focus-list">
+            <div class="focus-row compact-focus">
+              <span class="focus-label">Source</span>
+              <strong>{reference?.source_provider ?? currentCompany?.source_provider ?? "N/A"}</strong>
+              <p>{reference?.origin ?? currentCompany?.origin ?? "No provider context loaded."}</p>
+            </div>
+            {#each reference?.provider_warnings ?? [] as warning}
+              <div class="focus-row compact-focus">
+                <span class="focus-label">Warning</span>
+                <strong>Configuration</strong>
+                <p>{warning}</p>
+              </div>
+            {/each}
+            <div class="focus-row compact-focus">
+              <span class="focus-label">Inspection</span>
+              <strong>{referenceInspection?.source_provider ?? "N/A"}</strong>
+              <p>{referenceInspection?.transformation_note ?? "Raw-versus-normalized inspection will document derived rows here."}</p>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Trace</p>
+            <h3>Normalized Rows to Source Concepts</h3>
+          </div>
+          <small>{referenceInspection?.traces.length ?? 0} rows</small>
+        </div>
+        <div class="table-wrap statement-wrap">
+          <table>
+            <thead>
+              <tr><th>Statement</th><th>Line</th><th>Period</th><th>Value</th><th>Concept</th><th>Filing</th><th>Derived Note</th></tr>
+            </thead>
+            <tbody>
+              {#if referenceInspection?.traces.length}
+                {#each referenceInspection.traces as trace}
+                  <tr>
+                    <td>{trace.basis} {trace.statement}</td>
+                    <td>{trace.line_label}</td>
+                    <td>{trace.period_label ?? trace.period_key}</td>
+                    <td>{trace.display_value ?? "N/A"}</td>
+                    <td>{trace.concept_name ?? "Derived"}</td>
+                    <td>{trace.filing_form ?? "N/A"} | {shortDate(trace.filing_date)}<small>{trace.accession_number ?? ""}</small></td>
+                    <td>{trace.transformation_note ?? "N/A"}</td>
+                  </tr>
+                {/each}
+              {:else}
+                <tr><td colspan="7">Source trace appears once Gamma has normalized statement rows and filing source metadata.</td></tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
   {/if}
 </section>
 
@@ -1102,7 +1635,10 @@
     gap: 0.5rem;
   }
 
-  .dcf-shell {
+  .dcf-shell,
+  .peers-shell,
+  .reverse-shell,
+  .reference-shell {
     display: grid;
     gap: 0.5rem;
   }
@@ -1122,6 +1658,13 @@
   .workspace-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.56fr) minmax(21rem, 0.94fr);
+    gap: 0.5rem;
+    align-items: start;
+  }
+
+  .peer-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
     gap: 0.5rem;
     align-items: start;
   }
@@ -1197,7 +1740,7 @@
     display: inline-grid;
     background: var(--surface-0);
     border: 1px solid var(--panel-strong);
-    grid-template-columns: repeat(3, auto);
+    grid-template-columns: repeat(6, auto);
   }
 
   .compact-bar {
@@ -1206,6 +1749,20 @@
 
   .statement-bar {
     grid-template-columns: repeat(4, auto);
+  }
+
+  .snapshot-actions {
+    align-items: end;
+    flex-wrap: wrap;
+  }
+
+  .snapshot-actions input {
+    min-width: 12rem;
+  }
+
+  .compact-button {
+    min-height: 1.65rem;
+    padding: 0.22rem 0.48rem;
   }
 
   .mode-bar button,
@@ -1445,6 +2002,17 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .sensitivity-table .sens-cell strong,
+  .sensitivity-table .sens-cell small {
+    display: block;
+  }
+
+  .sensitivity-table .sens-cell small {
+    color: var(--text-2);
+    font-size: 0.66rem;
+    line-height: 1.25;
+  }
+
   .sens-heat-pos-strong {
     background: color-mix(in srgb, var(--positive) 32%, transparent);
   }
@@ -1674,6 +2242,10 @@
     max-height: 18rem;
   }
 
+  .peer-comparison-wrap {
+    max-height: 28rem;
+  }
+
   .heatmap-wrap {
     max-height: 34rem;
   }
@@ -1793,12 +2365,17 @@
     color: var(--positive);
   }
 
+  .warning {
+    color: var(--warning);
+  }
+
   .negative {
     color: var(--negative);
   }
 
   @media (max-width: 1180px) {
     .workspace-grid,
+    .peer-layout,
     .profile-grid,
     .financials-support-grid {
       grid-template-columns: 1fr;

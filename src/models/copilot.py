@@ -23,6 +23,8 @@ class CopilotRequestContext:
     macro: MacroCopilotContext | None = None
     prediction_market_id: str | None = None
     crypto_token_id: str | None = None
+    fundamentals_ticker: str | None = None
+    fundamentals_state: dict[str, Any] | None = None
     portfolio_state: dict[str, Any] | None = None
     research_state: dict[str, Any] | None = None
     risk_state: dict[str, Any] | None = None

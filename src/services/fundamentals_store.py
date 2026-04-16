@@ -10,8 +10,10 @@ class FundamentalsResearchStore:
         self.base_dir = Path(base_dir)
         self.peer_dir = self.base_dir / "peer_baskets"
         self.dcf_dir = self.base_dir / "dcf_models"
+        self.dcf_snapshot_dir = self.base_dir / "dcf_snapshots"
         self.peer_dir.mkdir(parents=True, exist_ok=True)
         self.dcf_dir.mkdir(parents=True, exist_ok=True)
+        self.dcf_snapshot_dir.mkdir(parents=True, exist_ok=True)
 
     def load_peer_basket(self, ticker: str) -> dict[str, Any] | None:
         return self._load_json(self.peer_dir / f"{self._safe_key(ticker)}.json")
@@ -24,6 +26,26 @@ class FundamentalsResearchStore:
 
     def save_dcf_model(self, ticker: str, payload: dict[str, Any]) -> None:
         self._write_json(self.dcf_dir / f"{self._safe_key(ticker)}.json", payload)
+
+    def list_dcf_snapshots(self, ticker: str) -> list[dict[str, Any]]:
+        directory = self.dcf_snapshot_dir / self._safe_key(ticker)
+        rows: list[dict[str, Any]] = []
+        if not directory.exists():
+            return rows
+        for path in sorted(directory.glob("*.json")):
+            payload = self._load_json(path)
+            if payload is not None:
+                rows.append(payload)
+        rows.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return rows
+
+    def load_dcf_snapshot(self, ticker: str, snapshot_id: str) -> dict[str, Any] | None:
+        safe_snapshot_id = self._safe_key(snapshot_id)
+        return self._load_json(self.dcf_snapshot_dir / self._safe_key(ticker) / f"{safe_snapshot_id}.json")
+
+    def save_dcf_snapshot(self, ticker: str, snapshot_id: str, payload: dict[str, Any]) -> None:
+        safe_snapshot_id = self._safe_key(snapshot_id)
+        self._write_json(self.dcf_snapshot_dir / self._safe_key(ticker) / f"{safe_snapshot_id}.json", payload)
 
     def _load_json(self, path: Path) -> dict[str, Any] | None:
         if not path.exists():

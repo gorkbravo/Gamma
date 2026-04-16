@@ -5,22 +5,34 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.models.fundamentals import (
+    FundamentalsCoverageRecord,
     FundamentalsCompanyRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
     FundamentalsDcfScenarioRecord,
     FundamentalsDcfSensitivityCell,
     FundamentalsDcfSensitivityMatrix,
+    FundamentalsDcfSnapshotRecord,
     FundamentalsDcfValuationSummary,
     FundamentalsFinancialsResult,
     FundamentalsMetricRecord,
     FundamentalsOverviewResult,
     FundamentalsPeerBasketRecord,
     FundamentalsPeerCandidateRecord,
+    FundamentalsPeerComparisonRecord,
+    FundamentalsPeerDiagnosticsRecord,
     FundamentalsPeerHeatmapCell,
     FundamentalsPeerHeatmapMetricRow,
     FundamentalsPeerHeatmapView,
+    FundamentalsPeersResult,
+    FundamentalsRawNormalizedInspectionResult,
+    FundamentalsReferenceResult,
+    FundamentalsReverseValuationDriverRecord,
+    FundamentalsReverseValuationResult,
+    FundamentalsReverseValuationSensitivityCell,
+    FundamentalsReverseValuationSensitivityMatrix,
     FundamentalsSearchResult,
+    FundamentalsSourceTraceRecord,
     FundamentalsStatementCell,
     FundamentalsStatementLine,
     FundamentalsStatementView,
@@ -167,6 +179,74 @@ class FundamentalsService:
             warnings=_dedupe_warnings(price_context.warnings),
         )
 
+    def get_peers(
+        self,
+        ticker: str,
+        *,
+        force_refresh: bool = False,
+    ) -> FundamentalsPeersResult | None:
+        sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=force_refresh)
+        if sec_data is None:
+            return None
+        peer_basket = self._load_or_create_peer_basket(sec_data.company)
+        peer_candidates = self._build_peer_candidates(sec_data.company, peer_basket)
+        peer_heatmap = self._build_peer_heatmap(sec_data.company, peer_basket)
+        comparisons = self._build_peer_comparisons(sec_data.company, peer_basket)
+        diagnostics = self._build_peer_diagnostics(peer_heatmap)
+        return FundamentalsPeersResult(
+            company=sec_data.company,
+            peer_basket=peer_basket,
+            peer_candidates=peer_candidates,
+            peer_heatmap=peer_heatmap,
+            comparisons=comparisons,
+            diagnostics=diagnostics,
+            warnings=[
+                item.warning
+                for item in diagnostics
+                if item.warning
+            ],
+            source_provider="gamma",
+            retrieved_at=datetime.now(timezone.utc),
+            origin="fundamentals.peers",
+            transformation_note="Gamma materializes the persistent peer basket into valuation, profitability, growth, efficiency, leverage, and implied-expectation comparison rows.",
+        )
+
+    def get_reference(
+        self,
+        ticker: str,
+        *,
+        force_refresh: bool = False,
+    ) -> FundamentalsReferenceResult | None:
+        sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=force_refresh)
+        if sec_data is None:
+            return None
+        inspection = self._build_raw_normalized_inspection(sec_data)
+        provider_warnings = self._provider_config_warnings()
+        warnings = _dedupe_warnings(inspection.warnings, provider_warnings)
+        return FundamentalsReferenceResult(
+            company=sec_data.company,
+            filings=sec_data.filings,
+            inspection=inspection,
+            provider_warnings=provider_warnings,
+            warnings=warnings,
+            source_provider="sec",
+            retrieved_at=sec_data.company.retrieved_at,
+            origin="fundamentals.reference",
+            transformation_note="Gamma packages SEC filing chronology, company-facts coverage, and raw-versus-normalized statement traces for audit-oriented fundamentals research.",
+        )
+
+    def get_reverse_valuation(
+        self,
+        ticker: str,
+        *,
+        force_refresh: bool = False,
+    ) -> FundamentalsReverseValuationResult | None:
+        sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=force_refresh)
+        if sec_data is None:
+            return None
+        price_context = self.valuation_adapter.get_price_context(ticker, force_refresh=force_refresh)
+        return self._build_reverse_valuation(sec_data, price_context, include_sensitivity=True)
+
     def get_dcf_model(
         self,
         ticker: str,
@@ -196,6 +276,81 @@ class FundamentalsService:
         sanitized = self._sanitize_dcf_payload(sec_data.company.ticker, payload, sec_data, market_context)
         self.store.save_dcf_model(sec_data.company.ticker, sanitized)
         return self._materialize_dcf_model(sec_data, market_context, sanitized)
+
+    def list_dcf_snapshots(
+        self,
+        ticker: str,
+        *,
+        force_refresh: bool = False,
+    ) -> list[FundamentalsDcfSnapshotRecord] | None:
+        sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=force_refresh)
+        if sec_data is None:
+            return None
+        return [
+            self._snapshot_record_from_payload(payload)
+            for payload in self.store.list_dcf_snapshots(sec_data.company.ticker)
+        ]
+
+    def save_dcf_snapshot(
+        self,
+        ticker: str,
+        *,
+        name: str | None = None,
+        force_refresh: bool = False,
+    ) -> FundamentalsDcfSnapshotRecord | None:
+        sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=force_refresh)
+        if sec_data is None:
+            return None
+        price_context = self.valuation_adapter.get_price_context(ticker, force_refresh=force_refresh)
+        market_context = self._build_market_context(sec_data, price_context)
+        raw_model = self.store.load_dcf_model(sec_data.company.ticker) or self._create_default_dcf_payload(sec_data, market_context)
+        materialized = self._materialize_dcf_model(sec_data, market_context, raw_model)
+        created_at = datetime.now(timezone.utc)
+        clean_name = str(name or "").strip() or f"{materialized.active_scenario_id.title()} snapshot"
+        snapshot_id = self._build_snapshot_id(created_at, clean_name)
+        payload = {
+            "snapshot_id": snapshot_id,
+            "ticker": sec_data.company.ticker,
+            "name": clean_name,
+            "created_at": created_at.isoformat(),
+            "active_scenario_id": materialized.active_scenario_id,
+            "projection_years": list(materialized.projection_years),
+            "model": {
+                "ticker": sec_data.company.ticker,
+                "active_scenario_id": materialized.active_scenario_id,
+                "projection_years": list(materialized.projection_years),
+                "scenarios": deepcopy(raw_model.get("scenarios", {})),
+            },
+            "scenario_summaries": [
+                _summary_to_payload(scenario.summary)
+                for scenario in materialized.scenarios
+                if scenario.summary is not None
+            ],
+            "source_provider": "manual",
+            "retrieved_at": created_at.isoformat(),
+            "origin": "fundamentals.dcf.snapshot",
+            "transformation_note": "Gamma snapshots the locally persisted DCF scenario inputs with the then-current computed scenario summaries for later read-only recall.",
+        }
+        self.store.save_dcf_snapshot(sec_data.company.ticker, snapshot_id, payload)
+        return self._snapshot_record_from_payload(payload)
+
+    def load_dcf_snapshot_model(
+        self,
+        ticker: str,
+        snapshot_id: str,
+        *,
+        force_refresh: bool = False,
+    ) -> FundamentalsDcfModelRecord | None:
+        sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=force_refresh)
+        if sec_data is None:
+            return None
+        payload = self.store.load_dcf_snapshot(sec_data.company.ticker, snapshot_id)
+        if payload is None:
+            return None
+        price_context = self.valuation_adapter.get_price_context(ticker, force_refresh=force_refresh)
+        market_context = self._build_market_context(sec_data, price_context)
+        raw_model = payload.get("model") if isinstance(payload.get("model"), dict) else payload
+        return self._materialize_dcf_model(sec_data, market_context, raw_model)
 
     def save_peer_basket(
         self,
@@ -554,9 +709,10 @@ class FundamentalsService:
             ("fcf_growth", "FCF Growth", "growth"),
             ("roic", "ROIC", "returns"),
             ("roe", "ROE", "returns"),
-            ("current_ratio", "Current Ratio", "balance_sheet"),
-            ("net_debt_to_ebit", "Net Debt / EBIT", "balance_sheet"),
-            ("cash_conversion", "Cash Conversion", "balance_sheet"),
+            ("asset_turnover", "Asset Turnover", "efficiency"),
+            ("cash_conversion", "Cash Conversion", "efficiency"),
+            ("current_ratio", "Current Ratio", "leverage"),
+            ("net_debt_to_ebit", "Net Debt / EBIT", "leverage"),
         ):
             cells: list[FundamentalsPeerHeatmapCell] = []
             for ticker in ordered_tickers:
@@ -569,7 +725,11 @@ class FundamentalsService:
                         source_provider="gamma",
                         retrieved_at=datetime.now(timezone.utc),
                         origin=f"fundamentals.peer_heatmap.{metric_id}",
-                        transformation_note=None if metric is None else metric.get("note"),
+                        transformation_note=(
+                            metric.get("note")
+                            if metric is not None
+                            else "Gamma preserves the peer heatmap row with a null value because the required SEC taxonomy or market context was unavailable."
+                        ),
                     )
                 )
             rows.append(
@@ -608,6 +768,7 @@ class FundamentalsService:
         taxes = annual_income.get("income_tax", [])
         current_assets = annual_balance.get("current_assets", [])
         current_liabilities = annual_balance.get("current_liabilities", [])
+        total_assets = annual_balance.get("total_assets", [])
         equity = annual_balance.get("shareholders_equity", [])
         debt = _series_sum(annual_balance.get("short_term_debt", []), annual_balance.get("long_term_debt", []))
         cash_values = _series_sum(
@@ -678,6 +839,14 @@ class FundamentalsService:
                 "percent",
                 "Gamma approximates ROE from annual net income and average shareholder equity.",
             ),
+            "asset_turnover": _heatmap_metric(
+                _last_non_null([
+                    _safe_ratio(rev, avg_assets)
+                    for rev, avg_assets in zip(revenue, _series_average(total_assets), strict=False)
+                ]),
+                "ratio",
+                "Gamma derives asset turnover from annual revenue and average total assets.",
+            ),
             "current_ratio": _heatmap_metric(
                 _safe_ratio(_last_non_null(current_assets), _last_non_null(current_liabilities)),
                 "ratio",
@@ -695,6 +864,588 @@ class FundamentalsService:
             ),
         }
         return metrics
+
+    def _build_peer_comparisons(
+        self,
+        company: FundamentalsCompanyRecord,
+        peer_basket: FundamentalsPeerBasketRecord,
+    ) -> list[FundamentalsPeerComparisonRecord]:
+        comparisons: list[FundamentalsPeerComparisonRecord] = []
+        selected = set(peer_basket.peer_tickers)
+        ordered_tickers = [company.ticker, *[ticker for ticker in peer_basket.peer_tickers if ticker != company.ticker]]
+        for ticker in ordered_tickers[:6]:
+            sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=False)
+            if sec_data is None:
+                comparisons.append(
+                    FundamentalsPeerComparisonRecord(
+                        ticker=ticker,
+                        name=ticker,
+                        selected=ticker in selected,
+                        candidate_reason="Selected peer" if ticker in selected else "Focal company",
+                        warnings=[f"{ticker} could not be loaded from SEC company data."],
+                        source_provider="gamma",
+                        retrieved_at=datetime.now(timezone.utc),
+                        origin="fundamentals.peers.comparison",
+                        transformation_note="Gamma preserves missing peer rows instead of silently dropping selected comparables.",
+                    )
+                )
+                continue
+            price_context = self.valuation_adapter.get_price_context(ticker)
+            market_context = self._build_market_context(sec_data, price_context)
+            snapshot = self._company_metric_snapshot(sec_data, market_context)
+            metrics = [
+                _metric(metric_id, label, snapshot.get(metric_id, {}).get("value"), unit, "gamma", datetime.now(timezone.utc), f"fundamentals.peers.metric.{metric_id}", snapshot.get(metric_id, {}).get("note"))
+                for metric_id, label, unit in (
+                    ("ev_to_sales", "EV / Sales", "ratio"),
+                    ("ev_to_ebit", "EV / EBIT", "ratio"),
+                    ("price_to_earnings", "P / E", "ratio"),
+                    ("fcf_yield", "FCF Yield", "percent"),
+                    ("gross_margin", "Gross Margin", "percent"),
+                    ("ebit_margin", "EBIT Margin", "percent"),
+                    ("fcf_margin", "FCF Margin", "percent"),
+                    ("revenue_growth", "Revenue Growth", "percent"),
+                    ("ebit_growth", "EBIT Growth", "percent"),
+                    ("fcf_growth", "FCF Growth", "percent"),
+                    ("roic", "ROIC", "percent"),
+                    ("roe", "ROE", "percent"),
+                    ("asset_turnover", "Asset Turnover", "ratio"),
+                    ("cash_conversion", "Cash Conversion", "percent"),
+                    ("net_debt_to_ebit", "Net Debt / EBIT", "ratio"),
+                    ("current_ratio", "Current Ratio", "ratio"),
+                )
+            ]
+            reverse = self._build_reverse_valuation(sec_data, price_context, include_sensitivity=False)
+            for driver in reverse.drivers[:2]:
+                metrics.append(
+                    _metric(
+                        driver.driver_id,
+                        driver.label,
+                        driver.implied_value,
+                        "percent",
+                        driver.source_provider,
+                        driver.retrieved_at,
+                        driver.origin,
+                        driver.transformation_note,
+                    )
+                )
+            comparisons.append(
+                FundamentalsPeerComparisonRecord(
+                    ticker=sec_data.company.ticker,
+                    name=sec_data.company.name,
+                    selected=ticker in selected,
+                    candidate_reason="Selected peer" if ticker in selected else "Focal company",
+                    metrics=metrics,
+                    warnings=_dedupe_warnings(price_context.warnings, reverse.warnings),
+                    source_provider="gamma",
+                    retrieved_at=datetime.now(timezone.utc),
+                    origin="fundamentals.peers.comparison",
+                    transformation_note="Gamma combines normalized SEC metrics, market-aware multiples, and available reverse-valuation outputs into one peer comparison payload.",
+                )
+            )
+        return comparisons
+
+    def _build_peer_diagnostics(
+        self,
+        peer_heatmap: FundamentalsPeerHeatmapView | None,
+    ) -> list[FundamentalsPeerDiagnosticsRecord]:
+        if peer_heatmap is None:
+            return []
+        diagnostics: list[FundamentalsPeerDiagnosticsRecord] = []
+        for ticker in peer_heatmap.tickers:
+            missing = [
+                row.metric_id
+                for row in peer_heatmap.rows
+                for cell in row.cells
+                if cell.ticker == ticker and cell.value is None
+            ]
+            diagnostics.append(
+                FundamentalsPeerDiagnosticsRecord(
+                    ticker=ticker,
+                    missing_metric_ids=missing,
+                    warning=(
+                        f"{ticker} is missing {len(missing)} peer metrics; market context or SEC taxonomy coverage may be incomplete."
+                        if missing
+                        else None
+                    ),
+                    source_provider="gamma",
+                    retrieved_at=peer_heatmap.retrieved_at,
+                    origin="fundamentals.peers.diagnostics",
+                    transformation_note="Gamma reports peer missing-data diagnostics from the heatmap rather than dropping sparse companies.",
+                )
+            )
+        return diagnostics
+
+    def _build_raw_normalized_inspection(
+        self,
+        sec_data: SecCompanyData,
+    ) -> FundamentalsRawNormalizedInspectionResult:
+        traces: list[FundamentalsSourceTraceRecord] = []
+        coverage: list[FundamentalsCoverageRecord] = []
+        for view in self._statement_views_for_trace(sec_data):
+            traces.extend(self._source_traces_for_view(view))
+            coverage.extend(self._coverage_records_for_view(view))
+        warnings = [
+            record.warning
+            for record in coverage
+            if record.warning
+        ]
+        return FundamentalsRawNormalizedInspectionResult(
+            company=sec_data.company,
+            traces=traces,
+            coverage=coverage,
+            warnings=warnings,
+            source_provider="sec",
+            retrieved_at=sec_data.company.retrieved_at,
+            origin="fundamentals.reference.raw_normalized_inspection",
+            transformation_note="Gamma maps normalized statement rows back to SEC company-facts concepts, filings, accessions, amendments, and quarterly derivation notes for raw-versus-normalized inspection.",
+        )
+
+    def _statement_views_for_trace(self, sec_data: SecCompanyData) -> list[FundamentalsStatementView]:
+        return [
+            sec_data.annual_income_statement,
+            sec_data.annual_balance_sheet,
+            sec_data.annual_cash_flow_statement,
+            sec_data.quarterly_income_statement,
+            sec_data.quarterly_balance_sheet,
+            sec_data.quarterly_cash_flow_statement,
+        ]
+
+    def _source_traces_for_view(
+        self,
+        view: FundamentalsStatementView,
+    ) -> list[FundamentalsSourceTraceRecord]:
+        period_map = {period.period_key: period for period in view.periods}
+        rows: list[FundamentalsSourceTraceRecord] = []
+        for line in view.lines:
+            for cell in line.cells:
+                period = period_map.get(cell.period_key)
+                rows.append(
+                    FundamentalsSourceTraceRecord(
+                        statement=view.statement,
+                        basis=view.basis,
+                        line_key=line.line_key,
+                        line_label=line.label,
+                        period_key=cell.period_key,
+                        period_label=period.label if period else None,
+                        normalized_value=cell.value,
+                        display_value=cell.display_value,
+                        unit=line.unit,
+                        concept_name=cell.concept_name,
+                        accession_number=cell.accession_number or (period.accession_number if period else None),
+                        filing_form=cell.form or (period.form if period else None),
+                        fiscal_year=period.fiscal_year if period else None,
+                        fiscal_period=period.fiscal_period if period else None,
+                        filing_date=cell.filing_date or (period.filing_date if period else None),
+                        report_period=cell.end_date or (period.end_date if period else None),
+                        is_amendment=cell.is_amendment or bool(period.is_amendment if period else False),
+                        source_provider=cell.source_provider,
+                        retrieved_at=cell.retrieved_at or line.retrieved_at or view.retrieved_at,
+                        origin=cell.origin or line.origin or view.origin,
+                        transformation_note=cell.transformation_note or line.transformation_note,
+                    )
+                )
+        return rows
+
+    def _coverage_records_for_view(
+        self,
+        view: FundamentalsStatementView,
+    ) -> list[FundamentalsCoverageRecord]:
+        rows: list[FundamentalsCoverageRecord] = []
+        period_count = len(view.periods)
+        for line in view.lines:
+            observed = [cell for cell in line.cells if cell.value is not None]
+            concepts = sorted({cell.concept_name for cell in observed if cell.concept_name})
+            missing = max(period_count - len(observed), 0)
+            derived = len([cell for cell in observed if cell.source_provider == "gamma"])
+            coverage_ratio = _safe_ratio(float(len(observed)), float(period_count)) if period_count else None
+            warning = None
+            if not observed:
+                warning = f"{view.basis} {view.statement} line `{line.label}` has no mapped SEC observations in the retained periods."
+            elif coverage_ratio is not None and coverage_ratio < 0.5:
+                warning = f"{view.basis} {view.statement} line `{line.label}` has sparse mapped SEC coverage ({len(observed)}/{period_count})."
+            rows.append(
+                FundamentalsCoverageRecord(
+                    statement=view.statement,
+                    basis=view.basis,
+                    line_key=line.line_key,
+                    line_label=line.label,
+                    concept_names=concepts,
+                    observed_periods=len(observed),
+                    missing_periods=missing,
+                    derived_observations=derived,
+                    coverage_ratio=coverage_ratio,
+                    warning=warning,
+                    source_provider=line.source_provider,
+                    retrieved_at=line.retrieved_at or view.retrieved_at,
+                    origin=f"fundamentals.reference.coverage.{view.basis}.{view.statement}.{line.line_key}",
+                    transformation_note="Gamma computes company-facts coverage diagnostics from retained normalized statement cells and flags sparse taxonomy mappings.",
+                )
+            )
+        return rows
+
+    def _provider_config_warnings(self) -> list[str]:
+        identity_name = str(getattr(self.sec_adapter, "identity_name", "") or "").strip()
+        identity_email = str(getattr(self.sec_adapter, "identity_email", "") or "").strip()
+        if identity_name == "Gorka Bravo" and identity_email == "gorka.bravo1@gmail.com":
+            return [
+                "SEC EDGAR access is using the existing EdgarTools development identity fallback; move to GAMMA_SEC_USER_NAME/GAMMA_SEC_USER_EMAIL when user configuration is available."
+            ]
+        return []
+
+    def _build_reverse_valuation(
+        self,
+        sec_data: SecCompanyData,
+        price_context: IbkrPriceContext,
+        *,
+        include_sensitivity: bool,
+    ) -> FundamentalsReverseValuationResult:
+        market_context = self._build_market_context(sec_data, price_context)
+        raw_model = self.store.load_dcf_model(sec_data.company.ticker) or self._create_default_dcf_payload(sec_data, market_context)
+        dcf_model = self._materialize_dcf_model(sec_data, market_context, raw_model)
+        base_scenario = next(
+            (scenario for scenario in dcf_model.scenarios if scenario.scenario_id == "base"),
+            dcf_model.scenarios[0] if dcf_model.scenarios else None,
+        )
+        base_summary = base_scenario.summary if base_scenario else None
+        actuals = self._dcf_actual_series(sec_data)
+        projection_years = dcf_model.projection_years
+        base_assumptions = deepcopy(base_scenario.assumptions if base_scenario else {})
+        base_overrides = deepcopy(base_scenario.overrides if base_scenario else {})
+        target_equity_value = _multiply_nullable(market_context.get("current_price"), market_context.get("shares"))
+        target_enterprise_value = None
+        if target_equity_value is not None:
+            target_enterprise_value = target_equity_value + (market_context.get("net_debt") or 0.0)
+        warnings = _dedupe_warnings(price_context.warnings, dcf_model.warnings)
+        if market_context.get("current_price") is None:
+            warnings.append("Current price context is unavailable, so reverse valuation cannot solve market-implied expectations.")
+        if market_context.get("shares") in {None, 0}:
+            warnings.append("Latest shares outstanding are unavailable, so reverse valuation cannot bridge price to equity value.")
+        if target_enterprise_value is None:
+            return FundamentalsReverseValuationResult(
+                company=sec_data.company,
+                current_price=market_context.get("current_price"),
+                shares_outstanding=market_context.get("shares"),
+                net_debt=market_context.get("net_debt"),
+                target_equity_value=target_equity_value,
+                target_enterprise_value=target_enterprise_value,
+                base_case_summary=base_summary,
+                scenario_gap_metrics=self._reverse_gap_metrics(base_summary, market_context),
+                drivers=[],
+                sensitivity_matrix=None,
+                warnings=_dedupe_warnings(warnings),
+                source_provider="gamma",
+                retrieved_at=datetime.now(timezone.utc),
+                origin="fundamentals.reverse_valuation",
+                transformation_note="Gamma attempted to reverse the current market price into DCF expectations but lacked the market bridge inputs needed to solve.",
+            )
+        drivers = [
+            self._solve_reverse_driver(
+                driver_id="implied_revenue_cagr",
+                label="Implied Revenue CAGR",
+                unit="percent",
+                base_value=_average_assumption(base_assumptions.get("revenue_growth_pct")),
+                lower=-0.20,
+                upper=0.40,
+                target_enterprise_value=target_enterprise_value,
+                actuals=actuals,
+                projection_years=projection_years,
+                base_assumptions=base_assumptions,
+                base_overrides=base_overrides,
+                market_context=market_context,
+                mutator=lambda assumptions, value: assumptions.update({"revenue_growth_pct": [value for _ in projection_years]}),
+            ),
+            self._solve_reverse_driver(
+                driver_id="implied_terminal_ebit_margin",
+                label="Implied Terminal EBIT Margin",
+                unit="percent",
+                base_value=_last_assumption(base_assumptions.get("ebit_margin_pct")),
+                lower=0.01,
+                upper=0.65,
+                target_enterprise_value=target_enterprise_value,
+                actuals=actuals,
+                projection_years=projection_years,
+                base_assumptions=base_assumptions,
+                base_overrides=base_overrides,
+                market_context=market_context,
+                mutator=lambda assumptions, value: assumptions.update({"ebit_margin_pct": _linear_series(_current_margin(actuals), value, len(projection_years))}),
+            ),
+            self._solve_reverse_driver(
+                driver_id="implied_terminal_growth",
+                label="Implied Terminal Growth",
+                unit="percent",
+                base_value=float(base_assumptions.get("terminal_growth_pct") or 0.025),
+                lower=-0.02,
+                upper=min(float(base_assumptions.get("wacc_pct") or 0.10) - 0.005, 0.06),
+                target_enterprise_value=target_enterprise_value,
+                actuals=actuals,
+                projection_years=projection_years,
+                base_assumptions=base_assumptions,
+                base_overrides=base_overrides,
+                market_context=market_context,
+                mutator=lambda assumptions, value: assumptions.update({"terminal_growth_pct": value}),
+            ),
+            self._solve_reverse_driver(
+                driver_id="implied_fcf_cagr",
+                label="Implied FCF CAGR",
+                unit="percent",
+                base_value=_projected_cagr(
+                    _compute_dcf_projection(
+                        actuals=actuals,
+                        projection_years=projection_years,
+                        assumptions=base_assumptions,
+                        overrides=base_overrides,
+                        market_context=market_context,
+                    )["projection_values"].get("free_cash_flow", [])
+                ),
+                lower=-0.20,
+                upper=0.35,
+                target_enterprise_value=target_enterprise_value,
+                actuals=actuals,
+                projection_years=projection_years,
+                base_assumptions=base_assumptions,
+                base_overrides=base_overrides,
+                market_context=market_context,
+                mutator=lambda assumptions, value: None,
+                override_mutator=lambda overrides, value: overrides.update({"free_cash_flow": _fcf_growth_series(actuals, value, len(projection_years))}),
+            ),
+        ]
+        sensitivity = (
+            self._build_reverse_sensitivity_matrix(
+                target_enterprise_value=target_enterprise_value,
+                actuals=actuals,
+                projection_years=projection_years,
+                base_assumptions=base_assumptions,
+                base_overrides=base_overrides,
+                market_context=market_context,
+            )
+            if include_sensitivity
+            else None
+        )
+        return FundamentalsReverseValuationResult(
+            company=sec_data.company,
+            current_price=market_context.get("current_price"),
+            shares_outstanding=market_context.get("shares"),
+            net_debt=market_context.get("net_debt"),
+            target_equity_value=target_equity_value,
+            target_enterprise_value=target_enterprise_value,
+            base_case_summary=base_summary,
+            scenario_gap_metrics=self._reverse_gap_metrics(base_summary, market_context),
+            drivers=drivers,
+            sensitivity_matrix=sensitivity,
+            warnings=_dedupe_warnings(warnings, *[driver.warnings for driver in drivers]),
+            source_provider="gamma",
+            retrieved_at=datetime.now(timezone.utc),
+            origin="fundamentals.reverse_valuation",
+            transformation_note="Gamma uses the current price, latest shares, net debt, normalized annual statements, and the Base DCF mechanics to solve bounded market-implied expectation drivers.",
+        )
+
+    def _solve_reverse_driver(
+        self,
+        *,
+        driver_id: str,
+        label: str,
+        unit: str,
+        base_value: float | None,
+        lower: float,
+        upper: float,
+        target_enterprise_value: float,
+        actuals: dict[str, list[float | None] | list[str]],
+        projection_years: list[int],
+        base_assumptions: dict[str, Any],
+        base_overrides: dict[str, list[float | None]],
+        market_context: dict[str, Any],
+        mutator: Any,
+        override_mutator: Any | None = None,
+    ) -> FundamentalsReverseValuationDriverRecord:
+        def enterprise_value_for(value: float) -> float | None:
+            assumptions = deepcopy(base_assumptions)
+            overrides = deepcopy(base_overrides)
+            mutator(assumptions, value)
+            if override_mutator is not None:
+                override_mutator(overrides, value)
+            computed = _compute_dcf_projection(
+                actuals=actuals,
+                projection_years=projection_years,
+                assumptions=assumptions,
+                overrides=overrides,
+                market_context=market_context,
+            )
+            return computed["summary"]["enterprise_value"]
+
+        solved_value, solved_ev, success, solver_warning = _solve_bounded_expectation(
+            enterprise_value_for,
+            target_enterprise_value=target_enterprise_value,
+            lower=lower,
+            upper=upper,
+        )
+        warnings = [solver_warning] if solver_warning else []
+        return FundamentalsReverseValuationDriverRecord(
+            driver_id=driver_id,
+            label=label,
+            implied_value=solved_value,
+            display_value=_format_metric(solved_value, unit) if solved_value is not None else "N/A",
+            base_value=base_value,
+            base_display_value=_format_metric(base_value, unit) if base_value is not None else "N/A",
+            gap_to_base=_subtract_nullable(solved_value, base_value),
+            gap_display_value=_format_metric(_subtract_nullable(solved_value, base_value), unit) if solved_value is not None and base_value is not None else "N/A",
+            target_enterprise_value=target_enterprise_value,
+            solved_enterprise_value=solved_ev,
+            success=success,
+            warnings=warnings,
+            source_provider="gamma",
+            retrieved_at=datetime.now(timezone.utc),
+            origin=f"fundamentals.reverse_valuation.{driver_id}",
+            transformation_note="Gamma solves this implied expectation with a bounded bisection over the Base DCF mechanics while holding other assumptions constant.",
+        )
+
+    def _build_reverse_sensitivity_matrix(
+        self,
+        *,
+        target_enterprise_value: float,
+        actuals: dict[str, list[float | None] | list[str]],
+        projection_years: list[int],
+        base_assumptions: dict[str, Any],
+        base_overrides: dict[str, list[float | None]],
+        market_context: dict[str, Any],
+    ) -> FundamentalsReverseValuationSensitivityMatrix:
+        base_wacc = float(base_assumptions.get("wacc_pct") or 0.10)
+        base_terminal = float(base_assumptions.get("terminal_growth_pct") or 0.025)
+        wacc_values = [round(max(base_wacc + offset, 0.005), 4) for offset in (-0.02, -0.01, 0.0, 0.01, 0.02)]
+        terminal_values = [round(base_terminal + offset, 4) for offset in (-0.01, -0.005, 0.0, 0.005, 0.01)]
+        rows: list[list[FundamentalsReverseValuationSensitivityCell]] = []
+        for terminal_growth in terminal_values:
+            row: list[FundamentalsReverseValuationSensitivityCell] = []
+            for wacc in wacc_values:
+                assumptions = deepcopy(base_assumptions)
+                assumptions["wacc_pct"] = wacc
+                assumptions["terminal_growth_pct"] = terminal_growth
+                revenue_driver = self._solve_reverse_driver(
+                    driver_id="implied_revenue_cagr",
+                    label="Implied Revenue CAGR",
+                    unit="percent",
+                    base_value=_average_assumption(assumptions.get("revenue_growth_pct")),
+                    lower=-0.20,
+                    upper=0.40,
+                    target_enterprise_value=target_enterprise_value,
+                    actuals=actuals,
+                    projection_years=projection_years,
+                    base_assumptions=assumptions,
+                    base_overrides=base_overrides,
+                    market_context=market_context,
+                    mutator=lambda next_assumptions, value: next_assumptions.update({"revenue_growth_pct": [value for _ in projection_years]}),
+                )
+                margin_driver = self._solve_reverse_driver(
+                    driver_id="implied_terminal_ebit_margin",
+                    label="Implied Terminal EBIT Margin",
+                    unit="percent",
+                    base_value=_last_assumption(assumptions.get("ebit_margin_pct")),
+                    lower=0.01,
+                    upper=0.65,
+                    target_enterprise_value=target_enterprise_value,
+                    actuals=actuals,
+                    projection_years=projection_years,
+                    base_assumptions=assumptions,
+                    base_overrides=base_overrides,
+                    market_context=market_context,
+                    mutator=lambda next_assumptions, value: next_assumptions.update({"ebit_margin_pct": _linear_series(_current_margin(actuals), value, len(projection_years))}),
+                )
+                fcf_driver = self._solve_reverse_driver(
+                    driver_id="implied_fcf_cagr",
+                    label="Implied FCF CAGR",
+                    unit="percent",
+                    base_value=None,
+                    lower=-0.20,
+                    upper=0.35,
+                    target_enterprise_value=target_enterprise_value,
+                    actuals=actuals,
+                    projection_years=projection_years,
+                    base_assumptions=assumptions,
+                    base_overrides=base_overrides,
+                    market_context=market_context,
+                    mutator=lambda next_assumptions, value: None,
+                    override_mutator=lambda overrides, value: overrides.update({"free_cash_flow": _fcf_growth_series(actuals, value, len(projection_years))}),
+                )
+                row.append(
+                    FundamentalsReverseValuationSensitivityCell(
+                        wacc_pct=wacc,
+                        terminal_growth_pct=terminal_growth,
+                        implied_revenue_growth_pct=revenue_driver.implied_value,
+                        implied_ebit_margin_pct=margin_driver.implied_value,
+                        implied_fcf_cagr_pct=fcf_driver.implied_value,
+                        source_provider="gamma",
+                        retrieved_at=datetime.now(timezone.utc),
+                        origin="fundamentals.reverse_valuation.sensitivity",
+                        transformation_note="Gamma re-solves implied revenue growth, terminal EBIT margin, and FCF CAGR across a WACC and terminal-growth grid.",
+                    )
+                )
+            rows.append(row)
+        return FundamentalsReverseValuationSensitivityMatrix(
+            wacc_values=wacc_values,
+            terminal_growth_values=terminal_values,
+            rows=rows,
+            source_provider="gamma",
+            retrieved_at=datetime.now(timezone.utc),
+            origin="fundamentals.reverse_valuation.sensitivity",
+            transformation_note="Gamma shows how market-implied expectations change as WACC and terminal-growth assumptions move around the Base case.",
+        )
+
+    def _reverse_gap_metrics(
+        self,
+        base_summary: FundamentalsDcfValuationSummary | None,
+        market_context: dict[str, Any],
+    ) -> list[FundamentalsMetricRecord]:
+        current_price = market_context.get("current_price")
+        base_value = base_summary.implied_value_per_share if base_summary else None
+        gap = _subtract_nullable(current_price, base_value)
+        gap_pct = _safe_ratio(gap, base_value)
+        return [
+            _metric(
+                "base_case_value_per_share",
+                "Base Case Value / Share",
+                base_value,
+                "price",
+                "manual",
+                base_summary.retrieved_at if base_summary else datetime.now(timezone.utc),
+                "fundamentals.reverse_valuation.base_gap",
+                "Gamma uses the active Base DCF scenario as the comparison anchor for market-implied expectations.",
+            ),
+            _metric(
+                "market_price_gap_pct",
+                "Market Gap vs Base",
+                gap_pct,
+                "percent",
+                "gamma",
+                market_context.get("retrieved_at"),
+                "fundamentals.reverse_valuation.base_gap",
+                "Gamma compares current price against the Base DCF implied value per share; this is research framing, not a recommendation.",
+            ),
+        ]
+
+    def _build_snapshot_id(self, created_at: datetime, name: str) -> str:
+        slug = "".join(char.lower() if char.isalnum() else "-" for char in name.strip())
+        slug = "-".join(part for part in slug.split("-") if part)[:32] or "snapshot"
+        return f"{created_at.strftime('%Y%m%dT%H%M%SZ')}-{slug}"
+
+    def _snapshot_record_from_payload(self, payload: dict[str, Any]) -> FundamentalsDcfSnapshotRecord:
+        created_at = _parse_iso_datetime(payload.get("created_at")) or datetime.now(timezone.utc)
+        summaries = [
+            _summary_from_payload(summary)
+            for summary in payload.get("scenario_summaries", [])
+            if isinstance(summary, dict)
+        ]
+        return FundamentalsDcfSnapshotRecord(
+            snapshot_id=str(payload.get("snapshot_id") or ""),
+            ticker=str(payload.get("ticker") or ""),
+            name=str(payload.get("name") or "DCF snapshot"),
+            created_at=created_at,
+            active_scenario_id=str(payload.get("active_scenario_id") or "base"),
+            projection_years=[int(value) for value in payload.get("projection_years", []) if str(value).strip()],
+            scenario_summaries=summaries,
+            source_provider=str(payload.get("source_provider") or "manual"),
+            retrieved_at=_parse_iso_datetime(payload.get("retrieved_at")),
+            origin=str(payload.get("origin") or "fundamentals.dcf.snapshot"),
+            transformation_note=str(payload.get("transformation_note") or "Gamma restores a saved DCF model snapshot."),
+        )
 
     def _create_default_dcf_payload(
         self,
@@ -1295,6 +2046,173 @@ def _median(values: list[float]) -> float | None:
     return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
 
 
+def _average_assumption(value: Any) -> float | None:
+    if isinstance(value, list):
+        numeric = [float(item) for item in value if isinstance(item, (int, float))]
+        return sum(numeric) / len(numeric) if numeric else None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _last_assumption(value: Any) -> float | None:
+    if isinstance(value, list):
+        for item in reversed(value):
+            if isinstance(item, (int, float)):
+                return float(item)
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _linear_series(start: float | None, end: float, length: int) -> list[float]:
+    if length <= 0:
+        return []
+    start_value = start if start is not None else end
+    if length == 1:
+        return [float(end)]
+    return [
+        float(start_value + ((end - start_value) * ((index + 1) / length)))
+        for index in range(length)
+    ]
+
+
+def _current_margin(actuals: dict[str, list[float | None] | list[str]]) -> float | None:
+    return _safe_ratio(
+        _last_non_null(actuals.get("ebit", [])),
+        _last_non_null(actuals.get("revenue", [])),
+    )
+
+
+def _projected_cagr(values: list[float | None]) -> float | None:
+    clean = [value for value in values if value is not None and value > 0]
+    if len(clean) < 2 or clean[0] == 0:
+        return None
+    return (clean[-1] / clean[0]) ** (1.0 / (len(clean) - 1)) - 1.0
+
+
+def _fcf_growth_series(
+    actuals: dict[str, list[float | None] | list[str]],
+    growth_rate: float,
+    length: int,
+) -> list[float | None]:
+    last_fcf = _last_non_null(actuals.get("free_cash_flow", []))
+    if last_fcf is None:
+        return [None for _ in range(length)]
+    return [last_fcf * ((1.0 + growth_rate) ** (index + 1)) for index in range(length)]
+
+
+def _solve_bounded_expectation(
+    value_fn: Any,
+    *,
+    target_enterprise_value: float,
+    lower: float,
+    upper: float,
+) -> tuple[float | None, float | None, bool, str | None]:
+    if upper <= lower:
+        return None, None, False, "Reverse-valuation bounds are invalid for this driver."
+    lower_ev = value_fn(lower)
+    upper_ev = value_fn(upper)
+    if lower_ev is None or upper_ev is None:
+        return None, None, False, "Reverse-valuation solver could not compute both endpoint values."
+    lower_gap = lower_ev - target_enterprise_value
+    upper_gap = upper_ev - target_enterprise_value
+    increasing = upper_gap >= lower_gap
+    if lower_gap == 0:
+        return lower, lower_ev, True, None
+    if upper_gap == 0:
+        return upper, upper_ev, True, None
+    if (lower_gap < 0 and upper_gap < 0) or (lower_gap > 0 and upper_gap > 0):
+        if abs(lower_gap) <= abs(upper_gap):
+            closest_value, closest_ev = lower, lower_ev
+        else:
+            closest_value, closest_ev = upper, upper_ev
+        return (
+            closest_value,
+            closest_ev,
+            False,
+            "Current price is outside the bounded reverse-valuation range; Gamma reports the closest bounded estimate.",
+        )
+    low = lower
+    high = upper
+    best_value = lower
+    best_ev = lower_ev
+    for _ in range(64):
+        mid = (low + high) / 2.0
+        mid_ev = value_fn(mid)
+        if mid_ev is None:
+            break
+        best_value = mid
+        best_ev = mid_ev
+        mid_gap = mid_ev - target_enterprise_value
+        if abs(mid_gap) <= max(abs(target_enterprise_value) * 0.00001, 1.0):
+            return mid, mid_ev, True, None
+        if increasing:
+            if mid_gap < 0:
+                low = mid
+            else:
+                high = mid
+        else:
+            if mid_gap > 0:
+                low = mid
+            else:
+                high = mid
+    return best_value, best_ev, True, None
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _summary_to_payload(summary: FundamentalsDcfValuationSummary) -> dict[str, Any]:
+    payload = dict(summary.__dict__)
+    for key in ("retrieved_at",):
+        value = payload.get(key)
+        if isinstance(value, datetime):
+            payload[key] = value.isoformat()
+    return payload
+
+
+def _summary_from_payload(payload: dict[str, Any]) -> FundamentalsDcfValuationSummary:
+    return FundamentalsDcfValuationSummary(
+        scenario_id=str(payload.get("scenario_id") or ""),
+        label=str(payload.get("label") or payload.get("scenario_id") or ""),
+        enterprise_value=_optional_float(payload.get("enterprise_value")),
+        equity_value=_optional_float(payload.get("equity_value")),
+        implied_value_per_share=_optional_float(payload.get("implied_value_per_share")),
+        implied_value_low=_optional_float(payload.get("implied_value_low")),
+        implied_value_high=_optional_float(payload.get("implied_value_high")),
+        upside_downside_pct=_optional_float(payload.get("upside_downside_pct")),
+        terminal_value=_optional_float(payload.get("terminal_value")),
+        discounted_terminal_value=_optional_float(payload.get("discounted_terminal_value")),
+        discounted_cash_flow_value=_optional_float(payload.get("discounted_cash_flow_value")),
+        current_price=_optional_float(payload.get("current_price")),
+        source_provider=str(payload.get("source_provider") or "manual"),
+        retrieved_at=_parse_iso_datetime(payload.get("retrieved_at")),
+        origin=str(payload.get("origin") or "fundamentals.dcf.snapshot"),
+        transformation_note=payload.get("transformation_note"),
+    )
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _bounded(value: float, minimum: float, maximum: float) -> float:
     return min(max(value, minimum), maximum)
 
@@ -1398,7 +2316,8 @@ def _compute_dcf_projection(
         incremental_revenue = (revenue or 0.0) - previous_revenue
         computed_nwc = incremental_revenue * nwc_pct[index]
         nwc = _override_or_value(overrides, "change_in_nwc", index, computed_nwc, override_flags)
-        fcf = None if None in {ebit, taxes, da, capex, nwc} else (ebit - taxes + da - capex - nwc)
+        computed_fcf = None if None in {ebit, taxes, da, capex, nwc} else (ebit - taxes + da - capex - nwc)
+        fcf = _override_or_value(overrides, "free_cash_flow", index, computed_fcf, override_flags)
         projection_values["revenue"].append(revenue)
         projection_values["ebit"].append(ebit)
         projection_values["taxes"].append(taxes)
@@ -1409,7 +2328,6 @@ def _compute_dcf_projection(
         discount_factor = 1.0 / ((1.0 + wacc) ** (index + 1))
         projection_values["discount_factor"].append(discount_factor)
         projection_values["present_value_of_fcf"].append(None if fcf is None else fcf * discount_factor)
-        override_flags["free_cash_flow"].append(False)
         override_flags["discount_factor"].append(False)
         override_flags["present_value_of_fcf"].append(False)
         previous_revenue = revenue or previous_revenue

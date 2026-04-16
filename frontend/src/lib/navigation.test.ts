@@ -105,7 +105,14 @@ describe("navigation tab ordering", () => {
     expect(hasRegisteredModes("macro")).toBe(true);
     expect(hasRegisteredModes("research")).toBe(true);
     expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro", "research"]);
-    expect(snapshot.fundamentals?.map((mode) => mode.id)).toEqual(["overview", "financials", "dcf"]);
+    expect(snapshot.fundamentals?.map((mode) => mode.id)).toEqual([
+      "overview",
+      "financials",
+      "peers",
+      "dcf",
+      "reverse_valuation",
+      "reference",
+    ]);
     expect(snapshot.research?.map((mode) => mode.id)).toEqual([
       "overview",
       "scope_analysis",

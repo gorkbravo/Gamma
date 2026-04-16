@@ -202,6 +202,46 @@ class FundamentalsPeerHeatmapView:
 
 
 @dataclass(frozen=True)
+class FundamentalsPeerComparisonRecord:
+    ticker: str
+    name: str
+    selected: bool = False
+    candidate_reason: str | None = None
+    metrics: list[FundamentalsMetricRecord] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsPeerDiagnosticsRecord:
+    ticker: str
+    missing_metric_ids: list[str] = field(default_factory=list)
+    warning: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsPeersResult:
+    company: FundamentalsCompanyRecord
+    peer_basket: FundamentalsPeerBasketRecord
+    peer_candidates: list[FundamentalsPeerCandidateRecord] = field(default_factory=list)
+    peer_heatmap: FundamentalsPeerHeatmapView | None = None
+    comparisons: list[FundamentalsPeerComparisonRecord] = field(default_factory=list)
+    diagnostics: list[FundamentalsPeerDiagnosticsRecord] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class FundamentalsDcfRowRecord:
     line_key: str
     label: str
@@ -283,6 +323,152 @@ class FundamentalsDcfModelRecord:
     actual_rows: list[FundamentalsDcfRowRecord] = field(default_factory=list)
     scenarios: list[FundamentalsDcfScenarioRecord] = field(default_factory=list)
     sensitivity_matrix: FundamentalsDcfSensitivityMatrix | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsDcfSnapshotRecord:
+    snapshot_id: str
+    ticker: str
+    name: str
+    created_at: datetime
+    active_scenario_id: str
+    projection_years: list[int] = field(default_factory=list)
+    scenario_summaries: list[FundamentalsDcfValuationSummary] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsSourceTraceRecord:
+    statement: str
+    basis: str
+    line_key: str
+    line_label: str
+    period_key: str
+    period_label: str | None = None
+    normalized_value: float | None = None
+    display_value: str | None = None
+    unit: str | None = None
+    concept_name: str | None = None
+    accession_number: str | None = None
+    filing_form: str | None = None
+    fiscal_year: int | None = None
+    fiscal_period: str | None = None
+    filing_date: datetime | None = None
+    report_period: datetime | None = None
+    is_amendment: bool = False
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsCoverageRecord:
+    statement: str
+    basis: str
+    line_key: str
+    line_label: str
+    concept_names: list[str] = field(default_factory=list)
+    observed_periods: int = 0
+    missing_periods: int = 0
+    derived_observations: int = 0
+    coverage_ratio: float | None = None
+    warning: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsRawNormalizedInspectionResult:
+    company: FundamentalsCompanyRecord
+    traces: list[FundamentalsSourceTraceRecord] = field(default_factory=list)
+    coverage: list[FundamentalsCoverageRecord] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsReferenceResult:
+    company: FundamentalsCompanyRecord
+    filings: list[FundamentalsFilingRecord] = field(default_factory=list)
+    inspection: FundamentalsRawNormalizedInspectionResult | None = None
+    provider_warnings: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsReverseValuationDriverRecord:
+    driver_id: str
+    label: str
+    implied_value: float | None = None
+    display_value: str | None = None
+    base_value: float | None = None
+    base_display_value: str | None = None
+    gap_to_base: float | None = None
+    gap_display_value: str | None = None
+    target_enterprise_value: float | None = None
+    solved_enterprise_value: float | None = None
+    success: bool = False
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsReverseValuationSensitivityCell:
+    wacc_pct: float
+    terminal_growth_pct: float
+    implied_revenue_growth_pct: float | None = None
+    implied_ebit_margin_pct: float | None = None
+    implied_fcf_cagr_pct: float | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsReverseValuationSensitivityMatrix:
+    wacc_values: list[float] = field(default_factory=list)
+    terminal_growth_values: list[float] = field(default_factory=list)
+    rows: list[list[FundamentalsReverseValuationSensitivityCell]] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsReverseValuationResult:
+    company: FundamentalsCompanyRecord
+    current_price: float | None = None
+    shares_outstanding: float | None = None
+    net_debt: float | None = None
+    target_equity_value: float | None = None
+    target_enterprise_value: float | None = None
+    base_case_summary: FundamentalsDcfValuationSummary | None = None
+    scenario_gap_metrics: list[FundamentalsMetricRecord] = field(default_factory=list)
+    drivers: list[FundamentalsReverseValuationDriverRecord] = field(default_factory=list)
+    sensitivity_matrix: FundamentalsReverseValuationSensitivityMatrix | None = None
     warnings: list[str] = field(default_factory=list)
     source_provider: str = ""
     retrieved_at: datetime | None = None

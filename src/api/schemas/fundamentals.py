@@ -6,24 +6,36 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from src.models.fundamentals import (
+    FundamentalsCoverageRecord,
     FundamentalsCompanyRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
     FundamentalsDcfScenarioRecord,
     FundamentalsDcfSensitivityCell,
     FundamentalsDcfSensitivityMatrix,
+    FundamentalsDcfSnapshotRecord,
     FundamentalsDcfValuationSummary,
     FundamentalsFinancialsResult,
     FundamentalsMetricRecord,
     FundamentalsOverviewResult,
     FundamentalsPeerBasketRecord,
     FundamentalsPeerCandidateRecord,
+    FundamentalsPeerComparisonRecord,
+    FundamentalsPeerDiagnosticsRecord,
     FundamentalsPeerHeatmapCell,
     FundamentalsPeerHeatmapMetricRow,
     FundamentalsPeerHeatmapView,
+    FundamentalsPeersResult,
+    FundamentalsRawNormalizedInspectionResult,
+    FundamentalsReferenceResult,
+    FundamentalsReverseValuationDriverRecord,
+    FundamentalsReverseValuationResult,
+    FundamentalsReverseValuationSensitivityCell,
+    FundamentalsReverseValuationSensitivityMatrix,
     FundamentalsPeriodRecord,
     FundamentalsPricePoint,
     FundamentalsSearchResult,
+    FundamentalsSourceTraceRecord,
     FundamentalsStatementCell,
     FundamentalsStatementLine,
     FundamentalsStatementView,
@@ -294,6 +306,72 @@ class FundamentalsPeerHeatmapViewModel(BaseModel):
         )
 
 
+class FundamentalsPeerComparisonModel(BaseModel):
+    ticker: str
+    name: str
+    selected: bool = False
+    candidate_reason: str | None = None
+    metrics: list[FundamentalsMetricModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsPeerComparisonRecord) -> "FundamentalsPeerComparisonModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "metrics": [FundamentalsMetricModel.from_domain(item) for item in row.metrics],
+            }
+        )
+
+
+class FundamentalsPeerDiagnosticsModel(BaseModel):
+    ticker: str
+    missing_metric_ids: list[str] = Field(default_factory=list)
+    warning: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsPeerDiagnosticsRecord) -> "FundamentalsPeerDiagnosticsModel":
+        return cls(**row.__dict__)
+
+
+class FundamentalsPeersResponseModel(BaseModel):
+    company: FundamentalsCompanyModel
+    peer_basket: FundamentalsPeerBasketModel
+    peer_candidates: list[FundamentalsPeerCandidateModel] = Field(default_factory=list)
+    peer_heatmap: FundamentalsPeerHeatmapViewModel | None = None
+    comparisons: list[FundamentalsPeerComparisonModel] = Field(default_factory=list)
+    diagnostics: list[FundamentalsPeerDiagnosticsModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsPeersResult) -> "FundamentalsPeersResponseModel":
+        return cls(
+            company=FundamentalsCompanyModel.from_domain(row.company),
+            peer_basket=FundamentalsPeerBasketModel.from_domain(row.peer_basket),
+            peer_candidates=[FundamentalsPeerCandidateModel.from_domain(item) for item in row.peer_candidates],
+            peer_heatmap=FundamentalsPeerHeatmapViewModel.from_domain(row.peer_heatmap) if row.peer_heatmap else None,
+            comparisons=[FundamentalsPeerComparisonModel.from_domain(item) for item in row.comparisons],
+            diagnostics=[FundamentalsPeerDiagnosticsModel.from_domain(item) for item in row.diagnostics],
+            warnings=list(row.warnings),
+            source_provider=row.source_provider,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
 class FundamentalsDcfRowModel(BaseModel):
     line_key: str
     label: str
@@ -424,6 +502,238 @@ class FundamentalsDcfModelModel(BaseModel):
                     else None
                 ),
             }
+        )
+
+
+class FundamentalsDcfSnapshotModel(BaseModel):
+    snapshot_id: str
+    ticker: str
+    name: str
+    created_at: datetime
+    active_scenario_id: str
+    projection_years: list[int] = Field(default_factory=list)
+    scenario_summaries: list[FundamentalsDcfValuationSummaryModel] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsDcfSnapshotRecord) -> "FundamentalsDcfSnapshotModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "scenario_summaries": [
+                    FundamentalsDcfValuationSummaryModel.from_domain(item)
+                    for item in row.scenario_summaries
+                ],
+            }
+        )
+
+
+class FundamentalsDcfSnapshotListResponseModel(BaseModel):
+    snapshots: list[FundamentalsDcfSnapshotModel] = Field(default_factory=list)
+
+
+class FundamentalsDcfSnapshotSaveRequestModel(BaseModel):
+    name: str | None = None
+
+
+class FundamentalsSourceTraceModel(BaseModel):
+    statement: str
+    basis: str
+    line_key: str
+    line_label: str
+    period_key: str
+    period_label: str | None = None
+    normalized_value: float | None = None
+    display_value: str | None = None
+    unit: str | None = None
+    concept_name: str | None = None
+    accession_number: str | None = None
+    filing_form: str | None = None
+    fiscal_year: int | None = None
+    fiscal_period: str | None = None
+    filing_date: datetime | None = None
+    report_period: datetime | None = None
+    is_amendment: bool = False
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsSourceTraceRecord) -> "FundamentalsSourceTraceModel":
+        return cls(**row.__dict__)
+
+
+class FundamentalsCoverageModel(BaseModel):
+    statement: str
+    basis: str
+    line_key: str
+    line_label: str
+    concept_names: list[str] = Field(default_factory=list)
+    observed_periods: int = 0
+    missing_periods: int = 0
+    derived_observations: int = 0
+    coverage_ratio: float | None = None
+    warning: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsCoverageRecord) -> "FundamentalsCoverageModel":
+        return cls(**row.__dict__)
+
+
+class FundamentalsRawNormalizedInspectionModel(BaseModel):
+    company: FundamentalsCompanyModel
+    traces: list[FundamentalsSourceTraceModel] = Field(default_factory=list)
+    coverage: list[FundamentalsCoverageModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsRawNormalizedInspectionResult) -> "FundamentalsRawNormalizedInspectionModel":
+        return cls(
+            company=FundamentalsCompanyModel.from_domain(row.company),
+            traces=[FundamentalsSourceTraceModel.from_domain(item) for item in row.traces],
+            coverage=[FundamentalsCoverageModel.from_domain(item) for item in row.coverage],
+            warnings=list(row.warnings),
+            source_provider=row.source_provider,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
+class FundamentalsReferenceResponseModel(BaseModel):
+    company: FundamentalsCompanyModel
+    filings: list[FundamentalsFilingModel] = Field(default_factory=list)
+    inspection: FundamentalsRawNormalizedInspectionModel | None = None
+    provider_warnings: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsReferenceResult) -> "FundamentalsReferenceResponseModel":
+        return cls(
+            company=FundamentalsCompanyModel.from_domain(row.company),
+            filings=[FundamentalsFilingModel.from_domain(item) for item in row.filings],
+            inspection=FundamentalsRawNormalizedInspectionModel.from_domain(row.inspection) if row.inspection else None,
+            provider_warnings=list(row.provider_warnings),
+            warnings=list(row.warnings),
+            source_provider=row.source_provider,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
+class FundamentalsReverseValuationDriverModel(BaseModel):
+    driver_id: str
+    label: str
+    implied_value: float | None = None
+    display_value: str | None = None
+    base_value: float | None = None
+    base_display_value: str | None = None
+    gap_to_base: float | None = None
+    gap_display_value: str | None = None
+    target_enterprise_value: float | None = None
+    solved_enterprise_value: float | None = None
+    success: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsReverseValuationDriverRecord) -> "FundamentalsReverseValuationDriverModel":
+        return cls(**row.__dict__)
+
+
+class FundamentalsReverseValuationSensitivityCellModel(BaseModel):
+    wacc_pct: float
+    terminal_growth_pct: float
+    implied_revenue_growth_pct: float | None = None
+    implied_ebit_margin_pct: float | None = None
+    implied_fcf_cagr_pct: float | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsReverseValuationSensitivityCell) -> "FundamentalsReverseValuationSensitivityCellModel":
+        return cls(**row.__dict__)
+
+
+class FundamentalsReverseValuationSensitivityMatrixModel(BaseModel):
+    wacc_values: list[float] = Field(default_factory=list)
+    terminal_growth_values: list[float] = Field(default_factory=list)
+    rows: list[list[FundamentalsReverseValuationSensitivityCellModel]] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsReverseValuationSensitivityMatrix) -> "FundamentalsReverseValuationSensitivityMatrixModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "rows": [
+                    [FundamentalsReverseValuationSensitivityCellModel.from_domain(cell) for cell in group]
+                    for group in row.rows
+                ],
+            }
+        )
+
+
+class FundamentalsReverseValuationResponseModel(BaseModel):
+    company: FundamentalsCompanyModel
+    current_price: float | None = None
+    shares_outstanding: float | None = None
+    net_debt: float | None = None
+    target_equity_value: float | None = None
+    target_enterprise_value: float | None = None
+    base_case_summary: FundamentalsDcfValuationSummaryModel | None = None
+    scenario_gap_metrics: list[FundamentalsMetricModel] = Field(default_factory=list)
+    drivers: list[FundamentalsReverseValuationDriverModel] = Field(default_factory=list)
+    sensitivity_matrix: FundamentalsReverseValuationSensitivityMatrixModel | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsReverseValuationResult) -> "FundamentalsReverseValuationResponseModel":
+        return cls(
+            company=FundamentalsCompanyModel.from_domain(row.company),
+            current_price=row.current_price,
+            shares_outstanding=row.shares_outstanding,
+            net_debt=row.net_debt,
+            target_equity_value=row.target_equity_value,
+            target_enterprise_value=row.target_enterprise_value,
+            base_case_summary=FundamentalsDcfValuationSummaryModel.from_domain(row.base_case_summary) if row.base_case_summary else None,
+            scenario_gap_metrics=[FundamentalsMetricModel.from_domain(item) for item in row.scenario_gap_metrics],
+            drivers=[FundamentalsReverseValuationDriverModel.from_domain(item) for item in row.drivers],
+            sensitivity_matrix=FundamentalsReverseValuationSensitivityMatrixModel.from_domain(row.sensitivity_matrix) if row.sensitivity_matrix else None,
+            warnings=list(row.warnings),
+            source_provider=row.source_provider,
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
         )
 
 

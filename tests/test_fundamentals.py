@@ -117,6 +117,75 @@ def test_fundamentals_peer_basket_persists_across_overview_requests(tmp_path):
     assert selected_candidates == ["MSFT", "GOOGL", "META"]
 
 
+def test_fundamentals_peers_payload_deepens_comparison_and_diagnostics(tmp_path):
+    service = _build_service(tmp_path)
+
+    peers = service.get_peers("AAPL")
+
+    assert peers is not None
+    assert peers.peer_basket.display_order[0] == "AAPL"
+    assert peers.peer_heatmap is not None
+    assert {"valuation", "profitability", "growth", "efficiency", "leverage"}.issubset(
+        {row.family for row in peers.peer_heatmap.rows}
+    )
+    assert peers.comparisons[0].ticker == "AAPL"
+    metric_ids = {metric.metric_id for metric in peers.comparisons[0].metrics}
+    assert "implied_revenue_cagr" in metric_ids
+    assert peers.diagnostics
+    assert peers.transformation_note is not None
+
+
+def test_fundamentals_reference_exposes_raw_normalized_trace_and_coverage(tmp_path):
+    service = _build_service(tmp_path)
+
+    reference = service.get_reference("AAPL")
+
+    assert reference is not None
+    assert reference.inspection is not None
+    assert reference.inspection.traces
+    revenue_trace = next(row for row in reference.inspection.traces if row.line_key == "revenue")
+    assert revenue_trace.concept_name == "test:revenue"
+    assert revenue_trace.accession_number is not None
+    assert revenue_trace.filing_form == "10-K"
+    assert reference.inspection.coverage
+    assert reference.inspection.transformation_note is not None
+
+
+def test_fundamentals_reverse_valuation_solves_implied_expectations(tmp_path):
+    service = _build_service(tmp_path)
+
+    reverse = service.get_reverse_valuation("AAPL")
+
+    assert reverse is not None
+    assert reverse.target_enterprise_value is not None
+    assert reverse.base_case_summary is not None
+    assert reverse.scenario_gap_metrics
+    revenue_driver = next(driver for driver in reverse.drivers if driver.driver_id == "implied_revenue_cagr")
+    fcf_driver = next(driver for driver in reverse.drivers if driver.driver_id == "implied_fcf_cagr")
+    assert revenue_driver.implied_value is not None
+    assert revenue_driver.transformation_note is not None
+    assert fcf_driver.solved_enterprise_value is not None
+    assert reverse.sensitivity_matrix is not None
+    assert reverse.sensitivity_matrix.rows[0][0].transformation_note is not None
+
+
+def test_fundamentals_dcf_snapshots_save_list_and_load_model(tmp_path):
+    service = _build_service(tmp_path)
+
+    snapshot = service.save_dcf_snapshot("AAPL", name="Base checkpoint")
+    snapshots = service.list_dcf_snapshots("AAPL")
+    loaded = service.load_dcf_snapshot_model("AAPL", snapshot.snapshot_id if snapshot else "")
+
+    assert snapshot is not None
+    assert snapshot.name == "Base checkpoint"
+    assert snapshot.scenario_summaries
+    assert snapshots is not None
+    assert snapshots[0].snapshot_id == snapshot.snapshot_id
+    assert loaded is not None
+    assert loaded.ticker == "AAPL"
+    assert loaded.active_scenario_id == snapshot.active_scenario_id
+
+
 def test_fundamentals_dcf_model_reanchors_stale_projection_years_from_store(tmp_path):
     service = _build_service(tmp_path)
 

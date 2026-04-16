@@ -18,9 +18,14 @@ import type {
   CryptoWorkspaceResponse,
   DiagnosticsResponse,
   FundamentalsDcfModel,
+  FundamentalsDcfSnapshot,
+  FundamentalsDcfSnapshotList,
   FundamentalsFinancials,
   FundamentalsOverview,
   FundamentalsPeerBasket,
+  FundamentalsPeers,
+  FundamentalsReference,
+  FundamentalsReverseValuation,
   FundamentalsSearchResponse,
   IvSessionStatus,
   IvSurface,
@@ -280,6 +285,10 @@ export const selectedFundamentalsTicker = writable<string | null>(null);
 export const fundamentalsOverview = writable<FundamentalsOverview | null>(null);
 export const fundamentalsFinancials = writable<FundamentalsFinancials | null>(null);
 export const fundamentalsDcfModel = writable<FundamentalsDcfModel | null>(null);
+export const fundamentalsPeers = writable<FundamentalsPeers | null>(null);
+export const fundamentalsReference = writable<FundamentalsReference | null>(null);
+export const fundamentalsReverseValuation = writable<FundamentalsReverseValuation | null>(null);
+export const fundamentalsDcfSnapshots = writable<FundamentalsDcfSnapshotList | null>(null);
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
   portfolio: null,
   research: null,
@@ -532,6 +541,9 @@ function buildCopilotContextFingerprint(
   if (domain === "fundamentals") {
     const overview = get(fundamentalsOverview);
     const dcf = get(fundamentalsDcfModel);
+    const peers = get(fundamentalsPeers);
+    const reverse = get(fundamentalsReverseValuation);
+    const reference = get(fundamentalsReference);
     return JSON.stringify({
       domain,
       workspaceMode,
@@ -540,7 +552,11 @@ function buildCopilotContextFingerprint(
       companyName: overview?.company.name ?? null,
       overviewRetrievedAt: overview?.company.retrieved_at ?? null,
       dcfRetrievedAt: dcf?.retrieved_at ?? null,
-      activeScenarioId: dcf?.active_scenario_id ?? null
+      peersRetrievedAt: peers?.retrieved_at ?? null,
+      reverseRetrievedAt: reverse?.retrieved_at ?? null,
+      referenceRetrievedAt: reference?.retrieved_at ?? null,
+      activeScenarioId: dcf?.active_scenario_id ?? null,
+      peerTickers: peers?.peer_basket.display_order ?? overview?.peer_basket?.display_order ?? []
     });
   }
 
@@ -1398,6 +1414,10 @@ export async function loadFundamentalsSearch(options: FundamentalsSearchOptions 
       fundamentalsOverview.set(null);
       fundamentalsFinancials.set(null);
       fundamentalsDcfModel.set(null);
+      fundamentalsPeers.set(null);
+      fundamentalsReference.set(null);
+      fundamentalsReverseValuation.set(null);
+      fundamentalsDcfSnapshots.set(null);
       resetCopilotCard("fundamentals");
     }
     lastError.set("");
@@ -1425,10 +1445,14 @@ export async function selectFundamentalsCompany(
   setLoading("fundamentals", true);
   try {
     const querySuffix = options.forceRefresh ? "?force_refresh=true" : "";
-    const [overviewResult, financialsResult, dcfResult] = await Promise.allSettled([
+    const [overviewResult, financialsResult, dcfResult, peersResult, reverseResult, referenceResult, snapshotsResult] = await Promise.allSettled([
       getJson<FundamentalsOverview>(`/fundamentals/${normalizedTicker}/overview${querySuffix}`),
       getJson<FundamentalsFinancials>(`/fundamentals/${normalizedTicker}/financials${querySuffix}`),
-      getJson<FundamentalsDcfModel>(`/fundamentals/${normalizedTicker}/dcf${querySuffix}`)
+      getJson<FundamentalsDcfModel>(`/fundamentals/${normalizedTicker}/dcf${querySuffix}`),
+      getJson<FundamentalsPeers>(`/fundamentals/${normalizedTicker}/peers${querySuffix}`),
+      getJson<FundamentalsReverseValuation>(`/fundamentals/${normalizedTicker}/reverse-valuation${querySuffix}`),
+      getJson<FundamentalsReference>(`/fundamentals/${normalizedTicker}/reference${querySuffix}`),
+      getJson<FundamentalsDcfSnapshotList>(`/fundamentals/${normalizedTicker}/dcf/snapshots${querySuffix}`)
     ]);
 
     const errors: unknown[] = [];
@@ -1454,6 +1478,34 @@ export async function selectFundamentalsCompany(
       errors.push(dcfResult.reason);
     }
 
+    if (peersResult.status === "fulfilled") {
+      fundamentalsPeers.set(peersResult.value);
+    } else {
+      fundamentalsPeers.set(null);
+      errors.push(peersResult.reason);
+    }
+
+    if (reverseResult.status === "fulfilled") {
+      fundamentalsReverseValuation.set(reverseResult.value);
+    } else {
+      fundamentalsReverseValuation.set(null);
+      errors.push(reverseResult.reason);
+    }
+
+    if (referenceResult.status === "fulfilled") {
+      fundamentalsReference.set(referenceResult.value);
+    } else {
+      fundamentalsReference.set(null);
+      errors.push(referenceResult.reason);
+    }
+
+    if (snapshotsResult.status === "fulfilled") {
+      fundamentalsDcfSnapshots.set(snapshotsResult.value);
+    } else {
+      fundamentalsDcfSnapshots.set(null);
+      errors.push(snapshotsResult.reason);
+    }
+
     if (errors.length === 0) {
       lastError.set("");
     } else {
@@ -1462,7 +1514,11 @@ export async function selectFundamentalsCompany(
     return {
       overview: overviewResult.status === "fulfilled" ? overviewResult.value : null,
       financials: financialsResult.status === "fulfilled" ? financialsResult.value : null,
-      dcf: dcfResult.status === "fulfilled" ? dcfResult.value : null
+      dcf: dcfResult.status === "fulfilled" ? dcfResult.value : null,
+      peers: peersResult.status === "fulfilled" ? peersResult.value : null,
+      reverseValuation: reverseResult.status === "fulfilled" ? reverseResult.value : null,
+      reference: referenceResult.status === "fulfilled" ? referenceResult.value : null,
+      snapshots: snapshotsResult.status === "fulfilled" ? snapshotsResult.value : null
     };
   } catch (error) {
     setError(error);
@@ -1518,8 +1574,60 @@ export async function saveFundamentalsDcfModel(ticker: string, payload: Fundamen
               .filter((summary): summary is NonNullable<typeof summary> => summary != null)
           }
     );
+    const querySuffix = "?force_refresh=false";
+    const [reverseResult, snapshotsResult] = await Promise.allSettled([
+      getJson<FundamentalsReverseValuation>(`/fundamentals/${normalizedTicker}/reverse-valuation${querySuffix}`),
+      getJson<FundamentalsDcfSnapshotList>(`/fundamentals/${normalizedTicker}/dcf/snapshots${querySuffix}`)
+    ]);
+    if (reverseResult.status === "fulfilled") {
+      fundamentalsReverseValuation.set(reverseResult.value);
+    }
+    if (snapshotsResult.status === "fulfilled") {
+      fundamentalsDcfSnapshots.set(snapshotsResult.value);
+    }
     lastError.set("");
     return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("fundamentalsSave", false);
+  }
+}
+
+export async function saveFundamentalsDcfSnapshot(ticker: string, name?: string) {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  setLoading("fundamentalsSave", true);
+  try {
+    const snapshot = await postJson<FundamentalsDcfSnapshot>(`/fundamentals/${normalizedTicker}/dcf/snapshots`, {
+      name: name?.trim() || null
+    });
+    const snapshots = await getJson<FundamentalsDcfSnapshotList>(`/fundamentals/${normalizedTicker}/dcf/snapshots`);
+    fundamentalsDcfSnapshots.set(snapshots);
+    lastError.set("");
+    return snapshot;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("fundamentalsSave", false);
+  }
+}
+
+export async function loadFundamentalsDcfSnapshot(ticker: string, snapshotId: string) {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  const normalizedSnapshotId = snapshotId.trim();
+  if (!normalizedTicker || !normalizedSnapshotId) {
+    return null;
+  }
+  setLoading("fundamentalsSave", true);
+  try {
+    const model = await getJson<FundamentalsDcfModel>(
+      `/fundamentals/${normalizedTicker}/dcf/snapshots/${encodeURIComponent(normalizedSnapshotId)}`
+    );
+    fundamentalsDcfModel.set(model);
+    lastError.set("");
+    return model;
   } catch (error) {
     setError(error);
     return null;
@@ -1644,12 +1752,35 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         workspace_mode: workspaceMode,
         crypto_token_id: get(selectedCryptoTokenId)
       };
-    case "fundamentals":
+    case "fundamentals": {
+      const fundamentalsTicker = get(selectedFundamentalsTicker);
+      const fundamentalsOverviewState = get(fundamentalsOverview);
+      const fundamentalsDcfState = get(fundamentalsDcfModel);
+      const fundamentalsPeersState = get(fundamentalsPeers);
+      const fundamentalsReverseState = get(fundamentalsReverseValuation);
       return {
         current_tab: "fundamentals",
         workspace_mode: workspaceMode,
-        fundamentals_ticker: get(selectedFundamentalsTicker)
+        fundamentals_ticker: fundamentalsTicker,
+        fundamentals_state: {
+          ticker: fundamentalsTicker,
+          company_name: fundamentalsOverviewState?.company.name ?? null,
+          active_scenario_id: fundamentalsDcfState?.active_scenario_id ?? null,
+          peer_tickers:
+            fundamentalsPeersState?.peer_basket.display_order ??
+            fundamentalsOverviewState?.peer_basket?.display_order ??
+            [],
+          reverse_drivers:
+            fundamentalsReverseState?.drivers.map((driver) => ({
+              driver_id: driver.driver_id,
+              display_value: driver.display_value,
+              base_display_value: driver.base_display_value,
+              gap_display_value: driver.gap_display_value,
+              success: driver.success
+            })) ?? []
+        }
       };
+    }
     case "risk":
       return {
         current_tab: "risk",
@@ -1725,8 +1856,8 @@ function validateSynthesisScopeDomain(
   if (domain === "crypto" && !get(cryptoTokenDetail)) {
     return "Select and load a crypto token before including it in a synthesis card.";
   }
-  if (domain === "fundamentals") {
-    return "Fundamentals Copilot grounding is not implemented yet.";
+  if (domain === "fundamentals" && !get(fundamentalsOverview)) {
+    return "Select and load a Fundamentals company before including it in a synthesis card.";
   }
   if (domain === "risk" && !get(riskResult)) {
     return "Run a Risk computation before including it in a synthesis card.";
@@ -1767,8 +1898,11 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "crypto" && !get(selectedCryptoTokenId)) {
     return "Select a crypto token before generating a research card.";
   }
-  if (domain === "fundamentals") {
-    return "Fundamentals Copilot grounding is not implemented yet.";
+  if (domain === "fundamentals" && !get(selectedFundamentalsTicker)) {
+    return "Select a Fundamentals company before generating a research card.";
+  }
+  if (domain === "fundamentals" && !get(fundamentalsOverview)) {
+    return "Load a Fundamentals company before generating a research card.";
   }
   if (domain === "risk" && !get(riskResult)) {
     return "Run a risk computation before generating a research card.";
@@ -1776,7 +1910,7 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "iv" && !hasRenderableIvSurface(resolvedIvSurface())) {
     return "Load an IV surface before generating a research card.";
   }
-  if (domain === "portfolio" || domain === "research" || domain === "crypto" || domain === "risk" || domain === "iv") {
+  if (domain === "portfolio" || domain === "research" || domain === "crypto" || domain === "fundamentals" || domain === "risk" || domain === "iv") {
     const context = buildCopilotContext(domain, options.workspaceMode);
     return context ? null : "The active Copilot context is unavailable.";
   }

@@ -239,6 +239,7 @@ def build_runtime(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
         crypto_service=crypto_service,
+        fundamentals_service=fundamentals_service,
         provider=_build_copilot_provider(),
     )
     risk_service = RiskService(

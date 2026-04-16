@@ -2,13 +2,25 @@ import type {
   FundamentalsDcfModel,
   FundamentalsDcfScenario,
   FundamentalsFinancials,
+  FundamentalsReference,
+  FundamentalsReverseValuationDriver,
+  FundamentalsSourceTrace,
   FundamentalsStatementView
 } from "../api/types";
 import type { FundamentalsDcfSavePayload } from "../stores/app";
 
-export type FundamentalsMode = "overview" | "financials" | "dcf";
+export type FundamentalsMode = "overview" | "financials" | "peers" | "dcf" | "reverse_valuation" | "reference";
 export type FundamentalsStatementBasis = "annual" | "quarterly";
 export type FundamentalsStatementKind = "income" | "balance" | "cashflow" | "ratios";
+
+export const fundamentalsModes: Array<{ id: FundamentalsMode; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "financials", label: "Financials" },
+  { id: "peers", label: "Peers" },
+  { id: "dcf", label: "DCF" },
+  { id: "reverse_valuation", label: "Reverse Valuation" },
+  { id: "reference", label: "Reference / Filings" }
+];
 
 export interface FundamentalsDcfDraftScenario {
   assumptions: Record<string, unknown>;
@@ -212,6 +224,39 @@ export function parseEditableNumber(value: string): number | null {
   }
   const numeric = Number(trimmed.replace(/,/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+export function driverTone(driver: FundamentalsReverseValuationDriver | null | undefined) {
+  if (!driver || !driver.success || driver.gap_to_base == null) {
+    return "";
+  }
+  return driver.gap_to_base >= 0 ? "warning" : "positive";
+}
+
+export function sourceTracesForStatement(
+  reference: FundamentalsReference | null,
+  basis: FundamentalsStatementBasis,
+  statementKind: FundamentalsStatementKind
+): FundamentalsSourceTrace[] {
+  const traces = reference?.inspection?.traces ?? [];
+  return traces.filter((trace) => trace.basis === basis && trace.statement === statementKind);
+}
+
+export function snapshotDisplayName(name: string | null | undefined, createdAt: string | null | undefined) {
+  const trimmed = String(name ?? "").trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  if (!createdAt) {
+    return "DCF snapshot";
+  }
+  return `Snapshot ${new Date(createdAt).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  })}`;
 }
 
 function structuredCloneValue<T>(value: T): T {

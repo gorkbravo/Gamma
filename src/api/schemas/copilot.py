@@ -69,6 +69,8 @@ class CopilotRequestContextModel(BaseModel):
     macro: MacroCopilotContextModel | None = None
     prediction_market_id: str | None = None
     crypto_token_id: str | None = None
+    fundamentals_ticker: str | None = None
+    fundamentals_state: dict[str, object] | None = None
     portfolio_state: CopilotPortfolioStateModel | None = None
     research_state: CopilotResearchStateModel | None = None
     risk_state: CopilotRiskStateModel | None = None
@@ -81,6 +83,8 @@ class CopilotRequestContextModel(BaseModel):
             macro=self.macro.to_domain() if self.macro is not None else None,
             prediction_market_id=self.prediction_market_id,
             crypto_token_id=self.crypto_token_id,
+            fundamentals_ticker=self.fundamentals_ticker,
+            fundamentals_state=self.fundamentals_state,
             portfolio_state=self.portfolio_state.model_dump(mode="python") if self.portfolio_state is not None else None,
             research_state=self.research_state.model_dump(mode="python") if self.research_state is not None else None,
             risk_state=self.risk_state.model_dump(mode="python") if self.risk_state is not None else None,

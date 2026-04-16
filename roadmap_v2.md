@@ -1142,9 +1142,10 @@ At the end of Crypto V2, Gamma should provide a flow-aware crypto research works
 
 ## Workstream 6 - Fundamentals V2
 
-_Status: Planned_
+_Status: In progress (~82%)_
 _Dependency marker: Parallelizable_
 _Parallelization note: US SEC improvements can progress independently; European/international expansion depends on provider and normalization choices._
+_Recent progress: Fundamentals V2 now has first-class Peers, Reverse Valuation, and Reference / Filings modes; raw-versus-normalized SEC source inspection; service-owned implied-expectation solves; deeper peer diagnostics; DCF model snapshots; and Fundamentals-specific Copilot grounding with read-only tools. Remaining work is mostly regional/provider expansion, richer statement trend overlays, optional terminal multiple framing, cleaner cross-tab handoffs, and additional overview polish._
 
 ### Why this workstream matters
 

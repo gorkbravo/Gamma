@@ -1153,6 +1153,43 @@ export interface FundamentalsPeerHeatmapView {
   transformation_note: string | null;
 }
 
+export interface FundamentalsPeerComparison {
+  ticker: string;
+  name: string;
+  selected: boolean;
+  candidate_reason: string | null;
+  metrics: FundamentalsMetric[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeerDiagnostics {
+  ticker: string;
+  missing_metric_ids: string[];
+  warning: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsPeers {
+  company: FundamentalsCompany;
+  peer_basket: FundamentalsPeerBasket;
+  peer_candidates: FundamentalsPeerCandidate[];
+  peer_heatmap: FundamentalsPeerHeatmapView | null;
+  comparisons: FundamentalsPeerComparison[];
+  diagnostics: FundamentalsPeerDiagnostics[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface FundamentalsDcfRow {
   line_key: string;
   label: string;
@@ -1229,6 +1266,147 @@ export interface FundamentalsDcfModel {
   actual_rows: FundamentalsDcfRow[];
   scenarios: FundamentalsDcfScenario[];
   sensitivity_matrix: FundamentalsDcfSensitivityMatrix | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfSnapshot {
+  snapshot_id: string;
+  ticker: string;
+  name: string;
+  created_at: string;
+  active_scenario_id: string;
+  projection_years: number[];
+  scenario_summaries: FundamentalsDcfValuationSummary[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsDcfSnapshotList {
+  snapshots: FundamentalsDcfSnapshot[];
+}
+
+export interface FundamentalsSourceTrace {
+  statement: string;
+  basis: string;
+  line_key: string;
+  line_label: string;
+  period_key: string;
+  period_label: string | null;
+  normalized_value: number | null;
+  display_value: string | null;
+  unit: string | null;
+  concept_name: string | null;
+  accession_number: string | null;
+  filing_form: string | null;
+  fiscal_year: number | null;
+  fiscal_period: string | null;
+  filing_date: string | null;
+  report_period: string | null;
+  is_amendment: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsCoverage {
+  statement: string;
+  basis: string;
+  line_key: string;
+  line_label: string;
+  concept_names: string[];
+  observed_periods: number;
+  missing_periods: number;
+  derived_observations: number;
+  coverage_ratio: number | null;
+  warning: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsRawNormalizedInspection {
+  company: FundamentalsCompany;
+  traces: FundamentalsSourceTrace[];
+  coverage: FundamentalsCoverage[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsReference {
+  company: FundamentalsCompany;
+  filings: FundamentalsFiling[];
+  inspection: FundamentalsRawNormalizedInspection | null;
+  provider_warnings: string[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsReverseValuationDriver {
+  driver_id: string;
+  label: string;
+  implied_value: number | null;
+  display_value: string | null;
+  base_value: number | null;
+  base_display_value: string | null;
+  gap_to_base: number | null;
+  gap_display_value: string | null;
+  target_enterprise_value: number | null;
+  solved_enterprise_value: number | null;
+  success: boolean;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsReverseValuationSensitivityCell {
+  wacc_pct: number;
+  terminal_growth_pct: number;
+  implied_revenue_growth_pct: number | null;
+  implied_ebit_margin_pct: number | null;
+  implied_fcf_cagr_pct: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsReverseValuationSensitivityMatrix {
+  wacc_values: number[];
+  terminal_growth_values: number[];
+  rows: FundamentalsReverseValuationSensitivityCell[][];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface FundamentalsReverseValuation {
+  company: FundamentalsCompany;
+  current_price: number | null;
+  shares_outstanding: number | null;
+  net_debt: number | null;
+  target_equity_value: number | null;
+  target_enterprise_value: number | null;
+  base_case_summary: FundamentalsDcfValuationSummary | null;
+  scenario_gap_metrics: FundamentalsMetric[];
+  drivers: FundamentalsReverseValuationDriver[];
+  sensitivity_matrix: FundamentalsReverseValuationSensitivityMatrix | null;
   warnings: string[];
   source_provider: string;
   retrieved_at: string | null;

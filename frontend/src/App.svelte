@@ -31,9 +31,13 @@
     clearPortfolioHistory,
     copilotThreads,
     cryptoComparison,
+    fundamentalsDcfSnapshots,
     fundamentalsDcfModel,
     fundamentalsFinancials,
     fundamentalsOverview,
+    fundamentalsPeers,
+    fundamentalsReference,
+    fundamentalsReverseValuation,
     fundamentalsSearch,
     cryptoFlowSummary,
     cryptoLiquidity,
@@ -91,11 +95,13 @@
     saveResearchItem,
     deleteSavedResearchItem,
     saveFundamentalsDcfModel,
+    saveFundamentalsDcfSnapshot,
     saveFundamentalsPeerBasket,
     savedResearchItems,
     selectedFundamentalsTicker,
     selectCryptoToken,
     selectFundamentalsCompany,
+    loadFundamentalsDcfSnapshot,
     selectPredictionMarket,
     setBaseCurrency,
     setMarketDataMode,
@@ -123,8 +129,12 @@
     CryptoToken,
     CryptoWorkspaceResponse,
     FundamentalsDcfModel,
+    FundamentalsDcfSnapshotList,
     FundamentalsFinancials,
     FundamentalsOverview,
+    FundamentalsPeers,
+    FundamentalsReference,
+    FundamentalsReverseValuation,
     FundamentalsSearchResponse,
     IvSessionStatus,
     IvSurface,
@@ -191,6 +201,7 @@
     macroSnapshot: $macroSnapshot,
     prediction: $predictionMarketDetail,
     crypto: $cryptoTokenDetail,
+    fundamentals: $fundamentalsOverview,
     risk: $riskResult,
     riskWorkspace: $riskWorkspaceBasis,
     ivSurface: $ivSurface,
@@ -395,6 +406,7 @@
     macroSnapshot,
     prediction,
     crypto,
+    fundamentals,
     risk,
     riskWorkspace,
     ivSurface,
@@ -410,6 +422,7 @@
     macroSnapshot: MacroSnapshot | null;
     prediction: PredictionMarket | null;
     crypto: CryptoToken | null;
+    fundamentals: FundamentalsOverview | null;
     risk: RiskResult | null;
     riskWorkspace: WorkspaceMode | null;
     ivSurface: IvSurface | null;
@@ -502,6 +515,17 @@
           ? `Token ${formatShortTimestamp(crypto.retrieved_at)}`
           : null,
         null
+      );
+    }
+
+    if (fundamentals) {
+      pushOption(
+        "fundamentals",
+        describeFundamentalsCopilotContext(fundamentals, fundamentals.company.ticker),
+        formatShortTimestamp(fundamentals.company.retrieved_at)
+          ? `Company ${formatShortTimestamp(fundamentals.company.retrieved_at)}`
+          : null,
+        formatWarningLabel(fundamentals.warnings.length)
       );
     }
 
@@ -675,16 +699,18 @@
 
     if (tab === "fundamentals") {
       return {
-        supported: false,
-        domain: null,
-        triggerLabel: "Coming later",
+        supported: fundamentals != null,
+        domain: "fundamentals",
+        triggerLabel: fundamentals ? "Fundamentals context" : "Select company",
         contextLabel: describeFundamentalsCopilotContext(fundamentals, fundamentalsTicker),
         domainLabel: "Fundamentals",
         guidance:
-          "The Fundamentals workspace is live, but Copilot grounding for filing-native fundamentals, peer baskets, and DCF state has not been wired yet.",
+          fundamentals != null
+            ? "Grounded in the selected company, filings, normalized statements, peer basket, DCF state, and reverse valuation. Gamma remains read-only."
+            : "Select and load a Fundamentals company before generating a research card.",
         placeholder:
-          "Fundamentals Copilot grounding is intentionally disabled until the tab has a dedicated backend context.",
-        thread: null,
+          "Pressure-test implied expectations, compare peers, or frame the cleanest filing-backed valuation question.",
+        thread: threads.fundamentals,
         scopeOptions: [],
         selectedScopeDomains: [],
         selectionMessage: null,
@@ -906,6 +932,10 @@
       push("Fundamentals", $fundamentalsOverview?.warnings, "warning");
       push("Financials", $fundamentalsFinancials?.warnings, "warning");
       push("DCF", $fundamentalsDcfModel?.warnings, "warning");
+      push("Peers", $fundamentalsPeers?.warnings, "warning");
+      push("Reverse", $fundamentalsReverseValuation?.warnings, "warning");
+      push("Reference", $fundamentalsReference?.warnings, "warning");
+      push("Provider", $fundamentalsReference?.provider_warnings, "warning");
     } else if ($activeTab === "risk") {
       push("Risk", $riskResult?.warnings, "warning");
     } else {
@@ -1485,12 +1515,18 @@
             overview={$fundamentalsOverview}
             financials={$fundamentalsFinancials}
             dcfModel={$fundamentalsDcfModel}
+            peers={$fundamentalsPeers}
+            reverseValuation={$fundamentalsReverseValuation}
+            reference={$fundamentalsReference}
+            dcfSnapshots={$fundamentalsDcfSnapshots}
             loading={$loading.fundamentals}
             saving={$loading.fundamentalsSave}
             onSearch={loadFundamentalsSearch}
             onSelectCompany={selectFundamentalsCompany}
             onSavePeerBasket={saveFundamentalsPeerBasket}
             onSaveDcfModel={saveFundamentalsDcfModel}
+            onSaveDcfSnapshot={saveFundamentalsDcfSnapshot}
+            onLoadDcfSnapshot={loadFundamentalsDcfSnapshot}
           />
         {:else if $activeTab === "risk"}
           <RiskView

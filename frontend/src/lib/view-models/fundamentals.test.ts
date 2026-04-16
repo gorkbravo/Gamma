@@ -2,16 +2,22 @@ import { describe, expect, it } from "vitest";
 import type {
   FundamentalsDcfModel,
   FundamentalsFinancials,
+  FundamentalsReference,
+  FundamentalsReverseValuationDriver,
   FundamentalsStatementView
 } from "../api/types";
 import {
   buildDcfSavePayload,
   createDcfDraft,
+  driverTone,
   findDcfScenario,
+  fundamentalsModes,
   normalizePeerTickers,
   parseEditableNumber,
   setDraftActiveScenario,
+  snapshotDisplayName,
   statementViewForSelection,
+  sourceTracesForStatement,
   updateDraftOverride,
   updateDraftScalarAssumption,
   updateDraftAssumptionSeriesValue
@@ -55,6 +61,49 @@ describe("fundamentals view-model helpers", () => {
     expect(parseEditableNumber(" 1,250.5 ")).toBe(1250.5);
     expect(parseEditableNumber("")).toBeNull();
     expect(parseEditableNumber("abc")).toBeNull();
+  });
+
+  it("registers the V2 mode order", () => {
+    expect(fundamentalsModes.map((mode) => mode.id)).toEqual([
+      "overview",
+      "financials",
+      "peers",
+      "dcf",
+      "reverse_valuation",
+      "reference"
+    ]);
+  });
+
+  it("filters source traces for the active financial statement", () => {
+    const reference = makeReference();
+
+    expect(sourceTracesForStatement(reference, "annual", "income")).toHaveLength(1);
+    expect(sourceTracesForStatement(reference, "quarterly", "income")).toHaveLength(0);
+  });
+
+  it("labels snapshots and reverse valuation driver tone", () => {
+    const driver = {
+      driver_id: "implied_revenue_cagr",
+      label: "Implied revenue CAGR",
+      implied_value: 0.08,
+      display_value: "8.0%",
+      base_value: 0.05,
+      base_display_value: "5.0%",
+      gap_to_base: 0.03,
+      gap_display_value: "+3.0 pts",
+      target_enterprise_value: 100,
+      solved_enterprise_value: 100,
+      success: true,
+      warnings: [],
+      source_provider: "gamma",
+      retrieved_at: "2026-04-09T10:00:00Z",
+      origin: "fundamentals.reverse.test",
+      transformation_note: "Gamma solved a bounded reverse valuation driver."
+    } satisfies FundamentalsReverseValuationDriver;
+
+    expect(driverTone(driver)).toBe("warning");
+    expect(snapshotDisplayName("Base case", "2026-04-09T10:00:00Z")).toBe("Base case");
+    expect(snapshotDisplayName("", "2026-04-09T10:00:00Z")).toContain("Snapshot");
   });
 });
 
@@ -127,6 +176,53 @@ function makeDcfModel(): FundamentalsDcfModel {
     retrieved_at: "2026-04-09T10:00:00Z",
     origin: "fundamentals.dcf.compute",
     transformation_note: "Gamma derived DCF model."
+  };
+}
+
+function makeReference(): FundamentalsReference {
+  return {
+    company: makeFinancials().company,
+    filings: [],
+    inspection: {
+      company: makeFinancials().company,
+      traces: [
+        {
+          statement: "income",
+          basis: "annual",
+          line_key: "revenue",
+          line_label: "Revenue",
+          period_key: "FY-2025",
+          period_label: "FY 2025",
+          normalized_value: 391_000_000_000,
+          display_value: "$391.0B",
+          unit: "usd",
+          concept_name: "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+          accession_number: "0000320193-25-000079",
+          filing_form: "10-K",
+          fiscal_year: 2025,
+          fiscal_period: "FY",
+          filing_date: "2025-10-31T00:00:00Z",
+          report_period: "2025-09-27T00:00:00Z",
+          is_amendment: false,
+          source_provider: "sec",
+          retrieved_at: "2026-04-09T10:00:00Z",
+          origin: "fundamentals.trace.test",
+          transformation_note: "Normalized source trace for test."
+        }
+      ],
+      coverage: [],
+      warnings: [],
+      source_provider: "gamma",
+      retrieved_at: "2026-04-09T10:00:00Z",
+      origin: "fundamentals.reference.test",
+      transformation_note: "Raw-versus-normalized inspection test payload."
+    },
+    provider_warnings: [],
+    warnings: [],
+    source_provider: "sec",
+    retrieved_at: "2026-04-09T10:00:00Z",
+    origin: "fundamentals.reference.test",
+    transformation_note: "Reference test payload."
   };
 }
 

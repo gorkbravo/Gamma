@@ -51,7 +51,10 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
   fundamentals: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
     { id: "financials", label: "Financials", defaultIndex: 1 },
-    { id: "dcf", label: "DCF", defaultIndex: 2 },
+    { id: "peers", label: "Peers", defaultIndex: 2 },
+    { id: "dcf", label: "DCF", defaultIndex: 3 },
+    { id: "reverse_valuation", label: "Reverse Valuation", defaultIndex: 4 },
+    { id: "reference", label: "Reference / Filings", defaultIndex: 5 },
   ]),
 };
 
