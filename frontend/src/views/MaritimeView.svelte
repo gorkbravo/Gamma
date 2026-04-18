@@ -213,6 +213,7 @@
         vessels={workspace?.vessels ?? []}
         ports={workspace?.ports ?? []}
         chokepoints={workspace?.chokepoints ?? []}
+        connected={coverage?.coverage_status === "live" || coverage?.coverage_status === "partial"}
       />
     </article>
 

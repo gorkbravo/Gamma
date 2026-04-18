@@ -1,0 +1,209 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "route": "North Transpacific" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [139.7, 35.4], [150, 40], [160, 44], [170, 47],
+          [180, 48], [-170, 50], [-160, 52], [-145, 50],
+          [-135, 47], [-125, 45]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Central Transpacific" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [121.5, 31.5], [130, 30], [140, 29], [150, 27],
+          [160, 24], [170, 21], [-170, 19], [-157, 21],
+          [-140, 22], [-120, 28], [-118, 34]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "South Pacific" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [151, -34], [160, -30], [170, -25], [180, -22],
+          [-170, -18], [-155, -14], [-130, -8], [-100, -4],
+          [-80, 8]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "North Atlantic" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-74, 41], [-65, 43], [-50, 46], [-30, 47],
+          [-15, 48], [-5, 50], [4, 52]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "South Atlantic" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-46, -24], [-38, -15], [-25, -5], [-17, 5],
+          [-15, 14]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Mediterranean" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-5.5, 36], [5, 37.5], [12, 37], [20, 35],
+          [25, 34], [32, 31.5]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Red Sea" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [32, 31.5], [33, 28], [35, 25], [37, 22],
+          [39, 18], [42, 13], [44, 12]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Gulf of Aden to Indian Ocean" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [44, 12], [50, 12], [55, 14], [60, 13],
+          [65, 12], [72, 9], [80, 7], [88, 6],
+          [95, 4], [100, 3], [104, 2]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Persian Gulf" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [58, 22], [56, 24], [53, 26], [50, 27]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "South China Sea to East Asia" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [104, 2], [108, 8], [112, 14], [114, 19],
+          [118, 23], [121, 25], [122, 30], [121.5, 31.5],
+          [126, 35], [130, 35], [135, 34], [139.7, 35.4]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Cape of Good Hope" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [4, 52], [-5, 44], [-10, 36], [-15, 28],
+          [-17, 14], [-15, 5], [2, -5], [10, -18],
+          [18, -34], [24, -40], [35, -36], [42, -22],
+          [52, -14], [60, -8], [65, 10], [72, 9]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Europe to Caribbean" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-5.5, 36], [-15, 32], [-30, 25], [-55, 17],
+          [-63, 15], [-80, 8]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Panama to US East Coast" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-80, 8], [-75, 11], [-70, 15], [-65, 18],
+          [-74, 41]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "English Channel / North Sea" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-5, 50], [-2, 51], [2, 51.5], [4, 52],
+          [10, 55], [12, 58]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Australia East" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [104, 2], [112, -5], [118, -14], [126, -22],
+          [134, -30], [144, -35], [151, -34]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "West Africa" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-15, 14], [-13, 10], [-4, 5], [3, 6]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Baltic Sea" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [12, 58], [16, 58], [18, 59], [20, 60],
+          [22, 60], [24, 60], [25, 60]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "route": "Brazil to Cape" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-46, -24], [-44, -30], [-40, -36],
+          [-30, -44], [-18, -44], [0, -40], [10, -38],
+          [18, -34]
+        ]
+      }
+    }
+  ]
+}

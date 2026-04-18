@@ -14,6 +14,7 @@
   export let ports: MaritimePort[] = [];
   export let chokepoints: MaritimeChokepointDefinition[] = [];
   export let is3D = false;
+  export let connected = false;
 
   // Design token values used for map layer styling
   const BG0 = "#070809";
@@ -25,6 +26,7 @@
   let map: maplibregl.Map | null = null;
   let popup: maplibregl.Popup | null = null;
   let mapReady = false;
+  let mapZoom = 1.5;
 
   $: vesselIndex = Object.fromEntries(vessels.map((v) => [v.vessel_id, v]));
 
@@ -114,8 +116,26 @@
       "bottom-right"
     );
 
+    map.on("zoom", () => { mapZoom = map?.getZoom() ?? mapZoom; });
+
     map.on("load", () => {
       if (!map) return;
+
+      // ── Shipping lanes (static, no interaction) ───────────────
+      map.addSource("shipping-lanes", {
+        type: "geojson",
+        data: "/shipping-lanes.geojson",
+      });
+      map.addLayer({
+        id: "shipping-lanes-line",
+        type: "line",
+        source: "shipping-lanes",
+        paint: {
+          "line-color": "#1a3a5c",
+          "line-opacity": 0.5,
+          "line-width": 1,
+        },
+      });
 
       // ── Vessels ──────────────────────────────────────────────
       map.addSource("vessels", { type: "geojson", data: vesselFeatureCollection() as never });
@@ -235,32 +255,38 @@
   // Push new data whenever props change and map is ready
   $: if (mapReady) void (positions, vessels, ports, chokepoints, pushSources());
   $: if (mapReady) applyProjection();
+  $: connDotActive = connected && mapZoom >= 4;
 </script>
 
 <div class="map-wrap">
   <div bind:this={container} class="map-container"></div>
 
-  <!-- Controls overlay -->
-  <div class="map-controls">
+  <!-- HUD: vessel count + connection status -->
+  <div class="map-hud">
+    <div class="hud-row">
+      <span class="hud-label">Vessels</span>
+      <span class="hud-value">{positions.length}</span>
+    </div>
+    <div class="hud-row">
+      <span class="conn-dot" class:active={connDotActive}></span>
+      <span class="hud-label">{connDotActive ? "Live" : "Offline"}</span>
+    </div>
+  </div>
+
+  <!-- Bottom-left: legend + 3D toggle -->
+  <div class="map-bottom">
+    <div class="map-legend">
+      <span class="legend-item vessel">Vessel</span>
+      <span class="legend-item port">Port</span>
+      <span class="legend-item choke">Chokepoint</span>
+    </div>
     <button
       type="button"
       class="map-ctrl-btn"
       class:active={is3D}
-      on:click={() => {
-        is3D = !is3D;
-        applyProjection();
-      }}
+      on:click={() => { is3D = !is3D; applyProjection(); }}
       title={is3D ? "Switch to 2D flat" : "Switch to 3D globe"}
-    >
-      {is3D ? "2D" : "3D"}
-    </button>
-  </div>
-
-  <!-- Legend -->
-  <div class="map-legend">
-    <span class="legend-item vessel">Vessel</span>
-    <span class="legend-item port">Port</span>
-    <span class="legend-item choke">Chokepoint</span>
+    >{is3D ? "2D" : "3D"}</button>
   </div>
 </div>
 
@@ -277,44 +303,69 @@
     inset: 0;
   }
 
-  .map-controls {
+  /* ── HUD (top-right) ─────────────────────────────────────── */
+  .map-hud {
     position: absolute;
     top: 0.6rem;
     right: 0.6rem;
     z-index: 10;
+    background: color-mix(in srgb, var(--bg-0, #070809) 88%, transparent);
+    border: 1px solid var(--panel-border, #1e2228);
+    padding: 0.38rem 0.65rem;
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.2rem;
   }
 
-  .map-ctrl-btn {
-    background: var(--bg-1);
-    border: 1px solid var(--panel-strong);
-    color: var(--text-1);
-    font: inherit;
-    font-size: 0.68rem;
-    padding: 0.3rem 0.65rem;
-    cursor: pointer;
-    letter-spacing: 0.06em;
+  .hud-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.7rem;
     text-transform: uppercase;
+    letter-spacing: 0.09em;
+    white-space: nowrap;
   }
 
-  .map-ctrl-btn:hover,
-  .map-ctrl-btn.active {
-    color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-strong));
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+  .hud-label {
+    color: var(--text-2, #8a919a);
   }
 
-  .map-legend {
+  .hud-value {
+    color: var(--text-0, #f0f2f5);
+    font-weight: 600;
+    margin-left: auto;
+    padding-left: 0.8rem;
+  }
+
+  .conn-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #475569;
+    flex-shrink: 0;
+  }
+
+  .conn-dot.active {
+    background: #22c55e;
+  }
+
+  /* ── Bottom-left: legend + 3D toggle ─────────────────────── */
+  .map-bottom {
     position: absolute;
-    bottom: 1.8rem; /* clear the MapLibre attribution bar */
+    bottom: 1.8rem; /* clear MapLibre attribution */
     left: 0.6rem;
     z-index: 10;
     display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .map-legend {
+    display: flex;
     gap: 0.9rem;
-    background: color-mix(in srgb, var(--bg-0) 90%, transparent);
-    border: 1px solid var(--panel-border);
+    background: color-mix(in srgb, var(--bg-0, #070809) 90%, transparent);
+    border: 1px solid var(--panel-border, #1e2228);
     padding: 0.28rem 0.65rem;
   }
 
@@ -322,7 +373,7 @@
     font-size: 0.6rem;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--text-2);
+    color: var(--text-2, #8a919a);
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -337,17 +388,26 @@
     flex-shrink: 0;
   }
 
-  .legend-item.vessel::before {
-    background: var(--accent);
+  .legend-item.vessel::before { background: var(--accent, #7aa6c8); }
+  .legend-item.port::before   { background: var(--chart-secondary, #c49a5a); }
+  .legend-item.choke::before  { background: transparent; border: 1px solid var(--text-2, #8a919a); }
+
+  .map-ctrl-btn {
+    background: color-mix(in srgb, var(--bg-0, #070809) 90%, transparent);
+    border: 1px solid var(--panel-border, #1e2228);
+    color: var(--text-2, #8a919a);
+    font: inherit;
+    font-size: 0.6rem;
+    padding: 0.28rem 0.55rem;
+    cursor: pointer;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
   }
 
-  .legend-item.port::before {
-    background: var(--chart-secondary);
-  }
-
-  .legend-item.choke::before {
-    background: transparent;
-    border: 1px solid var(--text-2);
+  .map-ctrl-btn:hover,
+  .map-ctrl-btn.active {
+    color: var(--accent, #7aa6c8);
+    border-color: color-mix(in srgb, var(--accent, #7aa6c8) 40%, var(--panel-border, #1e2228));
   }
 
   /* ── MapLibre GL popup overrides ── */
