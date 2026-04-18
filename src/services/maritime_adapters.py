@@ -802,6 +802,15 @@ def parse_aisstream_bounding_boxes(value: str | None) -> list[list[list[float]]]
     return boxes
 
 
+def normalize_aisstream_position_message(
+    message: dict[str, Any],
+    *,
+    index: int,
+    retrieved_at,
+) -> tuple[MaritimeAisPositionRecord, MaritimeVesselStaticRecord] | None:
+    return _position_from_aisstream_message(message, index=index, retrieved_at=retrieved_at)
+
+
 def _aisstream_boxes_from_chokepoints(
     chokepoints: list[MaritimeChokepointDefinition],
 ) -> list[list[list[float]]]:

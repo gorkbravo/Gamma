@@ -7,6 +7,7 @@ import {
   getModeRegistrySnapshot,
   getModeShortcutHint,
   getModeShortcutHintForIndex,
+  getTabLabel,
   getTabModes,
   getTabByShortcutIndex,
   hasRegisteredModes,
@@ -130,6 +131,7 @@ describe("navigation tab ordering", () => {
       "fleet_monitoring",
       "event_replay",
     ]);
+    expect(getTabLabel("maritime")).toBe("Sealanes");
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {

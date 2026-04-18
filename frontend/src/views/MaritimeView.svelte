@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import MaritimeMap from "../components/MaritimeMap.svelte";
   import type {
-    MaritimeAisPosition,
     MaritimeChokepointSummary,
     MaritimeFlowSummary,
     MaritimeMode,
@@ -26,23 +25,15 @@
   ];
 
   const modeDescriptions: Record<MaritimeMode, string> = {
-    live_map: "Latest sample positions, tracks, and coverage status.",
+    live_map: "Live AIS viewport sampling with static sealanes for global route context.",
     chokepoints: "Strategic bottleneck density, commodity links, and method caveats.",
     trade_flows: "Class-based flow proxies with explicit cargo-inference limits.",
     fleet_monitoring: "Sample vessels and watchlists without risk or sanctions labels.",
     event_replay: "Historical/sample event windows and track snippets for replay work."
   };
 
-  // Shelf open state for live_map mode
-  let shelvesOpen: Record<string, boolean> = { fleet_mix: false, ports: false, tracks: false };
-
-  // 3D globe toggle — stored locally, could later come from app settings
+  // 3D globe toggle stored locally, could later come from app settings.
   let map3D = false;
-
-  function toggleShelf(key: string) {
-    shelvesOpen[key] = !shelvesOpen[key];
-    shelvesOpen = shelvesOpen; // trigger reactivity
-  }
 
   function coverageLabel(value: string | null | undefined) {
     return String(value ?? "unknown").replace(/_/g, " ").toUpperCase();
@@ -75,16 +66,6 @@
 
   function byVesselId(vessels: MaritimeVesselStatic[]) {
     return Object.fromEntries(vessels.map((v) => [v.vessel_id, v]));
-  }
-
-  function typeCounts(positions: MaritimeAisPosition[]) {
-    const counts = new Map<string, number>();
-    for (const position of positions) {
-      const vessel = vesselIndex[position.vessel_id];
-      const key = vesselTypeLabel(vessel?.vessel_type);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((l, r) => r[1] - l[1]);
   }
 
   function summaryTone(summary: MaritimeChokepointSummary) {
@@ -127,7 +108,6 @@
   $: events = workspace?.event_windows ?? [];
   $: coverage = workspace?.coverage ?? null;
   $: activeChokepoints = chokepointSummaries.filter((s) => s.total_vessel_count > 0).length;
-  $: typeLeaderboard = typeCounts(positions);
   $: headlineMetrics = [
     { label: "Coverage", value: coverageLabel(coverage?.coverage_status), meta: coverage?.provider_label ?? "No provider" },
     { label: "Positions", value: String(positions.length), meta: coverage?.freshness_label ? coverageLabel(coverage.freshness_label) : null },
@@ -137,11 +117,10 @@
 </script>
 
 <section class="view" class:map-mode={mode === "live_map"}>
-  <!-- ── Header ───────────────────────────────────────────── -->
   <article class="panel header-panel">
     <div class="header-top">
       <div class="headline-block">
-        <p class="eyebrow">Maritime Intelligence</p>
+        <p class="eyebrow">Sealanes</p>
         <div class="headline-title-row">
           <h2>Shipping Flow Research</h2>
           {#if loading}<span class="status-pill loading">Refreshing</span>{/if}
@@ -155,7 +134,7 @@
     </div>
 
     <div class="mode-kpi-row">
-      <div class="mode-bar" role="tablist" aria-label="Maritime modes">
+      <div class="mode-bar" role="tablist" aria-label="Sealanes modes">
         {#each modes as m}
           <button class:selected={m.id === mode} role="tab" aria-selected={m.id === mode} type="button" on:click={() => setMode(m.id)}>
             {m.label}
@@ -173,13 +152,15 @@
       </div>
     </div>
 
-    <div class="coverage-row">
-      <p>{modeDescriptions[mode]}</p>
-      <p>{coverage?.caveats?.[0] ?? "AIS provider evaluation is still unresolved; live global coverage is unavailable."}</p>
-    </div>
+    {#if mode !== "live_map"}
+      <div class="coverage-row">
+        <p>{modeDescriptions[mode]}</p>
+        <p>{coverage?.caveats?.[0] ?? "AIS provider evaluation is still unresolved; live global coverage remains partial."}</p>
+      </div>
+    {/if}
   </article>
 
-  {#if workspace?.warnings?.length}
+  {#if workspace?.warnings?.length && mode !== "live_map"}
     <article class="panel warning-panel">
       <div class="panel-header">
         <div>
@@ -199,13 +180,7 @@
     </article>
   {/if}
 
-  <!-- ══════════════════════════════════════════════════════════
-       LIVE MAP MODE  — map takes entire content area
-       Other data panels become collapsible shelves below
-  ═══════════════════════════════════════════════════════════ -->
   {#if mode === "live_map"}
-
-    <!-- Full-bleed map panel -->
     <article class="panel map-panel">
       <MaritimeMap
         bind:is3D={map3D}
@@ -217,86 +192,6 @@
       />
     </article>
 
-    <!-- Shelf row: Fleet Mix | Ports | Tracks — each collapsible -->
-    <div class="shelf-row">
-      <!-- Fleet Mix shelf -->
-      <article class="panel shelf-panel">
-        <button class="shelf-header" type="button" on:click={() => toggleShelf("fleet_mix")} aria-expanded={shelvesOpen.fleet_mix}>
-          <div>
-            <p class="eyebrow">Fleet Mix</p>
-            <h3>Sample Clustering</h3>
-          </div>
-          <span class="shelf-chevron" class:open={shelvesOpen.fleet_mix}>▾</span>
-        </button>
-        {#if shelvesOpen.fleet_mix}
-          <div class="focus-list">
-            {#if typeLeaderboard.length}
-              {#each typeLeaderboard as [label, count]}
-                <div class="focus-row">
-                  <span class="focus-label">{label}</span>
-                  <strong>{count} vessels</strong>
-                  <p>Latest sample positions only.</p>
-                </div>
-              {/each}
-            {:else}
-              <p class="muted">No position data available.</p>
-            {/if}
-          </div>
-        {/if}
-      </article>
-
-      <!-- Ports shelf -->
-      <article class="panel shelf-panel">
-        <button class="shelf-header" type="button" on:click={() => toggleShelf("ports")} aria-expanded={shelvesOpen.ports}>
-          <div>
-            <p class="eyebrow">Ports</p>
-            <h3>Reference Nodes <small class="count-badge">{workspace?.ports.length ?? 0}</small></h3>
-          </div>
-          <span class="shelf-chevron" class:open={shelvesOpen.ports}>▾</span>
-        </button>
-        {#if shelvesOpen.ports}
-          <div class="focus-list">
-            {#each workspace?.ports ?? [] as port}
-              <div class="focus-row">
-                <span class="focus-label">{port.country}</span>
-                <strong>{port.name}</strong>
-                <p>{port.terminal_type ?? "Terminal"} | {port.commodity_links.join(", ") || "No commodity links"}</p>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </article>
-
-      <!-- Track Snippets shelf -->
-      <article class="panel shelf-panel">
-        <button class="shelf-header" type="button" on:click={() => toggleShelf("tracks")} aria-expanded={shelvesOpen.tracks}>
-          <div>
-            <p class="eyebrow">Tracks</p>
-            <h3>Route Snippets <small class="count-badge">{tracks.length}</small></h3>
-          </div>
-          <span class="shelf-chevron" class:open={shelvesOpen.tracks}>▾</span>
-        </button>
-        {#if shelvesOpen.tracks}
-          <div class="focus-list">
-            {#each tracks as track}
-              {@const vessel = vesselIndex[track.vessel_id] ?? null}
-              <div class="focus-row">
-                <span class="focus-label">{vessel?.name ?? track.vessel_id}</span>
-                <strong>{track.label}</strong>
-                <p>
-                  {track.chokepoint_ids.length ? track.chokepoint_ids.join(", ") : "No named chokepoint"}
-                  | {track.points.length} points
-                </p>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </article>
-    </div>
-
-  <!-- ══════════════════════════════════════════════════════════
-       OTHER MODES — standard workspace grid
-  ═══════════════════════════════════════════════════════════ -->
   {:else if mode === "chokepoints"}
     <div class="workspace-grid">
       <div class="primary-column">
@@ -514,17 +409,17 @@
     gap: 0.5rem;
   }
 
-  /* In live_map mode the view becomes a flex column so the map
-     panel can grow to fill available vertical space */
   .view.map-mode {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: calc(100vh - 5rem);
     min-height: 0;
+    overflow: hidden;
   }
 
   .view.map-mode .map-panel {
-    flex: 1;
-    min-height: 72vh;
+    height: 100%;
+    min-height: 0;
     padding: 0;
     overflow: hidden;
   }
@@ -545,66 +440,6 @@
   .event-grid {
     display: grid;
     gap: 0.5rem;
-  }
-
-  /* ── Shelf row (live_map only) ──────────────────────────── */
-  .shelf-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0.5rem;
-  }
-
-  .shelf-panel {
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .shelf-header {
-    width: 100%;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.65rem 0.9rem;
-    background: transparent;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-    text-align: left;
-    gap: 0.5rem;
-  }
-
-  .shelf-header:hover {
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
-  }
-
-  .shelf-header h3 {
-    font-size: 0.88rem;
-  }
-
-  .shelf-panel .focus-list {
-    padding: 0 0.9rem 0.75rem;
-    border-top: 1px solid var(--divider);
-    padding-top: 0.5rem;
-  }
-
-  .shelf-chevron {
-    color: var(--text-2);
-    font-size: 0.9rem;
-    flex-shrink: 0;
-    transition: transform 150ms ease-out;
-  }
-
-  .shelf-chevron.open {
-    transform: rotate(180deg);
-  }
-
-  .count-badge {
-    color: var(--text-2);
-    font-size: 0.72rem;
-    font-weight: 400;
-    margin-left: 0.35rem;
-    letter-spacing: 0;
   }
 
   /* ── Panel ──────────────────────────────────────────────── */
@@ -863,10 +698,6 @@
   /* ── Responsive ─────────────────────────────────────────── */
   @media (max-width: 1180px) {
     .workspace-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .shelf-row {
       grid-template-columns: 1fr;
     }
   }

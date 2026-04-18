@@ -87,6 +87,27 @@ def test_maritime_api_routes_return_sample_workspace_and_track(tmp_path, monkeyp
         runtime.shutdown()
 
 
+def test_maritime_live_ws_without_key_reports_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setenv("MARITIME_PROVIDER", "sample")
+    monkeypatch.setenv("AISSTREAM_API_KEY", "")
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        with client.websocket_connect("/maritime/live/ws") as websocket:
+            payload = websocket.receive_json()
+
+        assert payload["type"] == "status"
+        assert payload["status"] == "unavailable"
+        assert "AISSTREAM_API_KEY" in payload["message"]
+    finally:
+        runtime.shutdown()
+
+
 def test_aisstream_provider_without_key_returns_unavailable_reference_snapshot():
     provider = AisstreamMaritimeDataProvider(api_key="", reference_provider=SampleMaritimeDataProvider())
 
@@ -146,7 +167,7 @@ def test_aisstream_provider_maps_position_messages(monkeypatch):
 
 def test_runtime_can_select_aisstream_provider_without_key(tmp_path, monkeypatch):
     monkeypatch.setenv("MARITIME_PROVIDER", "aisstream")
-    monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("AISSTREAM_API_KEY", "")
     runtime = build_runtime(
         mock_mode=True,
         cache_dir=tmp_path / "cache",

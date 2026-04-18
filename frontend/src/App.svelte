@@ -942,7 +942,7 @@
       push("Reference", $fundamentalsReference?.warnings, "warning");
       push("Provider", $fundamentalsReference?.provider_warnings, "warning");
     } else if ($activeTab === "maritime") {
-      push("Maritime", $maritimeWorkspace?.warnings, "warning");
+      push("Sealanes", $maritimeWorkspace?.warnings, "warning");
       push("Coverage", $maritimeWorkspace?.coverage.caveats, "warning");
     } else if ($activeTab === "risk") {
       push("Risk", $riskResult?.warnings, "warning");

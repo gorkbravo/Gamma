@@ -3,6 +3,7 @@ const runtimeBase =
 const rawBase = runtimeBase ?? import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 export const API_BASE = rawBase.replace(/\/+$/, "");
+export const WS_BASE = API_BASE.replace(/^http/i, "ws");
 
 export async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
