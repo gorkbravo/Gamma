@@ -1,6 +1,15 @@
 export type WorkspaceMode = "portfolio" | "research";
 
-export type TabId = "portfolio" | "research" | "macro" | "prediction_markets" | "crypto" | "fundamentals" | "risk" | "iv";
+export type TabId =
+  | "portfolio"
+  | "research"
+  | "macro"
+  | "prediction_markets"
+  | "crypto"
+  | "fundamentals"
+  | "maritime"
+  | "risk"
+  | "iv";
 
 export interface WorkspaceTabDefinition {
   id: TabId;
@@ -1796,7 +1805,217 @@ export interface MacroEventsResponse {
   events: MacroEvent[];
 }
 
-export type CopilotBaseDomain = TabId;
+export type MaritimeMode = "live_map" | "chokepoints" | "trade_flows" | "fleet_monitoring" | "event_replay";
+
+export interface MaritimeCoverageMetadata {
+  coverage_status: "sample" | "mock" | "historical" | "partial" | "live" | "unavailable" | string;
+  provider_id: string;
+  provider_label: string;
+  freshness_label: string;
+  regions: string[];
+  as_of: string | null;
+  source_timestamp: string | null;
+  caveats: string[];
+  credential_env_vars: string[];
+  supports_live: boolean;
+  supports_historical: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeVesselIdentity {
+  vessel_id: string;
+  mmsi: string;
+  imo: string | null;
+  callsign: string | null;
+  normalized_id: string | null;
+}
+
+export interface MaritimeVesselStatic {
+  vessel_id: string;
+  name: string;
+  identity: MaritimeVesselIdentity;
+  vessel_type: string;
+  vessel_class: string;
+  flag: string | null;
+  owner_operator: string | null;
+  length_m: number | null;
+  beam_m: number | null;
+  deadweight_tons: number | null;
+  cargo_inference: string | null;
+  cargo_inference_confidence: number | null;
+  cargo_inference_caveat: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeAisPosition {
+  position_id: string;
+  vessel_id: string;
+  mmsi: string;
+  timestamp: string;
+  latitude: number;
+  longitude: number;
+  speed_knots: number | null;
+  course_degrees: number | null;
+  heading_degrees: number | null;
+  navigation_status: string | null;
+  destination: string | null;
+  draught_m: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeTrackSnippet {
+  track_id: string;
+  vessel_id: string;
+  label: string;
+  start_port_id: string | null;
+  end_port_id: string | null;
+  chokepoint_ids: string[];
+  points: MaritimeAisPosition[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimePort {
+  port_id: string;
+  name: string;
+  country: string;
+  region: string;
+  latitude: number;
+  longitude: number;
+  unlocode: string | null;
+  terminal_type: string | null;
+  commodity_links: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeBoundingBox {
+  min_latitude: number;
+  max_latitude: number;
+  min_longitude: number;
+  max_longitude: number;
+}
+
+export interface MaritimeChokepointDefinition {
+  chokepoint_id: string;
+  name: string;
+  region: string;
+  latitude: number;
+  longitude: number;
+  bounding_box: MaritimeBoundingBox;
+  strategic_commodities: string[];
+  description: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeChokepointSummary {
+  chokepoint_id: string;
+  name: string;
+  region: string;
+  coverage_status: string;
+  total_vessel_count: number;
+  vessel_count_by_type: Record<string, number>;
+  baseline_vessel_count: number | null;
+  congestion_score: number | null;
+  congestion_label: string;
+  commodity_links: string[];
+  methodology: string | null;
+  caveats: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeFlowSummary {
+  flow_id: string;
+  label: string;
+  vessel_type: string;
+  route_label: string;
+  coverage_status: string;
+  vessel_count: number;
+  affected_chokepoint_ids: string[];
+  inferred_commodity: string | null;
+  inference_confidence: number | null;
+  inference_caveat: string | null;
+  summary: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeEventWindow {
+  event_id: string;
+  title: string;
+  event_type: string;
+  region: string;
+  start_at: string;
+  end_at: string;
+  summary: string;
+  linked_chokepoint_ids: string[];
+  linked_commodity_flows: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeFleetWatchlist {
+  watchlist_id: string;
+  label: string;
+  description: string;
+  vessel_ids: string[];
+  vessel_type_filters: string[];
+  caveats: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeWorkspaceResponse {
+  mode: MaritimeMode | string;
+  available_modes: string[];
+  coverage: MaritimeCoverageMetadata;
+  vessels: MaritimeVesselStatic[];
+  positions: MaritimeAisPosition[];
+  tracks: MaritimeTrackSnippet[];
+  ports: MaritimePort[];
+  chokepoints: MaritimeChokepointDefinition[];
+  chokepoint_summaries: MaritimeChokepointSummary[];
+  flow_summaries: MaritimeFlowSummary[];
+  event_windows: MaritimeEventWindow[];
+  watchlists: MaritimeFleetWatchlist[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MaritimeTrackResponse {
+  vessel_id: string;
+  track: MaritimeTrackSnippet | null;
+}
+
+export type CopilotBaseDomain = Exclude<TabId, "maritime">;
 export type CopilotDomain = CopilotBaseDomain | "synthesis";
 
 export interface CopilotSourceRef {

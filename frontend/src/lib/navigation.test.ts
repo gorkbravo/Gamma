@@ -37,6 +37,7 @@ describe("navigation tab ordering", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "maritime",
       "risk",
       "iv",
     ]);
@@ -51,6 +52,7 @@ describe("navigation tab ordering", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "maritime",
     ]);
   });
 
@@ -62,6 +64,7 @@ describe("navigation tab ordering", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "maritime",
       "iv",
     ]);
   });
@@ -104,7 +107,7 @@ describe("navigation tab ordering", () => {
 
     expect(hasRegisteredModes("macro")).toBe(true);
     expect(hasRegisteredModes("research")).toBe(true);
-    expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro", "research"]);
+    expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro", "maritime", "research"]);
     expect(snapshot.fundamentals?.map((mode) => mode.id)).toEqual([
       "overview",
       "financials",
@@ -119,6 +122,13 @@ describe("navigation tab ordering", () => {
       "strategy_lab",
       "compare_scenario",
       "saved_research",
+    ]);
+    expect(snapshot.maritime?.map((mode) => mode.id)).toEqual([
+      "live_map",
+      "chokepoints",
+      "trade_flows",
+      "fleet_monitoring",
+      "event_replay",
     ]);
   });
 
@@ -135,7 +145,7 @@ describe("workspace tab-order persistence", () => {
 
     store.reorder("research", "risk", 1);
 
-    expect(get(store).research).toEqual(["research", "risk", "macro", "prediction_markets", "crypto", "fundamentals", "iv"]);
+    expect(get(store).research).toEqual(["research", "risk", "macro", "prediction_markets", "crypto", "fundamentals", "maritime", "iv"]);
     expect(get(store).portfolio).toEqual(DEFAULT_WORKSPACE_TAB_ORDER.portfolio);
 
     const reloadedStore = createWorkspaceTabOrderStore(storage);
@@ -146,6 +156,7 @@ describe("workspace tab-order persistence", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "maritime",
       "iv",
     ]);
     expect(get(reloadedStore).portfolio).toEqual(DEFAULT_WORKSPACE_TAB_ORDER.portfolio);

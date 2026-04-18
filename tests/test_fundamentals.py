@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -173,14 +174,20 @@ def test_fundamentals_dcf_snapshots_save_list_and_load_model(tmp_path):
     service = _build_service(tmp_path)
 
     snapshot = service.save_dcf_snapshot("AAPL", name="Base checkpoint")
+    duplicate_name_snapshot = service.save_dcf_snapshot("AAPL", name="Base checkpoint")
     snapshots = service.list_dcf_snapshots("AAPL")
     loaded = service.load_dcf_snapshot_model("AAPL", snapshot.snapshot_id if snapshot else "")
 
     assert snapshot is not None
+    assert duplicate_name_snapshot is not None
+    assert duplicate_name_snapshot.snapshot_id != snapshot.snapshot_id
     assert snapshot.name == "Base checkpoint"
     assert snapshot.scenario_summaries
     assert snapshots is not None
-    assert snapshots[0].snapshot_id == snapshot.snapshot_id
+    assert {item.snapshot_id for item in snapshots} == {
+        snapshot.snapshot_id,
+        duplicate_name_snapshot.snapshot_id,
+    }
     assert loaded is not None
     assert loaded.ticker == "AAPL"
     assert loaded.active_scenario_id == snapshot.active_scenario_id
@@ -235,6 +242,7 @@ def test_sec_adapter_normalizes_quarterly_periods_and_derives_missing_quarters(t
     operating_cash_flow_row = next(line for line in cash_view.lines if line.line_key == "operating_cash_flow")
     current_assets_row = next(line for line in balance_view.lines if line.line_key == "current_assets")
 
+    assert revenue_row.cells[0].concept_name == "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
     assert [cell.value for cell in revenue_row.cells] == [100.0, 110.0, 120.0, 130.0, 140.0]
     assert [cell.source_provider for cell in revenue_row.cells] == ["sec", "sec", "sec", "gamma", "sec"]
     assert [cell.value for cell in operating_cash_flow_row.cells] == [30.0, 40.0, 50.0, 50.0, 50.0]
@@ -242,6 +250,46 @@ def test_sec_adapter_normalizes_quarterly_periods_and_derives_missing_quarters(t
     assert operating_cash_flow_row.cells[1].transformation_note is not None
     assert [cell.value for cell in current_assets_row.cells][-5:] == [500.0, 520.0, 540.0, 560.0, 580.0]
     assert balance_view.transformation_note is None
+
+
+def test_fundamentals_dcf_and_reverse_do_not_assume_missing_shares(tmp_path):
+    service = _build_service(tmp_path)
+    sec_data = service.sec_adapter.company_data["AAPL"]
+    service.sec_adapter.company_data["AAPL"] = replace(
+        sec_data,
+        annual_income_statement=_without_statement_lines(sec_data.annual_income_statement, {"diluted_shares"}),
+        annual_balance_sheet=_without_statement_lines(sec_data.annual_balance_sheet, {"shares_outstanding"}),
+        quarterly_income_statement=_without_statement_lines(sec_data.quarterly_income_statement, {"diluted_shares"}),
+        quarterly_balance_sheet=_without_statement_lines(sec_data.quarterly_balance_sheet, {"shares_outstanding"}),
+    )
+
+    dcf = service.get_dcf_model("AAPL")
+    reverse = service.get_reverse_valuation("AAPL")
+
+    assert dcf is not None
+    assert any("Shares outstanding are unavailable" in warning for warning in dcf.warnings)
+    assert all(scenario.summary is not None and scenario.summary.implied_value_per_share is None for scenario in dcf.scenarios)
+    assert reverse is not None
+    assert reverse.target_equity_value is None
+    assert reverse.target_enterprise_value is None
+    assert reverse.drivers == []
+    assert any("shares outstanding are unavailable" in warning.lower() for warning in reverse.warnings)
+
+
+def test_fundamentals_peers_degrade_when_peer_price_context_fails(tmp_path):
+    service = _build_service(tmp_path)
+    service.valuation_adapter = FailingPeerValuationAdapter(
+        service.valuation_adapter.price_contexts,
+        failing_tickers={"MSFT"},
+    )
+
+    peers = service.get_peers("AAPL")
+
+    assert peers is not None
+    msft = next(comparison for comparison in peers.comparisons if comparison.ticker == "MSFT")
+    assert any("MSFT price context could not be loaded" in warning for warning in msft.warnings)
+    assert any(metric.metric_id == "gross_margin" and metric.value is not None for metric in msft.metrics)
+    assert any(metric.metric_id == "ev_to_sales" and metric.value is None for metric in msft.metrics)
 
 
 class StubSecFundamentalsAdapter:
@@ -289,6 +337,18 @@ class StubIbkrValuationAdapter:
         return self.price_contexts[str(ticker or "").strip().upper()]
 
 
+class FailingPeerValuationAdapter(StubIbkrValuationAdapter):
+    def __init__(self, price_contexts: dict[str, IbkrPriceContext], *, failing_tickers: set[str]):
+        super().__init__(price_contexts)
+        self.failing_tickers = {ticker.upper() for ticker in failing_tickers}
+
+    def get_price_context(self, ticker: str, *, lookback_days: int = 180, force_refresh: bool = False):
+        normalized = str(ticker or "").strip().upper()
+        if normalized in self.failing_tickers:
+            raise RuntimeError("price feed unavailable")
+        return super().get_price_context(ticker, lookback_days=lookback_days, force_refresh=force_refresh)
+
+
 def _build_service(tmp_path) -> FundamentalsService:
     company_data = {
         ticker: _company_data(ticker, name, revenue_scale, price)
@@ -317,6 +377,13 @@ def _build_service(tmp_path) -> FundamentalsService:
         valuation_adapter=StubIbkrValuationAdapter(price_contexts),
         store=FundamentalsResearchStore(tmp_path / "fundamentals"),
     )
+
+
+def _without_statement_lines(
+    view: FundamentalsStatementView,
+    line_keys: set[str],
+) -> FundamentalsStatementView:
+    return replace(view, lines=[line for line in view.lines if line.line_key not in line_keys])
 
 
 def _company_data(ticker: str, name: str, revenue_scale: float, price: float) -> SecCompanyData:

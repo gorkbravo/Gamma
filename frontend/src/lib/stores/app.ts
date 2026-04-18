@@ -32,6 +32,8 @@ import type {
   MacroContextState,
   MacroDivergenceListResponse,
   MacroEventsResponse,
+  MaritimeMode,
+  MaritimeWorkspaceResponse,
   MacroSeriesHistory,
   MacroSnapshot,
   PredictionCalibrationSummary,
@@ -197,6 +199,11 @@ export interface MacroLoadOptions {
   forceRefresh?: boolean;
 }
 
+export interface MaritimeLoadOptions {
+  mode?: MaritimeMode | string;
+  forceRefresh?: boolean;
+}
+
 export interface FundamentalsSearchOptions {
   query?: string;
   limit?: number;
@@ -265,6 +272,7 @@ export const macroSnapshot = writable<MacroSnapshot | null>(null);
 export const macroDivergences = writable<MacroDivergenceListResponse | null>(null);
 export const macroEvents = writable<MacroEventsResponse | null>(null);
 export const macroSeriesHistories = writable<Record<string, MacroSeriesHistory>>({});
+export const maritimeWorkspace = writable<MaritimeWorkspaceResponse | null>(null);
 export const predictionMarketScreener = writable<PredictionMarketListResponse | null>(null);
 export const selectedPredictionMarketId = writable<string | null>(null);
 export const predictionMarketDetail = writable<PredictionMarket | null>(null);
@@ -342,6 +350,7 @@ export const loading = writable<Record<string, boolean>>({
   savedResearch: false,
   macro: false,
   macroHistory: false,
+  maritime: false,
   prediction: false,
   predictionDetail: false,
   crypto: false,
@@ -1112,6 +1121,25 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
   return requestPromise;
 }
 
+export async function loadMaritimeWorkspace(options: MaritimeLoadOptions = {}) {
+  const params = new URLSearchParams({
+    mode: options.mode ?? get(maritimeWorkspace)?.mode ?? "live_map",
+    force_refresh: options.forceRefresh ? "true" : "false"
+  });
+  setLoading("maritime", true);
+  try {
+    const response = await getJson<MaritimeWorkspaceResponse>(`/maritime/workspace?${params.toString()}`);
+    maritimeWorkspace.set(response);
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("maritime", false);
+  }
+}
+
 export async function loadMacroSeriesHistory(seriesId: string, options: MacroLoadOptions = {}) {
   const nextContext = normalizeMacroContextState({
     ...get(macroContext),
@@ -1536,6 +1564,7 @@ export async function saveFundamentalsPeerBasket(ticker: string, peerTickers: st
       peer_tickers: peerTickers
     });
     await selectFundamentalsCompany(normalizedTicker, { resetThread: false });
+    resetCopilotCard("fundamentals");
     lastError.set("");
     return response;
   } catch (error) {
@@ -1585,6 +1614,7 @@ export async function saveFundamentalsDcfModel(ticker: string, payload: Fundamen
     if (snapshotsResult.status === "fulfilled") {
       fundamentalsDcfSnapshots.set(snapshotsResult.value);
     }
+    resetCopilotCard("fundamentals");
     lastError.set("");
     return response;
   } catch (error) {
@@ -1604,6 +1634,7 @@ export async function saveFundamentalsDcfSnapshot(ticker: string, name?: string)
     });
     const snapshots = await getJson<FundamentalsDcfSnapshotList>(`/fundamentals/${normalizedTicker}/dcf/snapshots`);
     fundamentalsDcfSnapshots.set(snapshots);
+    resetCopilotCard("fundamentals");
     lastError.set("");
     return snapshot;
   } catch (error) {
@@ -1626,6 +1657,7 @@ export async function loadFundamentalsDcfSnapshot(ticker: string, snapshotId: st
       `/fundamentals/${normalizedTicker}/dcf/snapshots/${encodeURIComponent(normalizedSnapshotId)}`
     );
     fundamentalsDcfModel.set(model);
+    resetCopilotCard("fundamentals");
     lastError.set("");
     return model;
   } catch (error) {

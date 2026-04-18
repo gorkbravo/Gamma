@@ -494,8 +494,8 @@ class FundamentalsService:
         market_cap = _multiply_nullable(price_context.current_price, shares)
         net_debt = _subtract_nullable(total_debt, cash)
         enterprise_value = None
-        if market_cap is not None:
-            enterprise_value = market_cap + (total_debt or 0.0) - (cash or 0.0)
+        if market_cap is not None and net_debt is not None:
+            enterprise_value = market_cap + net_debt
         return {
             "current_price": price_context.current_price,
             "market_cap": market_cap,
@@ -582,9 +582,13 @@ class FundamentalsService:
         stored = self.store.load_peer_basket(company.ticker)
         if stored:
             peer_tickers = [
-                str(value or "").strip().upper()
-                for value in stored.get("peer_tickers", []) or []
-                if str(value or "").strip()
+                value
+                for value in dict.fromkeys(
+                    str(item or "").strip().upper()
+                    for item in stored.get("peer_tickers", []) or []
+                    if str(item or "").strip()
+                )
+                if value != company.ticker
             ]
             return self._build_peer_basket_record(
                 company,
@@ -686,11 +690,11 @@ class FundamentalsService:
     ) -> FundamentalsPeerHeatmapView | None:
         ordered_tickers = [company.ticker, *[ticker for ticker in peer_basket.peer_tickers if ticker != company.ticker]]
         company_metrics: dict[str, dict[str, Any]] = {}
-        for ticker in ordered_tickers[:6]:
+        for ticker in ordered_tickers:
             sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=False)
             if sec_data is None:
                 continue
-            price_context = self.valuation_adapter.get_price_context(ticker)
+            price_context = self._peer_price_context(ticker)
             market_context = self._build_market_context(sec_data, price_context)
             company_metrics[ticker] = self._company_metric_snapshot(sec_data, market_context)
         if not company_metrics:
@@ -873,7 +877,7 @@ class FundamentalsService:
         comparisons: list[FundamentalsPeerComparisonRecord] = []
         selected = set(peer_basket.peer_tickers)
         ordered_tickers = [company.ticker, *[ticker for ticker in peer_basket.peer_tickers if ticker != company.ticker]]
-        for ticker in ordered_tickers[:6]:
+        for ticker in ordered_tickers:
             sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=False)
             if sec_data is None:
                 comparisons.append(
@@ -890,7 +894,7 @@ class FundamentalsService:
                     )
                 )
                 continue
-            price_context = self.valuation_adapter.get_price_context(ticker)
+            price_context = self._peer_price_context(ticker)
             market_context = self._build_market_context(sec_data, price_context)
             snapshot = self._company_metric_snapshot(sec_data, market_context)
             metrics = [
@@ -943,6 +947,23 @@ class FundamentalsService:
                 )
             )
         return comparisons
+
+    def _peer_price_context(self, ticker: str) -> IbkrPriceContext:
+        try:
+            return self.valuation_adapter.get_price_context(ticker)
+        except Exception as exc:
+            return IbkrPriceContext(
+                ticker=ticker,
+                current_price=None,
+                price_history=[],
+                warnings=[
+                    f"{ticker} price context could not be loaded; market-derived peer metrics are null. {type(exc).__name__}: {exc}"
+                ],
+                source_provider="ibkr",
+                retrieved_at=datetime.now(timezone.utc),
+                origin="fundamentals.ibkr.snapshot",
+                transformation_note="Gamma preserves the peer row with missing market context when the valuation adapter cannot load a price snapshot.",
+            )
 
     def _build_peer_diagnostics(
         self,
@@ -1113,13 +1134,15 @@ class FundamentalsService:
         base_overrides = deepcopy(base_scenario.overrides if base_scenario else {})
         target_equity_value = _multiply_nullable(market_context.get("current_price"), market_context.get("shares"))
         target_enterprise_value = None
-        if target_equity_value is not None:
-            target_enterprise_value = target_equity_value + (market_context.get("net_debt") or 0.0)
+        if target_equity_value is not None and market_context.get("net_debt") is not None:
+            target_enterprise_value = target_equity_value + market_context["net_debt"]
         warnings = _dedupe_warnings(price_context.warnings, dcf_model.warnings)
         if market_context.get("current_price") is None:
             warnings.append("Current price context is unavailable, so reverse valuation cannot solve market-implied expectations.")
         if market_context.get("shares") in {None, 0}:
             warnings.append("Latest shares outstanding are unavailable, so reverse valuation cannot bridge price to equity value.")
+        if market_context.get("net_debt") is None:
+            warnings.append("Net debt bridge is unavailable, so reverse valuation cannot bridge market equity value to enterprise value.")
         if target_enterprise_value is None:
             return FundamentalsReverseValuationResult(
                 company=sec_data.company,
@@ -1424,7 +1447,7 @@ class FundamentalsService:
     def _build_snapshot_id(self, created_at: datetime, name: str) -> str:
         slug = "".join(char.lower() if char.isalnum() else "-" for char in name.strip())
         slug = "-".join(part for part in slug.split("-") if part)[:32] or "snapshot"
-        return f"{created_at.strftime('%Y%m%dT%H%M%SZ')}-{slug}"
+        return f"{created_at.strftime('%Y%m%dT%H%M%S%fZ')}-{slug}"
 
     def _snapshot_record_from_payload(self, payload: dict[str, Any]) -> FundamentalsDcfSnapshotRecord:
         created_at = _parse_iso_datetime(payload.get("created_at")) or datetime.now(timezone.utc)
@@ -1461,7 +1484,7 @@ class FundamentalsService:
         base_da = _bounded(_safe_ratio(_last_non_null(actuals["depreciation_and_amortization"]), _last_non_null(actuals["revenue"])) or 0.04, 0.00, 0.20)
         base_capex = _bounded(_safe_ratio(_last_non_null(actuals["capital_expenditures"]), _last_non_null(actuals["revenue"])) or 0.04, 0.00, 0.20)
         base_nwc = _bounded(_median([value for value in actuals["nwc_intensity"] if value is not None]) or 0.02, -0.10, 0.20)
-        base_shares = _last_non_null(actuals["shares"]) or market_context.get("shares") or 1.0
+        base_shares = _first_non_null(_last_non_null(actuals["shares"]), market_context.get("shares")) or 0.0
         scenario_specs = {
             "bear": {"growth_shift": -0.03, "margin_shift": -0.03, "wacc": 0.11, "terminal": 0.02},
             "base": {"growth_shift": 0.00, "margin_shift": 0.00, "wacc": 0.10, "terminal": 0.025},
@@ -1682,6 +1705,10 @@ class FundamentalsService:
         warnings = []
         if market_context.get("current_price") is None:
             warnings.append("Current price context is unavailable, so valuation upside/downside may be incomplete.")
+        if _first_non_null(_last_non_null(actuals["shares"]), market_context.get("shares")) in {None, 0}:
+            warnings.append("Shares outstanding are unavailable, so DCF per-share values are not computed.")
+        if market_context.get("net_debt") is None:
+            warnings.append("Net debt bridge is unavailable, so DCF equity value and per-share outputs are incomplete.")
         return FundamentalsDcfModelRecord(
             ticker=sec_data.company.ticker,
             company_name=sec_data.company.name,
@@ -2142,7 +2169,12 @@ def _solve_bounded_expectation(
         mid = (low + high) / 2.0
         mid_ev = value_fn(mid)
         if mid_ev is None:
-            break
+            return (
+                best_value,
+                best_ev,
+                False,
+                "Reverse-valuation solver lost computability inside the bounded range.",
+            )
         best_value = mid
         best_ev = mid_ev
         mid_gap = mid_ev - target_enterprise_value
@@ -2158,7 +2190,12 @@ def _solve_bounded_expectation(
                 low = mid
             else:
                 high = mid
-    return best_value, best_ev, True, None
+    return (
+        best_value,
+        best_ev,
+        False,
+        "Reverse-valuation solver did not converge within the bounded range.",
+    )
 
 
 def _parse_iso_datetime(value: Any) -> datetime | None:
@@ -2289,7 +2326,7 @@ def _compute_dcf_projection(
     market_context: dict[str, Any],
 ) -> dict[str, Any]:
     last_revenue = _last_non_null(actuals["revenue"]) or 0.0
-    last_shares = _last_non_null(actuals["shares"]) or market_context.get("shares") or 1.0
+    last_shares = _first_non_null(_last_non_null(actuals["shares"]), market_context.get("shares")) or 0.0
     revenue_growth = _ensure_list_length(assumptions.get("revenue_growth_pct"), len(projection_years), 0.05)
     ebit_margin = _ensure_list_length(assumptions.get("ebit_margin_pct"), len(projection_years), 0.20)
     tax_rate = _ensure_list_length(assumptions.get("tax_rate_pct"), len(projection_years), 0.21)
@@ -2330,7 +2367,8 @@ def _compute_dcf_projection(
         projection_values["present_value_of_fcf"].append(None if fcf is None else fcf * discount_factor)
         override_flags["discount_factor"].append(False)
         override_flags["present_value_of_fcf"].append(False)
-        previous_revenue = revenue or previous_revenue
+        if revenue is not None:
+            previous_revenue = revenue
     terminal_fcf = projection_values["free_cash_flow"][-1] if projection_values["free_cash_flow"] else None
     terminal_value = None
     if terminal_fcf is not None and wacc > terminal_growth:
@@ -2344,7 +2382,11 @@ def _compute_dcf_projection(
     enterprise_value = None
     if discounted_terminal_value is not None:
         enterprise_value = discounted_cash_flow_value + discounted_terminal_value
-    equity_value = None if enterprise_value is None else enterprise_value - (market_context.get("net_debt") or 0.0)
+    equity_value = (
+        None
+        if enterprise_value is None or market_context.get("net_debt") is None
+        else enterprise_value - market_context["net_debt"]
+    )
     implied_value_per_share = None
     final_shares = shares_outstanding[-1] if shares_outstanding else last_shares
     if equity_value is not None and final_shares not in {None, 0}:

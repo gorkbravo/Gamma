@@ -817,9 +817,8 @@ class SecFundamentalsAdapter:
         except (TypeError, ValueError):
             return None
         concept_ref = _clean_text(row.get("concept")) or ""
-        _, _, concept_name = concept_ref.partition(":")
         return FactObservation(
-            concept_name=concept_name,
+            concept_name=concept_ref,
             value=value,
             start_date=_parse_datetime(row.get("period_start")),
             end_date=_parse_datetime(row.get("period_end")),

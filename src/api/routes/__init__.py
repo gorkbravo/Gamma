@@ -3,6 +3,7 @@ from src.api.routes.crypto import router as crypto_router
 from src.api.routes.fundamentals import router as fundamentals_router
 from src.api.routes.iv import router as iv_router
 from src.api.routes.macro import router as macro_router
+from src.api.routes.maritime import router as maritime_router
 from src.api.routes.portfolio import router as portfolio_router
 from src.api.routes.prediction_markets import router as prediction_markets_router
 from src.api.routes.research import router as research_router
@@ -15,6 +16,7 @@ __all__ = [
     "fundamentals_router",
     "iv_router",
     "macro_router",
+    "maritime_router",
     "portfolio_router",
     "prediction_markets_router",
     "research_router",

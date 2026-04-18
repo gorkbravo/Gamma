@@ -18,8 +18,9 @@ export const WORKSPACE_TAB_DEFINITIONS = {
     { id: "prediction_markets", label: "Prediction Markets", pinned: false, defaultIndex: 2 },
     { id: "crypto", label: "Crypto", pinned: false, defaultIndex: 3 },
     { id: "fundamentals", label: "Fundamentals", pinned: false, defaultIndex: 4 },
-    { id: "risk", label: "Risk", pinned: false, defaultIndex: 5 },
-    { id: "iv", label: "IV", pinned: false, defaultIndex: 6 },
+    { id: "maritime", label: "Maritime", pinned: false, defaultIndex: 5 },
+    { id: "risk", label: "Risk", pinned: false, defaultIndex: 6 },
+    { id: "iv", label: "IV", pinned: false, defaultIndex: 7 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 
@@ -55,6 +56,13 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
     { id: "dcf", label: "DCF", defaultIndex: 3 },
     { id: "reverse_valuation", label: "Reverse Valuation", defaultIndex: 4 },
     { id: "reference", label: "Reference / Filings", defaultIndex: 5 },
+  ]),
+  maritime: defineTabModes([
+    { id: "live_map", label: "Live Map", defaultIndex: 0 },
+    { id: "chokepoints", label: "Chokepoints", defaultIndex: 1 },
+    { id: "trade_flows", label: "Trade Flows", defaultIndex: 2 },
+    { id: "fleet_monitoring", label: "Fleet / Vessel", defaultIndex: 3 },
+    { id: "event_replay", label: "Event Replay", defaultIndex: 4 },
   ]),
 };
 

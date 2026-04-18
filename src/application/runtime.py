@@ -13,6 +13,7 @@ from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.iv_service import IVService
 from src.application.macro_service import MacroService
+from src.application.maritime_service import MaritimeService
 from src.application.portfolio_service import PortfolioService
 from src.application.prediction_market_service import PredictionMarketService
 from src.application.provider_capability_registry import (
@@ -29,6 +30,11 @@ from src.services.crypto_adapters import CoinGeckoAdapter, GeckoTerminalAdapter
 from src.services.fundamentals_adapters import IbkrValuationAdapter, SecFundamentalsAdapter
 from src.services.fundamentals_store import FundamentalsResearchStore
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.maritime_adapters import (
+    AisstreamMaritimeDataProvider,
+    SampleMaritimeDataProvider,
+    parse_aisstream_bounding_boxes,
+)
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
@@ -76,6 +82,7 @@ class ApplicationRuntime:
     research_service: ResearchService
     prediction_market_service: PredictionMarketService
     macro_service: MacroService
+    maritime_service: MaritimeService
     crypto_service: CryptoService
     fundamentals_service: FundamentalsService
     copilot_service: CopilotService
@@ -132,7 +139,7 @@ def build_runtime(
     sample_data_dir: str | Path | None = None,
     include_desktop_session: bool = False,
 ) -> ApplicationRuntime:
-    load_dotenv()
+    load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
     setup_logging()
 
     base_currency = os.getenv("BASE_CURRENCY", "EUR")
@@ -223,6 +230,7 @@ def build_runtime(
         fx_adapter=IBKRMacroFXAdapter(market_data),
         prediction_market_service=prediction_market_service,
     )
+    maritime_service = MaritimeService(provider=_build_maritime_provider())
     crypto_service = CryptoService(
         market_adapter=CoinGeckoAdapter(cache),
         dex_adapter=GeckoTerminalAdapter(cache),
@@ -275,6 +283,7 @@ def build_runtime(
         research_service=research_service,
         prediction_market_service=prediction_market_service,
         macro_service=macro_service,
+        maritime_service=maritime_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
         copilot_service=copilot_service,
@@ -351,4 +360,31 @@ def _build_copilot_provider():
             or "https://api.openai.com/v1/responses"
         ).strip(),
         store_responses=store_flag,
+    )
+
+
+def _build_maritime_provider():
+    provider = (os.getenv("MARITIME_PROVIDER", "sample") or "sample").strip().lower()
+    sample_provider = SampleMaritimeDataProvider()
+    if provider not in {"aisstream", "aisstream_live", "live"}:
+        return sample_provider
+
+    try:
+        bounding_boxes = parse_aisstream_bounding_boxes(os.getenv("AISSTREAM_BOUNDING_BOXES"))
+    except ValueError:
+        bounding_boxes = None
+
+    message_types = [
+        item.strip()
+        for item in (os.getenv("AISSTREAM_MESSAGE_TYPES", "") or "").split(",")
+        if item.strip()
+    ] or None
+    return AisstreamMaritimeDataProvider(
+        api_key=os.getenv("AISSTREAM_API_KEY", ""),
+        reference_provider=sample_provider,
+        bounding_boxes=bounding_boxes,
+        message_types=message_types,
+        sample_seconds=float(os.getenv("AISSTREAM_SAMPLE_SECONDS", "6") or 6.0),
+        max_messages=int(os.getenv("AISSTREAM_MAX_MESSAGES", "500") or 500),
+        cache_seconds=int(os.getenv("AISSTREAM_CACHE_SECONDS", "30") or 30),
     )

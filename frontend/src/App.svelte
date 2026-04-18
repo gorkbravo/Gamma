@@ -6,6 +6,7 @@
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
   import MacroView from "./views/MacroView.svelte";
+  import MaritimeView from "./views/MaritimeView.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
   import CryptoView from "./views/CryptoView.svelte";
   import FundamentalsView from "./views/FundamentalsView.svelte";
@@ -60,6 +61,7 @@
     macroContext,
     loadMacroSeriesHistory,
     loadMacroWorkspace,
+    loadMaritimeWorkspace,
     loadPortfolioPerformance,
     loading,
     loadPortfolioSnapshot,
@@ -68,6 +70,7 @@
     macroEvents,
     macroSeriesHistories,
     macroSnapshot,
+    maritimeWorkspace,
     portfolioHistory,
     portfolioPerformance,
     portfolioSnapshot,
@@ -140,6 +143,7 @@
     IvSurface,
     MacroContextState,
     MacroSnapshot,
+    MaritimeMode,
     PortfolioPerformanceResponse,
     PortfolioSnapshot,
     PredictionMarket,
@@ -167,6 +171,7 @@
   let researchMode: ResearchMode = "overview";
   let cryptoMode: CryptoMode = "overview";
   let fundamentalsMode: FundamentalsMode = "overview";
+  let maritimeMode: MaritimeMode = "live_map";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
   let sidebarOpen = false;
@@ -936,6 +941,9 @@
       push("Reverse", $fundamentalsReverseValuation?.warnings, "warning");
       push("Reference", $fundamentalsReference?.warnings, "warning");
       push("Provider", $fundamentalsReference?.provider_warnings, "warning");
+    } else if ($activeTab === "maritime") {
+      push("Maritime", $maritimeWorkspace?.warnings, "warning");
+      push("Coverage", $maritimeWorkspace?.coverage.caveats, "warning");
     } else if ($activeTab === "risk") {
       push("Risk", $riskResult?.warnings, "warning");
     } else {
@@ -1007,6 +1015,8 @@
       await loadFundamentalsSearch({
         query: $selectedFundamentalsTicker ?? undefined
       });
+    } else if (nextTab === "maritime") {
+      await loadMaritimeWorkspace({ mode: maritimeMode });
     } else if (nextTab === "iv") {
       const autoLoaded = await loadResearchIvContext();
       if (!autoLoaded) {
@@ -1100,6 +1110,10 @@
         query: $selectedFundamentalsTicker ?? undefined,
         forceRefresh: true
       });
+    }
+
+    if ($activeTab === "maritime") {
+      await loadMaritimeWorkspace({ mode: maritimeMode, forceRefresh: true });
     }
 
     if ($activeTab === "macro") {
@@ -1284,6 +1298,12 @@
 
     if ($activeTab === "fundamentals") {
       fundamentalsMode = nextMode.id as FundamentalsMode;
+      return true;
+    }
+
+    if ($activeTab === "maritime") {
+      maritimeMode = nextMode.id as MaritimeMode;
+      await loadMaritimeWorkspace({ mode: maritimeMode });
       return true;
     }
 
@@ -1527,6 +1547,13 @@
             onSaveDcfModel={saveFundamentalsDcfModel}
             onSaveDcfSnapshot={saveFundamentalsDcfSnapshot}
             onLoadDcfSnapshot={loadFundamentalsDcfSnapshot}
+          />
+        {:else if $activeTab === "maritime"}
+          <MaritimeView
+            bind:mode={maritimeMode}
+            workspace={$maritimeWorkspace}
+            loading={$loading.maritime}
+            onLoadWorkspace={loadMaritimeWorkspace}
           />
         {:else if $activeTab === "risk"}
           <RiskView

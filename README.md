@@ -544,6 +544,17 @@ $env:MOCK_DATA="true"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+Optional Maritime AISstream prototype:
+
+```powershell
+$env:MARITIME_PROVIDER="aisstream"
+$env:AISSTREAM_API_KEY="<your key>"
+$env:AISSTREAM_SAMPLE_SECONDS="6"
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+AISstream is treated as partial live AIS only. Gamma samples configured chokepoint bounding boxes, keeps the key server-side, and does not infer cargo, risk, sanctions, routing, or operational labels from the live stream.
+
 Frontend:
 
 ```powershell
