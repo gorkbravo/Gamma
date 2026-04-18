@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import maplibregl from "maplibre-gl";
   import "maplibre-gl/dist/maplibre-gl.css";
+  import { WS_BASE } from "../lib/api/client";
   import type {
     MaritimeAisPosition,
     MaritimeChokepointDefinition,
@@ -17,23 +18,36 @@
   export let connected = false;
 
   // Design token values used for map layer styling
-  const BG0 = "#070809";
+  const BG0 = "#02060c";
   const ACCENT = "#7aa6c8";
   const SECONDARY = "#c49a5a";
   const TEXT2 = "#8a919a";
+  const AIS_ZOOM_THRESHOLD = 4;
+  const VIEWPORT_DEBOUNCE_MS = 1500;
+  const MAX_LIVE_POSITIONS = 600;
 
   let container: HTMLDivElement;
   let map: maplibregl.Map | null = null;
   let popup: maplibregl.Popup | null = null;
   let mapReady = false;
-  let mapZoom = 1.5;
+  let mapZoom = 3;
+  let viewportDebounce: ReturnType<typeof setTimeout> | null = null;
+  let liveSocket: WebSocket | null = null;
+  let liveStatus: "idle" | "connecting" | "connected" | "subscribed" | "live" | "suspended" | "unavailable" | "error" = "idle";
+  let liveMessage: string | null = null;
+  let livePositions: MaritimeAisPosition[] = [];
+  let liveVessels: MaritimeVesselStatic[] = [];
+  let pendingSubscription: { BoundingBoxes: number[][][]; FilterMessageTypes: string[]; type: string } | null = null;
+  let lastSubscriptionKey = "";
 
-  $: vesselIndex = Object.fromEntries(vessels.map((v) => [v.vessel_id, v]));
+  $: displayPositions = mapZoom >= AIS_ZOOM_THRESHOLD ? (livePositions.length ? livePositions : positions) : [];
+  $: displayVessels = mergeVessels(vessels, liveVessels);
+  $: vesselIndex = Object.fromEntries(displayVessels.map((v) => [v.vessel_id, v]));
 
   function vesselFeatureCollection() {
     return {
       type: "FeatureCollection" as const,
-      features: positions
+      features: displayPositions
         .filter((p) => p.latitude != null && p.longitude != null)
         .map((p) => ({
           type: "Feature" as const,
@@ -46,7 +60,7 @@
             speed_knots: p.speed_knots ?? null,
             navigation_status: p.navigation_status ?? null,
             mmsi: p.mmsi,
-            heading: p.heading ?? 0,
+            heading: p.heading_degrees ?? p.course_degrees ?? 0,
           },
         })),
     };
@@ -84,25 +98,227 @@
   function applyProjection() {
     if (!map) return;
     try {
-      // MapLibre GL v3+ supports globe projection
       (map as Record<string, unknown> & { setProjection?: (p: unknown) => void }).setProjection?.(
         is3D ? { type: "globe" } : { type: "mercator" }
       );
     } catch {
       /* older version — ignore */
     }
+    if (is3D) {
+      map.dragRotate.enable();
+      map.touchZoomRotate.enableRotation();
+    } else {
+      map.dragRotate.disable();
+      map.touchZoomRotate.disableRotation();
+      map.setPitch(0);
+      map.setBearing(0);
+    }
   }
 
-  // CartoDB dark-matter-nolabels is already near-black; no color overrides needed.
+  function recolorBaseMap() {
+    if (!map) return;
+    for (const layer of map.getStyle()?.layers ?? []) {
+      const id = layer.id;
+      if (id === "background") {
+        // background = land base — everything that isn't explicitly filled by another layer
+        setPaint(id, "background-color", "#0d2540");
+      } else if (id === "water") {
+        // water fills ocean, seas, lakes, rivers on top of the land background
+        setPaint(id, "fill-color", "#01040c");
+        setPaint(id, "fill-opacity", 1);
+      } else if (id === "boundary_country_outline" || id === "boundary_country_inner") {
+        setPaint(id, "line-color", "#4f9deb");
+        setPaint(id, "line-opacity", 0.82);
+        setPaint(id, "line-width", ["interpolate", ["linear"], ["zoom"], 2, 0.85, 5, 1.15, 8, 1.55]);
+      } else if (id === "boundary_state" || id === "boundary_county") {
+        setPaint(id, "line-color", "#3d86d6");
+        setPaint(id, "line-opacity", 0.42);
+        setPaint(id, "line-width", ["interpolate", ["linear"], ["zoom"], 2, 0.35, 6, 0.7]);
+      } else {
+        // Hide everything else: landcover, landuse, parks, waterway, roads, buildings, etc.
+        // This lets the flat navy background show cleanly for all land areas.
+        setLayout(id, "visibility", "none");
+      }
+    }
+  }
+
+  function setLayout(layerId: string, property: string, value: unknown) {
+    if (!map || !map.getLayer(layerId)) return;
+    try {
+      map.setLayoutProperty(layerId, property, value as never);
+    } catch {
+      // ignore
+    }
+  }
+
+  function setPaint(layerId: string, property: string, value: unknown) {
+    if (!map || !map.getLayer(layerId)) return;
+    try {
+      map.setPaintProperty(layerId, property, value as never);
+    } catch {
+      // Some properties only apply to specific layer types.
+    }
+  }
+
+  function scheduleViewportSubscription() {
+    if (!map) return;
+    mapZoom = map.getZoom();
+    if (mapZoom < AIS_ZOOM_THRESHOLD) {
+      closeLiveSocket("zoom below live AIS threshold", "suspended", true);
+      return;
+    }
+    if (viewportDebounce) clearTimeout(viewportDebounce);
+    viewportDebounce = setTimeout(() => {
+      sendViewportSubscription();
+    }, VIEWPORT_DEBOUNCE_MS);
+  }
+
+  function sendViewportSubscription() {
+    if (!map || map.getZoom() < AIS_ZOOM_THRESHOLD) {
+      closeLiveSocket("zoom below live AIS threshold", "suspended", true);
+      return;
+    }
+    const bounds = map.getBounds();
+    const west = clamp(bounds.getWest(), -180, 180);
+    const east = clamp(bounds.getEast(), -180, 180);
+    const south = clamp(bounds.getSouth(), -90, 90);
+    const north = clamp(bounds.getNorth(), -90, 90);
+    const boundingBox = [
+      [Math.min(south, north), Math.min(west, east)],
+      [Math.max(south, north), Math.max(west, east)]
+    ];
+    pendingSubscription = {
+      type: "subscribe",
+      BoundingBoxes: [boundingBox],
+      FilterMessageTypes: ["PositionReport"]
+    };
+    ensureLiveSocket();
+    flushSubscription();
+  }
+
+  function ensureLiveSocket() {
+    if (liveSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(liveSocket.readyState)) {
+      return;
+    }
+    liveStatus = "connecting";
+    liveMessage = null;
+    const socket = new WebSocket(`${WS_BASE}/maritime/live/ws`);
+    liveSocket = socket;
+    socket.onopen = () => {
+      liveStatus = "connected";
+      flushSubscription();
+    };
+    socket.onmessage = handleLiveMessage;
+    socket.onerror = () => {
+      liveStatus = "error";
+      liveMessage = "Live AISstream proxy error.";
+    };
+    socket.onclose = () => {
+      if (liveSocket === socket) {
+        liveSocket = null;
+      }
+      if (liveStatus !== "unavailable" && liveStatus !== "error" && mapZoom >= AIS_ZOOM_THRESHOLD) {
+        liveStatus = "suspended";
+      }
+    };
+  }
+
+  function flushSubscription() {
+    if (!liveSocket || liveSocket.readyState !== WebSocket.OPEN || !pendingSubscription) return;
+    const key = JSON.stringify(pendingSubscription.BoundingBoxes);
+    if (key === lastSubscriptionKey) return;
+    liveSocket.send(JSON.stringify(pendingSubscription));
+    lastSubscriptionKey = key;
+    liveStatus = "subscribed";
+  }
+
+  function handleLiveMessage(event: MessageEvent<string>) {
+    let message: Record<string, unknown>;
+    try {
+      message = JSON.parse(event.data) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (message.type === "status") {
+      const status = String(message.status ?? "");
+      if (status === "unavailable") {
+        liveStatus = "unavailable";
+      } else if (status === "error") {
+        liveStatus = "error";
+      } else if (status === "subscribed") {
+        liveStatus = "subscribed";
+      } else if (status === "connected") {
+        liveStatus = "connected";
+      }
+      liveMessage = typeof message.message === "string" ? message.message : null;
+      return;
+    }
+    if (message.type !== "position" || !message.position) {
+      return;
+    }
+    liveStatus = "live";
+    upsertPosition(message.position as MaritimeAisPosition);
+    if (message.vessel) {
+      upsertVessel(message.vessel as MaritimeVesselStatic);
+    }
+  }
+
+  function upsertPosition(position: MaritimeAisPosition) {
+    livePositions = [
+      position,
+      ...livePositions.filter((item) => item.vessel_id !== position.vessel_id)
+    ]
+      .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
+      .slice(0, MAX_LIVE_POSITIONS);
+  }
+
+  function upsertVessel(vessel: MaritimeVesselStatic) {
+    liveVessels = [vessel, ...liveVessels.filter((item) => item.vessel_id !== vessel.vessel_id)];
+  }
+
+  function closeLiveSocket(reason: string, status: typeof liveStatus = "suspended", clearLiveData = false) {
+    if (viewportDebounce) {
+      clearTimeout(viewportDebounce);
+      viewportDebounce = null;
+    }
+    pendingSubscription = null;
+    lastSubscriptionKey = "";
+    if (clearLiveData) {
+      livePositions = [];
+      liveVessels = [];
+    }
+    if (liveSocket) {
+      const socket = liveSocket;
+      liveSocket = null;
+      if ([WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState)) {
+        socket.close(1000, reason);
+      }
+    }
+    liveStatus = status;
+  }
+
+  function clamp(value: number, low: number, high: number) {
+    return Math.max(low, Math.min(high, value));
+  }
+
+  function mergeVessels(base: MaritimeVesselStatic[], live: MaritimeVesselStatic[]) {
+    const rows = new Map<string, MaritimeVesselStatic>();
+    for (const vessel of base) rows.set(vessel.vessel_id, vessel);
+    for (const vessel of live) rows.set(vessel.vessel_id, vessel);
+    return [...rows.values()];
+  }
 
   onMount(() => {
     map = new maplibregl.Map({
       container,
       style: "https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json",
-      center: [10, 20],
-      zoom: 1.5,
+      center: [-20, 10],
+      zoom: 3,
       attributionControl: false,
+      dragRotate: false,
+      pitchWithRotate: false,
     });
+    map.touchZoomRotate.disableRotation();
 
     popup = new maplibregl.Popup({
       closeButton: false,
@@ -116,24 +332,74 @@
       "bottom-right"
     );
 
-    map.on("zoom", () => { mapZoom = map?.getZoom() ?? mapZoom; });
+    map.on("move", scheduleViewportSubscription);
+    map.on("zoom", scheduleViewportSubscription);
 
     map.on("load", () => {
       if (!map) return;
+      recolorBaseMap();
 
       // ── Shipping lanes (static, no interaction) ───────────────
       map.addSource("shipping-lanes", {
         type: "geojson",
         data: "/shipping-lanes.geojson",
+        attribution: "Shipping lanes: P. Benden / CIA, CC BY-SA 4.0",
+      });
+      // Width scaled by lane importance: Major > Middle > Minor
+      const laneWidth = (major: number, middle: number, minor: number) => [
+        "match", ["get", "Type"],
+        "Major", major, "Middle", middle, minor
+      ];
+
+      map.addLayer({
+        id: "shipping-lanes-aura",
+        type: "line",
+        source: "shipping-lanes",
+        paint: {
+          "line-color": "#76b9ff",
+          "line-opacity": ["interpolate", ["linear"], ["zoom"],
+            2, ["match", ["get", "Type"], "Major", 0.13, "Middle", 0.09, 0.06],
+            5, ["match", ["get", "Type"], "Major", 0.20, "Middle", 0.14, 0.09],
+            8, ["match", ["get", "Type"], "Major", 0.26, "Middle", 0.18, 0.11]],
+          "line-width": ["interpolate", ["linear"], ["zoom"],
+            2, laneWidth(16, 11, 7),
+            5, laneWidth(22, 15, 10),
+            8, laneWidth(30, 20, 13)],
+          "line-blur": 14,
+        },
       });
       map.addLayer({
-        id: "shipping-lanes-line",
+        id: "shipping-lanes-glow",
+        type: "line",
+        source: "shipping-lanes",
+        paint: {
+          "line-color": "#2f89d9",
+          "line-opacity": ["interpolate", ["linear"], ["zoom"],
+            2, ["match", ["get", "Type"], "Major", 0.36, "Middle", 0.25, 0.16],
+            5, ["match", ["get", "Type"], "Major", 0.45, "Middle", 0.31, 0.20],
+            8, ["match", ["get", "Type"], "Major", 0.52, "Middle", 0.36, 0.23]],
+          "line-width": ["interpolate", ["linear"], ["zoom"],
+            2, laneWidth(8, 5.5, 3.5),
+            5, laneWidth(12, 8, 5),
+            8, laneWidth(17, 11, 7)],
+          "line-blur": 8,
+        },
+      });
+      map.addLayer({
+        id: "shipping-lanes-body",
         type: "line",
         source: "shipping-lanes",
         paint: {
           "line-color": "#1a3a5c",
-          "line-opacity": 0.5,
-          "line-width": 1,
+          "line-opacity": ["interpolate", ["linear"], ["zoom"],
+            2, ["match", ["get", "Type"], "Major", 0.62, "Middle", 0.44, 0.28],
+            5, ["match", ["get", "Type"], "Major", 0.72, "Middle", 0.50, 0.32],
+            8, ["match", ["get", "Type"], "Major", 0.82, "Middle", 0.57, 0.37]],
+          "line-width": ["interpolate", ["linear"], ["zoom"],
+            2, laneWidth(4.5, 3, 2),
+            5, laneWidth(6.5, 4.5, 3),
+            8, laneWidth(9, 6, 4)],
+          "line-blur": 4.5,
         },
       });
 
@@ -236,10 +502,14 @@
       });
 
       mapReady = true;
+      mapZoom = map.getZoom();
+      pushSources();
+      scheduleViewportSubscription();
     });
   });
 
   onDestroy(() => {
+    closeLiveSocket("component destroyed", "idle", true);
     popup?.remove();
     map?.remove();
   });
@@ -253,9 +523,25 @@
   }
 
   // Push new data whenever props change and map is ready
-  $: if (mapReady) void (positions, vessels, ports, chokepoints, pushSources());
+  $: if (mapReady) void (displayPositions, displayVessels, ports, chokepoints, pushSources());
   $: if (mapReady) applyProjection();
-  $: connDotActive = connected && mapZoom >= 4;
+  $: connDotActive = mapZoom >= AIS_ZOOM_THRESHOLD && ["subscribed", "live"].includes(liveStatus);
+  $: liveStatusLabel =
+    mapZoom < AIS_ZOOM_THRESHOLD
+      ? "Zoom <4"
+      : liveStatus === "live"
+        ? "Live"
+        : liveStatus === "subscribed"
+          ? "Subscribed"
+          : liveStatus === "connecting" || liveStatus === "connected"
+            ? "Connecting"
+            : liveStatus === "unavailable"
+              ? "Unavailable"
+              : liveStatus === "error"
+                ? "Error"
+                : connected
+                  ? "API"
+                  : "Idle";
 </script>
 
 <div class="map-wrap">
@@ -265,18 +551,24 @@
   <div class="map-hud">
     <div class="hud-row">
       <span class="hud-label">Vessels</span>
-      <span class="hud-value">{positions.length}</span>
+      <span class="hud-value">{displayPositions.length}</span>
     </div>
     <div class="hud-row">
       <span class="conn-dot" class:active={connDotActive}></span>
-      <span class="hud-label">{connDotActive ? "Live" : "Offline"}</span>
+      <span class="hud-label">{liveStatusLabel}</span>
     </div>
+    <div class="hud-row">
+      <span class="hud-label">Zoom</span>
+      <span class="hud-value">{mapZoom.toFixed(1)}</span>
+    </div>
+    {#if liveMessage}<div class="hud-note">{liveMessage}</div>{/if}
   </div>
 
   <!-- Bottom-left: legend + 3D toggle -->
   <div class="map-bottom">
     <div class="map-legend">
       <span class="legend-item vessel">Vessel</span>
+      <span class="legend-item lane">Sealanes</span>
       <span class="legend-item port">Port</span>
       <span class="legend-item choke">Chokepoint</span>
     </div>
@@ -347,7 +639,14 @@
   }
 
   .conn-dot.active {
-    background: #22c55e;
+    background: var(--positive, #4bb474);
+  }
+
+  .hud-note {
+    max-width: 14rem;
+    color: var(--warning, #c49a5a);
+    font-size: 0.66rem;
+    line-height: 1.35;
   }
 
   /* ── Bottom-left: legend + 3D toggle ─────────────────────── */
@@ -389,6 +688,15 @@
   }
 
   .legend-item.vessel::before { background: var(--accent, #7aa6c8); }
+  .legend-item.lane::before {
+    width: 18px;
+    height: 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, #1a3a5c 72%, transparent);
+    box-shadow:
+      0 0 4px color-mix(in srgb, #2f89d9 72%, transparent),
+      0 0 10px color-mix(in srgb, #76b9ff 42%, transparent);
+  }
   .legend-item.port::before   { background: var(--chart-secondary, #c49a5a); }
   .legend-item.choke::before  { background: transparent; border: 1px solid var(--text-2, #8a919a); }
 
