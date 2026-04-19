@@ -103,7 +103,7 @@ The current API surface is grouped by workspace:
 
 Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 
-- `IBKR`: portfolio snapshots, security history, FX spot/history, IV surfaces, and listed-market data where the user has entitlements
+- `IBKR`: portfolio snapshots, security history, FX spot/history, IV surfaces, listed-market data, and commodity futures curves where the user has entitlements
 - `FRED`: macro time series
 - `EIA`: optional selected official US energy fundamentals for the Commodities tab when `EIA_API_KEY` is configured
 - `US Treasury`: Treasury curve snapshots for the US rates view
@@ -386,7 +386,9 @@ Provider behavior:
 - default `COMMODITIES_PROVIDER=sample` uses generated offline sample prices, curves, inventories, and events
 - `COMMODITIES_PROVIDER=eia` enables selected EIA official energy fundamentals when `EIA_API_KEY` is present
 - optional `FRED_API_KEY` lets the EIA provider enrich selected spot/proxy price histories through existing FRED client infrastructure
-- futures curves remain sample-derived until an entitled read-only futures-chain provider is added
+- `COMMODITIES_PROVIDER=ibkr` builds read-only futures curves from individual IBKR/TWS `FUT` contract details and market-data snapshots when TWS is connected and the account has the needed futures market-data entitlements
+- IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
+- if IBKR contract discovery, quotes, or entitlements are unavailable, Gamma keeps the sample or EIA/FRED fallback payload and returns explicit coverage warnings
 
 What Gamma computes:
 
@@ -401,6 +403,8 @@ Important caveats:
 - sample data is illustrative and explicitly marked as sample or proxy coverage
 - EIA coverage is official but partial, US-energy-focused, and release-lagged
 - FRED price histories are spot or proxy series, not futures chains
+- IBKR curves are constructed by Gamma from discovered futures contracts; live, delayed, cached, or missing quote status depends on TWS connectivity, exchange subscriptions, and market-data mode
+- IBKR front-contract histories are not back-adjusted continuous futures, and local daily curve snapshots accumulate only after Gamma observes the curve
 - roll-yield, spread z-scores, seasonal inventory context, and cross-domain links are Gamma heuristics
 - Commodities remains read-only and does not expose order placement, strategy execution, or trading automation
 
@@ -536,7 +540,7 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 4 - AI Copilot`: paused around 70%, with a shell-level read-only Copilot that can generate structured research cards across the current tab set, sustain lightweight same-domain follow-up threads, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
-- `Roadmap V2 Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
+- `Roadmap V2 Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 
 That means the app already has meaningful portfolio/risk/IV capabilities, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
 
@@ -575,7 +579,7 @@ The important boundary does not change: Gamma can study strategies, market data,
 - Prediction Markets currently go deepest on discovery, normalization, and first-pass comparative analysis, not exhaustive microstructure backtesting
 - Crypto is currently strongest on token discovery, normalization, and liquidity-aware first-pass comparison, not deep wallet analytics or derivatives overlays
 - Fundamentals is strongest on US SEC-native coverage; broader international equities remain future work
-- Commodities has a practical first pass with sample curves, optional EIA fundamentals, and proxy analytics; live futures curves and deep historical curve storage remain future work
+- Commodities has a practical first pass with sample curves, optional EIA fundamentals, and IBKR-built futures curves; deeper vendor-grade historical curve storage remains future work
 - IV is an exploration surface, not a full options analytics suite
 
 ## Running Gamma
@@ -608,6 +612,18 @@ $env:EIA_API_KEY="<your key>"
 ```
 
 Without `EIA_API_KEY`, Commodities degrades to the sample provider and returns explicit coverage warnings. Provider credentials stay server-side.
+
+Optional Commodities IBKR futures curves:
+
+```powershell
+$env:COMMODITIES_PROVIDER="ibkr"
+$env:IB_MARKET_DATA_MODE="delayed"
+$env:IBKR_COMMODITIES_ENABLED="wti,henry_hub,gold,copper"
+$env:IBKR_COMMODITIES_CONTRACT_DEPTH="6"
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+This path requires a running TWS session and futures market-data permissions. Gamma discovers `FUT` contracts, requests read-only snapshots, caches daily curve observations locally, and falls back to sample or EIA/FRED records when IBKR is disconnected or entitlement-limited.
 
 Optional Maritime AISstream prototype:
 

@@ -65,6 +65,8 @@ def test_ibkr_capability_is_explicitly_data_only():
     assert ibkr.requires_user_entitlement is True
     assert "portfolio_snapshot" in ibkr.data_types
     assert "implied_volatility_surface" in ibkr.data_types
+    assert "futures_curve_snapshots" in ibkr.data_types
+    assert "commodities" in ibkr.supported_domains
     assert not any("order" in data_type for data_type in ibkr.data_types)
     assert any("No order placement" in note for note in ibkr.read_only_notes)
     assert any("market-data and portfolio-inspection" in note for note in ibkr.read_only_notes)

@@ -372,6 +372,104 @@ class MarketDataService:
 
         return results, list(dict.fromkeys(warnings))
 
+    def fetch_snapshot_quotes_batch(
+        self,
+        contracts: List[Contract],
+        timeout_seconds: float | None = None,
+        *,
+        batch_size: int = 8,
+    ) -> Tuple[Dict[str, QuoteSnapshot], List[str]]:
+        results: Dict[str, QuoteSnapshot] = {}
+        warnings: List[str] = []
+        if not self._is_connected():
+            return results, ["Market data unavailable: not connected"]
+
+        timeout = timeout_seconds or self.quote_timeout_seconds
+        prefer_live = self.market_data_mode in {"live", "auto"}
+        self._set_market_data_type(live=prefer_live)
+
+        chunk_size = max(1, int(batch_size or 1))
+        for offset in range(0, len(contracts), chunk_size):
+            chunk = contracts[offset : offset + chunk_size]
+            chunk_results = self._run_ib(
+                lambda chunk=chunk: self._request_snapshot_batch(chunk, timeout),
+                timeout=timeout + 5.0,
+            )
+            for contract, snapshot in chunk_results:
+                key = self.quote_key(contract)
+                if snapshot.price is None and prefer_live:
+                    self._set_market_data_type(live=False)
+                    delayed_snapshot = self._run_ib(
+                        lambda contract=contract: self._request_snapshot(contract, timeout),
+                        timeout=timeout + 5.0,
+                    )
+                    self._set_market_data_type(live=True)
+                    price, field, delayed = delayed_snapshot
+                    snapshot = QuoteSnapshot(price, field, delayed or self.market_data_mode == "delayed")
+
+                if snapshot.price is None:
+                    cached = self._quote_cache.get(key)
+                    if cached is not None:
+                        snapshot = QuoteSnapshot(cached, "cached", snapshot.delayed)
+                        warnings.append(f"Snapshot quote missing for {contract.symbol}; using cached value")
+                    else:
+                        warnings.append(f"Snapshot quote missing for {contract.symbol}")
+                else:
+                    self._quote_cache[key] = snapshot.price
+                    self._quote_cache_ts[key] = datetime.utcnow()
+
+                if snapshot.delayed:
+                    warnings.append(f"Delayed market data for {contract.symbol}")
+                results[key] = snapshot
+
+        return results, list(dict.fromkeys(warnings))
+
+    def _request_snapshot_batch(
+        self,
+        contracts: List[Contract],
+        timeout_seconds: float,
+    ) -> list[tuple[Contract, QuoteSnapshot]]:
+        tickers = []
+        for contract in contracts:
+            try:
+                ticker = self.ib.reqMktData(contract, snapshot=True)
+            except Exception as exc:
+                self._record_error(f"Quote request failed for {contract.symbol}: {exc}")
+                tickers.append((contract, None))
+                continue
+            tickers.append((contract, ticker))
+
+        start = time.time()
+        prices: dict[int, QuoteSnapshot] = {}
+        while time.time() - start < timeout_seconds:
+            complete = True
+            for index, (_contract, ticker) in enumerate(tickers):
+                if index in prices or ticker is None:
+                    continue
+                price, field, delayed = self._best_price(ticker)
+                if price is not None:
+                    prices[index] = QuoteSnapshot(price, field, delayed)
+                else:
+                    complete = False
+            if complete:
+                break
+            self.ib.sleep(0.1)
+
+        results: list[tuple[Contract, QuoteSnapshot]] = []
+        for index, (contract, ticker) in enumerate(tickers):
+            if ticker is None:
+                results.append((contract, QuoteSnapshot(None, None, False)))
+                continue
+            snapshot = prices.get(index)
+            if snapshot is None:
+                snapshot = QuoteSnapshot(None, None, self._is_delayed(ticker))
+            results.append((contract, snapshot))
+            try:
+                self.ib.wrapper.endTicker(ticker, "mktData")
+            except Exception:
+                pass
+        return results
+
     def _set_market_data_type(self, live: bool) -> None:
         market_data_type = 1 if live else 3
         try:

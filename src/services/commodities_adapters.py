@@ -9,6 +9,9 @@ from typing import Any, Callable, Protocol
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+import pandas as pd
+from ib_insync import Contract
+
 from src.models.commodities import (
     CommodityCoverageMetadata,
     CommodityCurveNode,
@@ -25,6 +28,8 @@ from src.models.commodities import (
 )
 from src.services.cache import CacheService
 from src.services.fred import FredClient
+from src.services.ibkr_client import IBKRClient
+from src.services.market_data import MarketDataService, QuoteSnapshot
 from src.utils.time import now_utc
 
 
@@ -55,6 +60,18 @@ class FredPriceConfig:
     instrument_id: str
     label: str
     unit: str
+
+
+@dataclass(frozen=True)
+class IbkrFutureRootConfig:
+    instrument_id: str
+    symbol: str
+    exchange: str
+    currency: str
+    quote_unit: str
+    label: str
+    trading_class: str | None = None
+    multiplier: str | None = None
 
 
 EIA_INVENTORY_SERIES: tuple[EiaSeriesConfig, ...] = (
@@ -95,6 +112,17 @@ FRED_PRICE_SERIES: tuple[FredPriceConfig, ...] = (
     FredPriceConfig("GOLDAMGBD228NLBM", "gold", "Gold London AM Fix", "USD/oz"),
     FredPriceConfig("SLVPRUSD", "silver", "Silver Price Proxy", "USD/oz"),
     FredPriceConfig("PCOPPUSDM", "copper", "Copper Price Proxy", "USD/metric ton"),
+)
+
+IBKR_FUTURES_ROOTS: tuple[IbkrFutureRootConfig, ...] = (
+    IbkrFutureRootConfig("wti", "CL", "NYMEX", "USD", "USD/bbl", "WTI Crude Oil", trading_class="CL"),
+    IbkrFutureRootConfig("brent", "BZ", "NYMEX", "USD", "USD/bbl", "Brent Crude Oil", trading_class="BZ"),
+    IbkrFutureRootConfig("henry_hub", "NG", "NYMEX", "USD", "USD/MMBtu", "Henry Hub Natural Gas", trading_class="NG"),
+    IbkrFutureRootConfig("gasoline", "RB", "NYMEX", "USD", "USD/gal", "RBOB Gasoline", trading_class="RB"),
+    IbkrFutureRootConfig("heating_oil", "HO", "NYMEX", "USD", "USD/gal", "Heating Oil / Diesel", trading_class="HO"),
+    IbkrFutureRootConfig("gold", "GC", "COMEX", "USD", "USD/oz", "Gold", trading_class="GC"),
+    IbkrFutureRootConfig("silver", "SI", "COMEX", "USD", "USD/oz", "Silver", trading_class="SI"),
+    IbkrFutureRootConfig("copper", "HG", "COMEX", "USD", "USD/lb", "Copper", trading_class="HG"),
 )
 
 MONTH_CODES = "FGHJKMNQUVXZ"
@@ -425,6 +453,424 @@ class EiaCommoditiesDataProvider:
         )
 
 
+class IbkrCommoditiesDataProvider:
+    provider_id = "ibkr"
+    provider_label = "IBKR Futures Curves"
+
+    def __init__(
+        self,
+        *,
+        client: IBKRClient,
+        market_data: MarketDataService,
+        cache: CacheService | None = None,
+        reference_provider: CommoditiesDataProvider | None = None,
+        root_configs: tuple[IbkrFutureRootConfig, ...] | None = None,
+        enabled_instrument_ids: list[str] | tuple[str, ...] | None = None,
+        contract_depth: int = 6,
+        history_days: int = 120,
+        quote_timeout_seconds: float = 4.0,
+        contract_details_timeout_seconds: float = 12.0,
+        quote_batch_size: int = 8,
+    ) -> None:
+        self.client = client
+        self.market_data = market_data
+        self.cache = cache
+        self.reference_provider = reference_provider or SampleCommoditiesDataProvider()
+        self.root_configs = {
+            config.instrument_id: config for config in (root_configs or _ibkr_root_configs_from_env())
+        }
+        enabled = enabled_instrument_ids
+        if enabled is None:
+            enabled = _parse_csv_env(
+                "IBKR_COMMODITIES_ENABLED",
+                ",".join(config.instrument_id for config in self.root_configs.values()),
+            )
+        self.enabled_instrument_ids = tuple(_dedupe([_slug(item) for item in enabled]))
+        self.contract_depth = max(1, int(contract_depth or 1))
+        self.history_days = max(0, int(history_days or 0))
+        self.quote_timeout_seconds = max(0.5, float(quote_timeout_seconds or 4.0))
+        self.contract_details_timeout_seconds = max(1.0, float(contract_details_timeout_seconds or 12.0))
+        self.quote_batch_size = max(1, int(quote_batch_size or 1))
+
+    def get_snapshot(self, *, force_refresh: bool = False) -> CommodityProviderSnapshot:
+        reference = self.reference_provider.get_snapshot(force_refresh=force_refresh)
+        if getattr(self.client, "mock", False):
+            return _with_provider_warning(
+                reference,
+                "COMMODITIES_PROVIDER=ibkr but Gamma is running in mock IBKR mode; using commodities fallback data.",
+                credential_env_vars=_ibkr_credential_env_vars(),
+            )
+        if not self._is_connected():
+            return _with_provider_warning(
+                reference,
+                "COMMODITIES_PROVIDER=ibkr but TWS/IBKR is not connected; using commodities fallback data.",
+                credential_env_vars=_ibkr_credential_env_vars(),
+            )
+
+        retrieved_at = now_utc().replace(microsecond=0)
+        warnings: list[str] = []
+        curve_by_id = {curve.instrument_id: curve for curve in reference.curve_snapshots}
+        history_by_id = {history.instrument_id: history for history in reference.price_histories}
+        ibkr_curve_ids: list[str] = []
+        delayed_nodes = 0
+        priced_nodes = 0
+
+        for instrument in reference.instruments:
+            if instrument.instrument_id not in self.enabled_instrument_ids:
+                continue
+            config = self.root_configs.get(instrument.instrument_id)
+            if config is None:
+                warnings.append(f"No IBKR futures root configured for {instrument.name}; keeping fallback curve.")
+                continue
+
+            contracts, detail_warnings = self._discover_contracts(config, retrieved_at)
+            warnings.extend(detail_warnings)
+            if not contracts:
+                warnings.append(
+                    f"IBKR returned no active futures contracts for {config.label} ({config.symbol} {config.exchange}); keeping fallback curve."
+                )
+                continue
+
+            quote_contracts = [contract for contract, _detail in contracts]
+            try:
+                quotes, quote_warnings = self._fetch_quotes(quote_contracts)
+            except Exception as exc:
+                warnings.append(f"IBKR quote fetch failed for {config.label}: {exc.__class__.__name__}.")
+                continue
+            warnings.extend(quote_warnings)
+            delayed_nodes += sum(1 for snapshot in quotes.values() if snapshot.delayed)
+
+            curve = self._build_curve(config, contracts, quotes, retrieved_at)
+            curve_priced_nodes = sum(1 for node in curve.nodes if node.price is not None)
+            priced_nodes += curve_priced_nodes
+            if curve_priced_nodes >= 2:
+                curve_by_id[config.instrument_id] = curve
+                ibkr_curve_ids.append(config.instrument_id)
+                self._append_curve_snapshot(curve)
+            else:
+                warnings.append(
+                    f"IBKR curve for {config.label} had fewer than two priced nodes; keeping fallback curve."
+                )
+
+            if self.history_days > 0 and curve.nodes and contracts:
+                history = self._fetch_front_history(config, contracts[0][0], retrieved_at)
+                if history.points:
+                    history_by_id[config.instrument_id] = history
+
+        if not ibkr_curve_ids:
+            return _with_provider_warning(
+                reference,
+                "IBKR futures-chain discovery ran but returned no usable priced curves; using commodities fallback data.",
+                extra_warnings=warnings,
+                credential_env_vars=_ibkr_credential_env_vars(),
+            )
+
+        coverage = CommodityCoverageMetadata(
+            coverage_status="partial",
+            provider_id=self.provider_id,
+            provider_label=self.provider_label,
+            freshness_label="ibkr_live_or_delayed_snapshot",
+            instruments=[instrument.instrument_id for instrument in reference.instruments],
+            regions=["Global"],
+            as_of=retrieved_at,
+            source_timestamp=retrieved_at,
+            caveats=_dedupe(
+                [
+                    "IBKR curves are built by Gamma from individual read-only FUT contract market-data snapshots.",
+                    "Quotes may be live, delayed, cached, or unavailable depending on TWS connectivity and market-data entitlements.",
+                    "Historical futures-curve context accumulates from Gamma's local daily snapshots; IBKR is not treated as a bulk curve-history warehouse.",
+                    "EIA/FRED/sample fallback data may still supply fundamentals, events, or proxy price histories.",
+                    *reference.coverage.caveats,
+                    *warnings,
+                ]
+            ),
+            credential_env_vars=_dedupe([*reference.coverage.credential_env_vars, *_ibkr_credential_env_vars()]),
+            supports_prices=True,
+            supports_curves=True,
+            supports_inventories=reference.coverage.supports_inventories,
+            supports_events=reference.coverage.supports_events,
+            source_provider="ibkr",
+            retrieved_at=retrieved_at,
+            origin="ibkr.commodities.coverage",
+            transformation_note=(
+                "Gamma discovered IBKR FUT contracts, requested read-only market-data snapshots, and normalized them into commodity curve nodes."
+            ),
+        )
+        return CommodityProviderSnapshot(
+            coverage=coverage,
+            instruments=_mark_ibkr_instruments(reference.instruments, set(ibkr_curve_ids), retrieved_at),
+            price_histories=list(history_by_id.values()),
+            curve_snapshots=list(curve_by_id.values()),
+            inventory_series=reference.inventory_series,
+            events=reference.events,
+            warnings=_dedupe(
+                [
+                    *reference.warnings,
+                    *warnings,
+                    f"IBKR curves loaded for {len(ibkr_curve_ids)} commodity instruments with {priced_nodes} priced nodes.",
+                    f"Delayed quote nodes detected: {delayed_nodes}." if delayed_nodes else "",
+                    "Gamma remains read-only; IBKR is used here for futures market data only.",
+                    "Front-contract histories use IBKR historical bars when available; calendar-spread history still depends on saved curve snapshots and provider limits.",
+                ]
+            ),
+            source_provider="ibkr",
+            retrieved_at=retrieved_at,
+            origin="ibkr.commodities.snapshot",
+            transformation_note=(
+                "IBKR futures curves replace fallback curves where at least two priced contracts are available; other commodities fields retain explicit fallback provenance."
+            ),
+        )
+
+    def _is_connected(self) -> bool:
+        try:
+            return bool(self.client.is_connected())
+        except Exception:
+            return False
+
+    def _run_ib(self, fn, *, timeout: float | None = None):
+        run_ib = getattr(self.client, "_run_ib", None)
+        if callable(run_ib):
+            return run_ib(fn, timeout=timeout)
+        runner = getattr(self.client, "ib_runner", None)
+        if runner is not None:
+            return runner.run(fn, timeout=timeout)
+        return fn()
+
+    def _discover_contracts(
+        self,
+        config: IbkrFutureRootConfig,
+        retrieved_at: datetime,
+    ) -> tuple[list[tuple[Contract, Any]], list[str]]:
+        warnings: list[str] = []
+        seed = Contract(
+            symbol=config.symbol,
+            secType="FUT",
+            exchange=config.exchange,
+            currency=config.currency,
+        )
+        if config.trading_class:
+            seed.tradingClass = config.trading_class
+        try:
+            details = self._run_ib(
+                lambda: self.client.ib.reqContractDetails(seed),
+                timeout=self.contract_details_timeout_seconds,
+            ) or []
+        except Exception as exc:
+            return [], [f"IBKR contract discovery failed for {config.label}: {exc.__class__.__name__}."]
+
+        rows: list[tuple[Contract, Any, str, datetime | None]] = []
+        seen: set[str] = set()
+        for detail in details:
+            contract = getattr(detail, "contract", detail)
+            if str(getattr(contract, "secType", "")).upper() != "FUT":
+                continue
+            if config.symbol and str(getattr(contract, "symbol", "")).upper() != config.symbol.upper():
+                continue
+            expiry = _ibkr_contract_expiry(contract, detail)
+            month_key = _ibkr_contract_month_key(contract, detail)
+            if expiry is not None and expiry.date() < retrieved_at.date():
+                continue
+            if not month_key:
+                continue
+            dedupe_key = str(getattr(contract, "conId", "") or month_key)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            rows.append((contract, detail, month_key, expiry))
+
+        rows.sort(key=lambda row: (row[2], row[3] or datetime.max))
+        selected = [(contract, detail) for contract, detail, _month_key, _expiry in rows[: self.contract_depth]]
+        if len(rows) > self.contract_depth:
+            warnings.append(
+                f"IBKR returned {len(rows)} active {config.label} contracts; Gamma kept the front {self.contract_depth} nodes."
+            )
+        return selected, warnings
+
+    def _fetch_quotes(self, contracts: list[Contract]) -> tuple[dict[str, QuoteSnapshot], list[str]]:
+        batch_fetch = getattr(self.market_data, "fetch_snapshot_quotes_batch", None)
+        if callable(batch_fetch):
+            return batch_fetch(
+                contracts,
+                timeout_seconds=self.quote_timeout_seconds,
+                batch_size=self.quote_batch_size,
+            )
+        return self.market_data.fetch_snapshot_quotes(contracts, timeout_seconds=self.quote_timeout_seconds)
+
+    def _build_curve(
+        self,
+        config: IbkrFutureRootConfig,
+        contracts: list[tuple[Contract, Any]],
+        quotes: dict[str, QuoteSnapshot],
+        retrieved_at: datetime,
+    ) -> CommodityCurveSnapshot:
+        previous_prices = self._previous_curve_prices(config.instrument_id, retrieved_at)
+        nodes: list[CommodityCurveNode] = []
+        warnings: list[str] = []
+        for index, (contract, detail) in enumerate(contracts):
+            quote = quotes.get(self.market_data.quote_key(contract), QuoteSnapshot(None, None, False))
+            price = quote.price if _valid_positive(quote.price) else None
+            expiry = _ibkr_contract_expiry(contract, detail)
+            contract_id = _ibkr_contract_id(contract, config)
+            month_label = _ibkr_contract_month_label(contract, detail)
+            previous_price = previous_prices.get(contract_id) or previous_prices.get(month_label)
+            change = price - previous_price if price is not None and previous_price is not None else None
+            if price is None:
+                warnings.append(f"No IBKR quote for {config.label} {month_label}.")
+            if quote.delayed:
+                warnings.append(f"Delayed IBKR quote for {config.label} {month_label}.")
+            contract_meta = CommodityFuturesContract(
+                contract_id=contract_id,
+                instrument_id=config.instrument_id,
+                symbol=_ibkr_contract_symbol(contract, config),
+                contract_month=month_label,
+                expiry_date=expiry,
+                is_front_month=index == 0,
+                source_provider="ibkr",
+                retrieved_at=retrieved_at,
+                origin=_ibkr_contract_origin(contract),
+                transformation_note="IBKR FUT contract metadata normalized from reqContractDetails.",
+            )
+            nodes.append(
+                CommodityCurveNode(
+                    contract=contract_meta,
+                    price=round(float(price), 6) if price is not None else None,
+                    previous_price=round(previous_price, 6) if previous_price is not None else None,
+                    change=round(change, 6) if change is not None else None,
+                    days_to_expiry=(expiry.date() - retrieved_at.date()).days if expiry is not None else None,
+                    source_provider="ibkr",
+                    retrieved_at=retrieved_at,
+                    origin=f"ibkr.reqMktData:{getattr(contract, 'conId', '') or _ibkr_contract_symbol(contract, config)}",
+                    transformation_note=(
+                        f"Gamma requested a read-only IBKR futures snapshot and selected {quote.field or 'no usable'} price field."
+                    ),
+                )
+            )
+        return CommodityCurveSnapshot(
+            instrument_id=config.instrument_id,
+            as_of=retrieved_at,
+            nodes=nodes,
+            warnings=_dedupe(
+                [
+                    *warnings,
+                    "Curve nodes are individual IBKR FUT contracts; this is not a synthetic tradable instrument or order ticket.",
+                ]
+            ),
+            source_provider="ibkr",
+            retrieved_at=retrieved_at,
+            origin=f"ibkr.commodities.curve:{config.symbol}:{config.exchange}",
+            transformation_note=(
+                "Gamma constructs the futures curve from IBKR contract details and market-data snapshots, then the application service computes term-structure analytics."
+            ),
+        )
+
+    def _fetch_front_history(
+        self,
+        config: IbkrFutureRootConfig,
+        contract: Contract,
+        retrieved_at: datetime,
+    ) -> CommodityPriceHistory:
+        try:
+            series = self.market_data.fetch_history(contract, self.history_days)
+        except Exception:
+            series = None
+        points: list[CommodityPricePoint] = []
+        if series is not None and not series.empty:
+            clean = series.dropna().tail(self.history_days)
+            for timestamp, value in clean.items():
+                if not _valid_positive(value):
+                    continue
+                ts = timestamp.to_pydatetime() if isinstance(timestamp, pd.Timestamp) else _parse_datetime(timestamp)
+                if ts is None:
+                    continue
+                points.append(
+                    CommodityPricePoint(
+                        instrument_id=config.instrument_id,
+                        timestamp=ts,
+                        value=round(float(value), 6),
+                        unit=config.quote_unit,
+                        source_provider="ibkr",
+                        retrieved_at=retrieved_at,
+                        origin=f"ibkr.reqHistoricalData:{getattr(contract, 'conId', '') or _ibkr_contract_symbol(contract, config)}",
+                        transformation_note=(
+                            "IBKR historical daily bars for the current front futures contract; this is not a back-adjusted continuous series."
+                        ),
+                    )
+                )
+        return CommodityPriceHistory(
+            instrument_id=config.instrument_id,
+            label=f"{config.label} IBKR front futures history",
+            unit=config.quote_unit,
+            points=points,
+            source_provider="ibkr",
+            retrieved_at=retrieved_at,
+            origin=f"ibkr.reqHistoricalData:{getattr(contract, 'conId', '') or _ibkr_contract_symbol(contract, config)}",
+            transformation_note="Gamma maps IBKR front-contract futures bars into the normalized commodity price-history model.",
+        )
+
+    def _curve_history_key(self, instrument_id: str) -> str:
+        if self.cache is None:
+            return ""
+        return self.cache.make_key("commodities", "ibkr", "curve_history", instrument_id)
+
+    def _load_curve_history(self, instrument_id: str) -> list[dict[str, Any]]:
+        if self.cache is None:
+            return []
+        cached = self.cache.get_json(
+            self._curve_history_key(instrument_id),
+            max_age=timedelta(days=3650),
+        )
+        return cached if isinstance(cached, list) else []
+
+    def _append_curve_snapshot(self, curve: CommodityCurveSnapshot) -> None:
+        if self.cache is None:
+            return
+        history = self._load_curve_history(curve.instrument_id)
+        curve_date = curve.as_of.date().isoformat()
+        entry = {
+            "date": curve_date,
+            "as_of": curve.as_of.isoformat(),
+            "instrument_id": curve.instrument_id,
+            "nodes": [
+                {
+                    "contract_id": node.contract.contract_id,
+                    "symbol": node.contract.symbol,
+                    "contract_month": node.contract.contract_month,
+                    "expiry_date": node.contract.expiry_date.isoformat() if node.contract.expiry_date else None,
+                    "price": node.price,
+                    "source_provider": node.source_provider,
+                    "origin": node.origin,
+                }
+                for node in curve.nodes
+            ],
+        }
+        deduped = [row for row in history if row.get("date") != curve_date]
+        deduped.append(entry)
+        deduped = sorted(deduped, key=lambda row: str(row.get("date") or ""))[-400:]
+        self.cache.set_json(self._curve_history_key(curve.instrument_id), deduped)
+
+    def _previous_curve_prices(self, instrument_id: str, retrieved_at: datetime) -> dict[str, float]:
+        history = self._load_curve_history(instrument_id)
+        today = retrieved_at.date().isoformat()
+        previous_rows = [row for row in history if str(row.get("date") or "") < today]
+        if not previous_rows:
+            return {}
+        previous = sorted(previous_rows, key=lambda row: str(row.get("date") or ""))[-1]
+        prices: dict[str, float] = {}
+        for node in previous.get("nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            price = _float_value(node.get("price"))
+            if price is None:
+                continue
+            contract_id = str(node.get("contract_id") or "").strip()
+            month = str(node.get("contract_month") or "").strip()
+            if contract_id:
+                prices[contract_id] = price
+            if month:
+                prices[month] = price
+        return prices
+
+
 def _sample_instruments(retrieved_at: datetime) -> list[CommodityInstrument]:
     rows = [
         ("wti", "CL", "WTI Crude Oil", "energy", "crude", "USD/bbl", "NYMEX", "CL"),
@@ -687,17 +1133,197 @@ def _contract_for(
     )
 
 
+def _ibkr_root_configs_from_env() -> tuple[IbkrFutureRootConfig, ...]:
+    overrides = _parse_ibkr_root_overrides(os.getenv("IBKR_COMMODITIES_ROOT_OVERRIDES"))
+    rows: list[IbkrFutureRootConfig] = []
+    for config in IBKR_FUTURES_ROOTS:
+        override = overrides.get(config.instrument_id, {})
+        rows.append(
+            IbkrFutureRootConfig(
+                instrument_id=config.instrument_id,
+                symbol=str(override.get("symbol") or config.symbol).strip().upper(),
+                exchange=str(override.get("exchange") or config.exchange).strip().upper(),
+                currency=str(override.get("currency") or config.currency).strip().upper(),
+                quote_unit=str(override.get("quote_unit") or config.quote_unit).strip(),
+                label=str(override.get("label") or config.label).strip(),
+                trading_class=str(override.get("trading_class") or config.trading_class or "").strip().upper() or None,
+                multiplier=str(override.get("multiplier") or config.multiplier or "").strip() or None,
+            )
+        )
+    return tuple(rows)
+
+
+def _parse_ibkr_root_overrides(raw: str | None) -> dict[str, dict[str, Any]]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[str, dict[str, Any]] = {}
+    for key, value in payload.items():
+        if isinstance(value, dict):
+            normalized[_slug(str(key))] = value
+    return normalized
+
+
+def _parse_csv_env(name: str, default: str = "") -> list[str]:
+    raw = os.getenv(name, default)
+    return [item.strip() for item in str(raw or "").split(",") if item.strip()]
+
+
+def _ibkr_credential_env_vars() -> list[str]:
+    return [
+        "COMMODITIES_PROVIDER",
+        "IB_HOST",
+        "IB_PORT",
+        "IB_CLIENT_ID",
+        "IB_MARKET_DATA_MODE",
+        "IBKR_COMMODITIES_ENABLED",
+        "IBKR_COMMODITIES_CONTRACT_DEPTH",
+        "IBKR_COMMODITIES_HISTORY_DAYS",
+        "IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS",
+        "IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS",
+        "IBKR_COMMODITIES_QUOTE_BATCH_SIZE",
+        "IBKR_COMMODITIES_ROOT_OVERRIDES",
+    ]
+
+
+def _mark_ibkr_instruments(
+    instruments: list[CommodityInstrument],
+    live_curve_ids: set[str],
+    retrieved_at: datetime,
+) -> list[CommodityInstrument]:
+    rows: list[CommodityInstrument] = []
+    for instrument in instruments:
+        if instrument.instrument_id not in live_curve_ids:
+            rows.append(instrument)
+            continue
+        rows.append(
+            replace(
+                instrument,
+                source_provider="ibkr",
+                retrieved_at=retrieved_at,
+                origin="ibkr.commodities.instrument",
+                transformation_note=(
+                    "Instrument metadata is the Gamma commodity universe with IBKR futures-curve coverage active for this row."
+                ),
+            )
+        )
+    return rows
+
+
+def _ibkr_contract_id(contract: Contract, config: IbkrFutureRootConfig) -> str:
+    con_id = str(getattr(contract, "conId", "") or "").strip()
+    if con_id and con_id != "0":
+        return f"ibkr:{con_id}"
+    month = str(getattr(contract, "lastTradeDateOrContractMonth", "") or "").strip()
+    return f"ibkr:{config.instrument_id}:{config.symbol}:{month or _ibkr_contract_symbol(contract, config)}"
+
+
+def _ibkr_contract_symbol(contract: Contract, config: IbkrFutureRootConfig) -> str:
+    for attr in ("localSymbol", "symbol"):
+        value = str(getattr(contract, attr, "") or "").strip()
+        if value:
+            return value
+    return config.symbol
+
+
+def _ibkr_contract_origin(contract: Contract) -> str:
+    con_id = str(getattr(contract, "conId", "") or "").strip()
+    if con_id and con_id != "0":
+        return f"ibkr.reqContractDetails:{con_id}"
+    return "ibkr.reqContractDetails"
+
+
+def _ibkr_contract_month_key(contract: Contract, detail: Any = None) -> str:
+    raw_values = [
+        getattr(contract, "lastTradeDateOrContractMonth", None),
+        getattr(detail, "realExpirationDate", None),
+    ]
+    for value in raw_values:
+        text = str(value or "").strip()
+        if len(text) >= 6 and text[:6].isdigit():
+            return text[:6]
+    return ""
+
+
+def _ibkr_contract_month_label(contract: Contract, detail: Any = None) -> str:
+    month_key = _ibkr_contract_month_key(contract, detail)
+    if len(month_key) == 6:
+        try:
+            return datetime(int(month_key[:4]), int(month_key[4:6]), 1).strftime("%b %Y")
+        except ValueError:
+            pass
+    symbol = str(getattr(contract, "localSymbol", "") or getattr(contract, "symbol", "") or "").strip()
+    return symbol or "Unknown"
+
+
+def _ibkr_contract_expiry(contract: Contract, detail: Any = None) -> datetime | None:
+    for value in (
+        getattr(detail, "realExpirationDate", None),
+        getattr(contract, "lastTradeDateOrContractMonth", None),
+    ):
+        parsed = _parse_ibkr_contract_date(value)
+        if parsed is not None:
+            return parsed
+    month_key = _ibkr_contract_month_key(contract, detail)
+    if len(month_key) == 6:
+        try:
+            year = int(month_key[:4])
+            month = int(month_key[4:6])
+            next_month = datetime(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1)
+            return next_month - timedelta(days=1)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_ibkr_contract_date(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) == 8 and text.isdigit():
+        try:
+            return datetime.strptime(text, "%Y%m%d")
+        except ValueError:
+            return None
+    if len(text) == 6 and text.isdigit():
+        try:
+            year = int(text[:4])
+            month = int(text[4:6])
+            next_month = datetime(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1)
+            return next_month - timedelta(days=1)
+        except ValueError:
+            return None
+    return _parse_datetime(text)
+
+
+def _valid_positive(value: Any) -> bool:
+    numeric = _float_value(value)
+    return numeric is not None and math.isfinite(numeric) and numeric > 0
+
+
+def _slug(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    return "_".join(part for part in "".join(char if char.isalnum() else "_" for char in text).split("_") if part)
+
+
 def _with_provider_warning(
     reference: CommodityProviderSnapshot,
     warning: str,
     *,
     extra_warnings: list[str] | None = None,
+    credential_env_vars: list[str] | None = None,
 ) -> CommodityProviderSnapshot:
     warnings = _dedupe([warning, *(extra_warnings or []), *reference.warnings])
     coverage = replace(
         reference.coverage,
         caveats=_dedupe([warning, *reference.coverage.caveats]),
-        credential_env_vars=_dedupe([*reference.coverage.credential_env_vars, "EIA_API_KEY"]),
+        credential_env_vars=_dedupe([*reference.coverage.credential_env_vars, *(credential_env_vars or ["EIA_API_KEY"])]),
     )
     return replace(reference, coverage=coverage, warnings=warnings)
 

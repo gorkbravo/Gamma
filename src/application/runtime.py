@@ -29,6 +29,7 @@ from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
 from src.services.commodities_adapters import (
     EiaCommoditiesDataProvider,
+    IbkrCommoditiesDataProvider,
     SampleCommoditiesDataProvider,
 )
 from src.services.crypto_adapters import CoinGeckoAdapter, GeckoTerminalAdapter
@@ -237,7 +238,7 @@ def build_runtime(
         fx_adapter=IBKRMacroFXAdapter(market_data),
         prediction_market_service=prediction_market_service,
     )
-    commodities_service = CommoditiesService(provider=_build_commodities_provider(cache))
+    commodities_service = CommoditiesService(provider=_build_commodities_provider(cache, client, market_data))
     maritime_service = MaritimeService(provider=_build_maritime_provider())
     crypto_service = CryptoService(
         market_adapter=CoinGeckoAdapter(cache),
@@ -372,15 +373,44 @@ def _build_copilot_provider():
     )
 
 
-def _build_commodities_provider(cache: CacheService):
+def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_data: MarketDataService):
     provider = (os.getenv("COMMODITIES_PROVIDER", "sample") or "sample").strip().lower()
     sample_provider = SampleCommoditiesDataProvider()
     if provider in {"sample", "mock", "offline", "demo"}:
         return sample_provider
+
+    fred_client = FredClient(cache=cache) if (os.getenv("FRED_API_KEY", "") or "").strip() else None
+    eia_provider = None
+    if (os.getenv("EIA_API_KEY", "") or "").strip():
+        eia_provider = EiaCommoditiesDataProvider(
+            api_key=os.getenv("EIA_API_KEY", ""),
+            cache=cache,
+            reference_provider=sample_provider,
+            fred_client=fred_client,
+            cache_seconds=int(os.getenv("COMMODITIES_CACHE_SECONDS", "21600") or 21600),
+        )
+
+    if provider in {"ibkr", "tws", "ibkr_eia", "ibkr_futures"}:
+        return IbkrCommoditiesDataProvider(
+            client=client,
+            market_data=market_data,
+            cache=cache,
+            reference_provider=eia_provider or sample_provider,
+            contract_depth=int(os.getenv("IBKR_COMMODITIES_CONTRACT_DEPTH", "6") or 6),
+            history_days=int(os.getenv("IBKR_COMMODITIES_HISTORY_DAYS", "120") or 120),
+            quote_timeout_seconds=float(
+                os.getenv("IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS", os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2"))
+                or 2.0
+            ),
+            contract_details_timeout_seconds=float(
+                os.getenv("IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS", "12") or 12.0
+            ),
+            quote_batch_size=int(os.getenv("IBKR_COMMODITIES_QUOTE_BATCH_SIZE", "8") or 8),
+        )
+
     if provider not in {"eia", "official", "eia_fred", "fred"}:
         return sample_provider
 
-    fred_client = FredClient(cache=cache) if (os.getenv("FRED_API_KEY", "") or "").strip() else None
     return EiaCommoditiesDataProvider(
         api_key=os.getenv("EIA_API_KEY", ""),
         cache=cache,

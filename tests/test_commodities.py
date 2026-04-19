@@ -1,13 +1,24 @@
 from __future__ import annotations
 
+from datetime import datetime
+from types import SimpleNamespace
+
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from ib_insync import Contract
 
 from src.api.main import create_app
 from src.application.commodities_service import CommoditiesService, CommodityWorkspaceRequest
 from src.application.runtime import build_runtime
 from src.models.commodities import CommodityCoverageMetadata
-from src.services.commodities_adapters import EiaCommoditiesDataProvider, SampleCommoditiesDataProvider
+from src.services.cache import CacheService
+from src.services.commodities_adapters import (
+    EiaCommoditiesDataProvider,
+    IbkrCommoditiesDataProvider,
+    SampleCommoditiesDataProvider,
+)
+from src.services.market_data import QuoteSnapshot
 
 
 def test_commodity_coverage_rejects_unknown_status():
@@ -105,6 +116,132 @@ def test_eia_provider_enriches_energy_inventory_with_official_series():
     assert crude.metadata.provider_series_id == "PET.WCESTUS1.W"
     assert [point.value for point in crude.points] == [420.0, 421.5, 419.75]
     assert crude.points[-1].change == -1.75
+
+
+class _FakeIb:
+    def __init__(self, details):
+        self.details = details
+
+    def reqContractDetails(self, contract):
+        assert contract.secType == "FUT"
+        return self.details
+
+
+class _FakeIbkrClient:
+    mock = False
+
+    def __init__(self, details, connected: bool = True):
+        self.ib = _FakeIb(details)
+        self.connected = connected
+
+    def is_connected(self):
+        return self.connected
+
+    def _run_ib(self, fn, *args, timeout=None, **kwargs):
+        del timeout
+        return fn(*args, **kwargs)
+
+
+class _FakeMarketData:
+    def __init__(self, prices: dict[int, float], delayed: set[int] | None = None):
+        self.prices = prices
+        self.delayed = delayed or set()
+
+    def quote_key(self, contract):
+        return f"conid_{contract.conId}"
+
+    def fetch_snapshot_quotes_batch(self, contracts, timeout_seconds=None, *, batch_size=8):
+        del timeout_seconds, batch_size
+        return {
+            self.quote_key(contract): QuoteSnapshot(
+                self.prices.get(int(contract.conId)),
+                "last",
+                int(contract.conId) in self.delayed,
+            )
+            for contract in contracts
+        }, []
+
+    def fetch_history(self, contract, lookback_days):
+        del contract, lookback_days
+        return pd.Series(
+            [76.0, 77.5, 79.25],
+            index=pd.to_datetime(["2026-01-02", "2026-01-03", "2026-01-04"]),
+        )
+
+
+def _future_detail(con_id: int, month: str, local_symbol: str):
+    contract = Contract(
+        conId=con_id,
+        symbol="CL",
+        secType="FUT",
+        exchange="NYMEX",
+        currency="USD",
+        lastTradeDateOrContractMonth=month,
+        localSymbol=local_symbol,
+        tradingClass="CL",
+    )
+    return SimpleNamespace(contract=contract, realExpirationDate=f"{month}20")
+
+
+def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp_path):
+    details = [
+        _future_detail(1003, "202608", "CLQ6"),
+        _future_detail(1001, "202606", "CLM6"),
+        _future_detail(1002, "202607", "CLN6"),
+    ]
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient(details),
+        market_data=_FakeMarketData({1001: 80.0, 1002: 79.2, 1003: 78.7}, delayed={1002}),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["wti"],
+        contract_depth=3,
+        history_days=3,
+    )
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    assert snapshot.coverage.provider_id == "ibkr"
+    assert snapshot.coverage.coverage_status == "partial"
+    assert any("read-only FUT contract" in caveat for caveat in snapshot.coverage.caveats)
+    assert any("Delayed quote nodes detected" in warning for warning in snapshot.warnings)
+
+    wti_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "wti")
+    assert wti_curve.source_provider == "ibkr"
+    assert [node.contract.symbol for node in wti_curve.nodes] == ["CLM6", "CLN6", "CLQ6"]
+    assert [node.price for node in wti_curve.nodes] == [80.0, 79.2, 78.7]
+    assert wti_curve.nodes[0].contract.contract_id == "ibkr:1001"
+    assert wti_curve.nodes[0].contract.contract_month == "Jun 2026"
+    assert any("Delayed IBKR quote" in warning for warning in wti_curve.warnings)
+
+    wti_history = next(history for history in snapshot.price_histories if history.instrument_id == "wti")
+    assert wti_history.source_provider == "ibkr"
+    assert [point.value for point in wti_history.points] == [76.0, 77.5, 79.25]
+
+    cached_history = provider._load_curve_history("wti")
+    assert cached_history
+    assert cached_history[-1]["nodes"][0]["contract_id"] == "ibkr:1001"
+
+    service = CommoditiesService(provider=provider)
+    workspace = service.get_workspace(CommodityWorkspaceRequest(mode="curves_spreads", selected_instrument_id="wti"))
+    enriched_curve = next(curve for curve in workspace.curves if curve.instrument_id == "wti")
+    assert enriched_curve.shape_label == "backwardation"
+    assert enriched_curve.front_spread == 0.8
+
+
+def test_ibkr_provider_degrades_to_sample_when_disconnected():
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient([], connected=False),
+        market_data=_FakeMarketData({}),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["wti"],
+    )
+
+    snapshot = provider.get_snapshot()
+
+    assert snapshot.coverage.coverage_status == "sample"
+    assert any("TWS/IBKR is not connected" in warning for warning in snapshot.warnings)
+    assert "IB_HOST" in snapshot.coverage.credential_env_vars
 
 
 def test_commodities_api_routes_return_workspace_and_slices(tmp_path, monkeypatch):

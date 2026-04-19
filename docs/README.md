@@ -12,7 +12,7 @@ This directory is split into active documentation and archived project history.
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
 - [`fundamentals_phase6_spec.md`](./fundamentals_phase6_spec.md): product and architecture spec for the first-pass `Fundamentals` workspace
 
-Current Commodities tab setup, provider keys, sample fallback behavior, and read-only caveats are documented in [`../README.md`](../README.md).
+Current Commodities tab setup, EIA and IBKR provider switches, sample fallback behavior, futures-curve caveats, and read-only constraints are documented in [`../README.md`](../README.md).
 
 ## Archived Documents
 
