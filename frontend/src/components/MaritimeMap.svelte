@@ -73,6 +73,7 @@
   let pendingSubscription: { BoundingBoxes: number[][][]; FilterMessageTypes: string[]; type: string } | null = null;
   let lastSubscriptionKey = "";
   let settingsOpen = false;
+  let displaySettingsOpen = false;
   let selectedDetail: DetailSelection = null;
   let activeOverlays: Record<OverlayKey, boolean> = {
     chokepoints: true,
@@ -80,6 +81,10 @@
     fleet: false,
     eventReplay: false,
   };
+  let displaySettings = {
+    ports: true,
+  };
+  let vesselGroupFilters: Record<string, boolean> = Object.fromEntries(VESSEL_GROUPS.map((group) => [group, true]));
   let replayTrackId = "";
   let replayIndex = 0;
 
@@ -120,7 +125,8 @@
             heading: p.heading_degrees ?? p.course_degrees ?? 0,
             moving: (p.speed_knots ?? 0) >= 0.5,
           },
-        })),
+        }))
+        .filter((feature) => vesselGroupFilters[String(feature.properties.vessel_group)] !== false),
     };
   }
 
@@ -609,6 +615,26 @@
     for (const id of ["replay-line-glow", "replay-line-body", "replay-point"]) {
       setLayout(id, "visibility", eventReplay);
     }
+  }
+
+  function applyDisplaySettings() {
+    if (!map || !mapReady) return;
+    const portVisibility = displaySettings.ports ? "visible" : "none";
+    for (const id of ["major-ports-halo", "major-ports-dot", "major-ports-labels", "ports-dot"]) {
+      setLayout(id, "visibility", portVisibility);
+    }
+  }
+
+  function togglePorts() {
+    displaySettings = { ...displaySettings, ports: !displaySettings.ports };
+  }
+
+  function toggleVesselGroup(group: string) {
+    vesselGroupFilters = { ...vesselGroupFilters, [group]: vesselGroupFilters[group] === false };
+  }
+
+  function setAllVesselGroups(value: boolean) {
+    vesselGroupFilters = Object.fromEntries(VESSEL_GROUPS.map((group) => [group, value]));
   }
 
   function groupColorExpression(propertyName: string) {
@@ -1114,6 +1140,7 @@
       mapZoom = map.getZoom();
       pushSources();
       applyOverlayVisibility();
+      applyDisplaySettings();
       scheduleViewportSubscription();
     });
   });
@@ -1133,9 +1160,10 @@
   }
 
   // Push new data whenever props change and map is ready
-  $: if (mapReady) void (displayPositions, displayVessels, ports, chokepoints, chokepointSummaries, tracks, replayIndex, replayTrackId, pushSources());
+  $: if (mapReady) void (displayPositions, displayVessels, ports, chokepoints, chokepointSummaries, tracks, replayIndex, replayTrackId, vesselGroupFilters, pushSources());
   $: if (mapReady) applyProjection();
   $: if (mapReady) void (activeOverlays, applyOverlayVisibility());
+  $: if (mapReady) void (displaySettings, applyDisplaySettings());
   $: connDotActive = mapZoom >= AIS_ZOOM_THRESHOLD && ["subscribed", "live"].includes(liveStatus);
   $: liveStatusLabel =
     mapZoom < AIS_ZOOM_THRESHOLD
@@ -1159,14 +1187,30 @@
   <div bind:this={container} class="map-container"></div>
 
   <div class="settings-zone">
-    <button
-      type="button"
-      class="settings-button"
-      class:active={settingsOpen}
-      aria-expanded={settingsOpen}
-      on:click={() => settingsOpen = !settingsOpen}
-      title="Sealanes overlays"
-    >Modes</button>
+    <div class="top-control-row">
+      <button
+        type="button"
+        class="settings-button"
+        class:active={settingsOpen}
+        aria-expanded={settingsOpen}
+        on:click={() => { settingsOpen = !settingsOpen; if (settingsOpen) displaySettingsOpen = false; }}
+        title="Sealanes overlays"
+      >Modes</button>
+      <button
+        type="button"
+        class="settings-icon-button"
+        class:active={displaySettingsOpen}
+        aria-label="Map display settings"
+        aria-expanded={displaySettingsOpen}
+        on:click={() => { displaySettingsOpen = !displaySettingsOpen; if (displaySettingsOpen) settingsOpen = false; }}
+        title="Map display settings"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z" />
+          <path d="M19.4 13.2a7.5 7.5 0 0 0 0-2.4l2-1.5-2-3.5-2.4 1a7.7 7.7 0 0 0-2.1-1.2L14.6 3h-5.2l-.3 2.6A7.7 7.7 0 0 0 7 6.8l-2.4-1-2 3.5 2 1.5a7.5 7.5 0 0 0 0 2.4l-2 1.5 2 3.5 2.4-1a7.7 7.7 0 0 0 2.1 1.2l.3 2.6h5.2l.3-2.6a7.7 7.7 0 0 0 2.1-1.2l2.4 1 2-3.5-2-1.5Z" />
+        </svg>
+      </button>
+    </div>
 
     {#if settingsOpen}
       <section class="settings-shelf" aria-label="Sealanes overlay settings">
@@ -1242,6 +1286,55 @@
             {/each}
           </div>
         {/if}
+      </section>
+    {/if}
+
+    {#if displaySettingsOpen}
+      <section class="settings-shelf display-settings" aria-label="Map display settings">
+        <div class="shelf-header">
+          <div>
+            <p class="shelf-label">Display</p>
+            <strong>Map Settings</strong>
+          </div>
+        </div>
+
+        <div class="settings-toggle-row">
+          <div>
+            <strong>Show ports</strong>
+            <small>Major terminals and workspace ports.</small>
+          </div>
+          <button
+            type="button"
+            class="compact-toggle"
+            class:enabled={displaySettings.ports}
+            on:click={togglePorts}
+            aria-pressed={displaySettings.ports}
+          >{displaySettings.ports ? "On" : "Off"}</button>
+        </div>
+
+        <div class="shelf-section">
+          <div class="filter-header">
+            <p class="shelf-label">Vessel Types</p>
+            <div class="filter-actions">
+              <button type="button" class="mini-action" on:click={() => setAllVesselGroups(true)}>All</button>
+              <button type="button" class="mini-action" on:click={() => setAllVesselGroups(false)}>None</button>
+            </div>
+          </div>
+          <div class="vessel-filter-grid">
+            {#each VESSEL_GROUPS as group}
+              <button
+                type="button"
+                class="vessel-filter"
+                class:enabled={vesselGroupFilters[group] !== false}
+                on:click={() => toggleVesselGroup(group)}
+                aria-pressed={vesselGroupFilters[group] !== false}
+              >
+                <span class="filter-dot" style={`--filter-color: ${VESSEL_COLORS[group] ?? VESSEL_COLORS.unknown}`}></span>
+                <span>{vesselTypeLabel(group)}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
       </section>
     {/if}
   </div>
@@ -1568,10 +1661,22 @@
     pointer-events: none;
   }
 
+  .top-control-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: max-content;
+    pointer-events: auto;
+  }
+
   .settings-button,
+  .settings-icon-button,
   .shelf-action,
+  .compact-toggle,
+  .mini-action,
   .row-button,
   .overlay-list button,
+  .vessel-filter,
   .replay-panel select {
     font: inherit;
     border: 1px solid var(--panel-border, #1e2228);
@@ -1589,12 +1694,38 @@
     pointer-events: auto;
   }
 
+  .settings-icon-button {
+    width: 1.78rem;
+    height: 1.78rem;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+
+  .settings-icon-button svg {
+    width: 0.86rem;
+    height: 0.86rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .settings-button:hover,
   .settings-button.active,
+  .settings-icon-button:hover,
+  .settings-icon-button.active,
   .shelf-action:hover,
+  .compact-toggle:hover,
+  .compact-toggle.enabled,
+  .mini-action:hover,
   .row-button:hover,
   .overlay-list button:hover,
-  .overlay-list button.enabled {
+  .overlay-list button.enabled,
+  .vessel-filter:hover,
+  .vessel-filter.enabled {
     color: var(--accent, #7aa6c8);
     border-color: color-mix(in srgb, var(--accent, #7aa6c8) 42%, var(--panel-border, #1e2228));
   }
@@ -1613,6 +1744,10 @@
     max-height: calc(100vh - 8rem);
     overflow: auto;
     padding: 0.65rem;
+  }
+
+  .display-settings {
+    width: min(18rem, calc(100vw - 1.2rem));
   }
 
   .shelf-header,
@@ -1638,6 +1773,15 @@
     font-size: 0.64rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+    cursor: pointer;
+  }
+
+  .compact-toggle,
+  .mini-action {
+    padding: 0.26rem 0.5rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     cursor: pointer;
   }
 
@@ -1667,6 +1811,65 @@
   .shelf-section {
     display: grid;
     gap: 0.35rem;
+  }
+
+  .settings-toggle-row,
+  .filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.55rem;
+    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    padding-top: 0.45rem;
+  }
+
+  .settings-toggle-row strong {
+    display: block;
+    color: var(--text-0, #f0f2f5);
+    font-size: 0.75rem;
+  }
+
+  .settings-toggle-row small {
+    display: block;
+    color: var(--text-2, #8a919a);
+    font-size: 0.66rem;
+    line-height: 1.35;
+    margin-top: 0.12rem;
+  }
+
+  .filter-actions {
+    display: flex;
+    gap: 0.28rem;
+  }
+
+  .vessel-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.3rem;
+  }
+
+  .vessel-filter {
+    display: flex;
+    align-items: center;
+    gap: 0.38rem;
+    padding: 0.34rem 0.44rem;
+    color: var(--text-2, #8a919a);
+    font-size: 0.66rem;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .filter-dot {
+    width: 0.42rem;
+    height: 0.42rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--filter-color);
+    opacity: 0.55;
+  }
+
+  .vessel-filter.enabled .filter-dot {
+    opacity: 1;
   }
 
   .overlay-list button,
