@@ -6,7 +6,13 @@
   import type {
     MaritimeAisPosition,
     MaritimeChokepointDefinition,
+    MaritimeChokepointSummary,
+    MaritimeCoverageMetadata,
+    MaritimeEventWindow,
+    MaritimeFleetWatchlist,
+    MaritimeFlowSummary,
     MaritimePort,
+    MaritimeTrackSnippet,
     MaritimeVesselStatic,
   } from "../lib/api/types";
 
@@ -14,8 +20,25 @@
   export let vessels: MaritimeVesselStatic[] = [];
   export let ports: MaritimePort[] = [];
   export let chokepoints: MaritimeChokepointDefinition[] = [];
+  export let chokepointSummaries: MaritimeChokepointSummary[] = [];
+  export let flowSummaries: MaritimeFlowSummary[] = [];
+  export let tracks: MaritimeTrackSnippet[] = [];
+  export let watchlists: MaritimeFleetWatchlist[] = [];
+  export let eventWindows: MaritimeEventWindow[] = [];
+  export let coverage: MaritimeCoverageMetadata | null = null;
+  export let warnings: string[] = [];
+  export let loading = false;
+  export let onRefresh: ((forceRefresh?: boolean) => Promise<unknown> | void) | null = null;
   export let is3D = false;
   export let connected = false;
+
+  type OverlayKey = "chokepoints" | "tradeFlows" | "fleet" | "eventReplay";
+  type DetailSelection =
+    | { kind: "chokepoint"; id: string }
+    | { kind: "flow"; id: string }
+    | { kind: "vessel"; id: string }
+    | { kind: "event"; id: string }
+    | null;
 
   // Design token values used for map layer styling
   const BG0 = "#02060c";
@@ -49,10 +72,32 @@
   let liveVessels: MaritimeVesselStatic[] = [];
   let pendingSubscription: { BoundingBoxes: number[][][]; FilterMessageTypes: string[]; type: string } | null = null;
   let lastSubscriptionKey = "";
+  let settingsOpen = false;
+  let selectedDetail: DetailSelection = null;
+  let activeOverlays: Record<OverlayKey, boolean> = {
+    chokepoints: true,
+    tradeFlows: false,
+    fleet: false,
+    eventReplay: false,
+  };
+  let replayTrackId = "";
+  let replayIndex = 0;
 
   $: displayPositions = mapZoom >= AIS_ZOOM_THRESHOLD ? (livePositions.length ? livePositions : positions) : [];
   $: displayVessels = mergeVessels(vessels, liveVessels);
   $: vesselIndex = Object.fromEntries(displayVessels.map((v) => [v.vessel_id, v]));
+  $: summaryIndex = Object.fromEntries(chokepointSummaries.map((s) => [s.chokepoint_id, s]));
+  $: watchlistVesselIds = new Set(watchlists.flatMap((w) => w.vessel_ids));
+  $: selectedReplayTrack =
+    tracks.find((track) => track.track_id === replayTrackId) ??
+    tracks[0] ??
+    null;
+  $: replayMax = selectedReplayTrack ? Math.max(selectedReplayTrack.points.length - 1, 0) : 0;
+  $: if (replayIndex > replayMax) replayIndex = replayMax;
+  $: selectedChokepoint = selectedDetail?.kind === "chokepoint" ? summaryIndex[selectedDetail.id] : null;
+  $: selectedFlow = selectedDetail?.kind === "flow" ? flowSummaries.find((f) => f.flow_id === selectedDetail?.id) ?? null : null;
+  $: selectedVessel = selectedDetail?.kind === "vessel" ? displayVessels.find((v) => v.vessel_id === selectedDetail?.id) ?? null : null;
+  $: selectedEvent = selectedDetail?.kind === "event" ? eventWindows.find((e) => e.event_id === selectedDetail?.id) ?? null : null;
 
   function vesselFeatureCollection() {
     return {
@@ -68,6 +113,7 @@
             vessel_class: vesselIndex[p.vessel_id]?.vessel_class ?? "Unknown",
             vessel_type: vesselIndex[p.vessel_id]?.vessel_type ?? "Unknown",
             vessel_group: vesselGroup(vesselIndex[p.vessel_id]?.vessel_type),
+            watchlisted: watchlistVesselIds.has(p.vessel_id),
             speed_knots: p.speed_knots ?? null,
             navigation_status: p.navigation_status ?? null,
             mmsi: p.mmsi,
@@ -105,11 +151,118 @@
     };
   }
 
+  function chokepointAreaFeatureCollection() {
+    return {
+      type: "FeatureCollection" as const,
+      features: chokepoints.map((c) => {
+        const s = summaryIndex[c.chokepoint_id];
+        const bbox = c.bounding_box;
+        const score = s?.congestion_score ?? 0;
+        const tone = score >= 1.35 ? "high" : s && s.total_vessel_count > 0 ? "active" : "quiet";
+        return {
+          type: "Feature" as const,
+          geometry: {
+            type: "Polygon" as const,
+            coordinates: [[
+              [bbox.min_longitude, bbox.min_latitude],
+              [bbox.max_longitude, bbox.min_latitude],
+              [bbox.max_longitude, bbox.max_latitude],
+              [bbox.min_longitude, bbox.max_latitude],
+              [bbox.min_longitude, bbox.min_latitude],
+            ]],
+          },
+          properties: {
+            chokepoint_id: c.chokepoint_id,
+            name: c.name,
+            region: c.region,
+            total_vessel_count: s?.total_vessel_count ?? 0,
+            congestion_score: score,
+            congestion_label: s?.congestion_label ?? "sample unavailable",
+            commodities: (s?.commodity_links ?? c.strategic_commodities).join(", "),
+            methodology: s?.methodology ?? "Coverage is defined by a static chokepoint bounding box.",
+            caveat: s?.caveats?.[0] ?? c.description ?? "Sample or partial AIS coverage only.",
+            tone,
+          },
+        };
+      }),
+    };
+  }
+
+  function flowTrackFeatureCollection() {
+    return {
+      type: "FeatureCollection" as const,
+      features: tracks
+        .filter((track) => track.points.length >= 2)
+        .map((track) => {
+          const vessel = vesselIndex[track.vessel_id];
+          const flow = flowSummaries.find((item) => item.vessel_type === vessel?.vessel_type);
+          return {
+            type: "Feature" as const,
+            geometry: {
+              type: "LineString" as const,
+              coordinates: track.points.map((p) => [p.longitude, p.latitude]),
+            },
+            properties: {
+              track_id: track.track_id,
+              vessel_id: track.vessel_id,
+              label: track.label,
+              vessel_group: vesselGroup(vessel?.vessel_type),
+              vessel_type: vesselTypeLabel(vessel?.vessel_type),
+              flow_id: flow?.flow_id ?? "",
+              inferred_commodity: flow?.inferred_commodity ?? "Unknown",
+              inference_caveat: flow?.inference_caveat ?? "Route is a sample track snippet, not confirmed cargo.",
+            },
+          };
+        }),
+    };
+  }
+
+  function replayLineFeatureCollection() {
+    if (!selectedReplayTrack) return { type: "FeatureCollection" as const, features: [] };
+    const points = selectedReplayTrack.points.slice(0, replayIndex + 1);
+    if (points.length < 2) return { type: "FeatureCollection" as const, features: [] };
+    return {
+      type: "FeatureCollection" as const,
+      features: [{
+        type: "Feature" as const,
+        geometry: {
+          type: "LineString" as const,
+          coordinates: points.map((p) => [p.longitude, p.latitude]),
+        },
+        properties: {
+          track_id: selectedReplayTrack.track_id,
+          label: selectedReplayTrack.label,
+        },
+      }],
+    };
+  }
+
+  function replayPointFeatureCollection() {
+    if (!selectedReplayTrack || !selectedReplayTrack.points.length) return { type: "FeatureCollection" as const, features: [] };
+    const point = selectedReplayTrack.points[Math.min(replayIndex, selectedReplayTrack.points.length - 1)];
+    return {
+      type: "FeatureCollection" as const,
+      features: [{
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [point.longitude, point.latitude] },
+        properties: {
+          track_id: selectedReplayTrack.track_id,
+          label: selectedReplayTrack.label,
+          timestamp: point.timestamp,
+        },
+      }],
+    };
+  }
+
   function pushSources() {
     if (!map || !mapReady) return;
     (map.getSource("vessels") as maplibregl.GeoJSONSource | undefined)?.setData(vesselFeatureCollection() as never);
     (map.getSource("ports") as maplibregl.GeoJSONSource | undefined)?.setData(portFeatureCollection() as never);
     (map.getSource("chokepoints") as maplibregl.GeoJSONSource | undefined)?.setData(chokepointFeatureCollection() as never);
+    (map.getSource("chokepoint-areas") as maplibregl.GeoJSONSource | undefined)?.setData(chokepointAreaFeatureCollection() as never);
+    (map.getSource("flow-tracks") as maplibregl.GeoJSONSource | undefined)?.setData(flowTrackFeatureCollection() as never);
+    (map.getSource("replay-line") as maplibregl.GeoJSONSource | undefined)?.setData(replayLineFeatureCollection() as never);
+    (map.getSource("replay-point") as maplibregl.GeoJSONSource | undefined)?.setData(replayPointFeatureCollection() as never);
   }
 
   function applyProjection() {
@@ -382,6 +535,82 @@
     return "cargo";
   }
 
+  function vesselTypeLabel(value: string | null | undefined) {
+    const labels: Record<string, string> = {
+      dry_bulk: "Dry Bulk",
+      lng_carrier: "LNG",
+      product_tanker: "Products",
+      tanker: "Tanker",
+      container: "Container",
+      cargo: "Cargo",
+      fishing: "Fishing",
+      passenger: "Passenger",
+      special: "Special",
+      unknown: "Unknown",
+    };
+    const key = String(value ?? "unknown").toLowerCase();
+    return labels[key] ?? key.replace(/_/g, " ");
+  }
+
+  function coverageLabel(value: string | null | undefined) {
+    return String(value ?? "unknown").replace(/_/g, " ").toUpperCase();
+  }
+
+  function shortDate(value: string | null | undefined) {
+    return value
+      ? new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "N/A";
+  }
+
+  function number(value: number | null | undefined, digits = 1) {
+    return value == null ? "N/A" : value.toFixed(digits);
+  }
+
+  function pct(value: number | null | undefined, digits = 0) {
+    return value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
+  }
+
+  function vesselMix(summary: MaritimeChokepointSummary | null) {
+    if (!summary) return "No sample vessels";
+    const entries = Object.entries(summary.vessel_count_by_type).filter(([, count]) => count > 0);
+    return entries.length
+      ? entries.map(([type, count]) => `${vesselTypeLabel(type)} ${count}`).join(" | ")
+      : "No sample vessels";
+  }
+
+  function firstWarning() {
+    return warnings[0] ?? coverage?.caveats?.[0] ?? "AIS coverage is partial or sample unless explicitly marked live.";
+  }
+
+  function toggleOverlay(key: OverlayKey) {
+    activeOverlays = { ...activeOverlays, [key]: !activeOverlays[key] };
+    if (key === "eventReplay" && !activeOverlays.eventReplay && selectedDetail?.kind === "event") {
+      selectedDetail = null;
+    }
+  }
+
+  function showOverlay(key: OverlayKey) {
+    return activeOverlays[key] ? "visible" : "none";
+  }
+
+  function applyOverlayVisibility() {
+    if (!map || !mapReady) return;
+    const chokepoints = showOverlay("chokepoints");
+    const tradeFlows = showOverlay("tradeFlows");
+    const fleet = showOverlay("fleet");
+    const eventReplay = showOverlay("eventReplay");
+    for (const id of ["chokepoints-fill", "chokepoints-outline", "chokepoints-labels"]) {
+      setLayout(id, "visibility", chokepoints);
+    }
+    for (const id of ["flow-tracks-glow", "flow-tracks-line"]) {
+      setLayout(id, "visibility", tradeFlows);
+    }
+    setLayout("watchlist-halo", "visibility", fleet);
+    for (const id of ["replay-line-glow", "replay-line-body", "replay-point"]) {
+      setLayout(id, "visibility", eventReplay);
+    }
+  }
+
   function groupColorExpression(propertyName: string) {
     return [
       "match", ["get", propertyName],
@@ -444,6 +673,15 @@
       "fishing", "vessel-chevron-fishing",
       "special", "vessel-chevron-special",
       "vessel-chevron-unknown",
+    ];
+  }
+
+  function stressColorExpression() {
+    return [
+      "match", ["get", "tone"],
+      "high", "#c66b61",
+      "active", "#c49a5a",
+      "#7aa6c8",
     ];
   }
 
@@ -646,6 +884,28 @@
       });
 
       // ── Chokepoints ───────────────────────────────────────────
+      map.addSource("chokepoint-areas", { type: "geojson", data: chokepointAreaFeatureCollection() as never });
+      map.addLayer({
+        id: "chokepoints-fill",
+        type: "fill",
+        source: "chokepoint-areas",
+        paint: {
+          "fill-color": stressColorExpression(),
+          "fill-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.10, 5, 0.16, 8, 0.22],
+        },
+      });
+      map.addLayer({
+        id: "chokepoints-outline",
+        type: "line",
+        source: "chokepoint-areas",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": stressColorExpression(),
+          "line-opacity": 0.84,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 1.1, 6, 1.8],
+          "line-blur": 0.8,
+        },
+      });
       map.addSource("chokepoints", { type: "geojson", data: chokepointFeatureCollection() as never });
       map.addLayer({
         id: "chokepoints-labels",
@@ -664,6 +924,89 @@
           "text-halo-width": 1.5,
         },
       });
+
+      // ── Trade-flow and replay overlays ────────────────────────
+      map.addSource("flow-tracks", { type: "geojson", data: flowTrackFeatureCollection() as never });
+      map.addLayer({
+        id: "flow-tracks-glow",
+        type: "line",
+        source: "flow-tracks",
+        layout: { "line-cap": "round", "line-join": "round", visibility: "none" },
+        paint: {
+          "line-color": groupColorExpression("vessel_group"),
+          "line-opacity": 0.24,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 8, 7, 15],
+          "line-blur": 10,
+        },
+      });
+      map.addLayer({
+        id: "flow-tracks-line",
+        type: "line",
+        source: "flow-tracks",
+        layout: { "line-cap": "round", "line-join": "round", visibility: "none" },
+        paint: {
+          "line-color": groupColorExpression("vessel_group"),
+          "line-opacity": 0.78,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 1.5, 7, 3],
+          "line-blur": 1.6,
+        },
+      });
+
+      map.addSource("replay-line", { type: "geojson", data: replayLineFeatureCollection() as never });
+      map.addLayer({
+        id: "replay-line-glow",
+        type: "line",
+        source: "replay-line",
+        layout: { "line-cap": "round", "line-join": "round", visibility: "none" },
+        paint: {
+          "line-color": "#7aa6c8",
+          "line-opacity": 0.26,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 12, 7, 20],
+          "line-blur": 14,
+        },
+      });
+      map.addLayer({
+        id: "replay-line-body",
+        type: "line",
+        source: "replay-line",
+        layout: { "line-cap": "round", "line-join": "round", visibility: "none" },
+        paint: {
+          "line-color": "#7aa6c8",
+          "line-opacity": 0.86,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2, 7, 4],
+          "line-blur": 1.2,
+        },
+      });
+      map.addSource("replay-point", { type: "geojson", data: replayPointFeatureCollection() as never });
+      map.addLayer({
+        id: "replay-point",
+        type: "circle",
+        source: "replay-point",
+        layout: { visibility: "none" },
+        paint: {
+          "circle-color": "#7aa6c8",
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 4, 7, 7],
+          "circle-stroke-color": BG0,
+          "circle-stroke-width": 1.5,
+          "circle-opacity": 0.96,
+        },
+      });
+
+      map.addLayer({
+        id: "watchlist-halo",
+        type: "circle",
+        source: "vessels",
+        filter: ["==", ["get", "watchlisted"], true],
+        layout: { visibility: "none" },
+        paint: {
+          "circle-color": "#f0f2f5",
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 10, 8, 22],
+          "circle-opacity": 0.08,
+          "circle-stroke-color": "#f0f2f5",
+          "circle-stroke-opacity": 0.62,
+          "circle-stroke-width": 1.3,
+        },
+      }, "vessels-chevron");
 
       // ── Hover interaction ─────────────────────────────────────
       map.on("mouseenter", "vessels-chevron", (e) => {
@@ -698,9 +1041,79 @@
         popup.remove();
       });
 
+      map.on("click", "vessels-chevron", (e) => {
+        if (!e.features?.length) return;
+        const props = e.features[0].properties as Record<string, unknown>;
+        selectedDetail = { kind: "vessel", id: String(props.vessel_id ?? "") };
+      });
+
+      map.on("mouseenter", "chokepoints-fill", (e) => {
+        if (!map || !popup || !e.features?.length) return;
+        map.getCanvas().style.cursor = "crosshair";
+        const f = e.features[0];
+        const props = f.properties as Record<string, unknown>;
+        const coordinates = e.lngLat;
+        popup
+          .setLngLat(coordinates)
+          .setHTML(
+            `<div class="mp-inner">
+              <strong class="mp-name">${escapeHtml(String(props.name ?? ""))}</strong>
+              <div class="mp-row"><span>Region</span><span>${escapeHtml(String(props.region ?? ""))}</span></div>
+              <div class="mp-row"><span>Vessels</span><span>${escapeHtml(String(props.total_vessel_count ?? 0))}</span></div>
+              <div class="mp-row"><span>Score</span><span>${escapeHtml(number(Number(props.congestion_score ?? 0), 2))}</span></div>
+              <div class="mp-row"><span>Label</span><span>${escapeHtml(String(props.congestion_label ?? "N/A"))}</span></div>
+              <div class="mp-note">${escapeHtml(String(props.caveat ?? ""))}</div>
+            </div>`
+          )
+          .addTo(map);
+      });
+
+      map.on("mouseleave", "chokepoints-fill", () => {
+        if (!map || !popup) return;
+        map.getCanvas().style.cursor = "";
+        popup.remove();
+      });
+
+      map.on("click", "chokepoints-fill", (e) => {
+        if (!e.features?.length) return;
+        const props = e.features[0].properties as Record<string, unknown>;
+        selectedDetail = { kind: "chokepoint", id: String(props.chokepoint_id ?? "") };
+      });
+
+      map.on("mouseenter", "flow-tracks-line", (e) => {
+        if (!map || !popup || !e.features?.length) return;
+        map.getCanvas().style.cursor = "crosshair";
+        const props = e.features[0].properties as Record<string, unknown>;
+        popup
+          .setLngLat(e.lngLat)
+          .setHTML(
+            `<div class="mp-inner">
+              <strong class="mp-name">${escapeHtml(String(props.label ?? ""))}</strong>
+              <div class="mp-row"><span>Vessel</span><span>${escapeHtml(String(props.vessel_type ?? "Unknown"))}</span></div>
+              <div class="mp-row"><span>Commodity</span><span>${escapeHtml(String(props.inferred_commodity ?? "Unknown"))}</span></div>
+              <div class="mp-note">${escapeHtml(String(props.inference_caveat ?? ""))}</div>
+            </div>`
+          )
+          .addTo(map);
+      });
+
+      map.on("mouseleave", "flow-tracks-line", () => {
+        if (!map || !popup) return;
+        map.getCanvas().style.cursor = "";
+        popup.remove();
+      });
+
+      map.on("click", "flow-tracks-line", (e) => {
+        if (!e.features?.length) return;
+        const props = e.features[0].properties as Record<string, unknown>;
+        const flowId = String(props.flow_id ?? "");
+        if (flowId) selectedDetail = { kind: "flow", id: flowId };
+      });
+
       mapReady = true;
       mapZoom = map.getZoom();
       pushSources();
+      applyOverlayVisibility();
       scheduleViewportSubscription();
     });
   });
@@ -720,8 +1133,9 @@
   }
 
   // Push new data whenever props change and map is ready
-  $: if (mapReady) void (displayPositions, displayVessels, ports, chokepoints, pushSources());
+  $: if (mapReady) void (displayPositions, displayVessels, ports, chokepoints, chokepointSummaries, tracks, replayIndex, replayTrackId, pushSources());
   $: if (mapReady) applyProjection();
+  $: if (mapReady) void (activeOverlays, applyOverlayVisibility());
   $: connDotActive = mapZoom >= AIS_ZOOM_THRESHOLD && ["subscribed", "live"].includes(liveStatus);
   $: liveStatusLabel =
     mapZoom < AIS_ZOOM_THRESHOLD
@@ -743,6 +1157,94 @@
 
 <div class="map-wrap">
   <div bind:this={container} class="map-container"></div>
+
+  <div class="settings-zone">
+    <button
+      type="button"
+      class="settings-button"
+      class:active={settingsOpen}
+      aria-expanded={settingsOpen}
+      on:click={() => settingsOpen = !settingsOpen}
+      title="Sealanes overlays"
+    >Modes</button>
+
+    {#if settingsOpen}
+      <section class="settings-shelf" aria-label="Sealanes overlay settings">
+        <div class="shelf-header">
+          <div>
+            <p class="shelf-label">Sealanes</p>
+            <strong>Map Overlays</strong>
+          </div>
+          {#if onRefresh}
+            <button type="button" class="shelf-action" on:click={() => onRefresh?.(true)} disabled={loading}>
+              {loading ? "Loading" : "Refresh"}
+            </button>
+          {/if}
+        </div>
+
+        <div class="coverage-mini">
+          <span>{coverageLabel(coverage?.coverage_status)}</span>
+          <span>{coverage?.provider_label ?? "No provider"}</span>
+        </div>
+        <p class="shelf-note">{firstWarning()}</p>
+
+        <div class="overlay-list">
+          <button type="button" class:enabled={activeOverlays.chokepoints} on:click={() => toggleOverlay("chokepoints")}>
+            <span>Chokepoints</span>
+            <small>{chokepointSummaries.length} boxes, hover/click for stress context</small>
+          </button>
+          <button type="button" class:enabled={activeOverlays.tradeFlows} on:click={() => toggleOverlay("tradeFlows")}>
+            <span>Trade Flows</span>
+            <small>{flowSummaries.length} inferred commodity-flow summaries</small>
+          </button>
+          <button type="button" class:enabled={activeOverlays.fleet} on:click={() => toggleOverlay("fleet")}>
+            <span>Fleet / Vessel</span>
+            <small>{watchlists.length} watchlists, live chevrons stay read-only</small>
+          </button>
+          <button type="button" class:enabled={activeOverlays.eventReplay} on:click={() => toggleOverlay("eventReplay")}>
+            <span>Event Replay</span>
+            <small>{eventWindows.length} event windows, {tracks.length ? "sample track slider" : "track snippets unavailable"}</small>
+          </button>
+        </div>
+
+        {#if activeOverlays.tradeFlows}
+          <div class="shelf-section">
+            <p class="shelf-label">Flow Focus</p>
+            {#each flowSummaries.slice(0, 4) as flow}
+              <button type="button" class="row-button" on:click={() => selectedDetail = { kind: "flow", id: flow.flow_id }}>
+                <strong>{flow.label}</strong>
+                <small>{flow.inferred_commodity ?? "Unknown"} | {pct(flow.inference_confidence)} confidence</small>
+              </button>
+            {/each}
+          </div>
+        {/if}
+
+        {#if activeOverlays.fleet}
+          <div class="shelf-section">
+            <p class="shelf-label">Watchlists</p>
+            {#each watchlists as watchlist}
+              <div class="static-row">
+                <strong>{watchlist.label}</strong>
+                <small>{watchlist.vessel_ids.length} vessels | {watchlist.description}</small>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        {#if activeOverlays.eventReplay}
+          <div class="shelf-section">
+            <p class="shelf-label">Events</p>
+            {#each eventWindows as event}
+              <button type="button" class="row-button" on:click={() => selectedDetail = { kind: "event", id: event.event_id }}>
+                <strong>{event.title}</strong>
+                <small>{shortDate(event.start_at)} | {event.region}</small>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </section>
+    {/if}
+  </div>
 
   <!-- HUD: vessel count + connection status -->
   <div class="map-hud">
@@ -780,6 +1282,140 @@
       title={is3D ? "Switch to 2D flat" : "Switch to 3D globe"}
     >{is3D ? "2D" : "3D"}</button>
   </div>
+
+  {#if activeOverlays.eventReplay && selectedReplayTrack}
+    <section class="replay-panel" aria-label="Event replay controls">
+      <div class="replay-copy">
+        <p class="shelf-label">Event Replay</p>
+        <strong>{selectedReplayTrack.label}</strong>
+        <small>
+          {selectedReplayTrack.points.length} sample points |
+          {shortDate(selectedReplayTrack.points[replayIndex]?.timestamp)}
+        </small>
+      </div>
+      <select bind:value={replayTrackId} aria-label="Track snippet">
+        {#each tracks as track}
+          <option value={track.track_id}>{track.label}</option>
+        {/each}
+      </select>
+      <input
+        type="range"
+        min="0"
+        max={replayMax}
+        bind:value={replayIndex}
+        aria-label="Replay time"
+      />
+    </section>
+  {:else if activeOverlays.eventReplay}
+    <section class="replay-panel unavailable" aria-label="Event replay coverage">
+      <div class="replay-copy">
+        <p class="shelf-label">Event Replay</p>
+        <strong>Track snippets unavailable</strong>
+        <small>Live AIS viewport sampling does not provide historical track replay in this provider state.</small>
+      </div>
+      <small>{coverage?.caveats?.[0] ?? "Replay requires historical or sample track data."}</small>
+    </section>
+  {/if}
+
+  {#if selectedDetail}
+    <aside class="detail-drawer" aria-label="Sealanes detail">
+      <div class="drawer-header">
+        <div>
+          <p class="shelf-label">
+            {selectedDetail.kind === "chokepoint" ? "Chokepoint" : selectedDetail.kind === "flow" ? "Trade Flow" : selectedDetail.kind === "event" ? "Event" : "Vessel"}
+          </p>
+          <strong>
+            {selectedChokepoint?.name ?? selectedFlow?.label ?? selectedVessel?.name ?? selectedEvent?.title ?? "Detail"}
+          </strong>
+        </div>
+        <button type="button" class="shelf-action" on:click={() => selectedDetail = null}>Close</button>
+      </div>
+
+      {#if selectedChokepoint}
+        <div class="drawer-grid">
+          <div><span>Region</span><strong>{selectedChokepoint.region}</strong></div>
+          <div><span>Vessels</span><strong>{selectedChokepoint.total_vessel_count}</strong></div>
+          <div><span>Score</span><strong>{number(selectedChokepoint.congestion_score, 2)}</strong></div>
+          <div><span>Label</span><strong>{selectedChokepoint.congestion_label}</strong></div>
+        </div>
+        <div class="drawer-section">
+          <span>Commodity Links</span>
+          <p>{selectedChokepoint.commodity_links.join(", ") || "No commodity link in sample"}</p>
+        </div>
+        <div class="drawer-section">
+          <span>Vessel Mix</span>
+          <p>{vesselMix(selectedChokepoint)}</p>
+        </div>
+        <div class="drawer-section">
+          <span>Method</span>
+          <p>{selectedChokepoint.methodology ?? "Static bounding box with sample AIS positions."}</p>
+        </div>
+        {#each selectedChokepoint.caveats as caveat}
+          <div class="drawer-section">
+            <span>Caveat</span>
+            <p>{caveat}</p>
+          </div>
+        {/each}
+      {:else if selectedFlow}
+        <div class="drawer-grid">
+          <div><span>Route</span><strong>{selectedFlow.route_label}</strong></div>
+          <div><span>Vessels</span><strong>{selectedFlow.vessel_count}</strong></div>
+          <div><span>Type</span><strong>{vesselTypeLabel(selectedFlow.vessel_type)}</strong></div>
+          <div><span>Confidence</span><strong>{pct(selectedFlow.inference_confidence)}</strong></div>
+        </div>
+        <div class="drawer-section">
+          <span>Commodity</span>
+          <p>{selectedFlow.inferred_commodity ?? "Unknown"}</p>
+        </div>
+        <div class="drawer-section">
+          <span>Summary</span>
+          <p>{selectedFlow.summary ?? "No summary available."}</p>
+        </div>
+        <div class="drawer-section">
+          <span>Caveat</span>
+          <p>{selectedFlow.inference_caveat ?? "AIS does not confirm cargo; this is a proxy inference."}</p>
+        </div>
+      {:else if selectedVessel}
+        <div class="drawer-grid">
+          <div><span>MMSI</span><strong>{selectedVessel.identity.mmsi}</strong></div>
+          <div><span>IMO</span><strong>{selectedVessel.identity.imo ?? "N/A"}</strong></div>
+          <div><span>Class</span><strong>{selectedVessel.vessel_class}</strong></div>
+          <div><span>Flag</span><strong>{selectedVessel.flag ?? "N/A"}</strong></div>
+        </div>
+        <div class="drawer-section">
+          <span>Type</span>
+          <p>{vesselTypeLabel(selectedVessel.vessel_type)}</p>
+        </div>
+        <div class="drawer-section">
+          <span>Cargo Inference</span>
+          <p>{selectedVessel.cargo_inference ?? "N/A"} | {pct(selectedVessel.cargo_inference_confidence)} confidence</p>
+        </div>
+        <div class="drawer-section">
+          <span>Caveat</span>
+          <p>{selectedVessel.cargo_inference_caveat ?? "AIS static and position messages do not confirm cargo."}</p>
+        </div>
+      {:else if selectedEvent}
+        <div class="drawer-grid">
+          <div><span>Region</span><strong>{selectedEvent.region}</strong></div>
+          <div><span>Type</span><strong>{selectedEvent.event_type}</strong></div>
+          <div><span>Start</span><strong>{shortDate(selectedEvent.start_at)}</strong></div>
+          <div><span>End</span><strong>{shortDate(selectedEvent.end_at)}</strong></div>
+        </div>
+        <div class="drawer-section">
+          <span>Summary</span>
+          <p>{selectedEvent.summary}</p>
+        </div>
+        <div class="drawer-section">
+          <span>Linked Chokepoints</span>
+          <p>{selectedEvent.linked_chokepoint_ids.join(", ") || "None"}</p>
+        </div>
+        <div class="drawer-section">
+          <span>Linked Flows</span>
+          <p>{selectedEvent.linked_commodity_flows.join(", ") || "None"}</p>
+        </div>
+      {/if}
+    </aside>
+  {/if}
 </div>
 
 <style>
@@ -921,6 +1557,243 @@
     border-color: color-mix(in srgb, var(--accent, #7aa6c8) 40%, var(--panel-border, #1e2228));
   }
 
+  .settings-zone {
+    position: absolute;
+    top: 0.6rem;
+    left: 0.6rem;
+    z-index: 12;
+    display: grid;
+    gap: 0.45rem;
+    width: min(21rem, calc(100% - 1.2rem));
+    pointer-events: none;
+  }
+
+  .settings-button,
+  .shelf-action,
+  .row-button,
+  .overlay-list button,
+  .replay-panel select {
+    font: inherit;
+    border: 1px solid var(--panel-border, #1e2228);
+    background: color-mix(in srgb, var(--bg-0, #070809) 93%, transparent);
+    color: var(--text-1, #c2c8d0);
+  }
+
+  .settings-button {
+    width: max-content;
+    padding: 0.34rem 0.58rem;
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .settings-button:hover,
+  .settings-button.active,
+  .shelf-action:hover,
+  .row-button:hover,
+  .overlay-list button:hover,
+  .overlay-list button.enabled {
+    color: var(--accent, #7aa6c8);
+    border-color: color-mix(in srgb, var(--accent, #7aa6c8) 42%, var(--panel-border, #1e2228));
+  }
+
+  .settings-shelf,
+  .detail-drawer,
+  .replay-panel {
+    background: color-mix(in srgb, var(--bg-0, #070809) 94%, transparent);
+    border: 1px solid var(--panel-border, #1e2228);
+    pointer-events: auto;
+  }
+
+  .settings-shelf {
+    display: grid;
+    gap: 0.55rem;
+    max-height: calc(100vh - 8rem);
+    overflow: auto;
+    padding: 0.65rem;
+  }
+
+  .shelf-header,
+  .coverage-mini,
+  .drawer-header,
+  .replay-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.55rem;
+  }
+
+  .shelf-label {
+    margin: 0;
+    color: var(--text-2, #8a919a);
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .shelf-action {
+    padding: 0.28rem 0.5rem;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+  }
+
+  .shelf-action:disabled {
+    color: var(--text-2, #8a919a);
+    cursor: not-allowed;
+  }
+
+  .coverage-mini {
+    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    padding: 0.42rem 0;
+    color: var(--text-2, #8a919a);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .shelf-note {
+    margin: 0;
+    color: var(--warning, #c49a5a);
+    font-size: 0.68rem;
+    line-height: 1.35;
+  }
+
+  .overlay-list,
+  .shelf-section {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .overlay-list button,
+  .row-button {
+    display: grid;
+    gap: 0.16rem;
+    width: 100%;
+    padding: 0.46rem 0.55rem;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .overlay-list span,
+  .row-button strong,
+  .static-row strong,
+  .drawer-header strong,
+  .replay-copy strong {
+    color: var(--text-0, #f0f2f5);
+    font-size: 0.76rem;
+  }
+
+  .overlay-list small,
+  .row-button small,
+  .static-row small,
+  .drawer-section p,
+  .replay-copy small {
+    color: var(--text-2, #8a919a);
+    font-size: 0.67rem;
+    line-height: 1.35;
+  }
+
+  .static-row {
+    display: grid;
+    gap: 0.15rem;
+    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    padding-top: 0.4rem;
+  }
+
+  .detail-drawer {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    z-index: 13;
+    width: min(25rem, calc(100% - 1.2rem));
+    max-height: calc(100% - 1.2rem);
+    overflow: auto;
+    padding: 0.72rem;
+    display: grid;
+    gap: 0.62rem;
+  }
+
+  .drawer-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+  }
+
+  .drawer-grid div {
+    padding: 0.48rem 0.55rem;
+    border-right: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    display: grid;
+    gap: 0.12rem;
+  }
+
+  .drawer-grid div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .drawer-grid div:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .drawer-grid span,
+  .drawer-section span {
+    color: var(--text-2, #8a919a);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .drawer-grid strong {
+    color: var(--text-0, #f0f2f5);
+    font-size: 0.78rem;
+  }
+
+  .drawer-section {
+    display: grid;
+    gap: 0.18rem;
+    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    padding-top: 0.5rem;
+  }
+
+  .drawer-section p {
+    margin: 0;
+    color: var(--text-1, #c2c8d0);
+  }
+
+  .replay-panel {
+    position: absolute;
+    left: 0.6rem;
+    right: 0.6rem;
+    bottom: 3.25rem;
+    z-index: 11;
+    align-items: center;
+    padding: 0.55rem 0.65rem;
+  }
+
+  .replay-copy {
+    display: grid;
+    min-width: min(24rem, 42%);
+    gap: 0.08rem;
+  }
+
+  .replay-panel select {
+    min-width: 15rem;
+    max-width: 24rem;
+    padding: 0.32rem 0.45rem;
+    font-size: 0.7rem;
+  }
+
+  .replay-panel input[type="range"] {
+    flex: 1;
+    min-width: 8rem;
+    accent-color: var(--accent, #7aa6c8);
+  }
+
   /* ── MapLibre GL popup overrides ── */
   :global(.maplibregl-popup-content) {
     background: var(--bg-1, #0b0d10) !important;
@@ -969,6 +1842,15 @@
     text-align: right;
   }
 
+  :global(.mp-note) {
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
+    color: var(--text-2, #8a919a);
+    font-size: 0.66rem;
+    line-height: 1.35;
+  }
+
   /* Keep MapLibre attribution minimal */
   :global(.maplibregl-ctrl-attrib) {
     background: color-mix(in srgb, #070809 88%, transparent) !important;
@@ -977,5 +1859,30 @@
 
   :global(.maplibregl-ctrl-attrib a) {
     color: var(--text-2, #8a919a) !important;
+  }
+
+  @media (max-width: 760px) {
+    .map-bottom,
+    .replay-panel,
+    .shelf-header,
+    .drawer-header {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .map-legend {
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .detail-drawer {
+      left: 0.6rem;
+      width: auto;
+    }
+
+    .replay-panel select {
+      max-width: none;
+      width: 100%;
+    }
   }
 </style>
