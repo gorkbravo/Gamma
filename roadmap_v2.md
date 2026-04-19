@@ -1681,9 +1681,21 @@ At the end of Commodities V2, Gamma should have a full commodity research worksp
 
 ## Workstream 9 - Maritime Intelligence Tab
 
-_Status: Planned_
-_Dependency marker: Blocked by AIS/provider evaluation for live global coverage_
-_Parallelization note: Historical/prototype work can start with free or sample datasets, but a serious live product requires a reliable AIS/provider decision._
+_Status: In progress (~38%)_
+_Dependency marker: Blocked by AIS/provider evaluation for live global coverage; foundational sample/live prototype work is now underway._
+_Parallelization note: Historical/prototype work can continue with sample/static datasets and AISstream viewport streaming, but a serious live global product still requires validated AIS coverage, history, and vessel metadata quality._
+_Recent progress: The tab has been introduced in the Research workspace as `Sealanes`, with normalized maritime domain models, sample provider coverage, provenance-rich payloads, five research modes, an AISstream backend websocket proxy that keeps the API key server-side, live viewport subscriptions at zoom 4+, contextual major sealanes, static major port references, and a MapLibre live map that renders live/sample vessel positions with heading-aware markers where AIS fields support them._
+
+#### Completion snapshot
+
+- `Domain models and provider boundary`: ~62% complete. MMSI/IMO identity, AIS positions, vessel static records, ports, chokepoints, tracks, event windows, fleet watchlists, coverage metadata, and provenance fields now exist, with sample and AISstream provider paths separated. Remaining work: richer historical track storage, fuller vessel metadata enrichment, and durable cache/persistence beyond the current in-memory/live sample layer.
+- `Live Map mode`: ~52% complete. A real Sealanes live map now exists with MapLibre, dark maritime styling, static major shipping lanes, major port reference points, zoom-gated AISstream live streaming, debounced viewport subscriptions, heading-aware chevrons, and coverage status. Remaining work: stronger clustering, selected-vessel detail, track tails, viewport health diagnostics, and better handling of sparse AISstream coverage.
+- `AISstream prototype`: ~45% complete. The app can proxy AISstream over the backend, keep credentials out of the browser, subscribe by viewport, and ingest dynamic plus static AIS message types for heading and high-level AIS ship-type codes. Remaining work: provider quality evaluation, reconnection/backoff hardening, message-volume controls, static/dynamic message joining quality, and explicit limits around AIS type codes versus actual cargo class.
+- `Chokepoints mode`: ~32% complete. Sample chokepoint definitions and first-pass density summaries exist, but the counts are still sample/partial and not operational congestion measurements. Historical baselines, dwell/transit time, and validated chokepoint polygons remain open.
+- `Trade Flows mode`: ~25% complete. Gamma can show explicit sample flow proxies by vessel class and route context with cargo-inference caveats. Real cargo-flow interpretation remains blocked on stronger vessel metadata, route/port-call history, and commodity data links.
+- `Fleet / Vessel Monitoring mode`: ~28% complete. Sample vessel registry and watchlist structures exist, with no risk/sanctions labels. Live watchlists, vessel detail pages, owner/operator enrichment, and durable vessel histories remain open.
+- `Event Replay mode`: ~20% complete. Sample event windows and track snippets exist to exercise the workflow, but historical AIS replay is not implemented. NOAA/MarineCadastre or another historical dataset remains the likely next dependency.
+- `Risk Signals mode`: 0% complete by design. Suspicious-behavior, sanctions, dark-activity, and shadow-fleet labels remain intentionally out of scope until the base data model, historical context, and methodology are validated.
 
 ### Why this tab deserves to exist
 

@@ -16,7 +16,8 @@ from src.api.schemas.maritime import (
 )
 from src.services.maritime_adapters import (
     AISSTREAM_DEFAULT_ENDPOINT,
-    normalize_aisstream_position_message,
+    AISSTREAM_DEFAULT_MESSAGE_TYPES,
+    normalize_aisstream_live_message,
 )
 from src.utils.time import now_utc
 
@@ -146,7 +147,7 @@ async def maritime_live_ws(websocket: WebSocket) -> None:
                 subscription = {
                     "APIKey": api_key,
                     "BoundingBoxes": [box],
-                    "FilterMessageTypes": ["PositionReport"],
+                    "FilterMessageTypes": AISSTREAM_DEFAULT_MESSAGE_TYPES,
                 }
                 await upstream_socket.send(json.dumps(subscription))
                 if upstream_recv_task is None or upstream_recv_task.done():
@@ -182,18 +183,26 @@ async def maritime_live_ws(websocket: WebSocket) -> None:
                     continue
                 if not isinstance(payload, dict):
                     continue
-                normalized = normalize_aisstream_position_message(payload, index=message_index, retrieved_at=now_utc())
+                normalized = normalize_aisstream_live_message(payload, index=message_index, retrieved_at=now_utc())
                 message_index += 1
                 if normalized is None:
                     continue
                 position, vessel = normalized
-                await websocket.send_json(
-                    {
-                        "type": "position",
-                        "position": _jsonable_dataclass(position),
-                        "vessel": _jsonable_dataclass(vessel),
-                    }
-                )
+                if position is not None:
+                    await websocket.send_json(
+                        {
+                            "type": "position",
+                            "position": _jsonable_dataclass(position),
+                            "vessel": _jsonable_dataclass(vessel) if vessel is not None else None,
+                        }
+                    )
+                elif vessel is not None:
+                    await websocket.send_json(
+                        {
+                            "type": "vessel",
+                            "vessel": _jsonable_dataclass(vessel),
+                        }
+                    )
     except WebSocketDisconnect:
         pass
     finally:

@@ -19,12 +19,22 @@
 
   // Design token values used for map layer styling
   const BG0 = "#02060c";
-  const ACCENT = "#7aa6c8";
-  const SECONDARY = "#c49a5a";
   const TEXT2 = "#8a919a";
   const AIS_ZOOM_THRESHOLD = 4;
   const VIEWPORT_DEBOUNCE_MS = 1500;
   const MAX_LIVE_POSITIONS = 600;
+  const VESSEL_GROUPS = ["tanker", "lng_carrier", "cargo", "container", "dry_bulk", "passenger", "fishing", "special", "unknown"];
+  const VESSEL_COLORS: Record<string, string> = {
+    tanker: "#e36f5a",
+    lng_carrier: "#7aa6c8",
+    cargo: "#4bb474",
+    container: "#4bb474",
+    dry_bulk: "#c49a5a",
+    passenger: "#a4b0bc",
+    fishing: "#63b3a6",
+    special: "#b58bd8",
+    unknown: "#8a919a",
+  };
 
   let container: HTMLDivElement;
   let map: maplibregl.Map | null = null;
@@ -57,10 +67,12 @@
             name: vesselIndex[p.vessel_id]?.name ?? p.vessel_id,
             vessel_class: vesselIndex[p.vessel_id]?.vessel_class ?? "Unknown",
             vessel_type: vesselIndex[p.vessel_id]?.vessel_type ?? "Unknown",
+            vessel_group: vesselGroup(vesselIndex[p.vessel_id]?.vessel_type),
             speed_knots: p.speed_knots ?? null,
             navigation_status: p.navigation_status ?? null,
             mmsi: p.mmsi,
             heading: p.heading_degrees ?? p.course_degrees ?? 0,
+            moving: (p.speed_knots ?? 0) >= 0.5,
           },
         })),
     };
@@ -72,7 +84,12 @@
       features: ports.map((p) => ({
         type: "Feature" as const,
         geometry: { type: "Point" as const, coordinates: [p.longitude, p.latitude] },
-        properties: { name: p.name, country: p.country, terminal_type: p.terminal_type ?? "Port" },
+        properties: {
+          name: p.name,
+          country: p.country,
+          terminal_type: p.terminal_type ?? "Port",
+          port_group: portGroup(p.terminal_type, p.commodity_links),
+        },
       })),
     };
   }
@@ -190,7 +207,13 @@
     pendingSubscription = {
       type: "subscribe",
       BoundingBoxes: [boundingBox],
-      FilterMessageTypes: ["PositionReport"]
+      FilterMessageTypes: [
+        "PositionReport",
+        "ExtendedClassBPositionReport",
+        "StandardClassBPositionReport",
+        "ShipStaticData",
+        "StaticDataReport",
+      ],
     };
     ensureLiveSocket();
     flushSubscription();
@@ -253,6 +276,10 @@
       liveMessage = typeof message.message === "string" ? message.message : null;
       return;
     }
+    if (message.type === "vessel" && message.vessel) {
+      upsertVessel(message.vessel as MaritimeVesselStatic);
+      return;
+    }
     if (message.type !== "position" || !message.position) {
       return;
     }
@@ -273,7 +300,9 @@
   }
 
   function upsertVessel(vessel: MaritimeVesselStatic) {
-    liveVessels = [vessel, ...liveVessels.filter((item) => item.vessel_id !== vessel.vessel_id)];
+    const previous = liveVessels.find((item) => item.vessel_id === vessel.vessel_id);
+    const merged = mergeVesselStatic(previous, vessel);
+    liveVessels = [merged, ...liveVessels.filter((item) => item.vessel_id !== vessel.vessel_id)];
   }
 
   function closeLiveSocket(reason: string, status: typeof liveStatus = "suspended", clearLiveData = false) {
@@ -304,8 +333,118 @@
   function mergeVessels(base: MaritimeVesselStatic[], live: MaritimeVesselStatic[]) {
     const rows = new Map<string, MaritimeVesselStatic>();
     for (const vessel of base) rows.set(vessel.vessel_id, vessel);
-    for (const vessel of live) rows.set(vessel.vessel_id, vessel);
+    for (const vessel of live) rows.set(vessel.vessel_id, mergeVesselStatic(rows.get(vessel.vessel_id), vessel));
     return [...rows.values()];
+  }
+
+  function mergeVesselStatic(previous: MaritimeVesselStatic | undefined, incoming: MaritimeVesselStatic) {
+    if (!previous) return incoming;
+    const incomingIsMinimal = incoming.vessel_type === "unknown";
+    return {
+      ...incoming,
+      name: incoming.name.startsWith("MMSI ") && !previous.name.startsWith("MMSI ") ? previous.name : incoming.name,
+      vessel_type: incomingIsMinimal && previous.vessel_type !== "unknown" ? previous.vessel_type : incoming.vessel_type,
+      vessel_class:
+        incoming.vessel_class === "AISstream live vessel" && previous.vessel_class !== "AISstream live vessel"
+          ? previous.vessel_class
+          : incoming.vessel_class,
+      flag: incoming.flag ?? previous.flag,
+      owner_operator: incoming.owner_operator ?? previous.owner_operator,
+      length_m: incoming.length_m ?? previous.length_m,
+      beam_m: incoming.beam_m ?? previous.beam_m,
+      deadweight_tons: incoming.deadweight_tons ?? previous.deadweight_tons,
+      cargo_inference: incoming.cargo_inference ?? previous.cargo_inference,
+      cargo_inference_confidence: incoming.cargo_inference_confidence ?? previous.cargo_inference_confidence,
+      cargo_inference_caveat: incoming.cargo_inference_caveat ?? previous.cargo_inference_caveat,
+      transformation_note: incomingIsMinimal ? previous.transformation_note ?? incoming.transformation_note : incoming.transformation_note,
+    };
+  }
+
+  function vesselGroup(value: string | null | undefined) {
+    const normalized = String(value ?? "unknown").toLowerCase().replace(/[\s-]+/g, "_");
+    if (normalized.includes("tanker") || normalized.includes("oil")) return "tanker";
+    if (normalized.includes("lng") || normalized.includes("gas")) return "lng_carrier";
+    if (normalized.includes("container")) return "container";
+    if (normalized.includes("bulk")) return "dry_bulk";
+    if (normalized.includes("cargo")) return "cargo";
+    if (normalized.includes("passenger")) return "passenger";
+    if (normalized.includes("fishing")) return "fishing";
+    if (normalized.includes("tug") || normalized.includes("special")) return "special";
+    return "unknown";
+  }
+
+  function portGroup(terminalType: string | null | undefined, commodityLinks: string[] = []) {
+    const haystack = `${terminalType ?? ""} ${commodityLinks.join(" ")}`.toLowerCase();
+    if (haystack.includes("oil") || haystack.includes("crude") || haystack.includes("product")) return "tanker";
+    if (haystack.includes("lng") || haystack.includes("gas")) return "lng_carrier";
+    if (haystack.includes("container")) return "container";
+    if (haystack.includes("bulk") || haystack.includes("coal") || haystack.includes("iron ore")) return "dry_bulk";
+    return "cargo";
+  }
+
+  function groupColorExpression(propertyName: string) {
+    return [
+      "match", ["get", propertyName],
+      "tanker", VESSEL_COLORS.tanker,
+      "lng_carrier", VESSEL_COLORS.lng_carrier,
+      "cargo", VESSEL_COLORS.cargo,
+      "container", VESSEL_COLORS.container,
+      "dry_bulk", VESSEL_COLORS.dry_bulk,
+      "passenger", VESSEL_COLORS.passenger,
+      "fishing", VESSEL_COLORS.fishing,
+      "special", VESSEL_COLORS.special,
+      VESSEL_COLORS.unknown,
+    ];
+  }
+
+  function chevronImage(color: string) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, 64, 64);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 9;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(17, 46);
+    ctx.lineTo(32, 15);
+    ctx.lineTo(47, 46);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(2, 6, 12, 0.7)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    return ctx.getImageData(0, 0, 64, 64);
+  }
+
+  function addChevronImages() {
+    if (!map) return;
+    for (const group of VESSEL_GROUPS) {
+      const id = `vessel-chevron-${group}`;
+      if (map.hasImage(id)) continue;
+      const image = chevronImage(VESSEL_COLORS[group] ?? VESSEL_COLORS.unknown);
+      if (image) map.addImage(id, image);
+    }
+  }
+
+  function vesselIconExpression() {
+    return [
+      "match", ["get", "vessel_group"],
+      "tanker", "vessel-chevron-tanker",
+      "lng_carrier", "vessel-chevron-lng_carrier",
+      "cargo", "vessel-chevron-cargo",
+      "container", "vessel-chevron-container",
+      "dry_bulk", "vessel-chevron-dry_bulk",
+      "passenger", "vessel-chevron-passenger",
+      "fishing", "vessel-chevron-fishing",
+      "special", "vessel-chevron-special",
+      "vessel-chevron-unknown",
+    ];
   }
 
   onMount(() => {
@@ -355,55 +494,62 @@
         id: "shipping-lanes-aura",
         type: "line",
         source: "shipping-lanes",
+        filter: ["==", ["get", "Type"], "Major"],
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#76b9ff",
           "line-opacity": ["interpolate", ["linear"], ["zoom"],
-            2, ["match", ["get", "Type"], "Major", 0.13, "Middle", 0.09, 0.06],
-            5, ["match", ["get", "Type"], "Major", 0.20, "Middle", 0.14, 0.09],
-            8, ["match", ["get", "Type"], "Major", 0.26, "Middle", 0.18, 0.11]],
+            2, 0.16,
+            5, 0.25,
+            8, 0.31],
           "line-width": ["interpolate", ["linear"], ["zoom"],
-            2, laneWidth(16, 11, 7),
-            5, laneWidth(22, 15, 10),
-            8, laneWidth(30, 20, 13)],
-          "line-blur": 14,
+            2, laneWidth(18, 11, 7),
+            5, laneWidth(26, 15, 10),
+            8, laneWidth(34, 20, 13)],
+          "line-blur": 18,
         },
       });
       map.addLayer({
         id: "shipping-lanes-glow",
         type: "line",
         source: "shipping-lanes",
+        filter: ["==", ["get", "Type"], "Major"],
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#2f89d9",
           "line-opacity": ["interpolate", ["linear"], ["zoom"],
-            2, ["match", ["get", "Type"], "Major", 0.36, "Middle", 0.25, 0.16],
-            5, ["match", ["get", "Type"], "Major", 0.45, "Middle", 0.31, 0.20],
-            8, ["match", ["get", "Type"], "Major", 0.52, "Middle", 0.36, 0.23]],
+            2, 0.30,
+            5, 0.42,
+            8, 0.50],
           "line-width": ["interpolate", ["linear"], ["zoom"],
-            2, laneWidth(8, 5.5, 3.5),
-            5, laneWidth(12, 8, 5),
-            8, laneWidth(17, 11, 7)],
-          "line-blur": 8,
+            2, laneWidth(9, 5.5, 3.5),
+            5, laneWidth(14, 8, 5),
+            8, laneWidth(19, 11, 7)],
+          "line-blur": 10,
         },
       });
       map.addLayer({
         id: "shipping-lanes-body",
         type: "line",
         source: "shipping-lanes",
+        filter: ["==", ["get", "Type"], "Major"],
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#1a3a5c",
+          "line-color": "#2b79bf",
           "line-opacity": ["interpolate", ["linear"], ["zoom"],
-            2, ["match", ["get", "Type"], "Major", 0.62, "Middle", 0.44, 0.28],
-            5, ["match", ["get", "Type"], "Major", 0.72, "Middle", 0.50, 0.32],
-            8, ["match", ["get", "Type"], "Major", 0.82, "Middle", 0.57, 0.37]],
+            2, 0.36,
+            5, 0.50,
+            8, 0.62],
           "line-width": ["interpolate", ["linear"], ["zoom"],
             2, laneWidth(4.5, 3, 2),
             5, laneWidth(6.5, 4.5, 3),
-            8, laneWidth(9, 6, 4)],
-          "line-blur": 4.5,
+            8, laneWidth(8.5, 6, 4)],
+          "line-blur": 5,
         },
       });
 
       // ── Vessels ──────────────────────────────────────────────
+      addChevronImages();
       map.addSource("vessels", { type: "geojson", data: vesselFeatureCollection() as never });
 
       // Outer halo for visibility on any background
@@ -412,35 +558,86 @@
         type: "circle",
         source: "vessels",
         paint: {
-          "circle-color": ACCENT,
+          "circle-color": groupColorExpression("vessel_group"),
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 7, 8, 18],
-          "circle-opacity": 0.1,
+          "circle-opacity": 0.08,
           "circle-stroke-width": 0,
         },
       });
 
-      // Main vessel dot
       map.addLayer({
-        id: "vessels-dot",
-        type: "circle",
+        id: "vessels-chevron",
+        type: "symbol",
         source: "vessels",
+        layout: {
+          "icon-image": vesselIconExpression(),
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.22, 8, 0.34, 11, 0.46],
+          "icon-rotate": ["coalesce", ["get", "heading"], 0],
+          "icon-rotation-alignment": "map",
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
         paint: {
-          "circle-color": ACCENT,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 1, 3, 8, 6],
-          "circle-stroke-color": BG0,
-          "circle-stroke-width": 1,
-          "circle-opacity": 0.95,
+          "icon-opacity": ["case", ["get", "moving"], 0.96, 0.72],
         },
       });
 
       // ── Ports ─────────────────────────────────────────────────
+      map.addSource("major-ports", {
+        type: "geojson",
+        data: "/major-ports.geojson",
+        attribution: "Major ports: Gamma static public-reference layer",
+      });
+      map.addLayer({
+        id: "major-ports-halo",
+        type: "circle",
+        source: "major-ports",
+        paint: {
+          "circle-color": groupColorExpression("port_group"),
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 7, 6, 12],
+          "circle-blur": 1.15,
+          "circle-opacity": 0.2,
+        },
+      });
+      map.addLayer({
+        id: "major-ports-dot",
+        type: "circle",
+        source: "major-ports",
+        paint: {
+          "circle-color": groupColorExpression("port_group"),
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 2.3, 6, 4.2],
+          "circle-stroke-color": BG0,
+          "circle-stroke-width": 1,
+          "circle-opacity": 0.9,
+        },
+      });
+      map.addLayer({
+        id: "major-ports-labels",
+        type: "symbol",
+        source: "major-ports",
+        minzoom: 3.2,
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 9,
+          "text-anchor": "left",
+          "text-offset": [0.75, 0],
+          "text-allow-overlap": false,
+          "text-optional": true,
+        },
+        paint: {
+          "text-color": "#c2c8d0",
+          "text-halo-color": BG0,
+          "text-halo-width": 1.4,
+        },
+      });
+
       map.addSource("ports", { type: "geojson", data: portFeatureCollection() as never });
       map.addLayer({
         id: "ports-dot",
         type: "circle",
         source: "ports",
         paint: {
-          "circle-color": SECONDARY,
+          "circle-color": groupColorExpression("port_group"),
           "circle-radius": 3.5,
           "circle-stroke-color": BG0,
           "circle-stroke-width": 1,
@@ -469,7 +666,7 @@
       });
 
       // ── Hover interaction ─────────────────────────────────────
-      map.on("mouseenter", "vessels-dot", (e) => {
+      map.on("mouseenter", "vessels-chevron", (e) => {
         if (!map || !popup || !e.features?.length) return;
         map.getCanvas().style.cursor = "crosshair";
         const f = e.features[0];
@@ -495,7 +692,7 @@
           .addTo(map);
       });
 
-      map.on("mouseleave", "vessels-dot", () => {
+      map.on("mouseleave", "vessels-chevron", () => {
         if (!map || !popup) return;
         map.getCanvas().style.cursor = "";
         popup.remove();
@@ -567,7 +764,10 @@
   <!-- Bottom-left: legend + 3D toggle -->
   <div class="map-bottom">
     <div class="map-legend">
-      <span class="legend-item vessel">Vessel</span>
+      <span class="legend-item tanker">Tanker</span>
+      <span class="legend-item lng">LNG</span>
+      <span class="legend-item cargo">Cargo</span>
+      <span class="legend-item bulk">Bulk</span>
       <span class="legend-item lane">Sealanes</span>
       <span class="legend-item port">Port</span>
       <span class="legend-item choke">Chokepoint</span>
@@ -687,17 +887,20 @@
     flex-shrink: 0;
   }
 
-  .legend-item.vessel::before { background: var(--accent, #7aa6c8); }
+  .legend-item.tanker::before { background: #e36f5a; }
+  .legend-item.lng::before    { background: #7aa6c8; }
+  .legend-item.cargo::before  { background: #4bb474; }
+  .legend-item.bulk::before   { background: #c49a5a; }
   .legend-item.lane::before {
     width: 18px;
     height: 5px;
     border-radius: 999px;
-    background: color-mix(in srgb, #1a3a5c 72%, transparent);
+    background: color-mix(in srgb, #2b79bf 72%, transparent);
     box-shadow:
       0 0 4px color-mix(in srgb, #2f89d9 72%, transparent),
       0 0 10px color-mix(in srgb, #76b9ff 42%, transparent);
   }
-  .legend-item.port::before   { background: var(--chart-secondary, #c49a5a); }
+  .legend-item.port::before   { background: var(--text-2, #8a919a); }
   .legend-item.choke::before  { background: transparent; border: 1px solid var(--text-2, #8a919a); }
 
   .map-ctrl-btn {

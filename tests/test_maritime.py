@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -8,7 +10,12 @@ from src.application.maritime_service import MaritimeService
 from src.application.provider_capability_registry import build_default_provider_capability_registry
 from src.application.runtime import build_runtime
 from src.models.maritime import MaritimeCoverageMetadata
-from src.services.maritime_adapters import AisstreamMaritimeDataProvider, SampleMaritimeDataProvider
+from src.services.maritime_adapters import (
+    AISSTREAM_DEFAULT_MESSAGE_TYPES,
+    AisstreamMaritimeDataProvider,
+    SampleMaritimeDataProvider,
+    normalize_aisstream_live_message,
+)
 
 
 def test_maritime_coverage_model_rejects_unknown_status():
@@ -160,9 +167,136 @@ def test_aisstream_provider_maps_position_messages(monkeypatch):
     assert snapshot.positions[0].source_provider == "aisstream"
     assert snapshot.positions[0].vessel_id == "mmsi:538009991"
     assert snapshot.positions[0].speed_knots == 12.1
+    assert snapshot.positions[0].heading_degrees == 108
     assert snapshot.vessels[0].name == "GULF HORIZON"
     assert snapshot.vessels[0].cargo_inference is None
     assert any("partial live AIS coverage" in warning for warning in snapshot.warnings)
+
+
+def test_aisstream_live_normalizer_maps_static_vessel_type_and_dimensions():
+    message = {
+        "MessageType": "ShipStaticData",
+        "MetaData": {
+            "MMSI": 538009991,
+            "ShipName": "GULF HORIZON",
+            "time_utc": "2026-04-18 11:20:00.000000 +0000 UTC",
+        },
+        "Message": {
+            "ShipStaticData": {
+                "UserID": 538009991,
+                "ImoNumber": 9876543,
+                "CallSign": "V7GH9",
+                "Name": "GULF HORIZON",
+                "Type": 84,
+                "Dimension": {"A": 280, "B": 53, "C": 30, "D": 30},
+                "MaximumStaticDraught": 18.2,
+                "Destination": "FUJAIRAH",
+            }
+        },
+    }
+
+    normalized = normalize_aisstream_live_message(message, index=0, retrieved_at=datetime(2026, 4, 18, 11, 20))
+
+    assert normalized is not None
+    position, vessel = normalized
+    assert position is None
+    assert vessel is not None
+    assert vessel.vessel_type == "tanker"
+    assert vessel.vessel_class == "AIS tanker class 84"
+    assert vessel.identity.imo == "9876543"
+    assert vessel.identity.callsign == "V7GH9"
+    assert vessel.length_m == 333
+    assert vessel.beam_m == 60
+    assert vessel.cargo_inference is None
+    assert "does not infer commodity cargo" in (vessel.cargo_inference_caveat or "")
+
+
+def test_aisstream_live_normalizer_maps_static_data_report_ship_type():
+    message = {
+        "MessageType": "StaticDataReport",
+        "MetaData": {
+            "MMSI": 257702970,
+            "latitude": 59.1,
+            "longitude": 10.7,
+            "time_utc": "2026-04-18 11:20:00.000000 +0000 UTC",
+        },
+        "Message": {
+            "StaticDataReport": {
+                "UserID": 257702970,
+                "ReportA": {"Name": "OSLO CARGO", "Valid": True},
+                "ReportB": {
+                    "CallSign": "LESW",
+                    "ShipType": 70,
+                    "Dimension": {"A": 120, "B": 28, "C": 16, "D": 16},
+                    "Valid": True,
+                },
+            }
+        },
+    }
+
+    normalized = normalize_aisstream_live_message(message, index=0, retrieved_at=datetime(2026, 4, 18, 11, 20))
+
+    assert normalized is not None
+    position, vessel = normalized
+    assert position is not None
+    assert position.heading_degrees is None
+    assert vessel is not None
+    assert vessel.name == "OSLO CARGO"
+    assert vessel.vessel_type == "cargo"
+    assert vessel.length_m == 148
+    assert vessel.beam_m == 32
+
+
+def test_aisstream_provider_preserves_static_type_after_position_only_messages(monkeypatch):
+    provider = AisstreamMaritimeDataProvider(
+        api_key="test-key",
+        reference_provider=SampleMaritimeDataProvider(),
+        sample_seconds=1,
+    )
+    static_message = {
+        "MessageType": "ShipStaticData",
+        "MetaData": {"MMSI": 538009991, "ShipName": "GULF HORIZON"},
+        "Message": {
+            "ShipStaticData": {
+                "UserID": 538009991,
+                "Name": "GULF HORIZON",
+                "Type": 84,
+                "Dimension": {"A": 280, "B": 53, "C": 30, "D": 30},
+            }
+        },
+    }
+    position_message = {
+        "MessageType": "PositionReport",
+        "MetaData": {
+            "MMSI": 538009991,
+            "latitude": 26.33,
+            "longitude": 56.35,
+            "time_utc": "2026-04-18 11:20:00.000000 +0000 UTC",
+        },
+        "Message": {
+            "PositionReport": {
+                "UserID": 538009991,
+                "Latitude": 26.33,
+                "Longitude": 56.35,
+                "Sog": 12.1,
+                "Cog": 105.0,
+                "TrueHeading": 511,
+            }
+        },
+    }
+    monkeypatch.setattr(provider, "_collect_messages_sync", lambda reference: [static_message, position_message])
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    assert snapshot.positions[0].heading_degrees is None
+    assert snapshot.vessels[0].vessel_type == "tanker"
+    assert snapshot.vessels[0].length_m == 333
+
+
+def test_aisstream_live_message_types_include_static_data_for_vessel_coloring():
+    assert "PositionReport" in AISSTREAM_DEFAULT_MESSAGE_TYPES
+    assert "ShipStaticData" in AISSTREAM_DEFAULT_MESSAGE_TYPES
+    assert "StaticDataReport" in AISSTREAM_DEFAULT_MESSAGE_TYPES
 
 
 def test_runtime_can_select_aisstream_provider_without_key(tmp_path, monkeypatch):

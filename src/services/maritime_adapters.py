@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -163,13 +164,15 @@ class AisstreamMaritimeDataProvider:
         ]
 
         for index, message in enumerate(messages):
-            parsed = _position_from_aisstream_message(message, index=index, retrieved_at=retrieved_at)
+            parsed = normalize_aisstream_live_message(message, index=index, retrieved_at=retrieved_at)
             if parsed is None:
                 continue
             position, vessel = parsed
-            positions.append(position)
-            source_timestamps.append(position.timestamp)
-            vessel_by_id.setdefault(vessel.vessel_id, vessel)
+            if position is not None:
+                positions.append(position)
+                source_timestamps.append(position.timestamp)
+            if vessel is not None:
+                vessel_by_id[vessel.vessel_id] = _merge_vessel_static(vessel_by_id.get(vessel.vessel_id), vessel)
 
         latest_positions = _latest_positions_by_vessel(positions)
         if not latest_positions:
@@ -811,6 +814,33 @@ def normalize_aisstream_position_message(
     return _position_from_aisstream_message(message, index=index, retrieved_at=retrieved_at)
 
 
+def normalize_aisstream_live_message(
+    message: dict[str, Any],
+    *,
+    index: int,
+    retrieved_at,
+) -> tuple[MaritimeAisPositionRecord | None, MaritimeVesselStaticRecord | None] | None:
+    message_type = str(message.get("MessageType") or "").strip()
+    metadata = _first_dict(message.get("MetaData"), message.get("Metadata"), message.get("metadata"))
+    body = _aisstream_message_body(message, message_type)
+    mmsi = _string_value(_first_present(metadata.get("MMSI"), body.get("UserID"), body.get("Mmsi"), body.get("MMSI")))
+    if not mmsi:
+        return None
+
+    vessel_id = f"mmsi:{mmsi}"
+    vessel = _vessel_from_aisstream_message(
+        vessel_id=vessel_id,
+        mmsi=mmsi,
+        metadata=metadata,
+        body=body,
+        message_type=message_type,
+        retrieved_at=retrieved_at,
+    )
+    parsed = _position_from_aisstream_message(message, index=index, retrieved_at=retrieved_at)
+    position = parsed[0] if parsed is not None else None
+    return position, vessel
+
+
 def _aisstream_boxes_from_chokepoints(
     chokepoints: list[MaritimeChokepointDefinition],
 ) -> list[list[list[float]]]:
@@ -856,8 +886,8 @@ def _position_from_aisstream_message(
         latitude=latitude,
         longitude=longitude,
         speed_knots=_float_value(_first_present(body.get("Sog"), body.get("SpeedOverGround"))),
-        course_degrees=_float_value(_first_present(body.get("Cog"), body.get("CourseOverGround"))),
-        heading_degrees=_float_value(_first_present(body.get("TrueHeading"), body.get("Heading"))),
+        course_degrees=_degree_value(_first_present(body.get("Cog"), body.get("CourseOverGround"))),
+        heading_degrees=_heading_value(_first_present(body.get("TrueHeading"), body.get("Heading"))),
         navigation_status=_navigation_status_text(body.get("NavigationalStatus")),
         destination=_string_value(body.get("Destination")),
         draught_m=_float_value(_first_present(body.get("Draught"), body.get("MaximumStaticDraught"))),
@@ -899,12 +929,19 @@ def _vessel_from_aisstream_message(
     message_type: str,
     retrieved_at,
 ) -> MaritimeVesselStaticRecord:
-    ship_name = _string_value(_first_present(metadata.get("ShipName"), metadata.get("ship_name"), body.get("Name")))
-    ais_type = _first_present(body.get("Type"), body.get("ShipType"))
+    report_a = _first_dict(body.get("ReportA"))
+    report_b = _first_dict(body.get("ReportB"))
+    dimension = _first_dict(body.get("Dimension"), report_b.get("Dimension"))
+    ship_name = _string_value(
+        _first_present(metadata.get("ShipName"), metadata.get("ship_name"), body.get("Name"), report_a.get("Name"))
+    )
+    ais_type = _first_present(body.get("Type"), body.get("ShipType"), report_b.get("ShipType"))
     vessel_type = _vessel_type_from_ais_code(ais_type)
     vessel_class = _vessel_class_from_ais_code(ais_type)
     imo = _string_value(_first_present(body.get("ImoNumber"), body.get("IMO"), body.get("Imo")))
-    callsign = _string_value(_first_present(body.get("CallSign"), body.get("Callsign")))
+    callsign = _string_value(_first_present(body.get("CallSign"), body.get("Callsign"), report_b.get("CallSign")))
+    length_m = _dimension_sum(dimension.get("A"), dimension.get("B"))
+    beam_m = _dimension_sum(dimension.get("C"), dimension.get("D"))
     return MaritimeVesselStaticRecord(
         vessel_id=vessel_id,
         name=ship_name or f"MMSI {mmsi}",
@@ -917,10 +954,12 @@ def _vessel_from_aisstream_message(
         ),
         vessel_type=vessel_type,
         vessel_class=vessel_class,
+        length_m=length_m,
+        beam_m=beam_m,
         cargo_inference=None,
         cargo_inference_confidence=None,
         cargo_inference_caveat=(
-            "AISstream live messages do not identify actual cargo; Gamma does not infer cargo from this live provider slice."
+            "AISstream live messages expose AIS ship/cargo type codes, not actual cargo; Gamma does not infer commodity cargo from this live provider slice."
         ),
         source_provider="aisstream",
         retrieved_at=retrieved_at,
@@ -938,6 +977,44 @@ def _latest_positions_by_vessel(
         if previous is None or position.timestamp >= previous.timestamp:
             latest[position.vessel_id] = position
     return sorted(latest.values(), key=lambda item: item.timestamp, reverse=True)
+
+
+def _merge_vessel_static(
+    previous: MaritimeVesselStaticRecord | None,
+    incoming: MaritimeVesselStaticRecord,
+) -> MaritimeVesselStaticRecord:
+    if previous is None:
+        return incoming
+    vessel_type = previous.vessel_type if previous.vessel_type != "unknown" and incoming.vessel_type == "unknown" else incoming.vessel_type
+    vessel_class = (
+        previous.vessel_class
+        if previous.vessel_class != "AISstream live vessel" and incoming.vessel_class == "AISstream live vessel"
+        else incoming.vessel_class
+    )
+    name = previous.name if incoming.name.startswith("MMSI ") and not previous.name.startswith("MMSI ") else incoming.name
+    return replace(
+        incoming,
+        name=name,
+        vessel_type=vessel_type,
+        vessel_class=vessel_class,
+        flag=incoming.flag or previous.flag,
+        owner_operator=incoming.owner_operator or previous.owner_operator,
+        length_m=incoming.length_m if incoming.length_m is not None else previous.length_m,
+        beam_m=incoming.beam_m if incoming.beam_m is not None else previous.beam_m,
+        deadweight_tons=incoming.deadweight_tons if incoming.deadweight_tons is not None else previous.deadweight_tons,
+        cargo_inference=incoming.cargo_inference or previous.cargo_inference,
+        cargo_inference_confidence=(
+            incoming.cargo_inference_confidence
+            if incoming.cargo_inference_confidence is not None
+            else previous.cargo_inference_confidence
+        ),
+        cargo_inference_caveat=incoming.cargo_inference_caveat or previous.cargo_inference_caveat,
+        transformation_note=(
+            incoming.transformation_note
+            if incoming.vessel_type != "unknown"
+            else previous.transformation_note or incoming.transformation_note
+        ),
+    )
 
 
 def _first_dict(*values: Any) -> dict[str, Any]:
@@ -961,6 +1038,29 @@ def _float_value(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _degree_value(value: Any) -> float | None:
+    numeric = _float_value(value)
+    if numeric is None or not (0 <= numeric <= 360):
+        return None
+    return numeric
+
+
+def _heading_value(value: Any) -> float | None:
+    numeric = _float_value(value)
+    if numeric is None or int(numeric) == 511 or not (0 <= numeric <= 359):
+        return None
+    return numeric
+
+
+def _dimension_sum(left: Any, right: Any) -> float | None:
+    left_value = _float_value(left)
+    right_value = _float_value(right)
+    if left_value is None or right_value is None:
+        return None
+    total = left_value + right_value
+    return total if total > 0 else None
 
 
 def _string_value(value: Any) -> str | None:
