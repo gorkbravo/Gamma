@@ -5,7 +5,7 @@ For future product expansion work, start with [`roadmap.md`](./roadmap.md) and [
 Gamma is a read-only market research application built as a FastAPI backend, a Svelte frontend, and a Tauri desktop shell. Tauri is the primary desktop path today, while the older PySide client still exists as an explicit fallback. In practice, the product currently combines two things:
 
 - an existing IBKR-connected portfolio, risk, and implied-volatility workstation
-- a newer research workspace centered on macro, prediction-market, crypto, fundamentals, and AI-assisted analysis
+- a newer research workspace centered on macro, prediction-market, crypto, fundamentals, commodities, and AI-assisted analysis
 
 The app is designed to help the user inspect data, compare signals, and understand the calculations behind the screens. It is not designed to place trades or to hide its analytics behind unexplained scores.
 
@@ -24,6 +24,7 @@ Gamma currently lets a user:
 - screen and inspect prediction markets across Polymarket and Kalshi
 - screen and inspect crypto tokens with narrative baskets, DEX liquidity context, and comparative analytics
 - inspect company fundamentals, financial statements, peer context, and persistent DCF scenarios
+- research commodities across energy, metals, curves, spreads, inventories, events, and cross-domain handoffs
 - inspect implied-volatility surfaces through the IV explorer
 - generate shell-level Copilot research cards and cross-context synthesis from loaded Gamma state
 - navigate the app as a desktop product with reorderable tabs and keyboard shortcuts
@@ -37,6 +38,7 @@ Gamma does not:
 - run arbitrary user strategy code inside the app
 - support IB Gateway yet; the live path is Trader Workstation
 - treat heuristic macro interpretation layers as causal models
+- treat commodity curve, roll-yield, spread, or inventory heuristics as execution signals
 - treat incomplete risk coverage as exact portfolio-wide truth
 - present prediction-market freshness, relatedness, or research rank as objective ground truth
 
@@ -52,7 +54,7 @@ Gamma opens on a landing screen that shows connection state and lets the user en
 Within each workspace, tabs can be reordered in the sidebar. The default layout is:
 
 - `Portfolio View`: `Portfolio`, `Risk`, `IV`
-- `Research View`: `Research`, `Macro`, `Prediction Markets`, `Crypto`, `Fundamentals`, `Risk`, `IV`
+- `Research View`: `Research`, `Macro`, `Prediction Markets`, `Crypto`, `Fundamentals`, `Commodities`, `Sealanes`, `Risk`, `IV`
 
 The current desktop navigation model is part of the product, not an afterthought:
 
@@ -88,9 +90,11 @@ The current API surface is grouped by workspace:
 - `/portfolio/*`: snapshot, local history, performance
 - `/research/*`: single-name and synthetic-scope analysis
 - `/macro/*`: snapshot payload, divergences, event feed, series history
+- `/commodities/*`: workspace payload, market summaries, price history, curves, spreads, inventories, events, and cross-domain links
 - `/prediction-markets/*`: screener, detail, history, wallet summary, related markets, calibration
 - `/crypto/*`: workspace screener, token detail, price history, DEX liquidity, comparison
 - `/fundamentals/*`: company search, overview, financials, DCF model, peer baskets
+- `/maritime/*`: Sealanes workspace, AIS position samples, chokepoints, flows, and event windows
 - `/copilot/*`: structured research-card generation from app context
 - `/risk/*`: risk computation
 - `/iv/*`: IV snapshot and session loop
@@ -101,6 +105,7 @@ Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 
 - `IBKR`: portfolio snapshots, security history, FX spot/history, IV surfaces, and listed-market data where the user has entitlements
 - `FRED`: macro time series
+- `EIA`: optional selected official US energy fundamentals for the Commodities tab when `EIA_API_KEY` is configured
 - `US Treasury`: Treasury curve snapshots for the US rates view
 - official macro event adapters: policy and macro calendar coverage used in `Events / Regimes`
 - `Polymarket`: Gamma API, Data API, and CLOB history endpoints
@@ -109,7 +114,7 @@ Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 - `GeckoTerminal`: DEX network metadata, pool search, token-pool lookup, and liquidity context
 - `SEC EDGAR / data.sec.gov via EdgarTools`: company resolution, filing chronology, company facts, and statement inputs
 - `OpenAI`: optional Copilot model provider behind Gamma's AI service boundary
-- `sample_data/`: local offline development data when `MOCK_DATA=true`
+- `sample_data/` and generated sample providers: local offline development data when `MOCK_DATA=true` or a domain provider is not configured
 
 A lot of the app's trust model depends on provenance. Many returned entities carry:
 
@@ -118,7 +123,7 @@ A lot of the app's trust model depends on provenance. Many returned entities car
 - `origin`
 - `transformation_note`
 
-That metadata is especially important in Macro, Prediction Markets, and Crypto, where Gamma is often transforming raw public data into normalized metrics or heuristic interpretations.
+That metadata is especially important in Macro, Prediction Markets, Crypto, and Commodities, where Gamma is often transforming raw public data into normalized metrics or heuristic interpretations.
 
 The backend exposes shared Workstream 1 metadata through `/system/*` routes:
 
@@ -352,6 +357,53 @@ Important caveats:
 - `Global` is a lighter comparative lens, not a fully independent region stack
 - EU coverage is intentionally lighter than US coverage in v1
 
+#### Commodities tab
+
+Commodities is a Roadmap V2 Workstream 8 first pass. It is a research workspace, not a trading terminal.
+
+Modes:
+
+- `Overview`
+- `Energy`
+- `Metals`
+- `Curves & Spreads`
+- `Inventories & Fundamentals`
+- `Events / Cross-Domain`
+
+Main surfaces:
+
+- commodity universe selector across energy and metals
+- KPI strip for latest price, curve shape, front spread, roll-yield proxy, inventory signal, and provider coverage
+- price-history and curve charts using the shared time-series chart
+- market snapshot tables for energy and metals
+- curve node tables
+- calendar spreads, inter-commodity ratios, and product-crack proxies
+- inventory and fundamental panels
+- event notes and heuristic links into Macro, Prediction Markets, and Sealanes
+
+Provider behavior:
+
+- default `COMMODITIES_PROVIDER=sample` uses generated offline sample prices, curves, inventories, and events
+- `COMMODITIES_PROVIDER=eia` enables selected EIA official energy fundamentals when `EIA_API_KEY` is present
+- optional `FRED_API_KEY` lets the EIA provider enrich selected spot/proxy price histories through existing FRED client infrastructure
+- futures curves remain sample-derived until an entitled read-only futures-chain provider is added
+
+What Gamma computes:
+
+- contango / backwardation / flat curve labels
+- front spread, M1-M6 spread, curve slope, and a simple front-spread roll-yield proxy
+- spread change, z-score, and percentile when enough history exists
+- latest inventory change and simple percentile context
+- commodity-linked macro, maritime, and prediction-market handoff notes
+
+Important caveats:
+
+- sample data is illustrative and explicitly marked as sample or proxy coverage
+- EIA coverage is official but partial, US-energy-focused, and release-lagged
+- FRED price histories are spot or proxy series, not futures chains
+- roll-yield, spread z-scores, seasonal inventory context, and cross-domain links are Gamma heuristics
+- Commodities remains read-only and does not expose order placement, strategy execution, or trading automation
+
 #### Prediction Markets tab
 
 This is Gamma's first roadmap tab completed at a first-pass level. It is multi-venue by design and currently supports Polymarket and Kalshi.
@@ -484,8 +536,9 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 4 - AI Copilot`: paused around 70%, with a shell-level read-only Copilot that can generate structured research cards across the current tab set, sustain lightweight same-domain follow-up threads, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
+- `Roadmap V2 Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 
-That means the app already has meaningful portfolio/risk/IV capabilities, first-pass research surfaces across Prediction Markets, Macro, Crypto, and Fundamentals, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
+That means the app already has meaningful portfolio/risk/IV capabilities, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
 
 ## Roadmap V2 Direction
 
@@ -522,6 +575,7 @@ The important boundary does not change: Gamma can study strategies, market data,
 - Prediction Markets currently go deepest on discovery, normalization, and first-pass comparative analysis, not exhaustive microstructure backtesting
 - Crypto is currently strongest on token discovery, normalization, and liquidity-aware first-pass comparison, not deep wallet analytics or derivatives overlays
 - Fundamentals is strongest on US SEC-native coverage; broader international equities remain future work
+- Commodities has a practical first pass with sample curves, optional EIA fundamentals, and proxy analytics; live futures curves and deep historical curve storage remain future work
 - IV is an exploration surface, not a full options analytics suite
 
 ## Running Gamma
@@ -543,6 +597,17 @@ Backend:
 $env:MOCK_DATA="true"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+Optional Commodities EIA enrichment:
+
+```powershell
+$env:COMMODITIES_PROVIDER="eia"
+$env:EIA_API_KEY="<your key>"
+# Optional: set FRED_API_KEY to enrich selected spot/proxy price histories.
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Without `EIA_API_KEY`, Commodities degrades to the sample provider and returns explicit coverage warnings. Provider credentials stay server-side.
 
 Optional Maritime AISstream prototype:
 

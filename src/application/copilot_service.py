@@ -6,6 +6,7 @@ from typing import Any, Callable
 from src.application.copilot_context_helpers import (
     dedupe_warnings,
     resolve_iv_surface,
+    summarize_commodities_workspace,
     summarize_iv_state,
     summarize_portfolio_history,
     summarize_portfolio_performance,
@@ -69,6 +70,7 @@ class CopilotService:
             "portfolio": self._build_portfolio_context,
             "research": self._build_research_context,
             "macro": self._build_macro_context,
+            "commodities": self._build_commodities_context,
             "prediction_markets": self._build_prediction_market_context,
             "crypto": self._build_crypto_context,
             "fundamentals": self._build_fundamentals_context,
@@ -159,6 +161,18 @@ class CopilotService:
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_macro_series_history_summary,
+                ),
+                _CopilotToolDefinition(
+                    name="get_commodities_workspace_summary",
+                    description="Return a read-only summary of the loaded Commodities workspace, including market, curve, spread, inventory, event, warning, and provenance context.",
+                    domains=("commodities",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_commodities_workspace_summary,
                 ),
                 _CopilotToolDefinition(
                     name="get_prediction_market_history_summary",
@@ -848,6 +862,49 @@ class CopilotService:
             warnings=list(snapshot.warnings),
         )
 
+    def _build_commodities_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        state = request.context.commodities_state or {}
+        workspace = state.get("workspace")
+        if not isinstance(workspace, dict):
+            raise ValueError("Commodities copilot requires a loaded commodities workspace.")
+        summary = summarize_commodities_workspace(workspace)
+        if summary is None:
+            raise ValueError("Commodities copilot requires a loaded commodities workspace.")
+        coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
+        warnings = dedupe_warnings(workspace.get("warnings", []), coverage.get("caveats", []))
+        sources = [
+            CopilotSourceRef(
+                source_id="commodities.workspace",
+                label="Commodities workspace",
+                kind="workspace",
+                provider=str(workspace.get("source_provider") or coverage.get("source_provider") or "gamma"),
+                origin=str(workspace.get("origin") or "gamma.commodities.workspace"),
+                description="Loaded Commodities workspace payload assembled by Gamma.",
+                retrieved_at=workspace.get("retrieved_at") or coverage.get("retrieved_at"),
+            )
+        ]
+        source_timestamp = coverage.get("source_timestamp")
+        if source_timestamp:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="commodities.provider_coverage",
+                    label="Commodities provider coverage",
+                    kind="provenance",
+                    provider=str(coverage.get("source_provider") or coverage.get("provider_id") or "gamma"),
+                    origin=str(coverage.get("origin") or "gamma.commodities.coverage"),
+                    description="Provider coverage, freshness, and caveats for the loaded Commodities workspace.",
+                    retrieved_at=coverage.get("retrieved_at") or source_timestamp,
+                )
+            )
+        return CopilotContextBundle(
+            domain="commodities",
+            current_tab=request.context.current_tab or "commodities",
+            summary_data={"workspace_mode": request.context.workspace_mode or "research", "commodities": summary},
+            tool_state={"workspace": workspace},
+            sources=sources,
+            warnings=warnings,
+        )
+
     def _build_prediction_market_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
         market_id = (request.context.prediction_market_id or "").strip()
         if not market_id:
@@ -1509,6 +1566,40 @@ class CopilotService:
                 tool_name="get_macro_series_history_summary",
                 summary=f"Loaded {history.title} history for {history.region} over {macro_context.timeframe}.",
                 arguments={"series_id": series_id, "region": region},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_get_commodities_workspace_summary(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        workspace = self._commodities_workspace_from_bundle(context)
+        coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
+        source = CopilotSourceRef(
+            source_id="commodities.workspace.drilldown",
+            label="Commodities workspace drilldown",
+            kind="workspace",
+            provider=str(workspace.get("source_provider") or coverage.get("source_provider") or "gamma"),
+            origin=str(workspace.get("origin") or "gamma.commodities.workspace"),
+            description="Expanded read-only Commodities workspace context for the active research view.",
+            retrieved_at=workspace.get("retrieved_at") or coverage.get("retrieved_at"),
+        )
+        return CopilotToolExecution(
+            output=summarize_commodities_workspace(
+                workspace,
+                summary_limit=12,
+                spread_limit=12,
+                inventory_limit=12,
+            )
+            or {},
+            trace=CopilotToolTrace(
+                tool_name="get_commodities_workspace_summary",
+                summary="Expanded the loaded Commodities workspace into market, curve, spread, inventory, event, and provenance context.",
+                arguments={},
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -2315,6 +2406,7 @@ class CopilotService:
                 "get_research_coverage_context",
             ),
             "macro": ("get_macro_workspace_drilldown",),
+            "commodities": ("get_commodities_workspace_summary",),
             "prediction_markets": (
                 "get_prediction_market_history_summary",
                 "get_prediction_market_flow_context",
@@ -2391,6 +2483,13 @@ class CopilotService:
             theme=str(context.summary_data.get("theme") or "all"),
             comparison_region=context.summary_data.get("comparison_region"),
         )
+
+    @staticmethod
+    def _commodities_workspace_from_bundle(context: CopilotContextBundle) -> dict[str, Any]:
+        workspace = context.tool_state.get("workspace")
+        if not isinstance(workspace, dict):
+            raise ValueError("Commodities context is missing the loaded workspace.")
+        return workspace
 
     @staticmethod
     def _prediction_market_id_from_bundle(context: CopilotContextBundle) -> str:

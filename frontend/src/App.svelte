@@ -5,6 +5,7 @@
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
+  import CommoditiesView from "./views/CommoditiesView.svelte";
   import MacroView from "./views/MacroView.svelte";
   import MaritimeView from "./views/MaritimeView.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
@@ -30,6 +31,7 @@
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
+    commoditiesWorkspace,
     copilotThreads,
     cryptoComparison,
     fundamentalsDcfSnapshots,
@@ -61,6 +63,7 @@
     macroContext,
     loadMacroSeriesHistory,
     loadMacroWorkspace,
+    loadCommoditiesWorkspace,
     loadMaritimeWorkspace,
     loadPortfolioPerformance,
     loading,
@@ -124,6 +127,8 @@
     CopilotBaseDomain,
     CopilotDomain,
     CopilotThreadState,
+    CommodityMode,
+    CommodityWorkspaceResponse,
     CryptoComparison,
     CryptoDexLiquiditySummary,
     CryptoFlowSummary,
@@ -171,6 +176,7 @@
   let researchMode: ResearchMode = "overview";
   let cryptoMode: CryptoMode = "overview";
   let fundamentalsMode: FundamentalsMode = "overview";
+  let commoditiesMode: CommodityMode = "overview";
   let maritimeMode: MaritimeMode = "live_map";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
@@ -204,6 +210,7 @@
     research: $researchResult,
     macro: $macroContext,
     macroSnapshot: $macroSnapshot,
+    commodities: $commoditiesWorkspace,
     prediction: $predictionMarketDetail,
     crypto: $cryptoTokenDetail,
     fundamentals: $fundamentalsOverview,
@@ -238,6 +245,7 @@
     ivSurface: $ivSurface,
     ivSession: $ivSession,
     macro: $macroContext,
+    commodities: $commoditiesWorkspace,
     prediction: $predictionMarketDetail,
     crypto: $cryptoTokenDetail,
     fundamentals: $fundamentalsOverview,
@@ -284,6 +292,17 @@
 
   function describeMacroCopilotContext(context: MacroContextState) {
     return `Macro | ${context.region} | ${context.timeframe} | ${macroModeLabels[context.mode]}`;
+  }
+
+  function describeCommoditiesCopilotContext(workspace: CommodityWorkspaceResponse | null) {
+    if (!workspace) {
+      return "Commodities | Load workspace to ground the Copilot";
+    }
+    const selected = workspace.market_summaries.find(
+      (summary) => summary.instrument.instrument_id === workspace.selected_instrument_id
+    );
+    const provider = workspace.coverage.provider_label || workspace.coverage.provider_id || "Provider";
+    return `Commodities | ${selected?.instrument.name ?? workspace.selected_instrument_id} | ${provider}`;
   }
 
   function describePortfolioCopilotContext(
@@ -409,6 +428,7 @@
     research,
     macro,
     macroSnapshot,
+    commodities,
     prediction,
     crypto,
     fundamentals,
@@ -425,6 +445,7 @@
     research: ResearchResult | null;
     macro: MacroContextState;
     macroSnapshot: MacroSnapshot | null;
+    commodities: CommodityWorkspaceResponse | null;
     prediction: PredictionMarket | null;
     crypto: CryptoToken | null;
     fundamentals: FundamentalsOverview | null;
@@ -494,6 +515,19 @@
           ? `Snapshot ${formatShortTimestamp(macroSnapshot.retrieved_at)}`
           : null,
         formatWarningLabel(macroSnapshot.warnings.length)
+      );
+    }
+
+    if (commodities) {
+      pushOption(
+        "commodities",
+        describeCommoditiesCopilotContext(commodities),
+        formatShortTimestamp(commodities.coverage.source_timestamp ?? commodities.retrieved_at)
+          ? `Data ${formatShortTimestamp(commodities.coverage.source_timestamp ?? commodities.retrieved_at)}`
+          : commodities.coverage.freshness_label
+            ? `Freshness ${commodities.coverage.freshness_label}`
+            : null,
+        formatWarningLabel(commodities.warnings.length + commodities.coverage.caveats.length)
       );
     }
 
@@ -586,6 +620,7 @@
     ivSurface,
     ivSession,
     macro,
+    commodities,
     prediction,
     crypto,
     fundamentals,
@@ -603,6 +638,7 @@
     ivSurface: IvSurface | null;
     ivSession: IvSessionStatus | null;
     macro: MacroContextState;
+    commodities: CommodityWorkspaceResponse | null;
     prediction: PredictionMarket | null;
     crypto: CryptoToken | null;
     fundamentals: FundamentalsOverview | null;
@@ -660,6 +696,26 @@
         placeholder:
           "Map the active regime, stress-test the leading divergence, or frame the catalyst path.",
         thread: threads.macro,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
+      };
+    }
+
+    if (tab === "commodities") {
+      return {
+        supported: commodities != null,
+        domain: "commodities",
+        triggerLabel: commodities ? "Commodities context" : "Load workspace",
+        contextLabel: describeCommoditiesCopilotContext(commodities),
+        domainLabel: "Commodities",
+        guidance:
+          commodities != null
+            ? "Grounded in the loaded Commodities workspace: market summaries, curves, spreads, inventories, events, warnings, and provider caveats. Gamma remains read-only."
+            : "Load the Commodities workspace before generating a research card.",
+        placeholder:
+          "Pressure-test the selected commodity setup, compare curve and inventory context, or frame the cleanest cross-domain handoff.",
+        thread: threads.commodities,
         scopeOptions: [],
         selectedScopeDomains: [],
         selectionMessage: null,
@@ -927,6 +983,9 @@
       push("Research", $researchResult?.warnings, "warning");
     } else if ($activeTab === "macro") {
       push("Macro", $macroSnapshot?.warnings, "warning");
+    } else if ($activeTab === "commodities") {
+      push("Commodities", $commoditiesWorkspace?.warnings, "warning");
+      push("Coverage", $commoditiesWorkspace?.coverage.caveats, "warning");
     } else if ($activeTab === "prediction_markets") {
       push("Prediction", $predictionMarketDetail ? $predictionMarketWallet?.warnings : [], "warning");
       push("Calibration", $predictionMarketCalibration?.warnings, "warning");
@@ -1007,6 +1066,8 @@
       if (!$macroSnapshot) {
         await loadMacroWorkspace();
       }
+    } else if (nextTab === "commodities") {
+      await loadCommoditiesWorkspace({ mode: commoditiesMode });
     } else if (nextTab === "prediction_markets") {
       await loadPredictionMarketScreener();
     } else if (nextTab === "crypto") {
@@ -1118,6 +1179,10 @@
 
     if ($activeTab === "macro") {
       await loadMacroWorkspace({ forceRefresh: true });
+    }
+
+    if ($activeTab === "commodities") {
+      await loadCommoditiesWorkspace({ mode: commoditiesMode, forceRefresh: true });
     }
 
     if ($activeTab === "iv") {
@@ -1301,6 +1366,12 @@
       return true;
     }
 
+    if ($activeTab === "commodities") {
+      commoditiesMode = nextMode.id as CommodityMode;
+      await loadCommoditiesWorkspace({ mode: commoditiesMode });
+      return true;
+    }
+
     if ($activeTab === "maritime") {
       maritimeMode = nextMode.id as MaritimeMode;
       await loadMaritimeWorkspace({ mode: maritimeMode });
@@ -1421,7 +1492,7 @@
       <StatusRail
         status={$systemStatus}
         workspaceMode={workspaceMode}
-        busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.ivSession}
+        busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.commodities || $loading.ivSession}
         settingsOpen={settingsOpen}
         onToggleConnection={handleConnectionToggle}
         onBaseCurrencyChange={handleBaseCurrencyChange}
@@ -1497,6 +1568,13 @@
             loading={$loading.macro || $loading.macroHistory}
             onLoadWorkspace={loadMacroWorkspace}
             onLoadSeries={loadMacroSeriesHistory}
+          />
+        {:else if $activeTab === "commodities"}
+          <CommoditiesView
+            bind:mode={commoditiesMode}
+            workspace={$commoditiesWorkspace}
+            loading={$loading.commodities}
+            onLoadWorkspace={loadCommoditiesWorkspace}
           />
         {:else if $activeTab === "prediction_markets"}
           <PredictionMarketsView

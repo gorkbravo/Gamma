@@ -4,6 +4,7 @@ export type TabId =
   | "portfolio"
   | "research"
   | "macro"
+  | "commodities"
   | "prediction_markets"
   | "crypto"
   | "fundamentals"
@@ -49,6 +50,14 @@ export type MacroMode = "snapshot" | "cross_asset" | "rates_policy" | "events_re
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
 export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";
+
+export type CommodityMode =
+  | "overview"
+  | "energy"
+  | "metals"
+  | "curves_spreads"
+  | "inventories_fundamentals"
+  | "events_cross_domain";
 
 export interface MacroContextState {
   mode: MacroMode;
@@ -1803,6 +1812,257 @@ export interface MacroDivergenceListResponse {
 export interface MacroEventsResponse {
   region: string;
   events: MacroEvent[];
+}
+
+export interface CommodityCoverageMetadata {
+  coverage_status: "sample" | "mock" | "official_partial" | "partial" | "live" | "unavailable" | string;
+  provider_id: string;
+  provider_label: string;
+  freshness_label: string;
+  instruments: string[];
+  regions: string[];
+  as_of: string | null;
+  source_timestamp: string | null;
+  caveats: string[];
+  credential_env_vars: string[];
+  supports_prices: boolean;
+  supports_curves: boolean;
+  supports_inventories: boolean;
+  supports_events: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityInstrument {
+  instrument_id: string;
+  symbol: string;
+  name: string;
+  family: string;
+  subgroup: string;
+  quote_unit: string;
+  currency: string;
+  exchange: string | null;
+  front_symbol: string | null;
+  provider_symbols: Record<string, string>;
+  aliases: string[];
+  description: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityPricePoint {
+  instrument_id: string;
+  timestamp: string;
+  value: number;
+  unit: string;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityPriceHistory {
+  instrument_id: string;
+  label: string;
+  unit: string;
+  points: CommodityPricePoint[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityFuturesContract {
+  contract_id: string;
+  instrument_id: string;
+  symbol: string;
+  contract_month: string;
+  expiry_date: string | null;
+  is_front_month: boolean;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityCurveNode {
+  contract: CommodityFuturesContract;
+  price: number | null;
+  previous_price: number | null;
+  change: number | null;
+  days_to_expiry: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityCurveSnapshot {
+  instrument_id: string;
+  as_of: string;
+  nodes: CommodityCurveNode[];
+  shape_label: string;
+  front_spread: number | null;
+  front_spread_pct: number | null;
+  m1_m6_spread: number | null;
+  curve_slope: number | null;
+  roll_yield_proxy_pct: number | null;
+  summary: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommoditySpreadDefinition {
+  spread_id: string;
+  label: string;
+  spread_type: string;
+  left_leg_id: string;
+  right_leg_id: string;
+  unit: string;
+  formula: string;
+  rationale: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommoditySpreadPoint {
+  spread_id: string;
+  timestamp: string;
+  value: number;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommoditySpreadSnapshot {
+  definition: CommoditySpreadDefinition;
+  value: number | null;
+  previous_value: number | null;
+  change: number | null;
+  z_score: number | null;
+  percentile: number | null;
+  interpretation: string | null;
+  history: CommoditySpreadPoint[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityInventorySeriesMetadata {
+  series_id: string;
+  instrument_id: string | null;
+  label: string;
+  category: string;
+  unit: string;
+  frequency: string;
+  provider_series_id: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityInventoryPoint {
+  series_id: string;
+  timestamp: string;
+  value: number;
+  change: number | null;
+  seasonal_percentile: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityInventorySeries {
+  metadata: CommodityInventorySeriesMetadata;
+  points: CommodityInventoryPoint[];
+  latest_value: number | null;
+  latest_change: number | null;
+  seasonal_percentile: number | null;
+  interpretation: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityMarketSummary {
+  instrument: CommodityInstrument;
+  latest_price: number | null;
+  latest_change: number | null;
+  latest_change_pct: number | null;
+  curve_state: string;
+  front_spread: number | null;
+  inventory_signal: string | null;
+  summary: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityEventRecord {
+  event_id: string;
+  title: string;
+  category: string;
+  scheduled_at: string | null;
+  relative_label: string | null;
+  importance: string;
+  linked_instrument_ids: string[];
+  summary: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityCrossDomainLink {
+  link_id: string;
+  target_domain: string;
+  target_label: string;
+  relationship: string;
+  linked_instrument_ids: string[];
+  summary: string | null;
+  confidence: number | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityWorkspaceResponse {
+  mode: CommodityMode | string;
+  selected_instrument_id: string;
+  available_modes: string[];
+  coverage: CommodityCoverageMetadata;
+  instruments: CommodityInstrument[];
+  market_summaries: CommodityMarketSummary[];
+  price_histories: CommodityPriceHistory[];
+  curves: CommodityCurveSnapshot[];
+  spreads: CommoditySpreadSnapshot[];
+  inventories: CommodityInventorySeries[];
+  events: CommodityEventRecord[];
+  cross_domain_links: CommodityCrossDomainLink[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
 }
 
 export type MaritimeMode = "live_map" | "chokepoints" | "trade_flows" | "fleet_monitoring" | "event_replay";

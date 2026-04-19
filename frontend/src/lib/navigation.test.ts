@@ -38,6 +38,7 @@ describe("navigation tab ordering", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "commodities",
       "maritime",
       "risk",
       "iv",
@@ -53,6 +54,7 @@ describe("navigation tab ordering", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "commodities",
       "maritime",
     ]);
   });
@@ -65,6 +67,7 @@ describe("navigation tab ordering", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "commodities",
       "maritime",
       "iv",
     ]);
@@ -108,7 +111,22 @@ describe("navigation tab ordering", () => {
 
     expect(hasRegisteredModes("macro")).toBe(true);
     expect(hasRegisteredModes("research")).toBe(true);
-    expect(Object.keys(snapshot).sort()).toEqual(["crypto", "fundamentals", "macro", "maritime", "research"]);
+    expect(Object.keys(snapshot).sort()).toEqual([
+      "commodities",
+      "crypto",
+      "fundamentals",
+      "macro",
+      "maritime",
+      "research",
+    ]);
+    expect(snapshot.commodities?.map((mode) => mode.id)).toEqual([
+      "overview",
+      "energy",
+      "metals",
+      "curves_spreads",
+      "inventories_fundamentals",
+      "events_cross_domain",
+    ]);
     expect(snapshot.fundamentals?.map((mode) => mode.id)).toEqual([
       "overview",
       "financials",
@@ -131,6 +149,7 @@ describe("navigation tab ordering", () => {
       "fleet_monitoring",
       "event_replay",
     ]);
+    expect(getTabLabel("commodities")).toBe("Commodities");
     expect(getTabLabel("maritime")).toBe("Sealanes");
   });
 
@@ -147,7 +166,17 @@ describe("workspace tab-order persistence", () => {
 
     store.reorder("research", "risk", 1);
 
-    expect(get(store).research).toEqual(["research", "risk", "macro", "prediction_markets", "crypto", "fundamentals", "maritime", "iv"]);
+    expect(get(store).research).toEqual([
+      "research",
+      "risk",
+      "macro",
+      "prediction_markets",
+      "crypto",
+      "fundamentals",
+      "commodities",
+      "maritime",
+      "iv",
+    ]);
     expect(get(store).portfolio).toEqual(DEFAULT_WORKSPACE_TAB_ORDER.portfolio);
 
     const reloadedStore = createWorkspaceTabOrderStore(storage);
@@ -158,6 +187,7 @@ describe("workspace tab-order persistence", () => {
       "prediction_markets",
       "crypto",
       "fundamentals",
+      "commodities",
       "maritime",
       "iv",
     ]);

@@ -320,6 +320,88 @@ def summarize_iv_state(
     }
 
 
+def summarize_commodities_workspace(
+    workspace: dict[str, Any] | None,
+    *,
+    summary_limit: int = 8,
+    spread_limit: int = 8,
+    inventory_limit: int = 8,
+) -> dict[str, Any] | None:
+    if not workspace:
+        return None
+    coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
+    market_summaries = [row for row in workspace.get("market_summaries", []) if isinstance(row, dict)]
+    spreads = [row for row in workspace.get("spreads", []) if isinstance(row, dict)]
+    inventories = [row for row in workspace.get("inventories", []) if isinstance(row, dict)]
+    curves = [row for row in workspace.get("curves", []) if isinstance(row, dict)]
+    events = [row for row in workspace.get("events", []) if isinstance(row, dict)]
+    cross_domain_links = [row for row in workspace.get("cross_domain_links", []) if isinstance(row, dict)]
+
+    selected_id = str(workspace.get("selected_instrument_id") or "")
+    selected_summary = next(
+        (
+            _commodity_market_summary(row)
+            for row in market_summaries
+            if _as_dict(row.get("instrument")).get("instrument_id") == selected_id
+        ),
+        None,
+    )
+    selected_curve = next(
+        (_commodity_curve_summary(row) for row in curves if str(row.get("instrument_id") or "") == selected_id),
+        None,
+    )
+
+    return {
+        "mode": workspace.get("mode"),
+        "selected_instrument_id": selected_id or None,
+        "provider": {
+            "provider_id": coverage.get("provider_id"),
+            "provider_label": coverage.get("provider_label"),
+            "coverage_status": coverage.get("coverage_status"),
+            "freshness_label": coverage.get("freshness_label"),
+            "source_timestamp": _isoformat(coverage.get("source_timestamp")),
+            "caveats": list(coverage.get("caveats", []) or []),
+        },
+        "counts": {
+            "instruments": len(workspace.get("instruments", []) or []),
+            "market_summaries": len(market_summaries),
+            "curves": len(curves),
+            "spreads": len(spreads),
+            "inventories": len(inventories),
+            "events": len(events),
+            "cross_domain_links": len(cross_domain_links),
+        },
+        "selected_market": selected_summary,
+        "selected_curve": selected_curve,
+        "market_summaries": [_commodity_market_summary(row) for row in market_summaries[:summary_limit]],
+        "spreads": [_commodity_spread_summary(row) for row in spreads[:spread_limit]],
+        "inventories": [_commodity_inventory_summary(row) for row in inventories[:inventory_limit]],
+        "events": [
+            {
+                "title": row.get("title"),
+                "category": row.get("category"),
+                "scheduled_at": _isoformat(row.get("scheduled_at")),
+                "importance": row.get("importance"),
+                "linked_instrument_ids": list(row.get("linked_instrument_ids", []) or []),
+                "summary": row.get("summary"),
+            }
+            for row in events[:6]
+        ],
+        "cross_domain_links": [
+            {
+                "target_domain": row.get("target_domain"),
+                "target_label": row.get("target_label"),
+                "relationship": row.get("relationship"),
+                "confidence": _as_float(row.get("confidence")),
+                "linked_instrument_ids": list(row.get("linked_instrument_ids", []) or []),
+                "summary": row.get("summary"),
+            }
+            for row in cross_domain_links[:6]
+        ],
+        "warnings": dedupe_warnings(workspace.get("warnings", []), coverage.get("caveats", [])),
+    }
+
+
 def resolve_iv_surface(
     surface: dict[str, Any] | None,
     session: dict[str, Any] | None,
@@ -402,6 +484,89 @@ def _risk_contribution_summary(row: dict[str, Any] | None) -> dict[str, Any] | N
         "variance_contribution_pct": _as_float(row.get("variance_contribution_pct")),
         "marginal_contribution_to_risk": _as_float(row.get("marginal_contribution_to_risk")),
         "component_var": _as_float(row.get("component_var")),
+    }
+
+
+def _commodity_market_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    instrument = _as_dict(row.get("instrument"))
+    return {
+        "instrument_id": instrument.get("instrument_id"),
+        "symbol": instrument.get("symbol"),
+        "name": instrument.get("name"),
+        "family": instrument.get("family"),
+        "latest_price": _as_float(row.get("latest_price")),
+        "latest_change": _as_float(row.get("latest_change")),
+        "latest_change_pct": _as_float(row.get("latest_change_pct")),
+        "curve_state": row.get("curve_state"),
+        "front_spread": _as_float(row.get("front_spread")),
+        "inventory_signal": row.get("inventory_signal"),
+        "summary": row.get("summary"),
+        "warnings": list(row.get("warnings", []) or []),
+    }
+
+
+def _commodity_curve_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    nodes = [node for node in row.get("nodes", []) if isinstance(node, dict)]
+    return {
+        "instrument_id": row.get("instrument_id"),
+        "as_of": _isoformat(row.get("as_of")),
+        "shape_label": row.get("shape_label"),
+        "front_spread": _as_float(row.get("front_spread")),
+        "m1_m6_spread": _as_float(row.get("m1_m6_spread")),
+        "curve_slope": _as_float(row.get("curve_slope")),
+        "roll_yield_proxy_pct": _as_float(row.get("roll_yield_proxy_pct")),
+        "summary": row.get("summary"),
+        "front_nodes": [
+            {
+                "contract_month": _as_dict(node.get("contract")).get("contract_month"),
+                "symbol": _as_dict(node.get("contract")).get("symbol"),
+                "price": _as_float(node.get("price")),
+                "change": _as_float(node.get("change")),
+            }
+            for node in nodes[:6]
+        ],
+        "warnings": list(row.get("warnings", []) or []),
+    }
+
+
+def _commodity_spread_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    definition = _as_dict(row.get("definition"))
+    return {
+        "spread_id": definition.get("spread_id"),
+        "label": definition.get("label"),
+        "spread_type": definition.get("spread_type"),
+        "formula": definition.get("formula"),
+        "value": _as_float(row.get("value")),
+        "change": _as_float(row.get("change")),
+        "z_score": _as_float(row.get("z_score")),
+        "percentile": _as_float(row.get("percentile")),
+        "interpretation": row.get("interpretation"),
+        "warnings": list(row.get("warnings", []) or []),
+    }
+
+
+def _commodity_inventory_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    metadata = _as_dict(row.get("metadata"))
+    return {
+        "series_id": metadata.get("series_id"),
+        "instrument_id": metadata.get("instrument_id"),
+        "label": metadata.get("label"),
+        "category": metadata.get("category"),
+        "unit": metadata.get("unit"),
+        "latest_value": _as_float(row.get("latest_value")),
+        "latest_change": _as_float(row.get("latest_change")),
+        "seasonal_percentile": _as_float(row.get("seasonal_percentile")),
+        "interpretation": row.get("interpretation"),
+        "provider_series_id": metadata.get("provider_series_id"),
+        "warnings": list(row.get("warnings", []) or []),
     }
 
 
@@ -530,6 +695,10 @@ def _as_float(value: Any) -> float | None:
     if numeric != numeric:
         return None
     return numeric
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _as_int(value: Any) -> int | None:

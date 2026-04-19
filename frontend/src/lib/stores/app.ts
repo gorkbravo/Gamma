@@ -4,6 +4,8 @@ import { normalizeCopilotResearchCardResult } from "../copilot-result";
 import type {
   ActionResponse,
   BaseCurrencyResponse,
+  CommodityMode,
+  CommodityWorkspaceResponse,
   CopilotBaseDomain,
   CopilotDomain,
   CopilotResearchCardResult,
@@ -204,6 +206,12 @@ export interface MaritimeLoadOptions {
   forceRefresh?: boolean;
 }
 
+export interface CommodityWorkspaceLoadOptions {
+  mode?: CommodityMode | string;
+  selectedInstrumentId?: string;
+  forceRefresh?: boolean;
+}
+
 export interface FundamentalsSearchOptions {
   query?: string;
   limit?: number;
@@ -240,6 +248,7 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
     portfolio: createEmptyCopilotThread("portfolio"),
     research: createEmptyCopilotThread("research"),
     macro: createEmptyCopilotThread("macro"),
+    commodities: createEmptyCopilotThread("commodities"),
     prediction_markets: createEmptyCopilotThread("prediction_markets"),
     crypto: createEmptyCopilotThread("crypto"),
     fundamentals: createEmptyCopilotThread("fundamentals"),
@@ -272,6 +281,7 @@ export const macroSnapshot = writable<MacroSnapshot | null>(null);
 export const macroDivergences = writable<MacroDivergenceListResponse | null>(null);
 export const macroEvents = writable<MacroEventsResponse | null>(null);
 export const macroSeriesHistories = writable<Record<string, MacroSeriesHistory>>({});
+export const commoditiesWorkspace = writable<CommodityWorkspaceResponse | null>(null);
 export const maritimeWorkspace = writable<MaritimeWorkspaceResponse | null>(null);
 export const predictionMarketScreener = writable<PredictionMarketListResponse | null>(null);
 export const selectedPredictionMarketId = writable<string | null>(null);
@@ -301,6 +311,7 @@ export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardRe
   portfolio: null,
   research: null,
   macro: null,
+  commodities: null,
   prediction_markets: null,
   crypto: null,
   fundamentals: null,
@@ -350,6 +361,7 @@ export const loading = writable<Record<string, boolean>>({
   savedResearch: false,
   macro: false,
   macroHistory: false,
+  commodities: false,
   maritime: false,
   prediction: false,
   predictionDetail: false,
@@ -457,6 +469,7 @@ const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   portfolio: "Portfolio",
   research: "Research",
   macro: "Macro",
+  commodities: "Commodities",
   prediction_markets: "Prediction Markets",
   crypto: "Crypto",
   fundamentals: "Fundamentals",
@@ -523,6 +536,22 @@ function buildCopilotContextFingerprint(
       timeframe: macro.timeframe,
       theme: macro.theme,
       comparisonRegion: macro.comparisonRegion
+    });
+  }
+
+  if (domain === "commodities") {
+    const workspace = get(commoditiesWorkspace);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      mode: workspace?.mode ?? null,
+      selectedInstrumentId: workspace?.selected_instrument_id ?? null,
+      providerId: workspace?.coverage.provider_id ?? null,
+      sourceTimestamp: workspace?.coverage.source_timestamp ?? null,
+      retrievedAt: workspace?.retrieved_at ?? null,
+      summaries: workspace?.market_summaries.length ?? 0,
+      spreads: workspace?.spreads.length ?? 0,
+      inventories: workspace?.inventories.length ?? 0
     });
   }
 
@@ -1137,6 +1166,27 @@ export async function loadMaritimeWorkspace(options: MaritimeLoadOptions = {}) {
     return null;
   } finally {
     setLoading("maritime", false);
+  }
+}
+
+export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOptions = {}) {
+  setLoading("commodities", true);
+  try {
+    const current = get(commoditiesWorkspace);
+    const response = await postJson<CommodityWorkspaceResponse>("/commodities/workspace", {
+      mode: options.mode ?? current?.mode ?? "overview",
+      selected_instrument_id: options.selectedInstrumentId ?? current?.selected_instrument_id ?? "wti",
+      force_refresh: options.forceRefresh ?? false
+    });
+    commoditiesWorkspace.set(response);
+    resetCopilotCard("commodities");
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("commodities", false);
   }
 }
 
@@ -1772,6 +1822,14 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
           comparison_region: get(macroContext).comparisonRegion
         }
       };
+    case "commodities":
+      return {
+        current_tab: "commodities",
+        workspace_mode: workspaceMode,
+        commodities_state: {
+          workspace: get(commoditiesWorkspace)
+        }
+      };
     case "prediction_markets":
       return {
         current_tab: "prediction_markets",
@@ -1882,6 +1940,9 @@ function validateSynthesisScopeDomain(
   if (domain === "macro" && !get(macroSnapshot)) {
     return "Load the Macro workspace before including it in a synthesis card.";
   }
+  if (domain === "commodities" && !get(commoditiesWorkspace)) {
+    return "Load the Commodities workspace before including it in a synthesis card.";
+  }
   if (domain === "prediction_markets" && !get(predictionMarketDetail)) {
     return "Select and load a Prediction Markets contract before including it in a synthesis card.";
   }
@@ -1924,6 +1985,9 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "research" && !get(researchResult)) {
     return "Run a research analysis before generating a research card.";
   }
+  if (domain === "commodities" && !get(commoditiesWorkspace)) {
+    return "Load the Commodities workspace before generating a research card.";
+  }
   if (domain === "prediction_markets" && !get(selectedPredictionMarketId)) {
     return "Select a prediction market before generating a research card.";
   }
@@ -1942,7 +2006,15 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "iv" && !hasRenderableIvSurface(resolvedIvSurface())) {
     return "Load an IV surface before generating a research card.";
   }
-  if (domain === "portfolio" || domain === "research" || domain === "crypto" || domain === "fundamentals" || domain === "risk" || domain === "iv") {
+  if (
+    domain === "portfolio" ||
+    domain === "research" ||
+    domain === "commodities" ||
+    domain === "crypto" ||
+    domain === "fundamentals" ||
+    domain === "risk" ||
+    domain === "iv"
+  ) {
     const context = buildCopilotContext(domain, options.workspaceMode);
     return context ? null : "The active Copilot context is unavailable.";
   }

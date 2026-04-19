@@ -18,9 +18,10 @@ export const WORKSPACE_TAB_DEFINITIONS = {
     { id: "prediction_markets", label: "Prediction Markets", pinned: false, defaultIndex: 2 },
     { id: "crypto", label: "Crypto", pinned: false, defaultIndex: 3 },
     { id: "fundamentals", label: "Fundamentals", pinned: false, defaultIndex: 4 },
-    { id: "maritime", label: "Sealanes", pinned: false, defaultIndex: 5 },
-    { id: "risk", label: "Risk", pinned: false, defaultIndex: 6 },
-    { id: "iv", label: "IV", pinned: false, defaultIndex: 7 },
+    { id: "commodities", label: "Commodities", pinned: false, defaultIndex: 5 },
+    { id: "maritime", label: "Sealanes", pinned: false, defaultIndex: 6 },
+    { id: "risk", label: "Risk", pinned: false, defaultIndex: 7 },
+    { id: "iv", label: "IV", pinned: false, defaultIndex: 8 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 
@@ -56,6 +57,14 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
     { id: "dcf", label: "DCF", defaultIndex: 3 },
     { id: "reverse_valuation", label: "Reverse Valuation", defaultIndex: 4 },
     { id: "reference", label: "Reference / Filings", defaultIndex: 5 },
+  ]),
+  commodities: defineTabModes([
+    { id: "overview", label: "Overview", defaultIndex: 0 },
+    { id: "energy", label: "Energy", defaultIndex: 1 },
+    { id: "metals", label: "Metals", defaultIndex: 2 },
+    { id: "curves_spreads", label: "Curves & Spreads", defaultIndex: 3 },
+    { id: "inventories_fundamentals", label: "Inventories & Fundamentals", defaultIndex: 4 },
+    { id: "events_cross_domain", label: "Events / Cross-Domain", defaultIndex: 5 },
   ]),
   maritime: defineTabModes([
     { id: "live_map", label: "Live Map", defaultIndex: 0 },

@@ -61,10 +61,16 @@ from src.api.schemas.system import (
     ProviderCapabilityModel,
     SystemStatusResponseModel,
 )
+from src.api.schemas.commodities import (
+    CommodityWorkspaceRequestModel,
+    CommodityWorkspaceResponseModel,
+)
 
 __all__ = [
     "ConnectionStateModel",
     "CalibrationSummaryResponseModel",
+    "CommodityWorkspaceRequestModel",
+    "CommodityWorkspaceResponseModel",
     "CryptoComparisonModel",
     "CryptoDexLiquiditySummaryModel",
     "CryptoPriceHistoryResponseModel",

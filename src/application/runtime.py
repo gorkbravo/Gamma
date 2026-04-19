@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from dotenv import load_dotenv
 
 from src.application.copilot_service import CopilotService
+from src.application.commodities_service import CommoditiesService
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.iv_service import IVService
@@ -26,9 +27,14 @@ from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
+from src.services.commodities_adapters import (
+    EiaCommoditiesDataProvider,
+    SampleCommoditiesDataProvider,
+)
 from src.services.crypto_adapters import CoinGeckoAdapter, GeckoTerminalAdapter
 from src.services.fundamentals_adapters import IbkrValuationAdapter, SecFundamentalsAdapter
 from src.services.fundamentals_store import FundamentalsResearchStore
+from src.services.fred import FredClient
 from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 from src.services.maritime_adapters import (
     AisstreamMaritimeDataProvider,
@@ -82,6 +88,7 @@ class ApplicationRuntime:
     research_service: ResearchService
     prediction_market_service: PredictionMarketService
     macro_service: MacroService
+    commodities_service: CommoditiesService
     maritime_service: MaritimeService
     crypto_service: CryptoService
     fundamentals_service: FundamentalsService
@@ -230,6 +237,7 @@ def build_runtime(
         fx_adapter=IBKRMacroFXAdapter(market_data),
         prediction_market_service=prediction_market_service,
     )
+    commodities_service = CommoditiesService(provider=_build_commodities_provider(cache))
     maritime_service = MaritimeService(provider=_build_maritime_provider())
     crypto_service = CryptoService(
         market_adapter=CoinGeckoAdapter(cache),
@@ -283,6 +291,7 @@ def build_runtime(
         research_service=research_service,
         prediction_market_service=prediction_market_service,
         macro_service=macro_service,
+        commodities_service=commodities_service,
         maritime_service=maritime_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
@@ -360,6 +369,24 @@ def _build_copilot_provider():
             or "https://api.openai.com/v1/responses"
         ).strip(),
         store_responses=store_flag,
+    )
+
+
+def _build_commodities_provider(cache: CacheService):
+    provider = (os.getenv("COMMODITIES_PROVIDER", "sample") or "sample").strip().lower()
+    sample_provider = SampleCommoditiesDataProvider()
+    if provider in {"sample", "mock", "offline", "demo"}:
+        return sample_provider
+    if provider not in {"eia", "official", "eia_fred", "fred"}:
+        return sample_provider
+
+    fred_client = FredClient(cache=cache) if (os.getenv("FRED_API_KEY", "") or "").strip() else None
+    return EiaCommoditiesDataProvider(
+        api_key=os.getenv("EIA_API_KEY", ""),
+        cache=cache,
+        reference_provider=sample_provider,
+        fred_client=fred_client,
+        cache_seconds=int(os.getenv("COMMODITIES_CACHE_SECONDS", "21600") or 21600),
     )
 
 

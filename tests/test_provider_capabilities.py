@@ -115,7 +115,8 @@ def test_provider_capabilities_system_api(tmp_path):
         assert providers["ibkr"]["status"] == "active"
         assert providers["ibkr"]["requires_user_entitlement"] is True
         assert any("No order placement" in note for note in providers["ibkr"]["read_only_notes"])
-        assert providers["eia"]["status"] == "planned"
+        assert providers["eia"]["status"] == "optional"
+        assert providers["eia"]["credential_env_vars"] == ["EIA_API_KEY"]
         assert providers["polygon"]["status"] == "planned"
         assert providers["nasdaq_data_link"]["status"] == "planned"
         assert providers["alchemy"]["status"] == "planned"
@@ -124,7 +125,7 @@ def test_provider_capabilities_system_api(tmp_path):
         assert active_response.status_code == 200
         active_ids = {row["provider_id"] for row in active_response.json()["providers"]}
         assert "ibkr" in active_ids
-        assert "eia" not in active_ids
+        assert "eia" in active_ids
 
         planned_response = client.get("/system/provider-capabilities", params={"status": "planned"})
         assert planned_response.status_code == 200

@@ -12,6 +12,8 @@ This directory is split into active documentation and archived project history.
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
 - [`fundamentals_phase6_spec.md`](./fundamentals_phase6_spec.md): product and architecture spec for the first-pass `Fundamentals` workspace
 
+Current Commodities tab setup, provider keys, sample fallback behavior, and read-only caveats are documented in [`../README.md`](../README.md).
+
 ## Archived Documents
 
 Historical migration logs, audit checklists, and handoff notes live under [`archive/`](./archive/README.md).
