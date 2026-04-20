@@ -18,6 +18,10 @@ describe("CommoditiesView", () => {
     expect(body).toContain("Overview");
     expect(body).toContain("Energy");
     expect(body).toContain("Metals");
+    expect(body).toContain("Term Structure Stack");
+    expect(body).toContain("Commodity Matrix");
+    expect(body).toContain("Momentum / Roll Scatter");
+    expect(body).toContain("Market Regime Ranks");
     expect(body).toContain("WTI Crude Oil");
     expect(body).toContain("backwardation");
     expect(body).toContain("WTI M1-M2");
@@ -25,6 +29,30 @@ describe("CommoditiesView", () => {
     expect(body).toContain("EIA Weekly Petroleum Status Report");
     expect(body).toContain("Macro Inflation");
     expect(body).toContain("Sample Commodities Dataset");
+  });
+
+  it("surfaces degraded provider notices without requiring inventory data", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "inventories_fundamentals";
+    workspace.coverage.coverage_status = "official_partial";
+    workspace.coverage.freshness_label = "delayed";
+    workspace.coverage.caveats = ["EIA coverage is official but partial and release-lagged."];
+    workspace.warnings = ["IBKR futures curve unavailable; using fallback payload."];
+    workspace.inventories = [];
+
+    const { body } = render(CommoditiesView, {
+      props: {
+        workspace,
+        loading: false,
+        mode: "inventories_fundamentals",
+        onLoadWorkspace: vi.fn()
+      }
+    });
+
+    expect(body).toContain("OFFICIAL PARTIAL");
+    expect(body).toContain("EIA coverage is official but partial and release-lagged.");
+    expect(body).toContain("IBKR futures curve unavailable; using fallback payload.");
+    expect(body).toContain("No Inventory Series");
   });
 });
 

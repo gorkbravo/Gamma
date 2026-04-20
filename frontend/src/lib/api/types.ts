@@ -2016,6 +2016,130 @@ export interface CommodityMarketSummary {
   transformation_note: string | null;
 }
 
+export interface CommodityOverviewMarketBreadth {
+  total_markets: number;
+  counts_by_family: Record<string, number>;
+  backwardation_count: number;
+  contango_count: number;
+  flat_count: number;
+  unavailable_curve_count: number;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityOverviewMatrixRow {
+  instrument_id: string;
+  family: string;
+  symbol: string;
+  name: string;
+  quote_unit: string;
+  latest_price: number | null;
+  latest_change: number | null;
+  latest_change_pct: number | null;
+  curve_state: string;
+  front_spread: number | null;
+  front_basis: number | null;
+  roll_yield_proxy_pct: number | null;
+  inventory_signal: string | null;
+  inventory_seasonal_percentile: number | null;
+  price_source_provider: string | null;
+  curve_source_provider: string | null;
+  inventory_source_provider: string | null;
+  provenance_summary: string[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityOverviewScatterPoint {
+  instrument_id: string;
+  symbol: string;
+  name: string;
+  family: string;
+  x_value: number;
+  y_value: number;
+  display_label: string;
+  x_source_provider: string | null;
+  y_source_provider: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityOverviewScatter {
+  points: CommodityOverviewScatterPoint[];
+  x_methodology_label: string;
+  y_methodology_label: string;
+  caveats: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityOverviewRankingItem {
+  item_id: string;
+  label: string;
+  value: number | null;
+  instrument_id: string | null;
+  family: string | null;
+  display_value: string | null;
+  unit: string | null;
+  direction: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityOverviewRankings {
+  strongest_backwardation: CommodityOverviewRankingItem[];
+  deepest_contango: CommodityOverviewRankingItem[];
+  inventory_outliers: CommodityOverviewRankingItem[];
+  spread_z_score_outliers: CommodityOverviewRankingItem[];
+  largest_movers: CommodityOverviewRankingItem[];
+  caveats: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityOverviewTermStructure {
+  selected_instrument_id: string;
+  current_curve: CommodityCurveSnapshot | null;
+  previous_curve_snapshots: CommodityCurveSnapshot[];
+  current_curve_methodology: string | null;
+  previous_curve_methodology: string | null;
+  caveats: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityOverviewAnalytics {
+  market_breadth: CommodityOverviewMarketBreadth;
+  matrix_rows: CommodityOverviewMatrixRow[];
+  scatter: CommodityOverviewScatter | null;
+  rankings: CommodityOverviewRankings | null;
+  term_structure: CommodityOverviewTermStructure | null;
+  caveats: string[];
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface CommodityEventRecord {
   event_id: string;
   title: string;
@@ -2058,6 +2182,7 @@ export interface CommodityWorkspaceResponse {
   inventories: CommodityInventorySeries[];
   events: CommodityEventRecord[];
   cross_domain_links: CommodityCrossDomainLink[];
+  overview?: CommodityOverviewAnalytics | null;
   warnings: string[];
   source_provider: string;
   retrieved_at: string | null;

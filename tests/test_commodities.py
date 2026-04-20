@@ -51,6 +51,27 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert len(workspace.events) >= 2
     assert len(workspace.cross_domain_links) >= 3
     assert any("read-only research" in warning for warning in workspace.warnings)
+    assert workspace.overview is not None
+    assert workspace.overview.market_breadth.total_markets == 8
+    assert workspace.overview.market_breadth.counts_by_family == {"energy": 5, "metals": 3}
+    assert workspace.overview.market_breadth.backwardation_count >= 1
+    assert workspace.overview.market_breadth.contango_count >= 1
+    assert len(workspace.overview.matrix_rows) == 8
+    assert workspace.overview.scatter is not None
+    assert workspace.overview.scatter.x_methodology_label == "Loaded-history momentum (%)"
+    assert workspace.overview.scatter.points
+    assert any("not a fixed 30D" in caveat for caveat in workspace.overview.scatter.caveats)
+    assert workspace.overview.rankings is not None
+    assert workspace.overview.rankings.strongest_backwardation
+    assert workspace.overview.rankings.deepest_contango
+    assert workspace.overview.rankings.inventory_outliers
+    assert workspace.overview.rankings.spread_z_score_outliers
+    assert workspace.overview.rankings.largest_movers
+    assert any("Volatility z-score" in caveat for caveat in workspace.overview.rankings.caveats)
+    assert workspace.overview.term_structure is not None
+    assert workspace.overview.term_structure.current_curve is not None
+    assert workspace.overview.term_structure.previous_curve_snapshots == []
+    assert any("Historical curve stacks require" in caveat for caveat in workspace.overview.term_structure.caveats)
 
     wti_curve = next(curve for curve in workspace.curves if curve.instrument_id == "wti")
     assert wti_curve.shape_label == "backwardation"
@@ -85,6 +106,13 @@ def test_eia_provider_without_key_degrades_to_sample_with_warning():
     assert snapshot.instruments
     assert snapshot.price_histories
     assert snapshot.curve_snapshots
+
+    workspace = CommoditiesService(provider=provider).get_workspace(CommodityWorkspaceRequest(mode="overview"))
+    assert workspace.overview is not None
+    assert workspace.overview.market_breadth.total_markets == len(workspace.market_summaries)
+    assert workspace.overview.matrix_rows
+    assert any("EIA_API_KEY is not configured" in warning for warning in workspace.warnings)
+    assert any("Previous full curve snapshots" in caveat for caveat in workspace.overview.term_structure.caveats)
 
 
 def test_eia_provider_enriches_energy_inventory_with_official_series():
@@ -269,10 +297,14 @@ def test_commodities_api_routes_return_workspace_and_slices(tmp_path, monkeypatc
         assert len(workspace_payload["market_summaries"]) == 8
         assert len(workspace_payload["spreads"]) >= 6
         assert workspace_payload["cross_domain_links"]
+        assert workspace_payload["overview"]["market_breadth"]["total_markets"] == 8
+        assert workspace_payload["overview"]["matrix_rows"]
+        assert workspace_payload["overview"]["scatter"]["x_methodology_label"] == "Loaded-history momentum (%)"
 
         overview_response = client.get("/commodities/overview")
         assert overview_response.status_code == 200
         assert overview_response.json()["mode"] == "overview"
+        assert overview_response.json()["overview"]["rankings"]["largest_movers"]
 
         curve_response = client.get("/commodities/curve", params={"instrument_id": "wti"})
         assert curve_response.status_code == 200

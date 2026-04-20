@@ -243,6 +243,138 @@ class CommodityMarketSummary:
 
 
 @dataclass(frozen=True)
+class CommodityOverviewMarketBreadth:
+    total_markets: int
+    counts_by_family: dict[str, int] = field(default_factory=dict)
+    backwardation_count: int = 0
+    contango_count: int = 0
+    flat_count: int = 0
+    unavailable_curve_count: int = 0
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CommodityOverviewMatrixRow:
+    instrument_id: str
+    family: str
+    symbol: str
+    name: str
+    quote_unit: str
+    latest_price: float | None = None
+    latest_change: float | None = None
+    latest_change_pct: float | None = None
+    curve_state: str = "unavailable"
+    front_spread: float | None = None
+    front_basis: float | None = None
+    roll_yield_proxy_pct: float | None = None
+    inventory_signal: str | None = None
+    inventory_seasonal_percentile: float | None = None
+    price_source_provider: str | None = None
+    curve_source_provider: str | None = None
+    inventory_source_provider: str | None = None
+    provenance_summary: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CommodityOverviewScatterPoint:
+    instrument_id: str
+    symbol: str
+    name: str
+    family: str
+    x_value: float
+    y_value: float
+    display_label: str
+    x_source_provider: str | None = None
+    y_source_provider: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CommodityOverviewScatter:
+    points: list[CommodityOverviewScatterPoint] = field(default_factory=list)
+    x_methodology_label: str = "Loaded-history momentum (%)"
+    y_methodology_label: str = "Front-spread roll-yield proxy (%)"
+    caveats: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CommodityOverviewRankingItem:
+    item_id: str
+    label: str
+    value: float | None
+    instrument_id: str | None = None
+    family: str | None = None
+    display_value: str | None = None
+    unit: str | None = None
+    direction: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CommodityOverviewRankings:
+    strongest_backwardation: list[CommodityOverviewRankingItem] = field(default_factory=list)
+    deepest_contango: list[CommodityOverviewRankingItem] = field(default_factory=list)
+    inventory_outliers: list[CommodityOverviewRankingItem] = field(default_factory=list)
+    spread_z_score_outliers: list[CommodityOverviewRankingItem] = field(default_factory=list)
+    largest_movers: list[CommodityOverviewRankingItem] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CommodityOverviewTermStructure:
+    selected_instrument_id: str
+    current_curve: CommodityCurveSnapshot | None = None
+    previous_curve_snapshots: list[CommodityCurveSnapshot] = field(default_factory=list)
+    current_curve_methodology: str | None = None
+    previous_curve_methodology: str | None = None
+    caveats: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class CommodityOverviewAnalytics:
+    market_breadth: CommodityOverviewMarketBreadth
+    matrix_rows: list[CommodityOverviewMatrixRow] = field(default_factory=list)
+    scatter: CommodityOverviewScatter | None = None
+    rankings: CommodityOverviewRankings | None = None
+    term_structure: CommodityOverviewTermStructure | None = None
+    caveats: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class CommodityEventRecord:
     event_id: str
     title: str
@@ -302,6 +434,7 @@ class CommodityWorkspaceResult:
     inventories: list[CommodityInventorySeries] = field(default_factory=list)
     events: list[CommodityEventRecord] = field(default_factory=list)
     cross_domain_links: list[CommodityCrossDomainLink] = field(default_factory=list)
+    overview: CommodityOverviewAnalytics | None = None
     warnings: list[str] = field(default_factory=list)
     source_provider: str = ""
     retrieved_at: datetime | None = None

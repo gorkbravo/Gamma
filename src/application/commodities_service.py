@@ -11,6 +11,14 @@ from src.models.commodities import (
     CommodityInventoryPoint,
     CommodityInventorySeries,
     CommodityMarketSummary,
+    CommodityOverviewAnalytics,
+    CommodityOverviewMarketBreadth,
+    CommodityOverviewMatrixRow,
+    CommodityOverviewRankingItem,
+    CommodityOverviewRankings,
+    CommodityOverviewScatter,
+    CommodityOverviewScatterPoint,
+    CommodityOverviewTermStructure,
     CommodityPriceHistory,
     CommodityProviderSnapshot,
     CommoditySpreadDefinition,
@@ -42,6 +50,7 @@ class CommoditiesService:
         spreads = self._build_spreads(snapshot, curves)
         summaries = self._build_market_summaries(snapshot, curves, inventories)
         links = self._build_cross_domain_links(snapshot)
+        overview = self._build_overview(snapshot, selected, summaries, curves, inventories, spreads)
         warnings = _dedupe(
             [
                 *snapshot.warnings,
@@ -63,12 +72,13 @@ class CommoditiesService:
             inventories=inventories,
             events=snapshot.events,
             cross_domain_links=links,
+            overview=overview,
             warnings=warnings,
             source_provider="gamma",
             retrieved_at=_max_datetime(snapshot.retrieved_at, snapshot.coverage.retrieved_at),
             origin="gamma.commodities.workspace",
             transformation_note=(
-                "Gamma computes commodity summaries, curve labels, spreads, inventory context, and cross-domain links from normalized provider records."
+                "Gamma computes commodity summaries, overview regime analytics, curve labels, spreads, inventory context, and cross-domain links from normalized provider records."
             ),
         )
 
@@ -346,6 +356,496 @@ class CommoditiesService:
                 transformation_note="Heuristic related-context link; prediction-market retrieval is handled by the Prediction Markets workspace.",
             ),
         ]
+
+    def _build_overview(
+        self,
+        snapshot: CommodityProviderSnapshot,
+        selected_instrument_id: str,
+        summaries: list[CommodityMarketSummary],
+        curves: list[CommodityCurveSnapshot],
+        inventories: list[CommodityInventorySeries],
+        spreads: list[CommoditySpreadSnapshot],
+    ) -> CommodityOverviewAnalytics:
+        retrieved_at = _max_datetime(snapshot.retrieved_at, *(summary.retrieved_at for summary in summaries))
+        market_breadth = self._build_overview_market_breadth(summaries, retrieved_at)
+        matrix_rows = self._build_overview_matrix_rows(snapshot, summaries, curves, inventories)
+        scatter = self._build_overview_scatter(snapshot, summaries, curves)
+        rankings = self._build_overview_rankings(summaries, curves, inventories, spreads)
+        term_structure = self._build_overview_term_structure(selected_instrument_id, curves)
+        caveats = _dedupe(
+            [
+                "Overview analytics are Gamma-engineered from the loaded workspace payload and should be treated as research context, not execution signals.",
+                "Loaded-history momentum uses the first and last points currently loaded for each market; it is not labeled as a fixed 30D return.",
+                "Roll-yield proxy uses the current front calendar spread; it is not a realized roll-return or carry model.",
+                "Previous full curve snapshots are unavailable in this workspace payload unless a future provider/storage path exposes historical curve stacks.",
+                "Volatility z-scores are not computed for the Commodities overview; only spread z-scores with available spread history are ranked.",
+            ]
+        )
+        return CommodityOverviewAnalytics(
+            market_breadth=market_breadth,
+            matrix_rows=matrix_rows,
+            scatter=scatter,
+            rankings=rankings,
+            term_structure=term_structure,
+            caveats=caveats,
+            warnings=_dedupe(
+                [
+                    *(market_breadth.warnings or []),
+                    *(scatter.caveats if scatter is not None else []),
+                    *(rankings.caveats if rankings is not None else []),
+                    *(term_structure.caveats if term_structure is not None else []),
+                ]
+            ),
+            source_provider="gamma",
+            retrieved_at=_max_datetime(
+                retrieved_at,
+                market_breadth.retrieved_at,
+                scatter.retrieved_at if scatter is not None else None,
+                rankings.retrieved_at if rankings is not None else None,
+                term_structure.retrieved_at if term_structure is not None else None,
+            ),
+            origin="gamma.commodities.overview",
+            transformation_note=(
+                "Gamma builds first-class overview regime analytics by joining normalized summaries, curves, spreads, inventories, and loaded price histories."
+            ),
+        )
+
+    def _build_overview_market_breadth(
+        self,
+        summaries: list[CommodityMarketSummary],
+        retrieved_at: datetime | None,
+    ) -> CommodityOverviewMarketBreadth:
+        counts_by_family: dict[str, int] = {}
+        backwardation_count = 0
+        contango_count = 0
+        flat_count = 0
+        unavailable_curve_count = 0
+        for summary in summaries:
+            family = summary.instrument.family or "other"
+            counts_by_family[family] = counts_by_family.get(family, 0) + 1
+            state = summary.curve_state.lower()
+            if "backward" in state:
+                backwardation_count += 1
+            elif "contango" in state:
+                contango_count += 1
+            elif "flat" in state:
+                flat_count += 1
+            else:
+                unavailable_curve_count += 1
+        return CommodityOverviewMarketBreadth(
+            total_markets=len(summaries),
+            counts_by_family=counts_by_family,
+            backwardation_count=backwardation_count,
+            contango_count=contango_count,
+            flat_count=flat_count,
+            unavailable_curve_count=unavailable_curve_count,
+            warnings=[
+                "Curve breadth counts use Gamma's current curve labels and do not imply tradable curve signals."
+            ],
+            source_provider="gamma",
+            retrieved_at=retrieved_at,
+            origin="gamma.commodities.overview.market_breadth",
+            transformation_note="Gamma counts normalized commodity summaries by family and current curve state.",
+        )
+
+    def _build_overview_matrix_rows(
+        self,
+        snapshot: CommodityProviderSnapshot,
+        summaries: list[CommodityMarketSummary],
+        curves: list[CommodityCurveSnapshot],
+        inventories: list[CommodityInventorySeries],
+    ) -> list[CommodityOverviewMatrixRow]:
+        curve_by_id = {curve.instrument_id: curve for curve in curves}
+        history_by_id = {history.instrument_id: history for history in snapshot.price_histories}
+        inventory_by_id = _first_inventory_by_instrument(inventories)
+        rows: list[CommodityOverviewMatrixRow] = []
+        for summary in sorted(
+            summaries,
+            key=lambda item: (_family_rank(item.instrument.family), item.instrument.name),
+        ):
+            instrument = summary.instrument
+            history = history_by_id.get(instrument.instrument_id)
+            curve = curve_by_id.get(instrument.instrument_id)
+            inventory = inventory_by_id.get(instrument.instrument_id)
+            provenance_summary = _dedupe(
+                [
+                    _provenance_summary("price", history.source_provider, history.origin) if history else "",
+                    _provenance_summary("summary", summary.source_provider, summary.origin),
+                    _provenance_summary("curve", curve.source_provider, curve.origin) if curve else "",
+                    _provenance_summary("inventory", inventory.source_provider, inventory.origin) if inventory else "",
+                ]
+            )
+            rows.append(
+                CommodityOverviewMatrixRow(
+                    instrument_id=instrument.instrument_id,
+                    family=instrument.family,
+                    symbol=instrument.symbol,
+                    name=instrument.name,
+                    quote_unit=instrument.quote_unit,
+                    latest_price=summary.latest_price,
+                    latest_change=summary.latest_change,
+                    latest_change_pct=summary.latest_change_pct,
+                    curve_state=curve.shape_label if curve is not None else summary.curve_state,
+                    front_spread=curve.front_spread if curve is not None else summary.front_spread,
+                    front_basis=curve.front_spread_pct if curve is not None else None,
+                    roll_yield_proxy_pct=curve.roll_yield_proxy_pct if curve is not None else None,
+                    inventory_signal=inventory.interpretation if inventory is not None else summary.inventory_signal,
+                    inventory_seasonal_percentile=(
+                        inventory.seasonal_percentile if inventory is not None else None
+                    ),
+                    price_source_provider=history.source_provider if history is not None else summary.source_provider,
+                    curve_source_provider=curve.source_provider if curve is not None else None,
+                    inventory_source_provider=inventory.source_provider if inventory is not None else None,
+                    provenance_summary=provenance_summary,
+                    warnings=_dedupe(
+                        [
+                            *summary.warnings,
+                            *(curve.warnings if curve is not None else []),
+                            *(inventory.warnings if inventory is not None else []),
+                        ]
+                    ),
+                    source_provider="gamma",
+                    retrieved_at=_max_datetime(
+                        summary.retrieved_at,
+                        history.retrieved_at if history is not None else None,
+                        curve.retrieved_at if curve is not None else None,
+                        inventory.retrieved_at if inventory is not None else None,
+                    ),
+                    origin="gamma.commodities.overview.matrix_row",
+                    transformation_note=(
+                        "Gamma joins the market summary, current curve analytics, loaded price history provenance, and first linked inventory/fundamental series."
+                    ),
+                )
+            )
+        return rows
+
+    def _build_overview_scatter(
+        self,
+        snapshot: CommodityProviderSnapshot,
+        summaries: list[CommodityMarketSummary],
+        curves: list[CommodityCurveSnapshot],
+    ) -> CommodityOverviewScatter:
+        curve_by_id = {curve.instrument_id: curve for curve in curves}
+        history_by_id = {history.instrument_id: history for history in snapshot.price_histories}
+        points: list[CommodityOverviewScatterPoint] = []
+        omitted = 0
+        for summary in summaries:
+            instrument = summary.instrument
+            history = history_by_id.get(instrument.instrument_id)
+            curve = curve_by_id.get(instrument.instrument_id)
+            momentum = _loaded_history_momentum_pct(history)
+            roll = curve.roll_yield_proxy_pct if curve is not None else None
+            if momentum is None or roll is None or not _finite(momentum) or not _finite(roll):
+                omitted += 1
+                continue
+            points.append(
+                CommodityOverviewScatterPoint(
+                    instrument_id=instrument.instrument_id,
+                    symbol=instrument.symbol,
+                    name=instrument.name,
+                    family=instrument.family,
+                    x_value=round(momentum, 3),
+                    y_value=round(roll, 3),
+                    display_label=instrument.symbol,
+                    x_source_provider=history.source_provider if history is not None else None,
+                    y_source_provider=curve.source_provider if curve is not None else None,
+                    warnings=_dedupe(
+                        [
+                            "X-axis uses loaded-history momentum, not a fixed 30D momentum window.",
+                            "Y-axis uses Gamma's current front-spread roll-yield proxy.",
+                            *(curve.warnings if curve is not None else []),
+                        ]
+                    ),
+                    source_provider="gamma",
+                    retrieved_at=_max_datetime(
+                        history.retrieved_at if history is not None else None,
+                        curve.retrieved_at if curve is not None else None,
+                    ),
+                    origin="gamma.commodities.overview.scatter_point",
+                    transformation_note=(
+                        "Gamma computes first-to-last loaded-history momentum and pairs it with the current curve roll-yield proxy."
+                    ),
+                )
+            )
+        caveats = _dedupe(
+            [
+                "X-axis is loaded-history momentum from the price points in this payload; it is not a fixed 30D or continuous-futures return.",
+                "Y-axis is Gamma's annualized front-spread roll-yield proxy; it is not realized carry or an execution signal.",
+                f"{omitted} markets were omitted because loaded price history or roll-yield proxy data was unavailable."
+                if omitted
+                else "",
+            ]
+        )
+        return CommodityOverviewScatter(
+            points=sorted(points, key=lambda point: (_family_rank(point.family), point.name)),
+            caveats=caveats,
+            source_provider="gamma",
+            retrieved_at=_max_datetime(*(point.retrieved_at for point in points), snapshot.retrieved_at),
+            origin="gamma.commodities.overview.scatter",
+            transformation_note=(
+                "Gamma builds the overview scatter from loaded commodity price histories and current curve analytics."
+            ),
+        )
+
+    def _build_overview_rankings(
+        self,
+        summaries: list[CommodityMarketSummary],
+        curves: list[CommodityCurveSnapshot],
+        inventories: list[CommodityInventorySeries],
+        spreads: list[CommoditySpreadSnapshot],
+    ) -> CommodityOverviewRankings:
+        summary_by_id = {summary.instrument.instrument_id: summary for summary in summaries}
+        strongest_backwardation = [
+            _curve_rank_item(curve, summary_by_id.get(curve.instrument_id), "backwardation")
+            for curve in sorted(
+                [curve for curve in curves if curve.front_spread is not None and curve.front_spread > 0],
+                key=lambda item: item.front_spread or 0.0,
+                reverse=True,
+            )[:5]
+        ]
+        deepest_contango = [
+            _curve_rank_item(curve, summary_by_id.get(curve.instrument_id), "contango")
+            for curve in sorted(
+                [curve for curve in curves if curve.front_spread is not None and curve.front_spread < 0],
+                key=lambda item: item.front_spread or 0.0,
+            )[:5]
+        ]
+        inventory_outliers = [
+            _inventory_rank_item(series)
+            for series in sorted(
+                [series for series in inventories if series.seasonal_percentile is not None],
+                key=lambda item: abs((item.seasonal_percentile or 50.0) - 50.0),
+                reverse=True,
+            )[:5]
+        ]
+        spread_z_score_outliers = [
+            _spread_rank_item(spread)
+            for spread in sorted(
+                [spread for spread in spreads if spread.z_score is not None],
+                key=lambda item: abs(item.z_score or 0.0),
+                reverse=True,
+            )[:5]
+        ]
+        largest_movers = [
+            _mover_rank_item(summary)
+            for summary in sorted(
+                [summary for summary in summaries if summary.latest_change_pct is not None],
+                key=lambda item: abs(item.latest_change_pct or 0.0),
+                reverse=True,
+            )[:5]
+        ]
+        return CommodityOverviewRankings(
+            strongest_backwardation=strongest_backwardation,
+            deepest_contango=deepest_contango,
+            inventory_outliers=inventory_outliers,
+            spread_z_score_outliers=spread_z_score_outliers,
+            largest_movers=largest_movers,
+            caveats=_dedupe(
+                [
+                    "Backwardation and contango ranks use current front-spread analytics from enriched curve snapshots.",
+                    "Inventory outlier ranks use simple percentiles from available inventory/fundamental history, not official surprise data.",
+                    "Spread z-score ranks use available spread history and may include proxy calendar-spread history where full historical futures curves are unavailable.",
+                    "Largest movers use the latest consecutive loaded price points, not intraday live moves or fixed-window momentum.",
+                    "Volatility z-score ranks are unavailable until Gamma stores a suitable volatility history for commodity instruments.",
+                ]
+            ),
+            source_provider="gamma",
+            retrieved_at=_max_datetime(
+                *(item.retrieved_at for item in strongest_backwardation),
+                *(item.retrieved_at for item in deepest_contango),
+                *(item.retrieved_at for item in inventory_outliers),
+                *(item.retrieved_at for item in spread_z_score_outliers),
+                *(item.retrieved_at for item in largest_movers),
+            ),
+            origin="gamma.commodities.overview.rankings",
+            transformation_note=(
+                "Gamma ranks current curve states, inventory percentiles, spread z-scores, and latest loaded price changes for the overview regime dashboard."
+            ),
+        )
+
+    def _build_overview_term_structure(
+        self,
+        selected_instrument_id: str,
+        curves: list[CommodityCurveSnapshot],
+    ) -> CommodityOverviewTermStructure:
+        selected_curve = next((curve for curve in curves if curve.instrument_id == selected_instrument_id), None)
+        caveats = [
+            "Current curve uses the selected commodity's latest normalized curve snapshot.",
+            "Previous full curve snapshots are not available in this workspace payload. Node-level previous_price values may reflect sample/provider prior node observations, but they are not a stored historical curve stack.",
+            "Historical curve stacks require stored futures-curve history or a provider with historical curve snapshot support.",
+        ]
+        if selected_curve is None:
+            caveats.append("No current curve is available for the selected commodity.")
+        return CommodityOverviewTermStructure(
+            selected_instrument_id=selected_instrument_id,
+            current_curve=selected_curve,
+            previous_curve_snapshots=[],
+            current_curve_methodology=(
+                "Current curve is the enriched curve snapshot for the selected instrument after Gamma computes shape, spreads, and roll-yield proxy."
+            ),
+            previous_curve_methodology=(
+                "Unavailable as full historical snapshots in this payload; previous curve history requires stored futures-curve history/provider support."
+            ),
+            caveats=_dedupe(caveats),
+            source_provider="gamma",
+            retrieved_at=selected_curve.retrieved_at if selected_curve is not None else None,
+            origin="gamma.commodities.overview.term_structure",
+            transformation_note=(
+                "Gamma exposes the selected current curve and an explicit caveat instead of fabricating a historical curve stack."
+            ),
+        )
+
+
+def _first_inventory_by_instrument(
+    inventories: list[CommodityInventorySeries],
+) -> dict[str, CommodityInventorySeries]:
+    rows: dict[str, CommodityInventorySeries] = {}
+    preferred_categories = {"inventories", "storage"}
+    for series in inventories:
+        instrument_id = series.metadata.instrument_id
+        if not instrument_id:
+            continue
+        existing = rows.get(instrument_id)
+        if existing is None:
+            rows[instrument_id] = series
+            continue
+        if series.metadata.category in preferred_categories and existing.metadata.category not in preferred_categories:
+            rows[instrument_id] = series
+    return rows
+
+
+def _family_rank(family: str | None) -> int:
+    order = {"energy": 0, "metals": 1}
+    return order.get(str(family or "").lower(), 2)
+
+
+def _provenance_summary(label: str, source_provider: str | None, origin: str | None) -> str:
+    source = str(source_provider or "").strip()
+    source_origin = str(origin or "").strip()
+    if not source and not source_origin:
+        return ""
+    if source_origin:
+        return f"{label}: {source or 'unknown'} via {source_origin}"
+    return f"{label}: {source}"
+
+
+def _loaded_history_momentum_pct(history: CommodityPriceHistory | None) -> float | None:
+    if history is None or len(history.points) < 2:
+        return None
+    points = sorted(history.points, key=lambda point: point.timestamp)
+    first = next((point.value for point in points if _finite(point.value) and point.value != 0), None)
+    last = next((point.value for point in reversed(points) if _finite(point.value)), None)
+    if first is None or last is None:
+        return None
+    return ((last - first) / first) * 100.0
+
+
+def _curve_rank_item(
+    curve: CommodityCurveSnapshot,
+    summary: CommodityMarketSummary | None,
+    direction: str,
+) -> CommodityOverviewRankingItem:
+    label = summary.instrument.symbol if summary is not None else curve.instrument_id.upper()
+    family = summary.instrument.family if summary is not None else None
+    value = curve.front_spread
+    return CommodityOverviewRankingItem(
+        item_id=f"{curve.instrument_id}:{direction}",
+        label=label,
+        instrument_id=curve.instrument_id,
+        family=family,
+        value=round(value, 6) if value is not None else None,
+        display_value=_format_number(value, 3),
+        unit="front minus second contract",
+        direction=direction,
+        warnings=curve.warnings,
+        source_provider="gamma",
+        retrieved_at=curve.retrieved_at,
+        origin="gamma.commodities.overview.rankings.curve",
+        transformation_note="Gamma ranks current front calendar spreads from enriched curve analytics.",
+    )
+
+
+def _inventory_rank_item(series: CommodityInventorySeries) -> CommodityOverviewRankingItem:
+    percentile = series.seasonal_percentile
+    direction = None
+    if percentile is not None:
+        direction = "high_inventory_percentile" if percentile >= 50 else "low_inventory_percentile"
+    return CommodityOverviewRankingItem(
+        item_id=series.metadata.series_id,
+        label=series.metadata.label,
+        instrument_id=series.metadata.instrument_id,
+        family=None,
+        value=round(percentile, 2) if percentile is not None else None,
+        display_value=_format_pct(percentile, from_decimal=False, digits=1),
+        unit="seasonal percentile",
+        direction=direction,
+        warnings=series.warnings,
+        source_provider="gamma",
+        retrieved_at=series.retrieved_at,
+        origin="gamma.commodities.overview.rankings.inventory",
+        transformation_note=(
+            "Gamma ranks inventory/fundamental series by distance from the middle of available-history percentile context."
+        ),
+    )
+
+
+def _spread_rank_item(spread: CommoditySpreadSnapshot) -> CommodityOverviewRankingItem:
+    z_score = spread.z_score
+    return CommodityOverviewRankingItem(
+        item_id=spread.definition.spread_id,
+        label=spread.definition.label,
+        instrument_id=None,
+        family=None,
+        value=round(z_score, 3) if z_score is not None else None,
+        display_value=_format_number(z_score, 2),
+        unit="z-score",
+        direction="high_spread_z_score" if (z_score or 0) >= 0 else "low_spread_z_score",
+        warnings=spread.warnings,
+        source_provider="gamma",
+        retrieved_at=spread.retrieved_at,
+        origin="gamma.commodities.overview.rankings.spread_z_score",
+        transformation_note=(
+            "Gamma ranks spread z-scores where available spread history is long enough; this is not a volatility z-score."
+        ),
+    )
+
+
+def _mover_rank_item(summary: CommodityMarketSummary) -> CommodityOverviewRankingItem:
+    value = summary.latest_change_pct * 100.0 if summary.latest_change_pct is not None else None
+    return CommodityOverviewRankingItem(
+        item_id=f"{summary.instrument.instrument_id}:latest_move",
+        label=summary.instrument.symbol,
+        instrument_id=summary.instrument.instrument_id,
+        family=summary.instrument.family,
+        value=round(value, 3) if value is not None else None,
+        display_value=_format_pct(value, from_decimal=False, digits=2),
+        unit="latest loaded price change",
+        direction="up" if (value or 0) >= 0 else "down",
+        warnings=summary.warnings,
+        source_provider="gamma",
+        retrieved_at=summary.retrieved_at,
+        origin="gamma.commodities.overview.rankings.latest_mover",
+        transformation_note=(
+            "Gamma ranks the latest consecutive loaded price-point percentage change; this is not fixed-window momentum."
+        ),
+    )
+
+
+def _format_number(value: float | None, digits: int = 2) -> str | None:
+    if value is None or not _finite(value):
+        return None
+    return f"{value:.{digits}f}"
+
+
+def _format_pct(value: float | None, *, from_decimal: bool = True, digits: int = 2) -> str | None:
+    if value is None or not _finite(value):
+        return None
+    pct = value * 100.0 if from_decimal else value
+    return f"{pct:+.{digits}f}%"
+
+
+def _finite(value: float | None) -> bool:
+    return value is not None and math.isfinite(value)
 
 
 def _normalize_mode(value: str) -> str:

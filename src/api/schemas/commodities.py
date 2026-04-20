@@ -17,6 +17,14 @@ from src.models.commodities import (
     CommodityInventorySeries,
     CommodityInventorySeriesMetadata,
     CommodityMarketSummary,
+    CommodityOverviewAnalytics,
+    CommodityOverviewMarketBreadth,
+    CommodityOverviewMatrixRow,
+    CommodityOverviewRankingItem,
+    CommodityOverviewRankings,
+    CommodityOverviewScatter,
+    CommodityOverviewScatterPoint,
+    CommodityOverviewTermStructure,
     CommodityPriceHistory,
     CommodityPricePoint,
     CommoditySpreadDefinition,
@@ -330,6 +338,211 @@ class CommodityMarketSummaryModel(BaseModel):
         )
 
 
+class CommodityOverviewMarketBreadthModel(BaseModel):
+    total_markets: int
+    counts_by_family: dict[str, int] = Field(default_factory=dict)
+    backwardation_count: int = 0
+    contango_count: int = 0
+    flat_count: int = 0
+    unavailable_curve_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewMarketBreadth) -> "CommodityOverviewMarketBreadthModel":
+        return cls(**row.__dict__)
+
+
+class CommodityOverviewMatrixRowModel(BaseModel):
+    instrument_id: str
+    family: str
+    symbol: str
+    name: str
+    quote_unit: str
+    latest_price: float | None = None
+    latest_change: float | None = None
+    latest_change_pct: float | None = None
+    curve_state: str = "unavailable"
+    front_spread: float | None = None
+    front_basis: float | None = None
+    roll_yield_proxy_pct: float | None = None
+    inventory_signal: str | None = None
+    inventory_seasonal_percentile: float | None = None
+    price_source_provider: str | None = None
+    curve_source_provider: str | None = None
+    inventory_source_provider: str | None = None
+    provenance_summary: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewMatrixRow) -> "CommodityOverviewMatrixRowModel":
+        return cls(**row.__dict__)
+
+
+class CommodityOverviewScatterPointModel(BaseModel):
+    instrument_id: str
+    symbol: str
+    name: str
+    family: str
+    x_value: float
+    y_value: float
+    display_label: str
+    x_source_provider: str | None = None
+    y_source_provider: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewScatterPoint) -> "CommodityOverviewScatterPointModel":
+        return cls(**row.__dict__)
+
+
+class CommodityOverviewScatterModel(BaseModel):
+    points: list[CommodityOverviewScatterPointModel] = Field(default_factory=list)
+    x_methodology_label: str
+    y_methodology_label: str
+    caveats: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewScatter) -> "CommodityOverviewScatterModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "points": [CommodityOverviewScatterPointModel.from_domain(point) for point in row.points],
+            }
+        )
+
+
+class CommodityOverviewRankingItemModel(BaseModel):
+    item_id: str
+    label: str
+    value: float | None = None
+    instrument_id: str | None = None
+    family: str | None = None
+    display_value: str | None = None
+    unit: str | None = None
+    direction: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewRankingItem) -> "CommodityOverviewRankingItemModel":
+        return cls(**row.__dict__)
+
+
+class CommodityOverviewRankingsModel(BaseModel):
+    strongest_backwardation: list[CommodityOverviewRankingItemModel] = Field(default_factory=list)
+    deepest_contango: list[CommodityOverviewRankingItemModel] = Field(default_factory=list)
+    inventory_outliers: list[CommodityOverviewRankingItemModel] = Field(default_factory=list)
+    spread_z_score_outliers: list[CommodityOverviewRankingItemModel] = Field(default_factory=list)
+    largest_movers: list[CommodityOverviewRankingItemModel] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewRankings) -> "CommodityOverviewRankingsModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "strongest_backwardation": [
+                    CommodityOverviewRankingItemModel.from_domain(item) for item in row.strongest_backwardation
+                ],
+                "deepest_contango": [
+                    CommodityOverviewRankingItemModel.from_domain(item) for item in row.deepest_contango
+                ],
+                "inventory_outliers": [
+                    CommodityOverviewRankingItemModel.from_domain(item) for item in row.inventory_outliers
+                ],
+                "spread_z_score_outliers": [
+                    CommodityOverviewRankingItemModel.from_domain(item) for item in row.spread_z_score_outliers
+                ],
+                "largest_movers": [
+                    CommodityOverviewRankingItemModel.from_domain(item) for item in row.largest_movers
+                ],
+            }
+        )
+
+
+class CommodityOverviewTermStructureModel(BaseModel):
+    selected_instrument_id: str
+    current_curve: CommodityCurveSnapshotModel | None = None
+    previous_curve_snapshots: list[CommodityCurveSnapshotModel] = Field(default_factory=list)
+    current_curve_methodology: str | None = None
+    previous_curve_methodology: str | None = None
+    caveats: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewTermStructure) -> "CommodityOverviewTermStructureModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "current_curve": (
+                    CommodityCurveSnapshotModel.from_domain(row.current_curve) if row.current_curve is not None else None
+                ),
+                "previous_curve_snapshots": [
+                    CommodityCurveSnapshotModel.from_domain(curve) for curve in row.previous_curve_snapshots
+                ],
+            }
+        )
+
+
+class CommodityOverviewAnalyticsModel(BaseModel):
+    market_breadth: CommodityOverviewMarketBreadthModel
+    matrix_rows: list[CommodityOverviewMatrixRowModel] = Field(default_factory=list)
+    scatter: CommodityOverviewScatterModel | None = None
+    rankings: CommodityOverviewRankingsModel | None = None
+    term_structure: CommodityOverviewTermStructureModel | None = None
+    caveats: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityOverviewAnalytics) -> "CommodityOverviewAnalyticsModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "market_breadth": CommodityOverviewMarketBreadthModel.from_domain(row.market_breadth),
+                "matrix_rows": [CommodityOverviewMatrixRowModel.from_domain(item) for item in row.matrix_rows],
+                "scatter": CommodityOverviewScatterModel.from_domain(row.scatter) if row.scatter is not None else None,
+                "rankings": (
+                    CommodityOverviewRankingsModel.from_domain(row.rankings) if row.rankings is not None else None
+                ),
+                "term_structure": (
+                    CommodityOverviewTermStructureModel.from_domain(row.term_structure)
+                    if row.term_structure is not None
+                    else None
+                ),
+            }
+        )
+
+
 class CommodityEventRecordModel(BaseModel):
     event_id: str
     title: str
@@ -380,6 +593,7 @@ class CommodityWorkspaceResponseModel(BaseModel):
     inventories: list[CommodityInventorySeriesModel] = Field(default_factory=list)
     events: list[CommodityEventRecordModel] = Field(default_factory=list)
     cross_domain_links: list[CommodityCrossDomainLinkModel] = Field(default_factory=list)
+    overview: CommodityOverviewAnalyticsModel | None = None
     warnings: list[str] = Field(default_factory=list)
     source_provider: str
     retrieved_at: datetime | None = None
@@ -402,6 +616,9 @@ class CommodityWorkspaceResponseModel(BaseModel):
                 "cross_domain_links": [
                     CommodityCrossDomainLinkModel.from_domain(item) for item in row.cross_domain_links
                 ],
+                "overview": CommodityOverviewAnalyticsModel.from_domain(row.overview)
+                if row.overview is not None
+                else None,
             }
         )
 

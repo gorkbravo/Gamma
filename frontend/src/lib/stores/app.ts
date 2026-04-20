@@ -1173,9 +1173,11 @@ export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOp
   setLoading("commodities", true);
   try {
     const current = get(commoditiesWorkspace);
+    const mode = options.mode ?? current?.mode ?? "overview";
     const response = await postJson<CommodityWorkspaceResponse>("/commodities/workspace", {
-      mode: options.mode ?? current?.mode ?? "overview",
-      selected_instrument_id: options.selectedInstrumentId ?? current?.selected_instrument_id ?? "wti",
+      mode,
+      selected_instrument_id:
+        options.selectedInstrumentId ?? resolveCommodityInstrumentForMode(current, mode) ?? "wti",
       force_refresh: options.forceRefresh ?? false
     });
     commoditiesWorkspace.set(response);
@@ -1188,6 +1190,47 @@ export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOp
   } finally {
     setLoading("commodities", false);
   }
+}
+
+function resolveCommodityInstrumentForMode(
+  current: CommodityWorkspaceResponse | null,
+  mode: CommodityWorkspaceLoadOptions["mode"]
+) {
+  const selectedInstrumentId = current?.selected_instrument_id ?? null;
+  if (!current || !selectedInstrumentId) {
+    return selectedInstrumentId;
+  }
+  const validInstrumentIds = commodityInstrumentIdsForMode(current, mode);
+  if (!validInstrumentIds.length || validInstrumentIds.includes(selectedInstrumentId)) {
+    return selectedInstrumentId;
+  }
+  return validInstrumentIds[0] ?? selectedInstrumentId;
+}
+
+function commodityInstrumentIdsForMode(
+  current: CommodityWorkspaceResponse,
+  mode: CommodityWorkspaceLoadOptions["mode"]
+) {
+  if (mode === "energy" || mode === "metals") {
+    return current.market_summaries
+      .filter((summary) => summary.instrument.family === mode)
+      .map((summary) => summary.instrument.instrument_id);
+  }
+  if (mode === "overview" || mode === "curves_spreads") {
+    return current.curves.map((curve) => curve.instrument_id);
+  }
+  if (mode === "inventories_fundamentals") {
+    return current.inventories
+      .map((series) => series.metadata.instrument_id)
+      .filter((instrumentId): instrumentId is string => Boolean(instrumentId));
+  }
+  if (mode === "events_cross_domain") {
+    return Array.from(new Set([
+      ...current.events.flatMap((event) => event.linked_instrument_ids),
+      ...current.cross_domain_links.flatMap((link) => link.linked_instrument_ids)
+    ]));
+  }
+  return [];
 }
 
 export async function loadMacroSeriesHistory(seriesId: string, options: MacroLoadOptions = {}) {
