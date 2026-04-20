@@ -28,6 +28,8 @@
   ];
 
   let selectedInstrumentId = "wti";
+  const scatterBounds = { left: 12, right: 190, top: 10, bottom: 108 };
+  const scatterGridFractions = [0.25, 0.5, 0.75];
 
   $: if (workspace?.selected_instrument_id && workspace.selected_instrument_id !== selectedInstrumentId) {
     selectedInstrumentId = workspace.selected_instrument_id;
@@ -81,7 +83,7 @@
     ? buildRankRowsFromOverview(overview.rankings.inventory_outliers, "warning")
     : buildInventoryOutlierRows(workspace?.inventories ?? []);
   $: spreadZRows = overview?.rankings
-    ? buildRankRowsFromOverview(overview.rankings.spread_z_score_outliers, "warning")
+    ? buildRankRowsFromOverview(overview.rankings.spread_z_score_outliers, "warning", true)
     : buildSpreadZRows(workspace?.spreads ?? []);
   $: historyPointCount = selectedHistory?.points.length ?? 0;
   $: latestHistoryDate = selectedHistory?.points.at(-1)?.timestamp ?? selectedSummary?.retrieved_at ?? workspace?.retrieved_at ?? null;
@@ -175,13 +177,15 @@
     }
     const current = curve.nodes
       .map((node, index) => ({
-        time: contractTimestamp(curve, node.contract.expiry_date, index),
+        time: relativeContractTimestamp(index),
+        tickLabel: relativeContractLabel(index),
         value: node.price
       }))
       .filter((point): point is { time: number; value: number } => Number.isFinite(point.time) && point.value != null && Number.isFinite(point.value));
     const previous = curve.nodes
       .map((node, index) => ({
-        time: contractTimestamp(curve, node.contract.expiry_date, index),
+        time: relativeContractTimestamp(index),
+        tickLabel: relativeContractLabel(index),
         value: node.previous_price
       }))
       .filter((point): point is { time: number; value: number } => Number.isFinite(point.time) && point.value != null && Number.isFinite(point.value));
@@ -191,16 +195,20 @@
         label: "Current curve",
         color: "var(--chart-primary)",
         type: "line",
+        showPointMarkers: true,
+        pointMarkerRadius: 3,
         data: current
       },
       ...(previous.length
         ? [
             {
               id: `${curve.instrument_id}-curve-previous`,
-              label: "Previous node prices",
+              label: "Previous curve",
               color: "var(--chart-secondary)",
               type: "line" as const,
               lineStyle: "dashed" as const,
+              showPointMarkers: true,
+              pointMarkerRadius: 3,
               data: previous
             }
           ]
@@ -208,10 +216,12 @@
     ];
   }
 
-  function contractTimestamp(curve: CommodityCurveSnapshot, expiryDate: string | null, index: number) {
-    return expiryDate
-      ? Math.floor(new Date(expiryDate).getTime() / 1000)
-      : Math.floor(new Date(curve.as_of).getTime() / 1000) + (index + 1) * 30 * 24 * 60 * 60;
+  function relativeContractTimestamp(index: number) {
+    return Math.floor(Date.UTC(2000, index, 1) / 1000);
+  }
+
+  function relativeContractLabel(index: number) {
+    return `M${index + 1}`;
   }
 
   function formatNumber(value: number | null | undefined, digits = 2) {
@@ -408,7 +418,7 @@
   function buildOverviewRows(data: CommodityWorkspaceResponse | null) {
     const backendRows = data?.overview?.matrix_rows ?? [];
     if (backendRows.length) {
-      return backendRows.map((row) => ({
+      return prepareOverviewRows(backendRows.map((row) => ({
         instrumentId: row.instrument_id,
         family: row.family,
         symbol: row.symbol,
@@ -422,7 +432,7 @@
           row.inventory_seasonal_percentile != null
             ? formatPercentile(row.inventory_seasonal_percentile)
             : row.inventory_signal ?? "N/A"
-      }));
+      })));
     }
     const summaries = data?.market_summaries ?? [];
     const curves = data?.curves ?? [];
@@ -433,7 +443,7 @@
         .filter((series) => series.metadata.instrument_id)
         .map((series) => [series.metadata.instrument_id as string, series])
     );
-    return [...summaries]
+    return prepareOverviewRows([...summaries]
       .sort((left, right) => familyRank(left.instrument.family) - familyRank(right.instrument.family) || left.instrument.name.localeCompare(right.instrument.name))
       .map((summary) => ({
         instrumentId: summary.instrument.instrument_id,
@@ -448,7 +458,29 @@
         inventoryDisplay: inventoryByInstrument.get(summary.instrument.instrument_id)
           ? formatPercentile(inventoryByInstrument.get(summary.instrument.instrument_id)?.seasonal_percentile)
           : summary.inventory_signal ?? "N/A"
-      }));
+      })));
+  }
+
+  function prepareOverviewRows<T extends { family: string | null | undefined; name: string }>(rows: T[]) {
+    const ordered = [...rows].sort(
+      (left, right) => familyRank(left.family) - familyRank(right.family) || left.name.localeCompare(right.name)
+    );
+    const familyCounts = new Map<string, number>();
+    for (const row of ordered) {
+      const family = row.family || "other";
+      familyCounts.set(family, (familyCounts.get(family) ?? 0) + 1);
+    }
+    const renderedFamilies = new Set<string>();
+    return ordered.map((row) => {
+      const family = row.family || "other";
+      const showFamily = !renderedFamilies.has(family);
+      renderedFamilies.add(family);
+      return {
+        ...row,
+        showFamily,
+        familyRowspan: showFamily ? familyCounts.get(family) ?? 1 : 0
+      };
+    });
   }
 
   function familyRank(family: string | null | undefined) {
@@ -540,16 +572,13 @@
 
     const xValues = raw.map((point) => point.x);
     const yValues = raw.map((point) => point.y);
-    const xPad = Math.max((Math.max(...xValues) - Math.min(...xValues)) * 0.16, 1);
-    const yPad = Math.max((Math.max(...yValues) - Math.min(...yValues)) * 0.16, 1);
-    const xMin = Math.min(...xValues, 0) - xPad;
-    const xMax = Math.max(...xValues, 0) + xPad;
-    const yMin = Math.min(...yValues, 0) - yPad;
-    const yMax = Math.max(...yValues, 0) + yPad;
-    const left = 10;
-    const right = 190;
-    const top = 10;
-    const bottom = 108;
+    const xExtent = Math.max(...xValues.map((value) => Math.abs(value)), 1) * 1.18;
+    const yExtent = Math.max(...yValues.map((value) => Math.abs(value)), 1) * 1.18;
+    const xMin = -xExtent;
+    const xMax = xExtent;
+    const yMin = -yExtent;
+    const yMax = yExtent;
+    const { left, right, top, bottom } = scatterBounds;
     const scaleX = (value: number) => left + ((value - xMin) / (xMax - xMin || 1)) * (right - left);
     const scaleY = (value: number) => bottom - ((value - yMin) / (yMax - yMin || 1)) * (bottom - top);
     return {
@@ -582,22 +611,29 @@
     display: string;
     tone: string;
     width: number;
+    signed?: boolean;
   };
 
-  function buildRankRowsFromOverview(items: CommodityOverviewRankingItem[], defaultTone: string) {
+  function buildRankRowsFromOverview(items: CommodityOverviewRankingItem[], defaultTone: string, signed = false) {
     return normalizeRankRows(
       items.map((item) => {
         const numericValue = item.value ?? 0;
         return {
           id: item.item_id,
           label: item.label,
-          value: Math.abs(numericValue),
+          value: signed ? numericValue : Math.abs(numericValue),
           display: item.display_value ?? formatNumber(item.value, 2),
-          tone: rankingTone(item, defaultTone),
-          width: 0
+          tone: signed ? signedTone(numericValue) : rankingTone(item, defaultTone),
+          width: 0,
+          signed
         };
-      })
+      }),
+      { signed }
     );
+  }
+
+  function signedTone(value: number) {
+    return value < 0 ? "negative" : "positive";
   }
 
   function rankingTone(item: CommodityOverviewRankingItem, fallback: string) {
@@ -673,20 +709,37 @@
         .map((spread) => ({
           id: spread.definition.spread_id,
           label: spread.definition.label,
-          value: Math.abs(spread.z_score ?? 0),
+          value: spread.z_score ?? 0,
           display: formatNumber(spread.z_score, 2),
           tone: (spread.z_score ?? 0) >= 0 ? "positive" : "negative",
-          width: 0
-        }))
+          width: 0,
+          signed: true
+        })),
+      { signed: true }
     );
   }
 
-  function normalizeRankRows(rows: RankRow[]) {
-    const max = Math.max(...rows.map((row) => row.value), 0);
-    return rows.map((row) => ({
-      ...row,
-      width: max > 0 ? Math.max(8, (row.value / max) * 100) : 0
-    }));
+  function normalizeRankRows(rows: RankRow[], options: { signed?: boolean } = {}) {
+    const max = Math.max(...rows.map((row) => Math.abs(row.value)), 0);
+    return [...rows]
+      .sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
+      .map((row) => {
+        const magnitude = Math.abs(row.value);
+        const scaledWidth = options.signed ? (magnitude / max) * 50 : (magnitude / max) * 100;
+        return {
+          ...row,
+          signed: options.signed || row.signed,
+          width: max > 0 && magnitude > 0 ? Math.max(options.signed ? 5 : 8, scaledWidth) : 0
+        };
+      });
+  }
+
+  function scatterGridX(fraction: number) {
+    return scatterBounds.left + (scatterBounds.right - scatterBounds.left) * fraction;
+  }
+
+  function scatterGridY(fraction: number) {
+    return scatterBounds.top + (scatterBounds.bottom - scatterBounds.top) * fraction;
   }
 
   function curveTone(value: string | null | undefined) {
@@ -838,7 +891,7 @@
               <strong>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={300} emptyMessage="NO CURVE NODES" />
+          <TimeSeriesChart series={curveSeries} height={340} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
         <article class="panel matrix-panel span-2">
@@ -850,6 +903,15 @@
           </div>
           <div class="table-wrap">
             <table class="matrix-table">
+              <colgroup>
+                <col class="sector-col" />
+                <col class="market-col" />
+                <col class="last-col" />
+                <col class="change-col" />
+                <col class="curve-col" />
+                <col class="basis-col" />
+                <col class="inventory-col" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Sector</th>
@@ -865,14 +927,16 @@
                 {#if overviewRows.length}
                   {#each overviewRows as row}
                     <tr>
-                      <td>{humanize(row.family)}</td>
+                      {#if row.showFamily}
+                        <td class="sector-cell" rowspan={row.familyRowspan}>{humanize(row.family)}</td>
+                      {/if}
                       <td>
                         <strong>{row.name}</strong>
                         <span>{row.symbol} | {row.quoteUnit}</span>
                       </td>
                       <td>{formatNumber(row.latestPrice, 2)}</td>
                       <td class={valueClass(row.latestChangePct)}>{formatPct(row.latestChangePct)}</td>
-                      <td><span class="tag {curveTone(row.curveState)}">{humanize(row.curveState)}</span></td>
+                      <td><span class="tag {curveTone(row.curveState)}" title={humanize(row.curveState)}>{humanize(row.curveState)}</span></td>
                       <td class={valueClass(row.frontSpread)}>{formatNumber(row.frontSpread, 2)}</td>
                       <td>{row.inventoryDisplay}</td>
                     </tr>
@@ -887,20 +951,25 @@
           </div>
         </article>
 
-        <article class="panel scatter-panel span-4">
+        <article class="panel scatter-panel span-2">
           <div class="section-head">
             <div>
               <h2>Momentum / Roll Scatter</h2>
-                <p>{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"} and {overview?.scatter?.y_methodology_label ?? "curve roll-yield proxy"}.</p>
+              <p>{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"} and {overview?.scatter?.y_methodology_label ?? "curve roll-yield proxy"}.</p>
             </div>
           </div>
           {#if scatterState.points.length}
             <div class="scatter-shell" bind:this={scatterShellEl}
+                 role="presentation"
                  on:mousemove={handleScatterMouseMove}
                  on:mouseleave={() => tooltipPoint = null}>
               <svg viewBox="0 0 200 130" role="img" aria-label="Commodity momentum versus roll yield scatter plot">
-                <line class="axis-line" x1="10" x2="190" y1={scatterState.zeroY} y2={scatterState.zeroY} />
-                <line class="axis-line" x1={scatterState.zeroX} x2={scatterState.zeroX} y1="10" y2="108" />
+                {#each scatterGridFractions as fraction}
+                  <line class="grid-line" x1={scatterGridX(fraction)} x2={scatterGridX(fraction)} y1={scatterBounds.top} y2={scatterBounds.bottom} />
+                  <line class="grid-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterGridY(fraction)} y2={scatterGridY(fraction)} />
+                {/each}
+                <line class="axis-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterState.zeroY} y2={scatterState.zeroY} />
+                <line class="axis-line" x1={scatterState.zeroX} x2={scatterState.zeroX} y1={scatterBounds.top} y2={scatterBounds.bottom} />
                 <text class="quadrant-label" x="11" y="17">Carry / weak momentum</text>
                 <text class="quadrant-label" x="189" y="17" text-anchor="end">Backwardation + momentum</text>
                 <text class="quadrant-label" x="11" y="105">Contango / weak</text>
@@ -910,12 +979,14 @@
                 {#each scatterState.points as point}
                   {@const hovered = tooltipPoint?.id === point.id}
                   <g class="scatter-point {point.family}"
+                     role="img"
+                     aria-label={`${point.name}: momentum ${formatNumber(point.x, 2)}%, roll proxy ${formatNumber(point.y, 2)}%`}
                      class:hovered
                      transform={`translate(${point.cx}, ${point.cy})`}
                      on:mouseenter={() => tooltipPoint = point}
                      on:mouseleave={() => tooltipPoint = null}>
-                    <circle r={hovered ? 5.5 : 4} />
-                    <text x="5" y="-4">{point.symbol}</text>
+                    <circle r={hovered ? 4.6 : 3.2} />
+                    <text x="4.5" y="-4">{point.symbol}</text>
                   </g>
                 {/each}
               </svg>
@@ -933,21 +1004,36 @@
           {/if}
         </article>
 
-        <article class="panel span-4">
+        <article class="panel event-panel span-2">
           <div class="section-head">
             <div>
               <h2>Event Tape</h2>
               <p>Release calendar and watch items across the loaded commodity universe.</p>
             </div>
           </div>
-          <div class="note-list compact-notes two-col-notes">
+          <div class="table-wrap">
             {#if workspace.events.length}
-              {#each workspace.events.slice(0, 6) as event}
-                <div class="note-row">
-                  <strong>{event.title}</strong>
-                  <span>{event.relative_label ?? humanize(event.category)} | {formatDate(event.scheduled_at)}</span>
-                </div>
-              {/each}
+              <table class="event-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Event</th>
+                    <th>Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each workspace.events.slice(0, 6) as event}
+                    <tr>
+                      <td>{formatDate(event.scheduled_at)}</td>
+                      <td><strong>{event.title}</strong></td>
+                      <td>
+                        <span>{event.relative_label ?? humanize(event.category)}</span>
+                        <span>{displayStatus(event.importance)}</span>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
             {:else}
               <p class="empty-hint">No event rows are linked to the selected commodity.</p>
             {/if}
@@ -969,7 +1055,15 @@
                   {#each backwardationRows as row}
                     <li>
                       <span class="rank-label">{row.label}</span>
-                      <div class="rank-bar-shell"><span class="rank-bar {row.tone}" style={`width:${row.width}%`}></span></div>
+                      <div class="rank-bar-shell" class:signed={row.signed}>
+                        <span
+                          class="rank-bar {row.tone}"
+                          class:signed={row.signed}
+                          class:negative-side={row.signed && row.value < 0}
+                          class:positive-side={row.signed && row.value >= 0}
+                          style={`width:${row.width}%`}
+                        ></span>
+                      </div>
                       <span class="rank-value {row.tone}">{row.display}</span>
                     </li>
                   {/each}
@@ -985,7 +1079,15 @@
                   {#each contangoRows as row}
                     <li>
                       <span class="rank-label">{row.label}</span>
-                      <div class="rank-bar-shell"><span class="rank-bar {row.tone}" style={`width:${row.width}%`}></span></div>
+                      <div class="rank-bar-shell" class:signed={row.signed}>
+                        <span
+                          class="rank-bar {row.tone}"
+                          class:signed={row.signed}
+                          class:negative-side={row.signed && row.value < 0}
+                          class:positive-side={row.signed && row.value >= 0}
+                          style={`width:${row.width}%`}
+                        ></span>
+                      </div>
                       <span class="rank-value {row.tone}">{row.display}</span>
                     </li>
                   {/each}
@@ -1001,7 +1103,15 @@
                   {#each inventoryOutlierRows as row}
                     <li>
                       <span class="rank-label">{row.label}</span>
-                      <div class="rank-bar-shell"><span class="rank-bar {row.tone}" style={`width:${row.width}%`}></span></div>
+                      <div class="rank-bar-shell" class:signed={row.signed}>
+                        <span
+                          class="rank-bar {row.tone}"
+                          class:signed={row.signed}
+                          class:negative-side={row.signed && row.value < 0}
+                          class:positive-side={row.signed && row.value >= 0}
+                          style={`width:${row.width}%`}
+                        ></span>
+                      </div>
                       <span class="rank-value {row.tone}">{row.display}</span>
                     </li>
                   {/each}
@@ -1017,7 +1127,15 @@
                   {#each spreadZRows as row}
                     <li>
                       <span class="rank-label">{row.label}</span>
-                      <div class="rank-bar-shell"><span class="rank-bar {row.tone}" style={`width:${row.width}%`}></span></div>
+                      <div class="rank-bar-shell" class:signed={row.signed}>
+                        <span
+                          class="rank-bar {row.tone}"
+                          class:signed={row.signed}
+                          class:negative-side={row.signed && row.value < 0}
+                          class:positive-side={row.signed && row.value >= 0}
+                          style={`width:${row.width}%`}
+                        ></span>
+                      </div>
                       <span class="rank-value {row.tone}">{row.display}</span>
                     </li>
                   {/each}
@@ -1194,7 +1312,7 @@
               <strong>{formatNumber(selectedCurve?.curve_slope, 3)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={245} emptyMessage="NO CURVE NODES" />
+          <TimeSeriesChart series={curveSeries} height={285} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
         <article class="panel">
@@ -1754,8 +1872,15 @@
 
   .market-table,
   .matrix-table {
-    min-width: 100%;
     table-layout: fixed;
+  }
+
+  .market-table {
+    min-width: 100%;
+  }
+
+  .matrix-table {
+    min-width: 42rem;
   }
 
   .market-table th:nth-child(1),
@@ -1775,14 +1900,32 @@
     width: 18%;
   }
 
-  .matrix-table th:nth-child(1),
-  .matrix-table td:nth-child(1) {
-    width: 12%;
+  .matrix-table .sector-col {
+    width: 10%;
   }
 
-  .matrix-table th:nth-child(2),
-  .matrix-table td:nth-child(2) {
-    width: 24%;
+  .matrix-table .market-col {
+    width: 23%;
+  }
+
+  .matrix-table .last-col {
+    width: 11%;
+  }
+
+  .matrix-table .change-col {
+    width: 10%;
+  }
+
+  .matrix-table .curve-col {
+    width: 17%;
+  }
+
+  .matrix-table .basis-col {
+    width: 11%;
+  }
+
+  .matrix-table .inventory-col {
+    width: 18%;
   }
 
   .spread-table {
@@ -1809,6 +1952,17 @@
   td strong,
   td span {
     display: block;
+  }
+
+  .matrix-table td {
+    overflow-wrap: anywhere;
+  }
+
+  .sector-cell {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.66rem;
   }
 
   tr.selected {
@@ -1861,8 +2015,12 @@
 
   .tag {
     display: inline-block;
+    max-width: 100%;
     border: 1px solid var(--divider);
     padding: 0.05rem 0.3rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-size: 0.62rem;
@@ -1901,6 +2059,12 @@
     stroke-width: 0.5;
   }
 
+  .grid-line {
+    stroke: var(--divider);
+    stroke-width: 0.35;
+    opacity: 0.5;
+  }
+
   .axis-label,
   .quadrant-label {
     fill: var(--text-2);
@@ -1936,7 +2100,7 @@
 
   .scatter-point text {
     fill: var(--text-1);
-    font-size: 5px;
+    font-size: 4.6px;
     letter-spacing: 0;
     pointer-events: none;
   }
@@ -1975,6 +2139,30 @@
 
   .tip-row span:last-child {
     color: var(--text-1);
+  }
+
+  .event-table {
+    min-width: 100%;
+    table-layout: fixed;
+  }
+
+  .event-table th:nth-child(1),
+  .event-table td:nth-child(1) {
+    width: 25%;
+  }
+
+  .event-table th:nth-child(2),
+  .event-table td:nth-child(2) {
+    width: 50%;
+  }
+
+  .event-table th:nth-child(3),
+  .event-table td:nth-child(3) {
+    width: 25%;
+  }
+
+  .event-table td {
+    overflow-wrap: anywhere;
   }
 
   .rank-grid {
@@ -2038,10 +2226,12 @@
   }
 
   .rank-bar-shell {
+    position: relative;
     height: 0.7rem;
     border-left: 1px solid var(--divider);
     background: var(--surface-soft);
     min-width: 0;
+    overflow: hidden;
   }
 
   .rank-bar {
@@ -2049,6 +2239,34 @@
     height: 100%;
     background: var(--text-2);
     opacity: 0.75;
+  }
+
+  .rank-bar-shell.signed {
+    border-left: 0;
+  }
+
+  .rank-bar-shell.signed::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    z-index: 1;
+    border-left: 1px solid var(--divider);
+  }
+
+  .rank-bar.signed {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+  }
+
+  .rank-bar.positive-side {
+    left: 50%;
+  }
+
+  .rank-bar.negative-side {
+    right: 50%;
   }
 
   .rank-bar.positive {
@@ -2115,33 +2333,6 @@
 
   .compact-notes .note-row {
     padding: 0.45rem 0;
-  }
-
-  .two-col-notes {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0;
-  }
-
-  .two-col-notes .note-row {
-    border-top: 1px solid var(--divider);
-    border-right: 1px solid var(--divider);
-    padding: 0.45rem 0.65rem 0.45rem 0;
-  }
-
-  .two-col-notes .note-row:nth-child(odd) {
-    border-right: 1px solid var(--divider);
-  }
-
-  .two-col-notes .note-row:nth-child(even) {
-    border-right: 0;
-    padding-left: 0.65rem;
-    padding-right: 0;
-  }
-
-  .two-col-notes .note-row:first-child,
-  .two-col-notes .note-row:nth-child(2) {
-    border-top: 0;
   }
 
   .four-col-notes {

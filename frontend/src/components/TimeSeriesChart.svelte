@@ -18,6 +18,7 @@
   export interface ChartPoint {
     time: UTCTimestamp;
     value: number;
+    tickLabel?: string;
   }
 
   export interface ChartSeries {
@@ -26,6 +27,8 @@
     color: string;
     type?: "line" | "area";
     lineStyle?: "solid" | "dashed";
+    showPointMarkers?: boolean;
+    pointMarkerRadius?: number;
     invertFilledArea?: boolean;
     data: ChartPoint[];
   }
@@ -33,6 +36,7 @@
   export let series: ChartSeries[] = [];
   export let height = 320;
   export let emptyMessage = "No chart data";
+  export let showLegend = false;
 
   let container: HTMLDivElement;
   let chart: IChartApi | null = null;
@@ -44,6 +48,19 @@
 
   let currentTheme = "blue";
   $: currentTheme = $chartTheme;
+  $: seriesWithData = series.filter((item) => item.data.length);
+
+  function buildTickLabelMap() {
+    const tickLabels = new Map<number, string>();
+    for (const item of series) {
+      for (const point of item.data) {
+        if (point.tickLabel) {
+          tickLabels.set(point.time, point.tickLabel);
+        }
+      }
+    }
+    return tickLabels;
+  }
 
   function inferPricePrecision(data: ChartPoint[]): number {
     const latest = data.at(-1)?.value ?? data[0]?.value ?? 0;
@@ -70,25 +87,29 @@
   function createOrReplaceChart() {
     const width = Math.max(container.clientWidth, 1);
     const measuredHeight = Math.max(container.clientHeight || height, 1);
+    const computedStyle = getComputedStyle(container);
+    const divider = resolveChartColor("var(--divider)", computedStyle);
+    const textMuted = resolveChartColor("var(--text-2)", computedStyle);
+    const tickLabels = buildTickLabelMap();
     chart?.remove();
     chart = createChart(container, {
       width,
       height: measuredHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#8a919a"
+        textColor: textMuted
       },
       grid: {
-        vertLines: { color: "rgba(48, 54, 62, 0.24)" },
-        horzLines: { color: "rgba(48, 54, 62, 0.24)" }
+        vertLines: { color: colorWithAlpha(divider, 0.36) },
+        horzLines: { color: colorWithAlpha(divider, 0.36) }
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "rgba(140, 145, 154, 0.25)" },
-        horzLine: { color: "rgba(140, 145, 154, 0.18)" }
+        vertLine: { color: colorWithAlpha(textMuted, 0.25) },
+        horzLine: { color: colorWithAlpha(textMuted, 0.18) }
       },
       rightPriceScale: {
-        borderColor: "rgba(50, 56, 64, 0.55)",
+        borderColor: divider,
         minimumWidth: 60,
         entireTextOnly: true,
         scaleMargins: {
@@ -97,9 +118,14 @@
         }
       },
       timeScale: {
-        borderColor: "rgba(50, 56, 64, 0.55)",
+        borderColor: divider,
         timeVisible: true,
-        secondsVisible: false
+        secondsVisible: false,
+        ...(tickLabels.size
+          ? {
+              tickMarkFormatter: (time: unknown) => tickLabels.get(Number(time)) ?? ""
+            }
+          : {})
       },
       handleScroll: true,
       handleScale: true
@@ -129,6 +155,8 @@
               color: resolvedColor,
               lineWidth: 2,
               lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
+              pointMarkersVisible: item.showPointMarkers ?? false,
+              pointMarkersRadius: item.pointMarkerRadius ?? 3,
               priceFormat: {
                 type: "price",
                 precision: inferPricePrecision(normalizedData),
@@ -143,6 +171,8 @@
               bottomColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.2) : colorWithAlpha(resolvedColor, 0.012),
               invertFilledArea: item.invertFilledArea ?? false,
               lineWidth: 2,
+              pointMarkersVisible: item.showPointMarkers ?? false,
+              pointMarkersRadius: item.pointMarkerRadius ?? 3,
               priceFormat: {
                 type: "price",
                 precision: inferPricePrecision(normalizedData),
@@ -221,10 +251,13 @@
         item.id,
         item.type ?? "area",
         item.lineStyle ?? "solid",
+        item.showPointMarkers ?? false,
+        item.pointMarkerRadius ?? null,
         item.invertFilledArea ?? false,
         item.data.length,
         item.data.at(0)?.time ?? null,
-        item.data.at(-1)?.time ?? null
+        item.data.at(-1)?.time ?? null,
+        item.data.map((point) => point.tickLabel ?? "").join("|")
       ])
     );
     signature;
@@ -235,6 +268,16 @@
 
 <div class="chart-shell" style={`height:${height}px`}>
   <div class="chart" bind:this={container}></div>
+  {#if showLegend && seriesWithData.length}
+    <div class="legend" aria-label="Chart legend">
+      {#each seriesWithData as item}
+        <span class="legend-item">
+          <span class:dash={item.lineStyle === "dashed"} style={`--legend-color:${item.color}`}></span>
+          {item.label}
+        </span>
+      {/each}
+    </div>
+  {/if}
   {#if !series.length || !series.some((item) => item.data.length)}
     <div class="empty">{emptyMessage}</div>
   {/if}
@@ -252,6 +295,38 @@
   .chart {
     position: absolute;
     inset: 0;
+  }
+
+  .legend {
+    position: absolute;
+    top: 0.45rem;
+    left: 0.55rem;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.65rem;
+    max-width: calc(100% - 1.1rem);
+    color: var(--text-1);
+    font-size: 0.66rem;
+    line-height: 1.2;
+    pointer-events: none;
+  }
+
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .legend-item span {
+    width: 1rem;
+    border-top: 2px solid var(--legend-color);
+  }
+
+  .legend-item span.dash {
+    border-top-style: dashed;
   }
 
   .empty {
