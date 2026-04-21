@@ -711,15 +711,18 @@ export function treemapArea(rect: TreemapRect) {
   return rect.width * rect.height;
 }
 
-export function treemapDensityClass(rect: TreemapRect) {
-  const area = treemapArea(rect);
-  if (area >= 420) {
+export function treemapDensityClass(rect: TreemapRect, parent?: TreemapRect) {
+  const parentScale = parent ? (parent.width * parent.height) / 10000 : 1;
+  const area = treemapArea(rect) * parentScale;
+  const parentMinSide = Math.min(parent?.width ?? 100, parent?.height ?? 100);
+  const minSide = (Math.min(rect.width, rect.height) * parentMinSide) / 100;
+  if (area >= 150 && minSide >= 8) {
     return "hero";
   }
-  if (area >= 180) {
+  if (area >= 55 && minSide >= 4.5) {
     return "major";
   }
-  if (area >= 70) {
+  if (area >= 15 && minSide >= 2.2) {
     return "minor";
   }
   return "micro";

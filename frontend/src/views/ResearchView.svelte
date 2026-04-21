@@ -720,6 +720,39 @@
   let overviewTreemapSections: ResearchTreemapSection[] = [];
   let overviewMetricMaxAbs = 0.01;
   let selectedOverviewNode: ResearchOverviewNode | null = null;
+  let treemapTooltip: {
+    section: string;
+    tile: ResearchTreemapTile;
+    x: number;
+    y: number;
+    flipX: boolean;
+    flipY: boolean;
+  } | null = null;
+  const treemapTooltipOffset = 14;
+  const treemapTooltipEstWidth = 240;
+  const treemapTooltipEstHeight = 160;
+
+  function handleTileHover(event: MouseEvent, section: ResearchTreemapSection, tile: ResearchTreemapTile) {
+    const canvas = (event.currentTarget as HTMLElement).closest(".treemap-canvas") as HTMLElement | null;
+    const bounds = canvas?.getBoundingClientRect();
+    if (!bounds) {
+      return;
+    }
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    treemapTooltip = {
+      section: section.label,
+      tile,
+      x,
+      y,
+      flipX: x + treemapTooltipOffset + treemapTooltipEstWidth > bounds.width,
+      flipY: y + treemapTooltipOffset + treemapTooltipEstHeight > bounds.height
+    };
+  }
+
+  function handleTileLeave() {
+    treemapTooltip = null;
+  }
   let overviewRankingBars: Record<string, RankBarItem[]> = {};
   let researchHeadlineKPIs: Array<{
     label: string;
@@ -1122,109 +1155,52 @@
           </button>
         {/each}
       </div>
-      {#if researchHeadlineKPIs.length}
-        <div class="headline-strip">
-          {#each researchHeadlineKPIs as kpi}
-            <div class="headline-kpi">
-              <span class="headline-kpi-label">{kpi.label}</span>
-              <strong class="headline-kpi-value">{kpi.value}</strong>
-              {#if kpi.delta}<small class={`headline-kpi-delta ${kpi.tone ?? ""}`}>{kpi.delta}</small>{/if}
-            </div>
-          {/each}
-        </div>
-      {/if}
     </div>
   </article>
 
   {#if mode === "overview"}
-      <article class="panel overview-hero">
-        <div class="panel-header top-line">
-          <div class="title-block">
-            <p class="eyebrow">Research Overview</p>
-            <h2>{overview?.universe_label ?? "Overview"}</h2>
-            <p class="muted">
-              {overview?.universe_description ?? "Map a narrow research universe by return, volatility, beta, drawdown, and relative return."}
-            </p>
-          </div>
-          <div class="overview-controls">
-            <label class="inline-field">
-              <span>Universe</span>
-              <select bind:value={overviewUniverseId} on:change={handleOverviewUniverseChange}>
-                {#each (overview?.available_universes ?? [{
-                  universe_id: "broad_us_market",
-                  label: "Broad US Market",
-                  description: "Static proxy universe.",
-                  instruments: [],
-                  limitations: [],
-                  metadata_source_label: "Static S&P 500-derived proxy metadata",
-                  coverage_label: "Static large-cap US seed, partial coverage",
-                  is_complete_universe: false
-                }]).filter((item) => !hiddenOverviewUniverseIds.has(item.universe_id)) as item}
-                  <option value={item.universe_id}>{item.label}</option>
-                {/each}
-              </select>
-            </label>
-            <label class="inline-field short-field">
-              <span>Sort by</span>
-              <select bind:value={overviewSortBy}>
-                {#each overviewSortOptions(overview) as item}
-                  <option value={item.sort_id}>{item.label}</option>
-                {/each}
-              </select>
-            </label>
-            <label class="inline-field short-field">
-              <span>Timeframe</span>
-              <select bind:value={overviewTimeframe} on:change={handleOverviewTimeframeChange}>
-                {#each overview?.available_timeframes ?? ["DoD", "1M", "3M", "6M", "1Y"] as item}
-                  <option value={item}>{overviewTimeframeLabels[item] ?? item}</option>
-                {/each}
-              </select>
-            </label>
-            <label class="inline-field benchmark-field">
-              <span>Benchmark</span>
-              <input bind:value={overviewBenchmarkSymbol} on:change={handleOverviewBenchmarkChange} placeholder="SPY" />
-            </label>
-          </div>
-        </div>
-
-        <div class="overview-context-strip">
-          <div>
-            <span>Coverage</span>
-            <strong>{overview?.coverage.priced_count ?? 0}/{overview?.coverage.instrument_count ?? 0} priced</strong>
-          </div>
-          <div>
-            <span>Benchmark</span>
-            <strong>{overview?.coverage.benchmark_available ? overview.benchmark_symbol : `${overviewBenchmarkSymbol || "SPY"} unavailable`}</strong>
-          </div>
-          <div>
-            <span>History</span>
-            <strong>{overview?.history_source_label ?? "pending"} / {overview?.freshness_label ?? "unknown"}</strong>
-          </div>
-          <div>
-            <span>Reference</span>
-            <strong>{overview?.metadata_source_label ?? "pending"}</strong>
-          </div>
-          <div>
-            <span>Retrieved</span>
-            <strong>{shortDate(overview?.retrieved_at)}</strong>
-          </div>
-        </div>
-      </article>
-
       <div class="overview-grid">
         <article class="panel treemap-panel">
-          <div class="panel-header">
-            <div>
+          <div class="panel-header treemap-header">
+            <div class="title-block">
               <p class="eyebrow">Market Map</p>
-              <h3>{researchSortMetricLabel(overviewSortBy)} Treemap</h3>
+              <h3>{overview?.universe_label ?? "Overview"}</h3>
             </div>
-            <div class="builder-actions compact">
-              <button type="button" class="ghost-button" on:click={() => void loadOverview({ forceRefresh: true })} disabled={overviewLoading}>
-                {overviewLoading ? "Loading..." : "Refresh"}
-              </button>
-              <button type="button" on:click={() => inspectOverviewNodeInScope(selectedOverviewNode)} disabled={!selectedOverviewNode?.symbol}>
-                Inspect Scope
-              </button>
+            <div class="treemap-header-right">
+              <div class="ctrl-group">
+                <select class="ctrl-select" bind:value={overviewUniverseId} on:change={handleOverviewUniverseChange} title="Universe">
+                  {#each (overview?.available_universes ?? [{
+                    universe_id: "broad_us_market",
+                    label: "Broad US Market",
+                    description: "Static proxy universe.",
+                    instruments: [],
+                    limitations: [],
+                    metadata_source_label: "Static S&P 500-derived proxy metadata",
+                    coverage_label: "Static large-cap US seed, partial coverage",
+                    is_complete_universe: false
+                  }]).filter((item) => !hiddenOverviewUniverseIds.has(item.universe_id)) as item}
+                    <option value={item.universe_id}>{item.label}</option>
+                  {/each}
+                </select>
+                <select class="ctrl-select" bind:value={overviewSortBy} title="Size by">
+                  {#each overviewSortOptions(overview) as item}
+                    <option value={item.sort_id}>{item.label}</option>
+                  {/each}
+                </select>
+                <select class="ctrl-select ctrl-select--short" bind:value={overviewTimeframe} on:change={handleOverviewTimeframeChange} title="Timeframe">
+                  {#each overview?.available_timeframes ?? ["DoD", "1M", "3M", "6M", "1Y"] as item}
+                    <option value={item}>{overviewTimeframeLabels[item] ?? item}</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="builder-actions compact">
+                <button type="button" class="ghost-button" on:click={() => void loadOverview({ forceRefresh: true })} disabled={overviewLoading}>
+                  {overviewLoading ? "Loading..." : "Refresh"}
+                </button>
+                <button type="button" on:click={() => inspectOverviewNodeInScope(selectedOverviewNode)} disabled={!selectedOverviewNode?.symbol}>
+                  Inspect Scope
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1238,14 +1214,19 @@
                   </div>
                   <div class="treemap-section-body">
                     {#each section.tiles as tile}
-                      {@const density = treemapDensityClass(tile.rect)}
+                      {@const density = treemapDensityClass(tile.rect, section.rect)}
                       <button
                         type="button"
                         class={`treemap-tile ${density}`}
                         class:selected={selectedOverviewNode?.node_id === tile.node.node_id}
                         style={overviewTileStyle(tile, overviewMetric, overviewMetricMaxAbs)}
-                        title={`${section.label} | ${tile.node.label} | ${overviewMetricLabels[overviewMetric]} ${formatResearchOverviewMetricValue(tile.colorValue, overviewMetric)} | ${researchSortMetricLabel(overviewSortBy)} ${formatResearchOverviewSortValue(tile.metricValue, overviewSortBy)}`}
+                        aria-label={`${section.label}. ${tile.node.label}. ${overviewMetricLabels[overviewMetric]} ${formatResearchOverviewMetricValue(tile.colorValue, overviewMetric)}. ${researchSortMetricLabel(overviewSortBy)} ${formatResearchOverviewSortValue(tile.metricValue, overviewSortBy)}`}
                         on:click={() => selectOverviewNode(tile.node.node_id)}
+                        on:mouseenter={(event) => handleTileHover(event, section, tile)}
+                        on:mousemove={(event) => handleTileHover(event, section, tile)}
+                        on:mouseleave={handleTileLeave}
+                        on:focus={(event) => handleTileHover(event as unknown as MouseEvent, section, tile)}
+                        on:blur={handleTileLeave}
                       >
                         <div class="tile-copy">
                           <div class="tile-topline">
@@ -1272,6 +1253,36 @@
               {/each}
             {:else}
               <div class="treemap-empty">{overviewLoading ? "Loading overview..." : "No overview history available."}</div>
+            {/if}
+            {#if treemapTooltip}
+              {@const tipColorValue = treemapTooltip.tile.colorValue}
+              {@const tipColorTone = tipColorValue == null ? "neutral" : tipColorValue > 0 ? "positive" : tipColorValue < 0 ? "negative" : "neutral"}
+              <div
+                class="treemap-tooltip"
+                class:flip-x={treemapTooltip.flipX}
+                class:flip-y={treemapTooltip.flipY}
+                role="presentation"
+                style={`left:${treemapTooltip.x}px; top:${treemapTooltip.y}px;`}
+              >
+                <div class="treemap-tooltip-head">
+                  <strong>{treemapTooltip.tile.node.symbol ?? treemapTooltip.tile.node.label}</strong>
+                  <span class={`treemap-tooltip-chip ${tipColorTone}`}>
+                    {formatResearchOverviewMetricValue(tipColorValue, overviewMetric)}
+                  </span>
+                </div>
+                <div class="treemap-tooltip-name">{treemapTooltip.tile.node.label}</div>
+                <div class="treemap-tooltip-sector">{treemapTooltip.section}</div>
+                <dl class="treemap-tooltip-metrics">
+                  <div>
+                    <dt>{overviewMetricLabels[overviewMetric]}</dt>
+                    <dd>{formatResearchOverviewMetricValue(tipColorValue, overviewMetric)}</dd>
+                  </div>
+                  <div>
+                    <dt>{researchSortMetricLabel(overviewSortBy)}</dt>
+                    <dd>{formatResearchOverviewSortValue(treemapTooltip.tile.metricValue, overviewSortBy)}</dd>
+                  </div>
+                </dl>
+              </div>
             {/if}
           </div>
 
@@ -1306,7 +1317,7 @@
               <h3>{selectedOverviewNode?.symbol ?? selectedOverviewNode?.label ?? "No Selection"}</h3>
             </div>
           </div>
-          <div class="selection-grid">
+          <div class="stack">
             <div class="row"><span>Group</span><strong>{selectedOverviewNode?.group ?? "N/A"}</strong></div>
             <div class="row"><span>Market Cap</span><strong>{formatResearchOverviewSortValue(selectedOverviewNode?.market_cap_usd, "market_cap_desc")}</strong></div>
             <div class="row"><span>History Obs</span><strong>{selectedOverviewNode?.metrics.observation_count ?? 0}</strong></div>
@@ -1999,7 +2010,6 @@
   .kpi-grid,
   .detail-split,
   .stack,
-  .selection-grid,
   .field-grid,
   .builder-actions,
   .notes-list,
@@ -2026,7 +2036,6 @@
   }
 
   .performance-panel,
-  .overview-hero,
   .treemap-panel,
   .composition-panel,
   .insight-panel,
@@ -2122,100 +2131,67 @@
     color: var(--accent);
   }
 
-  /* ── Headline KPI strip (situational awareness in the mode bar) ── */
-  .headline-strip {
+  /* ── Treemap panel header with inline controls ── */
+  .treemap-header {
+    align-items: center;
+  }
+
+  .treemap-header-right {
     display: flex;
-    gap: 0;
-    align-items: stretch;
-  }
-
-  .headline-kpi {
-    padding: 0.2rem 0.75rem;
-    border-left: 1px solid rgba(46, 60, 74, 0.42);
-    text-align: right;
-  }
-
-  .headline-kpi:first-child {
-    border-left: 0;
-  }
-
-  .headline-kpi-label {
-    display: block;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.52rem;
-    white-space: nowrap;
-  }
-
-  .headline-kpi-value {
-    display: block;
-    font-size: 0.9rem;
-    line-height: 1.2;
-    margin-top: 0.06rem;
-    white-space: nowrap;
-  }
-
-  .headline-kpi-delta {
-    display: block;
-    color: var(--text-2);
-    font-size: 0.62rem;
-    margin-top: 0.02rem;
-    white-space: nowrap;
-  }
-
-  .headline-kpi-delta.positive {
-    color: var(--positive);
-  }
-
-  .headline-kpi-delta.negative {
-    color: var(--negative);
-  }
-
-  /* ── Overview hero ── */
-  .overview-hero {
-    gap: 0.6rem;
-  }
-
-  .overview-controls {
-    display: grid;
-    grid-template-columns: minmax(12rem, 1.25fr) 8.5rem 7rem 8rem minmax(7rem, 0.7fr);
+    align-items: center;
     gap: 0.5rem;
-    align-items: end;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
-  .overview-context-strip {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0;
-    border-top: 1px solid var(--divider);
-    padding-top: 0.5rem;
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--panel-border);
+    background: var(--surface-0);
   }
 
-  .overview-context-strip > div {
+  .ctrl-select {
+    appearance: none;
+    border: 0;
+    border-right: 1px solid var(--panel-border);
+    background-color: var(--surface-0);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23718096'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 8px 5px;
+    color: var(--text-1);
+    font: inherit;
+    font-size: 0.75rem;
+    padding: 0.3rem 1.6rem 0.3rem 0.65rem;
+    cursor: pointer;
     min-width: 0;
-    padding-inline: 0.85rem;
-    border-left: 1px solid var(--divider);
+    white-space: nowrap;
   }
 
-  .overview-context-strip > div:first-child {
-    border-left: 0;
-    padding-left: 0;
+  .ctrl-select:last-child {
+    border-right: 0;
   }
 
-  .overview-context-strip span {
-    display: block;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.6rem;
+  .ctrl-select:hover {
+    background-color: color-mix(in srgb, var(--accent) 8%, var(--surface-0));
+    color: var(--text-0);
   }
 
-  .overview-context-strip strong {
-    display: block;
-    font-size: 0.82rem;
-    margin-top: 0.14rem;
-    overflow-wrap: anywhere;
+  .ctrl-select:focus,
+  .ctrl-select:focus-visible {
+    background-color: var(--surface-0);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .ctrl-select option {
+    background-color: var(--surface-0);
+    color: var(--text-0);
+  }
+
+  .ctrl-select--short {
+    width: 5.5rem;
   }
 
   /* ── Overview grid / treemap ── */
@@ -2393,6 +2369,121 @@
     font-size: 0.72rem;
   }
 
+  .treemap-tooltip {
+    --tip-offset-x: 14px;
+    --tip-offset-y: 14px;
+    position: absolute;
+    pointer-events: none;
+    transform: translate(var(--tip-offset-x), var(--tip-offset-y));
+    min-width: 12.5rem;
+    max-width: 18rem;
+    padding: 0.6rem 0.75rem 0.65rem;
+    background: color-mix(in srgb, var(--bg-1) 96%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
+    box-shadow:
+      0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent) inset,
+      0 12px 28px rgba(0, 0, 0, 0.55),
+      0 2px 6px rgba(0, 0, 0, 0.4);
+    color: var(--text-0);
+    z-index: 20;
+    backdrop-filter: blur(6px);
+  }
+
+  .treemap-tooltip-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .treemap-tooltip-head strong {
+    font-size: 0.92rem;
+    letter-spacing: 0.04em;
+    color: var(--text-0);
+  }
+
+  .treemap-tooltip-chip {
+    font-size: 0.74rem;
+    font-weight: 700;
+    padding: 0.08rem 0.4rem;
+    border: 1px solid var(--divider);
+    background: color-mix(in srgb, var(--surface-0) 78%, transparent);
+  }
+
+  .treemap-tooltip-chip.positive {
+    color: #4bb474;
+    border-color: color-mix(in srgb, #4bb474 40%, transparent);
+    background: color-mix(in srgb, #4bb474 12%, var(--surface-0));
+  }
+
+  .treemap-tooltip-chip.negative {
+    color: #c66b61;
+    border-color: color-mix(in srgb, #c66b61 40%, transparent);
+    background: color-mix(in srgb, #c66b61 12%, var(--surface-0));
+  }
+
+  .treemap-tooltip-chip.neutral {
+    color: var(--text-1);
+  }
+
+  .treemap-tooltip-name {
+    margin-top: 0.32rem;
+    font-size: 0.76rem;
+    color: var(--text-1);
+    line-height: 1.2;
+  }
+
+  .treemap-tooltip-sector {
+    margin-top: 0.15rem;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text-2);
+  }
+
+  .treemap-tooltip-metrics {
+    margin: 0.55rem 0 0;
+    padding-top: 0.45rem;
+    border-top: 1px solid var(--divider);
+    display: grid;
+    gap: 0.3rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .treemap-tooltip-metrics > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .treemap-tooltip-metrics dt {
+    margin: 0;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .treemap-tooltip-metrics dd {
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-0);
+    white-space: nowrap;
+  }
+
+  .treemap-tooltip.flip-x {
+    --tip-offset-x: calc(-100% - 14px);
+  }
+
+  .treemap-tooltip.flip-y {
+    --tip-offset-y: calc(-100% - 14px);
+  }
+
   /* ── Rankings grid ── */
   .ranking-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2401,11 +2492,6 @@
 
   .overview-bottom-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: start;
-  }
-
-  .selection-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
   }
 
@@ -2855,12 +2941,9 @@
   @media (max-width: 980px) {
     .support-column,
     .field-grid,
-    .overview-controls,
-    .overview-context-strip,
     .overview-bottom-grid,
     .ranking-grid,
     .builder-actions,
-    .selection-grid,
     .kpi-grid {
       grid-template-columns: 1fr;
     }
@@ -2869,22 +2952,17 @@
       flex-wrap: wrap;
     }
 
-    .headline-strip {
-      display: none;
-    }
-
     .treemap-canvas {
       min-height: 26rem;
     }
 
-    .overview-context-strip > div {
-      border-left: 0;
-      border-top: 1px solid var(--divider);
-      padding: 0.45rem 0 0;
+    .treemap-header {
+      flex-direction: column;
+      align-items: flex-start;
     }
 
-    .overview-context-strip > div:first-child {
-      border-top: 0;
+    .treemap-header-right {
+      justify-content: flex-start;
     }
 
     .metric {
