@@ -1461,9 +1461,23 @@ At the end of Copilot V2, Gamma should have a dedicated AI research workspace th
 
 ## Workstream 8 - Commodities Tab
 
-_Status: Planned_
-_Dependency marker: Blocked by futures/commodity provider shape for deeper curve work_
-_Parallelization note: Official energy/inventory data can start early; full futures-curve analytics need a reliable futures-chain and historical data path._
+_Status: In progress (~69%)_
+_Dependency marker: First-pass sample/EIA/IBKR vertical slice is live; vendor-grade futures-chain history, continuous front-month mapping, real metals warehouse feeds, physical-flow data, and full cross-domain handoffs remain data-provider dependent._
+_Parallelization note: The current tab can be hardened independently across UI, analytics, Copilot grounding, and sample/EIA coverage, but deeper curve history, provider-validated crack spreads, true seasonal inventory models, real warehouse stocks, and maritime links need stronger futures and physical-flow data._
+_Recent progress: Commodities now exists as a first-pass research tab with `Overview`, `Energy`, `Metals`, `Curves & Spreads`, `Inventories & Fundamentals`, and `Events / Cross-Domain` modes; normalized commodity/futures/inventory/event models; `/commodities/*` API routes; a sample provider; optional EIA official energy fundamentals with FRED spot/proxy history enrichment; optional IBKR/TWS read-only futures-curve construction from discovered `FUT` contracts; Gamma-owned curve/spread/inventory/overview analytics; expanded sample metals coverage for platinum, aluminum, and zinc; sample COMEX/LME warehouse-stock proxies; Energy crack-spread matrix, term-structure heatmap, inventory seasonality cloud, and vessel/flow proxy modules; Metals macro-driver correlation, precious-ratio gauges, warehouse-stock, and copper/aluminum substitution-spread modules; frontend matrix/chart/ranking/detail panels; mode shortcuts/navigation registration; provider capability metadata; read-only warnings; tests; and Commodities Copilot context._
+
+#### Completion snapshot
+
+- `Tab shell and mode navigation`: ~78% complete. Commodities is a top-level Research workspace tab with the intended six-mode structure, shared selected-instrument state, refresh behavior, mode shortcut registration, and Copilot shelf integration. Remaining work: durable deep links, richer state persistence, real cross-tab handoff actions, and saved commodity watchlists.
+- `Domain models and API surface`: ~76% complete. Gamma now has normalized instruments, price histories, futures contracts, curve nodes, spreads, inventories/fundamentals, overview analytics, events, cross-domain links, coverage metadata, Pydantic schemas, and `/commodities/*` routes. Recent work added composite crack-spread and substitution-spread definitions without changing the read-only API boundary. Remaining work: durable spread/watchlist entities, a first-class historical curve-snapshot contract, explicit front-month/continuous-futures mapping, richer event-source models, and stronger provider-quality metadata.
+- `Provider layer`: ~62% complete. The tab has an offline sample provider, optional EIA official US energy inventory/storage enrichment, optional FRED spot/proxy price histories, optional IBKR/TWS futures curves built from read-only contract discovery, market-data snapshots, front-contract history, and local daily curve observations, plus expanded sample platinum/aluminum/zinc and COMEX/LME warehouse-stock proxy rows. Remaining work: vendor-grade futures-chain history, exchange calendar handling, continuous/roll-adjusted histories, fuller production/demand/refinery/import/export coverage, real metals warehouse feeds, and provider quality scoring.
+- `Overview mode`: ~70% complete. The workspace has market breadth, a commodity matrix, selected term-structure stack, momentum/roll scatter, ranked backwardation/contango/inventory/spread/mover panels, event highlights, and cross-domain notes. Remaining work: richer "what changed" windows, stored historical curve-stack comparisons, true inventory-surprise context, alert/watchlist behavior, and cleaner click-through handoffs.
+- `Energy mode`: ~76% complete. WTI, Brent, Henry Hub, gasoline, and heating oil have first-pass summaries, curves, adjacent calendar-spread heatmap, 1-1/2-1-1/3-2-1 crack-spread matrix, selected EIA fundamentals, inventory seasonality-cloud rendering, sample event context, vessel/flow handoff proxy, and optional IBKR roots. Remaining work: deeper official EIA production/demand/import/export/refinery coverage, provider-validated crack-spread methodology, true 5-year seasonal ranges, better Brent/global handling, real tanker/floating-storage feeds, and optional LNG/electricity proxies.
+- `Metals mode`: ~60% complete. Gold, silver, platinum, copper, aluminum, and zinc now have first-pass sample/FRED/IBKR-compatible coverage where configured, price histories, curves, gold/silver and gold/platinum ratios, copper/gold and copper/aluminum relative-value spreads, Macro USD/real-yield correlation rendering, and sample COMEX/LME warehouse-stock proxy rows. Remaining work: real exchange/warehouse inventory coverage, stronger China/global demand context, richer industrial-metals breadth, and provider-backed macro/warehouse data-quality labels.
+- `Curves & Spreads mode`: ~68% complete. Current curve charts/tables, contango/backwardation labels, front/M1-M6 spreads, inter-commodity ratios, composite crack proxies, substitution spreads, z-scores, and percentiles exist where history is available. Remaining work: historical futures-curve stacks, provider-backed spread history, curve-change-by-date views, roll calendar handling, seasonality-aware spreads, and saved spread watchlists.
+- `Inventories & Fundamentals mode`: ~55% complete. Sample inventory/fundamental series, selected official EIA weekly energy series, inventory cloud rendering, and sample COMEX/LME warehouse rows feed latest value, change, percentile, and interpretation panels. Remaining work: real surprise models, true 5-year seasonal ranges, broader EIA fundamentals, real metals inventories, regional coverage, and tighter price-versus-inventory comparison modules.
+- `Events / Cross-Domain mode`: ~40% complete. Sample EIA release events, Red Sea/Suez watch items, and heuristic Macro, Maritime, Prediction Markets, and Copilot links are live. Remaining work: real event calendar ingestion, actual `CrossTabHandoffEnvelope` flows, prediction-market retrieval, Sealanes route/chokepoint context, weather/geopolitical event sources, and saved commodity notes.
+- `Copilot and test coverage`: ~69% complete. Commodities has a compact Copilot context helper, mock Copilot tool/card support, backend tests for sample/EIA/IBKR/API/Copilot behavior, and frontend render coverage for the workspace shell, degraded provider notices, Energy deep-flow modules, and Metals macro modules. Remaining work: richer drilldown tools, source-citation drill paths, live-provider smoke coverage, and broader interactive UI tests.
 
 ### Why this tab deserves to exist
 
@@ -1662,16 +1676,16 @@ Potential sources include:
 
 ### Progression notes
 
-Suggested progression:
+Current progression:
 
-1. Define commodity instrument and futures-curve schemas.
-2. Establish whether IBKR/TWS can provide enough futures-chain and history coverage for the first pass.
-3. Build Energy mode with EIA fundamentals and a narrow futures set.
-4. Add Curves & Spreads mode for the initial energy contracts.
-5. Add Metals mode with gold, silver, and copper.
-6. Add cross-tab links to Macro and Prediction Markets.
-7. Add Maritime Intelligence links once that tab has route/chokepoint context.
-8. Consider deeper paid futures data only if IBKR/TWS proves insufficient for curve history and analytics.
+1. First-pass commodity instrument, futures-curve, inventory, event, spread, and overview schemas are live; next schema work should focus on historical curve snapshots, continuous/front-month mapping, saved spread/watchlist entities, and provider-quality metadata.
+2. IBKR/TWS can provide a usable read-only first pass for discovered futures curves and front-contract history when TWS is connected and entitled; next work should validate pacing, entitlement behavior, root mappings, exchange calendars, and whether IBKR is enough for stored historical curve analytics.
+3. Energy mode is the strongest vertical and should be hardened next with deeper EIA fundamentals, true 5-year seasonal ranges, provider-validated crack-spread framing, real flow data, and clearer global/Brent caveats.
+4. Curves & Spreads should move from current-snapshot analytics toward stored historical curve stacks, curve-change views, spread watchlists, and provider-backed spread histories.
+5. Metals mode has a stronger sample/proxy research surface after the macro-correlation, precious-ratio, warehouse-stock, and substitution-spread pass, but should remain careful until provider coverage for real futures, warehouse stocks, and macro overlays is stronger.
+6. Cross-domain links to Macro, Prediction Markets, and Copilot are currently heuristic notes; they should become real handoff flows once the shared handoff layer has domain-specific target behavior.
+7. Maritime Intelligence links should wait for stronger route/chokepoint and commodity-flow context from the Sealanes workstream.
+8. Deeper paid futures data should be evaluated only if IBKR/TWS proves insufficient for historical curve storage, spread analytics, and reliable multi-contract coverage.
 
 ### Deliverable
 
@@ -2176,10 +2190,10 @@ Likely early wins:
 
 ### First new-domain prototypes
 
-New tabs should begin as data prototypes before full UI builds:
+New tabs should begin as data prototypes before full UI builds. Commodities has crossed this first-prototype line, so remaining new-domain prototype work should focus on provider hardening and Maritime feasibility:
 
-- Commodities futures-chain and EIA prototype,
-- Commodities curve/spread schema,
+- Commodities IBKR futures-chain and EIA/FRED provider hardening,
+- Commodities historical curve/spread storage and provider-quality measurement,
 - Maritime vessel/position/chokepoint schema,
 - Maritime historical/mock map,
 - AIS provider feasibility.
@@ -2190,7 +2204,7 @@ After data shapes are proven:
 
 - Strategy Lab,
 - Market Overview,
-- Commodities Energy and Curves & Spreads,
+- Commodities Energy/Curves hardening and Metals/Events deepening,
 - IV Skew & Term and Realized vs Implied,
 - Crypto Wallets & Flows,
 - Fundamentals Reverse Valuation,
@@ -2242,7 +2256,7 @@ Keep the shell shelf, add a dedicated Copilot workspace, and support streaming, 
 
 ### Workstream 8 - Commodities
 
-Build a full commodity research tab with energy, metals, futures curves, spreads, inventories, events, and cross-domain links.
+Deepen the live first-pass commodity research tab into a fuller workspace with better historical curves, spreads, inventories, metals coverage, events, and cross-domain handoffs.
 
 ### Workstream 9 - Maritime Intelligence
 
