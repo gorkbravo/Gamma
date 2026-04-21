@@ -9,6 +9,7 @@
     CommodityOverviewRankingItem,
     CommodityPriceHistory,
     CommoditySpreadSnapshot,
+    MacroSeriesHistory,
     CommodityWorkspaceResponse
   } from "../lib/api/types";
   import type { CommodityWorkspaceLoadOptions } from "../lib/stores/app";
@@ -17,6 +18,8 @@
   export let loading = false;
   export let mode: CommodityMode = "overview";
   export let onLoadWorkspace: (options?: CommodityWorkspaceLoadOptions) => Promise<unknown> | void;
+  export let macroHistories: Record<string, MacroSeriesHistory> = {};
+  export let onLoadMacroSeries: (seriesId: string, options?: { region?: string; timeframe?: string; forceRefresh?: boolean }) => Promise<unknown> | void = () => undefined;
 
   const modes: Array<{ id: CommodityMode; label: string }> = [
     { id: "overview", label: "Overview" },
@@ -30,6 +33,8 @@
   let selectedInstrumentId = "wti";
   const scatterBounds = { left: 12, right: 190, top: 10, bottom: 108 };
   const scatterGridFractions = [0.25, 0.5, 0.75];
+  const macroDriverSeries = ["us-dollar-broad", "us-real-10y-yield"];
+  const requestedMacroDrivers = new Set<string>();
 
   $: if (workspace?.selected_instrument_id && workspace.selected_instrument_id !== selectedInstrumentId) {
     selectedInstrumentId = workspace.selected_instrument_id;
@@ -87,6 +92,17 @@
     : buildSpreadZRows(workspace?.spreads ?? []);
   $: historyPointCount = selectedHistory?.points.length ?? 0;
   $: latestHistoryDate = selectedHistory?.points.at(-1)?.timestamp ?? selectedSummary?.retrieved_at ?? workspace?.retrieved_at ?? null;
+  $: termSpreadHeatmapRows = buildTermSpreadHeatmap(selectedCurve);
+  $: crackMatrixRows = buildCrackMatrix(workspace?.spreads ?? []);
+  $: inventoryCloudRows = buildInventoryCloudRows(visibleInventories);
+  $: flowProxyRows = buildFlowProxyRows(workspace, selectedInstrumentId);
+  $: metalsCorrelationRows = buildMetalsCorrelationRows(workspace, macroHistories);
+  $: metalRatioGaugeRows = buildMetalRatioGaugeRows(workspace?.spreads ?? []);
+  $: warehouseStockRows = buildWarehouseStockRows(mode === "metals" ? workspace?.inventories ?? [] : visibleInventories);
+  $: substitutionSpreadRows = buildSubstitutionSpreadRows(workspace?.spreads ?? []);
+  $: if (mode === "metals") {
+    void ensureMacroDrivers();
+  }
 
   let scatterShellEl: HTMLElement | null = null;
   let tooltipPoint: (typeof scatterState.points)[0] | null = null;
@@ -214,6 +230,253 @@
           ]
         : [])
     ];
+  }
+
+  async function ensureMacroDrivers() {
+    for (const seriesId of macroDriverSeries) {
+      const key = macroHistoryKey(seriesId);
+      if (macroHistories[key] || requestedMacroDrivers.has(key)) {
+        continue;
+      }
+      requestedMacroDrivers.add(key);
+      await onLoadMacroSeries(seriesId, { region: "US", timeframe: "3M" });
+    }
+  }
+
+  function macroHistoryKey(seriesId: string) {
+    return `US:3M:${seriesId}`;
+  }
+
+  function buildTermSpreadHeatmap(curve: CommodityCurveSnapshot | null) {
+    const nodes = curve?.nodes ?? [];
+    return nodes.slice(0, -1).map((node, index) => {
+      const next = nodes[index + 1];
+      const value = node.price != null && next.price != null ? node.price - next.price : null;
+      return {
+        id: `${curve?.instrument_id ?? "curve"}-${index}`,
+        label: `M${index + 1}-M${index + 2}`,
+        left: node.contract.symbol,
+        right: next.contract.symbol,
+        value,
+        tone: value == null ? "neutral" : value > 0 ? "positive" : value < 0 ? "negative" : "neutral",
+        width: value == null ? 0 : Math.min(100, Math.max(12, Math.abs(value) * 42))
+      };
+    });
+  }
+
+  function buildCrackMatrix(spreads: CommoditySpreadSnapshot[]) {
+    const ids = ["gasoline-crack", "heating-oil-crack", "two-one-one-crack", "three-two-one-crack"];
+    return ids
+      .map((id) => spreads.find((spread) => spread.definition.spread_id === id))
+      .filter((spread): spread is CommoditySpreadSnapshot => Boolean(spread))
+      .map((spread) => ({
+        id: spread.definition.spread_id,
+        label: spread.definition.label,
+        formula: spread.definition.formula,
+        value: spread.value,
+        change: spread.change,
+        percentile: spread.percentile,
+        interpretation: spread.interpretation ?? "N/A",
+        tone: spread.change == null ? "" : spread.change > 0 ? "positive" : spread.change < 0 ? "negative" : ""
+      }));
+  }
+
+  function buildInventoryCloudRows(seriesRows: CommodityInventorySeries[]) {
+    return seriesRows.map((series) => {
+      const latest = series.points.at(-1);
+      const latestDate = latest ? new Date(latest.timestamp) : null;
+      const weekKey = latestDate && !Number.isNaN(latestDate.getTime()) ? weekOfYear(latestDate) : null;
+      const seasonalPoints = weekKey == null
+        ? series.points
+        : series.points.filter((point) => weekOfYear(new Date(point.timestamp)) === weekKey);
+      const values = seasonalPoints.map((point) => point.value).filter((value) => Number.isFinite(value));
+      const allValues = series.points.map((point) => point.value).filter((value) => Number.isFinite(value));
+      const bandValues = values.length >= 3 ? values : allValues;
+      const min = bandValues.length ? Math.min(...bandValues) : null;
+      const max = bandValues.length ? Math.max(...bandValues) : null;
+      const latestValue = series.latest_value ?? latest?.value ?? null;
+      const position = min != null && max != null && latestValue != null && max !== min
+        ? ((latestValue - min) / (max - min)) * 100
+        : null;
+      return {
+        id: series.metadata.series_id,
+        label: series.metadata.label,
+        unit: series.metadata.unit,
+        latest: latestValue,
+        change: series.latest_change,
+        min,
+        max,
+        position: position == null ? null : Math.max(0, Math.min(100, position)),
+        percentile: series.seasonal_percentile,
+        methodology: series.points.length >= 240 ? "5Y seasonal band" : "Loaded seasonal band",
+        interpretation: series.interpretation ?? "N/A"
+      };
+    });
+  }
+
+  function buildFlowProxyRows(data: CommodityWorkspaceResponse | null, instrumentId: string) {
+    const selectedLinks = (data?.cross_domain_links ?? []).filter((link) => link.linked_instrument_ids.includes(instrumentId));
+    const maritimeLink = selectedLinks.find((link) => link.target_domain === "maritime");
+    const inventory = findSelectedInventory(data, instrumentId);
+    const isEnergy = findSelectedInstrument(data, instrumentId)?.family === "energy";
+    return [
+      {
+        hub: "Cushing",
+        metric: inventory ? inventoryValue(inventory) : "Storage N/A",
+        signal: inventory?.interpretation ?? "No linked storage series",
+        source: inventory?.source_provider ?? "inventory payload"
+      },
+      {
+        hub: "US Gulf",
+        metric: isEnergy ? "Maritime handoff" : "N/A",
+        signal: maritimeLink?.summary ?? "No vessel-count feed in commodities payload",
+        source: maritimeLink?.source_provider ?? "handoff proxy"
+      },
+      {
+        hub: "Rotterdam",
+        metric: maritimeLink ? `confidence ${formatNumber(maritimeLink.confidence, 2)}` : "Proxy only",
+        signal: maritimeLink ? humanize(maritimeLink.relationship) : "Requires Maritime flow coverage",
+        source: maritimeLink?.origin ?? "provider unavailable"
+      }
+    ];
+  }
+
+  function buildMetalsCorrelationRows(
+    data: CommodityWorkspaceResponse | null,
+    histories: Record<string, MacroSeriesHistory>
+  ) {
+    const drivers = [
+      { id: "us-dollar-broad", label: "DXY/Broad USD", history: histories[macroHistoryKey("us-dollar-broad")] },
+      { id: "us-real-10y-yield", label: "10Y Real Yield", history: histories[macroHistoryKey("us-real-10y-yield")] }
+    ];
+    const metals = ["gold", "copper"]
+      .map((instrumentId) => findSelectedHistory(data, instrumentId))
+      .filter((history): history is CommodityPriceHistory => Boolean(history));
+    return metals.flatMap((metal) =>
+      drivers.map((driver) => {
+        const corr = rollingCorrelation(metal.points, driver.history?.points ?? [], 30);
+        return {
+          id: `${metal.instrument_id}-${driver.id}`,
+          metal: metal.instrument_id === "gold" ? "Gold" : "Copper",
+          driver: driver.label,
+          value: corr,
+          tone: corr == null ? "neutral" : corr > 0.35 ? "positive" : corr < -0.35 ? "negative" : "warning",
+          note: corr == null ? "Load Macro US 3M driver history" : correlationNote(metal.instrument_id, driver.id, corr)
+        };
+      })
+    );
+  }
+
+  function buildMetalRatioGaugeRows(spreads: CommoditySpreadSnapshot[]) {
+    return ["gold-silver-ratio", "gold-platinum-ratio"]
+      .map((id) => spreads.find((spread) => spread.definition.spread_id === id))
+      .filter((spread): spread is CommoditySpreadSnapshot => Boolean(spread))
+      .map((spread) => {
+        const values = spread.history.map((point) => point.value).filter((value) => Number.isFinite(value));
+        const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+        const current = spread.value;
+        const distance = current != null && mean ? ((current - mean) / mean) * 100 : null;
+        return {
+          id: spread.definition.spread_id,
+          label: spread.definition.label,
+          current,
+          mean,
+          distance,
+          percentile: spread.percentile,
+          position: spread.percentile ?? (distance == null ? null : Math.max(0, Math.min(100, 50 + distance))),
+          methodology: values.length >= 2400 ? "10Y mean" : "Loaded-history mean"
+        };
+      });
+  }
+
+  function buildWarehouseStockRows(seriesRows: CommodityInventorySeries[]) {
+    return seriesRows
+      .filter((series) => series.metadata.category === "warehouse")
+      .map((series) => ({
+        id: series.metadata.series_id,
+        label: series.metadata.label,
+        market: findSelectedInstrument(workspace, series.metadata.instrument_id ?? "")?.symbol ?? displayStatus(series.metadata.instrument_id),
+        latest: series.latest_value,
+        change: series.latest_change,
+        percentile: series.seasonal_percentile,
+        unit: series.metadata.unit,
+        signal: series.interpretation ?? "N/A",
+        source: series.metadata.source_provider
+      }));
+  }
+
+  function buildSubstitutionSpreadRows(spreads: CommoditySpreadSnapshot[]) {
+    return spreads
+      .filter((spread) => spread.definition.spread_id === "copper-aluminum-spread")
+      .map((spread) => ({
+        id: spread.definition.spread_id,
+        label: spread.definition.label,
+        value: spread.value,
+        change: spread.change,
+        zScore: spread.z_score,
+        percentile: spread.percentile,
+        interpretation: spread.interpretation ?? "N/A"
+      }));
+  }
+
+  function weekOfYear(date: Date) {
+    const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const day = Math.floor((Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - start.getTime()) / 86400000);
+    return Math.floor(day / 7) + 1;
+  }
+
+  function rollingCorrelation(
+    leftPoints: Array<{ timestamp: string; value: number }>,
+    rightPoints: Array<{ timestamp: string; value: number }>,
+    windowSize: number
+  ) {
+    const rightByDate = new Map(rightPoints.map((point) => [dateKey(point.timestamp), point.value]));
+    const aligned = leftPoints
+      .map((point) => ({ left: point.value, right: rightByDate.get(dateKey(point.timestamp)) }))
+      .filter((point): point is { left: number; right: number } => point.right != null && Number.isFinite(point.left) && Number.isFinite(point.right));
+    const window = aligned.slice(-windowSize);
+    if (window.length < Math.min(18, windowSize)) {
+      return null;
+    }
+    return correlation(window.map((point) => point.left), window.map((point) => point.right));
+  }
+
+  function correlation(left: number[], right: number[]) {
+    const count = Math.min(left.length, right.length);
+    if (count < 2) {
+      return null;
+    }
+    const leftMean = left.slice(0, count).reduce((sum, value) => sum + value, 0) / count;
+    const rightMean = right.slice(0, count).reduce((sum, value) => sum + value, 0) / count;
+    let numerator = 0;
+    let leftDenom = 0;
+    let rightDenom = 0;
+    for (let index = 0; index < count; index += 1) {
+      const leftDiff = left[index] - leftMean;
+      const rightDiff = right[index] - rightMean;
+      numerator += leftDiff * rightDiff;
+      leftDenom += leftDiff * leftDiff;
+      rightDenom += rightDiff * rightDiff;
+    }
+    const denom = Math.sqrt(leftDenom * rightDenom);
+    return denom ? numerator / denom : null;
+  }
+
+  function dateKey(value: string) {
+    return value.slice(0, 10);
+  }
+
+  function correlationNote(metalId: string, driverId: string, value: number) {
+    if (metalId === "gold" && driverId === "us-real-10y-yield" && value > 0.25) {
+      return "Gold and real yields are rising together; macro narrative may be stressed.";
+    }
+    if (metalId === "gold" && driverId === "us-dollar-broad" && value < -0.25) {
+      return "Classic inverse dollar sensitivity is active.";
+    }
+    if (metalId === "copper" && value > 0.25) {
+      return "Industrial metal is moving with the macro driver.";
+    }
+    return "Near mixed/neutral 30D correlation bucket.";
   }
 
   function relativeContractTimestamp(index: number) {
@@ -1289,6 +1552,267 @@
       </section>
     {/if}
 
+    {#if mode === "energy"}
+      <section class="deep-grid">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Crack Spread Matrix</h2>
+              <p>1-1, 2-1-1, and 3-2-1 refining margin proxies versus WTI.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Spread</th>
+                  <th>Value</th>
+                  <th>Chg</th>
+                  <th>Pctl</th>
+                  <th>Read</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if crackMatrixRows.length}
+                  {#each crackMatrixRows as row}
+                    <tr>
+                      <td>
+                        <strong>{row.label}</strong>
+                        <span>{row.formula}</span>
+                      </td>
+                      <td>{formatNumber(row.value, 2)} USD/bbl</td>
+                      <td class={row.tone}>{formatNumber(row.change, 2)}</td>
+                      <td>{formatPercentile(row.percentile)}</td>
+                      <td>{row.interpretation}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="5">No crack-spread rows are available.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Term Structure Heatmap</h2>
+              <p>Calendar-spread kinks across adjacent contracts.</p>
+            </div>
+          </div>
+          {#if termSpreadHeatmapRows.length}
+            <div class="heatmap-list">
+              {#each termSpreadHeatmapRows as row}
+                <div class="heatmap-row">
+                  <span>{row.label}</span>
+                  <div class="heatmap-track">
+                    <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
+                  </div>
+                  <strong class={row.tone}>{formatNumber(row.value, 3)}</strong>
+                  <small>{row.left} / {row.right}</small>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="empty-hint">No adjacent curve nodes for calendar-spread heatmap.</p>
+          {/if}
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Inventory vs Seasonality Cloud</h2>
+              <p>Latest inventory location inside the loaded seasonal min/max band.</p>
+            </div>
+          </div>
+          <div class="seasonality-list">
+            {#if inventoryCloudRows.length}
+              {#each inventoryCloudRows as row}
+                <div class="seasonality-row">
+                  <div>
+                    <strong>{row.label}</strong>
+                    <span>{row.methodology} | {row.interpretation}</span>
+                  </div>
+                  <div class="seasonality-band">
+                    {#if row.position != null}
+                      <span class="seasonality-dot" style={`left:${row.position}%`}></span>
+                    {/if}
+                  </div>
+                  <small>{formatNumber(row.min, 1)} / {formatNumber(row.latest, 1)} / {formatNumber(row.max, 1)} {row.unit}</small>
+                </div>
+              {/each}
+            {:else}
+              <p class="empty-hint">No inventory series for the selected energy market.</p>
+            {/if}
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Vessel / Flow Proxy</h2>
+              <p>Physical-flow hooks and availability status for energy hubs.</p>
+            </div>
+          </div>
+          <div class="note-list compact-notes">
+            {#each flowProxyRows as row}
+              <div class="note-row">
+                <strong>{row.hub}</strong>
+                <span>{row.metric} | {row.source}</span>
+                <p>{row.signal}</p>
+              </div>
+            {/each}
+          </div>
+        </article>
+      </section>
+    {/if}
+
+    {#if mode === "metals"}
+      <section class="deep-grid">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Macro Driver Correlation</h2>
+              <p>30D rolling correlation of gold/copper versus USD and real yields.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Metal</th>
+                  <th>Driver</th>
+                  <th>Corr</th>
+                  <th>Read</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if metalsCorrelationRows.length}
+                  {#each metalsCorrelationRows as row}
+                    <tr>
+                      <td>{row.metal}</td>
+                      <td>{row.driver}</td>
+                      <td><span class="tag {row.tone}">{formatNumber(row.value, 2)}</span></td>
+                      <td>{row.note}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="4">No gold/copper histories are available for macro correlation.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Precious Ratio Gauges</h2>
+              <p>Gold/silver and gold/platinum versus long-run or loaded-history mean.</p>
+            </div>
+          </div>
+          <div class="ratio-gauge-list">
+            {#if metalRatioGaugeRows.length}
+              {#each metalRatioGaugeRows as row}
+                <div class="ratio-gauge-row">
+                  <div>
+                    <strong>{row.label}</strong>
+                    <span>{row.methodology} | mean {formatNumber(row.mean, 2)}</span>
+                  </div>
+                  <div class="gauge-track">
+                    {#if row.position != null}
+                      <span class="gauge-marker" style={`left:${row.position}%`}></span>
+                    {/if}
+                  </div>
+                  <small>{formatNumber(row.current, 2)}x | {formatPercentile(row.percentile)}</small>
+                </div>
+              {/each}
+            {:else}
+              <p class="empty-hint">No precious-metal ratio rows are available.</p>
+            {/if}
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>LME / COMEX Warehouse Stocks</h2>
+              <p>On-warrant and registered inventory proxies by industrial metal.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Series</th>
+                  <th>Market</th>
+                  <th>Latest</th>
+                  <th>Chg</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if warehouseStockRows.length}
+                  {#each warehouseStockRows as row}
+                    <tr>
+                      <td>
+                        <strong>{row.label}</strong>
+                        <span>{row.source}</span>
+                      </td>
+                      <td>{row.market}</td>
+                      <td>{formatNumber(row.latest, 1)} {row.unit}</td>
+                      <td class={valueClass(row.change)}>{formatNumber(row.change, 1)}</td>
+                      <td>{row.signal}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="5">No exchange warehouse rows are available.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Substitution Spreads</h2>
+              <p>Copper versus aluminum normalized to metric-ton terms.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Spread</th>
+                  <th>Value</th>
+                  <th>Chg</th>
+                  <th>Z</th>
+                  <th>Read</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if substitutionSpreadRows.length}
+                  {#each substitutionSpreadRows as row}
+                    <tr>
+                      <td>{row.label}</td>
+                      <td>{formatNumber(row.value, 1)} USD/mt</td>
+                      <td class={valueClass(row.change)}>{formatNumber(row.change, 1)}</td>
+                      <td>{formatNumber(row.zScore, 2)}</td>
+                      <td>{row.interpretation}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="5">No copper/aluminum spread row is available.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    {/if}
+
     {#if mode === "energy" || mode === "metals" || mode === "curves_spreads"}
       <section class="split">
         <article class="panel chart-panel">
@@ -2285,6 +2809,119 @@
     gap: 0.5rem;
   }
 
+  .deep-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .compact-table {
+    min-width: 100%;
+    table-layout: fixed;
+  }
+
+  .heatmap-list,
+  .seasonality-list,
+  .ratio-gauge-list {
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--divider);
+  }
+
+  .heatmap-row,
+  .seasonality-row,
+  .ratio-gauge-row {
+    display: grid;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.48rem 0;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .heatmap-row {
+    grid-template-columns: 4.5rem minmax(0, 1fr) 4.5rem 6.5rem;
+  }
+
+  .seasonality-row,
+  .ratio-gauge-row {
+    grid-template-columns: minmax(0, 1.1fr) minmax(8rem, 1fr) minmax(8rem, auto);
+  }
+
+  .seasonality-row strong,
+  .seasonality-row span,
+  .ratio-gauge-row strong,
+  .ratio-gauge-row span {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  .seasonality-row span,
+  .ratio-gauge-row span {
+    color: var(--text-2);
+    font-size: 0.72rem;
+  }
+
+  .heatmap-track,
+  .seasonality-band,
+  .gauge-track {
+    position: relative;
+    height: 0.75rem;
+    background: var(--surface-soft);
+    border-left: 1px solid var(--divider);
+    border-right: 1px solid var(--divider);
+    overflow: hidden;
+  }
+
+  .heatmap-track::before,
+  .gauge-track::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    border-left: 1px solid var(--divider);
+  }
+
+  .heatmap-bar {
+    display: block;
+    height: 100%;
+    opacity: 0.78;
+  }
+
+  .heatmap-bar.positive {
+    background: var(--positive);
+  }
+
+  .heatmap-bar.negative {
+    background: var(--negative);
+  }
+
+  .heatmap-bar.neutral {
+    background: var(--text-2);
+  }
+
+  .seasonality-dot,
+  .gauge-marker {
+    position: absolute;
+    top: -0.15rem;
+    width: 2px;
+    height: 1.05rem;
+    background: var(--accent);
+  }
+
+  .seasonality-dot::after,
+  .gauge-marker::after {
+    content: "";
+    position: absolute;
+    top: 0.28rem;
+    left: -0.2rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border: 1px solid var(--accent);
+    background: var(--bg-0);
+  }
+
   .inventory-panel {
     display: grid;
     gap: 0.5rem;
@@ -2427,7 +3064,8 @@
 
     .overview-grid,
     .rank-grid,
-    .inventory-grid {
+    .inventory-grid,
+    .deep-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -2487,8 +3125,16 @@
     .overview-grid,
     .rank-grid,
     .inventory-grid,
+    .deep-grid,
     dl {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .heatmap-row,
+    .seasonality-row,
+    .ratio-gauge-row {
+      grid-template-columns: minmax(0, 1fr);
+      align-items: stretch;
     }
 
     .span-2 {

@@ -269,9 +269,11 @@ class CommoditiesService:
 
         ratio_specs = [
             ("gold-silver-ratio", "Gold / Silver", "gold", "silver", "ratio"),
+            ("gold-platinum-ratio", "Gold / Platinum", "gold", "platinum", "ratio"),
             ("copper-gold-ratio", "Copper / Gold", "copper", "gold", "ratio"),
-            ("gasoline-crack", "Gasoline Crack Proxy", "gasoline", "wti", "crack"),
-            ("heating-oil-crack", "Heating Oil Crack Proxy", "heating_oil", "wti", "crack"),
+            ("copper-aluminum-spread", "Copper - Aluminum", "copper", "aluminum", "substitution"),
+            ("gasoline-crack", "Gasoline 1-1 Crack Proxy", "gasoline", "wti", "crack"),
+            ("heating-oil-crack", "Distillate 1-1 Crack Proxy", "heating_oil", "wti", "crack"),
         ]
         for spread_id, label, left_id, right_id, kind in ratio_specs:
             left = histories_by_id.get(left_id)
@@ -286,8 +288,8 @@ class CommoditiesService:
                 spread_type="inter_commodity",
                 left_leg_id=left_id,
                 right_leg_id=right_id,
-                unit="ratio" if kind == "ratio" else "USD/bbl",
-                formula="left / right" if kind == "ratio" else "product price * 42 - crude price",
+                unit=_relative_spread_unit(kind),
+                formula=_relative_spread_formula(kind),
                 rationale=_spread_rationale(spread_id),
                 source_provider="gamma",
                 retrieved_at=history[-1].retrieved_at,
@@ -295,6 +297,29 @@ class CommoditiesService:
                 transformation_note="Gamma-defined inter-commodity spread using aligned normalized price histories.",
             )
             spreads.append(_spread_snapshot(definition, value, history, history[-1].retrieved_at))
+
+        for spread_id, label, product_weights, crude_barrels in [
+            ("two-one-one-crack", "2-1-1 Crack Proxy", {"gasoline": 1.0, "heating_oil": 1.0}, 2.0),
+            ("three-two-one-crack", "3-2-1 Crack Proxy", {"gasoline": 2.0, "heating_oil": 1.0}, 3.0),
+        ]:
+            history = _composite_crack_history(spread_id, histories_by_id, product_weights, "wti", crude_barrels)
+            if not history:
+                continue
+            definition = CommoditySpreadDefinition(
+                spread_id=spread_id,
+                label=label,
+                spread_type="refining_margin",
+                left_leg_id="+".join(f"{weight:g}x:{instrument_id}" for instrument_id, weight in product_weights.items()),
+                right_leg_id=f"{crude_barrels:g}x:wti",
+                unit="USD/bbl",
+                formula="weighted product barrel value minus crude cost, divided by crude barrels",
+                rationale=_spread_rationale(spread_id),
+                source_provider="gamma",
+                retrieved_at=history[-1].retrieved_at,
+                origin="gamma.commodities.spread_definition",
+                transformation_note="Gamma-defined composite crack spread using aligned normalized product and crude price histories.",
+            )
+            spreads.append(_spread_snapshot(definition, history[-1].value, history, history[-1].retrieved_at))
         return sorted(spreads, key=lambda spread: spread.definition.label)
 
     def _build_cross_domain_links(
@@ -986,6 +1011,8 @@ def _relative_spread_history(
             continue
         if kind == "crack":
             value = (left_point.value * 42.0) - right_point.value
+        elif kind == "substitution":
+            value = _price_as_metric_ton(left_point.value, left.unit) - _price_as_metric_ton(right_point.value, right.unit)
         else:
             value = left_point.value / right_point.value
         rows.append(
@@ -1000,6 +1027,75 @@ def _relative_spread_history(
             )
         )
     return rows[-120:]
+
+
+def _composite_crack_history(
+    spread_id: str,
+    histories_by_id: dict[str, CommodityPriceHistory],
+    product_weights: dict[str, float],
+    crude_id: str,
+    crude_barrels: float,
+) -> list[CommoditySpreadPoint]:
+    crude = histories_by_id.get(crude_id)
+    product_histories = {instrument_id: histories_by_id.get(instrument_id) for instrument_id in product_weights}
+    if crude is None or any(history is None for history in product_histories.values()) or crude_barrels <= 0:
+        return []
+    crude_by_date = {point.timestamp.date(): point for point in crude.points}
+    product_by_date = {
+        instrument_id: {point.timestamp.date(): point for point in history.points}
+        for instrument_id, history in product_histories.items()
+        if history is not None
+    }
+    rows: list[CommoditySpreadPoint] = []
+    for date_key, crude_point in crude_by_date.items():
+        product_value = 0.0
+        retrieved_values = [crude_point.retrieved_at]
+        missing = False
+        for instrument_id, weight in product_weights.items():
+            point = product_by_date.get(instrument_id, {}).get(date_key)
+            if point is None:
+                missing = True
+                break
+            product_value += weight * point.value * 42.0
+            retrieved_values.append(point.retrieved_at)
+        if missing:
+            continue
+        value = (product_value - (crude_barrels * crude_point.value)) / crude_barrels
+        rows.append(
+            CommoditySpreadPoint(
+                spread_id=spread_id,
+                timestamp=crude_point.timestamp,
+                value=round(value, 6),
+                source_provider="gamma",
+                retrieved_at=_max_datetime(*retrieved_values),
+                origin="gamma.commodities.composite_crack_history",
+                transformation_note="Gamma computes this composite crack spread from aligned normalized product and crude price histories.",
+            )
+        )
+    return rows[-120:]
+
+
+def _relative_spread_unit(kind: str) -> str:
+    if kind == "ratio":
+        return "ratio"
+    if kind == "substitution":
+        return "USD/mt"
+    return "USD/bbl"
+
+
+def _relative_spread_formula(kind: str) -> str:
+    if kind == "ratio":
+        return "left / right"
+    if kind == "substitution":
+        return "left USD/mt - right USD/mt"
+    return "product price * 42 - crude price"
+
+
+def _price_as_metric_ton(value: float, unit: str | None) -> float:
+    normalized = str(unit or "").lower()
+    if "lb" in normalized:
+        return value * 2204.62262185
+    return value
 
 
 def _spread_snapshot(
@@ -1040,9 +1136,13 @@ def _spread_snapshot(
 def _spread_rationale(spread_id: str) -> str:
     mapping = {
         "gold-silver-ratio": "Precious-metal ratio often frames defensive metal leadership and liquidity preference.",
+        "gold-platinum-ratio": "Gold/platinum frames defensive monetary metal strength against industrial precious-metal demand.",
         "copper-gold-ratio": "Industrial-versus-defensive metal ratio can frame growth sensitivity.",
-        "gasoline-crack": "Gasoline crack proxy frames refining margin pressure around crude and product prices.",
-        "heating-oil-crack": "Heating oil crack proxy frames distillate tightness around crude and product prices.",
+        "copper-aluminum-spread": "Copper and aluminum can substitute in selected industrial uses, so the normalized spread can frame relative-value pressure.",
+        "gasoline-crack": "Gasoline 1-1 crack proxy frames refining margin pressure around crude and product prices.",
+        "heating-oil-crack": "Distillate 1-1 crack proxy frames diesel and heating-oil tightness around crude and product prices.",
+        "two-one-one-crack": "2-1-1 crack proxy summarizes a balanced gasoline/distillate refining barrel against crude input cost.",
+        "three-two-one-crack": "3-2-1 crack proxy is a common refinery-margin shorthand for two gasoline barrels and one distillate barrel against three crude barrels.",
     }
     return mapping.get(spread_id, "Gamma-defined spread for commodity research.")
 

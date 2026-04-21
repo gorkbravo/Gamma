@@ -111,7 +111,10 @@ FRED_PRICE_SERIES: tuple[FredPriceConfig, ...] = (
     FredPriceConfig("DHHNGSP", "henry_hub", "Henry Hub Spot Proxy", "USD/MMBtu"),
     FredPriceConfig("GOLDAMGBD228NLBM", "gold", "Gold London AM Fix", "USD/oz"),
     FredPriceConfig("SLVPRUSD", "silver", "Silver Price Proxy", "USD/oz"),
+    FredPriceConfig("PPLTUSDM", "platinum", "Platinum Price Proxy", "USD/oz"),
     FredPriceConfig("PCOPPUSDM", "copper", "Copper Price Proxy", "USD/metric ton"),
+    FredPriceConfig("PALUMUSDM", "aluminum", "Aluminum Price Proxy", "USD/metric ton"),
+    FredPriceConfig("PZINCUSDM", "zinc", "Zinc Price Proxy", "USD/metric ton"),
 )
 
 IBKR_FUTURES_ROOTS: tuple[IbkrFutureRootConfig, ...] = (
@@ -880,7 +883,10 @@ def _sample_instruments(retrieved_at: datetime) -> list[CommodityInstrument]:
         ("heating_oil", "HO", "Heating Oil / Diesel", "energy", "products", "USD/gal", "NYMEX", "HO"),
         ("gold", "GC", "Gold", "metals", "precious", "USD/oz", "COMEX", "GC"),
         ("silver", "SI", "Silver", "metals", "precious", "USD/oz", "COMEX", "SI"),
+        ("platinum", "PL", "Platinum", "metals", "precious", "USD/oz", "NYMEX", "PL"),
         ("copper", "HG", "Copper", "metals", "industrial", "USD/lb", "COMEX", "HG"),
+        ("aluminum", "ALI", "Aluminum", "metals", "industrial", "USD/metric ton", "LME/COMEX", "ALI"),
+        ("zinc", "ZS", "Zinc", "metals", "industrial", "USD/metric ton", "LME", "ZS"),
     ]
     return [
         CommodityInstrument(
@@ -916,7 +922,10 @@ def _sample_price_histories(
         "heating_oil": (2.62, 0.12, -0.0005),
         "gold": (2385.0, 46.0, 0.42),
         "silver": (31.4, 1.1, 0.012),
+        "platinum": (985.0, 22.0, 0.08),
         "copper": (4.58, 0.17, 0.0015),
+        "aluminum": (2560.0, 84.0, 0.85),
+        "zinc": (2860.0, 96.0, 0.7),
     }
     histories: list[CommodityPriceHistory] = []
     for instrument in instruments:
@@ -966,7 +975,10 @@ def _sample_curves(
         "heating_oil": [2.68, 2.66, 2.64, 2.62, 2.59, 2.57],
         "gold": [2392.0, 2397.0, 2404.0, 2412.0, 2420.0, 2429.0],
         "silver": [31.55, 31.62, 31.71, 31.82, 31.95, 32.08],
+        "platinum": [991.0, 994.0, 998.0, 1002.0, 1006.0, 1010.0],
         "copper": [4.61, 4.58, 4.55, 4.52, 4.50, 4.47],
+        "aluminum": [2575.0, 2584.0, 2595.0, 2608.0, 2620.0, 2634.0],
+        "zinc": [2878.0, 2890.0, 2901.0, 2915.0, 2928.0, 2940.0],
     }
     curves: list[CommodityCurveSnapshot] = []
     for instrument in instruments:
@@ -1011,6 +1023,10 @@ def _sample_inventory_series(retrieved_at: datetime) -> list[CommodityInventoryS
         ("lower-48-working-gas-storage", "henry_hub", "Lower 48 Working Gas Storage", "storage", "bcf", 2430.0, 620.0, 22.0),
         ("us-crude-production", "wti", "US Crude Oil Production", "production", "million b/d", 13.1, 0.35, 0.02),
         ("refinery-utilization", "gasoline", "US Refinery Utilization", "refinery", "pct", 88.4, 5.2, 0.15),
+        ("comex-copper-registered-stocks", "copper", "COMEX Copper Registered Stocks", "warehouse", "short tons", 24400.0, 3600.0, -9.0),
+        ("lme-copper-on-warrant", "copper", "LME Copper On-Warrant Stocks", "warehouse", "metric tons", 118000.0, 21000.0, -42.0),
+        ("lme-aluminum-on-warrant", "aluminum", "LME Aluminum On-Warrant Stocks", "warehouse", "metric tons", 421000.0, 62000.0, 155.0),
+        ("lme-zinc-on-warrant", "zinc", "LME Zinc On-Warrant Stocks", "warehouse", "metric tons", 84000.0, 18000.0, -36.0),
     ]
     series_rows: list[CommodityInventorySeries] = []
     for series_id, instrument_id, label, category, unit, base, amplitude, drift in specs:

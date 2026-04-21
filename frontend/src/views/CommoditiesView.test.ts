@@ -54,6 +54,46 @@ describe("CommoditiesView", () => {
     expect(body).toContain("IBKR futures curve unavailable; using fallback payload.");
     expect(body).toContain("No Inventory Series");
   });
+
+  it("renders the deep energy flow modules", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "energy";
+
+    const { body } = render(CommoditiesView, {
+      props: {
+        workspace,
+        loading: false,
+        mode: "energy",
+        onLoadWorkspace: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Crack Spread Matrix");
+    expect(body).toContain("Term Structure Heatmap");
+    expect(body).toContain("Inventory vs Seasonality Cloud");
+    expect(body).toContain("Vessel / Flow Proxy");
+  });
+
+  it("renders the deep metals macro modules", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "metals";
+    workspace.selected_instrument_id = "gold";
+
+    const { body } = render(CommoditiesView, {
+      props: {
+        workspace,
+        loading: false,
+        mode: "metals",
+        onLoadWorkspace: vi.fn(),
+        onLoadMacroSeries: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Macro Driver Correlation");
+    expect(body).toContain("Precious Ratio Gauges");
+    expect(body).toContain("LME / COMEX Warehouse Stocks");
+    expect(body).toContain("Substitution Spreads");
+  });
 });
 
 function makeWorkspace(): CommodityWorkspaceResponse {

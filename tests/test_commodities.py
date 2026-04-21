@@ -43,20 +43,20 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert workspace.coverage.supports_curves is True
     assert workspace.coverage.supports_inventories is True
     assert {instrument.family for instrument in workspace.instruments} == {"energy", "metals"}
-    assert len(workspace.market_summaries) == 8
-    assert len(workspace.price_histories) == 8
-    assert len(workspace.curves) == 8
+    assert len(workspace.market_summaries) == 11
+    assert len(workspace.price_histories) == 11
+    assert len(workspace.curves) == 11
     assert len(workspace.spreads) >= 6
     assert len(workspace.inventories) >= 6
     assert len(workspace.events) >= 2
     assert len(workspace.cross_domain_links) >= 3
     assert any("read-only research" in warning for warning in workspace.warnings)
     assert workspace.overview is not None
-    assert workspace.overview.market_breadth.total_markets == 8
-    assert workspace.overview.market_breadth.counts_by_family == {"energy": 5, "metals": 3}
+    assert workspace.overview.market_breadth.total_markets == 11
+    assert workspace.overview.market_breadth.counts_by_family == {"energy": 5, "metals": 6}
     assert workspace.overview.market_breadth.backwardation_count >= 1
     assert workspace.overview.market_breadth.contango_count >= 1
-    assert len(workspace.overview.matrix_rows) == 8
+    assert len(workspace.overview.matrix_rows) == 11
     assert workspace.overview.scatter is not None
     assert workspace.overview.scatter.x_methodology_label == "Loaded-history momentum (%)"
     assert workspace.overview.scatter.points
@@ -93,6 +93,14 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert rich_spread.z_score is not None
     assert rich_spread.percentile is not None
     assert rich_spread.history
+
+    composite_crack = next(spread for spread in workspace.spreads if spread.definition.spread_id == "three-two-one-crack")
+    assert composite_crack.value is not None
+    assert composite_crack.definition.spread_type == "refining_margin"
+
+    copper_aluminum = next(spread for spread in workspace.spreads if spread.definition.spread_id == "copper-aluminum-spread")
+    assert copper_aluminum.value is not None
+    assert copper_aluminum.definition.unit == "USD/mt"
 
 
 def test_eia_provider_without_key_degrades_to_sample_with_warning():
@@ -294,10 +302,10 @@ def test_commodities_api_routes_return_workspace_and_slices(tmp_path, monkeypatc
         workspace_payload = workspace_response.json()
         assert workspace_payload["mode"] == "curves_spreads"
         assert workspace_payload["coverage"]["coverage_status"] == "sample"
-        assert len(workspace_payload["market_summaries"]) == 8
+        assert len(workspace_payload["market_summaries"]) == 11
         assert len(workspace_payload["spreads"]) >= 6
         assert workspace_payload["cross_domain_links"]
-        assert workspace_payload["overview"]["market_breadth"]["total_markets"] == 8
+        assert workspace_payload["overview"]["market_breadth"]["total_markets"] == 11
         assert workspace_payload["overview"]["matrix_rows"]
         assert workspace_payload["overview"]["scatter"]["x_methodology_label"] == "Loaded-history momentum (%)"
 

@@ -1575,6 +1575,8 @@
             workspace={$commoditiesWorkspace}
             loading={$loading.commodities}
             onLoadWorkspace={loadCommoditiesWorkspace}
+            macroHistories={$macroSeriesHistories}
+            onLoadMacroSeries={loadMacroSeriesHistory}
           />
         {:else if $activeTab === "prediction_markets"}
           <PredictionMarketsView
