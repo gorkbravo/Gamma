@@ -266,6 +266,7 @@ export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
 export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
 export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
 export const researchOverview = writable<ResearchOverviewResponse | null>(null);
+export const sitrepIndicesOverview = writable<ResearchOverviewResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
 export const strategyLabResult = writable<StrategyLabResult | null>(null);
 export const researchCompareResult = writable<ResearchCompareResult | null>(null);
@@ -390,7 +391,7 @@ const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = [
   "fx-eurusd", "fx-gbpusd", "fx-usdjpy", "fx-usdchf",
-  "fx-usdcad", "fx-audusd", "fx-nzdusd", "fx-usdcnh"
+  "fx-usdcad", "fx-audusd", "fx-nzdusd"
 ] as const;
 const MACRO_CROSS_ASSET_SERIES: Record<MacroContextState["region"], readonly string[]> = {
   US: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
@@ -885,6 +886,29 @@ export async function loadResearchOverview(options: ResearchOverviewLoadOptions 
     }
     const overview = await getJson<ResearchOverviewResponse>(`/research/overview?${params.toString()}`);
     researchOverview.set(overview);
+    lastError.set("");
+    return overview;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("researchOverview", false);
+  }
+}
+
+export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOptions = {}) {
+  setLoading("researchOverview", true);
+  try {
+    const params = new URLSearchParams({
+      universe_id: options.universeId ?? "global_indices",
+      timeframe: options.timeframe ?? "3M",
+      benchmark_symbol: options.benchmarkSymbol ?? "SPY"
+    });
+    if (options.forceRefresh) {
+      params.set("force_refresh", "true");
+    }
+    const overview = await getJson<ResearchOverviewResponse>(`/research/overview?${params.toString()}`);
+    sitrepIndicesOverview.set(overview);
     lastError.set("");
     return overview;
   } catch (error) {

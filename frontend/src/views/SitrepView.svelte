@@ -19,11 +19,13 @@
 
   export let system: SystemStatus | null = null;
   export let overview: ResearchOverviewResponse | null = null;
+  export let indicesOverview: ResearchOverviewResponse | null = null;
   export let macro: MacroSnapshot | null = null;
   export let commodities: CommodityWorkspaceResponse | null = null;
   export let prediction: PredictionMarketListResponse | null = null;
   export let loading = false;
   export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
+  export let onLoadIndicesOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void = onLoadOverview;
   export let onLoadMacro: (options?: MacroLoadOptions) => Promise<unknown> | void;
   export let onLoadCommodities: (options?: CommodityWorkspaceLoadOptions) => Promise<unknown> | void;
   export let onLoadPrediction: (options?: PredictionMarketScreenerOptions) => Promise<unknown> | void;
@@ -48,6 +50,7 @@
     last: string;
     change: string;
     secondary: string;
+    secondaryTone?: string;
     tone: string;
     source: string;
   };
@@ -56,6 +59,9 @@
     const tasks: Array<Promise<unknown> | void> = [];
     if (!overview) {
       tasks.push(onLoadOverview({ universeId: "broad_us_market", timeframe: "3M", benchmarkSymbol: "SPY" }));
+    }
+    if (!indicesOverview) {
+      tasks.push(onLoadIndicesOverview({ universeId: "global_indices", timeframe: "3M", benchmarkSymbol: "SPY" }));
     }
     if (!macro) {
       tasks.push(onLoadMacro({ region: "US", timeframe: "3M", theme: "all", mode: "snapshot" }));
@@ -191,13 +197,13 @@
 
   const FX_SERIES_ORDER = [
     "fx-eurusd", "fx-gbpusd", "fx-usdjpy", "fx-usdchf",
-    "fx-usdcad", "fx-audusd", "fx-nzdusd", "fx-usdcnh"
+    "fx-usdcad", "fx-audusd", "fx-nzdusd"
   ];
 
   function buildFxRows(data: MacroSnapshot | null): SitrepMarketRow[] {
     const allFx = uniqueMetrics(
       allMacroMetrics(data).filter((m) =>
-        metricMatches(m, ["fx-", "eur/usd", "gbp/usd", "usd/jpy", "usd/chf", "usd/cad", "aud/usd", "nzd/usd", "dollar"])
+        metricMatches(m, ["fx-", "eur/usd", "gbp/usd", "usd/jpy", "usd/chf", "usd/cad", "aud/usd", "nzd/usd"])
       )
     );
     const ordered = [
@@ -248,6 +254,7 @@
   function cleanYieldLabel(label: string): string {
     return label
       .replace(/^(US|EU)\s+/i, "")
+      .replace(/\bFed\s+Funds\s+Rate\b/i, "Feds Funds")
       .replace(/\bTreasury\s*/gi, "")
       .replace(/\bYield\b/gi, "")
       .replace(/\s+/g, " ")
@@ -299,6 +306,23 @@
     }));
   }
 
+  function buildIndexRows(data: ResearchOverviewResponse | null): SitrepMarketRow[] {
+    const nodes = (data?.nodes ?? [])
+      .filter((node): node is ResearchOverviewNode => node.level === "instrument")
+      .sort((left, right) => (left.sort_rank ?? 999) - (right.sort_rank ?? 999))
+      .slice(0, 12);
+    return nodes.map((node) => ({
+      id: node.node_id,
+      label: node.label,
+      group: node.group ?? "Global",
+      last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
+      change: formatPct(node.metrics.total_return),
+      secondary: node.symbol ?? "",
+      tone: toneFromValue(node.metrics.total_return),
+      source: node.source_provider
+    }));
+  }
+
   function buildCommodityRows(data: CommodityWorkspaceResponse | null): SitrepMarketRow[] {
     const overviewRows = data?.overview?.matrix_rows ?? [];
     if (overviewRows.length) {
@@ -310,7 +334,8 @@
         change: row.latest_change_pct == null
           ? row.latest_change == null ? "N/A" : formatNumber(row.latest_change, 2)
           : formatPct(row.latest_change_pct),
-        secondary: row.curve_state,
+        secondary: formatCommodityState(row.curve_state),
+        secondaryTone: toneFromCommodityState(row.curve_state),
         tone: toneFromValue(row.latest_change_pct ?? row.latest_change),
         source: row.price_source_provider ?? row.source_provider
       }));
@@ -321,10 +346,42 @@
       group: humanize(summary.instrument.family),
       last: summary.latest_price == null ? "N/A" : formatNumber(summary.latest_price, 2),
       change: summary.latest_change_pct == null ? "N/A" : formatPct(summary.latest_change_pct),
-      secondary: summary.curve_state,
+      secondary: formatCommodityState(summary.curve_state),
+      secondaryTone: toneFromCommodityState(summary.curve_state),
       tone: toneFromValue(summary.latest_change_pct),
       source: summary.source_provider
     }));
+  }
+
+  function formatCommodityState(value: string | null | undefined) {
+    const normalized = (value ?? "").trim().toLowerCase();
+    if (!normalized) {
+      return "N/A";
+    }
+    if (normalized.includes("backwardation")) {
+      return "Backwardation";
+    }
+    if (normalized.includes("contango")) {
+      return "Contango";
+    }
+    if (normalized.includes("flat")) {
+      return "Flat";
+    }
+    return humanize(normalized);
+  }
+
+  function toneFromCommodityState(value: string | null | undefined) {
+    const normalized = (value ?? "").trim().toLowerCase();
+    if (normalized.includes("backwardation")) {
+      return "positive";
+    }
+    if (normalized.includes("contango")) {
+      return "negative";
+    }
+    if (normalized.includes("flat")) {
+      return "neutral";
+    }
+    return "";
   }
 
   function buildTapeRows(
@@ -426,6 +483,7 @@
   }
 
   $: equityRows = buildEquityRows(overview);
+  $: indexRows = buildIndexRows(indicesOverview);
   $: fxRows = buildFxRows(macro);
   $: yieldRows = buildYieldRows(macro);
   $: commodityRows = buildCommodityRows(commodities);
@@ -453,6 +511,21 @@
         <span>{formatDateTime(asOf)}</span>
       </div>
     </div>
+    <div class="equity-strip" aria-label="US equity tape">
+      {#if equityRows.length}
+        <div class="strip-track">
+          {#each [...equityRows, ...equityRows] as row}
+            <span class="strip-item">
+              <strong>{row.label}</strong>
+              <em>{row.last}</em>
+              <b class={row.tone}>{row.change}</b>
+            </span>
+          {/each}
+        </div>
+      {:else}
+        <span class="strip-empty">US EQUITY TAPE UNAVAILABLE</span>
+      {/if}
+    </div>
   </article>
 
   <div class="workspace-grid">
@@ -460,43 +533,40 @@
       <div class="market-grid">
         <article class="panel table-panel">
           <div class="panel-head">
-            <div><p class="eyebrow">Equities</p><h3>Market Map</h3></div>
-            <small>{overview?.universe_label ?? "Broad US Market"}</small>
+            <div class="title-line"><p class="eyebrow">Equities</p><h3>Worldwide Indices</h3></div>
+            <small>{indicesOverview?.universe_label ?? "Global Indices"}</small>
           </div>
-          <SitrepMarketTable rows={equityRows} hideSource contextLabel="Vol" emptyLabel="No equity overview loaded." />
+          <SitrepMarketTable rows={indexRows} profile="indices" hideSource contextLabel="Proxy" emptyLabel="No index overview loaded." />
         </article>
 
         <article class="panel table-panel">
           <div class="panel-head">
-            <div><p class="eyebrow">FX</p><h3>G10 Pairs</h3></div>
+            <div class="title-line"><p class="eyebrow">FX</p><h3>G10 Pairs</h3></div>
             <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
           </div>
-          <SitrepMarketTable rows={fxRows} hideGroup hideSource hideContext emptyLabel="No FX strip loaded." />
+          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext emptyLabel="No FX strip loaded." />
         </article>
 
         <article class="panel table-panel">
           <div class="panel-head">
-            <div><p class="eyebrow">Yields</p><h3>Rates</h3></div>
+            <div class="title-line"><p class="eyebrow">Yields</p><h3>Rates</h3></div>
             <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
           </div>
-          <SitrepMarketTable rows={yieldRows} hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." />
+          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." />
         </article>
 
         <article class="panel table-panel">
           <div class="panel-head">
-            <div><p class="eyebrow">Commodities</p><h3>Futures</h3></div>
+            <div class="title-line"><p class="eyebrow">Commodities</p><h3>Futures</h3></div>
             <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
           </div>
-          <SitrepMarketTable rows={commodityRows} emptyLabel="No commodities workspace loaded." />
+          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource contextTone emptyLabel="No commodities workspace loaded." />
         </article>
       </div>
 
       <article class="panel tape-panel">
         <div class="panel-head">
-          <div>
-            <p class="eyebrow">Triage</p>
-            <h3>What Changed</h3>
-          </div>
+          <div class="title-line"><p class="eyebrow">Triage</p><h3>What Changed</h3></div>
         </div>
         <div class="tape-list">
           {#if changedRows.length}
@@ -519,8 +589,8 @@
     <aside class="support-column">
       <article class="panel media-panel">
         <div class="panel-head">
-          <div><p class="eyebrow">Live Media</p><h3>Bloomberg TV</h3></div>
-          <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">↗ YouTube</a>
+          <div class="title-line"><p class="eyebrow">Live Media</p><h3>Bloomberg TV</h3></div>
+          <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">YouTube</a>
         </div>
         <div class="video-shell">
           <iframe
@@ -534,7 +604,7 @@
 
       <article class="panel tape-panel">
         <div class="panel-head">
-          <div><p class="eyebrow">News / Events</p><h3>Event Tape</h3></div>
+          <div class="title-line"><p class="eyebrow">News / Events</p><h3>Event Tape</h3></div>
         </div>
         <div class="tape-list compact">
           {#if tapeRows.length}
@@ -554,12 +624,12 @@
 
       <article class="panel provider-panel">
         <div class="panel-head">
-          <div><p class="eyebrow">Coverage</p><h3>Provider Status</h3></div>
+          <div class="title-line"><p class="eyebrow">Coverage</p><h3>Provider Status</h3></div>
         </div>
         <div class="need-list">
           <div><strong>News</strong><span class="warning">NO ADAPTER</span></div>
           <div><strong>TV</strong><span class="warning">EMBED ONLY</span></div>
-          <div><strong>Listed Markets</strong><span>Research Overview</span></div>
+          <div><strong>Listed Markets</strong><span>Research Overview / IBKR ETFs</span></div>
           <div><strong>FX / Rates</strong><span>Macro / FRED / IBKR</span></div>
         </div>
         {#if warnings.length}
@@ -599,6 +669,13 @@
     gap: 0.75rem;
   }
 
+  .title-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
   .header-top,
   .panel-head {
     display: flex;
@@ -628,6 +705,67 @@
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: 0.62rem;
+  }
+
+  .title-line .eyebrow {
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .equity-strip {
+    overflow: hidden;
+    border-top: 1px solid var(--divider);
+    border-bottom: 1px solid var(--divider);
+    background: var(--bg-0);
+    min-height: 1.9rem;
+  }
+
+  .strip-track {
+    display: flex;
+    width: max-content;
+    animation: strip-scroll 42s linear infinite;
+  }
+
+  .strip-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.38rem;
+    padding: 0.42rem 0.72rem;
+    border-right: 1px solid var(--divider);
+    white-space: nowrap;
+  }
+
+  .strip-item strong,
+  .strip-item em,
+  .strip-item b {
+    font-style: normal;
+    font-size: 0.72rem;
+    line-height: 1;
+  }
+
+  .strip-item strong {
+    color: var(--text-0);
+  }
+
+  .strip-item em {
+    color: var(--text-1);
+  }
+
+  .strip-empty {
+    display: block;
+    padding: 0.5rem 0.65rem;
+    color: var(--text-2);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+  }
+
+  @keyframes strip-scroll {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
   }
 
   .status-line {
@@ -818,6 +956,10 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       justify-content: stretch;
+    }
+
+    .title-line {
+      flex-wrap: wrap;
     }
 
     .status-line {

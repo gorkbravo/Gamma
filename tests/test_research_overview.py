@@ -81,6 +81,39 @@ def test_research_overview_builds_nodes_rankings_and_provenance():
     assert response.transformation_note is not None
 
 
+def test_research_overview_global_indices_uses_proxy_universe():
+    idx = pd.date_range("2026-01-02", periods=8, freq="B")
+    service = ResearchService(
+        _OverviewProvider(
+            {
+                "SPY": pd.Series([100, 101, 102, 103, 104, 105, 106, 107], index=idx),
+                "IEUR": pd.Series([100, 100, 101, 101, 102, 103, 103, 104], index=idx),
+                "EWJ": pd.Series([100, 99, 100, 101, 101, 102, 103, 104], index=idx),
+            }
+        )
+    )
+
+    result = service.overview(
+        ResearchOverviewRequest(
+            universe_id="global_indices",
+            timeframe="1M",
+            benchmark_symbol="SPY",
+        )
+    )
+
+    instrument_nodes = [node for node in result.nodes if node.level == "instrument"]
+
+    assert result.universe_id == "global_indices"
+    assert result.universe_label == "Global Indices"
+    assert result.coverage.instrument_count == 12
+    assert result.coverage.priced_count == 3
+    assert result.coverage.coverage_label == "Curated global index proxy board, partial coverage"
+    assert result.metadata_source_label == "Curated Gamma global index ETF proxy list"
+    assert {node.symbol for node in instrument_nodes} >= {"SPY", "IEUR", "EWJ"}
+    assert {node.group for node in instrument_nodes} >= {"US", "Europe", "Japan"}
+    assert any("ETF proxy board" in warning for warning in result.warnings)
+
+
 def test_research_overview_labels_partial_coverage_without_failing():
     idx = pd.date_range("2026-01-02", periods=5, freq="B")
     service = ResearchService(

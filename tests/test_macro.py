@@ -471,6 +471,16 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
         "Curve Shape",
         "Real Yields / Breakevens",
     }
+    dollar_card = next(card for card in snapshot.snapshot_cards if card.card_id == "dollar")
+    assert [metric.series_id for metric in dollar_card.metrics if metric.series_id and metric.series_id.startswith("fx-")] == [
+        "fx-eurusd",
+        "fx-gbpusd",
+        "fx-usdjpy",
+        "fx-usdchf",
+        "fx-usdcad",
+        "fx-audusd",
+        "fx-nzdusd",
+    ]
     assert snapshot.rates_policy is not None
     assert len(snapshot.rates_policy.curve_nodes) == 5
     assert snapshot.rates_policy.transformation_note is not None
@@ -1065,6 +1075,7 @@ def _build_fx_series_map() -> dict[tuple[str, str], list[MacroSeriesPoint]]:
         ("USD", "CHF"): _fx_points([220, 120, 60, 20, 0], [0.88, 0.89, 0.90, 0.89, 0.91], pair_code="USDCHF"),
         ("USD", "CAD"): _fx_points([220, 120, 60, 20, 0], [1.34, 1.35, 1.36, 1.37, 1.36], pair_code="USDCAD"),
         ("AUD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.64, 0.66, 0.67, 0.65, 0.66], pair_code="AUDUSD"),
+        ("NZD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.58, 0.60, 0.61, 0.60, 0.62], pair_code="NZDUSD"),
         ("USD", "EUR"): _fx_points([220, 120, 60, 20, 0], [0.95, 0.93, 0.92, 0.94, 0.93], pair_code="USDEUR"),
         ("USD", "GBP"): _fx_points([220, 120, 60, 20, 0], [0.81, 0.79, 0.78, 0.79, 0.78], pair_code="USDGBP"),
         ("JPY", "USD"): _fx_points([220, 120, 60, 20, 0], [0.0068, 0.0067, 0.0066, 0.0067, 0.0066], pair_code="JPYUSD"),

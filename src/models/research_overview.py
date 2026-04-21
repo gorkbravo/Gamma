@@ -289,6 +289,25 @@ def _overview_equity(
     )
 
 
+def _overview_index_proxy(
+    rank: int,
+    symbol: str,
+    label: str,
+    group: str,
+    benchmark: str,
+) -> ResearchOverviewUniverseInstrument:
+    return ResearchOverviewUniverseInstrument(
+        symbol=symbol,
+        label=label,
+        group=group,
+        sector=group,
+        industry=benchmark,
+        weight=max(1.0, 100.0 - rank),
+        index_weight=max(1.0, 100.0 - rank),
+        sort_rank=rank,
+    )
+
+
 BROAD_US_MARKET_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
     _overview_equity(1, "NVDA", "NVIDIA", "4.85T", "Information Technology", "Semiconductors"),
     _overview_equity(2, "GOOGL", "Alphabet Class A", "4.04T", "Communication Services", "Interactive Media & Services"),
@@ -373,6 +392,22 @@ BROAD_US_MARKET_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
 )
 
 
+GLOBAL_INDEX_PROXY_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
+    _overview_index_proxy(1, "SPY", "S&P 500", "US", "SPDR S&P 500 ETF Trust"),
+    _overview_index_proxy(2, "QQQ", "Nasdaq 100", "US", "Invesco QQQ ETF"),
+    _overview_index_proxy(3, "IWM", "Russell 2000", "US", "iShares Russell 2000 ETF"),
+    _overview_index_proxy(4, "EWC", "MSCI Canada", "Canada", "iShares MSCI Canada ETF"),
+    _overview_index_proxy(5, "IEUR", "MSCI Europe", "Europe", "iShares Core MSCI Europe ETF"),
+    _overview_index_proxy(6, "EWU", "MSCI United Kingdom", "UK", "iShares MSCI United Kingdom ETF"),
+    _overview_index_proxy(7, "EWJ", "MSCI Japan", "Japan", "iShares MSCI Japan ETF"),
+    _overview_index_proxy(8, "EWH", "MSCI Hong Kong", "Hong Kong", "iShares MSCI Hong Kong ETF"),
+    _overview_index_proxy(9, "MCHI", "MSCI China", "China", "iShares MSCI China ETF"),
+    _overview_index_proxy(10, "INDA", "MSCI India", "India", "iShares MSCI India ETF"),
+    _overview_index_proxy(11, "EWA", "MSCI Australia", "Australia", "iShares MSCI Australia ETF"),
+    _overview_index_proxy(12, "EEM", "MSCI Emerging Markets", "EM", "iShares MSCI Emerging Markets ETF"),
+)
+
+
 def _sector_slug(sector: str) -> str:
     return sector.strip().lower().replace("&", "and").replace(" ", "_")
 
@@ -427,6 +462,23 @@ RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
         ),
         metadata_source_label="Static S&P 500-derived proxy metadata",
         coverage_label="Static large-cap US seed, partial coverage",
+        is_complete_universe=False,
+    ),
+    ResearchOverviewUniverse(
+        universe_id="global_indices",
+        label="Global Indices",
+        description=(
+            "Worldwide index proxy board for SITREP, using liquid IBKR-tradable ETF histories "
+            "to stand in for broad regional equity index exposure."
+        ),
+        instruments=GLOBAL_INDEX_PROXY_INSTRUMENTS,
+        limitations=(
+            "This is an ETF proxy board, not direct cash-index contract coverage.",
+            "Regional labels describe the intended index exposure; live prices come from the listed ETF proxies.",
+            "IBKR/TWS history coverage is entitlement, symbol, session, and pacing dependent.",
+        ),
+        metadata_source_label="Curated Gamma global index ETF proxy list",
+        coverage_label="Curated global index proxy board, partial coverage",
         is_complete_universe=False,
     ),
     *_SECTOR_UNIVERSES,

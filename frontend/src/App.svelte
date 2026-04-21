@@ -60,6 +60,7 @@
     loadIvSurface,
     loadFundamentalsSearch,
     loadResearchOverview,
+    loadSitrepIndicesOverview,
     loadSavedResearch,
     macroContext,
     loadMacroSeriesHistory,
@@ -86,6 +87,7 @@
     predictionMarketWallet,
     refreshSystemStatus,
     researchOverview,
+    sitrepIndicesOverview,
     researchCompareResult,
     researchResult,
     riskResult,
@@ -290,6 +292,12 @@
     await Promise.allSettled([
       loadResearchOverview({
         universeId: "broad_us_market",
+        timeframe: "3M",
+        benchmarkSymbol: "SPY",
+        forceRefresh: options.forceRefresh
+      }),
+      loadSitrepIndicesOverview({
+        universeId: "global_indices",
         timeframe: "3M",
         benchmarkSymbol: "SPY",
         forceRefresh: options.forceRefresh
@@ -1585,11 +1593,13 @@
           <SitrepView
             system={$systemStatus}
             overview={$researchOverview}
+            indicesOverview={$sitrepIndicesOverview}
             macro={$macroSnapshot}
             commodities={$commoditiesWorkspace}
             prediction={$predictionMarketScreener}
             loading={$loading.researchOverview || $loading.macro || $loading.commodities || $loading.prediction}
             onLoadOverview={loadResearchOverview}
+            onLoadIndicesOverview={loadSitrepIndicesOverview}
             onLoadMacro={loadMacroWorkspace}
             onLoadCommodities={loadCommoditiesWorkspace}
             onLoadPrediction={loadPredictionMarketScreener}

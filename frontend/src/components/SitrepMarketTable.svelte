@@ -6,6 +6,7 @@
     last: string;
     change: string;
     secondary: string;
+    secondaryTone?: string;
     tone: string;
     source: string;
   }
@@ -18,33 +19,35 @@
   export let hideSource = false;
   export let contextLabel = "Context";
   export let hideContext = false;
+  export let contextTone = false;
+  export let profile: "default" | "equities" | "indices" | "fx" | "yields" | "commodities" = "default";
 
   $: colCount = 3 + (hideGroup ? 0 : 1) + (hideContext ? 0 : 1);
 </script>
 
 <div class="table-wrap">
-  <table>
+  <table class={`profile-${profile}`}>
     <thead>
       <tr>
-        <th>Market</th>
-        {#if !hideGroup}<th>Group</th>{/if}
-        <th class="num-cell">Last</th>
-        <th class="num-cell">Move</th>
-        {#if !hideContext}<th>{contextLabel}</th>{/if}
+        <th class="market-cell">Market</th>
+        {#if !hideGroup}<th class="group-cell">Group</th>{/if}
+        <th class="num-cell last-cell">Last</th>
+        <th class="num-cell move-cell">Move</th>
+        {#if !hideContext}<th class="context-cell">{contextLabel}</th>{/if}
       </tr>
     </thead>
     <tbody>
       {#if rows.length}
         {#each rows as row}
           <tr>
-            <td>
+            <td class="market-cell">
               <strong>{row.label}</strong>
               {#if !hideSource && row.source}<span>{row.source}</span>{/if}
             </td>
-            {#if !hideGroup}<td>{row.group}</td>{/if}
-            <td class="num-cell">{row.last}</td>
-            <td class="num-cell {row.tone}">{row.change}</td>
-            {#if !hideContext}<td>{row.secondary}</td>{/if}
+            {#if !hideGroup}<td class="group-cell">{row.group}</td>{/if}
+            <td class="num-cell last-cell">{row.last}</td>
+            <td class="num-cell move-cell {row.tone}">{row.change}</td>
+            {#if !hideContext}<td class="context-cell {contextTone ? row.secondaryTone ?? '' : ''}">{row.secondary}</td>{/if}
           </tr>
         {/each}
       {:else}
@@ -68,6 +71,7 @@
     width: 100%;
     min-width: 33rem;
     border-collapse: collapse;
+    table-layout: fixed;
   }
 
   th,
@@ -99,6 +103,98 @@
   .num-cell {
     text-align: right;
     white-space: nowrap;
+  }
+
+  .profile-equities {
+    min-width: 28rem;
+  }
+
+  .profile-equities .market-cell {
+    width: 30%;
+  }
+
+  .profile-equities .group-cell {
+    width: 24%;
+    padding-right: 0.2rem;
+  }
+
+  .profile-equities .last-cell {
+    width: 16%;
+    padding-left: 0.2rem;
+  }
+
+  .profile-equities .move-cell,
+  .profile-equities .context-cell {
+    width: 15%;
+  }
+
+  .profile-indices {
+    min-width: 30rem;
+  }
+
+  .profile-indices .market-cell {
+    width: 34%;
+  }
+
+  .profile-indices .group-cell {
+    width: 18%;
+    padding-right: 0.24rem;
+  }
+
+  .profile-indices .last-cell {
+    width: 17%;
+    padding-left: 0.24rem;
+  }
+
+  .profile-indices .move-cell,
+  .profile-indices .context-cell {
+    width: 15.5%;
+  }
+
+  .profile-fx {
+    min-width: 20rem;
+  }
+
+  .profile-fx th,
+  .profile-fx td {
+    padding-left: 0.28rem;
+    padding-right: 0.28rem;
+  }
+
+  .profile-fx .market-cell {
+    width: 38%;
+  }
+
+  .profile-fx .last-cell,
+  .profile-fx .move-cell {
+    width: 31%;
+    text-align: left;
+  }
+
+  .profile-yields {
+    min-width: 24rem;
+  }
+
+  .profile-yields .market-cell {
+    width: 24%;
+    padding-right: 0.2rem;
+  }
+
+  .profile-yields .last-cell {
+    width: 20%;
+    padding-left: 0.2rem;
+  }
+
+  .profile-yields .move-cell {
+    width: 22%;
+  }
+
+  .profile-yields .context-cell {
+    width: 34%;
+  }
+
+  .profile-commodities .context-cell {
+    font-weight: 700;
   }
 
   .empty-cell {

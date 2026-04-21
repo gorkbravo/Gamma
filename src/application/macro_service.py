@@ -317,6 +317,20 @@ SERIES_REGISTRY: dict[str, dict[str, Any]] = {
         "ttl_hours": 12,
         "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
     },
+    "fx-nzdusd": {
+        "kind": "fx",
+        "region": "Global",
+        "base_currency": "NZD",
+        "quote_currency": "USD",
+        "title": "NZD/USD",
+        "unit": "fx",
+        "frequency": "daily",
+        "theme": "policy",
+        "mode_tags": ["snapshot"],
+        "history_days": 540,
+        "ttl_hours": 12,
+        "transformation_note": "Daily FX history is sourced from IBKR midpoint market data through Gamma's existing market-data service.",
+    },
     "fx-usdeur": {
         "kind": "fx",
         "region": "Global",
@@ -634,6 +648,13 @@ REGION_SNAPSHOT_SERIES = {
         "us-5y-breakeven",
         "us-10y-breakeven",
         "us-dollar-broad",
+        "fx-eurusd",
+        "fx-gbpusd",
+        "fx-usdjpy",
+        "fx-usdchf",
+        "fx-usdcad",
+        "fx-audusd",
+        "fx-nzdusd",
         "us-hy-oas",
     ],
     "EU": [
@@ -1329,7 +1350,30 @@ class MacroService:
             ]
             dollar_history = histories.get("us-dollar-broad")
             if dollar_history is not None:
-                cards.append(self._build_metric_card(card_id="dollar", title="Dollar / FX Proxy", subtitle="Broad dollar positioning", summary="Firmer dollar confirms tighter policy and global stress; softer dollar signals the opposite.", mode_target="cross_asset", target_theme="policy", metric_histories=[histories.get("us-dollar-broad"), histories.get("us-10y-yield"), histories.get("us-fed-funds")], linked_markets=linked_markets.get("policy", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories))
+                cards.append(
+                    self._build_metric_card(
+                        card_id="dollar",
+                        title="Dollar / FX Proxy",
+                        subtitle="IBKR major pairs",
+                        summary="Major FX pairs frame the dollar tape around policy and global stress catalysts.",
+                        mode_target="cross_asset",
+                        target_theme="policy",
+                        metric_histories=[
+                            histories.get("us-dollar-broad"),
+                            histories.get("fx-eurusd"),
+                            histories.get("fx-gbpusd"),
+                            histories.get("fx-usdjpy"),
+                            histories.get("fx-usdchf"),
+                            histories.get("fx-usdcad"),
+                            histories.get("fx-audusd"),
+                            histories.get("fx-nzdusd"),
+                        ],
+                        linked_markets=linked_markets.get("policy", []),
+                        timeframe=timeframe,
+                        comparison_region=comparison_region,
+                        comparison_histories=comparison_histories,
+                    )
+                )
             credit_history = histories.get("us-hy-oas")
             if credit_history is not None:
                 cards.append(self._build_metric_card(card_id="credit", title="Credit / Stress Proxy", subtitle="HY spread as stress gauge", summary="Credit spreads proxy tightening financial conditions and recession risk.", mode_target="cross_asset", target_theme="recession_risk", metric_histories=[histories.get("us-hy-oas"), histories.get("us-2s10s-slope"), histories.get("us-unemployment-rate")], linked_markets=linked_markets.get("recession_risk", []), timeframe=timeframe, comparison_region=comparison_region, comparison_histories=comparison_histories))
