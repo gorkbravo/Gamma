@@ -72,6 +72,8 @@ describe("CommoditiesView", () => {
     expect(body).toContain("Term Structure Heatmap");
     expect(body).toContain("Inventory vs Seasonality Cloud");
     expect(body).toContain("Vessel / Flow Proxy");
+    expect(body).toContain("EIA Fundamental Stack");
+    expect(body).toContain("Fundamental Tape");
   });
 
   it("renders the deep metals macro modules", () => {

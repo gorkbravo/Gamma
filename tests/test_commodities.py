@@ -14,6 +14,7 @@ from src.application.runtime import build_runtime
 from src.models.commodities import CommodityCoverageMetadata
 from src.services.cache import CacheService
 from src.services.commodities_adapters import (
+    EIA_INVENTORY_SERIES,
     EiaCommoditiesDataProvider,
     IbkrCommoditiesDataProvider,
     SampleCommoditiesDataProvider,
@@ -147,11 +148,20 @@ def test_eia_provider_enriches_energy_inventory_with_official_series():
     assert snapshot.coverage.coverage_status == "official_partial"
     assert snapshot.source_provider == "eia"
     assert any("EIA" in caveat for caveat in snapshot.coverage.caveats)
+    configured_labels = {config.label for config in EIA_INVENTORY_SERIES}
+    assert "US Crude Oil Production" in configured_labels
+    assert "US Crude Oil Imports" in configured_labels
+    assert "US Refinery Utilization" in configured_labels
+    assert "US Gasoline Product Supplied" in configured_labels
     crude = next(series for series in snapshot.inventory_series if series.metadata.series_id == "us-commercial-crude-stocks")
     assert crude.source_provider == "eia"
     assert crude.metadata.provider_series_id == "PET.WCESTUS1.W"
     assert [point.value for point in crude.points] == [420.0, 421.5, 419.75]
     assert crude.points[-1].change == -1.75
+    production = next(series for series in snapshot.inventory_series if series.metadata.series_id == "us-crude-oil-production")
+    assert production.source_provider == "eia"
+    assert production.metadata.category == "production"
+    assert production.metadata.provider_series_id == "PET.WCRFPUS2.W"
 
 
 class _FakeIb:

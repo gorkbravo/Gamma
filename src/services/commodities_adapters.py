@@ -74,34 +74,87 @@ class IbkrFutureRootConfig:
     multiplier: str | None = None
 
 
+def _env_series_id(name: str, default: str) -> str:
+    return (os.getenv(name) or default).strip()
+
+
 EIA_INVENTORY_SERIES: tuple[EiaSeriesConfig, ...] = (
     EiaSeriesConfig(
-        series_id=os.getenv("EIA_CRUDE_STOCKS_SERIES_ID", "PET.WCESTUS1.W"),
+        series_id=_env_series_id("EIA_CRUDE_STOCKS_SERIES_ID", "PET.WCESTUS1.W"),
         instrument_id="wti",
         label="US Commercial Crude Stocks",
         category="inventories",
         unit="million bbl",
     ),
     EiaSeriesConfig(
-        series_id=os.getenv("EIA_GASOLINE_STOCKS_SERIES_ID", "PET.WGTSTUS1.W"),
+        series_id=_env_series_id("EIA_GASOLINE_STOCKS_SERIES_ID", "PET.WGTSTUS1.W"),
         instrument_id="gasoline",
         label="US Motor Gasoline Stocks",
         category="inventories",
         unit="million bbl",
     ),
     EiaSeriesConfig(
-        series_id=os.getenv("EIA_DISTILLATE_STOCKS_SERIES_ID", "PET.WDISTUS1.W"),
+        series_id=_env_series_id("EIA_DISTILLATE_STOCKS_SERIES_ID", "PET.WDISTUS1.W"),
         instrument_id="heating_oil",
         label="US Distillate Fuel Oil Stocks",
         category="inventories",
         unit="million bbl",
     ),
     EiaSeriesConfig(
-        series_id=os.getenv("EIA_NATGAS_STORAGE_SERIES_ID", "NG.NW2_EPG0_SWO_R48_BCF.W"),
+        series_id=_env_series_id("EIA_NATGAS_STORAGE_SERIES_ID", "NG.NW2_EPG0_SWO_R48_BCF.W"),
         instrument_id="henry_hub",
         label="Lower 48 Working Gas Storage",
         category="storage",
         unit="bcf",
+    ),
+    EiaSeriesConfig(
+        series_id=_env_series_id("EIA_CRUDE_PRODUCTION_SERIES_ID", "PET.WCRFPUS2.W"),
+        instrument_id="wti",
+        label="US Crude Oil Production",
+        category="production",
+        unit="million b/d",
+    ),
+    EiaSeriesConfig(
+        series_id=_env_series_id("EIA_CRUDE_IMPORTS_SERIES_ID", "PET.WCRIMUS2.W"),
+        instrument_id="wti",
+        label="US Crude Oil Imports",
+        category="imports",
+        unit="million b/d",
+    ),
+    EiaSeriesConfig(
+        series_id=_env_series_id("EIA_CRUDE_EXPORTS_SERIES_ID", "PET.WCREXUS2.W"),
+        instrument_id="wti",
+        label="US Crude Oil Exports",
+        category="exports",
+        unit="million b/d",
+    ),
+    EiaSeriesConfig(
+        series_id=_env_series_id("EIA_REFINERY_INPUTS_SERIES_ID", "PET.WCRRIUS2.W"),
+        instrument_id="wti",
+        label="US Refinery Crude Inputs",
+        category="refinery",
+        unit="million b/d",
+    ),
+    EiaSeriesConfig(
+        series_id=_env_series_id("EIA_REFINERY_UTILIZATION_SERIES_ID", "PET.WPULEUS3.W"),
+        instrument_id="gasoline",
+        label="US Refinery Utilization",
+        category="refinery",
+        unit="pct",
+    ),
+    EiaSeriesConfig(
+        series_id=_env_series_id("EIA_GASOLINE_PRODUCT_SUPPLIED_SERIES_ID", "PET.WGFUPUS2.W"),
+        instrument_id="gasoline",
+        label="US Gasoline Product Supplied",
+        category="demand",
+        unit="million b/d",
+    ),
+    EiaSeriesConfig(
+        series_id=_env_series_id("EIA_DISTILLATE_PRODUCT_SUPPLIED_SERIES_ID", "PET.WDIUPUS2.W"),
+        instrument_id="heating_oil",
+        label="US Distillate Product Supplied",
+        category="demand",
+        unit="million b/d",
     ),
 )
 
@@ -241,6 +294,8 @@ class EiaCommoditiesDataProvider:
         inventories = {series.metadata.series_id: series for series in reference.inventory_series}
         official_count = 0
         for config in EIA_INVENTORY_SERIES:
+            if not config.series_id:
+                continue
             try:
                 series = self._fetch_eia_inventory_series(config, force_refresh=force_refresh)
             except Exception as exc:
@@ -288,7 +343,7 @@ class EiaCommoditiesDataProvider:
                 *(history.points[-1].timestamp for history in price_histories.values() if history.points),
             ),
             caveats=[
-                "EIA enrichment covers selected official US energy fundamentals only.",
+                "EIA enrichment covers configured official US energy inventories, storage, production, trade, refinery, and demand fundamentals where available.",
                 "FRED price histories are spot or proxy series where configured; futures curves remain sample unless a futures provider is added.",
                 "Gamma keeps provider credentials server-side and exposes read-only normalized research data.",
                 *warnings,
@@ -342,7 +397,7 @@ class EiaCommoditiesDataProvider:
             value = _float_value(row.get("value"))
             if timestamp is None or value is None:
                 continue
-            normalized_value = value / 1000.0 if "bbl" in config.unit.lower() and abs(value) > 10_000 else value
+            normalized_value = _normalize_eia_value(value, config.unit)
             change = normalized_value - previous_value if previous_value is not None else None
             points.append(
                 CommodityInventoryPoint(
@@ -1356,6 +1411,15 @@ def _extract_eia_rows(payload: Any) -> list[dict[str, Any]]:
     if isinstance(data, list):
         return [row for row in data if isinstance(row, dict)]
     return []
+
+
+def _normalize_eia_value(value: float, unit: str) -> float:
+    normalized_unit = unit.lower()
+    if "bbl" in normalized_unit and abs(value) > 10_000:
+        return value / 1000.0
+    if "b/d" in normalized_unit and abs(value) > 1_000:
+        return value / 1000.0
+    return value
 
 
 def _parse_period(value: Any) -> datetime | None:

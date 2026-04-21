@@ -96,6 +96,8 @@
   $: crackMatrixRows = buildCrackMatrix(workspace?.spreads ?? []);
   $: inventoryCloudRows = buildInventoryCloudRows(visibleInventories);
   $: flowProxyRows = buildFlowProxyRows(workspace, selectedInstrumentId);
+  $: fundamentalStackSeries = buildFundamentalStackSeries(visibleInventories);
+  $: fundamentalTapeRows = buildFundamentalTapeRows(visibleInventories);
   $: metalsCorrelationRows = buildMetalsCorrelationRows(workspace, macroHistories);
   $: metalRatioGaugeRows = buildMetalRatioGaugeRows(workspace?.spreads ?? []);
   $: warehouseStockRows = buildWarehouseStockRows(mode === "metals" ? workspace?.inventories ?? [] : visibleInventories);
@@ -341,6 +343,58 @@
     ];
   }
 
+  function buildFundamentalStackSeries(seriesRows: CommodityInventorySeries[]): ChartSeries[] {
+    const colors = [
+      "var(--chart-primary)",
+      "var(--chart-secondary)",
+      "var(--positive)",
+      "var(--warning)",
+      "var(--negative)"
+    ];
+    return [...seriesRows]
+      .filter((series) => series.points.length >= 2)
+      .sort((left, right) => categoryRank(left.metadata.category) - categoryRank(right.metadata.category))
+      .slice(0, 5)
+      .map((series, index) => {
+        const first = series.points.find((point) => Number.isFinite(point.value) && point.value !== 0)?.value;
+        const data = first
+          ? series.points
+              .slice(-260)
+              .map((point) => ({
+                time: Math.floor(new Date(point.timestamp).getTime() / 1000),
+                value: (point.value / first) * 100
+              }))
+              .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
+          : [];
+        return {
+          id: `${series.metadata.series_id}-indexed`,
+          label: `${humanize(series.metadata.category)} | ${series.metadata.label}`,
+          color: colors[index % colors.length],
+          type: "line" as const,
+          data
+        };
+      })
+      .filter((series) => series.data.length >= 2);
+  }
+
+  function buildFundamentalTapeRows(seriesRows: CommodityInventorySeries[]) {
+    return [...seriesRows]
+      .sort((left, right) => categoryRank(left.metadata.category) - categoryRank(right.metadata.category))
+      .map((series) => ({
+        id: series.metadata.series_id,
+        label: series.metadata.label,
+        category: humanize(series.metadata.category),
+        latest: series.latest_value ?? series.points.at(-1)?.value ?? null,
+        change: series.latest_change ?? series.points.at(-1)?.change ?? null,
+        unit: series.metadata.unit,
+        percentile: series.seasonal_percentile,
+        source: series.metadata.provider_series_id ?? series.metadata.source_provider,
+        signal: series.interpretation ?? "N/A",
+        path: sparklinePath(series.points),
+        tone: valueClass(series.latest_change)
+      }));
+  }
+
   function buildMetalsCorrelationRows(
     data: CommodityWorkspaceResponse | null,
     histories: Record<string, MacroSeriesHistory>
@@ -423,6 +477,32 @@
     const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
     const day = Math.floor((Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - start.getTime()) / 86400000);
     return Math.floor(day / 7) + 1;
+  }
+
+  function categoryRank(category: string | null | undefined) {
+    const order = ["inventories", "storage", "production", "imports", "exports", "refinery", "demand", "warehouse"];
+    const index = order.indexOf(category ?? "");
+    return index === -1 ? order.length : index;
+  }
+
+  function sparklinePath(points: Array<{ timestamp: string; value: number }>, width = 96, height = 28) {
+    const values = points
+      .slice(-48)
+      .map((point) => point.value)
+      .filter((value) => Number.isFinite(value));
+    if (values.length < 2) {
+      return "";
+    }
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    return values
+      .map((value, index) => {
+        const x = (index / Math.max(1, values.length - 1)) * width;
+        const y = height - ((value - min) / range) * height;
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      })
+      .join(" ");
   }
 
   function rollingCorrelation(
@@ -1813,6 +1893,66 @@
       </section>
     {/if}
 
+    {#if (mode === "energy" || mode === "inventories_fundamentals") && fundamentalTapeRows.length}
+      <section class="split">
+        <article class="panel chart-panel">
+          <div class="section-head">
+            <div>
+              <h2>EIA Fundamental Stack</h2>
+              <p>Loaded energy fundamentals indexed to 100 at the first observation.</p>
+            </div>
+          </div>
+          <TimeSeriesChart series={fundamentalStackSeries} height={260} emptyMessage="NO FUNDAMENTAL HISTORY" showLegend={true} />
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Fundamental Tape</h2>
+              <p>Latest stocks, flows, refinery, and demand readings for the selected market.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="compact-table fundamental-table">
+              <thead>
+                <tr>
+                  <th>Series</th>
+                  <th>Type</th>
+                  <th>Latest</th>
+                  <th>Chg</th>
+                  <th>Path</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each fundamentalTapeRows as row}
+                  <tr>
+                    <td>
+                      <strong>{row.label}</strong>
+                      <span>{row.source}</span>
+                    </td>
+                    <td>{row.category}</td>
+                    <td>{formatNumber(row.latest, 2)} {row.unit}</td>
+                    <td class={row.tone}>{formatNumber(row.change, 2)}</td>
+                    <td class="sparkline-cell">
+                      {#if row.path}
+                        <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${row.label} recent path`}>
+                          <path d={row.path}></path>
+                        </svg>
+                      {:else}
+                        <span class="sparkline-empty">N/A</span>
+                      {/if}
+                    </td>
+                    <td>{row.signal}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    {/if}
+
     {#if mode === "energy" || mode === "metals" || mode === "curves_spreads"}
       <section class="split">
         <article class="panel chart-panel">
@@ -1953,6 +2093,13 @@
                   <dd>{series.interpretation ?? "N/A"}</dd>
                 </div>
               </dl>
+              {#if sparklinePath(series.points, 120, 32)}
+                <svg class="inventory-sparkline" viewBox="0 0 120 32" aria-label={`${series.metadata.label} recent history`}>
+                  <path d={sparklinePath(series.points, 120, 32)}></path>
+                </svg>
+              {:else}
+                <p class="sparkline-empty">No loaded history path</p>
+              {/if}
             </article>
           {/each}
         {:else}
@@ -2818,6 +2965,39 @@
   .compact-table {
     min-width: 100%;
     table-layout: fixed;
+  }
+
+  .fundamental-table {
+    min-width: 46rem;
+  }
+
+  .sparkline-cell {
+    width: 7rem;
+  }
+
+  .sparkline,
+  .inventory-sparkline {
+    display: block;
+    width: 100%;
+    height: 2rem;
+    border: 1px solid var(--divider);
+    background: var(--bg-0);
+  }
+
+  .sparkline path,
+  .inventory-sparkline path {
+    fill: none;
+    stroke: var(--chart-primary);
+    stroke-width: 1.6;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .sparkline-empty {
+    margin: 0;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.68rem;
   }
 
   .heatmap-list,
