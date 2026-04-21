@@ -33,6 +33,7 @@ describe("navigation tab ordering", () => {
   it("returns the roadmap default order for each workspace", () => {
     expect(getDefaultTabOrder("portfolio")).toEqual(["portfolio", "risk", "iv"]);
     expect(getDefaultTabOrder("research")).toEqual([
+      "sitrep",
       "research",
       "macro",
       "prediction_markets",
@@ -47,8 +48,9 @@ describe("navigation tab ordering", () => {
 
   it("keeps the pinned first tab fixed even when restored state tries to move it", () => {
     expect(normalizeWorkspaceTabOrder("research", ["risk", "research", "iv", "macro", "prediction_markets"])).toEqual([
-      "research",
+      "sitrep",
       "risk",
+      "research",
       "iv",
       "macro",
       "prediction_markets",
@@ -61,6 +63,7 @@ describe("navigation tab ordering", () => {
 
   it("appends newly introduced tabs at the end when restoring older saved order", () => {
     expect(normalizeWorkspaceTabOrder("research", ["research", "risk", "macro"])).toEqual([
+      "sitrep",
       "research",
       "risk",
       "macro",
@@ -75,10 +78,10 @@ describe("navigation tab ordering", () => {
 
   it("maps Ctrl+N to the reordered visual tab order", () => {
     const reorderedState = normalizeWorkspaceTabOrderState({
-      research: ["research", "risk", "prediction_markets", "crypto", "macro", "iv"],
+      research: ["sitrep", "risk", "prediction_markets", "crypto", "macro", "iv"],
     });
 
-    expect(getTabByShortcutIndex("research", reorderedState, 1)).toBe("research");
+    expect(getTabByShortcutIndex("research", reorderedState, 1)).toBe("sitrep");
     expect(getTabByShortcutIndex("research", reorderedState, 2)).toBe("risk");
     expect(getTabByShortcutIndex("research", reorderedState, 3)).toBe("prediction_markets");
     expect(getTabByShortcutIndex("research", reorderedState, 4)).toBe("crypto");
@@ -166,8 +169,9 @@ describe("navigation tab ordering", () => {
       "distribution",
       "source",
     ]);
-    expect(getTabLabel("commodities")).toBe("Commodities");
-    expect(getTabLabel("maritime")).toBe("Sealanes");
+    expect(getTabLabel("sitrep")).toBe("SITREP");
+    expect(getTabLabel("commodities")).toBe("COMMODITIES");
+    expect(getTabLabel("maritime")).toBe("SEALANES");
     expect(getTabLabel("iv")).toBe("OPTIONS");
   });
 
@@ -185,8 +189,9 @@ describe("workspace tab-order persistence", () => {
     store.reorder("research", "risk", 1);
 
     expect(get(store).research).toEqual([
-      "research",
+      "sitrep",
       "risk",
+      "research",
       "macro",
       "prediction_markets",
       "crypto",
@@ -199,8 +204,9 @@ describe("workspace tab-order persistence", () => {
 
     const reloadedStore = createWorkspaceTabOrderStore(storage);
     expect(get(reloadedStore).research).toEqual([
-      "research",
+      "sitrep",
       "risk",
+      "research",
       "macro",
       "prediction_markets",
       "crypto",

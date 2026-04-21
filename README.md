@@ -18,6 +18,7 @@ Gamma currently lets a user:
 - connect to IBKR or run in mock mode
 - monitor a live or sample portfolio in a chosen base currency
 - study portfolio performance, exposures, and local history
+- open a dense SITREP surface for cross-asset situation awareness
 - build single-name or synthetic research scopes
 - forward research scopes into Risk and IV
 - explore a multi-mode Macro workspace
@@ -53,8 +54,8 @@ Gamma opens on a landing screen that shows connection state and lets the user en
 
 Within each workspace, tabs can be reordered in the sidebar. The default layout is:
 
-- `Portfolio View`: `Portfolio`, `Risk`, `IV`
-- `Research View`: `Research`, `Macro`, `Prediction Markets`, `Crypto`, `Fundamentals`, `Commodities`, `Sealanes`, `Risk`, `IV`
+- `Portfolio View`: `PORTFOLIO`, `RISK`, `OPTIONS`
+- `Research View`: `SITREP`, `RESEARCH`, `MACRO`, `PREDICTION MARKETS`, `CRYPTO`, `FUNDAMENTALS`, `COMMODITIES`, `SEALANES`, `RISK`, `OPTIONS`
 
 The current desktop navigation model is part of the product, not an afterthought:
 
@@ -540,9 +541,10 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 4 - AI Copilot`: paused around 70%, with a shell-level read-only Copilot that can generate structured research cards across the current tab set, sustain lightweight same-domain follow-up threads, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
+- `Roadmap V2 Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
 - `Roadmap V2 Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 
-That means the app already has meaningful portfolio/risk/IV capabilities, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
+That means the app already has meaningful portfolio/risk/IV capabilities, a first-pass SITREP entry surface, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
 
 ## Roadmap V2 Direction
 

@@ -14,6 +14,7 @@
   import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
   import ResearchView from "./views/ResearchView.svelte";
   import RiskView from "./views/RiskView.svelte";
+  import SitrepView from "./views/SitrepView.svelte";
   import IvView from "./views/IvView.svelte";
   import { matchesActionKeybinding, isEditableEventTarget } from "./lib/keybindings";
   import { openKeyBindingsWindow } from "./lib/keybindings-window";
@@ -284,6 +285,34 @@
     selectedScopeDomains: CopilotBaseDomain[];
     selectionMessage: string | null;
   };
+
+  async function loadSitrepContext(options: { forceRefresh?: boolean } = {}) {
+    await Promise.allSettled([
+      loadResearchOverview({
+        universeId: "broad_us_market",
+        timeframe: "3M",
+        benchmarkSymbol: "SPY",
+        forceRefresh: options.forceRefresh
+      }),
+      loadMacroWorkspace({
+        region: "US",
+        timeframe: "3M",
+        theme: "all",
+        mode: "snapshot",
+        forceRefresh: options.forceRefresh
+      }),
+      loadCommoditiesWorkspace({
+        mode: "overview",
+        forceRefresh: options.forceRefresh
+      }),
+      loadPredictionMarketScreener({
+        status: "open",
+        sortBy: "research_rank",
+        limit: 12,
+        forceRefresh: options.forceRefresh
+      })
+    ]);
+  }
 
   const macroModeLabels: Record<MacroContextState["mode"], string> = {
     snapshot: "Snapshot",
@@ -981,6 +1010,12 @@
     if ($activeTab === "portfolio") {
       push("Portfolio", $portfolioSnapshot?.warnings, "warning");
       push("Performance", $portfolioPerformance?.warnings, "warning");
+    } else if ($activeTab === "sitrep") {
+      push("Research Overview", $researchOverview?.warnings, "warning");
+      push("Macro", $macroSnapshot?.warnings, "warning");
+      push("Commodities", $commoditiesWorkspace?.warnings, "warning");
+      push("Coverage", $commoditiesWorkspace?.coverage.caveats, "warning");
+      push("Prediction", $predictionMarketScreener?.warnings, "warning");
     } else if ($activeTab === "research") {
       push("Research", $researchResult?.warnings, "warning");
     } else if ($activeTab === "macro") {
@@ -1028,9 +1063,7 @@
       tasks.push(loadPortfolioSnapshot());
     }
     if (mode === "research") {
-      researchMode = "overview";
-      tasks.push(loadResearchOverview());
-      tasks.push(loadSavedResearch());
+      tasks.push(loadSitrepContext());
     }
     await Promise.allSettled(tasks);
   }
@@ -1038,7 +1071,7 @@
   async function switchWorkspace(mode: WorkspaceMode) {
     if (workspaceMode === mode) {
       if (mode === "research") {
-        researchMode = "overview";
+        void loadSitrepContext();
       }
       activeTab.set(getWorkspaceHomeTab(mode));
       dismissSurfaces();
@@ -1056,7 +1089,9 @@
 
     activeTab.set(nextTab);
 
-    if (nextTab === "research") {
+    if (nextTab === "sitrep") {
+      await loadSitrepContext();
+    } else if (nextTab === "research") {
       researchMode = "overview";
       if (!$researchOverview) {
         await loadResearchOverview();
@@ -1158,6 +1193,10 @@
 
     if ($activeTab === "research" && researchMode === "overview") {
       await loadResearchOverview({ forceRefresh: true });
+    }
+
+    if ($activeTab === "sitrep") {
+      await loadSitrepContext({ forceRefresh: true });
     }
 
     if ($activeTab === "prediction_markets") {
@@ -1499,7 +1538,7 @@
       <StatusRail
         status={$systemStatus}
         workspaceMode={workspaceMode}
-        busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.commodities || $loading.ivSession}
+        busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.researchOverview || $loading.macro || $loading.commodities || $loading.prediction || $loading.ivSession}
         settingsOpen={settingsOpen}
         onToggleConnection={handleConnectionToggle}
         onBaseCurrencyChange={handleBaseCurrencyChange}
@@ -1541,6 +1580,19 @@
             onRunDiagnostics={handleRunDiagnostics}
             onForceSubscribe={handleForceSubscribe}
             onClearHistory={handleClearHistory}
+          />
+        {:else if $activeTab === "sitrep"}
+          <SitrepView
+            system={$systemStatus}
+            overview={$researchOverview}
+            macro={$macroSnapshot}
+            commodities={$commoditiesWorkspace}
+            prediction={$predictionMarketScreener}
+            loading={$loading.researchOverview || $loading.macro || $loading.commodities || $loading.prediction}
+            onLoadOverview={loadResearchOverview}
+            onLoadMacro={loadMacroWorkspace}
+            onLoadCommodities={loadCommoditiesWorkspace}
+            onLoadPrediction={loadPredictionMarketScreener}
           />
         {:else if $activeTab === "research"}
           <ResearchView

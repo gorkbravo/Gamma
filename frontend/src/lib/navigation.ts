@@ -8,20 +8,21 @@ import type {
 
 export const WORKSPACE_TAB_DEFINITIONS = {
   portfolio: [
-    { id: "portfolio", label: "Portfolio", pinned: true, defaultIndex: 0 },
-    { id: "risk", label: "Risk", pinned: false, defaultIndex: 1 },
+    { id: "portfolio", label: "PORTFOLIO", pinned: true, defaultIndex: 0 },
+    { id: "risk", label: "RISK", pinned: false, defaultIndex: 1 },
     { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 2 },
   ],
   research: [
-    { id: "research", label: "Research", pinned: true, defaultIndex: 0 },
-    { id: "macro", label: "Macro", pinned: false, defaultIndex: 1 },
-    { id: "prediction_markets", label: "Prediction Markets", pinned: false, defaultIndex: 2 },
-    { id: "crypto", label: "Crypto", pinned: false, defaultIndex: 3 },
-    { id: "fundamentals", label: "Fundamentals", pinned: false, defaultIndex: 4 },
-    { id: "commodities", label: "Commodities", pinned: false, defaultIndex: 5 },
-    { id: "maritime", label: "Sealanes", pinned: false, defaultIndex: 6 },
-    { id: "risk", label: "Risk", pinned: false, defaultIndex: 7 },
-    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 8 },
+    { id: "sitrep", label: "SITREP", pinned: true, defaultIndex: 0 },
+    { id: "research", label: "RESEARCH", pinned: false, defaultIndex: 1 },
+    { id: "macro", label: "MACRO", pinned: false, defaultIndex: 2 },
+    { id: "prediction_markets", label: "PREDICTION MARKETS", pinned: false, defaultIndex: 3 },
+    { id: "crypto", label: "CRYPTO", pinned: false, defaultIndex: 4 },
+    { id: "fundamentals", label: "FUNDAMENTALS", pinned: false, defaultIndex: 5 },
+    { id: "commodities", label: "COMMODITIES", pinned: false, defaultIndex: 6 },
+    { id: "maritime", label: "SEALANES", pinned: false, defaultIndex: 7 },
+    { id: "risk", label: "RISK", pinned: false, defaultIndex: 8 },
+    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 9 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 

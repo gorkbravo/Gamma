@@ -435,6 +435,61 @@ At the end of this workstream, Gamma should have a clearer platform layer for pr
 
 ---
 
+## Workstream 1A - SITREP
+
+_Status: In progress (~35%)_
+_Dependency marker: Cross-domain aggregator; improves with provider foundation_
+_Recent progress: A first-pass locked `SITREP` tab is now the Research workspace home. It aggregates the existing Research Overview, Macro Snapshot, Commodities Overview, and Prediction Markets screener payloads into a dense situation-report surface with a Bloomberg Television YouTube embed, cross-domain change triage, an event/news proxy tape, equities, FX, yields, and commodities tables, provider caveats, and all-uppercase tab navigation labels._
+
+### Why this workstream matters
+
+SITREP is the operating picture for Gamma. It should not replace the domain tabs. Its job is to answer:
+
+- What changed?
+- What matters right now?
+- Which deeper workspace should I open next?
+
+This makes it different from `Research`, `Macro`, `Commodities`, or `Prediction Markets`. Those tabs remain analytical domains. SITREP is the entry point and triage layer that compresses signals from them.
+
+### Current first pass
+
+The first pass deliberately reuses existing payloads rather than adding a new backend service too early:
+
+- `Research Overview` supplies equity market-map nodes, leaders, laggards, coverage, and freshness labels.
+- `Macro Snapshot` supplies focus items, FX/rates metrics, divergences, event windows, and warnings.
+- `Commodities Overview` supplies commodity price, curve, inventory, event, and provider coverage context.
+- `Prediction Markets` supplies open market/event context and freshness warnings.
+- Bloomberg Television is embedded through the public YouTube channel live-stream endpoint when YouTube/Bloomberg allow embedding.
+
+This is useful immediately, but it is still an aggregator over existing tab data, not a normalized SITREP backend model.
+
+### Provider and data needs
+
+Required for the next meaningful step:
+
+- `RSS/news adapter`: normalized source, URL, publication time, detected tickers/entities, tags, summary snippets, and provenance. The current News / Events panel is an event-market proxy, not real news coverage.
+- `SITREP response model`: a backend-owned payload that ranks cross-domain items consistently instead of letting the Svelte view assemble everything ad hoc.
+- `Provider-neutral listed-market data`: broader and fresher equity/index/ETF coverage beyond the current narrow Research Overview seeds.
+- `FX and rates freshness policy`: clearer distinction between delayed IBKR, FRED/public daily series, and unavailable intraday context.
+- `Media embed fallback`: YouTube embeds can be blocked by remote policy, so the UI should keep a fallback link and avoid treating the video as guaranteed infrastructure.
+- `Cross-tab handoff wiring`: SITREP rows should eventually open the relevant target tab/mode/lens directly.
+- `Copilot context`: SITREP should eventually provide a compact cross-domain context bundle or launch a synthesis flow from loaded constituent domains.
+
+### Completion snapshot
+
+- `Locked navigation home`: ~90% complete. SITREP is now pinned as the first Research workspace tab and the old Research tab is no longer the locked home.
+- `Dense visual shell`: ~65% complete. The first pass follows Gamma's flat, dense panel language, but responsive polish and row-level handoffs remain open.
+- `Cross-domain aggregation`: ~45% complete. Existing tab payloads are reused effectively, but there is no dedicated backend SITREP schema or ranking service yet.
+- `News`: ~15% complete. The current surface shows Macro events, prediction-market items, and commodity events as a proxy tape; a real RSS/news adapter is still needed.
+- `Bloomberg TV`: ~45% complete. YouTube embed is wired on a best-effort basis, but external embed availability cannot be controlled by Gamma.
+- `Provider transparency`: ~55% complete. Provider caveats and warnings are visible, but SITREP-specific freshness and source ranking are not yet normalized.
+
+### Deliverable
+
+At the end of SITREP V2, Gamma should open into a credible cross-asset situation report that shows market movement, news/events, live media, freshness/caveats, and direct drilldowns into the deeper research tabs without becoming a generic quote dashboard or execution surface.
+
+---
+
 ## Workstream 2 - Research V2
 
 _Status: In progress (~76%)_
@@ -2181,6 +2236,7 @@ Highest-leverage early work:
 
 Likely early wins:
 
+- SITREP locked home and cross-domain triage hardening,
 - Research multi-mode shell,
 - Research saved scopes,
 - Macro EU/global/event refinements,
@@ -2202,6 +2258,7 @@ New tabs should begin as data prototypes before full UI builds. Commodities has 
 
 After data shapes are proven:
 
+- SITREP news adapter, backend response model, and cross-tab row handoffs,
 - Strategy Lab,
 - Market Overview,
 - Commodities Energy/Curves hardening and Metals/Events deepening,
@@ -2229,6 +2286,10 @@ As soon as the app has stable representative workflows:
 ### Workstream 1 - Cross-Cutting Platform Foundation
 
 Build provider, provenance, cache, mode-navigation, cross-tab handoff, and Copilot-context infrastructure.
+
+### Workstream 1A - SITREP
+
+Keep the Research workspace home as a dense cross-asset situation report with news/events, live media, equities, FX, yields, commodities, provider caveats, and drilldowns into deeper tabs.
 
 ### Workstream 2 - Research V2
 
@@ -2277,6 +2338,7 @@ Prepare Gamma for external testing with installer, tutorial, first-run setup, mo
 If Roadmap V2 is executed well, Gamma becomes a deeper read-only research platform where the user can:
 
 - inspect portfolios and risk,
+- start from a cross-asset situation report,
 - build and compare research scopes,
 - import strategy returns without running arbitrary code,
 - study market overview maps,

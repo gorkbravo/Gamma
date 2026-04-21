@@ -2,6 +2,7 @@ export type WorkspaceMode = "portfolio" | "research";
 
 export type TabId =
   | "portfolio"
+  | "sitrep"
   | "research"
   | "macro"
   | "commodities"
@@ -2400,7 +2401,7 @@ export interface MaritimeTrackResponse {
   track: MaritimeTrackSnippet | null;
 }
 
-export type CopilotBaseDomain = Exclude<TabId, "maritime">;
+export type CopilotBaseDomain = Exclude<TabId, "sitrep" | "maritime">;
 export type CopilotDomain = CopilotBaseDomain | "synthesis";
 
 export interface CopilotSourceRef {

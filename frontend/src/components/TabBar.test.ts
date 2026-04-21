@@ -9,10 +9,10 @@ describe("TabBar", () => {
         activeTab: "prediction_markets",
         open: true,
         tabs: [
-          { id: "research", label: "Research", pinned: true },
-          { id: "risk", label: "Risk", pinned: false },
-          { id: "prediction_markets", label: "Prediction Markets", pinned: false },
-          { id: "macro", label: "Macro", pinned: false },
+          { id: "sitrep", label: "SITREP", pinned: true },
+          { id: "risk", label: "RISK", pinned: false },
+          { id: "prediction_markets", label: "PREDICTION MARKETS", pinned: false },
+          { id: "macro", label: "MACRO", pinned: false },
         ],
         onSelect: vi.fn(),
         onClose: vi.fn(),
@@ -22,8 +22,8 @@ describe("TabBar", () => {
     });
 
     expect(body).toContain("Reset");
-    expect(body).toContain("Research");
-    expect(body).toContain("Prediction Markets");
+    expect(body).toContain("SITREP");
+    expect(body).toContain("PREDICTION MARKETS");
     expect(body).toContain("Pinned");
   });
 });
