@@ -635,7 +635,7 @@
       if (draftScopeType === "synthetic_portfolio") {
         notes.push(previewCount ? `Draft basket has ${previewCount} parsed names before normalization.` : "Build a basket to inspect concentration and benchmark sensitivity.");
       } else {
-        notes.push("Single-name research is best for isolating benchmark sensitivity before sending the name to IV or Risk.");
+        notes.push("Single-name research is best for isolating benchmark sensitivity before sending the name to Options or Risk.");
       }
       return notes;
     }
@@ -1718,7 +1718,7 @@
 
         <div class="builder-actions">
           <button type="button" on:click={() => onOpenRisk?.()} disabled={!result?.snapshot}>Open In Risk</button>
-          <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In IV</button>
+          <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In Options</button>
         </div>
 
         {#if result?.snapshot}
@@ -1729,7 +1729,7 @@
             <div class="row"><span>Snapshot Time</span><strong>{new Date(result.snapshot.timestamp).toLocaleString()}</strong></div>
           </div>
         {:else}
-          <p class="muted">Run research to create the forwarded snapshot for Risk or IV.</p>
+          <p class="muted">Run research to create the forwarded snapshot for Risk or Options.</p>
         {/if}
       </article>
       </aside>

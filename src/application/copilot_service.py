@@ -320,7 +320,7 @@ class CopilotService:
                 ),
                 _CopilotToolDefinition(
                     name="get_iv_surface_context",
-                    description="Return a read-only IV surface and ATM term-structure summary for the active Gamma IV context.",
+                    description="Return a read-only options surface and ATM term-structure summary for the active Gamma Options context.",
                     domains=("iv",),
                     parameters_schema={
                         "type": "object",
@@ -332,7 +332,7 @@ class CopilotService:
                 ),
                 _CopilotToolDefinition(
                     name="get_iv_session_status",
-                    description="Return a read-only session and market-data-mode summary for the active Gamma IV context.",
+                    description="Return a read-only session and market-data-mode summary for the active Gamma Options context.",
                     domains=("iv",),
                     parameters_schema={
                         "type": "object",
@@ -698,19 +698,19 @@ class CopilotService:
         session = state.get("session") if isinstance(state.get("session"), dict) else None
         active_surface = resolve_iv_surface(surface, session)
         if not isinstance(active_surface, dict):
-            raise ValueError("IV copilot requires a loaded IV surface.")
+            raise ValueError("Options copilot requires a loaded options surface.")
         summary = summarize_iv_state(surface, session)
         if summary is None:
-            raise ValueError("IV copilot requires a loaded IV surface.")
+            raise ValueError("Options copilot requires a loaded options surface.")
         warnings = dedupe_warnings(summary.get("warnings", []))
         sources = [
             CopilotSourceRef(
                 source_id="iv.surface",
-                label="IV surface snapshot",
+                label="Options surface snapshot",
                 kind="workspace",
                 provider="gamma",
                 origin="gamma.iv.surface",
-                description="Loaded IV surface payload from Gamma.",
+                description="Loaded options implied-volatility surface payload from Gamma.",
                 retrieved_at=active_surface.get("timestamp"),
             )
         ]
@@ -722,7 +722,7 @@ class CopilotService:
                     kind="status",
                     provider="gamma",
                     origin="gamma.iv.session",
-                    description="Current IV session state from Gamma.",
+                    description="Current Options session state from Gamma.",
                     retrieved_at=active_surface.get("timestamp"),
                 )
             )
@@ -2245,18 +2245,18 @@ class CopilotService:
         active_surface = resolve_iv_surface(surface, session)
         source = CopilotSourceRef(
             source_id="iv.surface.drilldown",
-            label="IV surface drilldown",
+            label="Options surface drilldown",
             kind="workspace",
             provider="gamma",
             origin="gamma.iv.surface",
-            description="Expanded IV surface and ATM term-structure context.",
+            description="Expanded options implied-volatility surface and ATM term-structure context.",
             retrieved_at=(active_surface or {}).get("timestamp"),
         )
         return CopilotToolExecution(
             output=summarize_iv_state(surface, session) or {},
             trace=CopilotToolTrace(
                 tool_name="get_iv_surface_context",
-                summary="Expanded the active IV context into surface, front-slice, and term-structure summaries.",
+                summary="Expanded the active Options context into surface, front-slice, and term-structure summaries.",
                 arguments={},
                 source_ids=[source.source_id],
             ),
@@ -2272,11 +2272,11 @@ class CopilotService:
         session = self._iv_session_from_bundle(context) or {}
         source = CopilotSourceRef(
             source_id="iv.session.drilldown",
-            label="IV session drilldown",
+            label="Options session drilldown",
             kind="status",
             provider="gamma",
             origin="gamma.iv.session",
-            description="Expanded IV session state and market-data-mode context.",
+            description="Expanded Options session state and market-data-mode context.",
             retrieved_at=None,
         )
         output = {
@@ -2290,7 +2290,7 @@ class CopilotService:
             output=output,
             trace=CopilotToolTrace(
                 tool_name="get_iv_session_status",
-                summary="Expanded the active IV session state and market-data-mode context.",
+                summary="Expanded the active Options session state and market-data-mode context.",
                 arguments={},
                 source_ids=[source.source_id],
             ),

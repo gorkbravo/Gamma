@@ -2470,6 +2470,7 @@ export interface CopilotThreadState {
 export interface IvSurface {
   symbol: string;
   timestamp: string;
+  retrieved_at: string;
   snapshot_available: boolean;
   spot: number | null;
   expiries: string[];
@@ -2479,6 +2480,10 @@ export interface IvSurface {
   points: number;
   warnings: string[];
   messages: string[];
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+  freshness_label: string;
 }
 
 export interface ActionResponse {

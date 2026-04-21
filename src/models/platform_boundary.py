@@ -67,7 +67,7 @@ def build_gamma_read_only_boundary(*, retrieved_at: datetime | None = None) -> R
         ],
         app_boundary_notes=[
             "Gamma exposes data and research services only; no backend route or Copilot tool is an execution path.",
-            "IBKR/TWS access in Gamma is limited to market data, portfolio inspection, account summary, historical data, FX, and IV surface inspection.",
+            "IBKR/TWS access in Gamma is limited to market data, portfolio inspection, account summary, historical data, FX, and options surface inspection.",
             "Read-only provider capability records are metadata and must not be interpreted as execution permissions.",
         ],
         copilot_notes=[
@@ -82,4 +82,3 @@ def build_gamma_read_only_boundary(*, retrieved_at: datetime | None = None) -> R
         retrieved_at=generated_at,
         transformation_note="Static Workstream 1 platform metadata describing Gamma's data-only application boundary.",
     )
-

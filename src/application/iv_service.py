@@ -84,7 +84,7 @@ class IVService:
             success=False,
             symbol=normalized_symbol,
             status="Error",
-            messages=["Unable to start IV surface engine."],
+            messages=["Unable to start options surface engine."],
         )
 
     def stop_stream(self) -> None:
@@ -124,14 +124,14 @@ class IVService:
         if not self.client.is_connected():
             return IVSurfaceResult(
                 snapshot=None,
-                warnings=["Connect to IBKR before requesting an IV surface."],
+                warnings=["Connect to IBKR before requesting an options surface."],
             )
 
         engine = self.create_engine(mode)
         if not engine.start(symbol):
             return IVSurfaceResult(
                 snapshot=None,
-                warnings=["Unable to start IV surface engine."],
+                warnings=["Unable to start options surface engine."],
                 messages=engine.drain_messages(),
             )
 
@@ -149,7 +149,7 @@ class IVService:
 
         warnings: list[str] = []
         if latest is None:
-            warnings.append(f"No IV surface snapshot available yet for {symbol}.")
+            warnings.append(f"No options surface snapshot available yet for {symbol}.")
         return IVSurfaceResult(snapshot=latest, warnings=warnings, messages=messages)
 
     def _mock_snapshot(self, symbol: str) -> IVSurfaceSnapshot:
@@ -173,4 +173,8 @@ class IVService:
             timestamp=now,
             delayed=True,
             points=int(iv_grid.size),
+            source_provider="mock",
+            origin="gamma.iv.surface.mock",
+            transformation_note="Gamma generated a mock options volatility surface for development and offline checks.",
+            freshness_label="mocked",
         )

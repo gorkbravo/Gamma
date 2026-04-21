@@ -160,6 +160,7 @@
   } from "./lib/api/types";
   import type { CryptoMode } from "./lib/view-models/crypto";
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
+  import type { OptionsMode } from "./lib/view-models/iv";
   import type { ResearchMode } from "./lib/view-models/research";
 
   type ConsoleEntry = {
@@ -178,6 +179,7 @@
   let fundamentalsMode: FundamentalsMode = "overview";
   let commoditiesMode: CommodityMode = "overview";
   let maritimeMode: MaritimeMode = "live_map";
+  let optionsMode: OptionsMode = "surface";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
   let sidebarOpen = false;
@@ -390,9 +392,9 @@
   ) {
     const activeSurface = resolveIvCopilotSurface(surface, session);
     if (!activeSurface || (!activeSurface.snapshot_available && activeSurface.points === 0)) {
-      return "IV | Load a surface snapshot to ground the Copilot";
+      return "Options | Load a surface snapshot to ground the Copilot";
     }
-    return `IV | ${activeSurface.symbol} | ${activeSurface.expiries.length} expiries x ${activeSurface.strikes.length} strikes`;
+    return `Options | ${activeSurface.symbol} | ${activeSurface.expiries.length} expiries x ${activeSurface.strikes.length} strikes`;
   }
 
   function formatShortTimestamp(timestamp: string | null | undefined) {
@@ -470,7 +472,7 @@
             : domain === "macro"
               ? "Macro"
               : domain === "iv"
-                ? "IV"
+                ? "Options"
                 : domain.charAt(0).toUpperCase() + domain.slice(1),
         contextLabel,
         fingerprintLabel: shortFingerprint(fingerprint),
@@ -806,13 +808,13 @@
       return {
         supported: ivAvailable,
         domain: "iv",
-        triggerLabel: ivAvailable ? "IV context" : "Load surface",
+        triggerLabel: ivAvailable ? "Options context" : "Load surface",
         contextLabel: describeIvCopilotContext(ivSurface, ivSession),
-        domainLabel: "IV",
+        domainLabel: "Options",
         guidance:
           ivAvailable
-            ? "Grounded in the active IV surface and session state. Gamma remains read-only, so the Copilot should focus on surface interpretation, term structure, and caveats."
-            : "Load an IV surface snapshot before generating a research card from the IV workspace.",
+            ? "Grounded in the active options surface and session state. Gamma remains read-only, so the Copilot should focus on surface interpretation, term structure, and caveats."
+            : "Load an options surface snapshot before generating a research card from the Options workspace.",
         placeholder:
           "Interpret the term structure, flag skew caveats, or frame the cleanest surface-comparison question.",
         thread: threads.iv,
@@ -1006,9 +1008,9 @@
     } else if ($activeTab === "risk") {
       push("Risk", $riskResult?.warnings, "warning");
     } else {
-      push("IV", $ivSurface?.warnings, "warning");
+      push("Options", $ivSurface?.warnings, "warning");
       push("Session", $ivSession?.messages, "info");
-      push("IV", $ivSurface?.messages, "info");
+      push("Options", $ivSurface?.messages, "info");
     }
 
     return entries;
@@ -1378,6 +1380,11 @@
       return true;
     }
 
+    if ($activeTab === "iv") {
+      optionsMode = nextMode.id as OptionsMode;
+      return true;
+    }
+
     return false;
   }
 
@@ -1646,10 +1653,12 @@
           />
         {:else}
           <IvView
+            bind:mode={optionsMode}
             status={$systemStatus}
             requestedSymbol={ivRequestedSymbol}
             result={$ivSurface}
             session={$ivSession}
+            underlyingPricePoints={$researchResult?.primary_price_points ?? []}
             loading={$loading.iv}
             sessionLoading={$loading.ivSession}
             onLoad={loadIvSurface}

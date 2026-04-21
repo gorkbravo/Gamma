@@ -10,7 +10,7 @@ export const WORKSPACE_TAB_DEFINITIONS = {
   portfolio: [
     { id: "portfolio", label: "Portfolio", pinned: true, defaultIndex: 0 },
     { id: "risk", label: "Risk", pinned: false, defaultIndex: 1 },
-    { id: "iv", label: "IV", pinned: false, defaultIndex: 2 },
+    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 2 },
   ],
   research: [
     { id: "research", label: "Research", pinned: true, defaultIndex: 0 },
@@ -21,7 +21,7 @@ export const WORKSPACE_TAB_DEFINITIONS = {
     { id: "commodities", label: "Commodities", pinned: false, defaultIndex: 5 },
     { id: "maritime", label: "Sealanes", pinned: false, defaultIndex: 6 },
     { id: "risk", label: "Risk", pinned: false, defaultIndex: 7 },
-    { id: "iv", label: "IV", pinned: false, defaultIndex: 8 },
+    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 8 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 
@@ -72,6 +72,13 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
     { id: "trade_flows", label: "Trade Flows", defaultIndex: 2 },
     { id: "fleet_monitoring", label: "Fleet / Vessel", defaultIndex: 3 },
     { id: "event_replay", label: "Event Replay", defaultIndex: 4 },
+  ]),
+  iv: defineTabModes([
+    { id: "surface", label: "Surface", defaultIndex: 0 },
+    { id: "skew_term", label: "Skew & Term", defaultIndex: 1 },
+    { id: "realized_implied", label: "Realized vs Implied", defaultIndex: 2 },
+    { id: "distribution", label: "Implied Distribution", defaultIndex: 3 },
+    { id: "source", label: "Source", defaultIndex: 4 },
   ]),
 };
 

@@ -104,6 +104,15 @@ describe("navigation tab ordering", () => {
     ]);
     expect(getModeByShortcutIndex("macro", 2)?.id).toBe("cross_asset");
     expect(getModeShortcutHint("crypto", "flows_liquidity")).toBe("Shift+3");
+    expect(getTabModes("iv").map((mode) => mode.id)).toEqual([
+      "surface",
+      "skew_term",
+      "realized_implied",
+      "distribution",
+      "source",
+    ]);
+    expect(getModeByShortcutIndex("iv", 2)?.id).toBe("skew_term");
+    expect(getModeShortcutHint("iv", "distribution")).toBe("Shift+4");
   });
 
   it("exposes a reusable mode registry snapshot for current mode-bearing tabs", () => {
@@ -115,6 +124,7 @@ describe("navigation tab ordering", () => {
       "commodities",
       "crypto",
       "fundamentals",
+      "iv",
       "macro",
       "maritime",
       "research",
@@ -149,8 +159,16 @@ describe("navigation tab ordering", () => {
       "fleet_monitoring",
       "event_replay",
     ]);
+    expect(snapshot.iv?.map((mode) => mode.id)).toEqual([
+      "surface",
+      "skew_term",
+      "realized_implied",
+      "distribution",
+      "source",
+    ]);
     expect(getTabLabel("commodities")).toBe("Commodities");
     expect(getTabLabel("maritime")).toBe("Sealanes");
+    expect(getTabLabel("iv")).toBe("OPTIONS");
   });
 
   it("reorders draggable tabs without moving the pinned first slot", () => {

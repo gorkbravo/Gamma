@@ -474,7 +474,7 @@ const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   crypto: "Crypto",
   fundamentals: "Fundamentals",
   risk: "Risk",
-  iv: "IV"
+  iv: "Options"
 };
 
 function buildCopilotContextFingerprint(
@@ -1999,7 +1999,7 @@ function validateSynthesisScopeDomain(
     return "Run a Risk computation before including it in a synthesis card.";
   }
   if (domain === "iv" && !hasRenderableIvSurface(resolvedIvSurface())) {
-    return "Load an IV surface before including it in a synthesis card.";
+    return "Load an options surface before including it in a synthesis card.";
   }
   const context = buildCopilotContext(domain, workspaceMode);
   return context ? null : `The ${COPILOT_DOMAIN_LABELS[domain]} context is unavailable.`;
@@ -2047,7 +2047,7 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
     return "Run a risk computation before generating a research card.";
   }
   if (domain === "iv" && !hasRenderableIvSurface(resolvedIvSurface())) {
-    return "Load an IV surface before generating a research card.";
+    return "Load an options surface before generating a research card.";
   }
   if (
     domain === "portfolio" ||

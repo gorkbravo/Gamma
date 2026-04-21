@@ -27,6 +27,12 @@ class IVSurfaceSnapshot:
     timestamp: datetime
     delayed: bool
     points: int
+    source_provider: str = "ibkr"
+    origin: str = "gamma.iv.surface"
+    transformation_note: str = (
+        "Gamma builds the surface from IBKR/TWS option market-data subscriptions and interpolates missing grid cells."
+    )
+    freshness_label: str = "live"
 
 
 class IVSurfaceEngine:
@@ -88,7 +94,7 @@ class IVSurfaceEngine:
             symbol = "SPY"
         if not self.client.mock and not self.client.is_connected():
             self._set_status("Error: Not connected")
-            self._add_message("Connect to IBKR before starting IV surface.")
+            self._add_message("Connect to IBKR before starting options surface.")
             return False
 
         self._stop_event.clear()
@@ -148,10 +154,10 @@ class IVSurfaceEngine:
             else:
                 self._run_live_loop(symbol)
         except Exception as exc:
-            logger.exception("IV surface engine failed")
+            logger.exception("Options surface engine failed")
             detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             self._set_status("Error")
-            self._add_message(f"IV surface failed: {detail}")
+            self._add_message(f"Options surface failed: {detail}")
         finally:
             self._running = False
             self._cancel_subscriptions()
@@ -179,6 +185,10 @@ class IVSurfaceEngine:
                 timestamp=datetime.utcnow(),
                 delayed=True,
                 points=iv_grid.size,
+                source_provider="mock",
+                origin="gamma.iv.surface.mock",
+                transformation_note="Gamma generated a mock options volatility surface for development and offline checks.",
+                freshness_label="mocked",
             )
             with self._lock:
                 self._latest = snap
@@ -373,6 +383,14 @@ class IVSurfaceEngine:
             timestamp=datetime.utcnow(),
             delayed=bool(delayed),
             points=int(points),
+            source_provider="ibkr",
+            origin="gamma.iv.surface.ibkr",
+            transformation_note=(
+                "Gamma resolves the underlying through IBKR/TWS, requests option-chain parameters with "
+                "reqSecDefOptParams, subscribes to near-spot option contracts, and interpolates available model "
+                "implied-volatility points into a grid."
+            ),
+            freshness_label="delayed" if delayed else "live",
         )
 
     @staticmethod
