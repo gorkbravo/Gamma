@@ -499,17 +499,9 @@
 
 <section class="view">
   <article class="panel header-panel">
-    <div class="header-top">
-      <div class="header-identity">
-        <p class="eyebrow">SITREP</p>
-        <h2>Situation Report</h2>
-      </div>
-      <div class="status-line">
-        <span class:warning={loading}>{loading ? "REFRESHING" : "LIVE"}</span>
-        <span>{providerMode}</span>
-        {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
-        <span>{formatDateTime(asOf)}</span>
-      </div>
+    <div class="header-identity">
+      <p class="eyebrow">SITREP</p>
+      <h2>Situation Report</h2>
     </div>
     <div class="equity-strip" aria-label="US equity tape">
       {#if equityRows.length}
@@ -525,6 +517,12 @@
       {:else}
         <span class="strip-empty">US EQUITY TAPE UNAVAILABLE</span>
       {/if}
+    </div>
+    <div class="status-line">
+      <span class:warning={loading}>{loading ? "REFRESHING" : "LIVE"}</span>
+      <span>{providerMode}</span>
+      {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
+      <span>{formatDateTime(asOf)}</span>
     </div>
   </article>
 
@@ -660,13 +658,22 @@
   }
 
   .header-panel {
-    padding: 0.6rem 0.85rem;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    padding: 0;
+    gap: 0;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .header-identity {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.75rem;
+    padding: 0.52rem 0.85rem;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .title-line {
@@ -676,7 +683,6 @@
     min-width: 0;
   }
 
-  .header-top,
   .panel-head {
     display: flex;
     justify-content: space-between;
@@ -713,15 +719,21 @@
   }
 
   .equity-strip {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
-    border-top: 1px solid var(--divider);
-    border-bottom: 1px solid var(--divider);
-    background: var(--bg-0);
-    min-height: 1.9rem;
+    border-left: 1px solid var(--divider);
+    border-right: 1px solid var(--divider);
+    position: relative;
   }
 
   .strip-track {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
     display: flex;
+    align-items: center;
     width: max-content;
     animation: strip-scroll 42s linear infinite;
   }
@@ -770,22 +782,20 @@
 
   .status-line {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
+    flex-wrap: nowrap;
+    align-items: center;
+    flex-shrink: 0;
     gap: 0;
     color: var(--text-2);
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+    white-space: nowrap;
   }
 
   .status-line span {
-    padding: 0 0.55rem;
+    padding: 0 0.6rem;
     border-left: 1px solid var(--divider);
-  }
-
-  .status-line span:first-child {
-    border-left: 0;
   }
 
   .workspace-grid {
@@ -950,7 +960,6 @@
   }
 
   @media (max-width: 820px) {
-    .header-top,
     .panel-head,
     .support-column {
       display: grid;
