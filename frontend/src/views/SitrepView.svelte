@@ -189,39 +189,97 @@
     });
   }
 
+  const FX_SERIES_ORDER = [
+    "fx-eurusd", "fx-gbpusd", "fx-usdjpy", "fx-usdchf",
+    "fx-usdcad", "fx-audusd", "fx-nzdusd", "fx-usdcnh"
+  ];
+
   function buildFxRows(data: MacroSnapshot | null): SitrepMarketRow[] {
-    const directRows = uniqueMetrics(
-      allMacroMetrics(data)
-        .filter((metric) => metricMatches(metric, ["fx-", "eurusd", "gbpusd", "usdjpy", "dollar", "eur/usd", "usd/jpy"]))
-    )
-      .map(metricRow);
-    return directRows.length ? directRows.slice(0, 8) : [
-      {
-        id: "fx-placeholder",
-        label: "FX strip",
-        group: "provider needed",
-        last: "N/A",
-        change: "N/A",
-        secondary: "Load Macro Snapshot FX histories",
-        tone: "warning",
-        source: "macro workspace"
-      }
+    const allFx = uniqueMetrics(
+      allMacroMetrics(data).filter((m) =>
+        metricMatches(m, ["fx-", "eur/usd", "gbp/usd", "usd/jpy", "usd/chf", "usd/cad", "aud/usd", "nzd/usd", "dollar"])
+      )
+    );
+    const ordered = [
+      ...FX_SERIES_ORDER.map((sid) => allFx.find((m) => m.series_id === sid)).filter(Boolean) as typeof allFx,
+      ...allFx.filter((m) => !FX_SERIES_ORDER.includes(m.series_id ?? ""))
     ];
+    return ordered.length
+      ? ordered.slice(0, 12).map((m) => ({ ...metricRow(m), group: "", source: "" }))
+      : [{
+          id: "fx-placeholder",
+          label: "FX strip",
+          group: "",
+          last: "N/A",
+          change: "N/A",
+          secondary: "Load Macro Snapshot",
+          tone: "warning",
+          source: ""
+        }];
+  }
+
+  const SECTOR_SHORT: Record<string, string> = {
+    "information technology": "Info Tech",
+    "communication services": "Comm Svcs",
+    "consumer discretionary": "Cons Disc",
+    "consumer staples": "Cons Staples",
+    "health care": "Health Care",
+    "financials": "Financials",
+    "industrials": "Industrials",
+    "materials": "Materials",
+    "energy": "Energy",
+    "real estate": "Real Estate",
+    "utilities": "Utilities"
+  };
+
+  function abbreviateSector(group: string): string {
+    return SECTOR_SHORT[group.toLowerCase()] ?? group;
+  }
+
+  function simplifyYieldGroup(seriesId: string | null | undefined): string {
+    if (!seriesId) return "";
+    return seriesId
+      .replace(/^us-/, "")
+      .replace(/^eu-/, "")
+      .replace(/-/g, " ")
+      .toUpperCase();
+  }
+
+  function cleanYieldLabel(label: string): string {
+    return label
+      .replace(/^(US|EU)\s+/i, "")
+      .replace(/\bTreasury\s*/gi, "")
+      .replace(/\bYield\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function buildYieldRows(data: MacroSnapshot | null): SitrepMarketRow[] {
     const curveRows = (data?.rates_policy?.curve_nodes ?? []).map((node) => ({
       id: `curve-${node.tenor}`,
-      label: `${node.tenor} yield`,
-      group: data?.region ?? "US",
+      label: node.tenor,
+      group: "",
       last: node.current_value == null ? "N/A" : `${node.current_value.toFixed(2)}%`,
-      change: node.change_bps == null ? "N/A" : `${node.change_bps > 0 ? "+" : ""}${node.change_bps.toFixed(1)} bps`,
-      secondary: node.prior_value == null ? "" : `prior ${node.prior_value.toFixed(2)}%`,
+      change: node.change_bps == null ? "N/A" : `${node.change_bps > 0 ? "+" : ""}${node.change_bps.toFixed(1)}bp`,
+      secondary: node.prior_value == null ? "" : `${node.prior_value.toFixed(2)}%`,
       tone: toneFromValue(node.change_bps),
-      source: node.source_provider
+      source: ""
     }));
-    const policyRows = (data?.rates_policy?.policy_metrics ?? []).slice(0, 4).map(metricRow);
-    return [...curveRows, ...policyRows].slice(0, 9);
+    const curveTenors = new Set(curveRows.map((r) => r.label.toLowerCase()));
+    const policyRows = (data?.rates_policy?.policy_metrics ?? [])
+      .filter((m) => {
+        const clean = cleanYieldLabel(m.label).toLowerCase();
+        return !curveTenors.has(clean);
+      })
+      .slice(0, 4)
+      .map((m) => ({
+        ...metricRow(m),
+        label: cleanYieldLabel(m.label),
+        group: "",
+        secondary: m.display_value ?? "",
+        source: ""
+      }));
+    return [...curveRows, ...policyRows].slice(0, 10);
   }
 
   function buildEquityRows(data: ResearchOverviewResponse | null): SitrepMarketRow[] {
@@ -232,12 +290,12 @@
     return nodes.map((node) => ({
       id: node.node_id,
       label: node.symbol ?? node.label,
-      group: node.group ?? node.sector ?? "Equity",
+      group: abbreviateSector(node.group ?? node.sector ?? ""),
       last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
       change: formatPct(node.metrics.total_return),
-      secondary: `vol ${formatPct(node.metrics.annual_volatility)}`,
+      secondary: node.metrics.annual_volatility == null ? "" : formatPct(node.metrics.annual_volatility),
       tone: toneFromValue(node.metrics.total_return),
-      source: node.freshness_label
+      source: ""
     }));
   }
 
@@ -384,55 +442,61 @@
 <section class="view">
   <article class="panel header-panel">
     <div class="header-top">
-      <div>
+      <div class="header-identity">
         <p class="eyebrow">SITREP</p>
         <h2>Situation Report</h2>
       </div>
       <div class="status-line">
-        <span class:warning={loading}>{loading ? "REFRESHING" : "LIVE SNAPSHOT"}</span>
+        <span class:warning={loading}>{loading ? "REFRESHING" : "LIVE"}</span>
         <span>{providerMode}</span>
+        {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
         <span>{formatDateTime(asOf)}</span>
-      </div>
-    </div>
-
-    <div class="kpi-strip">
-      <div class="metric">
-        <span>Equity Coverage</span>
-        <strong>{pricedRatio == null ? "N/A" : `${(pricedRatio * 100).toFixed(0)}%`}</strong>
-        <small>{overview?.coverage.coverage_label ?? "Research Overview not loaded"}</small>
-      </div>
-      <div class="metric">
-        <span>Macro Breaks</span>
-        <strong class:warning={highDivergences > 0}>{highDivergences}</strong>
-        <small>{macro?.region ?? "US"} / {macro?.timeframe ?? "3M"} lens</small>
-      </div>
-      <div class="metric">
-        <span>Commodity Source</span>
-        <strong class={toneFromText(commodities?.coverage.coverage_status)}>{commodities?.coverage.provider_label ?? "N/A"}</strong>
-        <small>{commodities?.coverage.freshness_label ?? "No commodity payload"}</small>
-      </div>
-      <div class="metric">
-        <span>Prediction Health</span>
-        <strong class:warning={staleMarkets > 0}>{staleMarkets}</strong>
-        <small>{prediction?.markets.length ?? 0} open contracts loaded</small>
-      </div>
-      <div class="metric">
-        <span>Warnings</span>
-        <strong class:warning={warnings.length > 0}>{warnings.length}</strong>
-        <small>Provider caveats and stale-data notes</small>
       </div>
     </div>
   </article>
 
   <div class="workspace-grid">
     <div class="primary-column">
+      <div class="market-grid">
+        <article class="panel table-panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">Equities</p><h3>Market Map</h3></div>
+            <small>{overview?.universe_label ?? "Broad US Market"}</small>
+          </div>
+          <SitrepMarketTable rows={equityRows} hideSource contextLabel="Vol" emptyLabel="No equity overview loaded." />
+        </article>
+
+        <article class="panel table-panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">FX</p><h3>G10 Pairs</h3></div>
+            <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
+          </div>
+          <SitrepMarketTable rows={fxRows} hideGroup hideSource hideContext emptyLabel="No FX strip loaded." />
+        </article>
+
+        <article class="panel table-panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">Yields</p><h3>Rates</h3></div>
+            <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
+          </div>
+          <SitrepMarketTable rows={yieldRows} hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." />
+        </article>
+
+        <article class="panel table-panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">Commodities</p><h3>Futures</h3></div>
+            <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
+          </div>
+          <SitrepMarketTable rows={commodityRows} emptyLabel="No commodities workspace loaded." />
+        </article>
+      </div>
+
       <article class="panel tape-panel">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Triage</p>
             <h3>What Changed</h3>
           </div>
-          <small>Cross-domain handoff candidates</small>
         </div>
         <div class="tape-list">
           {#if changedRows.length}
@@ -450,46 +514,13 @@
         </div>
       </article>
 
-      <div class="market-grid">
-        <article class="panel table-panel">
-          <div class="panel-head">
-            <div><p class="eyebrow">Equities</p><h3>Market Map Table</h3></div>
-            <small>{overview?.universe_label ?? "Broad US Market"}</small>
-          </div>
-          <SitrepMarketTable rows={equityRows} emptyLabel="No equity overview loaded." />
-        </article>
-
-        <article class="panel table-panel">
-          <div class="panel-head">
-            <div><p class="eyebrow">FX</p><h3>Dollar / FX Readout</h3></div>
-            <small>{macro?.source_provider ?? "Macro Snapshot"}</small>
-          </div>
-          <SitrepMarketTable rows={fxRows} emptyLabel="No FX strip loaded." />
-        </article>
-
-        <article class="panel table-panel">
-          <div class="panel-head">
-            <div><p class="eyebrow">Yields</p><h3>Rates Table</h3></div>
-            <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
-          </div>
-          <SitrepMarketTable rows={yieldRows} emptyLabel="No rates policy payload loaded." />
-        </article>
-
-        <article class="panel table-panel">
-          <div class="panel-head">
-            <div><p class="eyebrow">Commodities</p><h3>Futures / Physical Proxies</h3></div>
-            <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
-          </div>
-          <SitrepMarketTable rows={commodityRows} emptyLabel="No commodities workspace loaded." />
-        </article>
-      </div>
     </div>
 
     <aside class="support-column">
       <article class="panel media-panel">
         <div class="panel-head">
           <div><p class="eyebrow">Live Media</p><h3>Bloomberg TV</h3></div>
-          <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">YouTube</a>
+          <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">↗ YouTube</a>
         </div>
         <div class="video-shell">
           <iframe
@@ -499,13 +530,11 @@
             allowfullscreen
           ></iframe>
         </div>
-        <p class="source-note">Uses the public Bloomberg Television YouTube live-stream endpoint. Availability depends on YouTube and Bloomberg embed policy.</p>
       </article>
 
       <article class="panel tape-panel">
         <div class="panel-head">
           <div><p class="eyebrow">News / Events</p><h3>Event Tape</h3></div>
-          <small>RSS provider pending</small>
         </div>
         <div class="tape-list compact">
           {#if tapeRows.length}
@@ -525,13 +554,13 @@
 
       <article class="panel provider-panel">
         <div class="panel-head">
-          <div><p class="eyebrow">Coverage</p><h3>Provider Needs</h3></div>
+          <div><p class="eyebrow">Coverage</p><h3>Provider Status</h3></div>
         </div>
         <div class="need-list">
-          <div><strong>News</strong><span>Needs a normalized RSS/news adapter for real headline coverage.</span></div>
-          <div><strong>TV</strong><span>YouTube embed is best-effort and can be blocked by remote policy.</span></div>
-          <div><strong>Listed Markets</strong><span>Uses current Research Overview provider coverage; fuller live breadth needs provider-neutral market data depth.</span></div>
-          <div><strong>FX / Rates</strong><span>Uses Macro/FRED/IBKR paths where present; intraday real-time coverage remains provider-dependent.</span></div>
+          <div><strong>News</strong><span class="warning">NO ADAPTER</span></div>
+          <div><strong>TV</strong><span class="warning">EMBED ONLY</span></div>
+          <div><strong>Listed Markets</strong><span>Research Overview</span></div>
+          <div><strong>FX / Rates</strong><span>Macro / FRED / IBKR</span></div>
         </div>
         {#if warnings.length}
           <ul class="warning-list">
@@ -561,7 +590,13 @@
   }
 
   .header-panel {
-    gap: 0.55rem;
+    padding: 0.6rem 0.85rem;
+  }
+
+  .header-identity {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
   }
 
   .header-top,
@@ -617,7 +652,7 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(21rem, 0.36fr);
+    grid-template-columns: minmax(0, 1fr) minmax(26rem, 0.44fr);
     gap: 0.5rem;
   }
 
@@ -635,27 +670,6 @@
     gap: 0.5rem;
   }
 
-  .kpi-strip {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0;
-    border-top: 1px solid var(--divider);
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .metric {
-    display: grid;
-    gap: 0.12rem;
-    min-width: 0;
-    padding: 0.45rem 0.65rem;
-    border-right: 1px solid var(--divider);
-  }
-
-  .metric:last-child {
-    border-right: 0;
-  }
-
-  .metric span,
   .tape-row span {
     color: var(--text-2);
     text-transform: uppercase;
@@ -663,15 +677,7 @@
     font-size: 0.64rem;
   }
 
-  .metric strong {
-    color: var(--text-0);
-    font-size: 0.95rem;
-    overflow-wrap: anywhere;
-  }
-
-  .metric small,
   .panel-head small,
-  .source-note,
   .tape-row small,
   .need-list span {
     color: var(--text-2);
@@ -816,18 +822,6 @@
 
     .status-line {
       justify-content: flex-start;
-    }
-
-    .kpi-strip {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .metric {
-      border-bottom: 1px solid var(--divider);
-    }
-
-    .metric:nth-child(2n) {
-      border-right: 0;
     }
 
     .tape-row {

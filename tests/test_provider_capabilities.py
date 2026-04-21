@@ -15,6 +15,7 @@ def test_default_provider_registry_distinguishes_active_optional_sample_and_plan
     assert {
         "ibkr",
         "fred",
+        "dbnomics",
         "us_treasury",
         "official_macro_events",
         "polymarket",
@@ -117,6 +118,8 @@ def test_provider_capabilities_system_api(tmp_path):
         assert providers["ibkr"]["status"] == "active"
         assert providers["ibkr"]["requires_user_entitlement"] is True
         assert any("No order placement" in note for note in providers["ibkr"]["read_only_notes"])
+        assert providers["dbnomics"]["status"] == "active"
+        assert "macro" in providers["dbnomics"]["supported_domains"]
         assert providers["eia"]["status"] == "optional"
         assert providers["eia"]["credential_env_vars"] == ["EIA_API_KEY"]
         assert providers["polygon"]["status"] == "planned"

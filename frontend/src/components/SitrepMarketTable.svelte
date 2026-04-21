@@ -14,6 +14,12 @@
 <script lang="ts">
   export let rows: SitrepMarketRow[] = [];
   export let emptyLabel = "No data loaded.";
+  export let hideGroup = false;
+  export let hideSource = false;
+  export let contextLabel = "Context";
+  export let hideContext = false;
+
+  $: colCount = 3 + (hideGroup ? 0 : 1) + (hideContext ? 0 : 1);
 </script>
 
 <div class="table-wrap">
@@ -21,10 +27,10 @@
     <thead>
       <tr>
         <th>Market</th>
-        <th>Group</th>
+        {#if !hideGroup}<th>Group</th>{/if}
         <th class="num-cell">Last</th>
         <th class="num-cell">Move</th>
-        <th>Context</th>
+        {#if !hideContext}<th>{contextLabel}</th>{/if}
       </tr>
     </thead>
     <tbody>
@@ -33,17 +39,17 @@
           <tr>
             <td>
               <strong>{row.label}</strong>
-              <span>{row.source}</span>
+              {#if !hideSource && row.source}<span>{row.source}</span>{/if}
             </td>
-            <td>{row.group}</td>
+            {#if !hideGroup}<td>{row.group}</td>{/if}
             <td class="num-cell">{row.last}</td>
             <td class="num-cell {row.tone}">{row.change}</td>
-            <td>{row.secondary}</td>
+            {#if !hideContext}<td>{row.secondary}</td>{/if}
           </tr>
         {/each}
       {:else}
         <tr>
-          <td colspan="5" class="empty-cell">{emptyLabel}</td>
+          <td colspan={colCount} class="empty-cell">{emptyLabel}</td>
         </tr>
       {/if}
     </tbody>

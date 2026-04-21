@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
-  font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace;
+  --app-font: "Consolas";
+  font-family: var(--app-font), monospace;
 
   /* ── Background layers (shifted to true neutral) ── */
   --bg-0: #070809;

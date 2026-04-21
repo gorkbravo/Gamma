@@ -41,6 +41,32 @@ def macro_series_history(
     return MacroSeriesHistoryResponseModel.from_domain(history)
 
 
+@router.get("/macro/dbnomics/series/history", response_model=MacroSeriesHistoryResponseModel)
+def macro_dbnomics_series_history(
+    request: Request,
+    provider_code: str = Query(..., min_length=1),
+    dataset_code: str = Query(..., min_length=1),
+    series_code: str = Query(..., min_length=1),
+    region: str = Query(default="Global"),
+    theme: str = Query(default="macro"),
+    timeframe: str = Query(default="1Y"),
+    force_refresh: bool = Query(default=False),
+) -> MacroSeriesHistoryResponseModel:
+    runtime = request.app.state.runtime
+    history = runtime.macro_service.get_dbnomics_series_history(
+        provider_code=provider_code,
+        dataset_code=dataset_code,
+        series_code=series_code,
+        region=region,
+        theme=theme,
+        timeframe=timeframe,
+        force_refresh=force_refresh,
+    )
+    if history is None:
+        raise HTTPException(status_code=404, detail="DB.nomics macro adapter is not available.")
+    return MacroSeriesHistoryResponseModel.from_domain(history)
+
+
 @router.post("/macro/divergences", response_model=MacroDivergenceListResponseModel)
 def macro_divergences(payload: MacroSnapshotRequestModel, request: Request) -> MacroDivergenceListResponseModel:
     runtime = request.app.state.runtime

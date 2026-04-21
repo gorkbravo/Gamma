@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
-  import { setChartTheme } from "../lib/stores/app";
+  import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
 
   export let status: SystemStatus | null = null;
   export let workspaceMode: WorkspaceMode = "portfolio";
@@ -31,6 +31,7 @@
   $: workspaceLabel = getWorkspaceLabel(workspaceMode);
 
   let selectedChartTheme: string = "blue";
+  let selectedFontFamily: string = "Consolas";
 </script>
 
 <section class="rail">
@@ -111,6 +112,20 @@
             <option value="green">Green Phosphor</option>
           </select>
           <small>Changes chart line and area colors across all views.</small>
+        </div>
+
+        <div class="settings-section field">
+          <span class="label">Font Family</span>
+          <select
+            bind:value={selectedFontFamily}
+            on:change={() => setFontFamily(selectedFontFamily as FontFamily)}
+          >
+            <option value="Consolas">Consolas (Default)</option>
+            <option value="JetBrains Mono">JetBrains Mono</option>
+            <option value="Cascadia Mono">Cascadia Mono</option>
+            <option value="IBM Plex Mono">IBM Plex Mono</option>
+            <option value="Courier New">Courier New</option>
+          </select>
         </div>
 
         <div class="settings-section">

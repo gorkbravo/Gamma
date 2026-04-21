@@ -28,7 +28,13 @@ from src.models.macro import (
 )
 from src.application.prediction_market_service import PredictionMarketScreenerRequest, PredictionMarketService
 from src.models.prediction_markets import PredictionMarketRecord
-from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.macro_adapters import (
+    DBnomicsMacroAdapter,
+    IBKRMacroFXAdapter,
+    FredMacroAdapter,
+    TreasuryCurveAdapter,
+    USMacroEventsAdapter,
+)
 from src.utils.time import now_utc
 
 
@@ -686,12 +692,14 @@ class MacroService:
         treasury_adapter: TreasuryCurveAdapter,
         events_adapter: USMacroEventsAdapter,
         fx_adapter: IBKRMacroFXAdapter | None = None,
+        dbnomics_adapter: DBnomicsMacroAdapter | None = None,
         prediction_market_service: PredictionMarketService | None = None,
     ) -> None:
         self.fred_adapter = fred_adapter
         self.treasury_adapter = treasury_adapter
         self.events_adapter = events_adapter
         self.fx_adapter = fx_adapter
+        self.dbnomics_adapter = dbnomics_adapter
         self.prediction_market_service = prediction_market_service
 
     def get_snapshot(self, request: MacroSnapshotRequest) -> MacroSnapshotPayload:
@@ -806,6 +814,52 @@ class MacroService:
         if data_region == "EU" and series_id.startswith("us-"):
             return None
         return self._load_histories([series_id], timeframe=self._normalize_timeframe(timeframe), force_refresh=force_refresh).get(series_id)
+
+    def get_dbnomics_series_history(
+        self,
+        *,
+        provider_code: str,
+        dataset_code: str,
+        series_code: str,
+        region: str = "Global",
+        theme: str = "macro",
+        timeframe: str = "1Y",
+        force_refresh: bool = False,
+    ) -> MacroSeriesHistory | None:
+        if self.dbnomics_adapter is None:
+            return None
+        normalized_timeframe = self._normalize_timeframe(timeframe)
+        start, end = self._history_window(TIMEFRAME_DAYS.get(normalized_timeframe, 370) + 45, normalized_timeframe)
+        result = self.dbnomics_adapter.get_series(
+            provider_code,
+            dataset_code,
+            series_code,
+            start=start,
+            end=end,
+            ttl=timedelta(hours=24),
+            force_refresh=force_refresh,
+        )
+        metadata = result.metadata
+        full_id = f"{metadata.provider_code}/{metadata.dataset_code}/{metadata.series_code}"
+        title = metadata.series_name or full_id
+        note = (
+            "External DB.nomics series loaded on demand for macro research. Gamma preserves provider/dataset/series identifiers, "
+            "keeps the response read-only, and does not fill missing periods."
+        )
+        return MacroSeriesHistory(
+            series_id=f"dbnomics:{full_id}",
+            title=title,
+            region=str(region or "Global").strip() or "Global",
+            unit=None,
+            frequency=metadata.frequency or "unknown",
+            theme=str(theme or "macro").strip() or "macro",
+            mode_tags=["external", "dbnomics"],
+            points=result.points,
+            source_provider="dbnomics",
+            retrieved_at=result.retrieved_at,
+            origin=f"dbnomics.series.observations:{full_id}",
+            transformation_note=note,
+        )
 
     def get_divergences(
         self,

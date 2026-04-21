@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any, Callable
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
@@ -17,6 +20,7 @@ from src.utils.time import now_utc
 
 
 TextFetcher = Callable[[str], str]
+JsonFetcher = Callable[[str], dict[str, Any]]
 _US_EASTERN = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,36 @@ def default_text_fetcher(url: str) -> str:
     )
     with urlopen(request, timeout=20) as response:
         return response.read().decode("utf-8", "ignore")
+
+
+def default_json_fetcher(url: str) -> dict[str, Any]:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "Gamma/0.1 read-only macro adapter",
+            "Accept": "application/json",
+        },
+    )
+    with urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8", "ignore"))
+
+
+@dataclass(frozen=True)
+class DBnomicsSeriesMetadata:
+    provider_code: str
+    dataset_code: str
+    series_code: str
+    dataset_name: str | None
+    series_name: str | None
+    frequency: str | None
+    indexed_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class DBnomicsSeriesResult:
+    points: list[MacroSeriesPoint]
+    retrieved_at: datetime
+    metadata: DBnomicsSeriesMetadata
 
 
 class FredMacroAdapter:
@@ -117,6 +151,117 @@ class IBKRMacroFXAdapter:
                 )
             )
         return [point for point in points if start <= point.timestamp <= end], retrieved_at
+
+
+class DBnomicsMacroAdapter:
+    provider = "dbnomics"
+    BASE_URL = "https://api.db.nomics.world/v22"
+
+    def __init__(self, cache: CacheService, fetch_json: JsonFetcher | None = None) -> None:
+        self.cache = cache
+        self.fetch_json = fetch_json or default_json_fetcher
+
+    def get_series(
+        self,
+        provider_code: str,
+        dataset_code: str,
+        series_code: str,
+        *,
+        start: datetime,
+        end: datetime,
+        ttl: timedelta,
+        force_refresh: bool = False,
+    ) -> DBnomicsSeriesResult:
+        provider_code = _clean_dbnomics_code(provider_code)
+        dataset_code = _clean_dbnomics_code(dataset_code)
+        series_code = _clean_dbnomics_code(series_code)
+        if not provider_code or not dataset_code or not series_code:
+            raise ValueError("DB.nomics provider_code, dataset_code, and series_code are required.")
+
+        cache_key = self.cache.make_key("macro", "dbnomics", provider_code, dataset_code, series_code)
+        cached: Any = None
+        if not force_refresh:
+            cached = self.cache.get_json(cache_key, max_age=ttl)
+        if isinstance(cached, dict) and "payload" in cached and "retrieved_at" in cached:
+            payload = cached["payload"]
+            retrieved_at = _parse_datetime(cached["retrieved_at"]) or now_utc()
+        else:
+            url = (
+                f"{self.BASE_URL}/series/{quote(provider_code, safe='')}/"
+                f"{quote(dataset_code, safe='')}/{quote(series_code, safe='')}"
+                "?observations=1&format=json"
+            )
+            payload = self.fetch_json(url)
+            retrieved_at = now_utc()
+            self.cache.set_json(
+                cache_key,
+                {
+                    "retrieved_at": retrieved_at.isoformat(),
+                    "payload": payload,
+                },
+            )
+        return self._parse_series_payload(
+            payload,
+            provider_code=provider_code,
+            dataset_code=dataset_code,
+            series_code=series_code,
+            start=start,
+            end=end,
+            retrieved_at=retrieved_at,
+        )
+
+    def _parse_series_payload(
+        self,
+        payload: Any,
+        *,
+        provider_code: str,
+        dataset_code: str,
+        series_code: str,
+        start: datetime,
+        end: datetime,
+        retrieved_at: datetime,
+    ) -> DBnomicsSeriesResult:
+        docs = []
+        if isinstance(payload, dict):
+            series_root = payload.get("series")
+            if isinstance(series_root, dict) and isinstance(series_root.get("docs"), list):
+                docs = series_root["docs"]
+        doc = docs[0] if docs and isinstance(docs[0], dict) else {}
+        metadata = DBnomicsSeriesMetadata(
+            provider_code=provider_code,
+            dataset_code=dataset_code,
+            series_code=series_code,
+            dataset_name=_optional_str(doc.get("dataset_name")),
+            series_name=_optional_str(doc.get("series_name")),
+            frequency=_optional_str(doc.get("@frequency") or doc.get("frequency")),
+            indexed_at=_parse_datetime(doc.get("indexed_at")),
+        )
+        periods = doc.get("period") if isinstance(doc.get("period"), list) else []
+        values = doc.get("value") if isinstance(doc.get("value"), list) else []
+        full_id = f"{provider_code}/{dataset_code}/{series_code}"
+        note = (
+            "DB.nomics wraps the original provider series. Gamma preserves raw observations, "
+            "skips missing values, and does not fill absent periods."
+        )
+        points: list[MacroSeriesPoint] = []
+        for period, value in zip(periods, values):
+            timestamp = _parse_dbnomics_period(period)
+            parsed_value = _parse_float(value)
+            if timestamp is None or parsed_value is None:
+                continue
+            if timestamp < start or timestamp > end:
+                continue
+            points.append(
+                MacroSeriesPoint(
+                    timestamp=timestamp,
+                    value=parsed_value,
+                    source_provider=self.provider,
+                    retrieved_at=retrieved_at,
+                    origin=f"dbnomics.series.observations:{full_id}",
+                    transformation_note=note,
+                )
+            )
+        return DBnomicsSeriesResult(points=points, retrieved_at=retrieved_at, metadata=metadata)
 
 
 class TreasuryCurveAdapter:
@@ -456,12 +601,41 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 def _parse_float(value: Any) -> float | None:
     text = str(value or "").strip()
-    if not text or text.upper() == "N/A":
+    if not text or text.upper() in {"N/A", "NA", "NULL", "NONE", "."}:
         return None
     try:
         return float(text)
     except ValueError:
         return None
+
+
+def _clean_dbnomics_code(value: str) -> str:
+    return str(value or "").strip().strip("/")
+
+
+def _optional_str(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _parse_dbnomics_period(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    quarter_match = re.fullmatch(r"(?P<year>\d{4})[- ]?Q(?P<quarter>[1-4])", text, flags=re.IGNORECASE)
+    if quarter_match:
+        month = (int(quarter_match.group("quarter")) - 1) * 3 + 1
+        return datetime(int(quarter_match.group("year")), month, 1)
+    semester_match = re.fullmatch(r"(?P<year>\d{4})[- ]?S(?P<semester>[1-2])", text, flags=re.IGNORECASE)
+    if semester_match:
+        month = 1 if semester_match.group("semester") == "1" else 7
+        return datetime(int(semester_match.group("year")), month, 1)
+    for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return _parse_datetime(text)
 
 
 def _parse_month_range(year: int, month: str, date_text: str) -> datetime | None:

@@ -36,7 +36,13 @@ from src.services.crypto_adapters import CoinGeckoAdapter, GeckoTerminalAdapter
 from src.services.fundamentals_adapters import IbkrValuationAdapter, SecFundamentalsAdapter
 from src.services.fundamentals_store import FundamentalsResearchStore
 from src.services.fred import FredClient
-from src.services.macro_adapters import IBKRMacroFXAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.macro_adapters import (
+    DBnomicsMacroAdapter,
+    IBKRMacroFXAdapter,
+    FredMacroAdapter,
+    TreasuryCurveAdapter,
+    USMacroEventsAdapter,
+)
 from src.services.maritime_adapters import (
     AisstreamMaritimeDataProvider,
     SampleMaritimeDataProvider,
@@ -236,6 +242,7 @@ def build_runtime(
         treasury_adapter=TreasuryCurveAdapter(cache),
         events_adapter=USMacroEventsAdapter(cache),
         fx_adapter=IBKRMacroFXAdapter(market_data),
+        dbnomics_adapter=DBnomicsMacroAdapter(cache),
         prediction_market_service=prediction_market_service,
     )
     commodities_service = CommoditiesService(provider=_build_commodities_provider(cache, client, market_data))

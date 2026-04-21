@@ -13,7 +13,7 @@ from src.models.macro import MacroEventRecord, MacroLinkedPredictionMarket, Macr
 from src.models.prediction_markets import PredictionMarketRecord, PredictionMarketScreenerResult
 from src.services.cache import CacheService
 from src.services.fred import FredObservation
-from src.services.macro_adapters import FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.macro_adapters import DBnomicsMacroAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
 
 
 NOW = datetime(2026, 3, 20, 12, 0, 0)
@@ -46,6 +46,173 @@ def test_fred_macro_adapter_normalizes_series_points_and_provenance(tmp_path):
     assert all(point.source_provider == "fred" for point in points)
     assert all(point.retrieved_at == FRED_RETRIEVED_AT for point in points)
     assert all(point.origin == "fred.series.observations:DGS10" for point in points)
+
+
+def test_dbnomics_macro_adapter_normalizes_observations_and_uses_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: FRED_RETRIEVED_AT)
+    calls: list[str] = []
+    payload = {
+        "series": {
+            "docs": [
+                {
+                    "@frequency": "monthly",
+                    "dataset_name": "Labor Force Statistics",
+                    "series_name": "Civilian Unemployment Rate",
+                    "indexed_at": "2026-03-07T02:10:29.978Z",
+                    "period": ["2025-12", "2026-01", "2026-02", "2026-03"],
+                    "value": ["NA", 4.0, "4.1", None],
+                }
+            ]
+        }
+    }
+
+    def fake_fetch_json(url: str):
+        calls.append(url)
+        return payload
+
+    adapter = DBnomicsMacroAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_json=fake_fetch_json)
+
+    first = adapter.get_series(
+        "BLS",
+        "ln",
+        "LNS14000000",
+        start=datetime(2026, 1, 1, 0, 0, 0),
+        end=datetime(2026, 3, 31, 0, 0, 0),
+        ttl=timedelta(hours=24),
+    )
+    second = adapter.get_series(
+        "BLS",
+        "ln",
+        "LNS14000000",
+        start=datetime(2026, 1, 1, 0, 0, 0),
+        end=datetime(2026, 3, 31, 0, 0, 0),
+        ttl=timedelta(hours=24),
+    )
+
+    assert len(calls) == 1
+    assert calls[0].endswith("/series/BLS/ln/LNS14000000?observations=1&format=json")
+    assert first.retrieved_at == FRED_RETRIEVED_AT
+    assert second.retrieved_at == FRED_RETRIEVED_AT
+    assert first.metadata.series_name == "Civilian Unemployment Rate"
+    assert first.metadata.frequency == "monthly"
+    assert [point.timestamp for point in first.points] == [
+        datetime(2026, 1, 1, 0, 0, 0),
+        datetime(2026, 2, 1, 0, 0, 0),
+    ]
+    assert [point.value for point in first.points] == [4.0, 4.1]
+    assert all(point.source_provider == "dbnomics" for point in first.points)
+    assert all(point.origin == "dbnomics.series.observations:BLS/ln/LNS14000000" for point in first.points)
+    assert all(point.transformation_note for point in first.points)
+
+
+def test_macro_service_exposes_on_demand_dbnomics_history(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    class FakeDBnomicsAdapter:
+        def get_series(self, provider_code: str, dataset_code: str, series_code: str, **kwargs):
+            from src.services.macro_adapters import DBnomicsSeriesMetadata, DBnomicsSeriesResult
+
+            assert (provider_code, dataset_code, series_code) == ("BLS", "ln", "LNS14000000")
+            return DBnomicsSeriesResult(
+                points=[
+                    MacroSeriesPoint(
+                        timestamp=datetime(2026, 2, 1, 0, 0, 0),
+                        value=4.1,
+                        source_provider="dbnomics",
+                        retrieved_at=FRED_RETRIEVED_AT,
+                        origin="dbnomics.series.observations:BLS/ln/LNS14000000",
+                    )
+                ],
+                retrieved_at=FRED_RETRIEVED_AT,
+                metadata=DBnomicsSeriesMetadata(
+                    provider_code="BLS",
+                    dataset_code="ln",
+                    series_code="LNS14000000",
+                    dataset_name="Labor Force Statistics",
+                    series_name="Civilian Unemployment Rate",
+                    frequency="monthly",
+                ),
+            )
+
+    service = _build_macro_service(dbnomics_adapter=FakeDBnomicsAdapter())
+
+    history = service.get_dbnomics_series_history(
+        provider_code="BLS",
+        dataset_code="ln",
+        series_code="LNS14000000",
+        region="US",
+        theme="growth",
+        timeframe="1Y",
+    )
+
+    assert history is not None
+    assert history.series_id == "dbnomics:BLS/ln/LNS14000000"
+    assert history.title == "Civilian Unemployment Rate"
+    assert history.region == "US"
+    assert history.theme == "growth"
+    assert history.frequency == "monthly"
+    assert history.source_provider == "dbnomics"
+    assert history.origin == "dbnomics.series.observations:BLS/ln/LNS14000000"
+    assert history.points[0].value == 4.1
+
+
+def test_macro_dbnomics_series_history_api_returns_normalized_payload(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+
+    class FakeDBnomicsAdapter:
+        def get_series(self, provider_code: str, dataset_code: str, series_code: str, **kwargs):
+            from src.services.macro_adapters import DBnomicsSeriesMetadata, DBnomicsSeriesResult
+
+            return DBnomicsSeriesResult(
+                points=[
+                    MacroSeriesPoint(
+                        timestamp=datetime(2026, 2, 1, 0, 0, 0),
+                        value=4.1,
+                        source_provider="dbnomics",
+                        retrieved_at=FRED_RETRIEVED_AT,
+                        origin=f"dbnomics.series.observations:{provider_code}/{dataset_code}/{series_code}",
+                    )
+                ],
+                retrieved_at=FRED_RETRIEVED_AT,
+                metadata=DBnomicsSeriesMetadata(
+                    provider_code=provider_code,
+                    dataset_code=dataset_code,
+                    series_code=series_code,
+                    dataset_name="Labor Force Statistics",
+                    series_name="Civilian Unemployment Rate",
+                    frequency="monthly",
+                ),
+            )
+
+    runtime.macro_service.dbnomics_adapter = FakeDBnomicsAdapter()
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.get(
+            "/macro/dbnomics/series/history",
+            params={
+                "provider_code": "BLS",
+                "dataset_code": "ln",
+                "series_code": "LNS14000000",
+                "region": "US",
+                "theme": "growth",
+                "timeframe": "1Y",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["series_id"] == "dbnomics:BLS/ln/LNS14000000"
+        assert payload["title"] == "Civilian Unemployment Rate"
+        assert payload["source_provider"] == "dbnomics"
+        assert payload["points"][0]["value"] == 4.1
+        assert payload["points"][0]["origin"] == "dbnomics.series.observations:BLS/ln/LNS14000000"
+    finally:
+        runtime.shutdown()
 
 
 def test_treasury_curve_adapter_parses_curve_xml_and_preserves_cached_retrieval_time(tmp_path, monkeypatch):
@@ -853,12 +1020,13 @@ class _FakePredictionMarketService:
         return PredictionMarketScreenerResult(markets=[market], venues=[], warnings=[])
 
 
-def _build_macro_service() -> MacroService:
+def _build_macro_service(dbnomics_adapter=None) -> MacroService:
     return MacroService(
         fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
         treasury_adapter=_FakeTreasuryCurveAdapter(),
         events_adapter=_FakeEventsAdapter(),
         fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
+        dbnomics_adapter=dbnomics_adapter,
         prediction_market_service=_FakePredictionMarketService(),
     )
 

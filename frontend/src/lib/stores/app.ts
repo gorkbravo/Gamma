@@ -348,6 +348,16 @@ export function setChartTheme(theme: ChartTheme) {
     }
   }
 }
+
+export type FontFamily = "Consolas" | "JetBrains Mono" | "Cascadia Mono" | "IBM Plex Mono" | "Courier New";
+export const fontFamily = writable<FontFamily>("Consolas");
+
+export function setFontFamily(family: FontFamily) {
+  fontFamily.set(family);
+  if (typeof document !== "undefined") {
+    document.documentElement.style.setProperty("--app-font", `"${family}"`);
+  }
+}
 export const loading = writable<Record<string, boolean>>({
   status: false,
   diagnostics: false,
@@ -378,7 +388,10 @@ export const loading = writable<Record<string, boolean>>({
 
 const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
-const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = ["fx-eurusd", "fx-gbpusd", "fx-usdjpy"] as const;
+const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = [
+  "fx-eurusd", "fx-gbpusd", "fx-usdjpy", "fx-usdchf",
+  "fx-usdcad", "fx-audusd", "fx-nzdusd", "fx-usdcnh"
+] as const;
 const MACRO_CROSS_ASSET_SERIES: Record<MacroContextState["region"], readonly string[]> = {
   US: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
   EU: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy"],
