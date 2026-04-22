@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Protocol, Tuple
 
 import pandas as pd
@@ -15,28 +15,20 @@ from src.models.instruments import (
     normalize_symbol,
 )
 from src.models.portfolio import PortfolioSnapshot, PositionItem
+from src.models.provenance import FreshnessLabel
 from src.services.ibkr_client import IBKRClient
 from src.services.fx import FXService
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
+from src.services.research_market_data import (
+    IbkrListedMarketHistoryProvider,
+    ListedMarketHistoryProvider,
+    MockListedMarketHistoryProvider,
+    ResearchHistoryResult,
+    contract_for_instrument,
+)
 from src.services.research_cache import ResearchHistoryCache
 from src.utils.time import now_utc
-
-
-def contract_for_instrument(instrument: InstrumentReference) -> Contract:
-    contract = Contract(
-        symbol=instrument.normalized_symbol(),
-        secType=instrument.sec_type or "STK",
-        exchange=instrument.exchange or "SMART",
-        currency=instrument.currency or "USD",
-    )
-    provider_id = str(instrument.provider_id or "").strip()
-    if provider_id.isdigit():
-        contract.conId = int(provider_id)
-    primary_exchange = str(instrument.primary_exchange or "").strip()
-    if primary_exchange:
-        contract.primaryExchange = primary_exchange
-    return contract
 
 
 def contract_for_position(position: PositionItem) -> Contract:
@@ -264,6 +256,18 @@ class ResearchDataProvider:
             currency="USD",
         )
     )
+    history_providers: List[ListedMarketHistoryProvider] | None = None
+    _history_metadata: dict[str, ResearchHistoryResult] = field(default_factory=dict, init=False)
+    _last_history_warnings: list[str] = field(default_factory=list, init=False)
+    _last_history_sources: dict[str, ResearchHistoryResult] = field(default_factory=dict, init=False)
+
+    def __post_init__(self) -> None:
+        if self.history_providers is not None:
+            return
+        if self.client.mock:
+            self.history_providers = [MockListedMarketHistoryProvider(self.mock_service)]
+        else:
+            self.history_providers = [IbkrListedMarketHistoryProvider(self.market_data)]
 
     def load_symbol_history(self, symbol: str, lookback_days: int) -> pd.Series | None:
         return self.load_instrument_history(InstrumentReference(symbol=symbol), lookback_days)
@@ -276,15 +280,34 @@ class ResearchDataProvider:
         base_currency: str | None = None,
         warnings: list[str] | None = None,
     ) -> pd.Series | None:
+        result = self.load_benchmark_history_result(
+            symbol,
+            lookback_days,
+            base_currency=base_currency,
+            warnings=warnings,
+        )
+        return result.series
+
+    def load_benchmark_history_result(
+        self,
+        symbol: str,
+        lookback_days: int,
+        *,
+        base_currency: str | None = None,
+        warnings: list[str] | None = None,
+    ) -> ResearchHistoryResult:
         instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
-        series = self.load_instrument_history(
+        history_result = self.load_instrument_history_result(
             instrument,
             lookback_days,
             defaults=self.benchmark_defaults,
         )
+        if warnings is not None:
+            warnings.extend(history_result.warnings)
+        series = history_result.series
         if series is None or series.empty or base_currency is None:
-            return series
-        result = convert_history_to_base_currency(
+            return history_result
+        conversion = convert_history_to_base_currency(
             series.astype(float),
             instrument.currency,
             base_currency,
@@ -294,8 +317,12 @@ class ResearchDataProvider:
             context="Benchmark",
         )
         if warnings is not None:
-            warnings.extend(result.warnings)
-        return result.series
+            warnings.extend(conversion.warnings)
+        return replace(
+            history_result,
+            series=conversion.series,
+            warnings=list(dict.fromkeys([*history_result.warnings, *conversion.warnings])),
+        )
 
     def load_instrument_history(
         self,
@@ -304,22 +331,108 @@ class ResearchDataProvider:
         *,
         defaults: InstrumentDefaults | None = None,
     ) -> pd.Series | None:
+        return self.load_instrument_history_result(instrument, lookback_days, defaults=defaults).series
+
+    def load_instrument_history_result(
+        self,
+        instrument: InstrumentReference,
+        lookback_days: int,
+        *,
+        defaults: InstrumentDefaults | None = None,
+    ) -> ResearchHistoryResult:
         resolved_defaults = defaults or self.instrument_defaults
         resolved = instrument.with_defaults(resolved_defaults)
         cache_key = self._history_cache_key(resolved, resolved_defaults)
         if not cache_key:
-            return None
+            return ResearchHistoryResult.unavailable(
+                source_provider="unavailable",
+                source_label="Unavailable history source",
+                origin="research_data_provider.load_instrument_history",
+                warning="Instrument history cache key is empty",
+            )
         cached = self.history_cache.get(cache_key, lookback_days)
         if cached is not None and not cached.empty:
-            return cached
-        if self.client.mock:
-            series = self.mock_service.load_history(resolved.normalized_symbol())
-        else:
-            contract = contract_for_instrument(resolved)
-            series = self.market_data.fetch_history(contract, lookback_days)
-        if series is not None and not series.empty:
-            self.history_cache.set(cache_key, series, lookback_days)
-        return series
+            metadata = self._history_metadata.get(cache_key)
+            if metadata is not None:
+                return replace(metadata, series=cached.astype(float), warnings=[])
+            return ResearchHistoryResult(
+                series=cached.astype(float),
+                source_provider="research_cache",
+                source_label="Research history cache",
+                origin="research_cache.memory",
+                freshness_label=FreshnessLabel.HISTORICAL,
+                transformation_note="Loaded from Gamma's in-memory research history cache.",
+            )
+
+        result = self._fetch_from_history_providers(resolved, lookback_days)
+        if result.series is not None and not result.series.empty:
+            clean_series = result.series.astype(float)
+            self.history_cache.set(cache_key, clean_series, lookback_days)
+            stored = replace(result, series=None)
+            self._history_metadata[cache_key] = stored
+            self._last_history_sources[resolved.instrument_id or resolved.normalized_symbol()] = stored
+            return replace(result, series=clean_series)
+        return result
+
+    def drain_history_warnings(self) -> list[str]:
+        warnings = list(dict.fromkeys(self._last_history_warnings))
+        self._last_history_warnings = []
+        return warnings
+
+    def reset_history_tracking(self) -> None:
+        self._last_history_warnings = []
+        self._last_history_sources = {}
+
+    def history_source_summary(self) -> ResearchHistoryResult:
+        sources = list(self._last_history_sources.values())
+        if not sources:
+            return ResearchHistoryResult(
+                series=None,
+                source_provider="unknown",
+                source_label="Unknown history source",
+                origin="research_data_provider.history_source_summary",
+                freshness_label=FreshnessLabel.UNKNOWN,
+            )
+        providers = sorted({source.source_provider for source in sources})
+        if len(providers) == 1:
+            return sources[0]
+        labels = sorted({source.source_label for source in sources})
+        return ResearchHistoryResult(
+            series=None,
+            source_provider="mixed",
+            source_label=f"Mixed listed-market history providers: {', '.join(labels)}",
+            origin="research_data_provider.history_source_summary",
+            freshness_label=FreshnessLabel.HISTORICAL,
+            warnings=["Scope uses more than one listed-market history provider."],
+            transformation_note="Gamma selected the first configured provider with usable daily history for each instrument.",
+        )
+
+    def _fetch_from_history_providers(
+        self,
+        instrument: InstrumentReference,
+        lookback_days: int,
+    ) -> ResearchHistoryResult:
+        warnings: list[str] = []
+        for provider in list(self.history_providers or []):
+            result = provider.load_history(instrument, lookback_days)
+            if result.series is not None and not result.series.empty:
+                combined = replace(result, warnings=list(dict.fromkeys([*warnings, *result.warnings])))
+                self._last_history_warnings.extend(combined.warnings)
+                return combined
+            warnings.extend(result.warnings)
+        warning = (
+            f"No configured history provider returned usable data for {instrument.normalized_display_symbol()}."
+        )
+        warnings.append(warning)
+        self._last_history_warnings.extend(warnings)
+        return ResearchHistoryResult(
+            series=None,
+            source_provider="unavailable",
+            source_label="Unavailable history source",
+            origin="research_data_provider.provider_chain",
+            freshness_label=FreshnessLabel.UNAVAILABLE,
+            warnings=list(dict.fromkeys(warnings)),
+        )
 
     def load_prices(
         self,
@@ -329,17 +442,20 @@ class ResearchDataProvider:
     ) -> Tuple[Dict[str, pd.Series], List[str]]:
         prices: Dict[str, pd.Series] = {}
         missing: List[str] = []
+        self._last_history_warnings = []
+        self._last_history_sources = {}
         positions = [pos for pos in snapshot.positions if not pos.symbol.startswith("CASH")]
         total = len(positions)
         for idx, position in enumerate(positions, start=1):
             instrument = self._instrument_for_position(position)
             instrument_id = position.resolved_instrument_id()
             display_symbol = position.resolved_display_symbol()
-            series = self.load_instrument_history(instrument, lookback_days)
-            if series is None or series.empty:
+            result = self.load_instrument_history_result(instrument, lookback_days)
+            if result.series is None or result.series.empty:
                 missing.append(display_symbol)
             else:
-                prices[instrument_id] = series.astype(float)
+                prices[instrument_id] = result.series.astype(float)
+                self._last_history_sources[instrument_id] = replace(result, series=None)
             if progress_cb:
                 progress_cb(idx, total, display_symbol)
         return prices, missing

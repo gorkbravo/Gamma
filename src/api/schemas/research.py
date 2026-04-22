@@ -637,6 +637,9 @@ class ResearchAnalyzeResponseModel(BaseModel):
     coverage: ResearchCoverageModel
     constituents: list[ResearchConstituentModel]
     warnings: list[str] = Field(default_factory=list)
+    source_provider: str = "unknown"
+    history_source_label: str = "Unknown history source"
+    freshness_label: str = "unknown"
 
     @classmethod
     def from_service_result(cls, result: ResearchAnalysisResult) -> "ResearchAnalyzeResponseModel":
@@ -683,6 +686,9 @@ class ResearchAnalyzeResponseModel(BaseModel):
             ),
             constituents=_constituents_from_result(result),
             warnings=list(result.warnings),
+            source_provider=result.source_provider,
+            history_source_label=result.history_source_label,
+            freshness_label=result.freshness_label.value,
         )
 
 

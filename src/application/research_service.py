@@ -53,6 +53,7 @@ from src.models.research_overview import (
     ResearchOverviewUniverseInstrument,
 )
 from src.services.data_providers import ResearchDataProvider, normalize_snapshot_price_histories
+from src.services.research_market_data import ResearchHistoryResult
 from src.services.saved_research_store import SavedResearchStore
 from src.utils.time import now_utc
 
@@ -83,6 +84,9 @@ class ResearchAnalysisResult:
     constituent_annual_vol: pd.Series
     constituent_max_drawdown: pd.Series
     warnings: list[str]
+    source_provider: str = "unknown"
+    history_source_label: str = "Unknown history source"
+    freshness_label: FreshnessLabel = FreshnessLabel.UNKNOWN
 
 
 class ResearchService:
@@ -102,6 +106,9 @@ class ResearchService:
         freshness_label = FreshnessLabel.MOCKED if source_provider == "mock" else FreshnessLabel.HISTORICAL
 
         warnings.extend(universe.limitations)
+        reset_tracking = getattr(self.provider, "reset_history_tracking", None)
+        if callable(reset_tracking):
+            reset_tracking()
 
         benchmark_returns = self._overview_benchmark_returns(benchmark_symbol, lookback_days, warnings)
         benchmark_total_return = total_return_from_returns(benchmark_returns)
@@ -118,9 +125,10 @@ class ResearchService:
         for instrument in universe.instruments:
             reference = self._overview_reference(instrument)
             symbol = instrument.normalized_symbol()
-            series = self.provider.load_instrument_history(reference, lookback_days)
+            history_result = self._load_overview_history(reference, lookback_days)
+            series = history_result.series
             returns = returns_from_price_series(series, lookback_days)
-            node_warnings: list[str] = []
+            node_warnings: list[str] = list(history_result.warnings)
             observation_counts[symbol] = int(len(returns))
             if returns.empty:
                 missing_symbols.append(symbol)
@@ -146,14 +154,19 @@ class ResearchService:
                     instrument,
                     reference,
                     metrics,
-                    source_provider=source_provider,
+                    source_provider=history_result.source_provider,
                     retrieved_at=retrieved_at,
                     timeframe=timeframe,
-                    freshness_label=freshness_label,
+                    freshness_label=history_result.freshness_label,
                     warnings=node_warnings,
                 )
             )
 
+        source_summary = self._provider_history_source_summary(source_provider, history_source_label, freshness_label)
+        source_provider = source_summary.source_provider
+        history_source_label = source_summary.source_label
+        freshness_label = source_summary.freshness_label
+        warnings.extend(source_summary.warnings)
         group_nodes = self._overview_group_nodes(
             universe.instruments,
             returns_by_symbol,
@@ -250,6 +263,9 @@ class ResearchService:
 
         identity_map = snapshot_identity_map(snapshot)
         raw_prices, missing = self.provider.load_prices(snapshot, lookback_days=request.lookback_days)
+        drain_warnings = getattr(self.provider, "drain_history_warnings", None)
+        if callable(drain_warnings):
+            warnings.extend(drain_warnings())
         if missing:
             warnings.append(
                 f"Missing history for {len(missing)} symbol(s) over {request.lookback_days} days: {', '.join(missing)}. "
@@ -335,6 +351,12 @@ class ResearchService:
             snapshot.base_currency,
             warnings,
         )
+        default_source = self._overview_source_provider()
+        source_summary = self._provider_history_source_summary(
+            default_source,
+            self._overview_history_source_label(default_source),
+            FreshnessLabel.MOCKED if default_source == "mock" else FreshnessLabel.HISTORICAL,
+        )
         aligned_returns = returns_df.reindex(columns=weights.index.tolist())
         constituent_total_returns = self._constituent_total_returns(aligned_returns)
         constituent_annual_vol = aligned_returns.apply(lambda series: realized_vol(series.dropna())[1])
@@ -357,7 +379,10 @@ class ResearchService:
             constituent_total_returns=constituent_total_returns,
             constituent_annual_vol=constituent_annual_vol,
             constituent_max_drawdown=constituent_max_drawdown,
-            warnings=warnings,
+            warnings=list(dict.fromkeys([*warnings, *source_summary.warnings])),
+            source_provider=source_summary.source_provider,
+            history_source_label=source_summary.source_label,
+            freshness_label=source_summary.freshness_label,
         )
 
     def analyze_strategy_lab(self, request: ImportedReturnStreamRequest) -> StrategyLabAnalysisResult:
@@ -495,6 +520,39 @@ class ResearchService:
         except TypeError:
             benchmark_history = self.provider.load_benchmark_history(benchmark_symbol, lookback_days)
         return returns_from_price_series(benchmark_history, lookback_days)
+
+    def _load_overview_history(self, reference: InstrumentReference, lookback_days: int) -> ResearchHistoryResult:
+        loader = getattr(self.provider, "load_instrument_history_result", None)
+        if callable(loader):
+            return loader(reference, lookback_days)
+        series = self.provider.load_instrument_history(reference, lookback_days)
+        source_provider = self._overview_source_provider()
+        return ResearchHistoryResult(
+            series=series,
+            source_provider=source_provider,
+            source_label=self._overview_history_source_label(source_provider),
+            origin="research_service.overview.compat_history_loader",
+            freshness_label=FreshnessLabel.MOCKED if source_provider == "mock" else FreshnessLabel.HISTORICAL,
+        )
+
+    def _provider_history_source_summary(
+        self,
+        default_source_provider: str,
+        default_source_label: str,
+        default_freshness_label: FreshnessLabel,
+    ) -> ResearchHistoryResult:
+        summary = getattr(self.provider, "history_source_summary", None)
+        if callable(summary):
+            row = summary()
+            if row.source_provider != "unknown":
+                return row
+        return ResearchHistoryResult(
+            series=None,
+            source_provider=default_source_provider,
+            source_label=default_source_label,
+            origin="research_service.history_source_summary",
+            freshness_label=default_freshness_label,
+        )
 
     def _saved_store(self) -> SavedResearchStore:
         if self.saved_store is None:
@@ -704,6 +762,12 @@ class ResearchService:
             return "Mock sample-data daily history"
         if source_provider == "ibkr":
             return "IBKR/TWS daily historical bars"
+        if source_provider == "yfinance":
+            return "Yahoo Finance/yfinance daily history"
+        if source_provider == "mixed":
+            return "Mixed listed-market history providers"
+        if source_provider == "research_cache":
+            return "Research history cache"
         return f"{source_provider} daily history"
 
     @staticmethod
@@ -934,6 +998,9 @@ class ResearchService:
         perf: pd.Series | None = None,
         available_symbols: list[str] | None = None,
         missing_symbols: list[str] | None = None,
+        source_provider: str = "unknown",
+        history_source_label: str = "Unknown history source",
+        freshness_label: FreshnessLabel = FreshnessLabel.UNKNOWN,
     ) -> ResearchAnalysisResult:
         return ResearchAnalysisResult(
             scope_type=scope_type,
@@ -951,6 +1018,9 @@ class ResearchService:
             constituent_annual_vol=pd.Series(dtype=float),
             constituent_max_drawdown=pd.Series(dtype=float),
             warnings=warnings,
+            source_provider=source_provider,
+            history_source_label=history_source_label,
+            freshness_label=freshness_label,
         )
 
     @staticmethod

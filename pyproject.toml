@@ -21,6 +21,7 @@ dependencies = [
     "uvicorn>=0.30",
     "edgartools>=5.28.4,<6",
     "websockets>=12",
+    "yfinance>=0.2.54",
 ]
 
 [project.optional-dependencies]

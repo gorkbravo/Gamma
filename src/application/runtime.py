@@ -56,6 +56,12 @@ from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
+from src.services.research_market_data import (
+    IbkrListedMarketHistoryProvider,
+    ListedMarketHistoryProvider,
+    MockListedMarketHistoryProvider,
+    YFinanceListedMarketHistoryProvider,
+)
 from src.services.portfolio_history_store import PortfolioHistoryStore
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
@@ -219,6 +225,7 @@ def build_runtime(
         research_cache,
         research_defaults,
         benchmark_defaults,
+        _build_research_history_providers(client, market_data, mock_service),
     )
 
     portfolio_service = PortfolioService(
@@ -378,6 +385,34 @@ def _build_copilot_provider():
         ).strip(),
         store_responses=store_flag,
     )
+
+
+def _build_research_history_providers(
+    client: IBKRClient,
+    market_data: MarketDataService,
+    mock_service: MockDataService,
+) -> list[ListedMarketHistoryProvider]:
+    configured = (os.getenv("RESEARCH_MARKET_DATA_PROVIDERS", "") or "").strip().lower()
+    if configured:
+        provider_ids = [item.strip() for item in configured.split(",") if item.strip()]
+    elif client.mock:
+        provider_ids = ["mock"]
+    else:
+        provider_ids = ["ibkr", "yfinance"]
+
+    providers: list[ListedMarketHistoryProvider] = []
+    for provider_id in provider_ids:
+        if provider_id in {"mock", "sample", "offline", "demo"}:
+            providers.append(MockListedMarketHistoryProvider(mock_service))
+        elif provider_id in {"ibkr", "tws"}:
+            providers.append(IbkrListedMarketHistoryProvider(market_data))
+        elif provider_id in {"yfinance", "yahoo", "yahoo_finance"}:
+            providers.append(
+                YFinanceListedMarketHistoryProvider(
+                    timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0)
+                )
+            )
+    return providers or [MockListedMarketHistoryProvider(mock_service) if client.mock else IbkrListedMarketHistoryProvider(market_data)]
 
 
 def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_data: MarketDataService):
