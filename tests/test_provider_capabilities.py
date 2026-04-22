@@ -50,6 +50,7 @@ def test_default_provider_registry_distinguishes_active_optional_sample_and_plan
     }.issubset(by_id)
 
     assert by_id["openai_copilot"].status == "optional"
+    assert by_id["rss_news_feeds"].status == "optional"
     assert by_id["sample_data"].status == "sample"
     assert all(row.status == "planned" for row in registry.list_capabilities(status="planned"))
     assert all("status=planned" in (row.transformation_note or "") for row in registry.list_capabilities(status="planned"))
@@ -126,7 +127,8 @@ def test_provider_capabilities_system_api(tmp_path):
         assert providers["polygon"]["status"] == "planned"
         assert providers["nasdaq_data_link"]["status"] == "planned"
         assert providers["alchemy"]["status"] == "planned"
-        assert providers["rss_news_feeds"]["status"] == "planned"
+        assert providers["rss_news_feeds"]["status"] == "optional"
+        assert "NEWS_PROVIDER" in providers["rss_news_feeds"]["credential_env_vars"]
         assert "news" in providers["sample_data"]["supported_domains"]
 
         active_response = client.get("/system/provider-capabilities", params={"include_planned": False})
@@ -134,6 +136,7 @@ def test_provider_capabilities_system_api(tmp_path):
         active_ids = {row["provider_id"] for row in active_response.json()["providers"]}
         assert "ibkr" in active_ids
         assert "eia" in active_ids
+        assert "rss_news_feeds" in active_ids
 
         planned_response = client.get("/system/provider-capabilities", params={"status": "planned"})
         assert planned_response.status_code == 200
@@ -195,18 +198,20 @@ def test_planned_research_market_data_candidates_are_not_live_providers():
     assert {"polygon", "twelve_data", "financial_modeling_prep", "eodhd", "databento"}.isdisjoint(active_research_ids)
 
 
-def test_rss_news_provider_is_planned_and_sample_data_supports_news_contracts():
+def test_rss_news_provider_is_optional_and_sample_data_supports_news_contracts():
     registry = build_default_provider_capability_registry()
 
     rss = registry.get_provider("rss_news_feeds")
     sample = registry.get_provider("sample_data")
 
     assert rss is not None
-    assert rss.status == "planned"
+    assert rss.status == "optional"
     assert "news" in rss.supported_domains
     assert "sitrep" in rss.supported_domains
     assert "rss_items" in rss.data_types
-    assert any("No Gamma adapter is implemented yet" in note for note in rss.limitations)
+    assert "NEWS_PROVIDER" in rss.credential_env_vars
+    assert any("source-owned RSS" in note for note in rss.configuration_notes)
+    assert any("fail per source" in note for note in rss.limitations)
     assert any("feed URL" in note for note in rss.provenance_notes)
 
     assert sample is not None

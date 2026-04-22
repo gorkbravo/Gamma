@@ -15,6 +15,7 @@ from src.application.fundamentals_service import FundamentalsService
 from src.application.iv_service import IVService
 from src.application.macro_service import MacroService
 from src.application.maritime_service import MaritimeService
+from src.application.news_service import NewsService
 from src.application.portfolio_service import PortfolioService
 from src.application.prediction_market_service import PredictionMarketService
 from src.application.provider_capability_registry import (
@@ -51,6 +52,7 @@ from src.services.maritime_adapters import (
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAdapter
+from src.services.news_adapters import NewsEventProvider, RssNewsEventProvider, SampleNewsEventProvider
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
 from src.services.ibkr_client import IBKRClient
@@ -106,6 +108,7 @@ class ApplicationRuntime:
     maritime_service: MaritimeService
     crypto_service: CryptoService
     fundamentals_service: FundamentalsService
+    news_service: NewsService
     copilot_service: CopilotService
     risk_service: RiskService
     iv_service: IVService
@@ -287,6 +290,7 @@ def build_runtime(
         ),
         store=FundamentalsResearchStore(base_dir=resolved_history_dir / "fundamentals"),
     )
+    news_service = NewsService(_build_news_providers())
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
@@ -331,6 +335,7 @@ def build_runtime(
         maritime_service=maritime_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
+        news_service=news_service,
         copilot_service=copilot_service,
         risk_service=risk_service,
         iv_service=iv_service,
@@ -545,3 +550,19 @@ def _build_maritime_provider():
         max_messages=int(os.getenv("AISSTREAM_MAX_MESSAGES", "500") or 500),
         cache_seconds=int(os.getenv("AISSTREAM_CACHE_SECONDS", "30") or 30),
     )
+
+
+def _build_news_providers() -> list[NewsEventProvider]:
+    configured = (os.getenv("NEWS_PROVIDER", "sample") or "sample").strip().lower()
+    provider_ids = [item.strip() for item in configured.split(",") if item.strip()]
+    providers: list[NewsEventProvider] = []
+    for provider_id in provider_ids:
+        if provider_id in {"rss", "rss_news", "rss_news_feeds"}:
+            providers.append(
+                RssNewsEventProvider(
+                    timeout_seconds=float(os.getenv("RSS_NEWS_TIMEOUT_SECONDS", "6") or 6.0),
+                )
+            )
+        elif provider_id in {"sample", "mock", "offline", "demo", "sample_news"}:
+            providers.append(SampleNewsEventProvider())
+    return providers or [SampleNewsEventProvider()]

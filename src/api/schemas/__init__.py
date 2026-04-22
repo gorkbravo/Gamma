@@ -31,6 +31,11 @@ from src.api.schemas.portfolio import (
     PositionModel,
     TimeSeriesPoint,
 )
+from src.api.schemas.news import (
+    NewsEventEntityModel,
+    NewsEventFeedResponseModel,
+    NewsEventItemModel,
+)
 from src.api.schemas.prediction_markets import (
     CalibrationSummaryResponseModel,
     PredictionMarketListResponseModel,
@@ -94,6 +99,9 @@ __all__ = [
     "MacroSeriesHistoryResponseModel",
     "MacroSnapshotRequestModel",
     "MacroSnapshotResponseModel",
+    "NewsEventEntityModel",
+    "NewsEventFeedResponseModel",
+    "NewsEventItemModel",
     "PortfolioHistoryPointModel",
     "PortfolioHistoryResponseModel",
     "ProviderCapabilityListResponseModel",

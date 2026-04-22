@@ -13,6 +13,7 @@ from src.api.routes import (
     iv_router,
     macro_router,
     maritime_router,
+    news_router,
     portfolio_router,
     prediction_markets_router,
     research_router,
@@ -65,6 +66,7 @@ def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
     app.include_router(research_router)
     app.include_router(macro_router)
     app.include_router(maritime_router)
+    app.include_router(news_router)
     app.include_router(prediction_markets_router)
     app.include_router(risk_router)
     app.include_router(iv_router)
