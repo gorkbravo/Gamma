@@ -326,6 +326,36 @@ Preferred layout for structured multi-column data.
 - Sortable columns: small directional icon only
 - Interactive rows (clickable): cursor pointer, hover background `rgba(--accent, 0.06)`
 
+#### Table-Fills-Panel Rule
+
+When a panel's primary content is a table, the **panel padding is zero**. The panel border is the table's visual container — the table fills edge-to-edge.
+
+```css
+.panel.table-panel {
+  padding: 0;
+  overflow: hidden;
+}
+```
+
+If a section label is needed above the table, use a single compact header row — not an eyebrow + title stack:
+
+```css
+.table-panel-header {
+  padding: 0.3rem 0.75rem;
+  border-bottom: 1px solid var(--divider);
+  min-height: 26px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+```
+
+**When to omit the header entirely:** If the mode bar, tab context, or the table's own column headers make the section identity unambiguous, remove the panel header completely. Column header cells receive `padding: 0.3rem 0.75rem` to align with the card edge.
+
+**Never** introduce a `.table-wrap` div with its own border inside an already-bordered panel — this double-borders the table and defeats the edge-to-edge effect.
+
 ### Dividers
 - `1px solid var(--divider)` — the primary tool for separating content groups
 - Muted, low contrast. They guide the eye, not call attention to themselves.
@@ -447,6 +477,9 @@ When building a new tab, follow this exact checklist:
 | Opacity-based panel backgrounds | Ambiguous depth, glassy feel | Solid token or transparent |
 | `linear-gradient` on panel background | Implies lighting/elevation | Flat solid only |
 | Rendering provenance metadata in every table cell or KPI by default | Turns the UI into a developer/debug surface | Keep provenance in the model, but surface it only where the user is explicitly asking for source context |
+| Panel padding around a table | Creates wasted margin — the user sees card-inside-card instead of data-as-boundary | Set `padding: 0` on the panel; table fills edge-to-edge |
+| Eyebrow + title stack above a table | Burns ~40–55px of chrome before first data row | One 26px compact header row (or none if column headers suffice) |
+| `.table-wrap` with its own border inside a bordered panel | Double border defeats the edge-to-edge effect | Remove inner border; panel border is the table's container |
 
 ---
 

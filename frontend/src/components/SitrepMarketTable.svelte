@@ -62,8 +62,6 @@
 <style>
   .table-wrap {
     overflow: auto;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
     max-height: 20rem;
   }
 

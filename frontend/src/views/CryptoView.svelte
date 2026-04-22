@@ -413,12 +413,9 @@
               </article>
             </div>
 
-            <article class="panel">
-              <div class="panel-header">
-                <div>
-                  <p class="eyebrow">Universe</p>
-                  <h3>Tokens</h3>
-                </div>
+            <article class="panel table-panel">
+              <div class="table-header">
+                <span>Tokens</span>
                 <small>{workspace?.tokens?.length ?? 0} tokens</small>
               </div>
 
@@ -475,12 +472,9 @@
               </div>
             </article>
 
-            <article class="panel">
-              <div class="panel-header">
-                <div>
-                  <p class="eyebrow">Opportunity Board</p>
-                  <h3>Flow Proxy Leaders</h3>
-                </div>
+            <article class="panel table-panel">
+              <div class="table-header">
+                <span>Flow Proxy Leaders</span>
                 <small>Gamma turnover + move proxy</small>
               </div>
 
@@ -817,12 +811,9 @@
         </article>
 
         <div class="detail-split">
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Liquidity</p>
-                <h3>Pool Tape</h3>
-              </div>
+          <article class="panel table-panel">
+            <div class="table-header">
+              <span>Pool Tape</span>
               <small>{liquidity?.dominant_dex ?? "N/A"}</small>
             </div>
 
@@ -893,12 +884,9 @@
             </div>
           </article>
 
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Cross-Section</p>
-                <h3>Flow Leaderboard</h3>
-              </div>
+          <article class="panel table-panel">
+            <div class="table-header">
+              <span>Flow Leaderboard</span>
               <small>Turnover-led ranking</small>
             </div>
 
@@ -1042,12 +1030,9 @@
           </article>
         {/if}
 
-        <article class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Universe</p>
-              <h3>Tokens</h3>
-            </div>
+        <article class="panel table-panel">
+          <div class="table-header">
+            <span>Tokens</span>
             <small>{workspace?.tokens?.length ?? 0} tokens</small>
           </div>
 
@@ -1165,6 +1150,40 @@
 
   .header-panel {
     gap: 0.3rem;
+  }
+
+  .table-panel {
+    padding: 0;
+    overflow: hidden;
+    gap: 0;
+  }
+
+  .table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--divider);
+    min-height: 26px;
+    flex-shrink: 0;
+  }
+
+  .table-header span {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+  }
+
+  .table-header small {
+    color: var(--text-2);
+    font-size: 0.64rem;
+  }
+
+  .table-panel .table-wrap {
+    border: 0;
+    background: transparent;
   }
 
   .panel-header,

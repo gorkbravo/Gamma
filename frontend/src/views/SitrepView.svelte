@@ -530,32 +530,32 @@
     <div class="primary-column">
       <div class="market-grid">
         <article class="panel table-panel">
-          <div class="panel-head">
-            <div class="title-line"><p class="eyebrow">Equities</p><h3>Worldwide Indices</h3></div>
+          <div class="table-header">
+            <span>Worldwide Indices</span>
             <small>{indicesOverview?.universe_label ?? "Global Indices"}</small>
           </div>
           <SitrepMarketTable rows={indexRows} profile="indices" hideSource contextLabel="Proxy" emptyLabel="No index overview loaded." />
         </article>
 
         <article class="panel table-panel">
-          <div class="panel-head">
-            <div class="title-line"><p class="eyebrow">FX</p><h3>G10 Pairs</h3></div>
+          <div class="table-header">
+            <span>G10 Pairs</span>
             <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
           </div>
           <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext emptyLabel="No FX strip loaded." />
         </article>
 
         <article class="panel table-panel">
-          <div class="panel-head">
-            <div class="title-line"><p class="eyebrow">Yields</p><h3>Rates</h3></div>
+          <div class="table-header">
+            <span>Rates</span>
             <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
           </div>
           <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." />
         </article>
 
         <article class="panel table-panel">
-          <div class="panel-head">
-            <div class="title-line"><p class="eyebrow">Commodities</p><h3>Futures</h3></div>
+          <div class="table-header">
+            <span>Futures</span>
             <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
           </div>
           <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource contextTone emptyLabel="No commodities workspace loaded." />
@@ -655,6 +655,35 @@
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
     padding: 0.85rem;
+  }
+
+  .table-panel {
+    padding: 0;
+    overflow: hidden;
+    gap: 0;
+  }
+
+  .table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--divider);
+    min-height: 26px;
+    flex-shrink: 0;
+  }
+
+  .table-header span {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+  }
+
+  .table-header small {
+    color: var(--text-2);
+    font-size: 0.64rem;
   }
 
   .header-panel {
