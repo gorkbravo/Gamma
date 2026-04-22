@@ -96,6 +96,27 @@ select {
   box-sizing: border-box;
 }
 
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--panel-strong);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-2);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* ── Bloomberg-style value flash ── */
 @keyframes flash-up {
   0%   { background-color: rgba(75, 180, 116, 0.22); }
