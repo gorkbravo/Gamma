@@ -135,6 +135,40 @@
     return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
   }
 
+  const SOURCE_ABBREV: Record<string, string> = {
+    "marketwatch top stories": "MarketWatch",
+    "marketwatch": "MarketWatch",
+    "bloomberg markets": "Bloomberg",
+    "bloomberg": "Bloomberg",
+    "yahoo finance": "Yahoo",
+    "reuters": "Reuters",
+    "cnbc": "CNBC",
+    "financial times": "FT",
+    "wall street journal": "WSJ",
+    "the wall street journal": "WSJ",
+    "24/7 wall st.": "24/7WS",
+    "motley fool": "Fool",
+    "zacks": "Zacks",
+    "seeking alpha": "SeekAlpha",
+    "al jazeera": "AJ",
+    "oilprice": "OilPrice",
+    "gamma sample news": "Gamma",
+    "axios": "Axios",
+    "business insider": "BI",
+    "investor's business daily": "IBD",
+    "barron's": "Barron's",
+    "thestreet": "TheStreet",
+    "benzinga": "Benzinga",
+    "fortune": "Fortune",
+  };
+
+  function abbreviateSource(name: string): string {
+    const key = name.trim().toLowerCase();
+    if (SOURCE_ABBREV[key]) return SOURCE_ABBREV[key];
+    const words = name.trim().split(/\s+/);
+    return words.length > 1 && name.length > 10 ? words[0] : name;
+  }
+
   function shortDate(value: string | null | undefined) {
     if (!value) {
       return "N/A";
@@ -638,7 +672,7 @@
               <div class="news-row">
                 <span class="news-time">{formatTime(item.published_at)}</span>
                 <p class="news-title">{item.title}</p>
-                <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{item.source_name}</a>
+                <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{abbreviateSource(item.source_name)}</a>
               </div>
             {/each}
           {:else}
@@ -856,7 +890,7 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(26rem, 0.44fr);
+    grid-template-columns: minmax(0, 1fr) minmax(29rem, 0.48fr);
     gap: 0.5rem;
   }
 
@@ -959,7 +993,7 @@
   }
 
   .news-time {
-    color: var(--text-2);
+    color: var(--accent);
     font-size: 0.7rem;
     padding-top: 0.12rem;
     white-space: nowrap;
@@ -967,8 +1001,8 @@
 
   .news-title {
     color: var(--text-0);
-    font-size: 0.8rem;
-    line-height: 1.38;
+    font-size: 0.74rem;
+    line-height: 1.35;
     margin: 0;
   }
 
