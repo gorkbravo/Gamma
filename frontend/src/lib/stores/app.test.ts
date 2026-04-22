@@ -14,6 +14,7 @@ import type {
   MacroEventsResponse,
   MacroSeriesHistory,
   MacroSnapshot,
+  NewsEventFeedResponse,
   PredictionCalibrationSummary,
   PredictionMarket,
   PredictionMarketListResponse,
@@ -51,6 +52,7 @@ import {
   loadCryptoWorkspace,
   loadIvSession,
   loadMacroWorkspace,
+  loadNewsFeed,
   loadPortfolioSnapshot,
   loadPredictionMarketScreener,
   loadResearchOverview,
@@ -61,6 +63,7 @@ import {
   macroEvents,
   macroSeriesHistories,
   macroSnapshot,
+  newsFeed,
   portfolioHistory,
   portfolioPerformance,
   portfolioSnapshot,
@@ -130,6 +133,7 @@ describe("app store orchestration", () => {
     macroDivergences.set(null);
     macroEvents.set(null);
     macroSeriesHistories.set({});
+    newsFeed.set(null);
     lastError.set("");
     loading.set({
       status: false,
@@ -144,6 +148,7 @@ describe("app store orchestration", () => {
       savedResearch: false,
       macro: false,
       macroHistory: false,
+      news: false,
       prediction: false,
       predictionDetail: false,
       crypto: false,
@@ -498,6 +503,45 @@ describe("app store orchestration", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
       "/research/overview?universe_id=sample_equities&timeframe=1M&benchmark_symbol=AAPL&surface=research_overview&force_refresh=true"
     );
+  });
+
+  it("loads the latest news feed for SITREP", async () => {
+    const feed: NewsEventFeedResponse = {
+      source_provider: "rss",
+      retrieved_at: "2026-04-22T12:00:00Z",
+      origin: "news_service.latest",
+      freshness_label: "delayed",
+      warnings: ["One RSS feed failed."],
+      transformation_note: "Merged news feed.",
+      items: [
+        {
+          normalized_id: "rss:test:1",
+          title: "Fed markets update",
+          url: "https://example.com/fed",
+          source_provider: "rss",
+          source_name: "Example Markets",
+          published_at: "2026-04-22T11:45:00Z",
+          retrieved_at: "2026-04-22T12:00:00Z",
+          origin: "rss.feed:test",
+          summary: "Policy-sensitive markets moved.",
+          source_domain: "example.com",
+          provider_item_id: "test:1",
+          detected_entities: [],
+          tags: ["macro"],
+          freshness_label: "delayed",
+          warnings: [],
+          transformation_note: "Parsed from RSS."
+        }
+      ]
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(feed));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadNewsFeed({ limit: 10 });
+
+    expect(get(newsFeed)?.items[0]?.title).toBe("Fed markets update");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/news/latest?limit=10");
+    expect(get(lastError)).toBe("");
   });
 
   it("analyzes Strategy Lab returns and stores the latest result", async () => {

@@ -67,6 +67,7 @@
     loadMacroWorkspace,
     loadCommoditiesWorkspace,
     loadMaritimeWorkspace,
+    loadNewsFeed,
     loadPortfolioPerformance,
     loading,
     loadPortfolioSnapshot,
@@ -76,6 +77,7 @@
     macroSeriesHistories,
     macroSnapshot,
     maritimeWorkspace,
+    newsFeed,
     portfolioHistory,
     portfolioPerformance,
     portfolioSnapshot,
@@ -290,6 +292,7 @@
 
   async function loadSitrepContext(options: { forceRefresh?: boolean } = {}) {
     await Promise.allSettled([
+      loadNewsFeed({ limit: 25 }),
       loadResearchOverview({
         universeId: "broad_us_market",
         timeframe: "3M",
@@ -1019,6 +1022,7 @@
       push("Portfolio", $portfolioSnapshot?.warnings, "warning");
       push("Performance", $portfolioPerformance?.warnings, "warning");
     } else if ($activeTab === "sitrep") {
+      push("News", $newsFeed?.warnings, "warning");
       push("Research Overview", $researchOverview?.warnings, "warning");
       push("Macro", $macroSnapshot?.warnings, "warning");
       push("Commodities", $commoditiesWorkspace?.warnings, "warning");
@@ -1594,10 +1598,12 @@
             system={$systemStatus}
             overview={$researchOverview}
             indicesOverview={$sitrepIndicesOverview}
+            news={$newsFeed}
             macro={$macroSnapshot}
             commodities={$commoditiesWorkspace}
             prediction={$predictionMarketScreener}
-            loading={$loading.researchOverview || $loading.macro || $loading.commodities || $loading.prediction}
+            loading={$loading.researchOverview || $loading.news || $loading.macro || $loading.commodities || $loading.prediction}
+            onLoadNews={loadNewsFeed}
             onLoadOverview={loadResearchOverview}
             onLoadIndicesOverview={loadSitrepIndicesOverview}
             onLoadMacro={loadMacroWorkspace}

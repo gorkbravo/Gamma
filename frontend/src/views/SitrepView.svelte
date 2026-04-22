@@ -5,6 +5,7 @@
     CommodityWorkspaceResponse,
     MacroMetric,
     MacroSnapshot,
+    NewsEventFeedResponse,
     PredictionMarketListResponse,
     ResearchOverviewNode,
     ResearchOverviewResponse,
@@ -20,10 +21,12 @@
   export let system: SystemStatus | null = null;
   export let overview: ResearchOverviewResponse | null = null;
   export let indicesOverview: ResearchOverviewResponse | null = null;
+  export let news: NewsEventFeedResponse | null = null;
   export let macro: MacroSnapshot | null = null;
   export let commodities: CommodityWorkspaceResponse | null = null;
   export let prediction: PredictionMarketListResponse | null = null;
   export let loading = false;
+  export let onLoadNews: (options?: { limit?: number }) => Promise<unknown> | void;
   export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
   export let onLoadIndicesOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void = onLoadOverview;
   export let onLoadMacro: (options?: MacroLoadOptions) => Promise<unknown> | void;
@@ -65,6 +68,9 @@
     }
     if (!macro) {
       tasks.push(onLoadMacro({ region: "US", timeframe: "3M", theme: "all", mode: "snapshot" }));
+    }
+    if (!news) {
+      tasks.push(onLoadNews({ limit: 25 }));
     }
     if (!commodities) {
       tasks.push(onLoadCommodities({ mode: "overview" }));
@@ -385,10 +391,19 @@
   }
 
   function buildTapeRows(
+    newsData: NewsEventFeedResponse | null,
     macroData: MacroSnapshot | null,
     predictionData: PredictionMarketListResponse | null,
     commodityData: CommodityWorkspaceResponse | null
   ): TapeRow[] {
+    const newsRows: TapeRow[] = (newsData?.items ?? []).slice(0, 6).map((item) => ({
+      id: item.normalized_id,
+      source: item.source_name,
+      tone: "neutral",
+      title: item.title,
+      detail: item.summary ?? item.source_domain ?? item.url,
+      meta: `${item.freshness_label} / ${formatDateTime(item.published_at)}`
+    }));
     const focusRows: TapeRow[] = (macroData?.focus_items ?? []).slice(0, 4).map((item) => ({
       id: item.focus_id,
       source: "Macro",
@@ -425,7 +440,7 @@
       detail: event.summary ?? humanize(event.category),
       meta: event.relative_label ?? shortDate(event.scheduled_at)
     }));
-    return [...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 14);
+    return [...newsRows, ...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 14);
   }
 
   function buildWhatChangedRows(
@@ -468,12 +483,14 @@
   }
 
   function warningRows(
+    newsData: NewsEventFeedResponse | null,
     overviewData: ResearchOverviewResponse | null,
     macroData: MacroSnapshot | null,
     commodityData: CommodityWorkspaceResponse | null,
     predictionData: PredictionMarketListResponse | null
   ) {
     return [
+      ...(newsData?.warnings ?? []),
       ...(overviewData?.warnings ?? []),
       ...(macroData?.warnings ?? []),
       ...(commodityData?.warnings ?? []),
@@ -487,13 +504,16 @@
   $: fxRows = buildFxRows(macro);
   $: yieldRows = buildYieldRows(macro);
   $: commodityRows = buildCommodityRows(commodities);
-  $: tapeRows = buildTapeRows(macro, prediction, commodities);
+  $: tapeRows = buildTapeRows(news, macro, prediction, commodities);
   $: changedRows = buildWhatChangedRows(macro, overview, commodities);
-  $: warnings = warningRows(overview, macro, commodities, prediction);
-  $: asOf = macro?.retrieved_at ?? overview?.retrieved_at ?? commodities?.retrieved_at ?? null;
+  $: warnings = warningRows(news, overview, macro, commodities, prediction);
+  $: asOf = news?.retrieved_at ?? macro?.retrieved_at ?? overview?.retrieved_at ?? commodities?.retrieved_at ?? null;
   $: pricedRatio = overview?.coverage.coverage_ratio ?? null;
   $: highDivergences = (macro?.top_divergences ?? []).filter((item) => item.label === "high").length;
   $: staleMarkets = (prediction?.venues ?? []).reduce((total, venue) => total + venue.stale_markets + venue.broken_markets, 0);
+  $: newsStatus = news
+    ? `${news.source_provider.toUpperCase()} / ${news.items.length} ITEMS / ${news.freshness_label.toUpperCase()}`
+    : "NOT LOADED";
   $: providerMode = system?.mock_mode ? "MOCK" : system?.connection.connected ? system.market_data_mode.toUpperCase() : "OFFLINE";
 </script>
 
@@ -625,7 +645,7 @@
           <div class="title-line"><p class="eyebrow">Coverage</p><h3>Provider Status</h3></div>
         </div>
         <div class="need-list">
-          <div><strong>News</strong><span class="warning">NO ADAPTER</span></div>
+          <div><strong>News</strong><span class:warning={!news || news.items.length === 0}>{newsStatus}</span></div>
           <div><strong>TV</strong><span class="warning">EMBED ONLY</span></div>
           <div><strong>Listed Markets</strong><span>{overview?.history_source_label ?? "Research Overview policy"}</span></div>
           <div><strong>FX / Rates</strong><span>Macro / FRED / IBKR</span></div>

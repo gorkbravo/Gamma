@@ -110,6 +110,43 @@ export interface DiagnosticsResponse {
   iv_active_symbol: string | null;
 }
 
+export interface NewsEventEntity {
+  label: string;
+  entity_type: string;
+  normalized_id: string | null;
+  symbol: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface NewsEventItem {
+  normalized_id: string;
+  title: string;
+  url: string;
+  source_provider: string;
+  source_name: string;
+  published_at: string;
+  retrieved_at: string;
+  origin: string;
+  summary: string | null;
+  source_domain: string | null;
+  provider_item_id: string | null;
+  detected_entities: NewsEventEntity[];
+  tags: string[];
+  freshness_label: string;
+  warnings: string[];
+  transformation_note: string | null;
+}
+
+export interface NewsEventFeedResponse {
+  items: NewsEventItem[];
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  freshness_label: string;
+  warnings: string[];
+  transformation_note: string | null;
+}
+
 export interface TimeSeriesPoint {
   timestamp: string;
   value: number;

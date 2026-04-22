@@ -38,6 +38,7 @@ import type {
   MaritimeWorkspaceResponse,
   MacroSeriesHistory,
   MacroSnapshot,
+  NewsEventFeedResponse,
   PredictionCalibrationSummary,
   PredictionMarket,
   PredictionMarketListResponse,
@@ -283,6 +284,7 @@ export const macroSnapshot = writable<MacroSnapshot | null>(null);
 export const macroDivergences = writable<MacroDivergenceListResponse | null>(null);
 export const macroEvents = writable<MacroEventsResponse | null>(null);
 export const macroSeriesHistories = writable<Record<string, MacroSeriesHistory>>({});
+export const newsFeed = writable<NewsEventFeedResponse | null>(null);
 export const commoditiesWorkspace = writable<CommodityWorkspaceResponse | null>(null);
 export const maritimeWorkspace = writable<MaritimeWorkspaceResponse | null>(null);
 export const predictionMarketScreener = writable<PredictionMarketListResponse | null>(null);
@@ -373,6 +375,7 @@ export const loading = writable<Record<string, boolean>>({
   savedResearch: false,
   macro: false,
   macroHistory: false,
+  news: false,
   commodities: false,
   maritime: false,
   prediction: false,
@@ -919,6 +922,24 @@ export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOpt
     return null;
   } finally {
     setLoading("researchOverview", false);
+  }
+}
+
+export async function loadNewsFeed(options: { limit?: number } = {}) {
+  setLoading("news", true);
+  try {
+    const params = new URLSearchParams({
+      limit: String(options.limit ?? 25)
+    });
+    const response = await getJson<NewsEventFeedResponse>(`/news/latest?${params.toString()}`);
+    newsFeed.set(response);
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("news", false);
   }
 }
 
