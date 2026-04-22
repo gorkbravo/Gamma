@@ -128,6 +128,13 @@
     });
   }
 
+  function formatTime(value: string | null | undefined) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value.slice(11, 16);
+    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
   function shortDate(value: string | null | undefined) {
     if (!value) {
       return "N/A";
@@ -620,22 +627,22 @@
         </div>
       </article>
 
-      <article class="panel tape-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">News / Events</p><h3>Event Tape</h3></div>
+      <article class="panel table-panel news-panel">
+        <div class="table-header">
+          <span>Market News</span>
+          <small>{news?.freshness_label ?? "not loaded"}</small>
         </div>
-        <div class="tape-list compact">
-          {#if tapeRows.length}
-            {#each tapeRows as row}
-              <div class="tape-row {row.tone}">
-                <span>{row.source}</span>
-                <strong>{row.title}</strong>
-                <p>{row.detail}</p>
-                <small>{row.meta}</small>
+        <div class="news-wrap">
+          {#if news?.items?.length}
+            {#each news.items as item}
+              <div class="news-row">
+                <span class="news-time">{formatTime(item.published_at)}</span>
+                <p class="news-title">{item.title}</p>
+                <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{item.source_name}</a>
               </div>
             {/each}
           {:else}
-            <p class="empty-state">No event or market tape loaded.</p>
+            <p class="news-empty">NO NEWS LOADED.</p>
           {/if}
         </div>
       </article>
@@ -935,6 +942,56 @@
     height: 100%;
     border: 0;
     background: var(--bg-0);
+  }
+
+  .news-wrap {
+    overflow: auto;
+    max-height: 28rem;
+  }
+
+  .news-row {
+    display: grid;
+    grid-template-columns: 3rem minmax(0, 1fr) minmax(4.5rem, max-content);
+    gap: 0 0.6rem;
+    align-items: start;
+    padding: 0.42rem 0.75rem;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .news-time {
+    color: var(--text-2);
+    font-size: 0.7rem;
+    padding-top: 0.12rem;
+    white-space: nowrap;
+  }
+
+  .news-title {
+    color: var(--text-0);
+    font-size: 0.8rem;
+    line-height: 1.38;
+    margin: 0;
+  }
+
+  .news-source {
+    color: var(--text-2);
+    font-size: 0.68rem;
+    text-decoration: none;
+    text-align: right;
+    white-space: nowrap;
+    padding-top: 0.12rem;
+  }
+
+  .news-source:hover {
+    color: var(--accent);
+  }
+
+  .news-empty {
+    padding: 0.75rem;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.72rem;
+    margin: 0;
   }
 
   a {
