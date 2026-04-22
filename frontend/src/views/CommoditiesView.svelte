@@ -1115,7 +1115,6 @@
           <h2>Commodities Research</h2>
           {#if loading}<span class="loading-pill">Refreshing</span>{/if}
         </div>
-        <p class="subtle">Curves, spreads, inventories, and cross-domain signals for the loaded commodity universe.</p>
       </div>
       <button type="button" class="refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>
         {loading ? "LOADING..." : "Refresh"}
@@ -1197,7 +1196,6 @@
           </ul>
         {:else}
           <strong>No active caveats</strong>
-          <small>Provider reported complete coverage for this payload.</small>
         {/if}
       </div>
     </section>
@@ -1516,7 +1514,6 @@
         <div>
           <p class="eyebrow">{modeTitle(mode)}</p>
           <h2>{selectedInstrument?.name ?? "Select a commodity"}</h2>
-          <p>{modeSubtitle(mode)}</p>
         </div>
         <label>
           Mode Market
@@ -1553,8 +1550,8 @@
         </div>
         <div class="metric">
           <span>Inventory</span>
-          <strong>{selectedInventory?.interpretation ?? "no linked series"}</strong>
-          <small>{selectedInventory ? inventoryValue(selectedInventory) : "N/A"}</small>
+          <strong>{selectedInventory ? formatPercentile(selectedInventory.seasonal_percentile) : "N/A"}</strong>
+          <small>{selectedInventory ? inventoryValue(selectedInventory) : "no linked series"}</small>
         </div>
         <div class="metric">
           <span>As Of</span>
@@ -1584,7 +1581,6 @@
           <div class="section-head">
             <div>
               <h2>{mode === "metals" ? "Metals Snapshot" : mode === "energy" ? "Energy Snapshot" : "Market Snapshot"}</h2>
-              <p>Latest price, curve state, and first linked fundamental signal.</p>
             </div>
           </div>
           <div class="table-wrap">
@@ -1638,7 +1634,6 @@
           <div class="section-head">
             <div>
               <h2>Crack Spread Matrix</h2>
-              <p>1-1, 2-1-1, and 3-2-1 refining margin proxies versus WTI.</p>
             </div>
           </div>
           <div class="table-wrap">
@@ -1649,7 +1644,6 @@
                   <th>Value</th>
                   <th>Chg</th>
                   <th>Pctl</th>
-                  <th>Read</th>
                 </tr>
               </thead>
               <tbody>
@@ -1663,11 +1657,10 @@
                       <td>{formatNumber(row.value, 2)} USD/bbl</td>
                       <td class={row.tone}>{formatNumber(row.change, 2)}</td>
                       <td>{formatPercentile(row.percentile)}</td>
-                      <td>{row.interpretation}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row"><td colspan="5">No crack-spread rows are available.</td></tr>
+                  <tr class="empty-row"><td colspan="4">No crack-spread rows are available.</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1678,7 +1671,6 @@
           <div class="section-head">
             <div>
               <h2>Term Structure Heatmap</h2>
-              <p>Calendar-spread kinks across adjacent contracts.</p>
             </div>
           </div>
           {#if termSpreadHeatmapRows.length}
@@ -1703,7 +1695,6 @@
           <div class="section-head">
             <div>
               <h2>Inventory vs Seasonality Cloud</h2>
-              <p>Latest inventory location inside the loaded seasonal min/max band.</p>
             </div>
           </div>
           <div class="seasonality-list">
@@ -1712,7 +1703,7 @@
                 <div class="seasonality-row">
                   <div>
                     <strong>{row.label}</strong>
-                    <span>{row.methodology} | {row.interpretation}</span>
+                    <span>{row.methodology}</span>
                   </div>
                   <div class="seasonality-band">
                     {#if row.position != null}
@@ -1732,17 +1723,27 @@
           <div class="section-head">
             <div>
               <h2>Vessel / Flow Proxy</h2>
-              <p>Physical-flow hooks and availability status for energy hubs.</p>
             </div>
           </div>
-          <div class="note-list compact-notes">
-            {#each flowProxyRows as row}
-              <div class="note-row">
-                <strong>{row.hub}</strong>
-                <span>{row.metric} | {row.source}</span>
-                <p>{row.signal}</p>
-              </div>
-            {/each}
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Hub</th>
+                  <th>Metric</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each flowProxyRows as row}
+                  <tr>
+                    <td>{row.hub}</td>
+                    <td>{row.metric}</td>
+                    <td>{row.source}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
           </div>
         </article>
       </section>
@@ -1909,7 +1910,6 @@
           <div class="section-head">
             <div>
               <h2>Fundamental Tape</h2>
-              <p>Latest stocks, flows, refinery, and demand readings for the selected market.</p>
             </div>
           </div>
           <div class="table-wrap">
@@ -1921,7 +1921,6 @@
                   <th>Latest</th>
                   <th>Chg</th>
                   <th>Path</th>
-                  <th>Signal</th>
                 </tr>
               </thead>
               <tbody>
@@ -1943,7 +1942,6 @@
                         <span class="sparkline-empty">N/A</span>
                       {/if}
                     </td>
-                    <td>{row.signal}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -1959,7 +1957,6 @@
           <div class="section-head">
             <div>
               <h2>Curve</h2>
-              <p>{selectedCurve?.summary ?? "Select a market with curve nodes."}</p>
             </div>
           </div>
           <div class="inline-stats">
@@ -1983,7 +1980,6 @@
           <div class="section-head">
             <div>
               <h2>Curve Nodes</h2>
-              <p>Front contracts and changes from the normalized provider snapshot.</p>
             </div>
           </div>
           <div class="table-wrap">
@@ -2025,7 +2021,6 @@
         <div class="section-head">
           <div>
             <h2>Spreads</h2>
-            <p>Calendar spreads, metal ratios, and product-crack proxies with history context when available.</p>
           </div>
         </div>
         <div class="table-wrap">
@@ -2037,7 +2032,6 @@
                 <th>Change</th>
                 <th>Z</th>
                 <th>Percentile</th>
-                <th>Interpretation</th>
               </tr>
             </thead>
             <tbody>
@@ -2052,12 +2046,11 @@
                     <td class={valueClass(spread.change)}>{formatNumber(spread.change, 3)}</td>
                     <td>{formatNumber(spread.z_score, 2)}</td>
                     <td>{formatPercentile(spread.percentile)}</td>
-                    <td>{spread.interpretation ?? "N/A"}</td>
                   </tr>
                 {/each}
               {:else}
                 <tr class="empty-row">
-                  <td colspan="6">No spread rows are linked to the selected market.</td>
+                  <td colspan="5">No spread rows are linked to the selected market.</td>
                 </tr>
               {/if}
             </tbody>
@@ -2600,7 +2593,7 @@
   }
 
   .spread-table {
-    min-width: 50rem;
+    min-width: 40rem;
   }
 
   th,
@@ -2968,7 +2961,7 @@
   }
 
   .fundamental-table {
-    min-width: 46rem;
+    min-width: 38rem;
   }
 
   .sparkline-cell {
