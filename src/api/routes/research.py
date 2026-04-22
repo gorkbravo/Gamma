@@ -29,6 +29,7 @@ def research_overview(
     universe_id: str = Query(default="broad_us_market"),
     timeframe: str = Query(default="DoD"),
     benchmark_symbol: str = Query(default="SPY"),
+    surface: str = Query(default="research_overview"),
     force_refresh: bool = Query(default=False),
 ) -> ResearchOverviewResponseModel:
     runtime = request.app.state.runtime
@@ -37,6 +38,8 @@ def research_overview(
             universe_id=universe_id,
             timeframe=timeframe,
             benchmark_symbol=benchmark_symbol,
+            provider_policy=surface,
+            force_refresh=force_refresh,
         )
     )
     return ResearchOverviewResponseModel.from_domain(result)

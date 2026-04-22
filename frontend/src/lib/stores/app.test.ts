@@ -496,7 +496,7 @@ describe("app store orchestration", () => {
     expect(get(researchOverview)?.universe_id).toBe("sample_equities");
     expect(get(researchOverview)?.nodes[0]?.source_provider).toBe("mock");
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
-      "/research/overview?universe_id=sample_equities&timeframe=1M&benchmark_symbol=AAPL&force_refresh=true"
+      "/research/overview?universe_id=sample_equities&timeframe=1M&benchmark_symbol=AAPL&surface=research_overview&force_refresh=true"
     );
   });
 

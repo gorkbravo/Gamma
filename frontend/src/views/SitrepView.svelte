@@ -58,10 +58,10 @@
   onMount(() => {
     const tasks: Array<Promise<unknown> | void> = [];
     if (!overview) {
-      tasks.push(onLoadOverview({ universeId: "broad_us_market", timeframe: "3M", benchmarkSymbol: "SPY" }));
+      tasks.push(onLoadOverview({ universeId: "broad_us_market", timeframe: "3M", benchmarkSymbol: "SPY", surface: "sitrep" }));
     }
     if (!indicesOverview) {
-      tasks.push(onLoadIndicesOverview({ universeId: "global_indices", timeframe: "3M", benchmarkSymbol: "SPY" }));
+      tasks.push(onLoadIndicesOverview({ universeId: "global_indices", timeframe: "3M", benchmarkSymbol: "SPY", surface: "sitrep" }));
     }
     if (!macro) {
       tasks.push(onLoadMacro({ region: "US", timeframe: "3M", theme: "all", mode: "snapshot" }));
@@ -627,7 +627,7 @@
         <div class="need-list">
           <div><strong>News</strong><span class="warning">NO ADAPTER</span></div>
           <div><strong>TV</strong><span class="warning">EMBED ONLY</span></div>
-          <div><strong>Listed Markets</strong><span>Research Overview / IBKR ETFs</span></div>
+          <div><strong>Listed Markets</strong><span>{overview?.history_source_label ?? "Research Overview policy"}</span></div>
           <div><strong>FX / Rates</strong><span>Macro / FRED / IBKR</span></div>
         </div>
         {#if warnings.length}

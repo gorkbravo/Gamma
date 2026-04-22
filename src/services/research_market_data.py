@@ -186,9 +186,12 @@ class YFinanceListedMarketHistoryProvider:
             origin="yfinance.download",
             freshness_label=FreshnessLabel.HISTORICAL,
             warnings=[
-                "Yahoo Finance/yfinance is an unofficial fallback source; use it for demo or coverage gaps, not as an institutional-quality feed."
+                "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context, not institutional quote truth."
             ],
-            transformation_note="Gamma uses yfinance adjusted daily close history as a read-only fallback when higher-priority providers have no usable history.",
+            transformation_note=(
+                "Gamma uses yfinance adjusted daily close history as read-only public overview data or as a fallback "
+                "when higher-fidelity providers have no usable history."
+            ),
         )
 
     @staticmethod
@@ -225,3 +228,19 @@ class YFinanceListedMarketHistoryProvider:
             series.index = series.index.tz_convert(None)
         return series.sort_index()
 
+
+@dataclass
+class UnavailableListedMarketHistoryProvider:
+    provider_id: str
+    source_label: str
+    warning: str
+
+    def load_history(self, instrument: InstrumentReference, lookback_days: int) -> ResearchHistoryResult:
+        del lookback_days
+        symbol = instrument.normalized_display_symbol()
+        return ResearchHistoryResult.unavailable(
+            source_provider=self.provider_id,
+            source_label=self.source_label,
+            origin=f"{self.provider_id}.history.unavailable",
+            warning=f"{self.warning} ({symbol})",
+        )

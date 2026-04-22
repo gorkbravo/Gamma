@@ -104,7 +104,8 @@ The current API surface is grouped by workspace:
 
 Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 
-- `IBKR`: portfolio snapshots, security history, FX spot/history, IV surfaces, listed-market data, and commodity futures curves where the user has entitlements
+- `IBKR`: portfolio snapshots, security history when explicitly configured or needed as fallback, FX spot/history, IV surfaces, fundamentals market-price context, and commodity futures curves where the user has entitlements
+- `Yahoo Finance / yfinance`: default public live-ish listed-market history for Research Overview and SITREP boards; unofficial and not institutional quote truth
 - `FRED`: macro time series
 - `EIA`: optional selected official US energy fundamentals for the Commodities tab when `EIA_API_KEY` is configured
 - `US Treasury`: Treasury curve snapshots for the US rates view
@@ -135,11 +136,19 @@ Shared backend primitives now cover provenance, freshness labels, cache freshnes
 
 For Roadmap V2 planning, the intended provider stance is:
 
-- keep `IBKR / TWS` first-class for Portfolio, IV, live listed-market context, options, and futures where subscriptions make sense
-- keep Research-side market data behind provider adapters so TWS can be used as a strong source without becoming the whole research architecture
+- keep `IBKR / TWS` first-class for Portfolio, IV/options, FX, fundamentals price context, selected commodity futures curves, and explicit high-fidelity research workflows
+- keep Research Overview and SITREP listed-market boards behind provider policy so they can prefer public providers such as `yfinance` first, with IBKR fallback only when configured
 - use official/free sources such as `FRED`, `BLS`, `BEA`, `EIA`, `ECB`, `Eurostat`, `US Treasury`, and `SEC EDGAR` for macro, energy, economic, and filing-backed datasets
 - consider specialist providers only where they add a structurally different surface, such as AIS/maritime data, deeper futures history, or on-chain analytics
 - keep every provider path read-only; market-data access must not imply order placement or execution features
+
+The current listed-market policy is configured server-side:
+
+- `RESEARCH_MARKET_DATA_PROVIDERS=yfinance,ibkr` for Research Overview
+- `SITREP_MARKET_DATA_PROVIDERS=yfinance` for SITREP listed-market boards
+- `RESEARCH_OVERVIEW_CACHE_SECONDS=300` and `SITREP_MARKET_DATA_CACHE_SECONDS=300` for the 5-minute live-ish overview cache
+
+`AKShare` is documented and recognized as a future China/Asia provider hook, but Gamma does not ship a live AKShare adapter yet.
 
 ## Currency, Caching, And State
 
@@ -388,7 +397,7 @@ Provider behavior:
 - `COMMODITIES_PROVIDER=eia` enables selected EIA official energy fundamentals when `EIA_API_KEY` is present
 - optional `FRED_API_KEY` lets the EIA provider enrich selected spot/proxy price histories through existing FRED client infrastructure
 - `COMMODITIES_PROVIDER=ibkr` builds read-only futures curves from individual IBKR/TWS `FUT` contract details and market-data snapshots when TWS is connected and the account has the needed futures market-data entitlements
-- IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
+- IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_STARTUP_ENABLED`, `IBKR_COMMODITIES_ON_DEMAND`, `IBKR_COMMODITIES_SELECTED_CACHE_SECONDS`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
 - if IBKR contract discovery, quotes, or entitlements are unavailable, Gamma keeps the sample or EIA/FRED fallback payload and returns explicit coverage warnings
 
 What Gamma computes:
@@ -621,11 +630,13 @@ Optional Commodities IBKR futures curves:
 $env:COMMODITIES_PROVIDER="ibkr"
 $env:IB_MARKET_DATA_MODE="delayed"
 $env:IBKR_COMMODITIES_ENABLED="wti,henry_hub,gold,copper"
-$env:IBKR_COMMODITIES_CONTRACT_DEPTH="6"
+$env:IBKR_COMMODITIES_STARTUP_ENABLED="wti"
+$env:IBKR_COMMODITIES_ON_DEMAND="true"
+$env:IBKR_COMMODITIES_CONTRACT_DEPTH="12"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-This path requires a running TWS session and futures market-data permissions. Gamma discovers `FUT` contracts, requests read-only snapshots, caches daily curve observations locally, and falls back to sample or EIA/FRED records when IBKR is disconnected or entitlement-limited.
+This path requires a running TWS session and futures market-data permissions. Gamma treats `IBKR_COMMODITIES_ENABLED` as the allowed universe, warms only `IBKR_COMMODITIES_STARTUP_ENABLED` at startup/default overview, and fetches another enabled curve on demand when the user selects it. Cached selected curves default to 300 seconds, contract discovery defaults to a longer cache, and fallback sample or EIA/FRED records remain visible when IBKR is disconnected, entitlement-limited, stale, or not selected.
 
 Optional Maritime AISstream prototype:
 

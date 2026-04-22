@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from types import SimpleNamespace
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, Callable, Protocol
@@ -40,7 +41,12 @@ class CommoditiesDataProvider(Protocol):
     provider_id: str
     provider_label: str
 
-    def get_snapshot(self, *, force_refresh: bool = False) -> CommodityProviderSnapshot:
+    def get_snapshot(
+        self,
+        *,
+        force_refresh: bool = False,
+        selected_instrument_id: str | None = None,
+    ) -> CommodityProviderSnapshot:
         ...
 
 
@@ -206,8 +212,14 @@ class SampleCommoditiesDataProvider:
     provider_id = "sample_commodities"
     provider_label = "Sample Commodities Dataset"
 
-    def get_snapshot(self, *, force_refresh: bool = False) -> CommodityProviderSnapshot:
+    def get_snapshot(
+        self,
+        *,
+        force_refresh: bool = False,
+        selected_instrument_id: str | None = None,
+    ) -> CommodityProviderSnapshot:
         del force_refresh
+        del selected_instrument_id
         retrieved_at = now_utc().replace(microsecond=0)
         instruments = _sample_instruments(retrieved_at)
         price_histories = _sample_price_histories(instruments, retrieved_at)
@@ -281,8 +293,13 @@ class EiaCommoditiesDataProvider:
         self.fetch_json = fetch_json or default_eia_fetcher
         self.cache_seconds = max(0, int(cache_seconds))
 
-    def get_snapshot(self, *, force_refresh: bool = False) -> CommodityProviderSnapshot:
-        reference = self.reference_provider.get_snapshot(force_refresh=False)
+    def get_snapshot(
+        self,
+        *,
+        force_refresh: bool = False,
+        selected_instrument_id: str | None = None,
+    ) -> CommodityProviderSnapshot:
+        reference = self.reference_provider.get_snapshot(force_refresh=False, selected_instrument_id=selected_instrument_id)
         if not self.api_key:
             return _with_provider_warning(
                 reference,
@@ -524,6 +541,10 @@ class IbkrCommoditiesDataProvider:
         reference_provider: CommoditiesDataProvider | None = None,
         root_configs: tuple[IbkrFutureRootConfig, ...] | None = None,
         enabled_instrument_ids: list[str] | tuple[str, ...] | None = None,
+        startup_instrument_ids: list[str] | tuple[str, ...] | None = None,
+        on_demand_enabled: bool = True,
+        selected_cache_seconds: int = 300,
+        contract_cache_seconds: int = 21_600,
         contract_depth: int = 6,
         history_days: int = 120,
         quote_timeout_seconds: float = 4.0,
@@ -544,14 +565,32 @@ class IbkrCommoditiesDataProvider:
                 ",".join(config.instrument_id for config in self.root_configs.values()),
             )
         self.enabled_instrument_ids = tuple(_dedupe([_slug(item) for item in enabled]))
+        startup = startup_instrument_ids
+        if startup is None:
+            startup = _parse_csv_env("IBKR_COMMODITIES_STARTUP_ENABLED", "wti")
+        allowed = set(self.enabled_instrument_ids)
+        self.startup_instrument_ids = tuple(
+            item for item in _dedupe([_slug(row) for row in startup]) if item in allowed
+        ) or tuple(self.enabled_instrument_ids[:1])
+        self.on_demand_enabled = bool(on_demand_enabled)
+        self.selected_cache_seconds = max(0, int(selected_cache_seconds or 0))
+        self.contract_cache_seconds = max(0, int(contract_cache_seconds or 0))
         self.contract_depth = max(1, int(contract_depth or 1))
         self.history_days = max(0, int(history_days or 0))
         self.quote_timeout_seconds = max(0.5, float(quote_timeout_seconds or 4.0))
         self.contract_details_timeout_seconds = max(1.0, float(contract_details_timeout_seconds or 12.0))
         self.quote_batch_size = max(1, int(quote_batch_size or 1))
 
-    def get_snapshot(self, *, force_refresh: bool = False) -> CommodityProviderSnapshot:
-        reference = self.reference_provider.get_snapshot(force_refresh=force_refresh)
+    def get_snapshot(
+        self,
+        *,
+        force_refresh: bool = False,
+        selected_instrument_id: str | None = None,
+    ) -> CommodityProviderSnapshot:
+        reference = self.reference_provider.get_snapshot(
+            force_refresh=force_refresh,
+            selected_instrument_id=selected_instrument_id,
+        )
         if getattr(self.client, "mock", False):
             return _with_provider_warning(
                 reference,
@@ -570,8 +609,11 @@ class IbkrCommoditiesDataProvider:
         curve_by_id = {curve.instrument_id: curve for curve in reference.curve_snapshots}
         history_by_id = {history.instrument_id: history for history in reference.price_histories}
         ibkr_curve_ids: list[str] = []
+        cached_curve_ids: list[str] = []
         delayed_nodes = 0
         priced_nodes = 0
+        selected = _slug(selected_instrument_id or "")
+        target_ids = self._target_instrument_ids(selected)
 
         for instrument in reference.instruments:
             if instrument.instrument_id not in self.enabled_instrument_ids:
@@ -580,8 +622,32 @@ class IbkrCommoditiesDataProvider:
             if config is None:
                 warnings.append(f"No IBKR futures root configured for {instrument.name}; keeping fallback curve.")
                 continue
+            is_target = instrument.instrument_id in target_ids
+            cached_curve = None if force_refresh else self._cached_curve_snapshot(
+                instrument.instrument_id,
+                retrieved_at,
+                max_age_seconds=self.selected_cache_seconds if self.selected_cache_seconds > 0 else None,
+            )
+            if cached_curve is not None:
+                curve_by_id[instrument.instrument_id] = cached_curve
+                cached_curve_ids.append(instrument.instrument_id)
+                warnings.append(
+                    f"Using cached IBKR curve for {config.label} from {cached_curve.as_of.isoformat()}; no fresh TWS request was made."
+                )
+                continue
+            if not is_target:
+                fallback_curve = curve_by_id.get(instrument.instrument_id)
+                fallback_source = fallback_curve.source_provider if fallback_curve is not None else "fallback"
+                warnings.append(
+                    f"{config.label} is outside the current IBKR warm/on-demand request set and remains on {fallback_source} fallback data until selected."
+                )
+                continue
 
-            contracts, detail_warnings = self._discover_contracts(config, retrieved_at)
+            contracts, detail_warnings = self._discover_contracts(
+                config,
+                retrieved_at,
+                force_refresh=force_refresh,
+            )
             warnings.extend(detail_warnings)
             if not contracts:
                 warnings.append(
@@ -605,6 +671,9 @@ class IbkrCommoditiesDataProvider:
                 curve_by_id[config.instrument_id] = curve
                 ibkr_curve_ids.append(config.instrument_id)
                 self._append_curve_snapshot(curve)
+                warnings.append(
+                    f"Fresh IBKR curve loaded for {config.label} with {curve_priced_nodes} priced node(s); live/delayed status is shown on curve-node warnings."
+                )
             else:
                 warnings.append(
                     f"IBKR curve for {config.label} had fewer than two priced nodes; keeping fallback curve."
@@ -615,7 +684,7 @@ class IbkrCommoditiesDataProvider:
                 if history.points:
                     history_by_id[config.instrument_id] = history
 
-        if not ibkr_curve_ids:
+        if not ibkr_curve_ids and not cached_curve_ids:
             return _with_provider_warning(
                 reference,
                 "IBKR futures-chain discovery ran but returned no usable priced curves; using commodities fallback data.",
@@ -636,6 +705,7 @@ class IbkrCommoditiesDataProvider:
                 [
                     "IBKR curves are built by Gamma from individual read-only FUT contract market-data snapshots.",
                     "Quotes may be live, delayed, cached, or unavailable depending on TWS connectivity and market-data entitlements.",
+                    "Startup/warm IBKR curves are limited separately from the allowed commodities universe; non-selected roots use cached or fallback data.",
                     "Historical futures-curve context accumulates from Gamma's local daily snapshots; IBKR is not treated as a bulk curve-history warehouse.",
                     "EIA/FRED/sample fallback data may still supply fundamentals, events, or proxy price histories.",
                     *reference.coverage.caveats,
@@ -656,7 +726,11 @@ class IbkrCommoditiesDataProvider:
         )
         return CommodityProviderSnapshot(
             coverage=coverage,
-            instruments=_mark_ibkr_instruments(reference.instruments, set(ibkr_curve_ids), retrieved_at),
+            instruments=_mark_ibkr_instruments(
+                reference.instruments,
+                set([*ibkr_curve_ids, *cached_curve_ids]),
+                retrieved_at,
+            ),
             price_histories=list(history_by_id.values()),
             curve_snapshots=list(curve_by_id.values()),
             inventory_series=reference.inventory_series,
@@ -665,7 +739,8 @@ class IbkrCommoditiesDataProvider:
                 [
                     *reference.warnings,
                     *warnings,
-                    f"IBKR curves loaded for {len(ibkr_curve_ids)} commodity instruments with {priced_nodes} priced nodes.",
+                    f"Fresh IBKR curves loaded for {len(ibkr_curve_ids)} commodity instruments with {priced_nodes} priced nodes.",
+                    f"Cached IBKR curves reused for {len(cached_curve_ids)} commodity instruments." if cached_curve_ids else "",
                     f"Delayed quote nodes detected: {delayed_nodes}." if delayed_nodes else "",
                     "Gamma remains read-only; IBKR is used here for futures market data only.",
                     "Front-contract histories use IBKR historical bars when available; calendar-spread history still depends on saved curve snapshots and provider limits.",
@@ -685,6 +760,15 @@ class IbkrCommoditiesDataProvider:
         except Exception:
             return False
 
+    def _target_instrument_ids(self, selected_instrument_id: str | None) -> set[str]:
+        if not self.on_demand_enabled:
+            return set(self.enabled_instrument_ids)
+        targets = {item for item in self.startup_instrument_ids if item in self.enabled_instrument_ids}
+        selected = _slug(selected_instrument_id or "")
+        if selected and selected in self.enabled_instrument_ids:
+            targets.add(selected)
+        return targets
+
     def _run_ib(self, fn, *, timeout: float | None = None):
         run_ib = getattr(self.client, "_run_ib", None)
         if callable(run_ib):
@@ -698,8 +782,15 @@ class IbkrCommoditiesDataProvider:
         self,
         config: IbkrFutureRootConfig,
         retrieved_at: datetime,
+        *,
+        force_refresh: bool = False,
     ) -> tuple[list[tuple[Contract, Any]], list[str]]:
         warnings: list[str] = []
+        cached = None if force_refresh else self._cached_contracts(config)
+        if cached:
+            return cached[: self.contract_depth], [
+                f"Using cached IBKR contract discovery for {config.label}; no reqContractDetails request was made."
+            ]
         seed = Contract(
             symbol=config.symbol,
             secType="FUT",
@@ -742,7 +833,71 @@ class IbkrCommoditiesDataProvider:
             warnings.append(
                 f"IBKR returned {len(rows)} active {config.label} contracts; Gamma kept the front {self.contract_depth} nodes."
             )
+        if selected:
+            self._store_contracts(config, selected)
         return selected, warnings
+
+    def _contract_cache_key(self, instrument_id: str) -> str:
+        if self.cache is None:
+            return ""
+        return self.cache.make_key("commodities", "ibkr", "contracts", instrument_id)
+
+    def _cached_contracts(self, config: IbkrFutureRootConfig) -> list[tuple[Contract, Any]]:
+        if self.cache is None or self.contract_cache_seconds <= 0:
+            return []
+        payload = self.cache.get_json(
+            self._contract_cache_key(config.instrument_id),
+            max_age=timedelta(seconds=self.contract_cache_seconds),
+        )
+        if not isinstance(payload, dict):
+            return []
+        rows = payload.get("contracts")
+        if not isinstance(rows, list):
+            return []
+        contracts: list[tuple[Contract, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            contract = Contract(
+                conId=int(row.get("conId") or 0),
+                symbol=str(row.get("symbol") or config.symbol),
+                secType="FUT",
+                exchange=str(row.get("exchange") or config.exchange),
+                currency=str(row.get("currency") or config.currency),
+                lastTradeDateOrContractMonth=str(row.get("lastTradeDateOrContractMonth") or ""),
+                localSymbol=str(row.get("localSymbol") or ""),
+                tradingClass=str(row.get("tradingClass") or config.trading_class or ""),
+            )
+            detail = SimpleNamespace(realExpirationDate=row.get("realExpirationDate"), contract=contract)
+            contracts.append((contract, detail))
+        return contracts
+
+    def _store_contracts(self, config: IbkrFutureRootConfig, contracts: list[tuple[Contract, Any]]) -> None:
+        if self.cache is None:
+            return
+        rows = []
+        for contract, detail in contracts:
+            rows.append(
+                {
+                    "conId": int(getattr(contract, "conId", 0) or 0),
+                    "symbol": str(getattr(contract, "symbol", "") or config.symbol),
+                    "exchange": str(getattr(contract, "exchange", "") or config.exchange),
+                    "currency": str(getattr(contract, "currency", "") or config.currency),
+                    "lastTradeDateOrContractMonth": str(
+                        getattr(contract, "lastTradeDateOrContractMonth", "") or ""
+                    ),
+                    "localSymbol": str(getattr(contract, "localSymbol", "") or ""),
+                    "tradingClass": str(getattr(contract, "tradingClass", "") or config.trading_class or ""),
+                    "realExpirationDate": str(getattr(detail, "realExpirationDate", "") or ""),
+                }
+            )
+        self.cache.set_json(
+            self._contract_cache_key(config.instrument_id),
+            {
+                "retrieved_at": now_utc().replace(microsecond=0).isoformat(),
+                "contracts": rows,
+            },
+        )
 
     def _fetch_quotes(self, contracts: list[Contract]) -> tuple[dict[str, QuoteSnapshot], list[str]]:
         batch_fetch = getattr(self.market_data, "fetch_snapshot_quotes_batch", None)
@@ -905,6 +1060,79 @@ class IbkrCommoditiesDataProvider:
         deduped.append(entry)
         deduped = sorted(deduped, key=lambda row: str(row.get("date") or ""))[-400:]
         self.cache.set_json(self._curve_history_key(curve.instrument_id), deduped)
+
+    def _cached_curve_snapshot(
+        self,
+        instrument_id: str,
+        retrieved_at: datetime,
+        *,
+        max_age_seconds: int | float | None,
+    ) -> CommodityCurveSnapshot | None:
+        history = self._load_curve_history(instrument_id)
+        if not history:
+            return None
+        latest = sorted(history, key=lambda row: str(row.get("as_of") or row.get("date") or ""))[-1]
+        as_of = _parse_datetime(latest.get("as_of")) or _parse_datetime(latest.get("date"))
+        if as_of is None:
+            return None
+        if max_age_seconds is not None and float(max_age_seconds) >= 0:
+            age_seconds = (retrieved_at - as_of).total_seconds()
+            if age_seconds > float(max_age_seconds):
+                return None
+        nodes: list[CommodityCurveNode] = []
+        for index, row in enumerate(latest.get("nodes") or []):
+            if not isinstance(row, dict):
+                continue
+            price = _float_value(row.get("price"))
+            contract_month = str(row.get("contract_month") or "").strip()
+            expiry = _parse_datetime(row.get("expiry_date"))
+            symbol = str(row.get("symbol") or "").strip()
+            contract_id = str(row.get("contract_id") or "").strip()
+            if not contract_id or not contract_month:
+                continue
+            contract = CommodityFuturesContract(
+                contract_id=contract_id,
+                instrument_id=instrument_id,
+                symbol=symbol or contract_id,
+                contract_month=contract_month,
+                expiry_date=expiry,
+                is_front_month=index == 0,
+                source_provider="ibkr_cached",
+                retrieved_at=retrieved_at,
+                origin=str(row.get("origin") or "ibkr.commodities.curve_history"),
+                transformation_note="Cached IBKR FUT contract metadata restored from Gamma's local curve snapshot cache.",
+            )
+            nodes.append(
+                CommodityCurveNode(
+                    contract=contract,
+                    price=round(float(price), 6) if price is not None else None,
+                    previous_price=None,
+                    change=None,
+                    days_to_expiry=(expiry.date() - retrieved_at.date()).days if expiry is not None else None,
+                    source_provider="ibkr_cached",
+                    retrieved_at=retrieved_at,
+                    origin=str(row.get("origin") or "ibkr.commodities.curve_history"),
+                    transformation_note=(
+                        "Cached IBKR futures node restored from Gamma's local curve snapshot cache; no fresh market-data line was used."
+                    ),
+                )
+            )
+        if not nodes:
+            return None
+        return CommodityCurveSnapshot(
+            instrument_id=instrument_id,
+            as_of=as_of,
+            nodes=nodes,
+            warnings=[
+                "Cached IBKR curve snapshot; refresh or select the commodity to request fresh live/delayed IBKR nodes."
+            ],
+            source_provider="ibkr_cached",
+            retrieved_at=retrieved_at,
+            origin="ibkr.commodities.curve_history_cache",
+            transformation_note=(
+                "Gamma reused a locally cached IBKR futures curve snapshot to avoid repeated contract discovery and quote requests."
+            ),
+        )
 
     def _previous_curve_prices(self, instrument_id: str, retrieved_at: datetime) -> dict[str, float]:
         history = self._load_curve_history(instrument_id)
@@ -1254,6 +1482,10 @@ def _ibkr_credential_env_vars() -> list[str]:
         "IB_CLIENT_ID",
         "IB_MARKET_DATA_MODE",
         "IBKR_COMMODITIES_ENABLED",
+        "IBKR_COMMODITIES_STARTUP_ENABLED",
+        "IBKR_COMMODITIES_ON_DEMAND",
+        "IBKR_COMMODITIES_SELECTED_CACHE_SECONDS",
+        "IBKR_COMMODITIES_CONTRACT_CACHE_SECONDS",
         "IBKR_COMMODITIES_CONTRACT_DEPTH",
         "IBKR_COMMODITIES_HISTORY_DAYS",
         "IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS",

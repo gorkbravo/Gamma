@@ -278,7 +278,7 @@ Potential sources include:
 The first implementation does not need every provider. It needs the boundary to avoid hard-coding the research product around one source.
 
 Implementation note:
-- The provider registry now documents planned research market-data candidates and their expected provenance/freshness constraints. The actual Research V2 abstraction, provider priority engine, fallback selection, corporate-action policy, and broad adoption into Research endpoints remain future Workstream 2/Workstream 1 overlap.
+- Research Overview and SITREP now use explicit listed-market provider policies instead of assuming TWS. The default live Research Overview policy is `yfinance,ibkr`, while SITREP defaults to `yfinance`; both use a short 5-minute overview cache and keep source providers visible in returned payloads and warnings. `AKShare` is recognized as a planned China/Asia hook but does not have an active adapter yet.
 
 #### 4. Normalized V2 entity schemas
 
@@ -2134,12 +2134,14 @@ Roadmap V2 should use multiple provider classes rather than search for one unive
 
 - Portfolio,
 - IV,
-- live listed-market context,
+- high-fidelity listed-market context when explicitly requested or needed as fallback,
 - options,
 - futures where subscriptions make sense,
 - global equities and ETFs where entitled.
 
 The adapter should remain read-only.
+
+IBKR/TWS capacity should be treated as scarce. The working budget model is: `critical_live` for IV/active portfolio/selected commodity curves, `broker_state` for account/positions/FX, `public_refresh` for SITREP and Research Overview through yfinance/AKShare-like providers, `official_slow` for FRED/Treasury/EIA/SEC/DB.nomics, and `manual_heavy` for broad IBKR history loads, full curve refreshes, or deep options scans.
 
 ### Official and public data providers
 
@@ -2180,7 +2182,7 @@ The following backlog came from reviewing FinceptTerminal's provider surface and
 | `BCB` | Brazil central bank rates, FX, inflation, credit, and macro series. | Usually no key. Useful if LATAM macro becomes relevant; normalize series IDs, currency/rate units, and local calendar conventions. | Macro country comparison, FX/rates context. |
 | `ADB` | Asia development and macro data, especially useful for regional context around China/Asia supply chains. | Usually no key. Treat as lower priority unless Asia macro or sealanes work needs regional context. | Macro country/regional comparison, Maritime/Commodities regional context. |
 | `AkShare` | China/Asia equities, macro, rates, funds, and calendars. Useful for China-specific research where Western APIs have gaps. | Usually no API key, but it adds a Python dependency and relies on upstream web/API shapes that can change. Keep behind an optional adapter with strong error handling and provenance warnings. | New `src/services/akshare_adapters.py` or Macro/Research adapters, Macro country lens, Research market overview, possibly Commodities if China demand indicators are useful. |
-| `Yahoo Finance / yfinance` | Free fallback for historical prices across equities, ETFs, indices, FX, and crypto when IBKR is unavailable. | No key, but unofficial and subject to breakage/rate limits. Should be a fallback or mock/demo enhancer, not the trusted primary source for high-stakes calculations. | `src/services/market_data.py`, `src/services/data_providers.py`, Research V2 market-data abstraction, mock/demo workflows. |
+| `Yahoo Finance / yfinance` | Free public live-ish historical prices across equities, ETFs, indices, FX, and crypto for low-impact overview surfaces and fallback coverage. | No key, but unofficial and subject to breakage/rate limits. It is now the default first provider for Research Overview and SITREP listed boards, cached around 5 minutes, and must not be treated as institutional quote truth. | `src/services/research_market_data.py`, `src/services/data_providers.py`, Research Overview/SITREP provider policy, mock/demo workflows. |
 | `RSS news feeds` | Lightweight macro, company, commodity, and geopolitical news/event context for research surfaces and Copilot grounding. | Usually no key. Normalize feed source, URL, publication time, detected tickers/entities, tags, and summary snippets. Avoid pretending RSS is comprehensive or real-time institutional news. | New news adapter/service, Macro Events / Regimes, Fundamentals, Commodities Events, Copilot context, possibly `frontend/src/components/CopilotResearchCard.svelte`. |
 
 Implementation rule:

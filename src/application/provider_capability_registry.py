@@ -155,6 +155,10 @@ _ACTIVE_PROVIDER_CAPABILITIES: tuple[ProviderCapability, ...] = (
             "IB_MARKET_DATA_MODE",
             "COMMODITIES_PROVIDER",
             "IBKR_COMMODITIES_ENABLED",
+            "IBKR_COMMODITIES_STARTUP_ENABLED",
+            "IBKR_COMMODITIES_ON_DEMAND",
+            "IBKR_COMMODITIES_SELECTED_CACHE_SECONDS",
+            "IBKR_COMMODITIES_CONTRACT_CACHE_SECONDS",
             "IBKR_COMMODITIES_CONTRACT_DEPTH",
             "IBKR_COMMODITIES_HISTORY_DAYS",
             "IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS",
@@ -167,11 +171,13 @@ _ACTIVE_PROVIDER_CAPABILITIES: tuple[ProviderCapability, ...] = (
             "IB Gateway is not supported by Gamma yet.",
             "Market data quality depends on account subscriptions and selected live/delayed mode.",
             "Set COMMODITIES_PROVIDER=ibkr to build commodity futures curves from individual read-only FUT contracts.",
+            "IBKR_COMMODITIES_STARTUP_ENABLED controls the small warm set; selected commodities are fetched on demand when IBKR_COMMODITIES_ON_DEMAND=true.",
         ],
         limitations=[
             "Session-based provider with pacing and market-data-line constraints.",
             "Historical depth varies by instrument, exchange, and entitlement.",
             "Futures and options coverage requires appropriate IBKR permissions and subscriptions.",
+            "Broad overview refreshes should not use IBKR unless public providers are unavailable and the configured policy allows fallback.",
             "Gamma builds commodity futures curves from discovered contracts and snapshots; IBKR is not treated as a bulk curve-history warehouse.",
         ],
         provenance_notes=[
@@ -220,7 +226,7 @@ _ACTIVE_PROVIDER_CAPABILITIES: tuple[ProviderCapability, ...] = (
         display_name="Yahoo Finance / yfinance",
         provider_class="research_market_data",
         status="optional",
-        supported_domains=["research", "mock_demo_enhancement"],
+        supported_domains=["research", "sitrep", "mock_demo_enhancement"],
         asset_classes=["equities", "etfs", "indices", "fx", "crypto_market_data"],
         regions=["Global"],
         data_types=["historical_daily_prices", "adjusted_close_history"],
@@ -229,7 +235,9 @@ _ACTIVE_PROVIDER_CAPABILITIES: tuple[ProviderCapability, ...] = (
         freshness_levels=["historical", "provider_dependent", "cached"],
         historical_depth="Unofficial fallback history provider; depth and coverage depend on Yahoo Finance/yfinance behavior.",
         configuration_notes=[
-            "Configured through RESEARCH_MARKET_DATA_PROVIDERS, for example ibkr,yfinance.",
+            "Configured through RESEARCH_MARKET_DATA_PROVIDERS for Research Overview; default live policy is yfinance,ibkr.",
+            "Configured through SITREP_MARKET_DATA_PROVIDERS for SITREP listed boards; default live policy is yfinance.",
+            "RESEARCH_OVERVIEW_CACHE_SECONDS and SITREP_MARKET_DATA_CACHE_SECONDS default to a 5-minute live-ish overview cache.",
             "YFINANCE_TIMEOUT_SECONDS controls the per-symbol fallback request timeout.",
         ],
         limitations=[
@@ -630,6 +638,35 @@ _PLANNED_PROVIDER_CAPABILITIES: tuple[ProviderCapability, ...] = (
         transformation_note=(
             "Static Roadmap V2 provider metadata; status=optional because Gamma has a first-pass EIA commodities adapter gated by EIA_API_KEY."
         ),
+    ),
+    _capability(
+        provider_id="akshare",
+        display_name="AkShare",
+        provider_class="public_market_data",
+        status="planned",
+        supported_domains=["research", "sitrep", "macro"],
+        asset_classes=["equities", "etfs", "indices", "macro", "rates", "funds"],
+        regions=["China", "Asia"],
+        data_types=["historical_prices", "market_overview", "macro_series", "calendars"],
+        supports_delayed=True,
+        supports_historical=True,
+        freshness_levels=["provider_dependent", "historical", "cached"],
+        historical_depth="Candidate optional Python dependency for China/Asia coverage where existing providers have gaps.",
+        configuration_notes=[
+            "The provider id is recognized in RESEARCH_MARKET_DATA_PROVIDERS and SITREP_MARKET_DATA_PROVIDERS as a planned hook, but no live Gamma adapter is implemented yet.",
+        ],
+        limitations=[
+            "No Gamma adapter is implemented yet.",
+            "AkShare depends on upstream public web/API shapes that can change without notice.",
+            "Symbol mapping, exchange calendars, and provenance warnings need adapter-level handling before production use.",
+        ],
+        provenance_notes=[
+            "Future AkShare records should use source_provider='akshare', preserve provider-native symbols/endpoints, and warn that it is public live-ish data rather than institutional quote truth.",
+        ],
+        read_only_notes=["Read-only public market-data candidate; no execution capability."],
+        source_provider_values=["akshare"],
+        batch_fetching="planned_provider_dependent",
+        background_refresh_safe=False,
     ),
     _capability(
         provider_id="bls",

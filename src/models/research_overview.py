@@ -61,6 +61,8 @@ class ResearchOverviewRequest:
     universe_id: str = "broad_us_market"
     timeframe: str = "DoD"
     benchmark_symbol: str = "SPY"
+    provider_policy: str = "research_overview"
+    force_refresh: bool = False
 
 
 @dataclass(frozen=True)

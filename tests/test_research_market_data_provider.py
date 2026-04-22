@@ -96,3 +96,45 @@ def test_research_data_provider_preserves_history_source_metadata_from_cache():
     assert second.source_label == "Yahoo Finance/yfinance daily history"
     assert second.warnings == []
 
+
+def test_research_data_provider_reports_cached_history_source_in_summary():
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    history = pd.Series([100.0, 101.0, 102.0, 103.0], index=idx)
+    first_provider = _FakeHistoryProvider("yfinance", "Yahoo Finance/yfinance daily history", {"MSFT": history})
+    provider = _provider(first_provider)
+
+    provider.load_instrument_history_result(InstrumentReference(symbol="MSFT"), 30)
+    provider.reset_history_tracking()
+    first_provider.histories = {}
+    provider.load_instrument_history_result(InstrumentReference(symbol="MSFT"), 30)
+
+    summary = provider.history_source_summary()
+
+    assert summary.source_provider == "yfinance"
+    assert summary.source_label == "Yahoo Finance/yfinance daily history"
+
+
+def test_research_data_provider_uses_policy_specific_provider_chain_and_cache():
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    yfinance_history = pd.Series([100.0, 101.0, 102.0, 103.0], index=idx)
+    ibkr_history = pd.Series([200.0, 201.0, 202.0, 203.0], index=idx)
+    provider = _provider(_FakeHistoryProvider("ibkr", "IBKR/TWS daily historical bars", {"AAPL": ibkr_history}))
+    provider.history_provider_sets = {
+        "sitrep": [
+            _FakeHistoryProvider("yfinance", "Yahoo Finance/yfinance daily history", {"AAPL": yfinance_history})
+        ]
+    }
+
+    sitrep = provider.load_instrument_history_result(
+        InstrumentReference(symbol="AAPL"),
+        30,
+        provider_policy="sitrep",
+    )
+    default = provider.load_instrument_history_result(InstrumentReference(symbol="AAPL"), 30)
+
+    assert sitrep.source_provider == "yfinance"
+    assert sitrep.series is not None
+    assert sitrep.series.equals(yfinance_history)
+    assert default.source_provider == "ibkr"
+    assert default.series is not None
+    assert default.series.equals(ibkr_history)

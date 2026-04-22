@@ -167,9 +167,14 @@ def test_eia_provider_enriches_energy_inventory_with_official_series():
 class _FakeIb:
     def __init__(self, details):
         self.details = details
+        self.requests: list[str] = []
 
     def reqContractDetails(self, contract):
         assert contract.secType == "FUT"
+        symbol = str(getattr(contract, "symbol", "") or "")
+        self.requests.append(symbol)
+        if isinstance(self.details, dict):
+            return self.details.get(symbol, [])
         return self.details
 
 
@@ -179,6 +184,7 @@ class _FakeIbkrClient:
     def __init__(self, details, connected: bool = True):
         self.ib = _FakeIb(details)
         self.connected = connected
+        self.requests = self.ib.requests
 
     def is_connected(self):
         return self.connected
@@ -215,16 +221,16 @@ class _FakeMarketData:
         )
 
 
-def _future_detail(con_id: int, month: str, local_symbol: str):
+def _future_detail(con_id: int, month: str, local_symbol: str, symbol: str = "CL", exchange: str = "NYMEX"):
     contract = Contract(
         conId=con_id,
-        symbol="CL",
+        symbol=symbol,
         secType="FUT",
-        exchange="NYMEX",
+        exchange=exchange,
         currency="USD",
         lastTradeDateOrContractMonth=month,
         localSymbol=local_symbol,
-        tradingClass="CL",
+        tradingClass=symbol,
     )
     return SimpleNamespace(contract=contract, realExpirationDate=f"{month}20")
 
@@ -273,6 +279,52 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
     enriched_curve = next(curve for curve in workspace.curves if curve.instrument_id == "wti")
     assert enriched_curve.shape_label == "backwardation"
     assert enriched_curve.front_spread == 0.8
+
+
+def test_ibkr_provider_warms_startup_only_and_fetches_selected_on_demand(tmp_path):
+    details = {
+        "CL": [
+            _future_detail(2001, "202606", "CLM6"),
+            _future_detail(2002, "202607", "CLN6"),
+        ],
+        "GC": [
+            _future_detail(3001, "202606", "GCM6", symbol="GC", exchange="COMEX"),
+            _future_detail(3002, "202607", "GCN6", symbol="GC", exchange="COMEX"),
+        ],
+    }
+    fake_client = _FakeIbkrClient(details)
+    provider = IbkrCommoditiesDataProvider(
+        client=fake_client,
+        market_data=_FakeMarketData({2001: 80.0, 2002: 79.0, 3001: 2400.0, 3002: 2404.0}),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["wti", "gold"],
+        startup_instrument_ids=["wti"],
+        selected_cache_seconds=300,
+        contract_depth=2,
+        history_days=0,
+    )
+
+    startup_snapshot = provider.get_snapshot(force_refresh=True)
+
+    assert fake_client.requests == ["CL"]
+    startup_gold_curve = next(curve for curve in startup_snapshot.curve_snapshots if curve.instrument_id == "gold")
+    assert startup_gold_curve.source_provider == "sample_data"
+    assert any("Gold is outside the current IBKR warm/on-demand request set" in warning for warning in startup_snapshot.warnings)
+
+    selected_snapshot = provider.get_snapshot(selected_instrument_id="gold")
+
+    assert fake_client.requests == ["CL", "GC"]
+    selected_gold_curve = next(curve for curve in selected_snapshot.curve_snapshots if curve.instrument_id == "gold")
+    assert selected_gold_curve.source_provider == "ibkr"
+    assert [node.price for node in selected_gold_curve.nodes] == [2400.0, 2404.0]
+
+    cached_snapshot = provider.get_snapshot(selected_instrument_id="wti")
+
+    assert fake_client.requests == ["CL", "GC"]
+    cached_gold_curve = next(curve for curve in cached_snapshot.curve_snapshots if curve.instrument_id == "gold")
+    assert cached_gold_curve.source_provider == "ibkr_cached"
+    assert any("Using cached IBKR curve for Gold" in warning for warning in cached_snapshot.warnings)
 
 
 def test_ibkr_provider_degrades_to_sample_when_disconnected():

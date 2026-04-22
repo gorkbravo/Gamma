@@ -60,6 +60,7 @@ from src.services.research_market_data import (
     IbkrListedMarketHistoryProvider,
     ListedMarketHistoryProvider,
     MockListedMarketHistoryProvider,
+    UnavailableListedMarketHistoryProvider,
     YFinanceListedMarketHistoryProvider,
 )
 from src.services.portfolio_history_store import PortfolioHistoryStore
@@ -217,15 +218,35 @@ def build_runtime(
 
     portfolio_provider = PortfolioDataProvider(client, market_data, mock_service)
     research_provider = ResearchDataProvider(
-        client,
-        market_data,
-        mock_service,
-        None,
-        base_currency,
-        research_cache,
-        research_defaults,
-        benchmark_defaults,
-        _build_research_history_providers(client, market_data, mock_service),
+        client=client,
+        market_data=market_data,
+        mock_service=mock_service,
+        context=None,
+        base_currency=base_currency,
+        history_cache=research_cache,
+        instrument_defaults=research_defaults,
+        benchmark_defaults=benchmark_defaults,
+        history_providers=_build_research_history_providers(client, market_data, mock_service),
+        history_provider_sets={
+            "research_overview": _build_research_history_providers(
+                client,
+                market_data,
+                mock_service,
+                env_var="RESEARCH_MARKET_DATA_PROVIDERS",
+                live_default="yfinance,ibkr",
+            ),
+            "sitrep": _build_research_history_providers(
+                client,
+                market_data,
+                mock_service,
+                env_var="SITREP_MARKET_DATA_PROVIDERS",
+                live_default="yfinance",
+            ),
+        },
+        history_cache_seconds_by_policy={
+            "research_overview": int(os.getenv("RESEARCH_OVERVIEW_CACHE_SECONDS", "300") or 300),
+            "sitrep": int(os.getenv("SITREP_MARKET_DATA_CACHE_SECONDS", "300") or 300),
+        },
     )
 
     portfolio_service = PortfolioService(
@@ -391,14 +412,17 @@ def _build_research_history_providers(
     client: IBKRClient,
     market_data: MarketDataService,
     mock_service: MockDataService,
+    *,
+    env_var: str = "RESEARCH_MARKET_DATA_PROVIDERS",
+    live_default: str = "yfinance,ibkr",
 ) -> list[ListedMarketHistoryProvider]:
-    configured = (os.getenv("RESEARCH_MARKET_DATA_PROVIDERS", "") or "").strip().lower()
+    configured = (os.getenv(env_var, "") or "").strip().lower()
     if configured:
         provider_ids = [item.strip() for item in configured.split(",") if item.strip()]
     elif client.mock:
         provider_ids = ["mock"]
     else:
-        provider_ids = ["ibkr", "yfinance"]
+        provider_ids = [item.strip() for item in live_default.split(",") if item.strip()]
 
     providers: list[ListedMarketHistoryProvider] = []
     for provider_id in provider_ids:
@@ -410,6 +434,24 @@ def _build_research_history_providers(
             providers.append(
                 YFinanceListedMarketHistoryProvider(
                     timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0)
+                )
+            )
+        elif provider_id in {"akshare", "ak_share"}:
+            providers.append(
+                UnavailableListedMarketHistoryProvider(
+                    provider_id="akshare",
+                    source_label="AKShare listed-market history (planned optional adapter)",
+                    warning=(
+                        "AKShare is recognized as a planned China/Asia coverage hook, but no Gamma adapter is active yet"
+                    ),
+                )
+            )
+        else:
+            providers.append(
+                UnavailableListedMarketHistoryProvider(
+                    provider_id=provider_id,
+                    source_label=f"{provider_id} listed-market history",
+                    warning=f"Configured listed-market provider '{provider_id}' is not supported by this Gamma build",
                 )
             )
     return providers or [MockListedMarketHistoryProvider(mock_service) if client.mock else IbkrListedMarketHistoryProvider(market_data)]
@@ -438,7 +480,11 @@ def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_
             market_data=market_data,
             cache=cache,
             reference_provider=eia_provider or sample_provider,
-            contract_depth=int(os.getenv("IBKR_COMMODITIES_CONTRACT_DEPTH", "6") or 6),
+            startup_instrument_ids=_parse_env_list("IBKR_COMMODITIES_STARTUP_ENABLED", "wti"),
+            on_demand_enabled=_parse_bool_env("IBKR_COMMODITIES_ON_DEMAND", True),
+            selected_cache_seconds=int(os.getenv("IBKR_COMMODITIES_SELECTED_CACHE_SECONDS", "300") or 300),
+            contract_cache_seconds=int(os.getenv("IBKR_COMMODITIES_CONTRACT_CACHE_SECONDS", "21600") or 21600),
+            contract_depth=int(os.getenv("IBKR_COMMODITIES_CONTRACT_DEPTH", "12") or 12),
             history_days=int(os.getenv("IBKR_COMMODITIES_HISTORY_DAYS", "120") or 120),
             quote_timeout_seconds=float(
                 os.getenv("IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS", os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2"))
@@ -460,6 +506,18 @@ def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_
         fred_client=fred_client,
         cache_seconds=int(os.getenv("COMMODITIES_CACHE_SECONDS", "21600") or 21600),
     )
+
+
+def _parse_env_list(name: str, default: str = "") -> list[str]:
+    raw = os.getenv(name, default)
+    return [item.strip() for item in str(raw or "").split(",") if item.strip()]
+
+
+def _parse_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _build_maritime_provider():

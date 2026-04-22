@@ -77,6 +77,7 @@ export interface ResearchOverviewLoadOptions {
   universeId?: string;
   timeframe?: string;
   benchmarkSymbol?: string;
+  surface?: "research_overview" | "sitrep";
   forceRefresh?: boolean;
 }
 
@@ -879,7 +880,8 @@ export async function loadResearchOverview(options: ResearchOverviewLoadOptions 
     const params = new URLSearchParams({
       universe_id: options.universeId ?? "broad_us_market",
       timeframe: options.timeframe ?? "3M",
-      benchmark_symbol: options.benchmarkSymbol ?? "SPY"
+      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+      surface: options.surface ?? "research_overview"
     });
     if (options.forceRefresh) {
       params.set("force_refresh", "true");
@@ -902,7 +904,8 @@ export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOpt
     const params = new URLSearchParams({
       universe_id: options.universeId ?? "global_indices",
       timeframe: options.timeframe ?? "3M",
-      benchmark_symbol: options.benchmarkSymbol ?? "SPY"
+      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+      surface: options.surface ?? "sitrep"
     });
     if (options.forceRefresh) {
       params.set("force_refresh", "true");

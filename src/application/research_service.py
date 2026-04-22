@@ -93,14 +93,22 @@ class ResearchService:
     def __init__(self, provider: ResearchDataProvider, saved_store: SavedResearchStore | None = None) -> None:
         self.provider = provider
         self.saved_store = saved_store
+        self._overview_cache: dict[tuple[str, str, str, str, str], ResearchOverviewResult] = {}
 
     def overview(self, request: ResearchOverviewRequest) -> ResearchOverviewResult:
         warnings: list[str] = []
         retrieved_at = now_utc()
+        provider_policy = self._overview_provider_policy(request.provider_policy)
+        cache_seconds = self._overview_cache_seconds(provider_policy)
         universe = self._overview_universe(request.universe_id, warnings)
         timeframe = self._overview_timeframe(request.timeframe, warnings)
         lookback_days = RESEARCH_OVERVIEW_TIMEFRAMES[timeframe]
         benchmark_symbol = str(request.benchmark_symbol or "").strip().upper() or "SPY"
+        cache_key = self._overview_cache_key(provider_policy, universe.universe_id, timeframe, benchmark_symbol)
+        cached = self._get_cached_overview(cache_key, cache_seconds, force_refresh=request.force_refresh)
+        if cached is not None:
+            return cached
+
         source_provider = self._overview_source_provider()
         history_source_label = self._overview_history_source_label(source_provider)
         freshness_label = FreshnessLabel.MOCKED if source_provider == "mock" else FreshnessLabel.HISTORICAL
@@ -110,7 +118,14 @@ class ResearchService:
         if callable(reset_tracking):
             reset_tracking()
 
-        benchmark_returns = self._overview_benchmark_returns(benchmark_symbol, lookback_days, warnings)
+        benchmark_returns = self._overview_benchmark_returns(
+            benchmark_symbol,
+            lookback_days,
+            warnings,
+            provider_policy=provider_policy,
+            force_refresh=request.force_refresh,
+            cache_seconds=cache_seconds,
+        )
         benchmark_total_return = total_return_from_returns(benchmark_returns)
         if benchmark_returns.empty:
             warnings.append(f"Benchmark history unavailable for {benchmark_symbol}; beta and relative return are limited.")
@@ -125,7 +140,13 @@ class ResearchService:
         for instrument in universe.instruments:
             reference = self._overview_reference(instrument)
             symbol = instrument.normalized_symbol()
-            history_result = self._load_overview_history(reference, lookback_days)
+            history_result = self._load_overview_history(
+                reference,
+                lookback_days,
+                provider_policy=provider_policy,
+                force_refresh=request.force_refresh,
+                cache_seconds=cache_seconds,
+            )
             series = history_result.series
             returns = returns_from_price_series(series, lookback_days)
             node_warnings: list[str] = list(history_result.warnings)
@@ -208,7 +229,7 @@ class ResearchService:
                 f"Thin overview history for {len(thin_history_symbols)} instruments over {timeframe}: {preview}{suffix}."
             )
 
-        return ResearchOverviewResult(
+        result = ResearchOverviewResult(
             universe_id=universe.universe_id,
             universe_label=universe.label,
             universe_description=universe.description,
@@ -237,6 +258,9 @@ class ResearchService:
             metadata_source_label=universe.metadata_source_label,
             coverage_label=universe.coverage_label,
         )
+        if cache_seconds > 0:
+            self._overview_cache[cache_key] = result
+        return result
 
     def analyze(self, request: ResearchAnalysisRequest) -> ResearchAnalysisResult:
         warnings: list[str] = []
@@ -508,6 +532,10 @@ class ResearchService:
         benchmark_symbol: str,
         lookback_days: int,
         warnings: list[str],
+        *,
+        provider_policy: str | None = None,
+        force_refresh: bool = False,
+        cache_seconds: int | None = None,
     ) -> pd.Series:
         base_currency = str(getattr(self.provider, "base_currency", "USD") or "USD").upper()
         try:
@@ -516,15 +544,32 @@ class ResearchService:
                 lookback_days,
                 base_currency=base_currency,
                 warnings=warnings,
+                provider_policy=provider_policy,
+                bypass_cache=force_refresh,
+                max_age_seconds=cache_seconds,
             )
         except TypeError:
             benchmark_history = self.provider.load_benchmark_history(benchmark_symbol, lookback_days)
         return returns_from_price_series(benchmark_history, lookback_days)
 
-    def _load_overview_history(self, reference: InstrumentReference, lookback_days: int) -> ResearchHistoryResult:
+    def _load_overview_history(
+        self,
+        reference: InstrumentReference,
+        lookback_days: int,
+        *,
+        provider_policy: str | None = None,
+        force_refresh: bool = False,
+        cache_seconds: int | None = None,
+    ) -> ResearchHistoryResult:
         loader = getattr(self.provider, "load_instrument_history_result", None)
         if callable(loader):
-            return loader(reference, lookback_days)
+            return loader(
+                reference,
+                lookback_days,
+                provider_policy=provider_policy,
+                bypass_cache=force_refresh,
+                max_age_seconds=cache_seconds,
+            )
         series = self.provider.load_instrument_history(reference, lookback_days)
         source_provider = self._overview_source_provider()
         return ResearchHistoryResult(
@@ -553,6 +598,48 @@ class ResearchService:
             origin="research_service.history_source_summary",
             freshness_label=default_freshness_label,
         )
+
+    @staticmethod
+    def _overview_provider_policy(value: str | None) -> str:
+        normalized = str(value or "").strip().lower().replace("-", "_")
+        if normalized in {"sitrep", "situation_report"}:
+            return "sitrep"
+        return "research_overview"
+
+    def _overview_cache_seconds(self, provider_policy: str) -> int:
+        mapping = getattr(self.provider, "history_cache_seconds_by_policy", {}) or {}
+        try:
+            return max(0, int(mapping.get(provider_policy, 0) or 0))
+        except Exception:
+            return 0
+
+    def _overview_cache_key(
+        self,
+        provider_policy: str,
+        universe_id: str,
+        timeframe: str,
+        benchmark_symbol: str,
+    ) -> tuple[str, str, str, str, str]:
+        base_currency = str(getattr(self.provider, "base_currency", "USD") or "USD").upper()
+        return (provider_policy, universe_id, timeframe, benchmark_symbol, base_currency)
+
+    def _get_cached_overview(
+        self,
+        cache_key: tuple[str, str, str, str, str],
+        cache_seconds: int,
+        *,
+        force_refresh: bool,
+    ) -> ResearchOverviewResult | None:
+        if force_refresh or cache_seconds <= 0:
+            return None
+        cached = self._overview_cache.get(cache_key)
+        if cached is None:
+            return None
+        age_seconds = (now_utc() - cached.retrieved_at).total_seconds()
+        if age_seconds > cache_seconds:
+            self._overview_cache.pop(cache_key, None)
+            return None
+        return cached
 
     def _saved_store(self) -> SavedResearchStore:
         if self.saved_store is None:

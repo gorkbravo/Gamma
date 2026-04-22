@@ -257,6 +257,8 @@ class ResearchDataProvider:
         )
     )
     history_providers: List[ListedMarketHistoryProvider] | None = None
+    history_provider_sets: dict[str, List[ListedMarketHistoryProvider]] = field(default_factory=dict)
+    history_cache_seconds_by_policy: dict[str, int] = field(default_factory=dict)
     _history_metadata: dict[str, ResearchHistoryResult] = field(default_factory=dict, init=False)
     _last_history_warnings: list[str] = field(default_factory=list, init=False)
     _last_history_sources: dict[str, ResearchHistoryResult] = field(default_factory=dict, init=False)
@@ -279,12 +281,18 @@ class ResearchDataProvider:
         *,
         base_currency: str | None = None,
         warnings: list[str] | None = None,
+        provider_policy: str | None = None,
+        bypass_cache: bool = False,
+        max_age_seconds: int | float | None = None,
     ) -> pd.Series | None:
         result = self.load_benchmark_history_result(
             symbol,
             lookback_days,
             base_currency=base_currency,
             warnings=warnings,
+            provider_policy=provider_policy,
+            bypass_cache=bypass_cache,
+            max_age_seconds=max_age_seconds,
         )
         return result.series
 
@@ -295,12 +303,18 @@ class ResearchDataProvider:
         *,
         base_currency: str | None = None,
         warnings: list[str] | None = None,
+        provider_policy: str | None = None,
+        bypass_cache: bool = False,
+        max_age_seconds: int | float | None = None,
     ) -> ResearchHistoryResult:
         instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
         history_result = self.load_instrument_history_result(
             instrument,
             lookback_days,
             defaults=self.benchmark_defaults,
+            provider_policy=provider_policy,
+            bypass_cache=bypass_cache,
+            max_age_seconds=max_age_seconds,
         )
         if warnings is not None:
             warnings.extend(history_result.warnings)
@@ -330,8 +344,18 @@ class ResearchDataProvider:
         lookback_days: int,
         *,
         defaults: InstrumentDefaults | None = None,
+        provider_policy: str | None = None,
+        bypass_cache: bool = False,
+        max_age_seconds: int | float | None = None,
     ) -> pd.Series | None:
-        return self.load_instrument_history_result(instrument, lookback_days, defaults=defaults).series
+        return self.load_instrument_history_result(
+            instrument,
+            lookback_days,
+            defaults=defaults,
+            provider_policy=provider_policy,
+            bypass_cache=bypass_cache,
+            max_age_seconds=max_age_seconds,
+        ).series
 
     def load_instrument_history_result(
         self,
@@ -339,10 +363,13 @@ class ResearchDataProvider:
         lookback_days: int,
         *,
         defaults: InstrumentDefaults | None = None,
+        provider_policy: str | None = None,
+        bypass_cache: bool = False,
+        max_age_seconds: int | float | None = None,
     ) -> ResearchHistoryResult:
         resolved_defaults = defaults or self.instrument_defaults
         resolved = instrument.with_defaults(resolved_defaults)
-        cache_key = self._history_cache_key(resolved, resolved_defaults)
+        cache_key = self._history_cache_key(resolved, resolved_defaults, provider_policy=provider_policy)
         if not cache_key:
             return ResearchHistoryResult.unavailable(
                 source_provider="unavailable",
@@ -350,11 +377,24 @@ class ResearchDataProvider:
                 origin="research_data_provider.load_instrument_history",
                 warning="Instrument history cache key is empty",
             )
-        cached = self.history_cache.get(cache_key, lookback_days)
+        cached = None if bypass_cache else self.history_cache.get(
+            cache_key,
+            lookback_days,
+            max_age_seconds=max_age_seconds,
+        )
         if cached is not None and not cached.empty:
             metadata = self._history_metadata.get(cache_key)
             if metadata is not None:
+                self._last_history_sources[resolved.instrument_id or resolved.normalized_symbol()] = metadata
                 return replace(metadata, series=cached.astype(float), warnings=[])
+            self._last_history_sources[resolved.instrument_id or resolved.normalized_symbol()] = ResearchHistoryResult(
+                series=None,
+                source_provider="research_cache",
+                source_label="Research history cache",
+                origin="research_cache.memory",
+                freshness_label=FreshnessLabel.HISTORICAL,
+                transformation_note="Loaded from Gamma's in-memory research history cache.",
+            )
             return ResearchHistoryResult(
                 series=cached.astype(float),
                 source_provider="research_cache",
@@ -364,7 +404,7 @@ class ResearchDataProvider:
                 transformation_note="Loaded from Gamma's in-memory research history cache.",
             )
 
-        result = self._fetch_from_history_providers(resolved, lookback_days)
+        result = self._fetch_from_history_providers(resolved, lookback_days, provider_policy=provider_policy)
         if result.series is not None and not result.series.empty:
             clean_series = result.series.astype(float)
             self.history_cache.set(cache_key, clean_series, lookback_days)
@@ -411,9 +451,11 @@ class ResearchDataProvider:
         self,
         instrument: InstrumentReference,
         lookback_days: int,
+        *,
+        provider_policy: str | None = None,
     ) -> ResearchHistoryResult:
         warnings: list[str] = []
-        for provider in list(self.history_providers or []):
+        for provider in self._history_providers_for_policy(provider_policy):
             result = provider.load_history(instrument, lookback_days)
             if result.series is not None and not result.series.empty:
                 combined = replace(result, warnings=list(dict.fromkeys([*warnings, *result.warnings])))
@@ -433,6 +475,12 @@ class ResearchDataProvider:
             freshness_label=FreshnessLabel.UNAVAILABLE,
             warnings=list(dict.fromkeys(warnings)),
         )
+
+    def _history_providers_for_policy(self, provider_policy: str | None) -> list[ListedMarketHistoryProvider]:
+        policy = str(provider_policy or "").strip().lower()
+        if policy and policy in self.history_provider_sets:
+            return list(self.history_provider_sets[policy])
+        return list(self.history_providers or [])
 
     def load_prices(
         self,
@@ -589,7 +637,13 @@ class ResearchDataProvider:
             provider_id=position.provider_id,
         ).with_defaults(self.instrument_defaults)
 
-    def _history_cache_key(self, instrument: InstrumentReference, defaults: InstrumentDefaults) -> str:
+    def _history_cache_key(
+        self,
+        instrument: InstrumentReference,
+        defaults: InstrumentDefaults,
+        *,
+        provider_policy: str | None = None,
+    ) -> str:
         provider = instrument.normalized_provider(defaults.provider)
         default_instrument_id = build_instrument_id(
             provider=defaults.provider,
@@ -608,8 +662,11 @@ class ResearchDataProvider:
             and not normalize_symbol(instrument.primary_exchange)
             and not str(instrument.provider_id or "").strip()
         ):
-            return instrument.normalized_symbol()
-        return str(instrument.instrument_id or instrument.normalized_symbol())
+            base_key = instrument.normalized_symbol()
+        else:
+            base_key = str(instrument.instrument_id or instrument.normalized_symbol())
+        policy = str(provider_policy or "").strip().lower()
+        return f"{policy}:{base_key}" if policy else base_key
 
 
 def select_data_provider(

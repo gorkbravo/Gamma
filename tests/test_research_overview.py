@@ -6,8 +6,12 @@ import pandas as pd
 
 from src.api.schemas.research import ResearchOverviewResponseModel
 from src.application.research_service import ResearchService
-from src.models.instruments import InstrumentDefaults
+from src.models.instruments import InstrumentDefaults, InstrumentReference
+from src.models.provenance import FreshnessLabel
 from src.models.research_overview import ResearchOverviewRequest
+from src.services.data_providers import ResearchDataProvider
+from src.services.research_cache import ResearchHistoryCache
+from src.services.research_market_data import ResearchHistoryResult
 
 
 class _OverviewProvider:
@@ -27,6 +31,68 @@ class _OverviewProvider:
 
     def load_benchmark_history(self, symbol, lookback_days, *, base_currency=None, warnings=None):
         return self.histories.get(str(symbol or "").strip().upper())
+
+
+class _NoopMarketData:
+    def fetch_fx_history(self, base, quote, lookback_days):
+        return None
+
+    def fetch_fx_rate(self, base, quote):
+        return None
+
+
+class _NoopMockService:
+    def load_history(self, symbol):
+        return None
+
+
+class _FakeHistoryProvider:
+    def __init__(self, provider_id: str, source_label: str, histories: dict[str, pd.Series]) -> None:
+        self.provider_id = provider_id
+        self.source_label = source_label
+        self.histories = histories
+
+    def load_history(self, instrument: InstrumentReference, lookback_days: int) -> ResearchHistoryResult:
+        symbol = instrument.normalized_symbol()
+        series = self.histories.get(symbol)
+        if series is None:
+            return ResearchHistoryResult.unavailable(
+                source_provider=self.provider_id,
+                source_label=self.source_label,
+                origin=f"{self.provider_id}.history",
+                warning=f"{self.provider_id} unavailable for {symbol}",
+            )
+        return ResearchHistoryResult(
+            series=series,
+            source_provider=self.provider_id,
+            source_label=self.source_label,
+            origin=f"{self.provider_id}.history",
+            freshness_label=FreshnessLabel.HISTORICAL,
+        )
+
+
+def _research_data_provider(*history_providers) -> ResearchDataProvider:
+    return ResearchDataProvider(
+        client=SimpleNamespace(mock=False),
+        market_data=_NoopMarketData(),
+        mock_service=_NoopMockService(),
+        context=None,
+        base_currency="USD",
+        history_cache=ResearchHistoryCache(),
+        instrument_defaults=InstrumentDefaults(
+            provider="research",
+            sec_type="STK",
+            exchange="SMART",
+            currency="USD",
+        ),
+        benchmark_defaults=InstrumentDefaults(
+            provider="benchmark",
+            sec_type="STK",
+            exchange="SMART",
+            currency="USD",
+        ),
+        history_providers=list(history_providers),
+    )
 
 
 def test_research_overview_builds_nodes_rankings_and_provenance():
@@ -144,3 +210,41 @@ def test_research_overview_labels_partial_coverage_without_failing():
     assert any("Unknown Research Overview universe" in warning for warning in result.warnings)
     assert any("Unknown Research Overview timeframe" in warning for warning in result.warnings)
     assert any("Coverage is partial" in warning for warning in result.warnings)
+
+
+def test_research_overview_reports_mixed_history_provider_sources():
+    idx = pd.date_range("2026-01-02", periods=8, freq="B")
+    provider = _research_data_provider(
+        _FakeHistoryProvider(
+            "yfinance",
+            "Yahoo Finance/yfinance daily history",
+            {
+                "AAPL": pd.Series([100, 101, 102, 103, 104, 105, 106, 107], index=idx),
+                "MSFT": pd.Series([100, 101, 103, 106, 110, 112, 116, 120], index=idx),
+            },
+        ),
+        _FakeHistoryProvider(
+            "ibkr",
+            "IBKR/TWS daily historical bars",
+            {
+                "SAP": pd.Series([100, 99, 98, 97, 98, 99, 98, 97], index=idx),
+            },
+        ),
+    )
+    service = ResearchService(provider)
+
+    result = service.overview(
+        ResearchOverviewRequest(
+            universe_id="sample_equities",
+            timeframe="1M",
+            benchmark_symbol="AAPL",
+            provider_policy="research_overview",
+        )
+    )
+
+    instrument_sources = {node.symbol: node.source_provider for node in result.nodes if node.level == "instrument"}
+
+    assert instrument_sources == {"AAPL": "yfinance", "MSFT": "yfinance", "SAP": "ibkr"}
+    assert result.source_provider == "mixed"
+    assert result.history_source_label.startswith("Mixed listed-market history providers")
+    assert any("more than one listed-market history provider" in warning for warning in result.warnings)

@@ -43,7 +43,10 @@ class CommoditiesService:
     def get_workspace(self, request: CommodityWorkspaceRequest | None = None) -> CommodityWorkspaceResult:
         normalized_request = request or CommodityWorkspaceRequest()
         mode = _normalize_mode(normalized_request.mode)
-        snapshot = self.provider.get_snapshot(force_refresh=normalized_request.force_refresh)
+        snapshot = self.provider.get_snapshot(
+            force_refresh=normalized_request.force_refresh,
+            selected_instrument_id=normalized_request.selected_instrument_id,
+        )
         selected = _normalize_selected_instrument(normalized_request.selected_instrument_id, snapshot)
         curves = [self._enrich_curve(curve) for curve in snapshot.curve_snapshots]
         inventories = [self._enrich_inventory(series) for series in snapshot.inventory_series]
@@ -89,7 +92,7 @@ class CommoditiesService:
         force_refresh: bool = False,
     ) -> CommodityPriceHistory | None:
         selected = _slug(instrument_id)
-        snapshot = self.provider.get_snapshot(force_refresh=force_refresh)
+        snapshot = self.provider.get_snapshot(force_refresh=force_refresh, selected_instrument_id=selected)
         return next((history for history in snapshot.price_histories if history.instrument_id == selected), None)
 
     def get_curve(
@@ -99,7 +102,7 @@ class CommoditiesService:
         force_refresh: bool = False,
     ) -> CommodityCurveSnapshot | None:
         selected = _slug(instrument_id)
-        snapshot = self.provider.get_snapshot(force_refresh=force_refresh)
+        snapshot = self.provider.get_snapshot(force_refresh=force_refresh, selected_instrument_id=selected)
         curve = next((row for row in snapshot.curve_snapshots if row.instrument_id == selected), None)
         return self._enrich_curve(curve) if curve is not None else None
 
