@@ -34,11 +34,17 @@
 
   interface SurfaceQuad { pts: string; fill: string; sortKey: number; ri: number; }
   interface AxisLabel  { x: number; y: number; label: string; anchor?: string; }
+  interface SlicePoint { x: number; y: number; strike: number; value: number; }
 
   let surfaceQuads: SurfaceQuad[] = [];
   let axisStrikeLabels: AxisLabel[] = [];
   let axisIvLabels: AxisLabel[] = [];
   let axisDteLabels: AxisLabel[] = [];
+  let sliceLinePoints = "";
+  let sliceAreaPoints = "";
+  let slicePoints: SlicePoint[] = [];
+  let sliceIvLabels: AxisLabel[] = [];
+  let sliceStrikeLabels: AxisLabel[] = [];
 
   function viridisColor(t: number): string {
     const v = Math.max(0, Math.min(1, t));
@@ -140,12 +146,14 @@
   let realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
   let distributionBuckets = deriveDistributionBuckets(result);
   let maxDistributionProbability = 0;
+  let selectedPairs = result?.pairs?.filter((pair) => pair.expiry === slice?.expiry) ?? [];
 
   $: expiryRows = result?.expiries.map((expiry, index) => ({
     expiry,
     values: result.iv_grid[index] ?? []
   })) ?? [];
   $: slice = expiryRows[selectedExpiry];
+  $: selectedPairs = result?.pairs?.filter((pair) => pair.expiry === slice?.expiry) ?? [];
   $: termStructure = deriveTermStructure(result);
   $: atmStrikeIndex = nearestStrikeIndex(result);
   $: surfaceStats = deriveSurfaceStats(result);
@@ -166,12 +174,17 @@
       const minIv = surfaceStats.minIv ?? 0;
       const maxIv = surfaceStats.maxIv ?? 1;
       const ivRange = Math.max(maxIv - minIv, 0.01);
+      const baseY = 268;
+      const strikeWidth = 404;
+      const depthX = 58;
+      const depthY = 72;
+      const zHeight = 132;
 
       const proj = (ri: number, ci: number, v: number | null | undefined): [number, number] => {
         const xr = colCount <= 1 ? 0.5 : ci / (colCount - 1);
         const yr = rowCount <= 1 ? 0.5 : ri / (rowCount - 1);
         const zr = v == null || !Number.isFinite(v) ? 0 : Math.max(0, Math.min(1, (v - minIv) / ivRange));
-        return [32 + xr * 408 + yr * 54, 258 - yr * 92 - zr * 92];
+        return [34 + xr * strikeWidth + yr * depthX, baseY - yr * depthY - zr * zHeight];
       };
 
       for (let ri = 0; ri < rowCount - 1; ri++) {
@@ -198,13 +211,13 @@
       const sStep = Math.max(1, Math.floor(colCount / 5));
       for (let ci = 0; ci < colCount; ci += sStep) {
         const xr = colCount <= 1 ? 0.5 : ci / (colCount - 1);
-        sLabels.push({ x: 32 + xr * 408, y: 273, label: fmt(result.strikes[ci], 1) });
+        sLabels.push({ x: 34 + xr * strikeWidth, y: 284, label: fmt(result.strikes[ci], 1) });
       }
 
       // Z-axis: IV% labels along left front edge
       for (let i = 0; i <= 4; i++) {
         const t = i / 4;
-        ivLabs.push({ x: 26, y: 258 - t * 92, label: pct(minIv + t * ivRange, 0), anchor: "end" });
+        ivLabs.push({ x: 27, y: baseY - t * zHeight, label: pct(minIv + t * ivRange, 0), anchor: "end" });
       }
 
       // Y-axis: DTE labels along right depth edge
@@ -212,7 +225,7 @@
       for (let ri = 0; ri < rowCount; ri += dStep) {
         const yr = rowCount <= 1 ? 0.5 : ri / (rowCount - 1);
         const dte = daysToExpiry(result.expiries[ri]);
-        dteLabs.push({ x: 32 + 408 + yr * 54 + 5, y: 258 - yr * 92 + 4, label: `${dte}d` });
+        dteLabs.push({ x: 34 + strikeWidth + yr * depthX + 5, y: baseY - yr * depthY + 4, label: `${dte}d` });
       }
     }
 
@@ -220,6 +233,51 @@
     axisStrikeLabels = sLabels;
     axisIvLabels = ivLabs;
     axisDteLabels = dteLabs;
+  }
+
+  $: {
+    const points: SlicePoint[] = [];
+    const ivLabels: AxisLabel[] = [];
+    const strikeLabels: AxisLabel[] = [];
+    const values = slice?.values ?? [];
+    const strikes = result?.strikes ?? [];
+    const finiteValues = values.filter((value) => Number.isFinite(value));
+    const minIv = finiteValues.length ? Math.min(...finiteValues) : 0;
+    const maxIv = finiteValues.length ? Math.max(...finiteValues) : 1;
+    const ivRange = Math.max(maxIv - minIv, 0.01);
+    const left = 42;
+    const right = 502;
+    const top = 24;
+    const bottom = 256;
+    if (values.length && strikes.length) {
+      values.forEach((value, index) => {
+        if (!Number.isFinite(value)) return;
+        const xRatio = values.length <= 1 ? 0.5 : index / (values.length - 1);
+        const yRatio = (value - minIv) / ivRange;
+        points.push({
+          x: left + xRatio * (right - left),
+          y: bottom - yRatio * (bottom - top),
+          strike: strikes[index],
+          value,
+        });
+      });
+      for (let i = 0; i <= 4; i++) {
+        const t = i / 4;
+        ivLabels.push({ x: left - 8, y: bottom - t * (bottom - top) + 4, label: pct(minIv + t * ivRange, 0), anchor: "end" });
+      }
+      const step = Math.max(1, Math.floor(strikes.length / 5));
+      for (let index = 0; index < strikes.length; index += step) {
+        const xRatio = strikes.length <= 1 ? 0.5 : index / (strikes.length - 1);
+        strikeLabels.push({ x: left + xRatio * (right - left), y: bottom + 18, label: fmt(strikes[index], 1), anchor: "middle" });
+      }
+    }
+    slicePoints = points;
+    sliceLinePoints = points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+    sliceAreaPoints = points.length
+      ? `${left},${bottom} ${points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ")} ${right},${bottom}`
+      : "";
+    sliceIvLabels = ivLabels;
+    sliceStrikeLabels = strikeLabels;
   }
 </script>
 
@@ -326,7 +384,7 @@
   </article>
 
   {#if mode === "surface"}
-    <div class="workspace-grid surface-grid">
+    <div class="surface-chart-row">
       <article class="panel surface-panel">
         <div class="panel-header">
           <h3>Surface</h3>
@@ -340,9 +398,20 @@
             aria-label="Volatility surface"
             on:mouseleave={() => (hoveredExpiry = null)}
           >
-            <line x1="32" y1="258" x2="440" y2="258" />
-            <line x1="32" y1="258" x2="86" y2="166" />
-            <line x1="440" y1="258" x2="494" y2="166" />
+            <g class="surface-gridlines">
+              <line x1="34" y1="268" x2="438" y2="268" />
+              <line x1="48.5" y1="250" x2="452.5" y2="250" />
+              <line x1="63" y1="232" x2="467" y2="232" />
+              <line x1="77.5" y1="214" x2="481.5" y2="214" />
+              <line x1="92" y1="196" x2="496" y2="196" />
+              <line x1="34" y1="235" x2="496" y2="163" />
+              <line x1="34" y1="202" x2="496" y2="130" />
+              <line x1="34" y1="169" x2="496" y2="97" />
+              <line x1="34" y1="136" x2="496" y2="64" />
+            </g>
+            <line x1="34" y1="268" x2="438" y2="268" />
+            <line x1="34" y1="268" x2="92" y2="196" />
+            <line x1="438" y1="268" x2="496" y2="196" />
             {#each surfaceQuads as quad}
               <polygon
                 role="presentation"
@@ -371,6 +440,44 @@
         {/if}
       </article>
 
+      <article class="panel slice-chart-panel">
+        <div class="panel-header">
+          <h3>Expiry Slice</h3>
+          {#if slice}<strong>{formatExpiry(slice.expiry)}</strong>{/if}
+        </div>
+        {#if sliceLinePoints}
+          <svg class="slice-svg" viewBox="0 0 540 300" role="img" aria-label="Selected expiry implied volatility slice">
+            <g class="chart-gridlines">
+              <line x1="42" y1="256" x2="502" y2="256" />
+              <line x1="42" y1="198" x2="502" y2="198" />
+              <line x1="42" y1="140" x2="502" y2="140" />
+              <line x1="42" y1="82" x2="502" y2="82" />
+              <line x1="42" y1="24" x2="502" y2="24" />
+              <line x1="42" y1="24" x2="42" y2="256" />
+              <line x1="157" y1="24" x2="157" y2="256" />
+              <line x1="272" y1="24" x2="272" y2="256" />
+              <line x1="387" y1="24" x2="387" y2="256" />
+              <line x1="502" y1="24" x2="502" y2="256" />
+            </g>
+            <polygon class="slice-area" points={sliceAreaPoints} />
+            <polyline class="slice-line" points={sliceLinePoints} />
+            {#each slicePoints as point}
+              <circle class:spot={point.strike === surfaceStats.atmStrike} cx={point.x} cy={point.y} r="2.4" />
+            {/each}
+            {#each sliceIvLabels as lbl}
+              <text class="axis-label" x={lbl.x} y={lbl.y} text-anchor="end">{lbl.label}</text>
+            {/each}
+            {#each sliceStrikeLabels as lbl}
+              <text class="axis-label" x={lbl.x} y={lbl.y} text-anchor="middle">{lbl.label}</text>
+            {/each}
+          </svg>
+        {:else}
+          <p class="muted">Select an expiry after loading a surface.</p>
+        {/if}
+      </article>
+    </div>
+
+    <div class="surface-data-row">
       <article class="panel heatmap-panel">
         <div class="panel-header">
           <h3>Expiry / Strike Grid</h3>
@@ -396,30 +503,48 @@
           <p class="muted">No options surface loaded.</p>
         {/if}
       </article>
-    </div>
-
-    <div class="detail-grid">
       <article class="panel table-panel">
         <div class="table-header">
-          <h3>Expiry Slice</h3>
+          <h3>Greeks / Pair Context</h3>
           {#if slice}<span>{formatExpiry(slice.expiry)}</span>{/if}
         </div>
-        {#if slice}
-          <table>
-            <thead><tr><th>Strike</th><th>IV</th></tr></thead>
-            <tbody>
-              {#each slice.values as value, index}
+        {#if selectedPairs.length}
+          <div class="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                  <td>{fmt(result?.strikes[index], 2)}</td>
-                  <td>{pct(value)}</td>
+                  <th>Strike</th>
+                  <th>Call IV</th>
+                  <th>Put IV</th>
+                  <th>Call Delta</th>
+                  <th>Put Delta</th>
+                  <th>Straddle</th>
+                  <th>Move</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each selectedPairs as pair}
+                  <tr>
+                    <td>{fmt(pair.strike, 2)}</td>
+                    <td>{pct(pair.call_implied_volatility)}</td>
+                    <td>{pct(pair.put_implied_volatility)}</td>
+                    <td>{fmt(pair.call_delta, 3)}</td>
+                    <td>{fmt(pair.put_delta, 3)}</td>
+                    <td>{fmt(pair.straddle_midpoint, 2)}</td>
+                    <td>{pct(pair.implied_move_pct)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
         {:else}
-          <p class="muted">Select an expiry after loading a surface.</p>
+          <p class="muted">No paired call/put context available for the selected expiry.</p>
         {/if}
       </article>
+
+    </div>
+
+    <div class="surface-summary-row">
 
       <article class="panel table-panel">
         <div class="table-header"><h3>ATM Term Structure</h3></div>
@@ -441,17 +566,19 @@
         {/if}
       </article>
 
-      <article class="panel">
-        <h3>Surface Context</h3>
-        <div class="metric-list">
-          <div><span>Selected Expiry</span><strong>{formatExpiry(slice?.expiry)}</strong></div>
-          <div><span>ATM Strike</span><strong>{fmt(surfaceStats.atmStrike, 2)}</strong></div>
-          <div><span>IV Range</span><strong>{pct(surfaceStats.minIv)} – {pct(surfaceStats.maxIv)}</strong></div>
-          <div><span>Avg IV</span><strong>{pct(surfaceStats.averageIv)}</strong></div>
-          <div><span>Grid</span><strong>{result?.collection ? `${result.collection.selected_expiry_count}x${result.collection.selected_strike_count}` : "N/A"}</strong></div>
-          <div><span>Interpolation</span><strong>{ratioPct(result?.quality?.interpolation_ratio)}</strong></div>
-          <div><span>Line Utilization</span><strong>{ratioPct(result?.collection?.market_data_line_utilization)}</strong></div>
-        </div>
+      <article class="panel table-panel">
+        <div class="table-header"><h3>Surface Context</h3></div>
+        <table>
+          <tbody>
+            <tr><th>Selected Expiry</th><td>{formatExpiry(slice?.expiry)}</td></tr>
+            <tr><th>ATM Strike</th><td>{fmt(surfaceStats.atmStrike, 2)}</td></tr>
+            <tr><th>IV Range</th><td>{pct(surfaceStats.minIv)} - {pct(surfaceStats.maxIv)}</td></tr>
+            <tr><th>Avg IV</th><td>{pct(surfaceStats.averageIv)}</td></tr>
+            <tr><th>Grid</th><td>{result?.collection ? `${result.collection.selected_expiry_count}x${result.collection.selected_strike_count}` : "N/A"}</td></tr>
+            <tr><th>Interpolation</th><td>{ratioPct(result?.quality?.interpolation_ratio)}</td></tr>
+            <tr><th>Line Utilization</th><td>{ratioPct(result?.collection?.market_data_line_utilization)}</td></tr>
+          </tbody>
+        </table>
       </article>
     </div>
   {:else if mode === "skew_term"}
@@ -616,6 +743,9 @@
 <style>
   .view,
   .workspace-grid,
+  .surface-chart-row,
+  .surface-data-row,
+  .surface-summary-row,
   .detail-grid,
   .bar-list,
   .metric-list,
@@ -650,6 +780,20 @@
 
   .surface-grid {
     grid-template-columns: minmax(22rem, 0.9fr) minmax(0, 1.1fr);
+  }
+
+  .surface-chart-row {
+    grid-template-columns: minmax(22rem, 0.95fr) minmax(22rem, 1.05fr);
+  }
+
+  .surface-data-row {
+    grid-template-columns: minmax(0, 1.2fr) minmax(22rem, 0.8fr);
+    align-items: start;
+  }
+
+  .surface-summary-row {
+    grid-template-columns: minmax(0, 1fr) minmax(22rem, 1fr);
+    align-items: start;
   }
 
   .detail-grid {
@@ -853,11 +997,13 @@
   }
 
   .surface-panel,
+  .slice-chart-panel,
   .heatmap-panel {
     padding: 0;
   }
 
   .surface-panel .panel-header,
+  .slice-chart-panel .panel-header,
   .heatmap-panel .panel-header {
     padding: 0.3rem 0.75rem;
     border-bottom: 1px solid var(--divider);
@@ -865,17 +1011,28 @@
     align-items: center;
   }
 
-  .surface-svg {
+  .surface-svg,
+  .slice-svg {
     width: 100%;
     min-height: 18rem;
     background: var(--bg-0);
     display: block;
+  }
+
+  .surface-svg {
     cursor: crosshair;
   }
 
   .surface-svg line {
     stroke: var(--divider);
     stroke-width: 1;
+  }
+
+  .surface-gridlines line,
+  .chart-gridlines line {
+    stroke: var(--divider);
+    stroke-width: 0.6;
+    opacity: 0.45;
   }
 
   .surface-svg polygon {
@@ -890,7 +1047,8 @@
     stroke-width: 0;
   }
 
-  .surface-svg .axis-label {
+  .surface-svg .axis-label,
+  .slice-svg .axis-label {
     fill: var(--text-2);
     font-size: 9px;
     font-family: monospace;
@@ -902,6 +1060,30 @@
     font-size: 11px;
     font-family: monospace;
     pointer-events: none;
+  }
+
+  .slice-area {
+    fill: color-mix(in srgb, var(--chart-primary) 14%, transparent);
+    stroke: none;
+  }
+
+  .slice-line {
+    fill: none;
+    stroke: var(--chart-primary);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .slice-svg circle {
+    fill: var(--bg-0);
+    stroke: var(--chart-primary);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .slice-svg circle.spot {
+    fill: var(--warning);
+    stroke: var(--warning);
   }
 
   .heatmap {
@@ -1036,6 +1218,9 @@
     .workspace-header,
     .workspace-grid,
     .surface-grid,
+    .surface-chart-row,
+    .surface-data-row,
+    .surface-summary-row,
     .detail-grid,
     .controls-panel,
     .field-grid,

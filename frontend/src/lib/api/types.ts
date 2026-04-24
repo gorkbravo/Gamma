@@ -2541,6 +2541,32 @@ export interface IvSurfaceQuality {
   pairs_with_both_sides: number;
 }
 
+export interface IvOptionPair {
+  pair_id: string;
+  expiry: string;
+  strike: number;
+  days_to_expiry: number | null;
+  call_contract_id: string | null;
+  put_contract_id: string | null;
+  call_midpoint: number | null;
+  put_midpoint: number | null;
+  call_mark_price: number | null;
+  put_mark_price: number | null;
+  call_implied_volatility: number | null;
+  put_implied_volatility: number | null;
+  blended_implied_volatility: number | null;
+  call_delta: number | null;
+  put_delta: number | null;
+  call_open_interest: number | null;
+  put_open_interest: number | null;
+  call_volume: number | null;
+  put_volume: number | null;
+  straddle_midpoint: number | null;
+  synthetic_forward_price: number | null;
+  implied_move_pct: number | null;
+  call_put_parity_gap: number | null;
+}
+
 export interface IvSurface {
   symbol: string;
   timestamp: string;
@@ -2560,6 +2586,7 @@ export interface IvSurface {
   freshness_label: string;
   collection: IvSurfaceCollection | null;
   quality: IvSurfaceQuality | null;
+  pairs: IvOptionPair[];
 }
 
 export interface ActionResponse {
