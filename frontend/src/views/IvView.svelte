@@ -184,10 +184,7 @@
     <div class="workspace-grid surface-grid">
       <article class="panel surface-panel">
         <div class="panel-header">
-          <div>
-            <h3>Surface</h3>
-            <p>{result?.expiries.length ?? 0} expiries x {result?.strikes.length ?? 0} strikes</p>
-          </div>
+          <h3>Surface</h3>
           <strong>{surfaceStats.frontExpiry ?? "N/A"}</strong>
         </div>
         {#if surfacePaths.length}
@@ -209,10 +206,7 @@
 
       <article class="panel heatmap-panel">
         <div class="panel-header">
-          <div>
-            <h3>Expiry / Strike Grid</h3>
-            <p>Spot-relative strike column is marked at {fmt(surfaceStats.atmStrike, 2)}</p>
-          </div>
+          <h3>Expiry / Strike Grid</h3>
         </div>
         {#if expiryRows.length}
           <div class="heatmap" style={`--strike-count:${result?.strikes.length ?? 1};`}>
@@ -284,8 +278,8 @@
     </div>
   {:else if mode === "skew_term"}
     <div class="workspace-grid">
-      <article class="panel">
-        <h3>Skew By Expiry</h3>
+      <article class="panel table-panel">
+        <div class="table-header"><h3>Skew By Expiry</h3></div>
         {#if skewRows.length}
           <div class="table-wrap">
             <table>
@@ -333,8 +327,8 @@
     </div>
   {:else if mode === "realized_implied"}
     <div class="workspace-grid">
-      <article class="panel">
-        <h3>Realized vs Implied</h3>
+      <article class="panel table-panel">
+        <div class="table-header"><h3>Realized vs Implied</h3></div>
         {#if realizedRows.some((row) => row.realizedVol != null)}
           <div class="table-wrap">
             <table>
@@ -400,7 +394,6 @@
           <div><span>Method</span><strong>Lognormal proxy</strong></div>
           <div><span>Expiry</span><strong>{surfaceStats.frontExpiry ?? "N/A"}</strong></div>
           <div><span>Vol Input</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
-          <div><span>Caveat</span><strong>Not Breeden-Litzenberger RND</strong></div>
         </div>
       </article>
     </div>
@@ -427,8 +420,8 @@
           {#each result?.messages ?? [] as message}
             <div>{message}</div>
           {/each}
-          {#if !(result?.warnings.length || result?.messages.length)}
-            <div>No provider warnings for the active surface.</div>
+          {#if !(result?.warnings?.length || result?.messages?.length)}
+            <div class="muted">—</div>
           {/if}
         </div>
       </article>
@@ -527,7 +520,7 @@
     display: inline-grid;
     grid-template-columns: repeat(5, auto);
     border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
+    background: var(--bg-1);
   }
 
   .mode-bar button {
@@ -592,7 +585,7 @@
   input,
   select,
   button {
-    background: var(--surface-0);
+    background: var(--bg-1);
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: 0.48rem 0.58rem;
@@ -663,7 +656,7 @@
   }
 
   .header {
-    background: var(--surface-0);
+    background: var(--bg-1);
     color: var(--text-2);
   }
 
@@ -704,17 +697,35 @@
   .bar {
     flex: 1;
     min-width: 5rem;
-    background: var(--surface-2);
+    background: var(--panel-strong);
   }
 
   .fill {
     background: var(--chart-primary);
   }
 
+  .table-panel {
+    padding: 0;
+  }
+
+  .table-panel > .muted {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .table-header {
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--divider);
+    height: 26px;
+    display: flex;
+    align-items: center;
+  }
+
+  .table-header h3 {
+    margin: 0;
+  }
+
   .table-wrap {
-    border: 1px solid var(--divider);
     overflow: auto;
-    background: var(--bg-0);
   }
 
   table {
