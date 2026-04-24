@@ -24,7 +24,6 @@
   export let onLoad: (options: IvLoadOptions) => void;
   export let onStartSession: (options: IvLoadOptions) => void;
   export let onStopSession: () => void;
-  export let onRefreshSession: () => void;
 
   let symbol = "SPY";
   let marketDataMode = "delayed";
@@ -76,8 +75,12 @@
     value == null || !Number.isFinite(value) ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const shortTime = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+  const sessionStateLabel = () =>
+    depthPreset === "max" ? "snapshot only" : session?.running ? "running" : "idle";
   const depthLabel = (value: string | null | undefined) =>
-    value === "front_deep"
+    value === "max"
+      ? "Max"
+      : value === "front_deep"
       ? "Front Deep"
       : value
         ? value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
@@ -93,6 +96,9 @@
   }
 
   function startSession() {
+    if (depthPreset === "max") {
+      return;
+    }
     onStartSession({
       symbol: symbol.trim().toUpperCase() || "SPY",
       marketDataMode,
@@ -223,11 +229,29 @@
       <span class="eyebrow">OPTIONS</span>
       <h2>{result?.symbol ?? symbol}</h2>
     </div>
-    <div class="action-row">
-      <button on:click={submit} disabled={loading}>{loading ? "Loading..." : "Load Snapshot"}</button>
-      <button on:click={startSession} disabled={sessionLoading}>{sessionLoading ? "Starting..." : "Start Session"}</button>
-      <button on:click={onRefreshSession} disabled={sessionLoading}>Refresh Session</button>
-      <button on:click={onStopSession} disabled={sessionLoading || !session?.running}>Stop Session</button>
+    <div class="surface-actions">
+      <button class="primary-action" on:click={submit} disabled={loading}>
+        {loading ? "LOADING..." : "Reload Surface"}
+      </button>
+      <div class="session-control" class:running={session?.running} class:snapshot-only={depthPreset === "max"}>
+        <div>
+          <span>Live Session</span>
+          <strong>{sessionStateLabel()}</strong>
+        </div>
+        {#if session?.running}
+          <button on:click={onStopSession} disabled={sessionLoading}>
+            {sessionLoading ? "STOPPING..." : "Stop"}
+          </button>
+        {:else}
+          <button
+            on:click={startSession}
+            disabled={sessionLoading || depthPreset === "max"}
+            title={depthPreset === "max" ? "Max Reload is snapshot-only to avoid holding a large option surface open." : "Start a continuous options surface session."}
+          >
+            {sessionLoading ? "STARTING..." : "Start Live"}
+          </button>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -276,6 +300,7 @@
           <option value="standard">Standard</option>
           <option value="deep">Deep</option>
           <option value="front_deep">Front Deep</option>
+          <option value="max">Max Reload</option>
         </select>
       </label>
       <label>
@@ -285,12 +310,15 @@
           <option value={2.5}>2.5s</option>
           <option value={4}>4.0s</option>
           <option value={8}>8.0s</option>
+          <option value={15}>15.0s</option>
+          <option value={25}>25.0s</option>
+          <option value={30}>30.0s</option>
         </select>
       </label>
     </div>
     <div class="source-strip">
       <div><span>Backend</span><strong>{status?.market_data_mode ?? "unknown"}</strong></div>
-      <div><span>Session</span><strong>{session?.running ? "running" : "idle"}</strong></div>
+      <div><span>Session</span><strong>{sessionStateLabel()}</strong></div>
       <div><span>Provider</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
       <div><span>Depth</span><strong>{depthLabel(result?.collection?.depth_preset ?? depthPreset)}</strong></div>
       <div><span>Updated</span><strong>{shortTime(result?.timestamp)}</strong></div>
@@ -600,7 +628,8 @@
   .workspace-header,
   .mode-kpi-row,
   .panel-header,
-  .action-row,
+  .surface-actions,
+  .session-control,
   .source-strip,
   .bar-row,
   .dist-row,
@@ -760,9 +789,55 @@
     color: var(--text-2);
   }
 
-  .action-row {
+  .surface-actions {
     flex-wrap: wrap;
     justify-content: flex-end;
+    align-items: stretch;
+  }
+
+  .primary-action {
+    border-color: rgba(122, 166, 200, 0.34);
+    background: rgba(122, 166, 200, 0.08);
+    min-width: 8.75rem;
+  }
+
+  .session-control {
+    align-items: stretch;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+  }
+
+  .session-control > div {
+    display: grid;
+    gap: 0.05rem;
+    min-width: 7.75rem;
+    padding: 0.2rem 0.55rem;
+    border-right: 1px solid var(--divider);
+  }
+
+  .session-control span {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+  }
+
+  .session-control strong {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+  }
+
+  .session-control.running strong {
+    color: var(--accent);
+  }
+
+  .session-control.snapshot-only strong {
+    color: var(--warning);
+  }
+
+  .session-control button {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    min-width: 5.8rem;
   }
 
   .source-strip {
@@ -969,7 +1044,7 @@
     }
 
     .workspace-header,
-    .action-row,
+    .surface-actions,
     .source-strip {
       align-items: stretch;
       flex-direction: column;

@@ -36,6 +36,14 @@ class OptionTickerSubscription:
     right: str
 
 
+@dataclass(frozen=True)
+class OptionSubscriptionCandidate:
+    contract: Contract
+    expiry: str
+    strike: float
+    right: str
+
+
 @dataclass
 class IVSurfaceSnapshot:
     symbol: str
@@ -113,7 +121,7 @@ class IVSurfaceEngine:
     @staticmethod
     def _normalize_depth_preset(value: str | None) -> str:
         preset = str(value or "").strip().lower().replace("-", "_")
-        if preset in {"compact", "standard", "deep", "front_deep"}:
+        if preset in {"compact", "standard", "deep", "front_deep", "max"}:
             return preset
         return "standard"
 
@@ -415,47 +423,48 @@ class IVSurfaceEngine:
                 f"{len(expiries) * len(strikes) * len(rights)} contracts requested vs {option_contract_budget} budget"
             )
 
+        candidates, validation_note = self._resolve_option_subscription_candidates(
+            symbol=symbol,
+            underlying_currency=underlying.currency or "USD",
+            trading_class=chain.tradingClass,
+            multiplier=chain.multiplier,
+            expiries=expiries,
+            strikes=strikes,
+            rights=rights,
+        )
+        selection_note = self._combine_notes(selection_note, validation_note)
+        if not candidates:
+            raise RuntimeError(f"No valid option contracts after IBKR contract-details validation for {symbol}")
+
         self._set_status(f"Subscribing ({symbol})")
-        option_exchange = "SMART"
         generic_ticks = "100,101,104,106,232"
-        for exp in expiries:
-            for strike in strikes:
-                if self._stop_event.is_set():
-                    break
-                for right in rights:
-                    option = Contract(
-                        symbol=symbol,
-                        secType="OPT",
-                        exchange=option_exchange,
-                        currency=underlying.currency or "USD",
-                        lastTradeDateOrContractMonth=exp,
-                        strike=float(strike),
-                        right=right,
-                        tradingClass=chain.tradingClass,
-                        multiplier=chain.multiplier,
+        for candidate in candidates:
+            if self._stop_event.is_set():
+                break
+            try:
+                ticker = self._run_ib(
+                    lambda c=candidate.contract: self.client.ib.reqMktData(
+                        c,
+                        genericTickList=generic_ticks,
+                        snapshot=False,
+                        regulatorySnapshot=False,
+                    ),
+                    timeout=8.0,
+                )
+                self._option_tickers.append(
+                    OptionTickerSubscription(
+                        ticker=ticker,
+                        contract=getattr(ticker, "contract", None) or candidate.contract,
+                        expiry=candidate.expiry,
+                        strike=float(candidate.strike),
+                        right=candidate.right,
                     )
-                    try:
-                        ticker = self._run_ib(
-                            lambda c=option: self.client.ib.reqMktData(
-                                c,
-                                genericTickList=generic_ticks,
-                                snapshot=False,
-                                regulatorySnapshot=False,
-                            ),
-                            timeout=8.0,
-                        )
-                        self._option_tickers.append(
-                            OptionTickerSubscription(
-                                ticker=ticker,
-                                contract=getattr(ticker, "contract", None) or option,
-                                expiry=exp,
-                                strike=float(strike),
-                                right=right,
-                            )
-                        )
-                    except Exception as exc:
-                        self._add_message(f"Option subscription failed {symbol} {exp} {strike} {right}: {exc}")
-                    self._sleep_with_stop(0.015)
+                )
+            except Exception as exc:
+                self._add_message(
+                    f"Option subscription failed {symbol} {candidate.expiry} {candidate.strike} {candidate.right}: {exc}"
+                )
+            self._sleep_with_stop(0.015)
 
         if not self._option_tickers:
             raise RuntimeError(f"No option market-data subscriptions for {symbol}")
@@ -537,6 +546,98 @@ class IVSurfaceEngine:
             return band
         nearest = sorted(clean, key=lambda x: abs(x - spot))[:15]
         return sorted(nearest)
+
+    def _resolve_option_subscription_candidates(
+        self,
+        *,
+        symbol: str,
+        underlying_currency: str,
+        trading_class: str,
+        multiplier: str,
+        expiries: list[str],
+        strikes: list[float],
+        rights: list[str],
+    ) -> tuple[list[OptionSubscriptionCandidate], str | None]:
+        strike_keys = {self._strike_key(strike) for strike in strikes}
+        requested_keys = {
+            (expiry, self._strike_key(strike), right)
+            for expiry in expiries
+            for strike in strikes
+            for right in rights
+        }
+        candidates: list[OptionSubscriptionCandidate] = []
+        seen: set[tuple[str, float, str]] = set()
+
+        self._set_status(f"Validating contracts ({symbol})")
+        for expiry in expiries:
+            if self._stop_event.is_set():
+                break
+            template = Contract(
+                symbol=symbol,
+                secType="OPT",
+                exchange="SMART",
+                currency=underlying_currency,
+                lastTradeDateOrContractMonth=expiry,
+                tradingClass=trading_class,
+                multiplier=multiplier,
+            )
+            try:
+                details = self._run_ib(lambda c=template: self.client.ib.reqContractDetails(c), timeout=12.0) or []
+            except Exception as exc:
+                self._add_message(f"Option contract validation failed {symbol} {expiry}: {exc}")
+                details = []
+
+            for detail in details:
+                contract = getattr(detail, "contract", None)
+                if contract is None:
+                    continue
+                right = str(getattr(contract, "right", "") or "").upper()
+                strike = self._coerce_positive(getattr(contract, "strike", None))
+                contract_expiry = str(getattr(contract, "lastTradeDateOrContractMonth", "") or expiry)
+                if not right or right not in rights or strike is None:
+                    continue
+                if contract_expiry != expiry or self._strike_key(strike) not in strike_keys:
+                    continue
+                candidate_key = (expiry, self._strike_key(strike), right)
+                if candidate_key in seen or candidate_key not in requested_keys:
+                    continue
+                seen.add(candidate_key)
+                candidates.append(
+                    OptionSubscriptionCandidate(
+                        contract=contract,
+                        expiry=expiry,
+                        strike=float(strike),
+                        right=right,
+                    )
+                )
+
+        expiry_order = {expiry: index for index, expiry in enumerate(expiries)}
+        strike_order = {self._strike_key(strike): index for index, strike in enumerate(strikes)}
+        right_order = {right: index for index, right in enumerate(rights)}
+        candidates.sort(
+            key=lambda item: (
+                expiry_order.get(item.expiry, len(expiries)),
+                strike_order.get(self._strike_key(item.strike), len(strikes)),
+                right_order.get(item.right, len(rights)),
+            )
+        )
+        skipped = max(0, len(requested_keys) - len(candidates))
+        note = None
+        if skipped:
+            note = (
+                f"Filtered {skipped} invalid option expiry/strike/right combinations using IBKR contract details "
+                "before requesting market data."
+            )
+        return candidates, note
+
+    @staticmethod
+    def _combine_notes(*notes: str | None) -> str | None:
+        clean = [note.strip() for note in notes if note and note.strip()]
+        return " ".join(clean) if clean else None
+
+    @staticmethod
+    def _strike_key(value: float) -> float:
+        return round(float(value), 6)
 
     def _build_snapshot(
         self,

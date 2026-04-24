@@ -1849,7 +1849,6 @@
             onLoad={loadIvSurface}
             onStartSession={startIvSession}
             onStopSession={stopIvSession}
-            onRefreshSession={loadIvSession}
           />
         {/if}
       </section>

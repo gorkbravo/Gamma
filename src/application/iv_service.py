@@ -67,7 +67,7 @@ class IVService:
     @staticmethod
     def normalize_depth_preset(value: str | None) -> str:
         preset = str(value or "").strip().lower().replace("-", "_")
-        if preset in {"compact", "standard", "deep", "front_deep"}:
+        if preset in {"compact", "standard", "deep", "front_deep", "max"}:
             return preset
         return "standard"
 
@@ -112,6 +112,21 @@ class IVService:
                     "market_data_line_budget": max(
                         config["market_data_line_budget"],
                         int(os.getenv("IV_FRONT_DEEP_MARKET_DATA_LINE_BUDGET", "120") or 120),
+                    ),
+                }
+            )
+        elif preset == "max":
+            config.update(
+                {
+                    "max_expiries": max(config["max_expiries"], int(os.getenv("IV_MAX_SURFACE_EXPIRIES", "8") or 8)),
+                    "strike_band_pct": max(
+                        config["strike_band_pct"],
+                        float(os.getenv("IV_MAX_SURFACE_STRIKE_BAND_PCT", "0.12") or 0.12),
+                    ),
+                    "max_contracts": max(config["max_contracts"], int(os.getenv("IV_MAX_SURFACE_CONTRACTS", "220") or 220)),
+                    "market_data_line_budget": max(
+                        config["market_data_line_budget"],
+                        int(os.getenv("IV_MAX_SURFACE_MARKET_DATA_LINE_BUDGET", "240") or 240),
                     ),
                 }
             )
