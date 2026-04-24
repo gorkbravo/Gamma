@@ -74,9 +74,11 @@ class IVSurfaceEngine:
         reserved_market_data_lines: int = 10,
         include_calls: bool = True,
         include_puts: bool = True,
+        depth_preset: str = "standard",
     ) -> None:
         self.client = client
         self.market_data_mode = self._normalize_market_data_mode(market_data_mode)
+        self.depth_preset = self._normalize_depth_preset(depth_preset)
         self.max_expiries = max(1, int(max_expiries))
         self.strike_band_pct = max(0.005, float(strike_band_pct))
         self.max_contracts = max(20, int(max_contracts))
@@ -107,6 +109,13 @@ class IVSurfaceEngine:
         if mode in {"delayed", "live", "auto"}:
             return mode
         return "delayed"
+
+    @staticmethod
+    def _normalize_depth_preset(value: str | None) -> str:
+        preset = str(value or "").strip().lower().replace("-", "_")
+        if preset in {"compact", "standard", "deep", "front_deep"}:
+            return preset
+        return "standard"
 
     def is_running(self) -> bool:
         return self._running
@@ -183,7 +192,7 @@ class IVSurfaceEngine:
 
     def build_mock_snapshot(self, symbol: str, *, timestamp: datetime | None = None) -> IVSurfaceSnapshot:
         now = timestamp or datetime.utcnow()
-        expiries = [(now + timedelta(days=7 * index)).strftime("%Y%m%d") for index in range(1, 7)]
+        expiries = [(now + timedelta(days=7 * index)).strftime("%Y%m%d") for index in range(1, self.max_expiries + 1)]
         spot = 500.0 if symbol == "SPY" else 100.0
         spot = float(spot + np.sin(now.timestamp() / 8.0) * 0.05)
         strike_count = min(11, max(5, self._option_contract_budget() // max(1, len(expiries) * len(self._selected_rights()))))
@@ -656,6 +665,7 @@ class IVSurfaceEngine:
         estimated_total_lines = 1 + subscribed_contract_count
         utilization = estimated_total_lines / max(self.market_data_line_budget, 1)
         return IVSurfaceCollectionMetadata(
+            depth_preset=self.depth_preset,
             market_data_mode=self.market_data_mode,
             include_calls=self.include_calls,
             include_puts=self.include_puts,

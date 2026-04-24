@@ -300,13 +300,13 @@
       loadNewsFeed({ limit: 25, forceRefresh: options.forceRefresh }),
       loadResearchOverview({
         universeId: "broad_us_market",
-        timeframe: "3M",
+        timeframe: "DoD",
         benchmarkSymbol: "SPY",
         forceRefresh: options.forceRefresh
       }),
       loadSitrepIndicesOverview({
         universeId: "global_indices",
-        timeframe: "3M",
+        timeframe: "DoD",
         benchmarkSymbol: "SPY",
         forceRefresh: options.forceRefresh
       }),

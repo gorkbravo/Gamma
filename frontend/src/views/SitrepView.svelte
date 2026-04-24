@@ -80,14 +80,14 @@
     return Date.now() < cooldownUntil[key];
   }
 
-  function refreshLabel(key: RefreshKey) {
+  function refreshTitle(key: RefreshKey) {
     if (refreshing[key]) {
-      return "Loading";
+      return "Loading latest data";
     }
     if (isCoolingDown(key)) {
-      return "Wait";
+      return "Reload cooling down";
     }
-    return "Reload";
+    return "Reload latest data";
   }
 
   async function refreshPanel(key: RefreshKey, loader: () => Promise<unknown> | void) {
@@ -110,7 +110,7 @@
     return refreshPanel("indices", () =>
       onLoadIndicesOverview({
         universeId: "global_indices",
-        timeframe: "3M",
+        timeframe: "DoD",
         benchmarkSymbol: "SPY",
         surface: "sitrep",
         forceRefresh: true
@@ -141,10 +141,10 @@
   onMount(() => {
     const tasks: Array<Promise<unknown> | void> = [];
     if (!overview) {
-      tasks.push(onLoadOverview({ universeId: "broad_us_market", timeframe: "3M", benchmarkSymbol: "SPY", surface: "sitrep" }));
+      tasks.push(onLoadOverview({ universeId: "broad_us_market", timeframe: "DoD", benchmarkSymbol: "SPY", surface: "sitrep" }));
     }
     if (!indicesOverview) {
-      tasks.push(onLoadIndicesOverview({ universeId: "global_indices", timeframe: "3M", benchmarkSymbol: "SPY", surface: "sitrep" }));
+      tasks.push(onLoadIndicesOverview({ universeId: "global_indices", timeframe: "DoD", benchmarkSymbol: "SPY", surface: "sitrep" }));
     }
     if (!macro) {
       tasks.push(onLoadMacro({ region: "US", timeframe: "3M", theme: "all", mode: "snapshot" }));
@@ -676,8 +676,8 @@
               <span>Worldwide Indices</span>
               <small>{indicesOverview?.universe_label ?? "Global Indices"}</small>
             </div>
-            <button type="button" class="reload-button" on:click={refreshIndices} disabled={refreshing.indices || isCoolingDown("indices")}>
-              {refreshLabel("indices")}
+            <button type="button" class="reload-button" on:click={refreshIndices} disabled={refreshing.indices || isCoolingDown("indices")} aria-label={refreshTitle("indices")} title={refreshTitle("indices")}>
+              <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
           </div>
           <SitrepMarketTable rows={indexRows} profile="indices" hideSource contextLabel="Symbol" emptyLabel="No index overview loaded." />
@@ -689,8 +689,8 @@
               <span>G10 Pairs</span>
               <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
             </div>
-            <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")}>
-              {refreshLabel("fx")}
+            <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")} aria-label={refreshTitle("fx")} title={refreshTitle("fx")}>
+              <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
           <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext emptyLabel="No FX strip loaded." />
@@ -702,8 +702,8 @@
               <span>Rates</span>
               <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
             </div>
-            <button type="button" class="reload-button" on:click={refreshRates} disabled={refreshing.rates || isCoolingDown("rates")}>
-              {refreshLabel("rates")}
+            <button type="button" class="reload-button" on:click={refreshRates} disabled={refreshing.rates || isCoolingDown("rates")} aria-label={refreshTitle("rates")} title={refreshTitle("rates")}>
+              <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
           </div>
           <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." />
@@ -715,8 +715,8 @@
               <span>Futures</span>
               <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
             </div>
-            <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")}>
-              {refreshLabel("commodities")}
+            <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")} aria-label={refreshTitle("commodities")} title={refreshTitle("commodities")}>
+              <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
           <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource contextTone emptyLabel="No commodities workspace loaded." />
@@ -767,8 +767,8 @@
             <span>Market News</span>
             <small>{news?.freshness_label ?? "not loaded"}</small>
           </div>
-          <button type="button" class="reload-button" on:click={refreshNews} disabled={refreshing.news || isCoolingDown("news")}>
-            {refreshLabel("news")}
+          <button type="button" class="reload-button" on:click={refreshNews} disabled={refreshing.news || isCoolingDown("news")} aria-label={refreshTitle("news")} title={refreshTitle("news")}>
+            <span class:spinning={refreshing.news} aria-hidden="true">↻</span>
           </button>
         </div>
         <div class="news-wrap">
@@ -866,18 +866,28 @@
   }
 
   .reload-button {
-    min-height: 20px;
-    padding: 0.08rem 0.38rem;
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
     border: 1px solid var(--panel-strong);
     border-radius: 0;
     background: transparent;
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: 0.78rem;
     line-height: 1;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
     cursor: pointer;
     flex-shrink: 0;
+  }
+
+  .reload-button span {
+    display: block;
+    transform-origin: 50% 50%;
+  }
+
+  .reload-button .spinning {
+    animation: reload-spin 0.8s linear infinite;
   }
 
   .reload-button:hover:not(:disabled) {
@@ -888,6 +898,12 @@
   .reload-button:disabled {
     cursor: default;
     opacity: 0.55;
+  }
+
+  @keyframes reload-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .header-panel {

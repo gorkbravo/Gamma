@@ -2505,6 +2505,42 @@ export interface CopilotThreadState {
   entries: CopilotThreadEntry[];
 }
 
+export interface IvSurfaceCollection {
+  depth_preset: string;
+  market_data_mode: string;
+  include_calls: boolean;
+  include_puts: boolean;
+  max_expiries: number;
+  strike_band_pct: number;
+  configured_max_contracts: number;
+  configured_market_data_line_budget: number;
+  reserved_market_data_lines: number;
+  underlying_market_data_lines: number;
+  option_market_data_line_budget: number;
+  selected_expiry_count: number;
+  selected_strike_count: number;
+  requested_contract_count: number;
+  subscribed_contract_count: number;
+  estimated_total_market_data_lines: number;
+  market_data_line_utilization: number | null;
+  contract_selection_note: string | null;
+}
+
+export interface IvSurfaceQuality {
+  expected_surface_cells: number;
+  observed_surface_cells: number;
+  interpolated_surface_cells: number;
+  interpolation_ratio: number | null;
+  contracts_with_bid_ask: number;
+  contracts_with_volume: number;
+  contracts_with_open_interest: number;
+  contracts_with_provider_greeks: number;
+  contracts_with_derived_greeks: number;
+  call_contract_count: number;
+  put_contract_count: number;
+  pairs_with_both_sides: number;
+}
+
 export interface IvSurface {
   symbol: string;
   timestamp: string;
@@ -2522,6 +2558,8 @@ export interface IvSurface {
   origin: string;
   transformation_note: string | null;
   freshness_label: string;
+  collection: IvSurfaceCollection | null;
+  quality: IvSurfaceQuality | null;
 }
 
 export interface ActionResponse {

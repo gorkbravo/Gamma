@@ -95,6 +95,7 @@ class IVOptionPairRecord:
 
 @dataclass(frozen=True)
 class IVSurfaceCollectionMetadata:
+    depth_preset: str
     market_data_mode: str
     include_calls: bool
     include_puts: bool

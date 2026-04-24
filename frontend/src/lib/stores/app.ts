@@ -149,6 +149,7 @@ export interface IvLoadOptions {
   symbol: string;
   marketDataMode?: string;
   waitSeconds?: number;
+  depthPreset?: string;
 }
 
 export interface PredictionMarketScreenerOptions {
@@ -2262,6 +2263,9 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
     if (request.waitSeconds != null) {
       params.set("wait_seconds", String(request.waitSeconds));
     }
+    if (request.depthPreset) {
+      params.set("depth_preset", request.depthPreset);
+    }
     const surface = await getJson<IvSurface>(`/iv/surface?${params.toString()}`);
     ivSurface.set(surface);
     ivSession.update((current) => (current == null ? current : { ...current, surface }));
@@ -2321,7 +2325,8 @@ export async function startIvSession(options: IvLoadOptions) {
   try {
     const session = await postJson<IvSessionStatus>("/iv/session/start", {
       symbol: options.symbol,
-      market_data_mode: options.marketDataMode ?? null
+      market_data_mode: options.marketDataMode ?? null,
+      depth_preset: options.depthPreset ?? null
     });
     ivSession.set(session);
     ivSurface.set(session.surface);

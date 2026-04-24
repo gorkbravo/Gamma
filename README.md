@@ -244,6 +244,7 @@ It provides:
 
 - one-shot IV surface loads
 - a Python-owned session loop for repeated refreshes
+- selectable surface depth presets that trade expiry count and strike width against TWS market-data-line usage
 - expiry/strike heatmap
 - selected expiry slice
 - ATM term structure
@@ -251,6 +252,7 @@ It provides:
 Under the hood:
 
 - live mode requests an IV surface snapshot from the backend IV engine over IBKR
+- `Compact`, `Standard`, `Deep`, and `Front Deep` presets tune the backend's expiry count, strike band, contract cap, and line budget; the UI shows line utilization and observed/interpolated surface cells
 - the frontend highlights the strike nearest to spot and uses that strike to derive ATM term structure
 - in mock mode, Gamma generates a synthetic surface with a simple skew/term-structure shape so the UI remains testable
 

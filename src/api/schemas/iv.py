@@ -126,6 +126,7 @@ class IVOptionPairModel(BaseModel):
 
 
 class IVSurfaceCollectionMetadataModel(BaseModel):
+    depth_preset: str
     market_data_mode: str
     include_calls: bool
     include_puts: bool
@@ -271,6 +272,7 @@ class IVSurfaceResponseModel(BaseModel):
 class IVSessionRequestModel(BaseModel):
     symbol: str = "SPY"
     market_data_mode: str | None = None
+    depth_preset: str | None = None
 
 
 class IVSessionStatusResponseModel(BaseModel):

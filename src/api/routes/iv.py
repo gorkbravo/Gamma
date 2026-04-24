@@ -19,6 +19,7 @@ def iv_surface(
     symbol: str = Query(default="SPY"),
     market_data_mode: str | None = Query(default=None),
     wait_seconds: float = Query(default=2.5, ge=0.5, le=10.0),
+    depth_preset: str | None = Query(default=None),
 ) -> IVSurfaceResponseModel:
     runtime = request.app.state.runtime
     result = runtime.iv_service.get_surface(
@@ -26,6 +27,7 @@ def iv_surface(
             symbol=symbol,
             market_data_mode=market_data_mode or runtime.market_data_mode,
             wait_seconds=wait_seconds,
+            depth_preset=depth_preset or "standard",
         )
     )
     return IVSurfaceResponseModel.from_service_result(symbol=symbol, result=result)
@@ -45,7 +47,7 @@ def start_iv_session(
     runtime = request.app.state.runtime
     if payload.market_data_mode:
         runtime.set_market_data_mode(payload.market_data_mode)
-    start_result = runtime.iv_service.start_stream_session(payload.symbol)
+    start_result = runtime.iv_service.start_stream_session(payload.symbol, depth_preset=payload.depth_preset)
     return _iv_session_status(runtime, status_override=start_result.status, messages=start_result.messages)
 
 

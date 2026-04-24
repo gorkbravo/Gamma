@@ -6,13 +6,11 @@
     deriveDistributionBuckets,
     deriveRealizedVolatility,
     deriveSkewRows,
-    deriveSurfacePaths,
     deriveSurfaceStats,
     deriveTermStructure,
     nearestStrikeIndex,
     optionsModes,
     type OptionsMode,
-    type SurfacePath,
   } from "../lib/view-models/iv";
 
   export let mode: OptionsMode = "surface";
@@ -30,9 +28,18 @@
 
   let symbol = "SPY";
   let marketDataMode = "delayed";
+  let depthPreset = "standard";
   let waitSeconds = 2.5;
   let selectedExpiry = 0;
-  let hoveredPath: SurfacePath | null = null;
+  let hoveredExpiry: number | null = null;
+
+  interface SurfaceQuad { pts: string; fill: string; sortKey: number; ri: number; }
+  interface AxisLabel  { x: number; y: number; label: string; anchor?: string; }
+
+  let surfaceQuads: SurfaceQuad[] = [];
+  let axisStrikeLabels: AxisLabel[] = [];
+  let axisIvLabels: AxisLabel[] = [];
+  let axisDteLabels: AxisLabel[] = [];
 
   function viridisColor(t: number): string {
     const v = Math.max(0, Math.min(1, t));
@@ -49,20 +56,10 @@
     return `rgb(${lr(stops[lo][0],stops[hi][0])},${lr(stops[lo][1],stops[hi][1])},${lr(stops[lo][2],stops[hi][2])})`;
   }
 
-  function pathViridisT(path: SurfacePath): number {
-    if (path.value == null || surfaceStats.minIv == null || surfaceStats.maxIv == null) return 0.5;
-    const range = Math.max(surfaceStats.maxIv - surfaceStats.minIv, 0.001);
-    return (path.value - surfaceStats.minIv) / range;
-  }
-
-  function pathLabel(path: SurfacePath): string {
-    if (!result) return "";
-    if (path.id.startsWith("expiry-")) {
-      const i = Number(path.id.split("-")[1]);
-      return `${result.expiries[i] ?? ""}  ${pct(path.value)}`;
-    }
-    const i = Number(path.id.split("-")[1]);
-    return `K=${fmt(result.strikes[i], 1)}  ${pct(path.value)}`;
+  function formatExpiry(expiry: string | null | undefined): string {
+    if (!expiry) return "N/A";
+    const m = /^(\d{4})-?(\d{2})-?(\d{2})$/.exec(expiry);
+    return m ? `${m[1]}/${m[2]}/${m[3]}` : expiry;
   }
 
   const fmt = (value: number | null | undefined, digits = 2) =>
@@ -75,21 +72,31 @@
     value == null || !Number.isFinite(value)
       ? "N/A"
       : `${value >= 0 ? "+" : ""}${(value * 100).toFixed(digits)}%`;
+  const ratioPct = (value: number | null | undefined, digits = 0) =>
+    value == null || !Number.isFinite(value) ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const shortTime = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+  const depthLabel = (value: string | null | undefined) =>
+    value === "front_deep"
+      ? "Front Deep"
+      : value
+        ? value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+        : "Standard";
 
   function submit() {
     onLoad({
       symbol: symbol.trim().toUpperCase() || "SPY",
       marketDataMode,
-      waitSeconds
+      waitSeconds,
+      depthPreset
     });
   }
 
   function startSession() {
     onStartSession({
       symbol: symbol.trim().toUpperCase() || "SPY",
-      marketDataMode
+      marketDataMode,
+      depthPreset
     });
   }
 
@@ -124,7 +131,6 @@
   let atmStrikeIndex = nearestStrikeIndex(result);
   let surfaceStats = deriveSurfaceStats(result);
   let skewRows = deriveSkewRows(result);
-  let surfacePaths = deriveSurfacePaths(result);
   let realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
   let distributionBuckets = deriveDistributionBuckets(result);
   let maxDistributionProbability = 0;
@@ -138,10 +144,77 @@
   $: atmStrikeIndex = nearestStrikeIndex(result);
   $: surfaceStats = deriveSurfaceStats(result);
   $: skewRows = deriveSkewRows(result);
-  $: surfacePaths = deriveSurfacePaths(result, 520, 300);
   $: realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
   $: distributionBuckets = deriveDistributionBuckets(result);
   $: maxDistributionProbability = Math.max(...distributionBuckets.map((bucket) => bucket.probability), 0.01);
+
+  $: {
+    const quads: SurfaceQuad[] = [];
+    const sLabels: AxisLabel[] = [];
+    const ivLabs: AxisLabel[] = [];
+    const dteLabs: AxisLabel[] = [];
+
+    if (result?.expiries.length && result.strikes.length) {
+      const rowCount = result.expiries.length;
+      const colCount = result.strikes.length;
+      const minIv = surfaceStats.minIv ?? 0;
+      const maxIv = surfaceStats.maxIv ?? 1;
+      const ivRange = Math.max(maxIv - minIv, 0.01);
+
+      const proj = (ri: number, ci: number, v: number | null | undefined): [number, number] => {
+        const xr = colCount <= 1 ? 0.5 : ci / (colCount - 1);
+        const yr = rowCount <= 1 ? 0.5 : ri / (rowCount - 1);
+        const zr = v == null || !Number.isFinite(v) ? 0 : Math.max(0, Math.min(1, (v - minIv) / ivRange));
+        return [32 + xr * 408 + yr * 54, 258 - yr * 92 - zr * 92];
+      };
+
+      for (let ri = 0; ri < rowCount - 1; ri++) {
+        for (let ci = 0; ci < colCount - 1; ci++) {
+          const v00 = result.iv_grid[ri]?.[ci];
+          const v01 = result.iv_grid[ri]?.[ci + 1];
+          const v10 = result.iv_grid[ri + 1]?.[ci];
+          const v11 = result.iv_grid[ri + 1]?.[ci + 1];
+          const vals = [v00, v01, v10, v11].filter((v): v is number => Number.isFinite(v));
+          if (vals.length < 2) continue;
+          const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
+          const [p00, p01, p11, p10] = [proj(ri,ci,v00), proj(ri,ci+1,v01), proj(ri+1,ci+1,v11), proj(ri+1,ci,v10)];
+          quads.push({
+            pts: [p00,p01,p11,p10].map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' '),
+            fill: viridisColor((avg - minIv) / ivRange),
+            sortKey: ri + ci * 0.001,
+            ri,
+          });
+        }
+      }
+      quads.sort((a, b) => b.sortKey - a.sortKey);
+
+      // X-axis: strike labels along front base
+      const sStep = Math.max(1, Math.floor(colCount / 5));
+      for (let ci = 0; ci < colCount; ci += sStep) {
+        const xr = colCount <= 1 ? 0.5 : ci / (colCount - 1);
+        sLabels.push({ x: 32 + xr * 408, y: 273, label: fmt(result.strikes[ci], 1) });
+      }
+
+      // Z-axis: IV% labels along left front edge
+      for (let i = 0; i <= 4; i++) {
+        const t = i / 4;
+        ivLabs.push({ x: 26, y: 258 - t * 92, label: pct(minIv + t * ivRange, 0), anchor: "end" });
+      }
+
+      // Y-axis: DTE labels along right depth edge
+      const dStep = Math.max(1, Math.floor(rowCount / 4));
+      for (let ri = 0; ri < rowCount; ri += dStep) {
+        const yr = rowCount <= 1 ? 0.5 : ri / (rowCount - 1);
+        const dte = daysToExpiry(result.expiries[ri]);
+        dteLabs.push({ x: 32 + 408 + yr * 54 + 5, y: 258 - yr * 92 + 4, label: `${dte}d` });
+      }
+    }
+
+    surfaceQuads = quads;
+    axisStrikeLabels = sLabels;
+    axisIvLabels = ivLabs;
+    axisDteLabels = dteLabs;
+  }
 </script>
 
 <section class="view">
@@ -178,7 +251,7 @@
       <div><span>Front ATM</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
       <div><span>Term Slope</span><strong class={toneClass(surfaceStats.termSlope)}>{signedPct(surfaceStats.termSlope)}</strong></div>
       <div><span>Points</span><strong>{surfaceStats.populatedPoints}</strong></div>
-      <div><span>Freshness</span><strong>{result?.freshness_label ?? (result?.delayed ? "delayed" : "unknown")}</strong></div>
+      <div><span>Lines</span><strong>{result?.collection ? `${result.collection.estimated_total_market_data_lines}/${result.collection.configured_market_data_line_budget}` : "N/A"}</strong></div>
     </div>
   </div>
 
@@ -197,11 +270,21 @@
         </select>
       </label>
       <label>
+        <span>Depth</span>
+        <select bind:value={depthPreset}>
+          <option value="compact">Compact</option>
+          <option value="standard">Standard</option>
+          <option value="deep">Deep</option>
+          <option value="front_deep">Front Deep</option>
+        </select>
+      </label>
+      <label>
         <span>Wait</span>
         <select bind:value={waitSeconds}>
           <option value={1.5}>1.5s</option>
           <option value={2.5}>2.5s</option>
           <option value={4}>4.0s</option>
+          <option value={8}>8.0s</option>
         </select>
       </label>
     </div>
@@ -209,6 +292,7 @@
       <div><span>Backend</span><strong>{status?.market_data_mode ?? "unknown"}</strong></div>
       <div><span>Session</span><strong>{session?.running ? "running" : "idle"}</strong></div>
       <div><span>Provider</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
+      <div><span>Depth</span><strong>{depthLabel(result?.collection?.depth_preset ?? depthPreset)}</strong></div>
       <div><span>Updated</span><strong>{shortTime(result?.timestamp)}</strong></div>
     </div>
   </article>
@@ -218,30 +302,40 @@
       <article class="panel surface-panel">
         <div class="panel-header">
           <h3>Surface</h3>
-          <strong>{surfaceStats.frontExpiry ?? "N/A"}</strong>
+          <strong>{formatExpiry(surfaceStats.frontExpiry)}</strong>
         </div>
-        {#if surfacePaths.length}
+        {#if surfaceQuads.length}
           <svg
             class="surface-svg"
             viewBox="0 0 520 300"
             role="img"
             aria-label="Volatility surface"
-            on:mouseleave={() => (hoveredPath = null)}
+            on:mouseleave={() => (hoveredExpiry = null)}
           >
-            <line x1="32" y1="258" x2="472" y2="258" />
+            <line x1="32" y1="258" x2="440" y2="258" />
             <line x1="32" y1="258" x2="86" y2="166" />
-            <line x1="472" y1="258" x2="526" y2="166" />
-            {#each surfacePaths as path}
-              <polyline
-                points={path.points}
-                class:hovered={hoveredPath?.id === path.id}
-                class:dimmed={hoveredPath != null && hoveredPath.id !== path.id}
-                style={`stroke:${viridisColor(pathViridisT(path))}`}
-                on:mouseenter={() => (hoveredPath = path)}
+            <line x1="440" y1="258" x2="494" y2="166" />
+            {#each surfaceQuads as quad}
+              <polygon
+                role="presentation"
+                aria-hidden="true"
+                points={quad.pts}
+                style={`fill:${quad.fill};stroke:${quad.fill};`}
+                class:row-hovered={hoveredExpiry === quad.ri}
+                on:mouseenter={() => (hoveredExpiry = quad.ri)}
               />
             {/each}
-            {#if hoveredPath}
-              <text class="hover-label" x="10" y="16">{pathLabel(hoveredPath)}</text>
+            {#each axisStrikeLabels as lbl}
+              <text class="axis-label" x={lbl.x} y={lbl.y} text-anchor="middle">{lbl.label}</text>
+            {/each}
+            {#each axisIvLabels as lbl}
+              <text class="axis-label" x={lbl.x} y={lbl.y} text-anchor="end">{lbl.label}</text>
+            {/each}
+            {#each axisDteLabels as lbl}
+              <text class="axis-label" x={lbl.x} y={lbl.y}>{lbl.label}</text>
+            {/each}
+            {#if hoveredExpiry !== null && result?.expiries[hoveredExpiry]}
+              <text class="hover-label" x="10" y="16">{formatExpiry(result.expiries[hoveredExpiry])} · {pct(result.iv_grid[hoveredExpiry]?.[atmStrikeIndex], 1)} ATM</text>
             {/if}
           </svg>
         {:else}
@@ -261,7 +355,7 @@
             {/each}
             {#each expiryRows as row, rowIndex}
               <button class:active={selectedExpiry === rowIndex} class="cell expiry" on:click={() => (selectedExpiry = rowIndex)}>
-                {row.expiry}
+                {formatExpiry(row.expiry)}
               </button>
               {#each row.values as value}
                 <div class="cell data" style={`--heat:${Math.round(heatIntensity(value) * 72)}%;`}>
@@ -280,7 +374,7 @@
       <article class="panel table-panel">
         <div class="table-header">
           <h3>Expiry Slice</h3>
-          {#if slice}<span>{slice.expiry}</span>{/if}
+          {#if slice}<span>{formatExpiry(slice.expiry)}</span>{/if}
         </div>
         {#if slice}
           <table>
@@ -307,7 +401,7 @@
             <tbody>
               {#each termStructure as point}
                 <tr>
-                  <td>{point.expiry}</td>
+                  <td>{formatExpiry(point.expiry)}</td>
                   <td>{daysToExpiry(point.expiry)}</td>
                   <td>{pct(point.iv)}</td>
                 </tr>
@@ -322,10 +416,13 @@
       <article class="panel">
         <h3>Surface Context</h3>
         <div class="metric-list">
-          <div><span>Selected Expiry</span><strong>{slice?.expiry ?? "N/A"}</strong></div>
+          <div><span>Selected Expiry</span><strong>{formatExpiry(slice?.expiry)}</strong></div>
           <div><span>ATM Strike</span><strong>{fmt(surfaceStats.atmStrike, 2)}</strong></div>
           <div><span>IV Range</span><strong>{pct(surfaceStats.minIv)} – {pct(surfaceStats.maxIv)}</strong></div>
           <div><span>Avg IV</span><strong>{pct(surfaceStats.averageIv)}</strong></div>
+          <div><span>Grid</span><strong>{result?.collection ? `${result.collection.selected_expiry_count}x${result.collection.selected_strike_count}` : "N/A"}</strong></div>
+          <div><span>Interpolation</span><strong>{ratioPct(result?.quality?.interpolation_ratio)}</strong></div>
+          <div><span>Line Utilization</span><strong>{ratioPct(result?.collection?.market_data_line_utilization)}</strong></div>
         </div>
       </article>
     </div>
@@ -350,7 +447,7 @@
               <tbody>
                 {#each skewRows as row}
                   <tr>
-                    <td>{row.expiry}</td>
+                    <td>{formatExpiry(row.expiry)}</td>
                     <td>{pct(row.atmIv)}</td>
                     <td>{fmt(row.putWingStrike, 2)} / {pct(row.putWingIv)}</td>
                     <td>{fmt(row.callWingStrike, 2)} / {pct(row.callWingIv)}</td>
@@ -370,7 +467,7 @@
       <article class="panel">
         <h3>Term Diagnostics</h3>
         <div class="metric-list">
-          <div><span>Front Expiry</span><strong>{surfaceStats.frontExpiry ?? "N/A"}</strong></div>
+          <div><span>Front Expiry</span><strong>{formatExpiry(surfaceStats.frontExpiry)}</strong></div>
           <div><span>Front DTE</span><strong>{surfaceStats.frontExpiry ? daysToExpiry(surfaceStats.frontExpiry) : 0}</strong></div>
           <div><span>Front ATM IV</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
           <div><span>Back ATM IV</span><strong>{pct(surfaceStats.backAtmIv)}</strong></div>
@@ -445,7 +542,7 @@
         <h3>Assumptions</h3>
         <div class="metric-list">
           <div><span>Method</span><strong>Lognormal proxy</strong></div>
-          <div><span>Expiry</span><strong>{surfaceStats.frontExpiry ?? "N/A"}</strong></div>
+          <div><span>Expiry</span><strong>{formatExpiry(surfaceStats.frontExpiry)}</strong></div>
           <div><span>Vol Input</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
         </div>
       </article>
@@ -459,6 +556,9 @@
           <div><span>Origin</span><strong>{result?.origin ?? "N/A"}</strong></div>
           <div><span>Freshness</span><strong>{result?.freshness_label ?? "unknown"}</strong></div>
           <div><span>Delayed</span><strong>{result?.delayed == null ? "unknown" : result.delayed ? "yes" : "no"}</strong></div>
+          <div><span>Depth</span><strong>{depthLabel(result?.collection?.depth_preset)}</strong></div>
+          <div><span>Line Budget</span><strong>{result?.collection ? `${result.collection.estimated_total_market_data_lines}/${result.collection.configured_market_data_line_budget}` : "N/A"}</strong></div>
+          <div><span>Observed Cells</span><strong>{result?.quality ? `${result.quality.observed_surface_cells}/${result.quality.expected_surface_cells}` : "N/A"}</strong></div>
           <div><span>Retrieved</span><strong>{shortTime(result?.retrieved_at)}</strong></div>
         </div>
       </article>
@@ -473,7 +573,10 @@
           {#each result?.messages ?? [] as message}
             <div>{message}</div>
           {/each}
-          {#if !(result?.warnings?.length || result?.messages?.length)}
+          {#if result?.collection?.contract_selection_note}
+            <div>{result.collection.contract_selection_note}</div>
+          {/if}
+          {#if !(result?.warnings?.length || result?.messages?.length || result?.collection?.contract_selection_note)}
             <div class="muted">—</div>
           {/if}
         </div>
@@ -627,7 +730,7 @@
 
   .field-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 0.7fr;
+    grid-template-columns: 1fr 1fr 1fr 0.7fr;
     gap: 0.5rem;
   }
 
@@ -700,20 +803,23 @@
     stroke-width: 1;
   }
 
-  .surface-svg polyline {
-    fill: none;
-    stroke-width: 1.2;
+  .surface-svg polygon {
+    stroke-width: 0.3;
     vector-effect: non-scaling-stroke;
-    transition: stroke-width 80ms, opacity 80ms;
+    transition: opacity 80ms;
+    opacity: 0.85;
   }
 
-  .surface-svg polyline.hovered {
-    stroke-width: 2.8;
+  .surface-svg polygon.row-hovered {
     opacity: 1;
+    stroke-width: 0;
   }
 
-  .surface-svg polyline.dimmed {
-    opacity: 0.12;
+  .surface-svg .axis-label {
+    fill: var(--text-2);
+    font-size: 9px;
+    font-family: monospace;
+    pointer-events: none;
   }
 
   .surface-svg .hover-label {
