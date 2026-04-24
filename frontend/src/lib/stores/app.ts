@@ -125,6 +125,13 @@ export interface ResearchDraftState {
   selectedPreset: string;
 }
 
+export interface SharedEquitySelection {
+  symbol: string;
+  label: string | null;
+  sourceTab: TabId | null;
+  updatedAt: string;
+}
+
 export interface RiskComputeOptions {
   alpha: number;
   lookbackDays: number;
@@ -332,6 +339,7 @@ export const researchDraft = writable<ResearchDraftState>({
   syntheticText: "SPY 0.60\nQQQ 0.40",
   selectedPreset: "index-core"
 });
+export const sharedEquitySelection = writable<SharedEquitySelection | null>(null);
 export const riskResult = writable<RiskResult | null>(null);
 export const riskSnapshotBasis = writable<PortfolioSnapshot | null>(null);
 export const riskWorkspaceBasis = writable<WorkspaceMode | null>(null);
@@ -429,6 +437,28 @@ function resetCopilotCard(domain: CopilotDomain) {
 
 export function setResearchDraft(nextDraft: ResearchDraftState) {
   researchDraft.set(nextDraft);
+}
+
+export function setSharedEquitySelection(
+  symbol: string,
+  options: { label?: string | null; sourceTab?: TabId | null } = {}
+) {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  if (!normalizedSymbol) {
+    return null;
+  }
+  const nextSelection: SharedEquitySelection = {
+    symbol: normalizedSymbol,
+    label: options.label?.trim() || null,
+    sourceTab: options.sourceTab ?? null,
+    updatedAt: new Date().toISOString()
+  };
+  sharedEquitySelection.set(nextSelection);
+  return nextSelection;
+}
+
+export function clearSharedEquitySelection() {
+  sharedEquitySelection.set(null);
 }
 
 export function setMacroContext(nextContext: Partial<MacroContextState>) {

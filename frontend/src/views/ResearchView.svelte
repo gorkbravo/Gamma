@@ -69,8 +69,10 @@
   export let strategyLoading = false;
   export let compareLoading = false;
   export let savedLoading = false;
+  export let selectedEquitySymbol: string | null = null;
   export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
   export let onRun: (options: ResearchRunOptions) => void;
+  export let onSelectEquity: ((symbol: string, label?: string | null) => void) | undefined = undefined;
   export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
   export let onCompare: (options: ResearchCompareOptions) => Promise<ResearchCompareResult | null> | void;
   export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
@@ -260,12 +262,17 @@
 
   function selectOverviewNode(nodeId: string) {
     selectedOverviewNodeId = nodeId;
+    const node = overview?.nodes.find((item) => item.node_id === nodeId) ?? null;
+    if (node?.symbol) {
+      onSelectEquity?.(node.symbol, node.label);
+    }
   }
 
   function inspectOverviewNodeInScope(node: ResearchOverviewNode | null) {
     if (!node?.symbol) {
       return;
     }
+    onSelectEquity?.(node.symbol, node.label);
     scopeType = "single_ticker";
     primarySymbol = node.symbol;
     benchmarkSymbol = overview?.benchmark_symbol ?? overviewBenchmarkSymbol;
@@ -471,6 +478,7 @@
       if (inputWarning) {
         return;
       }
+      onSelectEquity?.(primarySymbol, null);
       onRun({
         scopeType,
         primarySymbol: primarySymbol.trim().toUpperCase(),
@@ -851,6 +859,14 @@
     syntheticText,
     selectedPreset
   });
+  $: {
+    const normalizedSelectedEquity = selectedEquitySymbol?.trim().toUpperCase() ?? "";
+    if (normalizedSelectedEquity && normalizedSelectedEquity !== primarySymbol.trim().toUpperCase()) {
+      scopeType = "single_ticker";
+      primarySymbol = normalizedSelectedEquity;
+      inputWarning = "";
+    }
+  }
   $: savedResearchList = Array.isArray(savedItems) ? savedItems : [];
   $: compareOptions = buildResearchCompareOptions(result, strategyResult, savedResearchList);
   $: compareMetricRows = [

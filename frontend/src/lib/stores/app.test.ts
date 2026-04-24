@@ -82,10 +82,13 @@ import {
   saveResearchItem,
   deleteSavedResearchItem,
   runResearch,
+  clearSharedEquitySelection,
   setBaseCurrency,
   setMarketDataMode,
   setMacroContext,
+  setSharedEquitySelection,
   selectedCryptoTokenId,
+  sharedEquitySelection,
   selectedPredictionMarketId,
   strategyLabResult,
   systemStatus
@@ -101,6 +104,7 @@ describe("app store orchestration", () => {
     portfolioPerformance.set(null);
     researchOverview.set(null);
     researchResult.set(null);
+    sharedEquitySelection.set(null);
     strategyLabResult.set(null);
     researchCompareResult.set(null);
     savedResearchItems.set([]);
@@ -484,6 +488,22 @@ describe("app store orchestration", () => {
     expect(get(researchResult)?.primary_symbol).toBeNull();
     expect(get(researchResult)?.snapshot?.positions.map((position) => position.symbol)).toEqual(["XLV", "XLP", "XLU"]);
     expect(get(riskResult)).toBeNull();
+  });
+
+  it("normalizes and clears the shared equity lens", () => {
+    const selection = setSharedEquitySelection(" aapl ", {
+      label: " Apple Inc. ",
+      sourceTab: "research"
+    });
+
+    expect(selection?.symbol).toBe("AAPL");
+    expect(selection?.label).toBe("Apple Inc.");
+    expect(selection?.sourceTab).toBe("research");
+    expect(get(sharedEquitySelection)?.symbol).toBe("AAPL");
+
+    clearSharedEquitySelection();
+
+    expect(get(sharedEquitySelection)).toBeNull();
   });
 
   it("loads the Research Overview with universe, timeframe, and benchmark filters", async () => {

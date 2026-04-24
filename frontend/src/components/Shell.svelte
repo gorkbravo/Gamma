@@ -3,13 +3,22 @@
   import type { TabBarItem } from "./TabBar.svelte";
   import SearchDropdown from "./SearchDropdown.svelte";
 
+  type SharedEquitySelection = {
+    symbol: string;
+    label: string | null;
+    sourceTab: TabId | null;
+    updatedAt: string;
+  };
+
   export let title = "Gamma";
   export let activeTab: TabId = "portfolio";
   export let tabs: TabBarItem[] = [];
+  export let selectedEquity: SharedEquitySelection | null = null;
   export let copilotOpen = false;
   export let onToggleSidebar: () => void = () => {};
   export let onToggleCopilot: () => void = () => {};
   export let onSelectTab: (tab: TabId) => void = () => {};
+  export let onClearSelectedEquity: () => void = () => {};
 
   let searchValue = "";
   let previousActiveTab: TabId = activeTab;
@@ -65,6 +74,16 @@
           on:select={(event) => handleSearchSelect(event.detail.id as TabId)}
         />
       </div>
+      {#if selectedEquity}
+        <div class="asset-chip" title="Shared equity lens">
+          <span>Equity</span>
+          <strong>{selectedEquity.symbol}</strong>
+          {#if selectedEquity.label}
+            <small>{selectedEquity.label}</small>
+          {/if}
+          <button type="button" aria-label="Clear selected equity" on:click={onClearSelectedEquity}>x</button>
+        </div>
+      {/if}
       <button
         class="copilot-trigger"
         class:open={copilotOpen}
@@ -120,6 +139,62 @@
     flex: 1 1 17rem;
     min-width: 11rem;
     max-width: 24rem;
+  }
+
+  .asset-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.32rem;
+    min-width: 0;
+    max-width: 17rem;
+    height: 1.75rem;
+    padding: 0.12rem 0.18rem 0.12rem 0.46rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--panel-border));
+    background: color-mix(in srgb, var(--accent) 7%, var(--surface-0));
+    color: var(--text-1);
+  }
+
+  .asset-chip span,
+  .asset-chip small {
+    color: var(--text-2);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  .asset-chip strong {
+    color: var(--text-0);
+    font-size: 0.76rem;
+    line-height: 1;
+  }
+
+  .asset-chip small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .asset-chip button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.2rem;
+    height: 1.2rem;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .asset-chip button:hover {
+    color: var(--text-0);
+    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
   }
 
   .hamburger {
@@ -216,6 +291,11 @@
       min-width: 100%;
       max-width: none;
       order: 10;
+    }
+
+    .asset-chip {
+      flex: 1 1 auto;
+      max-width: 100%;
     }
 
     .status-slot {

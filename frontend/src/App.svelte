@@ -90,6 +90,7 @@
     refreshSystemStatus,
     researchOverview,
     sitrepIndicesOverview,
+    researchDraft,
     researchCompareResult,
     researchResult,
     riskResult,
@@ -110,10 +111,14 @@
     saveFundamentalsPeerBasket,
     savedResearchItems,
     selectedFundamentalsTicker,
+    sharedEquitySelection,
     selectCryptoToken,
     selectFundamentalsCompany,
     loadFundamentalsDcfSnapshot,
     selectPredictionMarket,
+    setResearchDraft,
+    setSharedEquitySelection,
+    clearSharedEquitySelection,
     setBaseCurrency,
     setMarketDataMode,
     startIvSession,
@@ -1092,6 +1097,88 @@
     await enterWorkspace(mode);
   }
 
+  function selectSharedEquity(symbol: string, label?: string | null, sourceTab: TabId | null = $activeTab) {
+    return setSharedEquitySelection(symbol, { label, sourceTab });
+  }
+
+  function sharedEquitySymbol() {
+    return $sharedEquitySelection?.symbol.trim().toUpperCase() || null;
+  }
+
+  function researchResultMatchesSingleEquity(symbol: string) {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    return (
+      $researchResult?.scope_type === "single_ticker" &&
+      ($researchResult.primary_symbol ?? $researchResult.snapshot?.positions[0]?.symbol ?? "")
+        .trim()
+        .toUpperCase() === normalizedSymbol
+    );
+  }
+
+  async function ensureSingleEquityResearch(symbol: string) {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!normalizedSymbol) {
+      return;
+    }
+    setResearchDraft({
+      ...$researchDraft,
+      scopeType: "single_ticker",
+      primarySymbol: normalizedSymbol,
+      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY"
+    });
+    if (researchResultMatchesSingleEquity(normalizedSymbol)) {
+      return;
+    }
+    await runResearch({
+      scopeType: "single_ticker",
+      primarySymbol: normalizedSymbol,
+      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY",
+      lookbackDays: $researchDraft.lookbackDays
+    });
+  }
+
+  async function applySharedEquityToTab(tab: TabId) {
+    const symbol = sharedEquitySymbol();
+    if (!symbol) {
+      return false;
+    }
+
+    if (tab === "research") {
+      researchMode = "scope_analysis";
+      await ensureSingleEquityResearch(symbol);
+      return true;
+    }
+
+    if (tab === "fundamentals") {
+      await loadFundamentalsSearch({ query: symbol });
+      if ($selectedFundamentalsTicker !== symbol || !$fundamentalsOverview) {
+        await selectFundamentalsCompany(symbol);
+      }
+      return true;
+    }
+
+    if (tab === "risk") {
+      await ensureSingleEquityResearch(symbol);
+      const request = buildRiskRequestFromResearch($researchResult);
+      if (request) {
+        await computeRisk(request);
+      }
+      return true;
+    }
+
+    if (tab === "iv") {
+      ivRequestedSymbol = symbol;
+      await loadIvSurface({
+        symbol,
+        marketDataMode: $systemStatus?.market_data_mode ?? "delayed"
+      });
+      await loadIvSession();
+      return true;
+    }
+
+    return false;
+  }
+
   async function selectTab(tab: TabId) {
     if (!workspaceMode) {
       return;
@@ -1104,6 +1191,9 @@
     if (nextTab === "sitrep") {
       await loadSitrepContext();
     } else if (nextTab === "research") {
+      if (await applySharedEquityToTab(nextTab)) {
+        return;
+      }
       researchMode = "overview";
       if (!$researchOverview) {
         await loadResearchOverview();
@@ -1122,12 +1212,20 @@
     } else if (nextTab === "crypto") {
       await loadCryptoWorkspace();
     } else if (nextTab === "fundamentals") {
+      if (await applySharedEquityToTab(nextTab)) {
+        return;
+      }
       await loadFundamentalsSearch({
         query: $selectedFundamentalsTicker ?? undefined
       });
     } else if (nextTab === "maritime") {
       await loadMaritimeWorkspace({ mode: maritimeMode });
+    } else if (nextTab === "risk") {
+      await applySharedEquityToTab(nextTab);
     } else if (nextTab === "iv") {
+      if (await applySharedEquityToTab(nextTab)) {
+        return;
+      }
       const autoLoaded = await loadResearchIvContext();
       if (!autoLoaded) {
         await loadIvSession();
@@ -1142,6 +1240,21 @@
     }
     activeTab.set("risk");
     await computeRisk(request);
+  }
+
+  async function runResearchFromView(options: Parameters<typeof runResearch>[0]) {
+    if (options.scopeType === "single_ticker" && options.primarySymbol) {
+      selectSharedEquity(options.primarySymbol, null, "research");
+    }
+    await runResearch(options);
+  }
+
+  async function selectFundamentalsCompanyFromView(
+    ticker: string,
+    options?: Parameters<typeof selectFundamentalsCompany>[1]
+  ) {
+    selectSharedEquity(ticker, null, "fundamentals");
+    await selectFundamentalsCompany(ticker, options);
   }
 
   async function openIvFromResearch() {
@@ -1541,8 +1654,10 @@
   <Shell
     activeTab={$activeTab}
     tabs={tabBarTabs}
+    selectedEquity={$sharedEquitySelection}
     copilotOpen={copilotOpen}
     onSelectTab={selectTab}
+    onClearSelectedEquity={clearSharedEquitySelection}
     onToggleCopilot={handleToggleCopilot}
     onToggleSidebar={handleToggleSidebar}
   >
@@ -1623,8 +1738,10 @@
             strategyLoading={$loading.strategyLab}
             compareLoading={$loading.compareScenario}
             savedLoading={$loading.savedResearch}
+            selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onLoadOverview={loadResearchOverview}
-            onRun={runResearch}
+            onRun={runResearchFromView}
+            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "research")}
             onAnalyzeStrategy={analyzeStrategyLab}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
@@ -1697,7 +1814,7 @@
             loading={$loading.fundamentals}
             saving={$loading.fundamentalsSave}
             onSearch={loadFundamentalsSearch}
-            onSelectCompany={selectFundamentalsCompany}
+            onSelectCompany={selectFundamentalsCompanyFromView}
             onSavePeerBasket={saveFundamentalsPeerBasket}
             onSaveDcfModel={saveFundamentalsDcfModel}
             onSaveDcfSnapshot={saveFundamentalsDcfSnapshot}
