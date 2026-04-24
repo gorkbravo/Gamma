@@ -955,12 +955,15 @@ export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOpt
   }
 }
 
-export async function loadNewsFeed(options: { limit?: number } = {}) {
+export async function loadNewsFeed(options: { limit?: number; forceRefresh?: boolean } = {}) {
   setLoading("news", true);
   try {
     const params = new URLSearchParams({
       limit: String(options.limit ?? 25)
     });
+    if (options.forceRefresh) {
+      params.set("force_refresh", "true");
+    }
     const response = await getJson<NewsEventFeedResponse>(`/news/latest?${params.toString()}`);
     newsFeed.set(response);
     lastError.set("");

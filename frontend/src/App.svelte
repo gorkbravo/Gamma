@@ -297,7 +297,7 @@
 
   async function loadSitrepContext(options: { forceRefresh?: boolean } = {}) {
     await Promise.allSettled([
-      loadNewsFeed({ limit: 25 }),
+      loadNewsFeed({ limit: 25, forceRefresh: options.forceRefresh }),
       loadResearchOverview({
         universeId: "broad_us_market",
         timeframe: "3M",

@@ -557,10 +557,10 @@ describe("app store orchestration", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(ok(feed));
     vi.stubGlobal("fetch", fetchMock);
 
-    await loadNewsFeed({ limit: 10 });
+    await loadNewsFeed({ limit: 10, forceRefresh: true });
 
     expect(get(newsFeed)?.items[0]?.title).toBe("Fed markets update");
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/news/latest?limit=10");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/news/latest?limit=10&force_refresh=true");
     expect(get(lastError)).toBe("");
   });
 

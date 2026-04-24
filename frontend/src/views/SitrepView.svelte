@@ -26,7 +26,7 @@
   export let commodities: CommodityWorkspaceResponse | null = null;
   export let prediction: PredictionMarketListResponse | null = null;
   export let loading = false;
-  export let onLoadNews: (options?: { limit?: number }) => Promise<unknown> | void;
+  export let onLoadNews: (options?: { limit?: number; forceRefresh?: boolean }) => Promise<unknown> | void;
   export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
   export let onLoadIndicesOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void = onLoadOverview;
   export let onLoadMacro: (options?: MacroLoadOptions) => Promise<unknown> | void;
@@ -57,6 +57,86 @@
     tone: string;
     source: string;
   };
+
+  type RefreshKey = "indices" | "fx" | "rates" | "commodities" | "news";
+
+  const REFRESH_COOLDOWN_MS = 30_000;
+  let refreshing: Record<RefreshKey, boolean> = {
+    indices: false,
+    fx: false,
+    rates: false,
+    commodities: false,
+    news: false
+  };
+  let cooldownUntil: Record<RefreshKey, number> = {
+    indices: 0,
+    fx: 0,
+    rates: 0,
+    commodities: 0,
+    news: 0
+  };
+
+  function isCoolingDown(key: RefreshKey) {
+    return Date.now() < cooldownUntil[key];
+  }
+
+  function refreshLabel(key: RefreshKey) {
+    if (refreshing[key]) {
+      return "Loading";
+    }
+    if (isCoolingDown(key)) {
+      return "Wait";
+    }
+    return "Reload";
+  }
+
+  async function refreshPanel(key: RefreshKey, loader: () => Promise<unknown> | void) {
+    if (refreshing[key] || isCoolingDown(key)) {
+      return;
+    }
+    refreshing = { ...refreshing, [key]: true };
+    cooldownUntil = { ...cooldownUntil, [key]: Date.now() + REFRESH_COOLDOWN_MS };
+    window.setTimeout(() => {
+      cooldownUntil = { ...cooldownUntil, [key]: 0 };
+    }, REFRESH_COOLDOWN_MS);
+    try {
+      await loader();
+    } finally {
+      refreshing = { ...refreshing, [key]: false };
+    }
+  }
+
+  function refreshIndices() {
+    return refreshPanel("indices", () =>
+      onLoadIndicesOverview({
+        universeId: "global_indices",
+        timeframe: "3M",
+        benchmarkSymbol: "SPY",
+        surface: "sitrep",
+        forceRefresh: true
+      })
+    );
+  }
+
+  function refreshFx() {
+    return refreshPanel("fx", () =>
+      onLoadMacro({ region: "US", timeframe: "3M", theme: "all", mode: "snapshot", forceRefresh: true })
+    );
+  }
+
+  function refreshRates() {
+    return refreshPanel("rates", () =>
+      onLoadMacro({ region: "US", timeframe: "3M", theme: "all", mode: "snapshot", forceRefresh: true })
+    );
+  }
+
+  function refreshCommodities() {
+    return refreshPanel("commodities", () => onLoadCommodities({ mode: "overview", forceRefresh: true }));
+  }
+
+  function refreshNews() {
+    return refreshPanel("news", () => onLoadNews({ limit: 25, forceRefresh: true }));
+  }
 
   onMount(() => {
     const tasks: Array<Promise<unknown> | void> = [];
@@ -592,32 +672,52 @@
       <div class="market-grid">
         <article class="panel table-panel">
           <div class="table-header">
-            <span>Worldwide Indices</span>
-            <small>{indicesOverview?.universe_label ?? "Global Indices"}</small>
+            <div class="table-title">
+              <span>Worldwide Indices</span>
+              <small>{indicesOverview?.universe_label ?? "Global Indices"}</small>
+            </div>
+            <button type="button" class="reload-button" on:click={refreshIndices} disabled={refreshing.indices || isCoolingDown("indices")}>
+              {refreshLabel("indices")}
+            </button>
           </div>
-          <SitrepMarketTable rows={indexRows} profile="indices" hideSource contextLabel="Proxy" emptyLabel="No index overview loaded." />
+          <SitrepMarketTable rows={indexRows} profile="indices" hideSource contextLabel="Symbol" emptyLabel="No index overview loaded." />
         </article>
 
         <article class="panel table-panel">
           <div class="table-header">
-            <span>G10 Pairs</span>
-            <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
+            <div class="table-title">
+              <span>G10 Pairs</span>
+              <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
+            </div>
+            <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")}>
+              {refreshLabel("fx")}
+            </button>
           </div>
           <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext emptyLabel="No FX strip loaded." />
         </article>
 
         <article class="panel table-panel">
           <div class="table-header">
-            <span>Rates</span>
-            <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
+            <div class="table-title">
+              <span>Rates</span>
+              <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
+            </div>
+            <button type="button" class="reload-button" on:click={refreshRates} disabled={refreshing.rates || isCoolingDown("rates")}>
+              {refreshLabel("rates")}
+            </button>
           </div>
           <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." />
         </article>
 
         <article class="panel table-panel">
           <div class="table-header">
-            <span>Futures</span>
-            <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
+            <div class="table-title">
+              <span>Futures</span>
+              <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
+            </div>
+            <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")}>
+              {refreshLabel("commodities")}
+            </button>
           </div>
           <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource contextTone emptyLabel="No commodities workspace loaded." />
         </article>
@@ -663,8 +763,13 @@
 
       <article class="panel table-panel news-panel">
         <div class="table-header">
-          <span>Market News</span>
-          <small>{news?.freshness_label ?? "not loaded"}</small>
+          <div class="table-title">
+            <span>Market News</span>
+            <small>{news?.freshness_label ?? "not loaded"}</small>
+          </div>
+          <button type="button" class="reload-button" on:click={refreshNews} disabled={refreshing.news || isCoolingDown("news")}>
+            {refreshLabel("news")}
+          </button>
         </div>
         <div class="news-wrap">
           {#if news?.items?.length}
@@ -728,23 +833,61 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 0.5rem;
     padding: 0.3rem 0.75rem;
     border-bottom: 1px solid var(--divider);
     min-height: 26px;
     flex-shrink: 0;
   }
 
-  .table-header span {
+  .table-title {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .table-title span {
     font-size: 0.68rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-2);
+    white-space: nowrap;
   }
 
-  .table-header small {
+  .table-title small {
     color: var(--text-2);
     font-size: 0.64rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reload-button {
+    min-height: 20px;
+    padding: 0.08rem 0.38rem;
+    border: 1px solid var(--panel-strong);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 0.62rem;
+    line-height: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .reload-button:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .reload-button:disabled {
+    cursor: default;
+    opacity: 0.55;
   }
 
   .header-panel {
@@ -928,11 +1071,6 @@
     border-top: 1px solid var(--divider);
   }
 
-  .tape-list.compact {
-    max-height: 23rem;
-    overflow: auto;
-  }
-
   .tape-row {
     display: grid;
     grid-template-columns: 5.8rem minmax(0, 0.9fr) minmax(0, 1.7fr) minmax(5.5rem, 0.45fr);
@@ -941,11 +1079,6 @@
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--divider);
     min-width: 0;
-  }
-
-  .tape-list.compact .tape-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.16rem;
   }
 
   .tape-row strong,

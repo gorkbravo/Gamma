@@ -12,7 +12,9 @@ router = APIRouter(tags=["news"])
 def news_latest(
     request: Request,
     limit: int = Query(default=25, ge=1, le=100),
+    force_refresh: bool = Query(default=False),
 ) -> NewsEventFeedResponseModel:
+    del force_refresh
     runtime = request.app.state.runtime
     feed = runtime.news_service.latest(limit=limit)
     return NewsEventFeedResponseModel.from_domain(feed)

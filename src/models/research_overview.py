@@ -291,22 +291,25 @@ def _overview_equity(
     )
 
 
-def _overview_index_proxy(
+def _overview_index(
     rank: int,
     symbol: str,
     label: str,
     group: str,
-    benchmark: str,
 ) -> ResearchOverviewUniverseInstrument:
     return ResearchOverviewUniverseInstrument(
         symbol=symbol,
         label=label,
         group=group,
         sector=group,
-        industry=benchmark,
+        industry=label,
         weight=max(1.0, 100.0 - rank),
         index_weight=max(1.0, 100.0 - rank),
         sort_rank=rank,
+        sec_type="IND",
+        exchange="INDEX",
+        provider="yfinance",
+        instrument_id=f"yfinance:index:{symbol}",
     )
 
 
@@ -394,19 +397,19 @@ BROAD_US_MARKET_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
 )
 
 
-GLOBAL_INDEX_PROXY_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
-    _overview_index_proxy(1, "SPY", "S&P 500", "US", "SPDR S&P 500 ETF Trust"),
-    _overview_index_proxy(2, "QQQ", "Nasdaq 100", "US", "Invesco QQQ ETF"),
-    _overview_index_proxy(3, "IWM", "Russell 2000", "US", "iShares Russell 2000 ETF"),
-    _overview_index_proxy(4, "EWC", "MSCI Canada", "Canada", "iShares MSCI Canada ETF"),
-    _overview_index_proxy(5, "IEUR", "MSCI Europe", "Europe", "iShares Core MSCI Europe ETF"),
-    _overview_index_proxy(6, "EWU", "MSCI United Kingdom", "UK", "iShares MSCI United Kingdom ETF"),
-    _overview_index_proxy(7, "EWJ", "MSCI Japan", "Japan", "iShares MSCI Japan ETF"),
-    _overview_index_proxy(8, "EWH", "MSCI Hong Kong", "Hong Kong", "iShares MSCI Hong Kong ETF"),
-    _overview_index_proxy(9, "MCHI", "MSCI China", "China", "iShares MSCI China ETF"),
-    _overview_index_proxy(10, "INDA", "MSCI India", "India", "iShares MSCI India ETF"),
-    _overview_index_proxy(11, "EWA", "MSCI Australia", "Australia", "iShares MSCI Australia ETF"),
-    _overview_index_proxy(12, "EEM", "MSCI Emerging Markets", "EM", "iShares MSCI Emerging Markets ETF"),
+GLOBAL_INDEX_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
+    _overview_index(1, "^GSPC", "S&P 500", "US"),
+    _overview_index(2, "^DJI", "Dow Jones Industrial Average", "US"),
+    _overview_index(3, "^IXIC", "Nasdaq Composite", "US"),
+    _overview_index(4, "^RUT", "Russell 2000", "US"),
+    _overview_index(5, "^GSPTSE", "S&P/TSX Composite", "Canada"),
+    _overview_index(6, "^STOXX50E", "Euro Stoxx 50", "Europe"),
+    _overview_index(7, "^FTSE", "FTSE 100", "UK"),
+    _overview_index(8, "^GDAXI", "DAX", "Germany"),
+    _overview_index(9, "^FCHI", "CAC 40", "France"),
+    _overview_index(10, "^IBEX", "IBEX 35", "Spain"),
+    _overview_index(11, "^N225", "Nikkei 225", "Japan"),
+    _overview_index(12, "^HSI", "Hang Seng", "Hong Kong"),
 )
 
 
@@ -470,17 +473,17 @@ RESEARCH_OVERVIEW_UNIVERSES: tuple[ResearchOverviewUniverse, ...] = (
         universe_id="global_indices",
         label="Global Indices",
         description=(
-            "Worldwide index proxy board for SITREP, using liquid IBKR-tradable ETF histories "
-            "to stand in for broad regional equity index exposure."
+            "Worldwide cash-index board for SITREP, using direct public index symbols where the "
+            "configured listed-market provider supports them."
         ),
-        instruments=GLOBAL_INDEX_PROXY_INSTRUMENTS,
+        instruments=GLOBAL_INDEX_INSTRUMENTS,
         limitations=(
-            "This is an ETF proxy board, not direct cash-index contract coverage.",
-            "Regional labels describe the intended index exposure; live prices come from the listed ETF proxies.",
-            "IBKR/TWS history coverage is entitlement, symbol, session, and pacing dependent.",
+            "This board uses direct public index symbols rather than ETF proxies.",
+            "Direct index coverage depends on the configured SITREP listed-market provider; yfinance supports these symbols, while IBKR may require exchange-specific index contracts and entitlements.",
+            "Yahoo Finance/yfinance remains an unofficial public source and should be treated as live-ish research context rather than institutional quote truth.",
         ),
-        metadata_source_label="Curated Gamma global index ETF proxy list",
-        coverage_label="Curated global index proxy board, partial coverage",
+        metadata_source_label="Curated Gamma global cash-index symbol list",
+        coverage_label="Curated global cash-index board, provider-dependent coverage",
         is_complete_universe=False,
     ),
     *_SECTOR_UNIVERSES,
