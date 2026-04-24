@@ -1,10 +1,8 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-
-import numpy as np
 
 from src.application.system_service import normalize_market_data_mode
 from src.services.ibkr_client import IBKRClient
@@ -39,6 +37,15 @@ class IVService:
         self.market_data_mode = normalize_market_data_mode(market_data_mode)
         self._engine: IVSurfaceEngine | None = None
         self._active_symbol = "SPY"
+        self._engine_config = {
+            "max_expiries": int(os.getenv("IV_MAX_EXPIRIES", "6") or 6),
+            "strike_band_pct": float(os.getenv("IV_STRIKE_BAND_PCT", "0.02") or 0.02),
+            "max_contracts": int(os.getenv("IV_MAX_CONTRACTS", "180") or 180),
+            "market_data_line_budget": int(os.getenv("IV_MARKET_DATA_LINE_BUDGET", "60") or 60),
+            "reserved_market_data_lines": int(os.getenv("IV_RESERVED_MARKET_DATA_LINES", "10") or 10),
+            "include_calls": str(os.getenv("IV_INCLUDE_CALLS", "true")).strip().lower() != "false",
+            "include_puts": str(os.getenv("IV_INCLUDE_PUTS", "true")).strip().lower() != "false",
+        }
 
     @staticmethod
     def normalize_market_data_mode(value: str | None) -> str:
@@ -57,7 +64,7 @@ class IVService:
 
     def create_engine(self, market_data_mode: str | None = None) -> IVSurfaceEngine:
         mode = normalize_market_data_mode(market_data_mode or self.market_data_mode)
-        return IVSurfaceEngine(client=self.client, market_data_mode=mode)
+        return IVSurfaceEngine(client=self.client, market_data_mode=mode, **self._engine_config)
 
     def start_stream(self, symbol: str = "SPY") -> bool:
         self.stop_stream()
@@ -153,28 +160,5 @@ class IVService:
         return IVSurfaceResult(snapshot=latest, warnings=warnings, messages=messages)
 
     def _mock_snapshot(self, symbol: str) -> IVSurfaceSnapshot:
-        now = datetime.utcnow()
-        expiries = [(now + timedelta(days=7 * index)).strftime("%Y%m%d") for index in range(1, 7)]
-        spot = 500.0 if symbol == "SPY" else 100.0
-        spot = float(spot + np.sin(now.timestamp() / 8.0) * 0.05)
-        strikes = np.round(np.linspace(spot * 0.98, spot * 1.02, 15), 2).tolist()
-        iv_grid = np.zeros((len(expiries), len(strikes)), dtype=float)
-        for row_index, _expiry in enumerate(expiries):
-            for col_index, strike in enumerate(strikes):
-                moneyness = (strike / max(spot, 1e-6)) - 1.0
-                iv = 0.14 + 0.55 * (moneyness**2) + 0.01 * row_index + 0.01 * np.sin(now.timestamp() * 0.8 + strike * 0.02)
-                iv_grid[row_index, col_index] = float(max(0.05, min(iv, 1.5)))
-        return IVSurfaceSnapshot(
-            symbol=symbol,
-            spot=spot,
-            expiries=list(expiries),
-            strikes=list(strikes),
-            iv_grid=iv_grid,
-            timestamp=now,
-            delayed=True,
-            points=int(iv_grid.size),
-            source_provider="mock",
-            origin="gamma.iv.surface.mock",
-            transformation_note="Gamma generated a mock options volatility surface for development and offline checks.",
-            freshness_label="mocked",
-        )
+        engine = self.create_engine(self.market_data_mode)
+        return engine.build_mock_snapshot(symbol)

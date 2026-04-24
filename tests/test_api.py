@@ -373,6 +373,17 @@ def test_iv_surface_and_diagnostics_endpoints(tmp_path):
         assert iv_payload["snapshot_available"] is True
         assert iv_payload["points"] > 0
         assert len(iv_payload["expiries"]) > 0
+        assert iv_payload["contracts"]
+        assert iv_payload["pairs"]
+        assert {row["right"] for row in iv_payload["contracts"]} == {"C", "P"}
+        assert iv_payload["collection"]["configured_market_data_line_budget"] >= 10
+        assert iv_payload["collection"]["option_market_data_line_budget"] >= 1
+        assert iv_payload["quality"]["pairs_with_both_sides"] > 0
+        assert iv_payload["quality"]["call_contract_count"] > 0
+        assert iv_payload["quality"]["put_contract_count"] > 0
+        assert iv_payload["pricing_assumptions"]["fallback_greeks_methodology"]
+        assert iv_payload["expiry_analytics"]
+        assert iv_payload["contracts"][0]["derived_greeks"] is not None
 
         assert iv_session_start.status_code == 200
         assert iv_session_start.json()["active_symbol"] == "SPY"
