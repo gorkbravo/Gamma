@@ -12,6 +12,7 @@
     nearestStrikeIndex,
     optionsModes,
     type OptionsMode,
+    type SurfacePath,
   } from "../lib/view-models/iv";
 
   export let mode: OptionsMode = "surface";
@@ -31,6 +32,38 @@
   let marketDataMode = "delayed";
   let waitSeconds = 2.5;
   let selectedExpiry = 0;
+  let hoveredPath: SurfacePath | null = null;
+
+  function viridisColor(t: number): string {
+    const v = Math.max(0, Math.min(1, t));
+    const stops: [number, number, number][] = [
+      [68, 1, 84], [70, 49, 126], [54, 91, 141], [39, 127, 142],
+      [31, 161, 135], [74, 193, 109], [159, 218, 58], [253, 231, 37],
+    ];
+    const n = stops.length - 1;
+    const pos = v * n;
+    const lo = Math.floor(pos);
+    const hi = Math.min(n, lo + 1);
+    const f = pos - lo;
+    const lr = (a: number, b: number) => Math.round(a + f * (b - a));
+    return `rgb(${lr(stops[lo][0],stops[hi][0])},${lr(stops[lo][1],stops[hi][1])},${lr(stops[lo][2],stops[hi][2])})`;
+  }
+
+  function pathViridisT(path: SurfacePath): number {
+    if (path.value == null || surfaceStats.minIv == null || surfaceStats.maxIv == null) return 0.5;
+    const range = Math.max(surfaceStats.maxIv - surfaceStats.minIv, 0.001);
+    return (path.value - surfaceStats.minIv) / range;
+  }
+
+  function pathLabel(path: SurfacePath): string {
+    if (!result) return "";
+    if (path.id.startsWith("expiry-")) {
+      const i = Number(path.id.split("-")[1]);
+      return `${result.expiries[i] ?? ""}  ${pct(path.value)}`;
+    }
+    const i = Number(path.id.split("-")[1]);
+    return `K=${fmt(result.strikes[i], 1)}  ${pct(path.value)}`;
+  }
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
@@ -105,7 +138,7 @@
   $: atmStrikeIndex = nearestStrikeIndex(result);
   $: surfaceStats = deriveSurfaceStats(result);
   $: skewRows = deriveSkewRows(result);
-  $: surfacePaths = deriveSurfacePaths(result);
+  $: surfacePaths = deriveSurfacePaths(result, 520, 300);
   $: realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
   $: distributionBuckets = deriveDistributionBuckets(result);
   $: maxDistributionProbability = Math.max(...distributionBuckets.map((bucket) => bucket.probability), 0.01);
@@ -188,16 +221,28 @@
           <strong>{surfaceStats.frontExpiry ?? "N/A"}</strong>
         </div>
         {#if surfacePaths.length}
-          <svg class="surface-svg" viewBox="0 0 520 240" role="img" aria-label="Projected volatility surface">
-            <line x1="32" y1="198" x2="472" y2="198" />
-            <line x1="32" y1="198" x2="86" y2="106" />
-            <line x1="472" y1="198" x2="526" y2="106" />
+          <svg
+            class="surface-svg"
+            viewBox="0 0 520 300"
+            role="img"
+            aria-label="Volatility surface"
+            on:mouseleave={() => (hoveredPath = null)}
+          >
+            <line x1="32" y1="258" x2="472" y2="258" />
+            <line x1="32" y1="258" x2="86" y2="166" />
+            <line x1="472" y1="258" x2="526" y2="166" />
             {#each surfacePaths as path}
               <polyline
                 points={path.points}
-                style={`--path-alpha:${Math.round(Math.max(0.26, Math.min(0.92, (path.value ?? surfaceStats.averageIv ?? 0.1) / Math.max(surfaceStats.maxIv ?? 0.5, 0.01))) * 100)}%;`}
+                class:hovered={hoveredPath?.id === path.id}
+                class:dimmed={hoveredPath != null && hoveredPath.id !== path.id}
+                style={`stroke:${viridisColor(pathViridisT(path))}`}
+                on:mouseenter={() => (hoveredPath = path)}
               />
             {/each}
+            {#if hoveredPath}
+              <text class="hover-label" x="10" y="16">{pathLabel(hoveredPath)}</text>
+            {/if}
           </svg>
         {:else}
           <p class="muted">No options surface loaded.</p>
@@ -232,35 +277,43 @@
     </div>
 
     <div class="detail-grid">
-      <article class="panel">
-        <h3>Selected Expiry Slice</h3>
+      <article class="panel table-panel">
+        <div class="table-header">
+          <h3>Expiry Slice</h3>
+          {#if slice}<span>{slice.expiry}</span>{/if}
+        </div>
         {#if slice}
-          <div class="bar-list">
-            {#each slice.values as value, index}
-              <div class="bar-row">
-                <span>{fmt(result?.strikes[index], 2)}</span>
-                <div class="bar"><div class="fill" style={`width:${Math.min(value / Math.max(surfaceStats.maxIv ?? 1, 0.01), 1) * 100}%`}></div></div>
-                <strong>{pct(value)}</strong>
-              </div>
-            {/each}
-          </div>
+          <table>
+            <thead><tr><th>Strike</th><th>IV</th></tr></thead>
+            <tbody>
+              {#each slice.values as value, index}
+                <tr>
+                  <td>{fmt(result?.strikes[index], 2)}</td>
+                  <td>{pct(value)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         {:else}
           <p class="muted">Select an expiry after loading a surface.</p>
         {/if}
       </article>
 
-      <article class="panel">
-        <h3>ATM Term Structure</h3>
+      <article class="panel table-panel">
+        <div class="table-header"><h3>ATM Term Structure</h3></div>
         {#if termStructure.length}
-          <div class="bar-list">
-            {#each termStructure as point}
-              <div class="bar-row">
-                <span>{point.expiry}</span>
-                <div class="bar"><div class="fill" style={`width:${Math.min((point.iv ?? 0) / Math.max(surfaceStats.maxIv ?? 1, 0.01), 1) * 100}%`}></div></div>
-                <strong>{pct(point.iv)}</strong>
-              </div>
-            {/each}
-          </div>
+          <table>
+            <thead><tr><th>Expiry</th><th>DTE</th><th>ATM IV</th></tr></thead>
+            <tbody>
+              {#each termStructure as point}
+                <tr>
+                  <td>{point.expiry}</td>
+                  <td>{daysToExpiry(point.expiry)}</td>
+                  <td>{pct(point.iv)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         {:else}
           <p class="muted">Load a surface to inspect ATM term structure.</p>
         {/if}
@@ -271,8 +324,8 @@
         <div class="metric-list">
           <div><span>Selected Expiry</span><strong>{slice?.expiry ?? "N/A"}</strong></div>
           <div><span>ATM Strike</span><strong>{fmt(surfaceStats.atmStrike, 2)}</strong></div>
-          <div><span>IV Range</span><strong>{pct(surfaceStats.minIv)} - {pct(surfaceStats.maxIv)}</strong></div>
-          <div><span>Average IV</span><strong>{pct(surfaceStats.averageIv)}</strong></div>
+          <div><span>IV Range</span><strong>{pct(surfaceStats.minIv)} – {pct(surfaceStats.maxIv)}</strong></div>
+          <div><span>Avg IV</span><strong>{pct(surfaceStats.averageIv)}</strong></div>
         </div>
       </article>
     </div>
@@ -474,7 +527,7 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.75rem;
+    padding: 0.85rem;
     min-width: 0;
   }
 
@@ -503,7 +556,7 @@
   }
 
   h3 {
-    font-size: 0.9rem;
+    font-size: 0.875rem;
   }
 
   strong {
@@ -521,6 +574,7 @@
     grid-template-columns: repeat(5, auto);
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
+    align-self: start;
   }
 
   .mode-bar button {
@@ -528,7 +582,7 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.42rem 0.82rem;
+    padding: 0.28rem 0.82rem;
     cursor: pointer;
   }
 
@@ -588,8 +642,9 @@
     background: var(--bg-1);
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
-    padding: 0.48rem 0.58rem;
+    padding: 0.28rem 0.58rem;
     font: inherit;
+    font-size: 0.84rem;
     border-radius: 2px;
   }
 
@@ -619,11 +674,25 @@
     text-align: right;
   }
 
+  .surface-panel,
+  .heatmap-panel {
+    padding: 0;
+  }
+
+  .surface-panel .panel-header,
+  .heatmap-panel .panel-header {
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--divider);
+    min-height: 26px;
+    align-items: center;
+  }
+
   .surface-svg {
     width: 100%;
-    min-height: 15rem;
+    min-height: 18rem;
     background: var(--bg-0);
-    border: 1px solid var(--divider);
+    display: block;
+    cursor: crosshair;
   }
 
   .surface-svg line {
@@ -633,9 +702,25 @@
 
   .surface-svg polyline {
     fill: none;
-    stroke: color-mix(in srgb, var(--chart-primary) var(--path-alpha), var(--text-2));
-    stroke-width: 1.1;
+    stroke-width: 1.2;
     vector-effect: non-scaling-stroke;
+    transition: stroke-width 80ms, opacity 80ms;
+  }
+
+  .surface-svg polyline.hovered {
+    stroke-width: 2.8;
+    opacity: 1;
+  }
+
+  .surface-svg polyline.dimmed {
+    opacity: 0.12;
+  }
+
+  .surface-svg .hover-label {
+    fill: var(--text-1);
+    font-size: 11px;
+    font-family: monospace;
+    pointer-events: none;
   }
 
   .heatmap {
@@ -643,14 +728,13 @@
     grid-template-columns: 7rem repeat(var(--strike-count, 1), minmax(3.6rem, 1fr));
     gap: 0;
     overflow: auto;
-    border: 1px solid var(--divider);
   }
 
   .cell {
     border-right: 1px solid var(--divider);
     border-bottom: 1px solid var(--divider);
-    padding: 0.45rem 0.36rem;
-    min-height: 2.35rem;
+    padding: 0.28rem 0.36rem;
+    min-height: 1.75rem;
     text-align: center;
     white-space: nowrap;
   }
@@ -686,7 +770,7 @@
   .warning-list > div {
     align-items: center;
     border-top: 1px solid var(--divider);
-    padding-top: 0.42rem;
+    padding-top: 0.3rem;
   }
 
   .bar,
@@ -733,16 +817,25 @@
     border-collapse: collapse;
   }
 
-  th,
-  td {
-    padding: 0.48rem 0.55rem;
+  th {
+    padding: 0.28rem 0.55rem;
     border-bottom: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
+    letter-spacing: 0.08em;
+    font-size: 0.69rem;
   }
 
   td {
+    padding: 0.3rem 0.55rem;
+    border-bottom: 1px solid var(--divider);
+    text-align: left;
+    white-space: nowrap;
     color: var(--text-1);
+  }
+
+  tr:hover td {
+    background: rgba(122, 166, 200, 0.06);
   }
 
   .positive {
