@@ -13,12 +13,15 @@ from src.api.schemas.portfolio import (
 from src.api.schemas.research import ResearchAnalyzeResponseModel
 from src.api.schemas.risk import RiskComputeResponseModel
 from src.models.copilot import (
+    CopilotMemo,
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotSession,
     CopilotSynthesisRequest,
     CopilotSynthesisScope,
     CopilotSourceRef,
+    CopilotTurn,
     CopilotToolTrace,
     MacroCopilotContext,
     ResearchCard,
@@ -125,6 +128,8 @@ class CopilotResearchCardRequestModel(BaseModel):
     prompt: str | None = None
     previous_response_id: str | None = None
     user_session_id: str | None = None
+    context_fingerprint: str | None = None
+    session_title: str | None = None
     context: CopilotRequestContextModel = Field(default_factory=CopilotRequestContextModel)
     synthesis: CopilotSynthesisRequestModel | None = None
 
@@ -134,6 +139,8 @@ class CopilotResearchCardRequestModel(BaseModel):
             prompt=self.prompt,
             previous_response_id=self.previous_response_id,
             user_session_id=self.user_session_id,
+            context_fingerprint=self.context_fingerprint,
+            session_title=self.session_title,
             context=self.context.to_domain(),
             synthesis=self.synthesis.to_domain() if self.synthesis is not None else None,
         )
@@ -229,3 +236,75 @@ class CopilotResearchCardResponseModel(BaseModel):
             tool_traces=[CopilotToolTraceModel.from_domain(item) for item in row.tool_traces],
             warnings=list(row.warnings),
         )
+
+
+class CopilotSessionModel(BaseModel):
+    session_id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    active_domain: str | None = None
+    active_context_fingerprint: str | None = None
+    turn_count: int = 0
+    memo_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotSession) -> "CopilotSessionModel":
+        return cls(**row.__dict__)
+
+
+class CopilotTurnModel(BaseModel):
+    turn_id: str
+    session_id: str
+    turn_index: int
+    domain: str
+    prompt: str
+    context_snapshot_id: str
+    result: CopilotResearchCardResponseModel
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, row: CopilotTurn) -> "CopilotTurnModel":
+        return cls(
+            turn_id=row.turn_id,
+            session_id=row.session_id,
+            turn_index=row.turn_index,
+            domain=row.domain,
+            prompt=row.prompt,
+            context_snapshot_id=row.context_snapshot_id,
+            result=CopilotResearchCardResponseModel.from_domain(row.result),
+            created_at=row.created_at,
+        )
+
+
+class CopilotSessionDetailModel(BaseModel):
+    session: CopilotSessionModel
+    turns: list[CopilotTurnModel] = Field(default_factory=list)
+    memos: list["CopilotMemoModel"] = Field(default_factory=list)
+
+
+class CopilotMemoModel(BaseModel):
+    memo_id: str
+    session_id: str
+    title: str
+    body: str
+    source_turn_ids: list[str] = Field(default_factory=list)
+    source_snapshot_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotMemo) -> "CopilotMemoModel":
+        return cls(**row.__dict__)
+
+
+class CopilotMemoCreateRequestModel(BaseModel):
+    session_id: str
+    title: str | None = None
+    notes: str | None = None
+    source_turn_ids: list[str] = Field(default_factory=list)

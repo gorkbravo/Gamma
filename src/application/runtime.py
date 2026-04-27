@@ -28,6 +28,7 @@ from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
+from src.services.copilot_store import CopilotStore
 from src.services.commodities_adapters import (
     EiaCommoditiesDataProvider,
     IbkrCommoditiesDataProvider,
@@ -97,6 +98,7 @@ class ApplicationRuntime:
     fx_service: FXService
     portfolio_history: PortfolioHistoryStore
     saved_research_store: SavedResearchStore
+    copilot_store: CopilotStore
     risk_free_service: RiskFreeRateService
     portfolio_provider: PortfolioDataProvider
     research_provider: ResearchDataProvider
@@ -217,6 +219,7 @@ def build_runtime(
     )
     portfolio_history = PortfolioHistoryStore(base_dir=resolved_history_dir, mock=bool(mock_mode))
     saved_research_store = SavedResearchStore(base_dir=resolved_history_dir / "research")
+    copilot_store = CopilotStore(base_dir=resolved_history_dir / "copilot")
     risk_free_service = RiskFreeRateService(cache=cache)
 
     portfolio_provider = PortfolioDataProvider(client, market_data, mock_service)
@@ -297,6 +300,7 @@ def build_runtime(
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
         provider=_build_copilot_provider(),
+        store=copilot_store,
     )
     risk_service = RiskService(
         client,
@@ -324,6 +328,7 @@ def build_runtime(
         fx_service=fx_service,
         portfolio_history=portfolio_history,
         saved_research_store=saved_research_store,
+        copilot_store=copilot_store,
         risk_free_service=risk_free_service,
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,

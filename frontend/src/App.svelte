@@ -6,6 +6,7 @@
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
   import CommoditiesView from "./views/CommoditiesView.svelte";
+  import CopilotView from "./views/CopilotView.svelte";
   import MacroView from "./views/MacroView.svelte";
   import MaritimeView from "./views/MaritimeView.svelte";
   import PortfolioView from "./views/PortfolioView.svelte";
@@ -33,7 +34,11 @@
     diagnosticsLog,
     clearPortfolioHistory,
     commoditiesWorkspace,
+    activeCopilotSession,
+    copilotMemos,
+    copilotSessions,
     copilotThreads,
+    createCopilotMemo,
     cryptoComparison,
     fundamentalsDcfSnapshots,
     fundamentalsDcfModel,
@@ -71,7 +76,10 @@
     loadPortfolioPerformance,
     loading,
     loadPortfolioSnapshot,
+    loadActiveCopilotSession,
+    loadCopilotMemos,
     loadCopilotResearchCard,
+    loadCopilotSessions,
     macroDivergences,
     macroEvents,
     macroSeriesHistories,
@@ -190,6 +198,7 @@
   let commoditiesMode: CommodityMode = "overview";
   let maritimeMode: MaritimeMode = "live_map";
   let optionsMode: OptionsMode = "surface";
+  let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
   let sidebarOpen = false;
@@ -245,7 +254,7 @@
     }
   }
   $: activeTabCopilotSurface = buildActiveTabCopilotSurface({
-    tab: $activeTab,
+    tab: $activeTab === "copilot" ? copilotContextTab : $activeTab,
     workspaceMode,
     threads: $copilotThreads,
     system: $systemStatus,
@@ -1187,9 +1196,14 @@
     const nextTab = isWorkspaceTab(workspaceMode, tab) ? tab : primaryTab;
 
     activeTab.set(nextTab);
+    if (nextTab !== "copilot") {
+      copilotContextTab = nextTab;
+    }
 
     if (nextTab === "sitrep") {
       await loadSitrepContext();
+    } else if (nextTab === "copilot") {
+      await handleLoadCopilotWorkspaceState();
     } else if (nextTab === "research") {
       if (await applySharedEquityToTab(nextTab)) {
         return;
@@ -1473,6 +1487,22 @@
     });
   }
 
+  async function handleGenerateCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+    return loadCopilotResearchCard(domain, prompt, {
+      workspaceMode,
+      synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
+      activeTabId: $activeTab,
+    });
+  }
+
+  async function handleCreateCopilotMemo(title?: string, notes?: string) {
+    return createCopilotMemo({ title, notes });
+  }
+
+  async function handleLoadCopilotWorkspaceState() {
+    await Promise.allSettled([loadCopilotSessions(), loadActiveCopilotSession(), loadCopilotMemos()]);
+  }
+
   async function handleOpenKeyBindings() {
     settingsOpen = false;
     await openKeyBindingsWindow();
@@ -1724,6 +1754,8 @@
             onLoadMacro={loadMacroWorkspace}
             onLoadCommodities={loadCommoditiesWorkspace}
             onLoadPrediction={loadPredictionMarketScreener}
+            selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
+            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
           />
         {:else if $activeTab === "research"}
           <ResearchView
@@ -1826,6 +1858,19 @@
             workspace={$maritimeWorkspace}
             loading={$loading.maritime}
             onLoadWorkspace={loadMaritimeWorkspace}
+          />
+        {:else if $activeTab === "copilot"}
+          <CopilotView
+            activeSurface={activeTabCopilotSurface}
+            synthesisSurface={synthesisCopilotSurface}
+            sessions={$copilotSessions}
+            activeSession={$activeCopilotSession}
+            memos={$copilotMemos}
+            loading={$loading.copilot}
+            onGenerate={handleGenerateCopilotWorkspace}
+            onCreateMemo={handleCreateCopilotMemo}
+            onLoadSessions={handleLoadCopilotWorkspaceState}
+            onToggleScope={handleToggleSynthesisScope}
           />
         {:else if $activeTab === "risk"}
           <RiskView

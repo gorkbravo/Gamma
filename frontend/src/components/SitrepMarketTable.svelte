@@ -13,6 +13,8 @@
 </script>
 
 <script lang="ts">
+  import { flashOnChange } from "../lib/flash";
+
   export let rows: SitrepMarketRow[] = [];
   export let emptyLabel = "No data loaded.";
   export let hideGroup = false;
@@ -38,15 +40,15 @@
     </thead>
     <tbody>
       {#if rows.length}
-        {#each rows as row}
+        {#each rows as row (row.id)}
           <tr>
             <td class="market-cell">
               <strong>{row.label}</strong>
               {#if !hideSource && row.source}<span>{row.source}</span>{/if}
             </td>
             {#if !hideGroup}<td class="group-cell">{row.group}</td>{/if}
-            <td class="num-cell last-cell">{row.last}</td>
-            <td class="num-cell move-cell {row.tone}">{row.change}</td>
+            <td use:flashOnChange={{ value: row.last, direction: 'neutral' }} class="num-cell last-cell">{row.last}</td>
+            <td use:flashOnChange={{ value: row.change, direction: row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral' }} class="num-cell move-cell {row.tone}">{row.change}</td>
             {#if !hideContext}<td class="context-cell {contextTone ? row.secondaryTone ?? '' : ''}">{row.secondary}</td>{/if}
           </tr>
         {/each}

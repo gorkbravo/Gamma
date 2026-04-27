@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from src.models.copilot_context import default_copilot_read_only_safety
+from src.utils.time import now_utc
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,8 @@ class CopilotResearchCardRequest:
     prompt: str | None = None
     previous_response_id: str | None = None
     user_session_id: str | None = None
+    context_fingerprint: str | None = None
+    session_title: str | None = None
     context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
     synthesis: CopilotSynthesisRequest | None = None
 
@@ -126,3 +130,62 @@ class CopilotResearchCardResult:
     sources: list[CopilotSourceRef] = field(default_factory=list)
     tool_traces: list[CopilotToolTrace] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotContextSnapshot:
+    snapshot_id: str
+    domain: str
+    context_fingerprint: str | None
+    current_tab: str
+    workspace_mode: str | None
+    summary: dict[str, Any] = field(default_factory=dict)
+    source_ids: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=now_utc)
+    read_only_safety: dict[str, Any] = field(default_factory=default_copilot_read_only_safety)
+
+
+@dataclass(frozen=True)
+class CopilotTurn:
+    turn_id: str
+    session_id: str
+    turn_index: int
+    domain: str
+    prompt: str
+    context_snapshot_id: str
+    result: CopilotResearchCardResult
+    created_at: datetime = field(default_factory=now_utc)
+
+
+@dataclass(frozen=True)
+class CopilotSession:
+    session_id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    active_domain: str | None = None
+    active_context_fingerprint: str | None = None
+    turn_count: int = 0
+    memo_count: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotMemo:
+    memo_id: str
+    session_id: str
+    title: str
+    body: str
+    source_turn_ids: list[str] = field(default_factory=list)
+    source_snapshot_ids: list[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=now_utc)
+    updated_at: datetime = field(default_factory=now_utc)
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = "gamma_copilot"
+    origin: str = "copilot_store.memo"
+    transformation_note: str | None = "Gamma memo generated from persisted read-only Copilot turns."
+
+
+def new_copilot_id(prefix: str) -> str:
+    return f"{prefix}_{uuid4().hex}"

@@ -31,12 +31,21 @@
   let waitSeconds = 2.5;
   let selectedExpiry = 0;
   let hoveredExpiry: number | null = null;
+  let cameraDepthX = 58;
+  let cameraDepthY = 72;
+  let isDragging = false;
+  let dragStart = { x: 0, y: 0 };
+  let dragStartCamera = { x: 0, y: 0 };
+  let sliceHover: SlicePoint | null = null;
 
   interface SurfaceQuad { pts: string; fill: string; sortKey: number; ri: number; }
   interface AxisLabel  { x: number; y: number; label: string; anchor?: string; }
   interface SlicePoint { x: number; y: number; strike: number; value: number; }
+  interface GridLine   { x1: number; y1: number; x2: number; y2: number; }
 
   let surfaceQuads: SurfaceQuad[] = [];
+  let surfaceGridLines: GridLine[] = [];
+  let surfaceFrameLines: GridLine[] = [];
   let axisStrikeLabels: AxisLabel[] = [];
   let axisIvLabels: AxisLabel[] = [];
   let axisDteLabels: AxisLabel[] = [];
@@ -129,6 +138,43 @@
     mode = nextMode;
   }
 
+  function onSurfacePointerDown(e: PointerEvent) {
+    isDragging = true;
+    dragStart = { x: e.clientX, y: e.clientY };
+    dragStartCamera = { x: cameraDepthX, y: cameraDepthY };
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  }
+
+  function onSurfacePointerMove(e: PointerEvent) {
+    if (!isDragging) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    cameraDepthX = Math.max(-30, Math.min(80, dragStartCamera.x + dx * 0.25));
+    cameraDepthY = Math.max(20, Math.min(120, dragStartCamera.y + dy * 0.25));
+  }
+
+  function onSurfacePointerUp() {
+    isDragging = false;
+  }
+
+  function onSliceMouseMove(e: MouseEvent) {
+    const target = e.currentTarget as SVGElement;
+    const rect = target.getBoundingClientRect();
+    const mouseX = ((e.clientX - rect.left) / rect.width) * 540;
+    if (!slicePoints.length) { sliceHover = null; return; }
+    let nearest = slicePoints[0];
+    let minDist = Math.abs(slicePoints[0].x - mouseX);
+    for (const pt of slicePoints) {
+      const dist = Math.abs(pt.x - mouseX);
+      if (dist < minDist) { minDist = dist; nearest = pt; }
+    }
+    sliceHover = nearest;
+  }
+
+  function onSliceMouseLeave() {
+    sliceHover = null;
+  }
+
   $: if (result && selectedExpiry >= result.expiries.length) {
     selectedExpiry = 0;
   }
@@ -164,6 +210,8 @@
 
   $: {
     const quads: SurfaceQuad[] = [];
+    const gLines: GridLine[] = [];
+    const fLines: GridLine[] = [];
     const sLabels: AxisLabel[] = [];
     const ivLabs: AxisLabel[] = [];
     const dteLabs: AxisLabel[] = [];
@@ -176,8 +224,8 @@
       const ivRange = Math.max(maxIv - minIv, 0.01);
       const baseY = 268;
       const strikeWidth = 404;
-      const depthX = 58;
-      const depthY = 72;
+      const depthX = cameraDepthX;
+      const depthY = cameraDepthY;
       const zHeight = 132;
 
       const proj = (ri: number, ci: number, v: number | null | undefined): [number, number] => {
@@ -207,6 +255,39 @@
       }
       quads.sort((a, b) => b.sortKey - a.sortKey);
 
+      // Frame edges (front, left depth, right depth)
+      const [flx, fly] = proj(0, 0, minIv);
+      const [frx, fry] = proj(0, colCount - 1, minIv);
+      const [blx, bly] = proj(rowCount - 1, 0, minIv);
+      const [brx, bry] = proj(rowCount - 1, colCount - 1, minIv);
+      fLines.push({ x1: flx, y1: fly, x2: frx, y2: fry });
+      fLines.push({ x1: flx, y1: fly, x2: blx, y2: bly });
+      fLines.push({ x1: frx, y1: fry, x2: brx, y2: bry });
+
+      // Floor grid: DTE rows
+      const rowSamples = Math.min(rowCount, 7);
+      const rowSampleStep = rowCount <= 1 ? 1 : Math.max(1, Math.floor((rowCount - 1) / (rowSamples - 1)));
+      for (let ri = 0; ri < rowCount; ri += rowSampleStep) {
+        const [lx, ly] = proj(ri, 0, minIv);
+        const [rx, ry] = proj(ri, colCount - 1, minIv);
+        gLines.push({ x1: lx, y1: ly, x2: rx, y2: ry });
+      }
+      // Floor grid: strike columns
+      const colSampleStep = Math.max(1, Math.floor((colCount - 1) / 4));
+      for (let ci = 0; ci <= colCount - 1; ci += colSampleStep) {
+        const [fx, fy] = proj(0, ci, minIv);
+        const [bx, by] = proj(rowCount - 1, ci, minIv);
+        gLines.push({ x1: fx, y1: fy, x2: bx, y2: by });
+      }
+      // Left-wall IV level lines
+      for (let i = 1; i <= 4; i++) {
+        const t = i / 4;
+        const iv = minIv + t * ivRange;
+        const [lfx, lfy] = proj(0, 0, iv);
+        const [lbx, lby] = proj(rowCount - 1, 0, iv);
+        gLines.push({ x1: lfx, y1: lfy, x2: lbx, y2: lby });
+      }
+
       // X-axis: strike labels along front base
       const sStep = Math.max(1, Math.floor(colCount / 5));
       for (let ci = 0; ci < colCount; ci += sStep) {
@@ -230,6 +311,8 @@
     }
 
     surfaceQuads = quads;
+    surfaceGridLines = gLines;
+    surfaceFrameLines = fLines;
     axisStrikeLabels = sLabels;
     axisIvLabels = ivLabs;
     axisDteLabels = dteLabs;
@@ -282,38 +365,37 @@
 </script>
 
 <section class="view">
-  <div class="workspace-header">
-    <div>
-      <span class="eyebrow">OPTIONS</span>
-      <h2>{result?.symbol ?? symbol}</h2>
-    </div>
-    <div class="surface-actions">
-      <button class="primary-action" on:click={submit} disabled={loading}>
-        {loading ? "LOADING..." : "Reload Surface"}
-      </button>
-      <div class="session-control" class:running={session?.running} class:snapshot-only={depthPreset === "max"}>
-        <div>
-          <span>Live Session</span>
-          <strong>{sessionStateLabel()}</strong>
+  <article class="panel header-panel">
+    <div class="workspace-header">
+      <div class="header-title">
+        <span class="eyebrow">OPTIONS</span>
+        <h2>{result?.symbol ?? symbol}</h2>
+      </div>
+      <div class="surface-actions">
+        <button class="primary-action" on:click={submit} disabled={loading}>
+          {loading ? "LOADING..." : "Reload Surface"}
+        </button>
+        <div class="session-control" class:running={session?.running} class:snapshot-only={depthPreset === "max"}>
+          <div>
+            <span>Live Session</span>
+            <strong>{sessionStateLabel()}</strong>
+          </div>
+          {#if session?.running}
+            <button on:click={onStopSession} disabled={sessionLoading}>
+              {sessionLoading ? "STOPPING..." : "Stop"}
+            </button>
+          {:else}
+            <button
+              on:click={startSession}
+              disabled={sessionLoading || depthPreset === "max"}
+              title={depthPreset === "max" ? "Max Reload is snapshot-only to avoid holding a large option surface open." : "Start a continuous options surface session."}
+            >
+              {sessionLoading ? "STARTING..." : "Start Live"}
+            </button>
+          {/if}
         </div>
-        {#if session?.running}
-          <button on:click={onStopSession} disabled={sessionLoading}>
-            {sessionLoading ? "STOPPING..." : "Stop"}
-          </button>
-        {:else}
-          <button
-            on:click={startSession}
-            disabled={sessionLoading || depthPreset === "max"}
-            title={depthPreset === "max" ? "Max Reload is snapshot-only to avoid holding a large option surface open." : "Start a continuous options surface session."}
-          >
-            {sessionLoading ? "STARTING..." : "Start Live"}
-          </button>
-        {/if}
       </div>
     </div>
-  </div>
-
-  <div class="mode-kpi-row">
     <div class="mode-bar" role="tablist" aria-label="Options modes">
       {#each optionsModes as optionMode}
         <button
@@ -327,15 +409,7 @@
         </button>
       {/each}
     </div>
-
-    <div class="kpi-strip">
-      <div><span>Spot</span><strong>{fmt(result?.spot, 2)}</strong></div>
-      <div><span>Front ATM</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
-      <div><span>Term Slope</span><strong class={toneClass(surfaceStats.termSlope)}>{signedPct(surfaceStats.termSlope)}</strong></div>
-      <div><span>Points</span><strong>{surfaceStats.populatedPoints}</strong></div>
-      <div><span>Lines</span><strong>{result?.collection ? `${result.collection.estimated_total_market_data_lines}/${result.collection.configured_market_data_line_budget}` : "N/A"}</strong></div>
-    </div>
-  </div>
+  </article>
 
   <article class="panel controls-panel">
     <div class="field-grid">
@@ -393,25 +467,24 @@
         {#if surfaceQuads.length}
           <svg
             class="surface-svg"
+            class:dragging={isDragging}
             viewBox="0 0 520 300"
             role="img"
-            aria-label="Volatility surface"
+            aria-label="Volatility surface — drag to rotate"
             on:mouseleave={() => (hoveredExpiry = null)}
+            on:pointerdown={onSurfacePointerDown}
+            on:pointermove={onSurfacePointerMove}
+            on:pointerup={onSurfacePointerUp}
+            on:pointercancel={onSurfacePointerUp}
           >
             <g class="surface-gridlines">
-              <line x1="34" y1="268" x2="438" y2="268" />
-              <line x1="48.5" y1="250" x2="452.5" y2="250" />
-              <line x1="63" y1="232" x2="467" y2="232" />
-              <line x1="77.5" y1="214" x2="481.5" y2="214" />
-              <line x1="92" y1="196" x2="496" y2="196" />
-              <line x1="34" y1="235" x2="496" y2="163" />
-              <line x1="34" y1="202" x2="496" y2="130" />
-              <line x1="34" y1="169" x2="496" y2="97" />
-              <line x1="34" y1="136" x2="496" y2="64" />
+              {#each surfaceGridLines as gl}
+                <line x1={gl.x1.toFixed(1)} y1={gl.y1.toFixed(1)} x2={gl.x2.toFixed(1)} y2={gl.y2.toFixed(1)} />
+              {/each}
             </g>
-            <line x1="34" y1="268" x2="438" y2="268" />
-            <line x1="34" y1="268" x2="92" y2="196" />
-            <line x1="438" y1="268" x2="496" y2="196" />
+            {#each surfaceFrameLines as fl}
+              <line class="surface-frame" x1={fl.x1.toFixed(1)} y1={fl.y1.toFixed(1)} x2={fl.x2.toFixed(1)} y2={fl.y2.toFixed(1)} />
+            {/each}
             {#each surfaceQuads as quad}
               <polygon
                 role="presentation"
@@ -446,7 +519,10 @@
           {#if slice}<strong>{formatExpiry(slice.expiry)}</strong>{/if}
         </div>
         {#if sliceLinePoints}
-          <svg class="slice-svg" viewBox="0 0 540 300" role="img" aria-label="Selected expiry implied volatility slice">
+          <svg class="slice-svg" viewBox="0 0 540 300" role="img" aria-label="Selected expiry implied volatility slice"
+            on:mousemove={onSliceMouseMove}
+            on:mouseleave={onSliceMouseLeave}
+          >
             <g class="chart-gridlines">
               <line x1="42" y1="256" x2="502" y2="256" />
               <line x1="42" y1="198" x2="502" y2="198" />
@@ -470,6 +546,18 @@
             {#each sliceStrikeLabels as lbl}
               <text class="axis-label" x={lbl.x} y={lbl.y} text-anchor="middle">{lbl.label}</text>
             {/each}
+            {#if sliceHover}
+              <line class="slice-crosshair"
+                x1={sliceHover.x.toFixed(1)} y1="24"
+                x2={sliceHover.x.toFixed(1)} y2="256" />
+              <circle class="slice-hover-dot"
+                cx={sliceHover.x.toFixed(1)} cy={sliceHover.y.toFixed(1)} r="3.5" />
+              <text class="slice-hover-label"
+                x={sliceHover.x < 350 ? sliceHover.x + 7 : sliceHover.x - 7}
+                y="16"
+                text-anchor={sliceHover.x < 350 ? "start" : "end"}
+              >{fmt(sliceHover.strike, 1)} · {pct(sliceHover.value, 1)}</text>
+            {/if}
           </svg>
         {:else}
           <p class="muted">Select an expiry after loading a surface.</p>
@@ -549,18 +637,20 @@
       <article class="panel table-panel">
         <div class="table-header"><h3>ATM Term Structure</h3></div>
         {#if termStructure.length}
-          <table>
-            <thead><tr><th>Expiry</th><th>DTE</th><th>ATM IV</th></tr></thead>
-            <tbody>
-              {#each termStructure as point}
-                <tr>
-                  <td>{formatExpiry(point.expiry)}</td>
-                  <td>{daysToExpiry(point.expiry)}</td>
-                  <td>{pct(point.iv)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Expiry</th><th>DTE</th><th>ATM IV</th></tr></thead>
+              <tbody>
+                {#each termStructure as point}
+                  <tr>
+                    <td>{formatExpiry(point.expiry)}</td>
+                    <td>{daysToExpiry(point.expiry)}</td>
+                    <td>{pct(point.iv)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
         {:else}
           <p class="muted">Load a surface to inspect ATM term structure.</p>
         {/if}
@@ -568,17 +658,19 @@
 
       <article class="panel table-panel">
         <div class="table-header"><h3>Surface Context</h3></div>
-        <table>
-          <tbody>
-            <tr><th>Selected Expiry</th><td>{formatExpiry(slice?.expiry)}</td></tr>
-            <tr><th>ATM Strike</th><td>{fmt(surfaceStats.atmStrike, 2)}</td></tr>
-            <tr><th>IV Range</th><td>{pct(surfaceStats.minIv)} - {pct(surfaceStats.maxIv)}</td></tr>
-            <tr><th>Avg IV</th><td>{pct(surfaceStats.averageIv)}</td></tr>
-            <tr><th>Grid</th><td>{result?.collection ? `${result.collection.selected_expiry_count}x${result.collection.selected_strike_count}` : "N/A"}</td></tr>
-            <tr><th>Interpolation</th><td>{ratioPct(result?.quality?.interpolation_ratio)}</td></tr>
-            <tr><th>Line Utilization</th><td>{ratioPct(result?.collection?.market_data_line_utilization)}</td></tr>
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table>
+            <tbody>
+              <tr><th>Selected Expiry</th><td>{formatExpiry(slice?.expiry)}</td></tr>
+              <tr><th>ATM Strike</th><td>{fmt(surfaceStats.atmStrike, 2)}</td></tr>
+              <tr><th>IV Range</th><td>{pct(surfaceStats.minIv)} - {pct(surfaceStats.maxIv)}</td></tr>
+              <tr><th>Avg IV</th><td>{pct(surfaceStats.averageIv)}</td></tr>
+              <tr><th>Grid</th><td>{result?.collection ? `${result.collection.selected_expiry_count}x${result.collection.selected_strike_count}` : "N/A"}</td></tr>
+              <tr><th>Interpolation</th><td>{ratioPct(result?.quality?.interpolation_ratio)}</td></tr>
+              <tr><th>Line Utilization</th><td>{ratioPct(result?.collection?.market_data_line_utilization)}</td></tr>
+            </tbody>
+          </table>
+        </div>
       </article>
     </div>
   {:else if mode === "skew_term"}
@@ -756,7 +848,6 @@
   }
 
   .workspace-header,
-  .mode-kpi-row,
   .panel-header,
   .surface-actions,
   .session-control,
@@ -770,7 +861,13 @@
   }
 
   .workspace-header {
-    align-items: end;
+    align-items: center;
+  }
+
+  .header-panel {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.65rem 0.85rem;
   }
 
   .workspace-grid {
@@ -840,17 +937,12 @@
     font-weight: 650;
   }
 
-  .mode-kpi-row {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-
   .mode-bar {
     display: inline-grid;
     grid-template-columns: repeat(5, auto);
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
-    align-self: start;
+    width: fit-content;
   }
 
   .mode-bar button {
@@ -858,7 +950,8 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.82rem;
+    padding: 0.28rem 0.55rem;
+    font-size: 0.8rem;
     cursor: pointer;
   }
 
@@ -874,24 +967,6 @@
   .mode-bar button.selected {
     background: rgba(122, 166, 200, 0.12);
     color: var(--accent);
-  }
-
-  .kpi-strip {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(6rem, 1fr));
-    border: 1px solid var(--panel-border);
-    flex: 1;
-  }
-
-  .kpi-strip > div {
-    padding: 0.38rem 0.58rem;
-    border-right: 1px solid var(--divider);
-    display: grid;
-    gap: 0.12rem;
-  }
-
-  .kpi-strip > div:last-child {
-    border-right: 0;
   }
 
   .controls-panel {
@@ -1020,7 +1095,16 @@
   }
 
   .surface-svg {
-    cursor: crosshair;
+    cursor: grab;
+  }
+
+  .surface-svg.dragging {
+    cursor: grabbing;
+  }
+
+  .surface-frame {
+    stroke: var(--divider);
+    stroke-width: 1;
   }
 
   .surface-svg line {
@@ -1084,6 +1168,26 @@
   .slice-svg circle.spot {
     fill: var(--warning);
     stroke: var(--warning);
+  }
+
+  .slice-crosshair {
+    stroke: var(--text-2);
+    stroke-width: 0.5;
+    stroke-dasharray: 3 3;
+    pointer-events: none;
+  }
+
+  .slice-hover-dot {
+    fill: var(--warning);
+    stroke: none;
+    pointer-events: none;
+  }
+
+  .slice-hover-label {
+    fill: var(--text-1);
+    font-size: 10px;
+    font-family: monospace;
+    pointer-events: none;
   }
 
   .heatmap {
@@ -1153,6 +1257,8 @@
 
   .table-panel {
     padding: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .table-panel > .muted {
@@ -1163,16 +1269,34 @@
     padding: 0.3rem 0.75rem;
     border-bottom: 1px solid var(--divider);
     height: 26px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
+    justify-content: space-between;
   }
 
   .table-header h3 {
     margin: 0;
   }
 
-  .table-wrap {
-    overflow: auto;
+  .table-wrap,
+  .table-scroll {
+    overflow-y: auto;
+    max-height: 280px;
+  }
+
+  .surface-summary-row {
+    align-items: stretch;
+  }
+
+  .surface-summary-row .table-panel {
+    overflow: hidden;
+  }
+
+  .surface-summary-row .table-scroll {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
   }
 
   table {
@@ -1223,8 +1347,7 @@
     .surface-summary-row,
     .detail-grid,
     .controls-panel,
-    .field-grid,
-    .mode-kpi-row {
+    .field-grid {
       grid-template-columns: 1fr;
     }
 
@@ -1239,7 +1362,6 @@
       text-align: left;
     }
 
-    .kpi-strip,
     .mode-bar {
       grid-template-columns: 1fr;
     }

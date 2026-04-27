@@ -10,6 +10,7 @@ export type TabId =
   | "crypto"
   | "fundamentals"
   | "maritime"
+  | "copilot"
   | "risk"
   | "iv";
 
@@ -2438,7 +2439,7 @@ export interface MaritimeTrackResponse {
   track: MaritimeTrackSnippet | null;
 }
 
-export type CopilotBaseDomain = Exclude<TabId, "sitrep" | "maritime">;
+export type CopilotBaseDomain = Exclude<TabId, "sitrep" | "maritime" | "copilot">;
 export type CopilotDomain = CopilotBaseDomain | "synthesis";
 
 export interface CopilotSourceRef {
@@ -2503,6 +2504,50 @@ export interface CopilotThreadState {
   contextFingerprint: string | null;
   latestResponseId: string | null;
   entries: CopilotThreadEntry[];
+}
+
+export interface CopilotSessionSummary {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  active_domain: string | null;
+  active_context_fingerprint: string | null;
+  turn_count: number;
+  memo_count: number;
+  warnings: string[];
+}
+
+export interface CopilotTurnRecord {
+  turn_id: string;
+  session_id: string;
+  turn_index: number;
+  domain: string;
+  prompt: string;
+  context_snapshot_id: string;
+  result: CopilotResearchCardResult;
+  created_at: string;
+}
+
+export interface CopilotMemo {
+  memo_id: string;
+  session_id: string;
+  title: string;
+  body: string;
+  source_turn_ids: string[];
+  source_snapshot_ids: string[];
+  created_at: string;
+  updated_at: string;
+  warnings: string[];
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CopilotSessionDetail {
+  session: CopilotSessionSummary;
+  turns: CopilotTurnRecord[];
+  memos: CopilotMemo[];
 }
 
 export interface IvSurfaceCollection {

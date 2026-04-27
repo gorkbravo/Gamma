@@ -20,14 +20,18 @@ from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.prediction_market_service import PredictionMarketService
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotMemo,
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotSession,
     CopilotSourceRef,
+    CopilotTurn,
     CopilotToolExecution,
     CopilotToolTrace,
     MacroCopilotContext,
 )
+from src.services.copilot_store import CopilotStore
 from src.models.macro import MacroMetricRecord, MacroSeriesHistory
 from src.models.prediction_markets import PredictionProbabilityPoint
 from src.services.copilot_provider import CopilotProvider
@@ -60,12 +64,14 @@ class CopilotService:
         crypto_service: CryptoService,
         fundamentals_service: FundamentalsService,
         provider: CopilotProvider,
+        store: CopilotStore | None = None,
     ) -> None:
         self.macro_service = macro_service
         self.prediction_market_service = prediction_market_service
         self.crypto_service = crypto_service
         self.fundamentals_service = fundamentals_service
         self.provider = provider
+        self.store = store
         self._context_builders = {
             "portfolio": self._build_portfolio_context,
             "research": self._build_research_context,
@@ -402,12 +408,81 @@ class CopilotService:
             for tool in self._tools.values()
             if resolved_domain in tool.domains
         ]
-        return self.provider.generate_research_card(
+        result = self.provider.generate_research_card(
             request=normalized_request,
             context=context,
             tool_specs=tool_specs,
             execute_tool=self._execute_tool,
         )
+        if self.store is not None:
+            self.store.record_turn(
+                session_id=normalized_request.user_session_id,
+                title=normalized_request.session_title,
+                domain=resolved_domain,
+                current_tab=context.current_tab,
+                workspace_mode=normalized_request.context.workspace_mode,
+                prompt=normalized_request.prompt,
+                context_fingerprint=normalized_request.context_fingerprint,
+                context_summary=self._context_summary_for_persistence(context),
+                result=result,
+            )
+        return result
+
+    def list_sessions(self) -> list[CopilotSession]:
+        return self.store.list_sessions() if self.store is not None else []
+
+    def list_turns(self, session_id: str) -> list[CopilotTurn]:
+        return self.store.list_turns(session_id) if self.store is not None else []
+
+    def list_memos(self, session_id: str | None = None) -> list[CopilotMemo]:
+        return self.store.list_memos(session_id) if self.store is not None else []
+
+    def create_memo(
+        self,
+        *,
+        session_id: str,
+        title: str | None = None,
+        notes: str | None = None,
+        source_turn_ids: list[str] | None = None,
+    ) -> CopilotMemo:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.create_memo(
+            session_id=session_id,
+            title=title,
+            notes=notes,
+            source_turn_ids=source_turn_ids,
+        )
+
+    @staticmethod
+    def stream_events_for_result(result: CopilotResearchCardResult) -> list[dict[str, Any]]:
+        return [
+            {"event": "status", "data": {"status": "started", "domain": result.domain}},
+            {
+                "event": "metadata",
+                "data": {
+                    "provider": result.provider,
+                    "model": result.model,
+                    "response_id": result.response_id,
+                    "source_count": len(result.sources),
+                    "tool_count": len(result.tool_traces),
+                    "warning_count": len(result.warnings),
+                },
+            },
+            {"event": "result", "data": result},
+            {"event": "done", "data": {"status": result.status}},
+        ]
+
+    @staticmethod
+    def _context_summary_for_persistence(context: CopilotContextBundle) -> dict[str, Any]:
+        return {
+            "domain": context.domain,
+            "current_tab": context.current_tab,
+            "summary_data": context.summary_data,
+            "source_ids": [source.source_id for source in context.sources],
+            "warnings": list(context.warnings),
+            "read_only_safety": context.read_only_safety,
+        }
 
     def _execute_tool(
         self,

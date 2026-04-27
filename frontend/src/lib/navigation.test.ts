@@ -41,6 +41,7 @@ describe("navigation tab ordering", () => {
       "fundamentals",
       "commodities",
       "maritime",
+      "copilot",
       "risk",
       "iv",
     ]);
@@ -58,6 +59,7 @@ describe("navigation tab ordering", () => {
       "fundamentals",
       "commodities",
       "maritime",
+      "copilot",
     ]);
   });
 
@@ -72,6 +74,7 @@ describe("navigation tab ordering", () => {
       "fundamentals",
       "commodities",
       "maritime",
+      "copilot",
       "iv",
     ]);
   });
@@ -123,6 +126,7 @@ describe("navigation tab ordering", () => {
 
     expect(hasRegisteredModes("macro")).toBe(true);
     expect(hasRegisteredModes("research")).toBe(true);
+    expect(hasRegisteredModes("copilot")).toBe(false);
     expect(Object.keys(snapshot).sort()).toEqual([
       "commodities",
       "crypto",
@@ -198,6 +202,7 @@ describe("workspace tab-order persistence", () => {
       "fundamentals",
       "commodities",
       "maritime",
+      "copilot",
       "iv",
     ]);
     expect(get(store).portfolio).toEqual(DEFAULT_WORKSPACE_TAB_ORDER.portfolio);
@@ -213,6 +218,7 @@ describe("workspace tab-order persistence", () => {
       "fundamentals",
       "commodities",
       "maritime",
+      "copilot",
       "iv",
     ]);
     expect(get(reloadedStore).portfolio).toEqual(DEFAULT_WORKSPACE_TAB_ORDER.portfolio);

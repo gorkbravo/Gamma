@@ -8,7 +8,10 @@ import type {
   CommodityWorkspaceResponse,
   CopilotBaseDomain,
   CopilotDomain,
+  CopilotMemo,
   CopilotResearchCardResult,
+  CopilotSessionDetail,
+  CopilotSessionSummary,
   CopilotThreadEntry,
   CopilotThreadState,
   CryptoComparison,
@@ -332,6 +335,9 @@ export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardRe
   synthesis: null
 });
 export const copilotThreads = writable<Record<CopilotDomain, CopilotThreadState>>(createEmptyCopilotThreads());
+export const copilotSessions = writable<CopilotSessionSummary[]>([]);
+export const activeCopilotSession = writable<CopilotSessionDetail | null>(null);
+export const copilotMemos = writable<CopilotMemo[]>([]);
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -2205,6 +2211,7 @@ export async function loadCopilotResearchCard(
       domain,
       prompt,
       user_session_id: getCopilotSessionId(),
+      context_fingerprint: contextFingerprint,
       ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
       context,
       ...(synthesis ? { synthesis } : {})
@@ -2239,6 +2246,69 @@ export async function loadCopilotResearchCard(
     }));
     lastError.set("");
     return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("copilot", false);
+  }
+}
+
+export async function loadCopilotSessions() {
+  try {
+    const sessions = await getJson<CopilotSessionSummary[]>("/copilot/sessions");
+    copilotSessions.set(sessions);
+    lastError.set("");
+    return sessions;
+  } catch (error) {
+    setError(error);
+    return [];
+  }
+}
+
+export async function loadActiveCopilotSession() {
+  try {
+    const sessionId = getCopilotSessionId();
+    const detail = await getJson<CopilotSessionDetail>(`/copilot/sessions/${encodeURIComponent(sessionId)}`);
+    activeCopilotSession.set(detail);
+    copilotMemos.set(detail.memos);
+    lastError.set("");
+    return detail;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function loadCopilotMemos(sessionId?: string | null) {
+  try {
+    const suffix = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+    const memos = await getJson<CopilotMemo[]>(`/copilot/memos${suffix}`);
+    copilotMemos.set(memos);
+    lastError.set("");
+    return memos;
+  } catch (error) {
+    setError(error);
+    return [];
+  }
+}
+
+export async function createCopilotMemo(options: {
+  title?: string;
+  notes?: string;
+  sourceTurnIds?: string[];
+} = {}) {
+  setLoading("copilot", true);
+  try {
+    const memo = await postJson<CopilotMemo>("/copilot/memos", {
+      session_id: getCopilotSessionId(),
+      title: options.title,
+      notes: options.notes,
+      source_turn_ids: options.sourceTurnIds ?? []
+    });
+    await Promise.allSettled([loadCopilotMemos(getCopilotSessionId()), loadActiveCopilotSession(), loadCopilotSessions()]);
+    lastError.set("");
+    return memo;
   } catch (error) {
     setError(error);
     return null;

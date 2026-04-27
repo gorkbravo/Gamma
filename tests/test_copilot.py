@@ -1065,6 +1065,85 @@ def test_macro_copilot_route_returns_structured_research_card(tmp_path):
         runtime.shutdown()
 
 
+def test_copilot_persists_sessions_turns_and_memos(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Persist this macro session.",
+                "user_session_id": "session_test_persist",
+                "context_fingerprint": "fp_macro_persist",
+                "context": {
+                    "current_tab": "macro",
+                    "workspace_mode": "research",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        sessions = client.get("/copilot/sessions")
+        assert sessions.status_code == 200
+        assert any(item["session_id"] == "session_test_persist" for item in sessions.json())
+
+        detail = client.get("/copilot/sessions/session_test_persist")
+        assert detail.status_code == 200
+        payload = detail.json()
+        assert payload["session"]["turn_count"] == 1
+        assert payload["turns"][0]["context_snapshot_id"].startswith("ctx_")
+        assert payload["turns"][0]["result"]["card"]["title"] == "Macro test card"
+
+        memo_response = client.post(
+            "/copilot/memos",
+            json={"session_id": "session_test_persist", "title": "Macro Memo"},
+        )
+        assert memo_response.status_code == 200
+        memo = memo_response.json()
+        assert memo["title"] == "Macro Memo"
+        assert "Hypothesis:" in memo["body"]
+        assert memo["source_turn_ids"] == [payload["turns"][0]["turn_id"]]
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_stream_endpoint_emits_ndjson_events(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-card/stream",
+            json={
+                "domain": "macro",
+                "prompt": "Stream the macro card.",
+                "user_session_id": "session_test_stream",
+                "context": {
+                    "current_tab": "macro",
+                    "workspace_mode": "research",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        assert [event["event"] for event in events] == ["status", "metadata", "result", "done"]
+        assert events[2]["data"]["card"]["title"] == "Macro test card"
+    finally:
+        runtime.shutdown()
+
+
 def test_macro_copilot_route_degrades_when_macro_provider_fails(tmp_path):
     class FailingMacroService:
         def get_snapshot(self, request):

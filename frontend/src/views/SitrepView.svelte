@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
   import type {
     CommodityWorkspaceResponse,
@@ -32,6 +33,8 @@
   export let onLoadMacro: (options?: MacroLoadOptions) => Promise<unknown> | void;
   export let onLoadCommodities: (options?: CommodityWorkspaceLoadOptions) => Promise<unknown> | void;
   export let onLoadPrediction: (options?: PredictionMarketScreenerOptions) => Promise<unknown> | void;
+  export let selectedEquitySymbol: string | null = null;
+  export let onSelectEquity: ((symbol: string, label?: string | null) => void) | null = null;
 
   const bloombergChannelId = "UCIALMKvObZNtJ6AmdCLP7Lg";
   const bloombergEmbedUrl = `https://www.youtube.com/embed/live_stream?channel=${bloombergChannelId}&autoplay=0&mute=1`;
@@ -48,7 +51,9 @@
 
   type SitrepMarketRow = {
     id: string;
+    symbol?: string | null;
     label: string;
+    selectionLabel?: string | null;
     group: string;
     last: string;
     change: string;
@@ -423,7 +428,9 @@
       .slice(0, 12);
     return nodes.map((node) => ({
       id: node.node_id,
+      symbol: node.symbol,
       label: node.symbol ?? node.label,
+      selectionLabel: node.label,
       group: abbreviateSector(node.group ?? node.sector ?? ""),
       last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
       change: formatPct(node.metrics.total_return),
@@ -431,6 +438,20 @@
       tone: toneFromValue(node.metrics.total_return),
       source: ""
     }));
+  }
+
+  function selectEquityRow(row: SitrepMarketRow) {
+    const symbol = row.symbol?.trim() || row.label.trim();
+    if (!symbol) {
+      return;
+    }
+    onSelectEquity?.(symbol, row.selectionLabel ?? row.label);
+  }
+
+  function isSelectedEquityRow(row: SitrepMarketRow) {
+    const selected = selectedEquitySymbol?.trim().toUpperCase();
+    const symbol = (row.symbol ?? row.label).trim().toUpperCase();
+    return Boolean(selected && symbol && selected === symbol);
   }
 
   function buildIndexRows(data: ResearchOverviewResponse | null): SitrepMarketRow[] {
@@ -648,11 +669,19 @@
       {#if equityRows.length}
         <div class="strip-track">
           {#each [...equityRows, ...equityRows] as row}
-            <span class="strip-item">
+            <button
+              type="button"
+              class:selected={isSelectedEquityRow(row)}
+              class="strip-item"
+              on:click={() => selectEquityRow(row)}
+              aria-label={`Select ${row.label} as selected equity`}
+              aria-pressed={isSelectedEquityRow(row)}
+              title={`Select ${row.label}`}
+            >
               <strong>{row.label}</strong>
               <em>{row.last}</em>
               <b class={row.tone}>{row.change}</b>
-            </span>
+            </button>
           {/each}
         </div>
       {:else}
@@ -729,8 +758,8 @@
         </div>
         <div class="tape-list">
           {#if changedRows.length}
-            {#each changedRows as row}
-              <div class="tape-row {row.tone}">
+            {#each changedRows as row (row.id)}
+              <div use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'} class="tape-row {row.tone}">
                 <span>{row.source}</span>
                 <strong>{row.title}</strong>
                 <p>{row.detail}</p>
@@ -773,8 +802,8 @@
         </div>
         <div class="news-wrap">
           {#if news?.items?.length}
-            {#each news.items as item}
-              <div class="news-row">
+            {#each news.items as item (item.normalized_id)}
+              <div use:flashOnMount={'neutral'} class="news-row">
                 <span class="news-time">{formatTime(item.published_at)}</span>
                 <p class="news-title">{item.title}</p>
                 <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{abbreviateSource(item.source_name)}</a>
@@ -988,12 +1017,32 @@
   }
 
   .strip-item {
+    appearance: none;
+    background: transparent;
+    border: 0;
     display: inline-flex;
     align-items: baseline;
     gap: 0.38rem;
     padding: 0.42rem 0.72rem;
     border-right: 1px solid var(--divider);
     white-space: nowrap;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+
+  .strip-item:hover,
+  .strip-item:focus-visible {
+    background: var(--bg-1);
+  }
+
+  .strip-item:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .strip-item.selected {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
   }
 
   .strip-item strong,

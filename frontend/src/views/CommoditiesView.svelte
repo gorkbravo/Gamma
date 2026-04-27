@@ -1096,14 +1096,6 @@
     return modes.find((item) => item.id === activeMode)?.label ?? "Commodities";
   }
 
-  function modeSubtitle(activeMode: CommodityMode) {
-    if (activeMode === "energy") return "Commodity-specific energy price, curve, spread, and inventory context.";
-    if (activeMode === "metals") return "Commodity-specific precious and industrial metals context.";
-    if (activeMode === "curves_spreads") return "Selected futures curve and linked spread analytics.";
-    if (activeMode === "inventories_fundamentals") return "Selected physical series and fundamental context where provider coverage exists.";
-    if (activeMode === "events_cross_domain") return "Selected release calendar, macro, maritime, and prediction-market links.";
-    return "Market-wide commodity regime snapshot.";
-  }
 </script>
 
 <section class="view">
@@ -1207,7 +1199,6 @@
           <div class="section-head control-head">
             <div>
               <h2>Term Structure Stack</h2>
-              <p>Current curve for the selected commodity. Previous curve history requires deeper futures-history coverage.</p>
             </div>
             <label>
               Curve Market
@@ -1235,13 +1226,8 @@
           <TimeSeriesChart series={curveSeries} height={340} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
-        <article class="panel matrix-panel span-2">
-          <div class="section-head">
-            <div>
-              <h2>Commodity Matrix</h2>
-              <p>Market-wide price, curve, spread, and inventory context.</p>
-            </div>
-          </div>
+        <article class="panel table-panel matrix-panel span-2">
+          <div class="table-panel-hdr">Commodity Matrix</div>
           <div class="table-wrap">
             <table class="matrix-table">
               <colgroup>
@@ -1296,7 +1282,6 @@
           <div class="section-head">
             <div>
               <h2>Momentum / Roll Scatter</h2>
-              <p>{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"} and {overview?.scatter?.y_methodology_label ?? "curve roll-yield proxy"}.</p>
             </div>
           </div>
           {#if scatterState.points.length}
@@ -1349,7 +1334,6 @@
           <div class="section-head">
             <div>
               <h2>Event Tape</h2>
-              <p>Release calendar and watch items across the loaded commodity universe.</p>
             </div>
           </div>
           <div class="table-wrap">
@@ -1385,7 +1369,6 @@
           <div class="section-head">
             <div>
               <h2>Market Regime Ranks</h2>
-              <p>Engineered from curve analytics, spread z-scores, and inventory percentiles.</p>
             </div>
           </div>
           <div class="rank-grid">
@@ -1492,7 +1475,6 @@
           <div class="section-head">
             <div>
               <h2>Cross-Domain Notes</h2>
-              <p>Macro, prediction-market, and maritime links where available.</p>
             </div>
           </div>
           <div class="note-list compact-notes four-col-notes">
@@ -1577,12 +1559,8 @@
           <TimeSeriesChart series={priceSeries} height={270} emptyMessage="CHART UNAVAILABLE" />
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>{mode === "metals" ? "Metals Snapshot" : mode === "energy" ? "Energy Snapshot" : "Market Snapshot"}</h2>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">{mode === "metals" ? "Metals Snapshot" : mode === "energy" ? "Energy Snapshot" : "Market Snapshot"}</div>
           <div class="table-wrap">
             <table class="market-table">
               <thead>
@@ -1630,12 +1608,8 @@
 
     {#if mode === "energy"}
       <section class="deep-grid">
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Crack Spread Matrix</h2>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">Crack Spread Matrix</div>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
@@ -1719,12 +1693,8 @@
           </div>
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Vessel / Flow Proxy</h2>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">Vessel / Flow Proxy</div>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
@@ -1751,13 +1721,8 @@
 
     {#if mode === "metals"}
       <section class="deep-grid">
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Macro Driver Correlation</h2>
-              <p>30D rolling correlation of gold/copper versus USD and real yields.</p>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">Macro Driver Correlation</div>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
@@ -1790,7 +1755,6 @@
           <div class="section-head">
             <div>
               <h2>Precious Ratio Gauges</h2>
-              <p>Gold/silver and gold/platinum versus long-run or loaded-history mean.</p>
             </div>
           </div>
           <div class="ratio-gauge-list">
@@ -1815,13 +1779,8 @@
           </div>
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>LME / COMEX Warehouse Stocks</h2>
-              <p>On-warrant and registered inventory proxies by industrial metal.</p>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">LME / COMEX Warehouse Stocks</div>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
@@ -1855,13 +1814,8 @@
           </div>
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Substitution Spreads</h2>
-              <p>Copper versus aluminum normalized to metric-ton terms.</p>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">Substitution Spreads</div>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
@@ -1880,7 +1834,7 @@
                       <td>{row.label}</td>
                       <td>{formatNumber(row.value, 1)} USD/mt</td>
                       <td class={valueClass(row.change)}>{formatNumber(row.change, 1)}</td>
-                      <td>{formatNumber(row.zScore, 2)}</td>
+                      <td class={valueClass(row.zScore)}>{formatNumber(row.zScore, 2)}</td>
                       <td>{row.interpretation}</td>
                     </tr>
                   {/each}
@@ -1900,18 +1854,13 @@
           <div class="section-head">
             <div>
               <h2>EIA Fundamental Stack</h2>
-              <p>Loaded energy fundamentals indexed to 100 at the first observation.</p>
             </div>
           </div>
           <TimeSeriesChart series={fundamentalStackSeries} height={260} emptyMessage="NO FUNDAMENTAL HISTORY" showLegend={true} />
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Fundamental Tape</h2>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">Fundamental Tape</div>
           <div class="table-wrap">
             <table class="compact-table fundamental-table">
               <thead>
@@ -1976,12 +1925,8 @@
           <TimeSeriesChart series={curveSeries} height={285} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Curve Nodes</h2>
-            </div>
-          </div>
+        <article class="panel table-panel">
+          <div class="table-panel-hdr">Curve Nodes</div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -2017,12 +1962,8 @@
     {/if}
 
     {#if mode === "curves_spreads" || mode === "metals" || mode === "energy"}
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <h2>Spreads</h2>
-          </div>
-        </div>
+      <section class="panel table-panel">
+        <div class="table-panel-hdr">Spreads</div>
         <div class="table-wrap">
           <table class="spread-table">
             <thead>
@@ -2044,7 +1985,7 @@
                     </td>
                     <td>{formatNumber(spread.value, 3)} {spreadUnit(spread)}</td>
                     <td class={valueClass(spread.change)}>{formatNumber(spread.change, 3)}</td>
-                    <td>{formatNumber(spread.z_score, 2)}</td>
+                    <td class={valueClass(spread.z_score)}>{formatNumber(spread.z_score, 2)}</td>
                     <td>{formatPercentile(spread.percentile)}</td>
                   </tr>
                 {/each}
@@ -2110,7 +2051,6 @@
           <div class="section-head">
             <div>
               <h2>Events</h2>
-              <p>Official releases and watch items linked to the selected commodity.</p>
             </div>
           </div>
           <div class="note-list">
@@ -2132,7 +2072,6 @@
           <div class="section-head">
             <div>
               <h2>Cross-Domain</h2>
-              <p>Heuristic links into Macro, Prediction Markets, and Sealanes contexts.</p>
             </div>
           </div>
           <div class="note-list">
@@ -2294,6 +2233,9 @@
 
   .refresh-button {
     flex: 0 0 auto;
+    min-height: 25px;
+    padding: 4px 9px;
+    font-size: 0.72rem;
   }
 
   label {
@@ -2344,8 +2286,8 @@
     border-right: 1px solid var(--panel-strong);
     border-radius: 0;
     background: transparent;
-    min-height: 1.9rem;
-    padding: 0.35rem 0.75rem;
+    min-height: 27px;
+    padding: 0.3rem 0.75rem;
     white-space: nowrap;
     color: var(--text-1);
   }
@@ -2521,6 +2463,24 @@
     color: var(--text-0);
     font-weight: 650;
     overflow-wrap: anywhere;
+  }
+
+  .table-panel {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .table-panel-hdr {
+    display: flex;
+    align-items: center;
+    padding: 0.3rem 0.75rem;
+    min-height: 26px;
+    border-bottom: 1px solid var(--divider);
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
   }
 
   .table-wrap {
