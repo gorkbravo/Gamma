@@ -118,6 +118,61 @@ def test_fundamentals_peer_basket_persists_across_overview_requests(tmp_path):
     assert selected_candidates == ["MSFT", "GOOGL", "META"]
 
 
+def test_fundamentals_peer_seed_uses_sic_instead_of_tech_fallback_for_chemicals(tmp_path):
+    service = _build_service(tmp_path)
+
+    peers = service.get_peers("ALB")
+
+    assert peers is not None
+    assert peers.peer_basket.peer_tickers == ["FMC", "CE", "DOW", "EMN", "DD"]
+    assert not {"AAPL", "GOOGL", "ORCL", "SAP", "CRM"}.intersection(peers.peer_basket.peer_tickers)
+    assert peers.peer_heatmap is not None
+    assert peers.peer_heatmap.tickers[:3] == ["ALB", "FMC", "CE"]
+
+
+def test_fundamentals_peer_seed_handles_semiconductor_equipment(tmp_path):
+    service = _build_service(tmp_path)
+
+    peers = service.get_peers("ASML")
+
+    assert peers is not None
+    assert peers.peer_basket.peer_tickers == ["AMAT", "LRCX", "KLAC", "TER", "ONTO"]
+    assert not {"AAPL", "GOOGL", "ORCL", "SAP", "CRM"}.intersection(peers.peer_basket.peer_tickers)
+
+
+def test_fundamentals_peer_seed_handles_broad_non_tech_buckets(tmp_path):
+    service = _build_service(tmp_path)
+
+    bank_peers = service.get_peers("JPM")
+    utility_peers = service.get_peers("NEE")
+    airline_peers = service.get_peers("DAL")
+
+    assert bank_peers is not None
+    assert bank_peers.peer_basket.peer_tickers == ["BAC", "WFC", "C", "PNC"]
+    assert utility_peers is not None
+    assert utility_peers.peer_basket.peer_tickers == ["DUK", "SO", "AEP", "EXC"]
+    assert airline_peers is not None
+    assert airline_peers.peer_basket.peer_tickers == ["UAL", "AAL", "LUV", "ALK"]
+
+
+def test_fundamentals_peer_basket_ignores_cross_ticker_cached_payload(tmp_path):
+    service = _build_service(tmp_path)
+    service.store.save_peer_basket(
+        "ALB",
+        {
+            "focal_ticker": "AAPL",
+            "peer_tickers": ["AAPL", "GOOGL", "ORCL", "SAP", "CRM"],
+            "display_order": ["AAPL", "GOOGL", "ORCL", "SAP", "CRM"],
+            "user_edited": False,
+        },
+    )
+
+    peers = service.get_peers("ALB")
+
+    assert peers is not None
+    assert peers.peer_basket.peer_tickers == ["FMC", "CE", "DOW", "EMN", "DD"]
+
+
 def test_fundamentals_peers_payload_deepens_comparison_and_diagnostics(tmp_path):
     service = _build_service(tmp_path)
 
@@ -218,6 +273,24 @@ def test_fundamentals_dcf_model_reanchors_stale_projection_years_from_store(tmp_
     assert reloaded is not None
     assert reloaded.historical_year_labels[-1] == "FY 2024"
     assert reloaded.projection_years == [2025, 2026, 2027, 2028, 2029]
+
+
+def test_fundamentals_default_dcf_mean_reverts_cyclical_trough_margins(tmp_path):
+    service = _build_service(tmp_path)
+
+    model = service.get_dcf_model("ALB")
+
+    assert model is not None
+    base = next(scenario for scenario in model.scenarios if scenario.scenario_id == "base")
+    revenue_growth = base.assumptions["revenue_growth_pct"]
+    ebit_margin = base.assumptions["ebit_margin_pct"]
+
+    assert isinstance(revenue_growth, list)
+    assert isinstance(ebit_margin, list)
+    assert revenue_growth[0] > -0.04
+    assert ebit_margin[0] > 0.02
+    assert ebit_margin[-1] > ebit_margin[0]
+    assert ebit_margin[-1] > 0.10
 
 
 def test_sec_adapter_normalizes_quarterly_periods_and_derives_missing_quarters(tmp_path):
@@ -359,8 +432,65 @@ def _build_service(tmp_path) -> FundamentalsService:
             ("AMZN", "Amazon.com, Inc.", 1.35, 185.0),
             ("META", "Meta Platforms, Inc.", 0.48, 510.0),
             ("SAP", "SAP SE", 0.19, 205.0),
+            ("FMC", "FMC Corporation", 0.07, 58.0),
+            ("CE", "Celanese Corporation", 0.08, 145.0),
+            ("DOW", "Dow Inc.", 0.16, 56.0),
+            ("EMN", "Eastman Chemical Company", 0.09, 88.0),
+            ("DD", "DuPont de Nemours, Inc.", 0.12, 76.0),
+            ("ASML", "ASML Holding N.V.", 0.22, 980.0),
+            ("AMAT", "Applied Materials, Inc.", 0.18, 210.0),
+            ("LRCX", "Lam Research Corporation", 0.13, 930.0),
+            ("KLAC", "KLA Corporation", 0.08, 710.0),
+            ("TER", "Teradyne, Inc.", 0.04, 125.0),
+            ("ONTO", "Onto Innovation Inc.", 0.02, 185.0),
+            ("JPM", "JPMorgan Chase & Co.", 0.30, 210.0),
+            ("BAC", "Bank of America Corporation", 0.22, 38.0),
+            ("WFC", "Wells Fargo & Company", 0.18, 62.0),
+            ("C", "Citigroup Inc.", 0.19, 64.0),
+            ("PNC", "The PNC Financial Services Group, Inc.", 0.09, 170.0),
+            ("NEE", "NextEra Energy, Inc.", 0.11, 74.0),
+            ("DUK", "Duke Energy Corporation", 0.10, 108.0),
+            ("SO", "The Southern Company", 0.10, 82.0),
+            ("AEP", "American Electric Power Company, Inc.", 0.08, 95.0),
+            ("EXC", "Exelon Corporation", 0.08, 38.0),
+            ("DAL", "Delta Air Lines, Inc.", 0.12, 48.0),
+            ("UAL", "United Airlines Holdings, Inc.", 0.11, 55.0),
+            ("AAL", "American Airlines Group Inc.", 0.10, 14.0),
+            ("LUV", "Southwest Airlines Co.", 0.08, 31.0),
+            ("ALK", "Alaska Air Group, Inc.", 0.03, 44.0),
         )
     }
+    company_data["ALB"] = _cyclical_alb_data()
+    for ticker in ("FMC", "CE", "DOW", "EMN", "DD"):
+        company_data[ticker] = _with_company_classification(
+            company_data[ticker],
+            sic="2821",
+            sic_description="Plastic Materials, Synthetic Resins, and Nonvulcanizable Elastomers",
+        )
+    for ticker in ("ASML", "AMAT", "LRCX", "KLAC", "TER", "ONTO"):
+        company_data[ticker] = _with_company_classification(
+            company_data[ticker],
+            sic="3559",
+            sic_description="Special Industry Machinery, Not Elsewhere Classified",
+        )
+    for ticker in ("JPM", "BAC", "WFC", "C", "PNC"):
+        company_data[ticker] = _with_company_classification(
+            company_data[ticker],
+            sic="6021",
+            sic_description="National Commercial Banks",
+        )
+    for ticker in ("NEE", "DUK", "SO", "AEP", "EXC"):
+        company_data[ticker] = _with_company_classification(
+            company_data[ticker],
+            sic="4911",
+            sic_description="Electric Services",
+        )
+    for ticker in ("DAL", "UAL", "AAL", "LUV", "ALK"):
+        company_data[ticker] = _with_company_classification(
+            company_data[ticker],
+            sic="4512",
+            sic_description="Air Transportation, Scheduled",
+        )
     price_contexts = {
         ticker: _price_context(ticker, price, scale)
         for ticker, price, scale in (
@@ -370,6 +500,33 @@ def _build_service(tmp_path) -> FundamentalsService:
             ("AMZN", 185.0, 1.35),
             ("META", 510.0, 0.48),
             ("SAP", 205.0, 0.19),
+            ("ALB", 118.0, 0.05),
+            ("FMC", 58.0, 0.07),
+            ("CE", 145.0, 0.08),
+            ("DOW", 56.0, 0.16),
+            ("EMN", 88.0, 0.09),
+            ("DD", 76.0, 0.12),
+            ("ASML", 980.0, 0.22),
+            ("AMAT", 210.0, 0.18),
+            ("LRCX", 930.0, 0.13),
+            ("KLAC", 710.0, 0.08),
+            ("TER", 125.0, 0.04),
+            ("ONTO", 185.0, 0.02),
+            ("JPM", 210.0, 0.30),
+            ("BAC", 38.0, 0.22),
+            ("WFC", 62.0, 0.18),
+            ("C", 64.0, 0.19),
+            ("PNC", 170.0, 0.09),
+            ("NEE", 74.0, 0.11),
+            ("DUK", 108.0, 0.10),
+            ("SO", 82.0, 0.10),
+            ("AEP", 95.0, 0.08),
+            ("EXC", 38.0, 0.08),
+            ("DAL", 48.0, 0.12),
+            ("UAL", 55.0, 0.11),
+            ("AAL", 14.0, 0.10),
+            ("LUV", 31.0, 0.08),
+            ("ALK", 44.0, 0.03),
         )
     }
     return FundamentalsService(
@@ -384,6 +541,186 @@ def _without_statement_lines(
     line_keys: set[str],
 ) -> FundamentalsStatementView:
     return replace(view, lines=[line for line in view.lines if line.line_key not in line_keys])
+
+
+def _with_company_classification(
+    sec_data: SecCompanyData,
+    *,
+    sic: str,
+    sic_description: str,
+) -> SecCompanyData:
+    return replace(
+        sec_data,
+        company=replace(
+            sec_data.company,
+            sic=sic,
+            sic_description=sic_description,
+            classification_labels=[sic_description, sec_data.company.filer_category or "", sec_data.company.exchange or ""],
+        ),
+    )
+
+
+def _cyclical_alb_data() -> SecCompanyData:
+    periods = [
+        _period(f"FY-{year}", f"FY {year}", year, "FY", f"{year}-12-31", form="10-K")
+        for year in (2020, 2021, 2022, 2023, 2024)
+    ]
+    quarterly_periods = [
+        _period(f"Q{quarter}-2025-{quarter}", f"Q{quarter} 2025", 2025, f"Q{quarter}", f"2025-0{quarter + 2}-30", form="10-Q")
+        for quarter in range(1, 5)
+    ]
+    revenues = [3_100_000_000.0, 3_300_000_000.0, 7_300_000_000.0, 9_600_000_000.0, 5_400_000_000.0]
+    gross_profit = [1_020_000_000.0, 1_150_000_000.0, 2_900_000_000.0, 3_840_000_000.0, 1_300_000_000.0]
+    operating_income = [372_000_000.0, 462_000_000.0, 1_752_000_000.0, 2_688_000_000.0, 108_000_000.0]
+    net_income = [84_000_000.0, 124_000_000.0, 1_050_000_000.0, 1_573_000_000.0, -45_000_000.0]
+    income_tax = [70_000_000.0, 88_000_000.0, 330_000_000.0, 510_000_000.0, 18_000_000.0]
+    diluted_shares = [117_000_000.0, 117_000_000.0, 117_500_000.0, 117_600_000.0, 117_700_000.0]
+    cash = [720_000_000.0, 680_000_000.0, 1_500_000_000.0, 1_900_000_000.0, 1_100_000_000.0]
+    marketable = [0.0 for _ in periods]
+    receivables = [420_000_000.0, 460_000_000.0, 930_000_000.0, 1_120_000_000.0, 760_000_000.0]
+    inventory = [750_000_000.0, 810_000_000.0, 1_400_000_000.0, 1_580_000_000.0, 1_220_000_000.0]
+    current_assets = [2_200_000_000.0, 2_320_000_000.0, 4_600_000_000.0, 5_200_000_000.0, 4_100_000_000.0]
+    total_assets = [10_200_000_000.0, 10_700_000_000.0, 15_800_000_000.0, 17_300_000_000.0, 16_100_000_000.0]
+    payables = [380_000_000.0, 410_000_000.0, 820_000_000.0, 920_000_000.0, 700_000_000.0]
+    short_term_debt = [150_000_000.0, 200_000_000.0, 250_000_000.0, 300_000_000.0, 320_000_000.0]
+    current_liabilities = [1_000_000_000.0, 1_060_000_000.0, 1_850_000_000.0, 2_100_000_000.0, 1_900_000_000.0]
+    long_term_debt = [2_100_000_000.0, 2_300_000_000.0, 3_400_000_000.0, 3_900_000_000.0, 4_100_000_000.0]
+    total_liabilities = [4_200_000_000.0, 4_500_000_000.0, 6_800_000_000.0, 7_500_000_000.0, 7_700_000_000.0]
+    equity = [6_000_000_000.0, 6_200_000_000.0, 9_000_000_000.0, 9_800_000_000.0, 8_400_000_000.0]
+    shares_outstanding = [117_000_000.0, 117_000_000.0, 117_500_000.0, 117_600_000.0, 117_700_000.0]
+    operating_cash_flow = [560_000_000.0, 610_000_000.0, 1_860_000_000.0, 2_420_000_000.0, 420_000_000.0]
+    capex = [330_000_000.0, 360_000_000.0, 620_000_000.0, 760_000_000.0, 690_000_000.0]
+    da = [260_000_000.0, 275_000_000.0, 360_000_000.0, 410_000_000.0, 430_000_000.0]
+
+    company = FundamentalsCompanyRecord(
+        ticker="ALB",
+        cik="0000915913",
+        name="Albemarle Corporation",
+        exchange="NYSE",
+        sic="2821",
+        sic_description="Plastic Materials, Synthetic Resins, and Nonvulcanizable Elastomers",
+        filer_category="Large accelerated filer",
+        fiscal_year_end="1231",
+        state_of_incorporation="NC",
+        phone=None,
+        website="https://alb.example.com",
+        investor_website="https://investors.alb.example.com",
+        description="Albemarle fixture with cyclical lithium trough economics.",
+        latest_report_period=_dt("2024-12-31"),
+        latest_filing_date=_dt("2025-02-20"),
+        classification_labels=["Plastic Materials, Synthetic Resins, and Nonvulcanizable Elastomers", "Large accelerated filer", "NYSE"],
+        source_provider="sec",
+        retrieved_at=NOW,
+        origin="fundamentals.sec.submissions",
+        transformation_note="Fixture company metadata.",
+    )
+    filings = [
+        FundamentalsFilingRecord(
+            form="10-K",
+            filing_date=_dt("2025-02-20"),
+            report_period=_dt("2024-12-31"),
+            accession_number="ALB-2024",
+            is_amendment=False,
+            source_provider="sec",
+            retrieved_at=NOW,
+            origin="fundamentals.sec.submissions.recent_filings",
+        )
+    ]
+    quarter_revenue = [revenues[-1] / 4.0 for _ in quarterly_periods]
+    quarter_ebit = [operating_income[-1] / 4.0 for _ in quarterly_periods]
+    quarter_tax = [income_tax[-1] / 4.0 for _ in quarterly_periods]
+    quarter_net_income = [net_income[-1] / 4.0 for _ in quarterly_periods]
+    quarter_gross = [gross_profit[-1] / 4.0 for _ in quarterly_periods]
+    return SecCompanyData(
+        company=company,
+        filings=filings,
+        annual_income_statement=_statement_view(
+            "income",
+            "annual",
+            periods,
+            {
+                "revenue": ("Revenue", "currency", revenues),
+                "gross_profit": ("Gross Profit", "currency", gross_profit),
+                "operating_income": ("Operating Income", "currency", operating_income),
+                "net_income": ("Net Income", "currency", net_income),
+                "income_tax": ("Income Tax", "currency", income_tax),
+                "diluted_shares": ("Diluted Shares", "shares", diluted_shares),
+            },
+        ),
+        annual_balance_sheet=_statement_view(
+            "balance",
+            "annual",
+            periods,
+            {
+                "cash_and_equivalents": ("Cash & Equivalents", "currency", cash),
+                "marketable_securities_current": ("Current Marketable Securities", "currency", marketable),
+                "accounts_receivable": ("Accounts Receivable", "currency", receivables),
+                "inventory": ("Inventory", "currency", inventory),
+                "current_assets": ("Current Assets", "currency", current_assets),
+                "total_assets": ("Total Assets", "currency", total_assets),
+                "accounts_payable": ("Accounts Payable", "currency", payables),
+                "short_term_debt": ("Short-Term Debt", "currency", short_term_debt),
+                "current_liabilities": ("Current Liabilities", "currency", current_liabilities),
+                "long_term_debt": ("Long-Term Debt", "currency", long_term_debt),
+                "total_liabilities": ("Total Liabilities", "currency", total_liabilities),
+                "shareholders_equity": ("Shareholders' Equity", "currency", equity),
+                "shares_outstanding": ("Shares Outstanding", "shares", shares_outstanding),
+            },
+        ),
+        annual_cash_flow_statement=_statement_view(
+            "cashflow",
+            "annual",
+            periods,
+            {
+                "operating_cash_flow": ("Operating Cash Flow", "currency", operating_cash_flow),
+                "capital_expenditures": ("Capex", "currency", capex),
+                "depreciation_and_amortization": ("D&A", "currency", da),
+            },
+        ),
+        quarterly_income_statement=_statement_view(
+            "income",
+            "quarterly",
+            quarterly_periods,
+            {
+                "revenue": ("Revenue", "currency", quarter_revenue),
+                "gross_profit": ("Gross Profit", "currency", quarter_gross),
+                "operating_income": ("Operating Income", "currency", quarter_ebit),
+                "net_income": ("Net Income", "currency", quarter_net_income),
+                "income_tax": ("Income Tax", "currency", quarter_tax),
+                "diluted_shares": ("Diluted Shares", "shares", [diluted_shares[-1] for _ in quarterly_periods]),
+            },
+        ),
+        quarterly_balance_sheet=_statement_view(
+            "balance",
+            "quarterly",
+            quarterly_periods,
+            {
+                "cash_and_equivalents": ("Cash & Equivalents", "currency", [cash[-1] for _ in quarterly_periods]),
+                "marketable_securities_current": ("Current Marketable Securities", "currency", [0.0 for _ in quarterly_periods]),
+                "accounts_receivable": ("Accounts Receivable", "currency", [receivables[-1] for _ in quarterly_periods]),
+                "inventory": ("Inventory", "currency", [inventory[-1] for _ in quarterly_periods]),
+                "current_assets": ("Current Assets", "currency", [current_assets[-1] for _ in quarterly_periods]),
+                "total_assets": ("Total Assets", "currency", [total_assets[-1] for _ in quarterly_periods]),
+                "accounts_payable": ("Accounts Payable", "currency", [payables[-1] for _ in quarterly_periods]),
+                "short_term_debt": ("Short-Term Debt", "currency", [short_term_debt[-1] for _ in quarterly_periods]),
+                "current_liabilities": ("Current Liabilities", "currency", [current_liabilities[-1] for _ in quarterly_periods]),
+                "long_term_debt": ("Long-Term Debt", "currency", [long_term_debt[-1] for _ in quarterly_periods]),
+                "total_liabilities": ("Total Liabilities", "currency", [total_liabilities[-1] for _ in quarterly_periods]),
+                "shareholders_equity": ("Shareholders' Equity", "currency", [equity[-1] for _ in quarterly_periods]),
+                "shares_outstanding": ("Shares Outstanding", "shares", [shares_outstanding[-1] for _ in quarterly_periods]),
+            },
+        ),
+        quarterly_cash_flow_statement=_statement_view(
+            "cashflow",
+            "quarterly",
+            quarterly_periods,
+            {
+                "operating_cash_flow": ("Operating Cash Flow", "currency", [operating_cash_flow[-1] / 4.0 for _ in quarterly_periods]),
+                "capital_expenditures": ("Capex", "currency", [capex[-1] / 4.0 for _ in quarterly_periods]),
+                "depreciation_and_amortization": ("D&A", "currency", [da[-1] / 4.0 for _ in quarterly_periods]),
+            },
+        ),
+    )
 
 
 def _company_data(ticker: str, name: str, revenue_scale: float, price: float) -> SecCompanyData:

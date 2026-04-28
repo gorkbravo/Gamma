@@ -54,16 +54,122 @@ _DEFAULT_PEER_SEEDS: dict[str, tuple[str, ...]] = {
     "CRM": ("MSFT", "ORCL", "SAP", "NOW", "ADBE"),
     "NVDA": ("AMD", "AVGO", "QCOM", "MU", "INTC"),
     "AMD": ("NVDA", "AVGO", "QCOM", "MU", "INTC"),
+    "ASML": ("AMAT", "LRCX", "KLAC", "TER", "ONTO"),
     "GOOGL": ("META", "AMZN", "MSFT", "ORCL", "CRM"),
     "AMZN": ("GOOGL", "META", "MSFT", "ORCL", "WMT"),
     "META": ("GOOGL", "AMZN", "MSFT", "SNAP", "RDDT"),
 }
 
 _SIC_SEED_MAP: dict[str, tuple[str, ...]] = {
+    "2821": ("FMC", "CE", "DOW", "EMN", "DD"),
+    "2810": ("DOW", "DD", "CE", "EMN", "FMC"),
+    "2834": ("PFE", "MRK", "BMY", "LLY", "AMGN"),
+    "3841": ("SYK", "BSX", "MDT", "ISRG", "EW"),
+    "4812": ("TMUS", "VZ", "T", "CMCSA", "CHTR"),
+    "4911": ("NEE", "DUK", "SO", "AEP", "EXC"),
+    "4941": ("AWK", "WTRG", "AWR", "CWT", "SJW"),
+    "4931": ("NEE", "DUK", "SO", "AEP", "EXC"),
+    "3559": ("ASML", "AMAT", "LRCX", "KLAC", "TER", "ONTO"),
+    "2911": ("XOM", "CVX", "COP", "MPC", "PSX"),
+    "1311": ("XOM", "CVX", "COP", "EOG", "OXY"),
+    "1389": ("SLB", "HAL", "BKR", "FTI", "NOV"),
+    "4512": ("DAL", "UAL", "AAL", "LUV", "ALK"),
+    "3721": ("BA", "LMT", "RTX", "NOC", "GD"),
+    "3760": ("LMT", "RTX", "NOC", "GD", "HII"),
+    "3711": ("GM", "F", "TSLA", "TM", "STLA"),
+    "3523": ("DE", "CAT", "CNH", "AGCO", "TEX"),
+    "3531": ("CAT", "DE", "PCAR", "CMI", "TEX"),
+    "3576": ("DELL", "HPQ", "NTAP", "STX", "WDC"),
+    "3674": ("NVDA", "AMD", "AVGO", "QCOM", "MU", "INTC"),
+    "4213": ("UPS", "FDX", "XPO", "ODFL", "SAIA"),
+    "4724": ("BKNG", "EXPE", "ABNB", "TCOM", "TRIP"),
+    "5311": ("WMT", "TGT", "COST", "DG", "DLTR"),
+    "5411": ("KR", "ACI", "WMT", "COST", "SFM"),
+    "5812": ("MCD", "SBUX", "YUM", "CMG", "DRI"),
+    "5912": ("CVS", "WBA", "RAD", "WMT", "COST"),
+    "6022": ("JPM", "BAC", "WFC", "C", "USB"),
+    "6021": ("JPM", "BAC", "WFC", "C", "PNC"),
+    "6035": ("CFG", "KEY", "FITB", "HBAN", "RF"),
+    "6211": ("MS", "GS", "SCHW", "RJF", "IBKR"),
+    "6282": ("BLK", "TROW", "BEN", "AMG", "IVZ"),
+    "6311": ("MET", "PRU", "AFL", "UNM", "LNC"),
+    "6324": ("UNH", "ELV", "CI", "HUM", "CNC"),
+    "6331": ("CB", "TRV", "PGR", "ALL", "AIG"),
+    "6798": ("AMT", "PLD", "EQIX", "SPG", "PSA"),
+    "7011": ("MAR", "HLT", "H", "IHG", "WH"),
+    "7370": ("MSFT", "ORCL", "SAP", "CRM", "ADBE", "NOW"),
+    "7372": ("MSFT", "ORCL", "SAP", "CRM", "ADBE", "NOW"),
+    "7373": ("MSFT", "ORCL", "SAP", "CRM", "ADBE", "NOW"),
+    "7389": ("V", "MA", "PYPL", "FIS", "FI"),
+    "7812": ("DIS", "NFLX", "WBD", "PARA", "CMCSA"),
+    "7830": ("AMC", "CNK", "IMAX", "DIS", "WBD"),
+    "8062": ("HCA", "THC", "UHS", "CYH", "ENSG"),
+    "8090": ("HCA", "THC", "UHS", "ENSG", "CHE"),
+    "8731": ("IQV", "ICLR", "MEDP", "CRL", "LH"),
+    "1520": ("DHI", "LEN", "PHM", "TOL", "KBH"),
+    "1531": ("DHI", "LEN", "PHM", "TOL", "KBH"),
+    "2080": ("KO", "PEP", "MNST", "KDP", "CELH"),
+    "2082": ("KO", "PEP", "MNST", "KDP", "CELH"),
+    "2090": ("MDLZ", "GIS", "K", "CPB", "HSY"),
+    "2111": ("PM", "MO", "BTI", "IMBBY", "TPB"),
+    "2835": ("MRNA", "BNTX", "REGN", "VRTX", "BIIB"),
+    "2836": ("MRNA", "BNTX", "REGN", "VRTX", "BIIB"),
     "electronic computers": ("AAPL", "MSFT", "DELL", "HPQ", "SMCI"),
+    "computer storage devices": ("DELL", "HPQ", "NTAP", "STX", "WDC"),
     "prepackaged software": ("MSFT", "ORCL", "SAP", "CRM", "ADBE", "NOW"),
+    "services-computer programming": ("MSFT", "ORCL", "SAP", "CRM", "ADBE", "NOW"),
+    "computer programming": ("MSFT", "ORCL", "SAP", "CRM", "ADBE", "NOW"),
+    "special industry machinery": ("ASML", "AMAT", "LRCX", "KLAC", "TER", "ONTO"),
+    "semiconductor equipment": ("ASML", "AMAT", "LRCX", "KLAC", "TER", "ONTO"),
+    "semiconductor machinery": ("ASML", "AMAT", "LRCX", "KLAC", "TER", "ONTO"),
     "semiconductors": ("NVDA", "AMD", "AVGO", "QCOM", "MU", "INTC"),
     "retail-catalog": ("AMZN", "WMT", "COST", "TGT", "EBAY"),
+    "retail-department stores": ("WMT", "TGT", "COST", "DG", "DLTR"),
+    "retail-grocery stores": ("KR", "ACI", "WMT", "COST", "SFM"),
+    "retail-drug stores": ("CVS", "WBA", "RAD", "WMT", "COST"),
+    "eating places": ("MCD", "SBUX", "YUM", "CMG", "DRI"),
+    "hotels": ("MAR", "HLT", "H", "IHG", "WH"),
+    "air transportation": ("DAL", "UAL", "AAL", "LUV", "ALK"),
+    "aircraft": ("BA", "LMT", "RTX", "NOC", "GD"),
+    "guided missiles": ("LMT", "RTX", "NOC", "GD", "HII"),
+    "motor vehicles": ("GM", "F", "TSLA", "TM", "STLA"),
+    "construction machinery": ("CAT", "DE", "PCAR", "CMI", "TEX"),
+    "farm machinery": ("DE", "CAT", "CNH", "AGCO", "TEX"),
+    "trucking": ("UPS", "FDX", "XPO", "ODFL", "SAIA"),
+    "transportation services": ("BKNG", "EXPE", "ABNB", "TCOM", "TRIP"),
+    "plastic materials": ("FMC", "CE", "DOW", "EMN", "DD"),
+    "specialty chemicals": ("FMC", "CE", "DOW", "EMN", "DD"),
+    "chemicals": ("DOW", "DD", "CE", "EMN", "FMC"),
+    "pharmaceutical": ("PFE", "MRK", "BMY", "LLY", "AMGN"),
+    "biological products": ("MRNA", "BNTX", "REGN", "VRTX", "BIIB"),
+    "surgical": ("SYK", "BSX", "MDT", "ISRG", "EW"),
+    "medical instruments": ("SYK", "BSX", "MDT", "ISRG", "EW"),
+    "hospital": ("HCA", "THC", "UHS", "CYH", "ENSG"),
+    "health services": ("HCA", "THC", "UHS", "ENSG", "CHE"),
+    "commercial physical research": ("IQV", "ICLR", "MEDP", "CRL", "LH"),
+    "national commercial banks": ("JPM", "BAC", "WFC", "C", "PNC"),
+    "state commercial banks": ("JPM", "BAC", "WFC", "C", "USB"),
+    "savings institution": ("CFG", "KEY", "FITB", "HBAN", "RF"),
+    "security brokers": ("MS", "GS", "SCHW", "RJF", "IBKR"),
+    "investment advice": ("BLK", "TROW", "BEN", "AMG", "IVZ"),
+    "life insurance": ("MET", "PRU", "AFL", "UNM", "LNC"),
+    "hospital and medical service plans": ("UNH", "ELV", "CI", "HUM", "CNC"),
+    "fire, marine": ("CB", "TRV", "PGR", "ALL", "AIG"),
+    "real estate investment trusts": ("AMT", "PLD", "EQIX", "SPG", "PSA"),
+    "electric services": ("NEE", "DUK", "SO", "AEP", "EXC"),
+    "electric and other services combined": ("NEE", "DUK", "SO", "AEP", "EXC"),
+    "water supply": ("AWK", "WTRG", "AWR", "CWT", "SJW"),
+    "radiotelephone communications": ("TMUS", "VZ", "T", "CMCSA", "CHTR"),
+    "motion picture": ("DIS", "NFLX", "WBD", "PARA", "CMCSA"),
+    "beverages": ("KO", "PEP", "MNST", "KDP", "CELH"),
+    "malt beverages": ("BUD", "TAP", "STZ", "HEINY", "SAM"),
+    "food preparations": ("MDLZ", "GIS", "K", "CPB", "HSY"),
+    "cigarettes": ("PM", "MO", "BTI", "IMBBY", "TPB"),
+    "operative builders": ("DHI", "LEN", "PHM", "TOL", "KBH"),
+    "payment": ("V", "MA", "PYPL", "FIS", "FI"),
+    "business services": ("V", "MA", "PYPL", "FIS", "FI"),
+    "crude petroleum": ("XOM", "CVX", "COP", "EOG", "OXY"),
+    "oil and gas field services": ("SLB", "HAL", "BKR", "FTI", "NOV"),
 }
 
 _DCF_SCENARIO_LABELS = {
@@ -581,6 +687,10 @@ class FundamentalsService:
     def _load_or_create_peer_basket(self, company: FundamentalsCompanyRecord) -> FundamentalsPeerBasketRecord:
         stored = self.store.load_peer_basket(company.ticker)
         if stored:
+            stored_focal = str(stored.get("focal_ticker") or "").strip().upper()
+            if stored_focal and stored_focal != company.ticker:
+                stored = None
+        if stored:
             peer_tickers = [
                 value
                 for value in dict.fromkeys(
@@ -609,11 +719,14 @@ class FundamentalsService:
     def _default_peer_seed(self, company: FundamentalsCompanyRecord) -> tuple[str, ...]:
         if company.ticker in _DEFAULT_PEER_SEEDS:
             return _DEFAULT_PEER_SEEDS[company.ticker]
+        sic_code = str(company.sic or "").strip()
+        if sic_code in _SIC_SEED_MAP:
+            return tuple(ticker for ticker in _SIC_SEED_MAP[sic_code] if ticker != company.ticker)
         sic_text = str(company.sic_description or "").strip().lower()
         for needle, seeds in _SIC_SEED_MAP.items():
             if needle in sic_text:
                 return tuple(ticker for ticker in seeds if ticker != company.ticker)
-        return tuple(ticker for ticker in _DEFAULT_PEER_SEEDS.get("MSFT", ()) if ticker != company.ticker)
+        return ()
 
     def _build_peer_basket_record(
         self,
@@ -1477,12 +1590,53 @@ class FundamentalsService:
     ) -> dict[str, Any]:
         actuals = self._dcf_actual_series(sec_data)
         projection_years = _projection_years(sec_data.annual_income_statement)
-        base_growth = _bounded(_median([value for value in _series_growth(actuals["revenue"]) if value is not None]) or 0.05, -0.05, 0.20)
-        base_ebit_margin = _bounded(_safe_ratio(_last_non_null(actuals["ebit"]), _last_non_null(actuals["revenue"])) or 0.20, 0.02, 0.50)
+        revenue_growth_history = _recent_numeric(_series_growth(actuals["revenue"]), 5)
+        ebit_margin_history = _recent_numeric(
+            [
+                _safe_ratio(ebit, revenue)
+                for ebit, revenue in zip(actuals["ebit"], actuals["revenue"], strict=False)
+            ],
+            5,
+        )
+        average_growth = _average(revenue_growth_history)
+        median_growth = _median(revenue_growth_history)
+        base_growth = _bounded(
+            average_growth if average_growth is not None else median_growth if median_growth is not None else 0.05,
+            -0.05,
+            0.20,
+        )
+        average_ebit_margin = _average(ebit_margin_history)
+        base_ebit_margin = _bounded(average_ebit_margin if average_ebit_margin is not None else 0.20, 0.02, 0.50)
+        current_ebit_margin = _last_non_null(ebit_margin_history)
+        margin_stdev = _stdev(ebit_margin_history) or 0.0
+        mean_revert_margin = (
+            current_ebit_margin is not None
+            and len(ebit_margin_history) >= 3
+            and margin_stdev >= 0.04
+            and abs(current_ebit_margin - base_ebit_margin) >= 0.03
+        )
         pretax = _last_non_null(self._statement_value_map(sec_data.annual_income_statement).get("pretax_income", []))
         base_tax = _bounded(_safe_ratio(_last_non_null(actuals["taxes"]), pretax) or 0.21, 0.10, 0.35)
-        base_da = _bounded(_safe_ratio(_last_non_null(actuals["depreciation_and_amortization"]), _last_non_null(actuals["revenue"])) or 0.04, 0.00, 0.20)
-        base_capex = _bounded(_safe_ratio(_last_non_null(actuals["capital_expenditures"]), _last_non_null(actuals["revenue"])) or 0.04, 0.00, 0.20)
+        average_da = _average(
+            _recent_numeric(
+                [
+                    _safe_ratio(da, revenue)
+                    for da, revenue in zip(actuals["depreciation_and_amortization"], actuals["revenue"], strict=False)
+                ],
+                5,
+            )
+        )
+        average_capex = _average(
+            _recent_numeric(
+                [
+                    _safe_ratio(capex, revenue)
+                    for capex, revenue in zip(actuals["capital_expenditures"], actuals["revenue"], strict=False)
+                ],
+                5,
+            )
+        )
+        base_da = _bounded(average_da if average_da is not None else 0.04, 0.00, 0.20)
+        base_capex = _bounded(average_capex if average_capex is not None else 0.04, 0.00, 0.20)
         base_nwc = _bounded(_median([value for value in actuals["nwc_intensity"] if value is not None]) or 0.02, -0.10, 0.20)
         base_shares = _first_non_null(_last_non_null(actuals["shares"]), market_context.get("shares")) or 0.0
         scenario_specs = {
@@ -1492,10 +1646,16 @@ class FundamentalsService:
         }
         scenarios: dict[str, Any] = {}
         for scenario_id, spec in scenario_specs.items():
+            target_margin = _bounded(base_ebit_margin + spec["margin_shift"], 0.01, 0.60)
+            if mean_revert_margin:
+                start_margin = _bounded((current_ebit_margin or target_margin) + spec["margin_shift"], 0.01, 0.60)
+                margin_series = [_bounded(value, 0.01, 0.60) for value in _linear_series(start_margin, target_margin, len(projection_years))]
+            else:
+                margin_series = [target_margin for _ in projection_years]
             scenarios[scenario_id] = {
                 "assumptions": {
                     "revenue_growth_pct": [_bounded(base_growth + spec["growth_shift"], -0.10, 0.30) for _ in projection_years],
-                    "ebit_margin_pct": [_bounded(base_ebit_margin + spec["margin_shift"], 0.01, 0.60) for _ in projection_years],
+                    "ebit_margin_pct": margin_series,
                     "tax_rate_pct": [_bounded(base_tax, 0.10, 0.35) for _ in projection_years],
                     "da_pct_revenue": [_bounded(base_da, 0.0, 0.20) for _ in projection_years],
                     "capex_pct_revenue": [_bounded(base_capex + max(spec["margin_shift"], 0.0) / 2.0, 0.0, 0.25) for _ in projection_years],
@@ -2071,6 +2231,23 @@ def _median(values: list[float]) -> float | None:
     if len(ordered) % 2:
         return ordered[midpoint]
     return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+
+
+def _recent_numeric(values: list[float | None], limit: int) -> list[float]:
+    numeric = [float(value) for value in values if value is not None]
+    return numeric[-limit:] if limit > 0 else numeric
+
+
+def _average(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _stdev(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    average = sum(values) / len(values)
+    variance = sum((value - average) ** 2 for value in values) / len(values)
+    return variance ** 0.5
 
 
 def _average_assumption(value: Any) -> float | None:

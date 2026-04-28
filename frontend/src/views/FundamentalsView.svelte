@@ -88,6 +88,7 @@
   let statementBasis: FundamentalsStatementBasis = "annual";
   let statementKind: FundamentalsStatementKind = "income";
   let peerDraftTickers: string[] = [];
+  let manualPeerTickers = "";
   let peerDirty = false;
   let dcfDraft: FundamentalsDcfDraft = createDcfDraft(null);
   let dcfDirty = false;
@@ -263,6 +264,29 @@
       ? normalizePeerTickers(overview?.company.ticker ?? "", [...peerDraftTickers, normalized])
       : peerDraftTickers.filter((item) => item !== normalized);
     peerDirty = true;
+  }
+
+
+  function addManualPeers() {
+    if (!overview) return;
+    const tickers = manualPeerTickers
+      .split(/[\s,;]+/)
+      .map((ticker) => ticker.trim().toUpperCase())
+      .filter(Boolean);
+    const nextTickers = normalizePeerTickers(overview.company.ticker, [...peerDraftTickers, ...tickers]);
+    if (nextTickers.join("|") === peerDraftTickers.join("|")) {
+      manualPeerTickers = "";
+      return;
+    }
+    peerDraftTickers = nextTickers;
+    manualPeerTickers = "";
+    peerDirty = true;
+  }
+
+  function handleManualPeerKeydown(event: KeyboardEvent) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addManualPeers();
   }
 
   async function savePeerBasket() {
@@ -666,6 +690,19 @@
           </div>
 
           <div class="builder-actions">
+            <div class="peer-manual-control">
+              <input
+                type="text"
+                bind:value={manualPeerTickers}
+                on:keydown={handleManualPeerKeydown}
+                placeholder="AMAT, LRCX, KLAC"
+                aria-label="Peer tickers"
+                disabled={!overview || saving}
+              />
+              <button type="button" class="secondary compact-button" on:click={addManualPeers} disabled={!manualPeerTickers.trim() || !overview || saving}>
+                Add
+              </button>
+            </div>
             <button type="button" class="secondary" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
               {saving ? "Saving..." : "Save Basket"}
             </button>
@@ -810,6 +847,19 @@
           </div>
           <div class="panel-actions">
             <small>{peers?.peer_basket.display_order.length ?? overview?.peer_basket?.display_order.length ?? 0} companies</small>
+            <div class="peer-manual-control">
+              <input
+                type="text"
+                bind:value={manualPeerTickers}
+                on:keydown={handleManualPeerKeydown}
+                placeholder="AMAT, LRCX, KLAC"
+                aria-label="Peer tickers"
+                disabled={!overview || saving}
+              />
+              <button type="button" class="secondary compact-button" on:click={addManualPeers} disabled={!manualPeerTickers.trim() || !overview || saving}>
+                Add
+              </button>
+            </div>
             <button type="button" class="secondary" on:click={savePeerBasket} disabled={!peerDirty || saving || !overview}>
               {saving ? "Saving..." : "Save Basket"}
             </button>
@@ -1754,6 +1804,23 @@
   .snapshot-actions {
     align-items: end;
     flex-wrap: wrap;
+  }
+
+  .peer-manual-control {
+    display: inline-flex;
+    align-items: stretch;
+    min-width: min(18rem, 100%);
+  }
+
+  .peer-manual-control input {
+    min-width: 10rem;
+    min-height: 1.65rem;
+    padding: 0.22rem 0.48rem;
+  }
+
+  .peer-manual-control button {
+    min-height: 1.65rem;
+    border-left: 0;
   }
 
   .snapshot-actions input {
