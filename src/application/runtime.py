@@ -26,11 +26,20 @@ from src.application.research_service import ResearchService
 from src.application.risk_service import RiskService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
+from src.models.commodities import (
+    CommodityCoverageMetadata,
+    CommodityInstrument,
+    CommodityProviderSnapshot,
+)
+from src.models.maritime import MaritimeCoverageMetadata, MaritimeProviderSnapshot, MaritimeTrackSnippet
+from src.models.news import NewsEventFeed
+from src.models.provenance import FreshnessLabel
 from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
 from src.services.copilot_store import CopilotStore
 from src.services.commodities_adapters import (
     EiaCommoditiesDataProvider,
+    IBKR_FUTURES_ROOTS,
     IbkrCommoditiesDataProvider,
     SampleCommoditiesDataProvider,
 )
@@ -70,6 +79,7 @@ from src.services.portfolio_history_store import PortfolioHistoryStore
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
 from src.services.risk_free_rate import RiskFreeRateService
+from src.utils.time import now_utc
 from src.utils.logging_config import setup_logging
 
 if TYPE_CHECKING:
@@ -279,8 +289,10 @@ def build_runtime(
         dbnomics_adapter=DBnomicsMacroAdapter(cache),
         prediction_market_service=prediction_market_service,
     )
-    commodities_service = CommoditiesService(provider=_build_commodities_provider(cache, client, market_data))
-    maritime_service = MaritimeService(provider=_build_maritime_provider())
+    commodities_service = CommoditiesService(
+        provider=_build_commodities_provider(cache, client, market_data, live_mode=not bool(mock_mode))
+    )
+    maritime_service = MaritimeService(provider=_build_maritime_provider(live_mode=not bool(mock_mode)))
     crypto_service = CryptoService(
         market_adapter=CoinGeckoAdapter(cache),
         dex_adapter=GeckoTerminalAdapter(cache),
@@ -293,13 +305,13 @@ def build_runtime(
         ),
         store=FundamentalsResearchStore(base_dir=resolved_history_dir / "fundamentals"),
     )
-    news_service = NewsService(_build_news_providers())
+    news_service = NewsService(_build_news_providers(live_mode=not bool(mock_mode)))
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
-        provider=_build_copilot_provider(),
+        provider=_build_copilot_provider(allow_mock=bool(mock_mode)),
         store=copilot_store,
     )
     risk_service = RiskService(
@@ -384,11 +396,15 @@ def _build_desktop_state(research_provider: ResearchDataProvider) -> DesktopRunt
     return DesktopRuntimeState(app_context=app_context)
 
 
-def _build_copilot_provider():
+def _build_copilot_provider(*, allow_mock: bool = True):
     provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
     if provider in {"disabled", "none", "off"}:
         return UnavailableCopilotProvider(message="Gamma Copilot is disabled by configuration.")
     if provider in {"mock", "demo", "offline"}:
+        if not allow_mock:
+            return UnavailableCopilotProvider(
+                message="Gamma Copilot mock/demo provider is disabled while Gamma is running in live mode."
+            )
         return MockCopilotProvider()
     if provider != "openai":
         return UnavailableCopilotProvider(message=f"Unsupported copilot provider: {provider}")
@@ -437,7 +453,19 @@ def _build_research_history_providers(
     providers: list[ListedMarketHistoryProvider] = []
     for provider_id in provider_ids:
         if provider_id in {"mock", "sample", "offline", "demo"}:
-            providers.append(MockListedMarketHistoryProvider(mock_service))
+            if client.mock:
+                providers.append(MockListedMarketHistoryProvider(mock_service))
+            else:
+                providers.append(
+                    UnavailableListedMarketHistoryProvider(
+                        provider_id=provider_id,
+                        source_label=f"{provider_id} listed-market history",
+                        warning=(
+                            f"Configured listed-market provider '{provider_id}' is disabled while Gamma is running "
+                            "in live mode."
+                        ),
+                    )
+                )
         elif provider_id in {"ibkr", "tws"}:
             providers.append(IbkrListedMarketHistoryProvider(market_data))
         elif provider_id in {"yfinance", "yahoo", "yahoo_finance"}:
@@ -467,10 +495,30 @@ def _build_research_history_providers(
     return providers or [MockListedMarketHistoryProvider(mock_service) if client.mock else IbkrListedMarketHistoryProvider(market_data)]
 
 
-def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_data: MarketDataService):
+def _build_commodities_provider(
+    cache: CacheService,
+    client: IBKRClient,
+    market_data: MarketDataService,
+    *,
+    live_mode: bool = False,
+):
     provider = (os.getenv("COMMODITIES_PROVIDER", "sample") or "sample").strip().lower()
     sample_provider = SampleCommoditiesDataProvider()
+    live_reference_provider = LiveCommoditiesReferenceProvider()
+    unavailable_live_provider = UnavailableCommoditiesDataProvider(
+        warning=(
+            "No live commodities provider is configured. Set COMMODITIES_PROVIDER=ibkr with TWS connectivity "
+            "or COMMODITIES_PROVIDER=eia with EIA_API_KEY/FRED_API_KEY for live-mode commodities coverage."
+        )
+    )
     if provider in {"sample", "mock", "offline", "demo"}:
+        if live_mode:
+            return UnavailableCommoditiesDataProvider(
+                warning=(
+                    f"COMMODITIES_PROVIDER={provider} is disabled while Gamma is running in live mode; "
+                    "sample commodities data was not loaded."
+                )
+            )
         return sample_provider
 
     fred_client = FredClient(cache=cache) if (os.getenv("FRED_API_KEY", "") or "").strip() else None
@@ -479,7 +527,7 @@ def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_
         eia_provider = EiaCommoditiesDataProvider(
             api_key=os.getenv("EIA_API_KEY", ""),
             cache=cache,
-            reference_provider=sample_provider,
+            reference_provider=live_reference_provider if live_mode else sample_provider,
             fred_client=fred_client,
             cache_seconds=int(os.getenv("COMMODITIES_CACHE_SECONDS", "21600") or 21600),
         )
@@ -489,7 +537,7 @@ def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_
             client=client,
             market_data=market_data,
             cache=cache,
-            reference_provider=eia_provider or sample_provider,
+            reference_provider=eia_provider or (live_reference_provider if live_mode else sample_provider),
             startup_instrument_ids=_parse_env_list("IBKR_COMMODITIES_STARTUP_ENABLED", "wti"),
             on_demand_enabled=_parse_bool_env("IBKR_COMMODITIES_ON_DEMAND", True),
             selected_cache_seconds=int(os.getenv("IBKR_COMMODITIES_SELECTED_CACHE_SECONDS", "300") or 300),
@@ -507,12 +555,22 @@ def _build_commodities_provider(cache: CacheService, client: IBKRClient, market_
         )
 
     if provider not in {"eia", "official", "eia_fred", "fred"}:
+        if live_mode:
+            return UnavailableCommoditiesDataProvider(
+                warning=(
+                    f"Unsupported COMMODITIES_PROVIDER={provider!r}; no commodities sample fallback is loaded "
+                    "in live mode."
+                )
+            )
         return sample_provider
+
+    if live_mode and not (os.getenv("EIA_API_KEY", "") or "").strip():
+        return unavailable_live_provider
 
     return EiaCommoditiesDataProvider(
         api_key=os.getenv("EIA_API_KEY", ""),
         cache=cache,
-        reference_provider=sample_provider,
+        reference_provider=live_reference_provider if live_mode else sample_provider,
         fred_client=fred_client,
         cache_seconds=int(os.getenv("COMMODITIES_CACHE_SECONDS", "21600") or 21600),
     )
@@ -530,10 +588,17 @@ def _parse_bool_env(name: str, default: bool) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _build_maritime_provider():
+def _build_maritime_provider(*, live_mode: bool = False):
     provider = (os.getenv("MARITIME_PROVIDER", "sample") or "sample").strip().lower()
     sample_provider = SampleMaritimeDataProvider()
     if provider not in {"aisstream", "aisstream_live", "live"}:
+        if live_mode:
+            return UnavailableMaritimeDataProvider(
+                warning=(
+                    f"MARITIME_PROVIDER={provider} is disabled while Gamma is running in live mode; "
+                    "sample maritime data was not loaded."
+                )
+            )
         return sample_provider
 
     try:
@@ -548,7 +613,11 @@ def _build_maritime_provider():
     ] or None
     return AisstreamMaritimeDataProvider(
         api_key=os.getenv("AISSTREAM_API_KEY", ""),
-        reference_provider=sample_provider,
+        reference_provider=UnavailableMaritimeDataProvider(
+            warning="AISstream reference definitions are unavailable until live provider configuration supplies them."
+        )
+        if live_mode
+        else sample_provider,
         bounding_boxes=bounding_boxes,
         message_types=message_types,
         sample_seconds=float(os.getenv("AISSTREAM_SAMPLE_SECONDS", "6") or 6.0),
@@ -557,7 +626,7 @@ def _build_maritime_provider():
     )
 
 
-def _build_news_providers() -> list[NewsEventProvider]:
+def _build_news_providers(*, live_mode: bool = False) -> list[NewsEventProvider]:
     configured = (os.getenv("NEWS_PROVIDER", "sample") or "sample").strip().lower()
     provider_ids = [item.strip() for item in configured.split(",") if item.strip()]
     providers: list[NewsEventProvider] = []
@@ -569,5 +638,190 @@ def _build_news_providers() -> list[NewsEventProvider]:
                 )
             )
         elif provider_id in {"sample", "mock", "offline", "demo", "sample_news"}:
-            providers.append(SampleNewsEventProvider())
-    return providers or [SampleNewsEventProvider()]
+            if live_mode:
+                providers.append(
+                    UnavailableNewsEventProvider(
+                        provider_id=provider_id,
+                        warning=(
+                            f"NEWS_PROVIDER={provider_id} is disabled while Gamma is running in live mode; "
+                            "sample news items were not loaded."
+                        ),
+                    )
+                )
+            else:
+                providers.append(SampleNewsEventProvider())
+    if providers:
+        return providers
+    if live_mode:
+        return [
+            UnavailableNewsEventProvider(
+                warning="No live news provider is configured. Set NEWS_PROVIDER=rss for live-mode RSS coverage."
+            )
+        ]
+    return [SampleNewsEventProvider()]
+
+
+class LiveCommoditiesReferenceProvider:
+    provider_id = "live_commodities_reference"
+    provider_label = "Live Commodities Reference Universe"
+
+    def get_snapshot(
+        self,
+        *,
+        force_refresh: bool = False,
+        selected_instrument_id: str | None = None,
+    ) -> CommodityProviderSnapshot:
+        del force_refresh
+        del selected_instrument_id
+        retrieved_at = now_utc().replace(microsecond=0)
+        instruments = [
+            CommodityInstrument(
+                instrument_id=config.instrument_id,
+                symbol=config.symbol,
+                name=config.label,
+                family="energy" if config.instrument_id in {"wti", "brent", "henry_hub", "gasoline", "heating_oil"} else "metals",
+                subgroup="futures",
+                quote_unit=config.quote_unit,
+                currency=config.currency,
+                exchange=config.exchange,
+                front_symbol=config.symbol,
+                provider_symbols={"ibkr": config.symbol},
+                aliases=[config.label.lower(), config.symbol.lower()],
+                description=f"{config.label} read-only futures research instrument.",
+                source_provider="gamma",
+                retrieved_at=retrieved_at,
+                origin="gamma.live_commodities_reference.instruments",
+                transformation_note="Static Gamma instrument metadata used to request live commodities providers.",
+            )
+            for config in IBKR_FUTURES_ROOTS
+        ]
+        coverage = CommodityCoverageMetadata(
+            coverage_status="unavailable",
+            provider_id=self.provider_id,
+            provider_label=self.provider_label,
+            freshness_label="unavailable",
+            instruments=[instrument.instrument_id for instrument in instruments],
+            regions=["US", "Global"],
+            as_of=retrieved_at,
+            caveats=["Reference universe only; no commodity prices, curves, inventories, or events are included."],
+            supports_prices=False,
+            supports_curves=False,
+            supports_inventories=False,
+            supports_events=False,
+            source_provider="gamma",
+            retrieved_at=retrieved_at,
+            origin="gamma.live_commodities_reference.coverage",
+            transformation_note="Gamma returned provider-neutral instrument metadata without sample market data.",
+        )
+        return CommodityProviderSnapshot(
+            coverage=coverage,
+            instruments=instruments,
+            warnings=["Live commodities reference metadata loaded without sample market data."],
+            source_provider="gamma",
+            retrieved_at=retrieved_at,
+            origin="gamma.live_commodities_reference.snapshot",
+            transformation_note="No sample commodity records are included in live-mode reference metadata.",
+        )
+
+
+class UnavailableCommoditiesDataProvider:
+    provider_id = "unavailable_commodities"
+    provider_label = "Unavailable Commodities Provider"
+
+    def __init__(self, *, warning: str) -> None:
+        self.warning = warning
+
+    def get_snapshot(
+        self,
+        *,
+        force_refresh: bool = False,
+        selected_instrument_id: str | None = None,
+    ) -> CommodityProviderSnapshot:
+        del force_refresh
+        del selected_instrument_id
+        retrieved_at = now_utc().replace(microsecond=0)
+        coverage = CommodityCoverageMetadata(
+            coverage_status="unavailable",
+            provider_id=self.provider_id,
+            provider_label=self.provider_label,
+            freshness_label="unavailable",
+            as_of=retrieved_at,
+            caveats=[self.warning],
+            credential_env_vars=["COMMODITIES_PROVIDER", "EIA_API_KEY", "FRED_API_KEY", "IBKR_COMMODITIES_ENABLED"],
+            supports_prices=False,
+            supports_curves=False,
+            supports_inventories=False,
+            supports_events=False,
+            source_provider="unavailable",
+            retrieved_at=retrieved_at,
+            origin="gamma.commodities.unavailable",
+            transformation_note="Gamma returned no commodities records because sample data is disabled in live mode.",
+        )
+        return CommodityProviderSnapshot(
+            coverage=coverage,
+            warnings=[self.warning],
+            source_provider="unavailable",
+            retrieved_at=retrieved_at,
+            origin="gamma.commodities.unavailable",
+            transformation_note="No mock or sample commodities data was loaded.",
+        )
+
+
+class UnavailableMaritimeDataProvider:
+    provider_id = "unavailable_maritime"
+    provider_label = "Unavailable Maritime Provider"
+
+    def __init__(self, *, warning: str) -> None:
+        self.warning = warning
+
+    def get_snapshot(self, *, force_refresh: bool = False) -> MaritimeProviderSnapshot:
+        del force_refresh
+        retrieved_at = now_utc()
+        coverage = MaritimeCoverageMetadata(
+            coverage_status="unavailable",
+            provider_id=self.provider_id,
+            provider_label=self.provider_label,
+            freshness_label="unavailable",
+            as_of=retrieved_at,
+            caveats=[self.warning],
+            credential_env_vars=["MARITIME_PROVIDER", "AISSTREAM_API_KEY", "AISSTREAM_BOUNDING_BOXES"],
+            supports_live=False,
+            supports_historical=False,
+            source_provider="unavailable",
+            retrieved_at=retrieved_at,
+            origin="gamma.maritime.unavailable",
+            transformation_note="Gamma returned no maritime records because sample data is disabled in live mode.",
+        )
+        return MaritimeProviderSnapshot(
+            coverage=coverage,
+            warnings=[self.warning],
+            source_provider="unavailable",
+            retrieved_at=retrieved_at,
+            origin="gamma.maritime.unavailable",
+            transformation_note="No mock or sample maritime data was loaded.",
+        )
+
+    def get_track(self, vessel_id: str, *, force_refresh: bool = False) -> MaritimeTrackSnippet | None:
+        del vessel_id
+        del force_refresh
+        return None
+
+
+class UnavailableNewsEventProvider:
+    source_name = "Unavailable news provider"
+
+    def __init__(self, *, warning: str, provider_id: str = "unavailable_news") -> None:
+        self.provider_id = provider_id
+        self.warning = warning
+
+    def latest(self, *, limit: int = 25) -> NewsEventFeed:
+        del limit
+        return NewsEventFeed(
+            items=[],
+            source_provider="unavailable",
+            retrieved_at=now_utc(),
+            origin="gamma.news.unavailable",
+            freshness_label=FreshnessLabel.UNAVAILABLE,
+            warnings=[self.warning],
+            transformation_note="Gamma returned no news/event records because sample data is disabled in live mode.",
+        )

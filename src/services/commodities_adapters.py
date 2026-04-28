@@ -300,10 +300,16 @@ class EiaCommoditiesDataProvider:
         selected_instrument_id: str | None = None,
     ) -> CommodityProviderSnapshot:
         reference = self.reference_provider.get_snapshot(force_refresh=False, selected_instrument_id=selected_instrument_id)
+        reference_is_sample = reference.coverage.coverage_status in {"sample", "mock"} or reference.source_provider == "sample_data"
         if not self.api_key:
             return _with_provider_warning(
                 reference,
-                "COMMODITIES_PROVIDER=eia but EIA_API_KEY is not configured; using sample commodities fallback.",
+                "COMMODITIES_PROVIDER=eia but EIA_API_KEY is not configured; "
+                + (
+                    "using sample commodities fallback."
+                    if reference_is_sample
+                    else "no commodities fallback data is available in live mode."
+                ),
             )
 
         retrieved_at = now_utc().replace(microsecond=0)
@@ -338,7 +344,12 @@ class EiaCommoditiesDataProvider:
         if official_count == 0 and fred_count == 0:
             return _with_provider_warning(
                 reference,
-                "EIA/FRED enrichment returned no usable commodity series; using sample commodities fallback.",
+                "EIA/FRED enrichment returned no usable commodity series; "
+                + (
+                    "using sample commodities fallback."
+                    if reference_is_sample
+                    else "no commodities fallback data is available in live mode."
+                ),
                 extra_warnings=warnings,
             )
 
@@ -361,20 +372,29 @@ class EiaCommoditiesDataProvider:
             ),
             caveats=[
                 "EIA enrichment covers configured official US energy inventories, storage, production, trade, refinery, and demand fundamentals where available.",
-                "FRED price histories are spot or proxy series where configured; futures curves remain sample unless a futures provider is added.",
+                (
+                    "FRED price histories are spot or proxy series where configured; futures curves remain sample unless a futures provider is added."
+                    if reference_is_sample
+                    else "FRED price histories are spot or proxy series where configured; futures curves remain unavailable unless a futures provider is added."
+                ),
                 "Gamma keeps provider credentials server-side and exposes read-only normalized research data.",
                 *warnings,
             ],
             credential_env_vars=["EIA_API_KEY", "FRED_API_KEY"],
             supports_prices=fred_count > 0,
-            supports_curves=True,
+            supports_curves=bool(reference.curve_snapshots),
             supports_inventories=official_count > 0,
-            supports_events=True,
+            supports_events=bool(reference.events),
             source_provider="eia",
             retrieved_at=latest_source,
             origin="eia_commodities.coverage",
             transformation_note=(
-                "Gamma combined EIA official energy fundamentals, optional FRED price proxies, and sample futures curves into one normalized workspace."
+                "Gamma combined EIA official energy fundamentals, optional FRED price proxies, "
+                + (
+                    "and sample futures curves into one normalized workspace."
+                    if reference_is_sample
+                    else "and live-mode reference metadata into one normalized workspace."
+                )
             ),
         )
         return CommodityProviderSnapshot(
@@ -387,7 +407,11 @@ class EiaCommoditiesDataProvider:
             warnings=_dedupe(
                 [
                     *warnings,
-                    "Futures curves are still sample-derived in this provider slice; add IBKR/Databento-style futures-chain coverage for live curves.",
+                    (
+                        "Futures curves are still sample-derived in this provider slice; add IBKR/Databento-style futures-chain coverage for live curves."
+                        if reference_is_sample
+                        else "Futures curves are unavailable in this provider slice; add IBKR/Databento-style futures-chain coverage for live curves."
+                    ),
                     "Official EIA data can be delayed by release cadence and revision timing.",
                 ]
             ),
@@ -395,7 +419,12 @@ class EiaCommoditiesDataProvider:
             retrieved_at=latest_source,
             origin="eia_commodities.snapshot",
             transformation_note=(
-                "Selected official energy fundamentals replace sample inventory series; unsupported fields remain explicit sample fallbacks."
+                "Selected official energy fundamentals replace configured reference inventory series; "
+                + (
+                    "unsupported fields remain explicit sample fallbacks."
+                    if reference_is_sample
+                    else "unsupported fields remain unavailable in live mode."
+                )
             ),
         )
 

@@ -325,6 +325,48 @@ def test_desktop_runtime_attaches_desktop_session_state(tmp_path):
         runtime.shutdown()
 
 
+def test_live_runtime_does_not_load_sample_or_mock_providers(tmp_path, monkeypatch):
+    monkeypatch.setenv("COMMODITIES_PROVIDER", "sample")
+    monkeypatch.setenv("MARITIME_PROVIDER", "sample")
+    monkeypatch.setenv("NEWS_PROVIDER", "sample")
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    monkeypatch.setenv("RESEARCH_MARKET_DATA_PROVIDERS", "mock")
+    monkeypatch.setenv("SITREP_MARKET_DATA_PROVIDERS", "mock")
+
+    runtime = build_runtime(
+        mock_mode=False,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        commodities = runtime.commodities_service.get_workspace()
+        assert commodities.coverage.coverage_status == "unavailable"
+        assert commodities.instruments == []
+        assert commodities.price_histories == []
+        assert commodities.coverage.source_provider == "unavailable"
+
+        maritime = runtime.maritime_service.get_workspace()
+        assert maritime.coverage.coverage_status == "unavailable"
+        assert maritime.vessels == []
+        assert maritime.positions == []
+        assert maritime.coverage.source_provider == "unavailable"
+
+        news = runtime.news_service.latest()
+        assert news.items == []
+        assert news.source_provider == "unavailable"
+        assert news.freshness_label.value == "unavailable"
+
+        assert runtime.copilot_service.provider.provider_name == "unconfigured"
+
+        history = runtime.research_provider.load_symbol_history("SPY", 5)
+        warnings = runtime.research_provider.drain_history_warnings()
+        assert history is None
+        assert any("disabled while Gamma is running in live mode" in warning for warning in warnings)
+    finally:
+        runtime.shutdown()
+
+
 def test_research_history_cache_survives_workspace_scope_reset():
     ctx = AppDataContext()
     client = _StubClient(mock=False)
