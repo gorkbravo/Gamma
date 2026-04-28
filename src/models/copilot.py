@@ -169,6 +169,7 @@ class CopilotSession:
     turn_count: int = 0
     memo_count: int = 0
     warnings: list[str] = field(default_factory=list)
+    archived_at: datetime | None = None
 
 
 @dataclass(frozen=True)

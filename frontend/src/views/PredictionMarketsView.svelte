@@ -51,9 +51,9 @@
   const pct = (value: number | null | undefined, digits = 1) =>
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const fmt = (value: number | null | undefined, digits = 0) =>
-    value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: digits });
+    value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleString() : "N/A";
+    value ? new Date(value).toLocaleString("en-US") : "N/A";
   const compactId = (value: string | null | undefined) => {
     const text = String(value ?? "").trim();
     if (!text) {

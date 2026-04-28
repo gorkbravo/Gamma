@@ -1110,6 +1110,34 @@ def test_copilot_persists_sessions_turns_and_memos(tmp_path):
         assert memo["title"] == "Macro Memo"
         assert "Hypothesis:" in memo["body"]
         assert memo["source_turn_ids"] == [payload["turns"][0]["turn_id"]]
+
+        update_response = client.patch(
+            f"/copilot/memos/{memo['memo_id']}",
+            json={"title": "Edited Macro Memo", "body": "# Edited Macro Memo\n\nSourced claim retained."},
+        )
+        assert update_response.status_code == 200
+        edited_memo = update_response.json()
+        assert edited_memo["title"] == "Edited Macro Memo"
+        assert "Sourced claim retained." in edited_memo["body"]
+
+        export_response = client.get(f"/copilot/memos/{memo['memo_id']}/export")
+        assert export_response.status_code == 200
+        assert "Source turns:" in export_response.text
+        assert payload["turns"][0]["turn_id"] in export_response.text
+
+        filtered_sessions = client.get("/copilot/sessions", params={"search": "macro"})
+        assert filtered_sessions.status_code == 200
+        assert any(item["session_id"] == "session_test_persist" for item in filtered_sessions.json())
+
+        archive_response = client.post("/copilot/sessions/session_test_persist/archive")
+        assert archive_response.status_code == 200
+        assert archive_response.json()["archived_at"] is not None
+
+        active_sessions = client.get("/copilot/sessions")
+        assert all(item["session_id"] != "session_test_persist" for item in active_sessions.json())
+
+        archived_sessions = client.get("/copilot/sessions", params={"include_archived": "true", "search": "macro"})
+        assert any(item["session_id"] == "session_test_persist" for item in archived_sessions.json())
     finally:
         runtime.shutdown()
 
@@ -1176,6 +1204,46 @@ def test_macro_copilot_route_degrades_when_macro_provider_fails(tmp_path):
         assert payload["status"] == "ready"
         assert any("Macro context is degraded" in warning for warning in payload["warnings"])
         assert any(source["source_id"] == "macro.degraded" for source in payload["sources"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_route_returns_structured_error_when_provider_raises(tmp_path):
+    class RaisingProvider:
+        provider_name = "raising_provider"
+
+        def generate_research_card(self, *, request, context, tool_specs, execute_tool):
+            del request, context, tool_specs, execute_tool
+            raise RuntimeError("provider transport failed")
+
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = RaisingProvider()
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Frame the active macro setup.",
+                "context": {
+                    "current_tab": "macro",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "error"
+        assert payload["provider"] == "raising_provider"
+        assert "provider transport failed" in payload["message"]
+        assert payload["sources"]
+        assert any("failed before a research card" in warning for warning in payload["warnings"])
     finally:
         runtime.shutdown()
 
@@ -2005,6 +2073,60 @@ def test_openai_provider_serializes_datetime_tool_outputs():
     )
 
     assert json.loads(rendered) == {"retrieved_at": "2026-04-05T10:52:00"}
+
+
+def test_openai_provider_omits_previous_response_id_when_response_storage_is_disabled():
+    class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.payloads: list[dict] = []
+
+        def _post_json(self, payload):
+            self.payloads.append(payload)
+            return {
+                "id": "resp_test",
+                "model": "gpt-test",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "title": "Test",
+                                        "hypothesis": "H",
+                                        "rationale": "R",
+                                        "required_data": [],
+                                        "proposed_test": "T",
+                                        "confounders": [],
+                                        "next_steps": [],
+                                        "caveats": [],
+                                        "source_backed_claims": [],
+                                        "inferred_claims": [],
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    provider = CaptureOpenAIProvider()
+    provider.generate_research_card(
+        request=CopilotResearchCardRequest(domain="macro", previous_response_id="resp_previous"),
+        context=CopilotContextBundle(domain="macro", current_tab="macro", summary_data={}),
+        tool_specs=[],
+        execute_tool=lambda *_args: None,
+    )
+
+    assert provider.payloads
+    assert "previous_response_id" not in provider.payloads[0]
 
 
 def test_runtime_enables_openai_response_storage_by_default(tmp_path, monkeypatch):

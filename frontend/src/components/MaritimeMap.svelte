@@ -564,7 +564,7 @@
 
   function shortDate(value: string | null | undefined) {
     return value
-      ? new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
       : "N/A";
   }
 

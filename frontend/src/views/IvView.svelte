@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../lib/api/types";
+  import type { CrossTabHandoffEnvelope, IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../lib/api/types";
   import type { IvLoadOptions } from "../lib/stores/app";
   import {
     daysToExpiry,
@@ -24,6 +24,7 @@
   export let onLoad: (options: IvLoadOptions) => void;
   export let onStartSession: (options: IvLoadOptions) => void;
   export let onStopSession: () => void;
+  export let onSendToCopilot: (handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void = () => {};
 
   let symbol = "SPY";
   let marketDataMode = "delayed";
@@ -79,7 +80,7 @@
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
       ? "N/A"
-      : value.toLocaleString(undefined, { maximumFractionDigits: digits });
+      : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const pct = (value: number | null | undefined, digits = 1) =>
     value == null || !Number.isFinite(value) ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const signedPct = (value: number | null | undefined, digits = 1) =>
@@ -89,7 +90,7 @@
   const ratioPct = (value: number | null | undefined, digits = 0) =>
     value == null || !Number.isFinite(value) ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const shortTime = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+    value ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
   const sessionStateLabel = () =>
     depthPreset === "max" ? "snapshot only" : session?.running ? "running" : "idle";
   const depthLabel = (value: string | null | undefined) =>
@@ -119,6 +120,43 @@
       marketDataMode,
       depthPreset
     });
+  }
+
+  function sendSurfaceToCopilot() {
+    const surface = result;
+    if (!surface) {
+      return;
+    }
+    const handoff: CrossTabHandoffEnvelope = {
+      source_tab: "iv",
+      source_mode: mode,
+      selected_entity: {
+        entity_type: "options_surface",
+        label: `${surface.symbol} IV Surface`,
+        normalized_id: surface.symbol,
+        provider_id: surface.source_provider,
+        native_id: surface.symbol,
+        metadata: {
+          symbol: surface.symbol,
+          expiries: surface.expiries.length,
+          strikes: surface.strikes.length,
+          points: surface.points,
+          freshness_label: surface.freshness_label,
+          delayed: surface.delayed
+        }
+      },
+      selected_timeframe: surface.timestamp
+        ? { label: `Snapshot ${shortTime(surface.timestamp)}`, start: null, end: surface.timestamp }
+        : null,
+      provider: surface.source_provider,
+      source: null,
+      warnings: surface.warnings ?? [],
+      normalized_ids: { symbol: surface.symbol },
+      timestamp: new Date().toISOString(),
+      intended_target_tab: "copilot",
+      intended_target_mode: "active_tab"
+    };
+    void onSendToCopilot(handoff);
   }
 
   function heatIntensity(value: number | null | undefined) {
@@ -374,6 +412,9 @@
       <div class="surface-actions">
         <button class="primary-action" on:click={submit} disabled={loading}>
           {loading ? "LOADING..." : "Reload Surface"}
+        </button>
+        <button class="secondary-action" on:click={sendSurfaceToCopilot} disabled={loading || !result}>
+          Send to Copilot
         </button>
         <div class="session-control" class:running={session?.running} class:snapshot-only={depthPreset === "max"}>
           <div>
@@ -1017,6 +1058,10 @@
   .primary-action {
     border-color: rgba(122, 166, 200, 0.34);
     background: rgba(122, 166, 200, 0.08);
+    min-width: 8.75rem;
+  }
+
+  .secondary-action {
     min-width: 8.75rem;
   }
 

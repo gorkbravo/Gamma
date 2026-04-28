@@ -1,5 +1,5 @@
 import { get, writable } from "svelte/store";
-import { deleteJson, getJson, postJson } from "../api/client";
+import { deleteJson, getJson, getText, patchJson, postJson } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
 import type {
   ActionResponse,
@@ -477,6 +477,10 @@ function setError(error: unknown) {
   lastError.set(error instanceof Error ? error.message : String(error));
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function hasRenderableIvSurface(surface: IvSurface | null | undefined) {
   if (!surface) {
     return false;
@@ -717,6 +721,57 @@ function buildCopilotThreadEntry(
     continuedFromResponseId: previousResponseId,
     result
   };
+}
+
+function buildCopilotFailureResult(
+  domain: CopilotDomain,
+  message: string,
+  status: "error" | "unavailable" = "error"
+): CopilotResearchCardResult {
+  return {
+    domain,
+    current_tab: domain,
+    status,
+    provider: "gamma_frontend",
+    model: null,
+    response_id: null,
+    message,
+    card: null,
+    sources: [],
+    tool_traces: [],
+    warnings: []
+  };
+}
+
+function appendCopilotThreadResult(
+  domain: CopilotDomain,
+  result: CopilotResearchCardResult,
+  prompt: string,
+  contextFingerprint: string | null,
+  previousResponseId: string | null,
+  baseThread: CopilotThreadState
+) {
+  const nextEntry = buildCopilotThreadEntry(
+    domain,
+    result,
+    prompt,
+    previousResponseId,
+    baseThread.entries.length + 1
+  );
+  const latestResponseId =
+    result.status === "ready" && result.response_id
+      ? result.response_id
+      : baseThread.latestResponseId;
+  copilotCards.update((current) => ({ ...current, [domain]: result }));
+  copilotThreads.update((current) => ({
+    ...current,
+    [domain]: {
+      domain,
+      contextFingerprint,
+      latestResponseId,
+      entries: [...baseThread.entries, nextEntry]
+    }
+  }));
 }
 
 export async function refreshSystemStatus() {
@@ -1915,6 +1970,12 @@ function getCopilotSessionId() {
   return nextId;
 }
 
+function setCopilotSessionId(sessionId: string) {
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem("gamma.copilot.session", sessionId);
+  }
+}
+
 type CopilotLoadOptions = {
   workspaceMode?: WorkspaceMode | null;
   synthesisDomains?: CopilotBaseDomain[];
@@ -2171,16 +2232,39 @@ export async function loadCopilotResearchCard(
   options: CopilotLoadOptions = {}
 ) {
   setLoading("copilot", true);
+  const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
+    synthesisDomains: options.synthesisDomains,
+    activeTabId: options.activeTabId
+  });
+  let activeThread = get(copilotThreads)[domain];
+  if (!activeThread) {
+    activeThread = createEmptyCopilotThread(domain);
+  }
+  let continuingThread =
+    activeThread.contextFingerprint != null &&
+    activeThread.contextFingerprint === contextFingerprint &&
+    activeThread.latestResponseId != null;
+  let previousResponseId = continuingThread ? activeThread.latestResponseId : null;
+  let baseThread =
+    continuingThread || !activeThread.entries.length
+      ? activeThread
+      : createEmptyCopilotThread(domain);
+
   try {
     const validationError = validateCopilotContext(domain, options);
     if (validationError) {
       lastError.set(validationError);
-      return null;
+      const result = buildCopilotFailureResult(domain, validationError);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+      return result;
     }
     const context = buildCopilotContext(domain, options.workspaceMode);
     if (!context) {
-      lastError.set("The active Copilot context is unavailable.");
-      return null;
+      const message = "The active Copilot context is unavailable.";
+      lastError.set(message);
+      const result = buildCopilotFailureResult(domain, message);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+      return result;
     }
 
     const synthesis =
@@ -2188,23 +2272,16 @@ export async function loadCopilotResearchCard(
         ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
         : null;
     if (domain === "synthesis" && !synthesis) {
-      lastError.set("The active synthesis scope is unavailable.");
-      return null;
+      const message = "The active synthesis scope is unavailable.";
+      lastError.set(message);
+      const result = buildCopilotFailureResult(domain, message);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+      return result;
     }
-
-    const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
-      synthesisDomains: options.synthesisDomains,
-      activeTabId: options.activeTabId
-    });
-    const activeThread = get(copilotThreads)[domain];
-    const continuingThread =
-      activeThread.contextFingerprint != null &&
-      activeThread.contextFingerprint === contextFingerprint &&
-      activeThread.latestResponseId != null;
-    const previousResponseId = continuingThread ? activeThread.latestResponseId : null;
 
     if (!continuingThread && activeThread.entries.length) {
       resetCopilotCard(domain);
+      baseThread = createEmptyCopilotThread(domain);
     }
 
     const payload = {
@@ -2219,44 +2296,31 @@ export async function loadCopilotResearchCard(
 
     const rawResult = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
     const result = normalizeCopilotResearchCardResult(domain, rawResult);
-    copilotCards.update((current) => ({ ...current, [domain]: result }));
-    const baseThread =
-      continuingThread
-        ? activeThread
-        : createEmptyCopilotThread(domain);
-    const nextEntry = buildCopilotThreadEntry(
-      domain,
-      result,
-      prompt,
-      previousResponseId,
-      baseThread.entries.length + 1
-    );
-    const latestResponseId =
-      result.status === "ready" && result.response_id
-        ? result.response_id
-        : baseThread.latestResponseId;
-    copilotThreads.update((current) => ({
-      ...current,
-      [domain]: {
-        domain,
-        contextFingerprint,
-        latestResponseId,
-        entries: [...baseThread.entries, nextEntry]
-      }
-    }));
-    lastError.set("");
+    appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+    lastError.set(result.status === "ready" ? "" : result.message ?? "Copilot failed.");
     return result;
   } catch (error) {
-    setError(error);
-    return null;
+    const message = errorMessage(error);
+    lastError.set(message);
+    const result = buildCopilotFailureResult(domain, message);
+    appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+    return result;
   } finally {
     setLoading("copilot", false);
   }
 }
 
-export async function loadCopilotSessions() {
+export async function loadCopilotSessions(options: { includeArchived?: boolean; search?: string } = {}) {
   try {
-    const sessions = await getJson<CopilotSessionSummary[]>("/copilot/sessions");
+    const params = new URLSearchParams();
+    if (options.includeArchived) {
+      params.set("include_archived", "true");
+    }
+    if (options.search?.trim()) {
+      params.set("search", options.search.trim());
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const sessions = await getJson<CopilotSessionSummary[]>(`/copilot/sessions${suffix}`);
     copilotSessions.set(sessions);
     lastError.set("");
     return sessions;
@@ -2270,6 +2334,22 @@ export async function loadActiveCopilotSession() {
   try {
     const sessionId = getCopilotSessionId();
     const detail = await getJson<CopilotSessionDetail>(`/copilot/sessions/${encodeURIComponent(sessionId)}`);
+    activeCopilotSession.set(detail);
+    copilotMemos.set(detail.memos);
+    lastError.set("");
+    return detail;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function loadCopilotSession(sessionId: string, options: { makeActive?: boolean } = {}) {
+  try {
+    const detail = await getJson<CopilotSessionDetail>(`/copilot/sessions/${encodeURIComponent(sessionId)}`);
+    if (options.makeActive) {
+      setCopilotSessionId(sessionId);
+    }
     activeCopilotSession.set(detail);
     copilotMemos.set(detail.memos);
     lastError.set("");
@@ -2314,6 +2394,57 @@ export async function createCopilotMemo(options: {
     return null;
   } finally {
     setLoading("copilot", false);
+  }
+}
+
+export async function archiveCopilotSession(sessionId: string) {
+  setLoading("copilot", true);
+  try {
+    const session = await postJson<CopilotSessionSummary>(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}/archive`,
+      {}
+    );
+    if (sessionId === getCopilotSessionId()) {
+      activeCopilotSession.set(null);
+      copilotMemos.set([]);
+    }
+    await loadCopilotSessions();
+    lastError.set("");
+    return session;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("copilot", false);
+  }
+}
+
+export async function updateCopilotMemo(memoId: string, options: { title?: string; body?: string }) {
+  setLoading("copilot", true);
+  try {
+    const memo = await patchJson<CopilotMemo>(`/copilot/memos/${encodeURIComponent(memoId)}`, {
+      title: options.title,
+      body: options.body
+    });
+    await Promise.allSettled([loadCopilotMemos(getCopilotSessionId()), loadActiveCopilotSession(), loadCopilotSessions()]);
+    lastError.set("");
+    return memo;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("copilot", false);
+  }
+}
+
+export async function exportCopilotMemo(memoId: string) {
+  try {
+    const markdown = await getText(`/copilot/memos/${encodeURIComponent(memoId)}/export`);
+    lastError.set("");
+    return markdown;
+  } catch (error) {
+    setError(error);
+    return null;
   }
 }
 

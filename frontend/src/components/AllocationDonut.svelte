@@ -50,7 +50,7 @@
   }
 
   function money(value: number | null | undefined) {
-    return value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
   }
 
   function tooltipDetail(detail: string | undefined) {

@@ -409,7 +409,7 @@ class USMacroEventsAdapter:
                     )
                 events.extend(parser(payload, source_retrieved_at))
             except Exception as exc:
-                logger.warning("Macro events source failed: source=%s url=%s error=%s", source_name, url, exc)
+                logger.debug("Macro events source unavailable: source=%s url=%s error=%s", source_name, url, exc)
                 continue
 
         unique: dict[str, MacroEventRecord] = {}

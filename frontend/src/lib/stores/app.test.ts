@@ -1282,6 +1282,20 @@ describe("app store orchestration", () => {
     expect(get(copilotThreads).macro.entries[0]?.result.response_id).toBe("resp_macro_2");
   });
 
+  it("adds a visible copilot error turn when generation fails before a response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("Failed to fetch")));
+
+    const result = await loadCopilotResearchCard("macro", "Map the active macro setup.");
+
+    expect(result?.status).toBe("error");
+    expect(result?.message).toContain("Failed to fetch");
+    expect(get(lastError)).toContain("Failed to fetch");
+    expect(get(copilotCards).macro?.status).toBe("error");
+    expect(get(copilotThreads).macro.entries).toHaveLength(1);
+    expect(get(copilotThreads).macro.entries[0]?.prompt).toBe("Map the active macro setup.");
+    expect(get(copilotThreads).macro.entries[0]?.result.message).toContain("Failed to fetch");
+  });
+
   it("threads previous_response_id through synthesis follow-ups when the grounding scope is unchanged", async () => {
     const snapshot = makeSnapshot();
     portfolioSnapshot.set(snapshot);

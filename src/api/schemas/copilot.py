@@ -248,6 +248,7 @@ class CopilotSessionModel(BaseModel):
     turn_count: int = 0
     memo_count: int = 0
     warnings: list[str] = Field(default_factory=list)
+    archived_at: datetime | None = None
 
     @classmethod
     def from_domain(cls, row: CopilotSession) -> "CopilotSessionModel":
@@ -308,3 +309,8 @@ class CopilotMemoCreateRequestModel(BaseModel):
     title: str | None = None
     notes: str | None = None
     source_turn_ids: list[str] = Field(default_factory=list)
+
+
+class CopilotMemoUpdateRequestModel(BaseModel):
+    title: str | None = None
+    body: str | None = None

@@ -27,6 +27,20 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw await httpError(response);
+  }
+  return (await response.json()) as T;
+}
+
 export async function deleteJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "DELETE"
@@ -35,6 +49,14 @@ export async function deleteJson<T>(path: string): Promise<T> {
     throw await httpError(response);
   }
   return (await response.json()) as T;
+}
+
+export async function getText(path: string): Promise<string> {
+  const response = await fetch(`${API_BASE}${path}`);
+  if (!response.ok) {
+    throw await httpError(response);
+  }
+  return response.text();
 }
 
 async function httpError(response: Response): Promise<Error> {

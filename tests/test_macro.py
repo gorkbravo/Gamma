@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError
@@ -429,7 +430,7 @@ def test_us_macro_events_adapter_keeps_same_day_future_bls_release(tmp_path, mon
     assert rows[0].scheduled_at == datetime(2026, 5, 1, 12, 30, 0)
 
 
-def test_us_macro_events_adapter_skips_blocked_sources_and_keeps_remaining_events(tmp_path, monkeypatch):
+def test_us_macro_events_adapter_skips_blocked_sources_and_keeps_remaining_events(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: EVENTS_RETRIEVED_AT)
 
     fomc_html = """
@@ -445,10 +446,12 @@ def test_us_macro_events_adapter_skips_blocked_sources_and_keeps_remaining_event
 
     adapter = USMacroEventsAdapter(CacheService(base_dir=tmp_path / "cache"), fetch_text=fake_fetch_text)
 
-    rows = adapter.list_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
+    with caplog.at_level(logging.WARNING, logger="src.services.macro_adapters"):
+        rows = adapter.list_events(region="US", as_of=datetime(2026, 4, 15, 0, 0, 0))
 
     assert [row.event_id for row in rows] == ["fomc:2026-05-06"]
     assert rows[0].title == "FOMC Meeting (May 6-7)"
+    assert "Macro events source" not in caplog.text
 
 
 def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch):

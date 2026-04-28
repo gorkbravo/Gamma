@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import SearchDropdown from "../components/SearchDropdown.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
+    CrossTabHandoffEnvelope,
     FundamentalsDcfModel,
     FundamentalsDcfScenario,
     FundamentalsDcfSnapshotList,
@@ -57,6 +58,7 @@
   export let onSaveDcfModel: (ticker: string, payload: FundamentalsDcfSavePayload) => Promise<unknown> | void;
   export let onSaveDcfSnapshot: (ticker: string, name?: string) => Promise<unknown> | void;
   export let onLoadDcfSnapshot: (ticker: string, snapshotId: string) => Promise<unknown> | void;
+  export let onSendToCopilot: (handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void = () => {};
 
   const modeOptions = fundamentalsModes;
   const statementOptions: Array<{ id: FundamentalsStatementKind; label: string }> = [
@@ -100,7 +102,7 @@
   const currency = (value: number | null | undefined, digits = 0) =>
     value == null
       ? "N/A"
-      : new Intl.NumberFormat(undefined, {
+      : new Intl.NumberFormat("en-US", {
           style: "currency",
           currency: "USD",
           maximumFractionDigits: digits
@@ -118,7 +120,7 @@
   const pct = (value: number | null | undefined, digits = 1) =>
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
   const shortDate = (value: string | null | undefined) =>
-    value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "N/A";
+    value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A";
 
   function companySummary(company: FundamentalsOverview["company"] | FundamentalsFinancials["company"] | null) {
     if (!company) {
@@ -224,6 +226,45 @@
     return unit === "percent" ? parsed / 100 : parsed;
   }
 
+  function sendCurrentCompanyToCopilot() {
+    const company = currentCompany;
+    if (!company) {
+      return;
+    }
+    const handoff: CrossTabHandoffEnvelope = {
+      source_tab: "fundamentals",
+      source_mode: mode,
+      selected_entity: {
+        entity_type: "equity",
+        label: `${company.name} (${company.ticker})`,
+        normalized_id: company.ticker,
+        provider_id: company.cik,
+        native_id: company.cik,
+        metadata: {
+          ticker: company.ticker,
+          cik: company.cik,
+          exchange: company.exchange,
+          latest_report_period: company.latest_report_period,
+          latest_filing_date: company.latest_filing_date
+        }
+      },
+      selected_timeframe: company.latest_report_period
+        ? { label: `Latest report ${shortDate(company.latest_report_period)}`, start: null, end: company.latest_report_period }
+        : null,
+      provider: company.source_provider,
+      source: null,
+      warnings: combinedWarnings,
+      normalized_ids: {
+        ticker: company.ticker,
+        ...(company.cik ? { cik: company.cik } : {})
+      },
+      timestamp: new Date().toISOString(),
+      intended_target_tab: "copilot",
+      intended_target_mode: "active_tab"
+    };
+    void onSendToCopilot(handoff);
+  }
+
   function projectionEditableValue(scenario: FundamentalsDcfScenario | null, lineKey: string, index: number) {
     const overrideValues = dcfDraft.scenarios[dcfDraft.activeScenarioId]?.overrides[lineKey] ?? [];
     const overrideValue = overrideValues[index];
@@ -245,11 +286,32 @@
   }
 
   async function runSearch(forceRefresh = false) {
+    const trimmed = searchQuery.trim();
+    lastAutoSearchQuery = trimmed;
     await onSearch({
-      query: searchQuery.trim() || undefined,
+      query: trimmed || undefined,
       limit: 12,
       forceRefresh
     });
+  }
+
+  let searchDebounceHandle: ReturnType<typeof setTimeout> | undefined;
+  let lastAutoSearchQuery = "";
+  const SEARCH_DEBOUNCE_MS = 250;
+
+  function scheduleAutoSearch(query: string) {
+    if (searchDebounceHandle !== undefined) {
+      clearTimeout(searchDebounceHandle);
+      searchDebounceHandle = undefined;
+    }
+    const trimmed = query.trim();
+    // Skip when the value just hydrated from the focal ticker — that is not a user keystroke.
+    if (trimmed && trimmed === searchHydratedTicker) return;
+    if (trimmed === lastAutoSearchQuery) return;
+    searchDebounceHandle = setTimeout(() => {
+      searchDebounceHandle = undefined;
+      void runSearch(false);
+    }, SEARCH_DEBOUNCE_MS);
   }
 
   async function chooseCompany(ticker: string, options: FundamentalsSelectOptions = {}) {
@@ -265,7 +327,6 @@
       : peerDraftTickers.filter((item) => item !== normalized);
     peerDirty = true;
   }
-
 
   function addManualPeers() {
     if (!overview) return;
@@ -355,6 +416,13 @@
     }
   });
 
+  onDestroy(() => {
+    if (searchDebounceHandle !== undefined) {
+      clearTimeout(searchDebounceHandle);
+      searchDebounceHandle = undefined;
+    }
+  });
+
   $: {
     const nextPeerFingerprint = `${overview?.company.ticker ?? ""}:${overview?.peer_basket?.peer_tickers.join(",") ?? ""}`;
     if (nextPeerFingerprint !== peerFingerprint) {
@@ -383,10 +451,13 @@
     if (nextTicker && nextTicker !== searchHydratedTicker && searchQuery.trim().length === 0) {
       searchQuery = nextTicker;
       searchHydratedTicker = nextTicker;
+      lastAutoSearchQuery = nextTicker;
     } else if (!nextTicker) {
       searchHydratedTicker = "";
     }
   }
+
+  $: scheduleAutoSearch(searchQuery);
 
   $: currentCompany = overview?.company ?? financials?.company ?? null;
   $: headlineMetrics = overview?.headline_metrics ?? [];
@@ -562,6 +633,9 @@
         {#if currentCompany}
           <button type="button" class="secondary" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
             Refresh {currentCompany.ticker}
+          </button>
+          <button type="button" class="secondary" on:click={sendCurrentCompanyToCopilot} disabled={loading}>
+            Send to Copilot
           </button>
         {/if}
       </div>

@@ -205,7 +205,7 @@
     if (Number.isNaN(date.getTime())) {
       return value.slice(0, 16);
     }
-    return date.toLocaleString(undefined, {
+    return date.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
       hour: "2-digit",
@@ -217,7 +217,7 @@
     if (!value) return "";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value.slice(11, 16);
-    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+    return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   }
 
   const SOURCE_ABBREV: Record<string, string> = {
@@ -262,7 +262,7 @@
     if (Number.isNaN(date.getTime())) {
       return value.slice(0, 10);
     }
-    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
   function toneFromValue(value: number | null | undefined) {

@@ -61,7 +61,7 @@
   let descending = true;
 
   const fmt = (value: number | null | undefined, digits = 2) =>
-    value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: digits });
+    value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
 
   const pct = (value: number | null | undefined, digits = 2) =>
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
@@ -338,7 +338,7 @@
           <article class="metric">
             <span>Net Liquidity</span>
             <strong>{fmt(snapshot?.net_liquidation)} {currency}</strong>
-            <small>{snapshot ? `Updated ${new Date(snapshot.timestamp).toLocaleString()}` : "Waiting for snapshot"}</small>
+            <small>{snapshot ? `Updated ${new Date(snapshot.timestamp).toLocaleString("en-US")}` : "Waiting for snapshot"}</small>
           </article>
           <article class="metric">
             <span>Day P&amp;L</span>

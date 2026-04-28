@@ -14,10 +14,10 @@
   export let region: MacroContextState["region"] = "US";
 
   const fmt = (value: number | null | undefined, digits = 2) =>
-    value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+    value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 
   function shortDate(value: string | null | undefined) {
-    return value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "N/A";
+    return value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A";
   }
 
   function deltaClass(display: string | null | undefined): string {
@@ -41,7 +41,7 @@
     for (const event of evts) {
       if (!event.scheduled_at) continue;
       const d = new Date(event.scheduled_at);
-      const key = d.toLocaleString(undefined, { month: "long", year: "numeric" });
+      const key = d.toLocaleString("en-US", { month: "long", year: "numeric" });
       if (key !== current) { current = key; groups.push({ label: key, events: [] }); }
       groups.at(-1)!.events.push(event);
     }

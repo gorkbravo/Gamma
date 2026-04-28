@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.api.schemas.copilot import (
     CopilotMemoCreateRequestModel,
     CopilotMemoModel,
+    CopilotMemoUpdateRequestModel,
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
     CopilotSessionDetailModel,
@@ -49,9 +50,16 @@ def stream_research_card(
 
 
 @router.get("/copilot/sessions", response_model=list[CopilotSessionModel])
-def list_copilot_sessions(request: Request) -> list[CopilotSessionModel]:
+def list_copilot_sessions(
+    request: Request,
+    include_archived: bool = False,
+    search: str | None = None,
+) -> list[CopilotSessionModel]:
     runtime = request.app.state.runtime
-    return [CopilotSessionModel.from_domain(item) for item in runtime.copilot_service.list_sessions()]
+    return [
+        CopilotSessionModel.from_domain(item)
+        for item in runtime.copilot_service.list_sessions(include_archived=include_archived, search=search)
+    ]
 
 
 @router.get("/copilot/sessions/{session_id}", response_model=CopilotSessionDetailModel)
@@ -96,3 +104,37 @@ def create_copilot_memo(
         source_turn_ids=payload.source_turn_ids,
     )
     return CopilotMemoModel.from_domain(memo)
+
+
+@router.post("/copilot/sessions/{session_id}/archive", response_model=CopilotSessionModel)
+def archive_copilot_session(session_id: str, request: Request) -> CopilotSessionModel:
+    runtime = request.app.state.runtime
+    try:
+        session = runtime.copilot_service.archive_session(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return CopilotSessionModel.from_domain(session)
+
+
+@router.patch("/copilot/memos/{memo_id}", response_model=CopilotMemoModel)
+def update_copilot_memo(
+    memo_id: str,
+    payload: CopilotMemoUpdateRequestModel,
+    request: Request,
+) -> CopilotMemoModel:
+    runtime = request.app.state.runtime
+    try:
+        memo = runtime.copilot_service.update_memo(memo_id, title=payload.title, body=payload.body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CopilotMemoModel.from_domain(memo)
+
+
+@router.get("/copilot/memos/{memo_id}/export")
+def export_copilot_memo(memo_id: str, request: Request) -> Response:
+    runtime = request.app.state.runtime
+    try:
+        markdown = runtime.copilot_service.export_memo_markdown(memo_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(content=markdown, media_type="text/markdown; charset=utf-8")

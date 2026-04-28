@@ -53,6 +53,7 @@ def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
             "http://tauri.localhost",
             "https://tauri.localhost",
         ],
+        allow_origin_regex=r"^http://(127\.0\.0\.1|localhost):\d+$",
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],

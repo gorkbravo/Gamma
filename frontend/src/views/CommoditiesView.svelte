@@ -571,7 +571,7 @@
     if (value == null || Number.isNaN(value)) {
       return "N/A";
     }
-    return value.toLocaleString(undefined, {
+    return value.toLocaleString("en-US", {
       maximumFractionDigits: digits,
       minimumFractionDigits: Math.abs(value) < 10 && value !== 0 ? Math.min(digits, 2) : 0
     });
@@ -600,7 +600,7 @@
     if (Number.isNaN(date.getTime())) {
       return "N/A";
     }
-    return date.toLocaleDateString(undefined, {
+    return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric"

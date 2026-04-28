@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import logging
 from typing import Any, Callable
 
 from src.application.copilot_context_helpers import (
@@ -35,6 +36,8 @@ from src.services.copilot_store import CopilotStore
 from src.models.macro import MacroMetricRecord, MacroSeriesHistory
 from src.models.prediction_markets import PredictionProbabilityPoint
 from src.services.copilot_provider import CopilotProvider
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -408,28 +411,57 @@ class CopilotService:
             for tool in self._tools.values()
             if resolved_domain in tool.domains
         ]
-        result = self.provider.generate_research_card(
-            request=normalized_request,
-            context=context,
-            tool_specs=tool_specs,
-            execute_tool=self._execute_tool,
-        )
-        if self.store is not None:
-            self.store.record_turn(
-                session_id=normalized_request.user_session_id,
-                title=normalized_request.session_title,
+        try:
+            result = self.provider.generate_research_card(
+                request=normalized_request,
+                context=context,
+                tool_specs=tool_specs,
+                execute_tool=self._execute_tool,
+            )
+        except Exception as exc:
+            logger.exception("Copilot provider failed for domain %s", resolved_domain)
+            result = CopilotResearchCardResult(
                 domain=resolved_domain,
                 current_tab=context.current_tab,
-                workspace_mode=normalized_request.context.workspace_mode,
-                prompt=normalized_request.prompt,
-                context_fingerprint=normalized_request.context_fingerprint,
-                context_summary=self._context_summary_for_persistence(context),
-                result=result,
+                status="error",
+                provider=getattr(self.provider, "provider_name", "unknown"),
+                message=f"Copilot failed: {exc}",
+                sources=list(context.sources),
+                warnings=dedupe_warnings(
+                    [
+                        *context.warnings,
+                        "Copilot generation failed before a research card could be produced.",
+                    ]
+                ),
             )
+        if self.store is not None:
+            try:
+                self.store.record_turn(
+                    session_id=normalized_request.user_session_id,
+                    title=normalized_request.session_title,
+                    domain=resolved_domain,
+                    current_tab=context.current_tab,
+                    workspace_mode=normalized_request.context.workspace_mode,
+                    prompt=normalized_request.prompt,
+                    context_fingerprint=normalized_request.context_fingerprint,
+                    context_summary=self._context_summary_for_persistence(context),
+                    result=result,
+                )
+            except Exception:
+                logger.exception("Copilot persistence failed for domain %s", resolved_domain)
+                result = replace(
+                    result,
+                    warnings=dedupe_warnings(
+                        [
+                            *result.warnings,
+                            "Copilot generated a response, but failed to persist this turn locally.",
+                        ]
+                    ),
+                )
         return result
 
-    def list_sessions(self) -> list[CopilotSession]:
-        return self.store.list_sessions() if self.store is not None else []
+    def list_sessions(self, *, include_archived: bool = False, search: str | None = None) -> list[CopilotSession]:
+        return self.store.list_sessions(include_archived=include_archived, search=search) if self.store is not None else []
 
     def list_turns(self, session_id: str) -> list[CopilotTurn]:
         return self.store.list_turns(session_id) if self.store is not None else []
@@ -453,6 +485,32 @@ class CopilotService:
             notes=notes,
             source_turn_ids=source_turn_ids,
         )
+
+    def archive_session(self, session_id: str) -> CopilotSession:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.archive_session(session_id)
+
+    def update_memo(self, memo_id: str, *, title: str | None = None, body: str | None = None) -> CopilotMemo:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.update_memo(memo_id, title=title, body=body)
+
+    def export_memo_markdown(self, memo_id: str) -> str:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        memo = self.store.get_memo(memo_id)
+        if memo is None:
+            raise ValueError(f"Copilot memo not found: {memo_id}")
+        meta = [
+            f"Session: {memo.session_id}",
+            f"Memo: {memo.memo_id}",
+            f"Updated: {memo.updated_at.isoformat()}",
+            f"Source turns: {', '.join(memo.source_turn_ids) if memo.source_turn_ids else 'none'}",
+        ]
+        if memo.warnings:
+            meta.extend(["", "Warnings:", *[f"- {warning}" for warning in memo.warnings]])
+        return "\n".join([memo.body.strip(), "", "---", *meta]).strip() + "\n"
 
     @staticmethod
     def stream_events_for_result(result: CopilotResearchCardResult) -> list[dict[str, Any]]:

@@ -36,9 +36,21 @@ class CopilotStore:
             directory.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
-    def list_sessions(self) -> list[CopilotSession]:
+    def list_sessions(self, *, include_archived: bool = False, search: str | None = None) -> list[CopilotSession]:
         with self._lock:
             sessions = [item for path in self.sessions_dir.glob("*.json") if (item := self._load_session_path(path))]
+        if not include_archived:
+            sessions = [session for session in sessions if session.archived_at is None]
+        query = str(search or "").strip().lower()
+        if query:
+            sessions = [
+                session
+                for session in sessions
+                if query in session.title.lower()
+                or query in session.session_id.lower()
+                or query in str(session.active_domain or "").lower()
+                or any(query in warning.lower() for warning in session.warnings)
+            ]
         return sorted(sessions, key=lambda item: item.updated_at, reverse=True)
 
     def get_session(self, session_id: str) -> CopilotSession | None:
@@ -86,7 +98,7 @@ class CopilotStore:
             if session is None:
                 session = CopilotSession(
                     session_id=safe_session_id,
-                    title=self._session_title(title, domain, result),
+                    title=self._session_title(title, domain, result, prompt),
                     created_at=now,
                     updated_at=now,
                 )
@@ -123,6 +135,7 @@ class CopilotStore:
                 turn_count=len(existing_turns) + 1,
                 memo_count=memo_count,
                 warnings=list(dict.fromkeys([*session.warnings, *result.warnings])),
+                archived_at=None,
             )
             self._write_json(self.sessions_dir / f"{safe_session_id}.json", self._session_to_json(next_session))
             self._write_json(self.snapshots_dir / f"{snapshot.snapshot_id}.json", self._snapshot_to_json(snapshot))
@@ -171,11 +184,72 @@ class CopilotStore:
                 active_domain=session.active_domain,
                 active_context_fingerprint=session.active_context_fingerprint,
                 turn_count=session.turn_count,
-                memo_count=len([item for item in self._load_memos_unlocked() if item.session_id == safe_session_id]) + 1,
+                memo_count=len([item for item in self._load_memos_unlocked() if item.session_id == safe_session_id]),
                 warnings=session.warnings,
+                archived_at=session.archived_at,
             )
             self._write_json(self.sessions_dir / f"{safe_session_id}.json", self._session_to_json(updated_session))
         return memo
+
+    def archive_session(self, session_id: str) -> CopilotSession:
+        safe_session_id = self._safe_id(session_id)
+        if not safe_session_id:
+            raise ValueError("session_id is required.")
+        with self._lock:
+            session = self._load_session_path(self.sessions_dir / f"{safe_session_id}.json")
+            if session is None:
+                raise ValueError(f"Copilot session not found: {session_id}")
+            now = now_utc()
+            archived = CopilotSession(
+                session_id=session.session_id,
+                title=session.title,
+                created_at=session.created_at,
+                updated_at=now,
+                active_domain=session.active_domain,
+                active_context_fingerprint=session.active_context_fingerprint,
+                turn_count=session.turn_count,
+                memo_count=session.memo_count,
+                warnings=session.warnings,
+                archived_at=now,
+            )
+            self._write_json(self.sessions_dir / f"{safe_session_id}.json", self._session_to_json(archived))
+        return archived
+
+    def update_memo(self, memo_id: str, *, title: str | None = None, body: str | None = None) -> CopilotMemo:
+        safe_memo_id = self._safe_id(memo_id)
+        if not safe_memo_id:
+            raise ValueError("memo_id is required.")
+        with self._lock:
+            memo = self._load_memo_path(self.memos_dir / f"{safe_memo_id}.json")
+            if memo is None:
+                raise ValueError(f"Copilot memo not found: {memo_id}")
+            next_title = str(title or "").strip() or memo.title
+            next_body = str(body if body is not None else memo.body).strip()
+            if not next_body:
+                raise ValueError("memo body cannot be empty.")
+            updated = CopilotMemo(
+                memo_id=memo.memo_id,
+                session_id=memo.session_id,
+                title=next_title[:140],
+                body=next_body,
+                source_turn_ids=memo.source_turn_ids,
+                source_snapshot_ids=memo.source_snapshot_ids,
+                created_at=memo.created_at,
+                updated_at=now_utc(),
+                warnings=memo.warnings,
+                source_provider=memo.source_provider,
+                origin=memo.origin,
+                transformation_note=memo.transformation_note,
+            )
+            self._write_json(self.memos_dir / f"{safe_memo_id}.json", self._memo_to_json(updated))
+        return updated
+
+    def get_memo(self, memo_id: str) -> CopilotMemo | None:
+        safe_memo_id = self._safe_id(memo_id)
+        if not safe_memo_id:
+            return None
+        with self._lock:
+            return self._load_memo_path(self.memos_dir / f"{safe_memo_id}.json")
 
     def _load_turns_unlocked(self, session_id: str) -> list[CopilotTurn]:
         turns_dir = self.turns_dir / session_id
@@ -199,6 +273,7 @@ class CopilotStore:
             turn_count=int(payload.get("turn_count") or 0),
             memo_count=int(payload.get("memo_count") or 0),
             warnings=list(payload.get("warnings") or []),
+            archived_at=self._parse_datetime(payload.get("archived_at")),
         )
 
     def _load_turn_path(self, path: Path) -> CopilotTurn | None:
@@ -262,6 +337,7 @@ class CopilotStore:
             "turn_count": session.turn_count,
             "memo_count": session.memo_count,
             "warnings": list(session.warnings),
+            "archived_at": session.archived_at.isoformat() if session.archived_at else None,
         }
 
     @staticmethod
@@ -411,11 +487,19 @@ class CopilotStore:
         return "\n".join(lines).strip()
 
     @staticmethod
-    def _session_title(title: str | None, domain: str, result: CopilotResearchCardResult) -> str:
+    def _session_title(
+        title: str | None,
+        domain: str,
+        result: CopilotResearchCardResult,
+        prompt: str | None = None,
+    ) -> str:
         explicit = str(title or "").strip()
         if explicit:
             return explicit[:96]
         card_title = result.card.title if result.card else ""
+        prompt_title = str(prompt or "").strip().replace("\n", " ")
+        if prompt_title:
+            return prompt_title[:96]
         return (card_title or f"{domain.replace('_', ' ').title()} Copilot Session")[:96]
 
     @staticmethod

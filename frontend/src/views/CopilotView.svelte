@@ -2,6 +2,7 @@
   import type {
     CopilotBaseDomain,
     CopilotDomain,
+    CrossTabHandoffEnvelope,
     CopilotMemo,
     CopilotSessionDetail,
     CopilotSessionSummary,
@@ -36,10 +37,16 @@
   export let sessions: CopilotSessionSummary[] = [];
   export let activeSession: CopilotSessionDetail | null = null;
   export let memos: CopilotMemo[] = [];
+  export let latestHandoff: CrossTabHandoffEnvelope | null = null;
   export let loading = false;
   export let onGenerate: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void;
   export let onCreateMemo: (title?: string, notes?: string) => Promise<unknown> | void = () => {};
+  export let onUpdateMemo: (memoId: string, title: string, body: string) => Promise<unknown> | void = () => {};
+  export let onArchiveSession: (sessionId: string) => Promise<unknown> | void = () => {};
+  export let onExportMemo: (memoId: string) => Promise<string | null | unknown> | string | null | void = () => null;
   export let onLoadSessions: () => Promise<unknown> | void = () => {};
+  export let onSelectSession: (sessionId: string) => Promise<unknown> | void = () => {};
+  export let onSearchSessions: (options?: { includeArchived?: boolean; search?: string }) => Promise<unknown> | void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
 
   type FocusMode = "synthesis" | "active_tab";
@@ -50,8 +57,14 @@
   let threadEntries: CopilotThreadEntry[] = [];
   let selectedCount = 0;
   let loadedCount = 0;
+  let displayedTurnCount = 0;
   let memoTitle = "";
   let memoNotes = "";
+  let memoEditId = "";
+  let memoEditTitle = "";
+  let memoEditBody = "";
+  let sessionSearch = "";
+  let includeArchivedSessions = false;
 
   function setFocusMode(nextMode: FocusMode) {
     focusMode = nextMode;
@@ -80,6 +93,60 @@
     }
   }
 
+  async function handleUpdateMemo() {
+    if (!memoEditId || loading) {
+      return;
+    }
+    const result = await onUpdateMemo(memoEditId, memoEditTitle.trim(), memoEditBody);
+    if (result != null) {
+      await onLoadSessions();
+    }
+  }
+
+  async function handleArchiveSession(sessionId: string) {
+    if (!sessionId || loading) {
+      return;
+    }
+    const result = await onArchiveSession(sessionId);
+    if (result != null) {
+      await onSearchSessions({ includeArchived: includeArchivedSessions, search: sessionSearch });
+    }
+  }
+
+  async function handleSearchSessions() {
+    await onSearchSessions({ includeArchived: includeArchivedSessions, search: sessionSearch });
+  }
+
+  async function handleSelectSession(sessionId: string) {
+    if (!sessionId || loading) {
+      return;
+    }
+    await onSelectSession(sessionId);
+  }
+
+  async function handleExportMemo() {
+    if (!memoEditId) {
+      return;
+    }
+    const markdown = await onExportMemo(memoEditId);
+    if (typeof markdown !== "string" || !markdown.trim()) {
+      return;
+    }
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${slugify(memoEditTitle || "copilot-memo")}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function selectMemo(memo: CopilotMemo) {
+    memoEditId = memo.memo_id;
+    memoEditTitle = memo.title;
+    memoEditBody = memo.body;
+  }
+
   function handleComposerKeydown(event: KeyboardEvent) {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
@@ -103,10 +170,20 @@
     return parts.join(" / ") || "No source trace";
   }
 
+  function slugify(value: string) {
+    const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    return slug || "copilot-memo";
+  }
+
+  function sessionStatusLabel(session: CopilotSessionSummary) {
+    return session.archived_at ? "ARCHIVED" : session.active_domain ?? "mixed";
+  }
+
   $: surface = focusMode === "synthesis" ? synthesisSurface : activeSurface;
   $: threadEntries = surface.thread?.entries ?? [];
   $: selectedCount = synthesisSurface.selectedScopeDomains.length;
   $: loadedCount = synthesisSurface.scopeOptions.length;
+  $: displayedTurnCount = threadEntries.length || activeSession?.turns.length || 0;
 </script>
 
 <section class="view">
@@ -131,7 +208,7 @@
       </div>
       <div>
         <span>Thread Turns</span>
-        <strong>{threadEntries.length}</strong>
+        <strong>{displayedTurnCount}</strong>
       </div>
     </div>
   </article>
@@ -204,6 +281,32 @@
               </section>
             {/each}
           </div>
+        {:else if activeSession?.turns.length}
+          <div class="thread-list">
+            {#each activeSession.turns as turn (turn.turn_id)}
+              <section class="turn-row">
+                <div class="turn-meta">
+                  <span>TURN {turn.turn_index + 1}</span>
+                  <small>{turn.result.model ? `${turn.result.provider} / ${turn.result.model}` : turn.result.provider}</small>
+                  <small>{turn.result.sources.length} sources / {turn.result.tool_traces.length} tools</small>
+                </div>
+                <div class="turn-body">
+                  {#if turn.prompt}
+                    <p class="prompt">{turn.prompt}</p>
+                  {/if}
+                  {#if turn.result.message}
+                    <p class="message {turn.result.status}">{turn.result.message}</p>
+                  {/if}
+                  {#if turn.result.card}
+                    <h4>{turn.result.card.title}</h4>
+                    <p><strong>Hypothesis</strong>{turn.result.card.hypothesis}</p>
+                    <p><strong>Rationale</strong>{turn.result.card.rationale}</p>
+                    <p><strong>Proposed test</strong>{turn.result.card.proposed_test}</p>
+                  {/if}
+                </div>
+              </section>
+            {/each}
+          </div>
         {:else}
           <p class="empty-state">No dedicated Copilot workspace thread yet.</p>
         {/if}
@@ -250,15 +353,27 @@
             Create Memo
           </button>
         </div>
-        <div class="plan-list">
+        <div class="memo-list">
           {#if memos.length}
             {#each memos.slice(0, 4) as memo}
-              <div><strong>{memo.source_turn_ids.length}</strong><span>{memo.title}</span></div>
+              <button type="button" class:selected={memo.memo_id === memoEditId} on:click={() => selectMemo(memo)}>
+                <strong>{memo.source_turn_ids.length}</strong><span>{memo.title}</span>
+              </button>
             {/each}
           {:else}
             <div><strong>0</strong><span>No saved Copilot memos for the active session.</span></div>
           {/if}
         </div>
+        {#if memoEditId}
+          <div class="memo-editor">
+            <input bind:value={memoEditTitle} placeholder="Memo title" disabled={loading} />
+            <textarea bind:value={memoEditBody} rows={8} placeholder="Memo body" disabled={loading}></textarea>
+            <div class="button-row">
+              <button type="button" disabled={loading || !memoEditBody.trim()} on:click={handleUpdateMemo}>Save</button>
+              <button type="button" class="secondary" disabled={loading} on:click={handleExportMemo}>Export Md</button>
+            </div>
+          </div>
+        {/if}
       </article>
 
       <article class="panel plan-panel">
@@ -266,18 +381,46 @@
           <div class="title-line"><p class="eyebrow">Sessions</p><h3>Persisted Threads</h3></div>
           <span>{sessions.length}</span>
         </div>
-        <div class="plan-list">
+        <div class="session-filter">
+          <input bind:value={sessionSearch} placeholder="Search sessions" on:keydown={(event) => event.key === "Enter" && handleSearchSessions()} />
+          <label><input type="checkbox" bind:checked={includeArchivedSessions} on:change={handleSearchSessions} /> Archived</label>
+          <button type="button" on:click={handleSearchSessions} disabled={loading}>Filter</button>
+        </div>
+        <div class="session-list">
           {#if sessions.length}
             {#each sessions.slice(0, 6) as session}
               <div>
                 <strong>{session.turn_count}</strong>
-                <span>{session.title} / {session.active_domain ?? "mixed"} / {session.memo_count} memos</span>
+                <span>{session.title} / {sessionStatusLabel(session)} / {session.memo_count} memos</span>
+                <div class="session-actions">
+                  <button type="button" disabled={loading} on:click={() => handleSelectSession(session.session_id)}>Open</button>
+                  <button type="button" disabled={loading || session.archived_at != null} on:click={() => handleArchiveSession(session.session_id)}>Archive</button>
+                </div>
               </div>
             {/each}
           {:else}
             <div><strong>0</strong><span>No persisted Copilot sessions yet.</span></div>
           {/if}
         </div>
+      </article>
+
+      <article class="panel handoff-panel">
+        <div class="panel-head">
+          <div class="title-line"><p class="eyebrow">Handoff</p><h3>Latest Context</h3></div>
+        </div>
+        {#if latestHandoff}
+          <div class="handoff-grid">
+            <div><span>Source</span><strong>{latestHandoff.source_tab}</strong></div>
+            <div><span>Target</span><strong>{latestHandoff.intended_target_tab}</strong></div>
+            <div><span>Entity</span><strong>{latestHandoff.selected_entity?.label ?? "N/A"}</strong></div>
+            <div><span>Mode</span><strong>{latestHandoff.source_mode ?? "N/A"}</strong></div>
+          </div>
+          {#if latestHandoff.warnings.length}
+            <p class="handoff-warning">{latestHandoff.warnings[0]}</p>
+          {/if}
+        {:else}
+          <p class="empty-state">No explicit cross-tab handoff has opened this workspace yet.</p>
+        {/if}
       </article>
     </aside>
   </div>
@@ -453,7 +596,9 @@
 
   .thread-list,
   .scope-list,
-  .plan-list {
+  .plan-list,
+  .memo-list,
+  .session-list {
     display: grid;
     gap: 0;
     border-top: 1px solid var(--divider);
@@ -512,7 +657,8 @@
     text-align: left;
   }
 
-  .scope-list button.selected strong {
+  .scope-list button.selected strong,
+  .memo-list button.selected span {
     color: var(--accent);
   }
 
@@ -522,12 +668,17 @@
 
   .scope-list span,
   .scope-list small,
-  .plan-list span {
+  .memo-list span,
+  .session-list span,
+  .session-filter label,
+  .handoff-grid span {
     color: var(--text-2);
     line-height: 1.35;
   }
 
-  .plan-list div {
+  .memo-list button,
+  .memo-list > div,
+  .session-list > div {
     display: grid;
     grid-template-columns: 2rem minmax(0, 1fr);
     gap: 0.5rem;
@@ -535,7 +686,34 @@
     border-bottom: 1px solid var(--divider);
   }
 
-  .memo-form {
+  .memo-list button {
+    border: 0;
+    background: transparent;
+    text-align: left;
+  }
+
+  .session-list > div {
+    grid-template-columns: 2rem minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .session-actions {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .session-list button,
+  .session-filter button {
+    padding: 0.32rem 0.55rem;
+    color: var(--text-1);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.68rem;
+  }
+
+  .memo-form,
+  .memo-editor,
+  .session-filter {
     display: grid;
     gap: 0.4rem;
   }
@@ -544,7 +722,37 @@
     min-height: 4.5rem;
   }
 
-  .memo-form button {
+  .memo-editor textarea {
+    min-height: 11rem;
+  }
+
+  .session-filter {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+  }
+
+  .session-filter label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.68rem;
+  }
+
+  .session-filter input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    padding: 0;
+  }
+
+  .button-row {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .memo-form button,
+  .memo-editor button {
     padding: 0.42rem 0.65rem;
     color: var(--accent);
     border-color: rgba(122, 166, 200, 0.34);
@@ -553,8 +761,35 @@
     font-size: 0.72rem;
   }
 
-  .plan-list strong {
+  .memo-editor button.secondary {
+    color: var(--text-1);
+    border-color: var(--panel-strong);
+  }
+
+  .memo-list strong,
+  .session-list strong,
+  .handoff-grid strong {
     color: var(--accent);
+  }
+
+  .handoff-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid var(--divider);
+  }
+
+  .handoff-grid div {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .handoff-warning {
+    margin: 0;
+    color: var(--warning);
+    font-size: 0.74rem;
+    line-height: 1.35;
   }
 
   .empty-state {

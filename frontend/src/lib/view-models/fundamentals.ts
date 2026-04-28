@@ -250,7 +250,7 @@ export function snapshotDisplayName(name: string | null | undefined, createdAt: 
   if (!createdAt) {
     return "DCF snapshot";
   }
-  return `Snapshot ${new Date(createdAt).toLocaleString(undefined, {
+  return `Snapshot ${new Date(createdAt).toLocaleString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",

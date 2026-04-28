@@ -92,7 +92,7 @@
   const money = (value: number | null | undefined, digits = 0) =>
     value == null
       ? "N/A"
-      : new Intl.NumberFormat(undefined, {
+      : new Intl.NumberFormat("en-US", {
           style: "currency",
           currency: "USD",
           maximumFractionDigits: digits
@@ -109,7 +109,7 @@
   };
   const pct = (value: number | null | undefined, digits = 1) => (value == null ? "N/A" : `${value.toFixed(digits)}%`);
   const ratio = (value: number | null | undefined, digits = 2) => (value == null ? "N/A" : `${value.toFixed(digits)}x`);
-  const shortDate = (value: string | null | undefined) => (value ? new Date(value).toLocaleString() : "N/A");
+  const shortDate = (value: string | null | undefined) => (value ? new Date(value).toLocaleString("en-US") : "N/A");
 
   function toneClass(value: number | null | undefined) {
     if (value == null) return "";
@@ -667,11 +667,11 @@
               </div>
               <div class="meta-row">
                 <span>Supply</span>
-                <strong>{detail?.circulating_supply?.toLocaleString() ?? "N/A"} / {detail?.total_supply?.toLocaleString() ?? "N/A"}</strong>
+                <strong>{detail?.circulating_supply?.toLocaleString("en-US") ?? "N/A"} / {detail?.total_supply?.toLocaleString("en-US") ?? "N/A"}</strong>
               </div>
               <div class="meta-row">
                 <span>Max Supply</span>
-                <strong>{detail?.max_supply?.toLocaleString() ?? "N/A"}</strong>
+                <strong>{detail?.max_supply?.toLocaleString("en-US") ?? "N/A"}</strong>
               </div>
               <div class="meta-row">
                 <span>Retrieved</span>
@@ -784,7 +784,7 @@
             <article class="metric">
               <span>Buy Pressure</span>
               <strong class={toneClass((flow?.buy_pressure_pct ?? 50) - 50)}>{pct(flow?.buy_pressure_pct)}</strong>
-              <small>{flow?.active_trader_proxy_24h?.toLocaleString() ?? "N/A"} trader proxy</small>
+              <small>{flow?.active_trader_proxy_24h?.toLocaleString("en-US") ?? "N/A"} trader proxy</small>
             </article>
             <article class="metric">
               <span>Reserve / Volume</span>

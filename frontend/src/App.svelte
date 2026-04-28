@@ -38,6 +38,7 @@
     copilotMemos,
     copilotSessions,
     copilotThreads,
+    archiveCopilotSession,
     createCopilotMemo,
     cryptoComparison,
     fundamentalsDcfSnapshots,
@@ -79,7 +80,9 @@
     loadActiveCopilotSession,
     loadCopilotMemos,
     loadCopilotResearchCard,
+    loadCopilotSession,
     loadCopilotSessions,
+    exportCopilotMemo,
     macroDivergences,
     macroEvents,
     macroSeriesHistories,
@@ -133,7 +136,8 @@
     strategyLabResult,
     stopIvSession,
     systemStatus,
-    toggleConnection
+    toggleConnection,
+    updateCopilotMemo
   } from "./lib/stores/app";
   import {
     reorderWorkspaceTab,
@@ -145,6 +149,7 @@
     CopilotBaseDomain,
     CopilotDomain,
     CopilotThreadState,
+    CrossTabHandoffEnvelope,
     CommodityMode,
     CommodityWorkspaceResponse,
     CryptoComparison,
@@ -205,6 +210,7 @@
   let copilotOpen = false;
   let copilotMode: CopilotDrawerMode = "active_tab";
   let selectedSynthesisDomains: CopilotBaseDomain[] = [];
+  let latestCopilotHandoff: CrossTabHandoffEnvelope | null = null;
   let settingsOpen = false;
   let orderedTabs: ReturnType<typeof getOrderedWorkspaceTabs> = [];
   let tabBarTabs: TabBarItem[] = [];
@@ -373,7 +379,7 @@
     const liquidity =
       snapshot.net_liquidation == null
         ? "No net liq"
-        : `${snapshot.net_liquidation.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${baseCurrency}`;
+        : `${snapshot.net_liquidation.toLocaleString("en-US", { maximumFractionDigits: 0 })} ${baseCurrency}`;
     const benchmark = performance?.benchmark_symbol ? ` | ${performance.benchmark_symbol}` : "";
     return `Portfolio | ${liquidity}${benchmark}`;
   }
@@ -1499,6 +1505,41 @@
     return createCopilotMemo({ title, notes });
   }
 
+  async function handleUpdateCopilotMemo(memoId: string, title: string, body: string) {
+    return updateCopilotMemo(memoId, { title, body });
+  }
+
+  async function handleArchiveCopilotSession(sessionId: string) {
+    return archiveCopilotSession(sessionId);
+  }
+
+  async function handleExportCopilotMemo(memoId: string) {
+    return exportCopilotMemo(memoId);
+  }
+
+  async function handleLoadCopilotSessionsFiltered(options: { includeArchived?: boolean; search?: string } = {}) {
+    return loadCopilotSessions(options);
+  }
+
+  async function handleSelectCopilotSession(sessionId: string) {
+    return loadCopilotSession(sessionId, { makeActive: true });
+  }
+
+  async function handleSendToCopilot(handoff: CrossTabHandoffEnvelope) {
+    const sourceTab = handoff.source_tab as TabId;
+    latestCopilotHandoff = handoff;
+    if (isWorkspaceTab("research", sourceTab) || isWorkspaceTab("portfolio", sourceTab)) {
+      copilotContextTab = sourceTab;
+    }
+    workspaceMode = "research";
+    activeTab.set("copilot");
+    copilotMode = "active_tab";
+    copilotOpen = false;
+    sidebarOpen = false;
+    settingsOpen = false;
+    await handleLoadCopilotWorkspaceState();
+  }
+
   async function handleLoadCopilotWorkspaceState() {
     await Promise.allSettled([loadCopilotSessions(), loadActiveCopilotSession(), loadCopilotMemos()]);
   }
@@ -1851,6 +1892,7 @@
             onSaveDcfModel={saveFundamentalsDcfModel}
             onSaveDcfSnapshot={saveFundamentalsDcfSnapshot}
             onLoadDcfSnapshot={loadFundamentalsDcfSnapshot}
+            onSendToCopilot={handleSendToCopilot}
           />
         {:else if $activeTab === "maritime"}
           <MaritimeView
@@ -1866,10 +1908,16 @@
             sessions={$copilotSessions}
             activeSession={$activeCopilotSession}
             memos={$copilotMemos}
+            latestHandoff={latestCopilotHandoff}
             loading={$loading.copilot}
             onGenerate={handleGenerateCopilotWorkspace}
             onCreateMemo={handleCreateCopilotMemo}
+            onUpdateMemo={handleUpdateCopilotMemo}
+            onArchiveSession={handleArchiveCopilotSession}
+            onExportMemo={handleExportCopilotMemo}
             onLoadSessions={handleLoadCopilotWorkspaceState}
+            onSelectSession={handleSelectCopilotSession}
+            onSearchSessions={handleLoadCopilotSessionsFiltered}
             onToggleScope={handleToggleSynthesisScope}
           />
         {:else if $activeTab === "risk"}
@@ -1894,6 +1942,7 @@
             onLoad={loadIvSurface}
             onStartSession={startIvSession}
             onStopSession={stopIvSession}
+            onSendToCopilot={handleSendToCopilot}
           />
         {/if}
       </section>

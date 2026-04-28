@@ -40,7 +40,7 @@
   <div class="summary">
     <article>
       <span>Generated</span>
-      <strong>{diagnostics ? new Date(diagnostics.generated_at).toLocaleString() : "N/A"}</strong>
+      <strong>{diagnostics ? new Date(diagnostics.generated_at).toLocaleString("en-US") : "N/A"}</strong>
     </article>
     <article>
       <span>Connection</span>

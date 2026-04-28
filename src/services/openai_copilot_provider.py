@@ -122,7 +122,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                     "current_tab": context.current_tab,
                 },
             }
-            if turn == 0 and request.previous_response_id:
+            if turn == 0 and request.previous_response_id and self.store_responses:
                 payload["previous_response_id"] = request.previous_response_id
 
             try:

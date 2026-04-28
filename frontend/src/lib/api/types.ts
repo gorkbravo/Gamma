@@ -2516,6 +2516,7 @@ export interface CopilotSessionSummary {
   turn_count: number;
   memo_count: number;
   warnings: string[];
+  archived_at: string | null;
 }
 
 export interface CopilotTurnRecord {
@@ -2548,6 +2549,35 @@ export interface CopilotSessionDetail {
   session: CopilotSessionSummary;
   turns: CopilotTurnRecord[];
   memos: CopilotMemo[];
+}
+
+export interface CrossTabHandoffEntity {
+  entity_type: string;
+  label: string;
+  normalized_id: string;
+  provider_id: string | null;
+  native_id: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface CrossTabHandoffTimeframe {
+  label: string;
+  start: string | null;
+  end: string | null;
+}
+
+export interface CrossTabHandoffEnvelope {
+  source_tab: TabId | string;
+  source_mode: string | null;
+  selected_entity: CrossTabHandoffEntity | null;
+  selected_timeframe: CrossTabHandoffTimeframe | null;
+  provider: string | null;
+  source: Record<string, unknown> | null;
+  warnings: string[];
+  normalized_ids: Record<string, string>;
+  timestamp: string;
+  intended_target_tab: TabId | string;
+  intended_target_mode: string | null;
 }
 
 export interface IvSurfaceCollection {

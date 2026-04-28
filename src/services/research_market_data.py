@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -16,6 +17,9 @@ from src.utils.time import now_utc
 
 
 logger = logging.getLogger(__name__)
+
+
+_CLASS_SHARE_SYMBOL_RE = re.compile(r"^([A-Z0-9]+)[-.]([A-Z]{1,2})$")
 
 
 @dataclass(frozen=True)
@@ -57,9 +61,10 @@ class ListedMarketHistoryProvider(Protocol):
 
 
 def contract_for_instrument(instrument: InstrumentReference) -> Contract:
+    sec_type = instrument.sec_type or "STK"
     contract = Contract(
-        symbol=instrument.normalized_symbol(),
-        secType=instrument.sec_type or "STK",
+        symbol=_ibkr_stock_symbol(instrument.normalized_symbol(), sec_type),
+        secType=sec_type,
         exchange=instrument.exchange or "SMART",
         currency=instrument.currency or "USD",
     )
@@ -70,6 +75,15 @@ def contract_for_instrument(instrument: InstrumentReference) -> Contract:
     if primary_exchange:
         contract.primaryExchange = primary_exchange
     return contract
+
+
+def _ibkr_stock_symbol(symbol: str, sec_type: str | None) -> str:
+    if normalize_symbol(sec_type) != "STK":
+        return symbol
+    match = _CLASS_SHARE_SYMBOL_RE.match(symbol)
+    if not match:
+        return symbol
+    return f"{match.group(1)} {match.group(2)}"
 
 
 @dataclass

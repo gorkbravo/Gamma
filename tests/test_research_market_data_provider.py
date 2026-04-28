@@ -8,7 +8,11 @@ from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.provenance import FreshnessLabel
 from src.services.data_providers import ResearchDataProvider
 from src.services.research_cache import ResearchHistoryCache
-from src.services.research_market_data import ResearchHistoryResult
+from src.services.research_market_data import (
+    ResearchHistoryResult,
+    YFinanceListedMarketHistoryProvider,
+    contract_for_instrument,
+)
 
 
 class _NoopMarketData:
@@ -138,3 +142,28 @@ def test_research_data_provider_uses_policy_specific_provider_chain_and_cache():
     assert default.source_provider == "ibkr"
     assert default.series is not None
     assert default.series.equals(ibkr_history)
+
+
+def test_ibkr_contract_normalizes_us_class_share_separator_without_changing_display_symbol():
+    instrument = InstrumentReference(
+        symbol="BRK-B",
+        display_symbol="BRK-B",
+        sec_type="STK",
+        exchange="SMART",
+        primary_exchange="NYSE",
+        currency="USD",
+    )
+
+    contract = contract_for_instrument(instrument)
+
+    assert contract.symbol == "BRK B"
+    assert contract.secType == "STK"
+    assert contract.exchange == "SMART"
+    assert contract.primaryExchange == "NYSE"
+    assert instrument.normalized_display_symbol() == "BRK-B"
+
+
+def test_yfinance_provider_keeps_dash_class_share_symbol():
+    instrument = InstrumentReference(symbol="BRK-B", sec_type="STK", exchange="SMART", currency="USD")
+
+    assert YFinanceListedMarketHistoryProvider._provider_symbol(instrument) == "BRK-B"

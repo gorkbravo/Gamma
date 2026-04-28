@@ -51,7 +51,7 @@
   $: activeSnapshot = mode === "research" ? researchSnapshot : snapshot;
 
   const fmt = (value: number | null | undefined, digits = 2) =>
-    value == null ? "N/A" : value.toLocaleString(undefined, { maximumFractionDigits: digits });
+    value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
 
   const pct = (value: number | null | undefined, digits = 2) =>
     value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;

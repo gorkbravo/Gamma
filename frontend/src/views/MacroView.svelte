@@ -101,7 +101,7 @@
   }
 
   function shortDate(value: string | null | undefined) {
-    return value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "N/A";
+    return value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A";
   }
 
   /* ── Navigation ── */
