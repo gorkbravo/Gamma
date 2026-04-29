@@ -153,11 +153,11 @@
   function buildChart(seriesMap: Record<string, MacroSeriesHistory>, context: MacroChartContext, seriesIds: string[], colors: string[]) {
     const rows: ChartSeries[] = [];
     seriesIds.forEach((seriesId, index) => {
-      rows.push(...chartFromSeries(seriesMap, context, seriesId, colors[index] ?? "#7aa6c8"));
+      rows.push(...chartFromSeries(seriesMap, context, seriesId, colors[index] ?? "var(--chart-primary)"));
       if (context.comparisonRegion && context.region !== "Global") {
         const comparisonSeriesId = chartComparisonPairs[seriesId];
         if (comparisonSeriesId) {
-          rows.push(...chartFromSeries(seriesMap, context, comparisonSeriesId, colors[index] ?? "#7aa6c8", {
+          rows.push(...chartFromSeries(seriesMap, context, comparisonSeriesId, colors[index] ?? "var(--chart-primary)", {
             region: context.comparisonRegion, lineStyle: "dashed", labelSuffix: ` (${context.comparisonRegion})`
           }));
         }
@@ -180,8 +180,8 @@
 
   /* ── Chart reactives ── */
   $: chartContext = { region: $macroContext.region, timeframe: $macroContext.timeframe, comparisonRegion: $macroContext.comparisonRegion } satisfies MacroChartContext;
-  $: ratesChart = buildChart(histories, chartContext, rateChartSeriesByRegion[chartContext.region], ["#7aa6c8", "#c49a5a"]);
-  $: inflationChart = buildChart(histories, chartContext, inflationChartSeriesByRegion[chartContext.region], ["#7aa6c8", "#c49a5a"]);
+  $: ratesChart = buildChart(histories, chartContext, rateChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--chart-secondary)"]);
+  $: inflationChart = buildChart(histories, chartContext, inflationChartSeriesByRegion[chartContext.region], ["var(--chart-primary)", "var(--chart-secondary)"]);
 
   /* ── FX reactives ── */
   $: fxPair0SeriesId = fxPairOptions.find((p) => p.id === fxPair0)?.seriesId ?? "fx-eurusd";
@@ -189,9 +189,9 @@
   $: fxPair2SeriesId = fxPairOptions.find((p) => p.id === fxPair2)?.seriesId ?? "fx-usdjpy";
   $: fxSeriesIds = Array.from(new Set([fxPair0SeriesId, fxPair1SeriesId, fxPair2SeriesId]));
   $: if ($macroContext.mode === "snapshot") { void ensureSeries(fxSeriesIds); }
-  $: fxChart1 = chartFromSeries(histories, chartContext, fxPair0SeriesId, "#7aa6c8");
-  $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "#c49a5a");
-  $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "#b65d54");
+  $: fxChart1 = chartFromSeries(histories, chartContext, fxPair0SeriesId, "var(--chart-primary)");
+  $: fxChart2 = chartFromSeries(histories, chartContext, fxPair1SeriesId, "var(--chart-secondary)");
+  $: fxChart3 = chartFromSeries(histories, chartContext, fxPair2SeriesId, "var(--chart-negative)");
   $: fxLast0 = fxLastPrice(fxChart1);
   $: fxLast1 = fxLastPrice(fxChart2);
   $: fxLast2 = fxLastPrice(fxChart3);

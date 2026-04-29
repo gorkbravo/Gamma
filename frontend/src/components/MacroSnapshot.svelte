@@ -183,7 +183,7 @@
       </select>
       {#if fxLast0}<strong class="fx-last-price">{fxLast0}</strong>{/if}
     </div>
-    <TimeSeriesChart series={fxChart1} height={200} emptyMessage="Loading FX data" />
+    <TimeSeriesChart series={fxChart1} height={160} emptyMessage="Loading FX data" />
   </article>
   <article class="panel fx-panel">
     <div class="fx-header">
@@ -193,7 +193,7 @@
       </select>
       {#if fxLast1}<strong class="fx-last-price">{fxLast1}</strong>{/if}
     </div>
-    <TimeSeriesChart series={fxChart2} height={200} emptyMessage="Loading FX data" />
+    <TimeSeriesChart series={fxChart2} height={160} emptyMessage="Loading FX data" />
   </article>
   <article class="panel fx-panel">
     <div class="fx-header">
@@ -203,7 +203,7 @@
       </select>
       {#if fxLast2}<strong class="fx-last-price">{fxLast2}</strong>{/if}
     </div>
-    <TimeSeriesChart series={fxChart3} height={200} emptyMessage="Loading FX data" />
+    <TimeSeriesChart series={fxChart3} height={160} emptyMessage="Loading FX data" />
   </article>
 </div>
 
@@ -485,26 +485,35 @@
   }
 
   .fx-panel {
-    gap: 0.4rem;
-    padding: 0.7rem;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
   }
 
   .fx-header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    padding: 0.28rem 0.55rem;
+    border-bottom: 1px solid var(--divider);
+    min-height: 28px;
+    box-sizing: border-box;
+  }
+
+  .fx-panel :global(.chart-shell) {
+    border: none;
   }
 
   .fx-last-price {
     margin-left: auto;
-    font-size: 0.92rem;
+    font-size: 0.88rem;
     color: var(--text-0);
     letter-spacing: 0.02em;
   }
 
   .fx-select {
     border: 1px solid var(--panel-strong);
-    background: #0d0f12;
+    background: var(--bg-1);
     color: var(--text-0);
     padding: 0.2rem 0.4rem;
     font: inherit;
