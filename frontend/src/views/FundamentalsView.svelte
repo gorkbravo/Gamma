@@ -192,6 +192,11 @@
     return "";
   }
 
+  function bridgeTone(unit: string | null | undefined, value: number | null | undefined) {
+    if (value == null || unit !== "currency") return "";
+    return toneClass(value);
+  }
+
   function sensitivityHeatClass(value: number | null | undefined, range: { min: number; max: number }) {
     if (value == null || !Number.isFinite(value)) return "";
     if (range.max === range.min) return "sens-heat-mid";
@@ -488,6 +493,8 @@
   $: currentSourceTraces = sourceTracesForStatement(reference, statementBasis, statementKind).slice(0, 24);
   $: activeScenario = findDcfScenario(dcfModel, dcfDraft.activeScenarioId);
   $: activeScenarioSummary = activeScenario?.summary ?? null;
+  $: activeCostOfCapitalRows = activeScenario?.cost_of_capital_rows ?? [];
+  $: activeValuationBridgeRows = activeScenario?.valuation_bridge_rows ?? [];
   $: sensitivityRange = (() => {
     const rows = dcfModel?.sensitivity_matrix?.rows ?? [];
     const values: number[] = [];
@@ -1272,6 +1279,70 @@
         </div>
       </article>
 
+      <div class="dcf-diagnostics-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Cost Of Capital</p>
+              <h3>WACC Bridge</h3>
+            </div>
+            <small>{activeScenario?.label ?? "No scenario"}</small>
+          </div>
+
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead>
+                <tr><th>Input</th><th>Value</th><th>Note</th></tr>
+              </thead>
+              <tbody>
+                {#if activeCostOfCapitalRows.length}
+                  {#each activeCostOfCapitalRows as row}
+                    <tr>
+                      <td>{row.label}</td>
+                      <td class="numeric-cell">{row.display_value ?? "N/A"}</td>
+                      <td><small>{row.note ?? row.transformation_note ?? "N/A"}</small></td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="3">WACC bridge appears once Gamma computes the active DCF scenario.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Valuation Pressure</p>
+              <h3>Driver Bridge</h3>
+            </div>
+            <small>{activeScenario?.label ?? "No scenario"}</small>
+          </div>
+
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead>
+                <tr><th>Driver</th><th>Value / Share</th><th>Read</th></tr>
+              </thead>
+              <tbody>
+                {#if activeValuationBridgeRows.length}
+                  {#each activeValuationBridgeRows as row}
+                    <tr>
+                      <td>{row.label}</td>
+                      <td class={`numeric-cell ${bridgeTone(row.unit, row.value)}`}>{row.display_value ?? "N/A"}</td>
+                      <td><small>{row.note ?? row.transformation_note ?? "N/A"}</small></td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="3">Valuation bridge appears once Gamma computes the active DCF scenario.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+
       <article class="panel">
         <div class="panel-header">
           <div>
@@ -1773,6 +1844,13 @@
   }
 
   .financials-support-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.5rem;
+    align-items: start;
+  }
+
+  .dcf-diagnostics-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 0.5rem;
@@ -2379,6 +2457,12 @@
     max-height: 30rem;
   }
 
+  .numeric-cell {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
   .compact-wrap {
     max-height: 18rem;
   }
@@ -2518,7 +2602,8 @@
     .workspace-grid,
     .peer-layout,
     .profile-grid,
-    .financials-support-grid {
+    .financials-support-grid,
+    .dcf-diagnostics-grid {
       grid-template-columns: 1fr;
     }
   }

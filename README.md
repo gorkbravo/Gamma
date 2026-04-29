@@ -397,9 +397,10 @@ Provider behavior:
 
 - default `COMMODITIES_PROVIDER=sample` uses generated offline sample prices, curves, inventories, and events
 - `COMMODITIES_PROVIDER=eia` enables selected EIA official energy fundamentals when `EIA_API_KEY` is present
-- optional `FRED_API_KEY` lets the EIA provider enrich selected spot/proxy price histories through existing FRED client infrastructure
+- optional `FRED_API_KEY` lets the EIA provider enrich selected spot/proxy price histories through existing FRED client infrastructure, including broad monthly metal proxies for aluminum, zinc, nickel, lead, tin, iron ore, uranium, and configured precious/industrial metals
 - `COMMODITIES_PROVIDER=ibkr` builds read-only futures curves from individual IBKR/TWS `FUT` contract details and market-data snapshots when TWS is connected and the account has the needed futures market-data entitlements
 - IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_STARTUP_ENABLED`, `IBKR_COMMODITIES_ON_DEMAND`, `IBKR_COMMODITIES_SELECTED_CACHE_SECONDS`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
+- when `COMMODITIES_PROVIDER=ibkr` and `EIA_API_KEY` is present, Gamma uses EIA/FRED as the low-cost SITREP reference layer and overlays IBKR futures curves only for warmed or selected roots; EIA product spot defaults cover RBOB gasoline and heating oil via `EIA_RBOB_GASOLINE_PRICE_SERIES_ID` and `EIA_HEATING_OIL_PRICE_SERIES_ID`
 - if IBKR contract discovery, quotes, or entitlements are unavailable, Gamma keeps the sample or EIA/FRED fallback payload and returns explicit coverage warnings
 
 What Gamma computes:

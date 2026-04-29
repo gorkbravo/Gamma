@@ -399,7 +399,7 @@ BROAD_US_MARKET_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
 
 GLOBAL_INDEX_INSTRUMENTS: tuple[ResearchOverviewUniverseInstrument, ...] = (
     _overview_index(1, "^GSPC", "S&P 500", "US"),
-    _overview_index(2, "^DJI", "Dow Jones Industrial Average", "US"),
+    _overview_index(2, "^DJI", "DJIA", "US"),
     _overview_index(3, "^IXIC", "Nasdaq Composite", "US"),
     _overview_index(4, "^RUT", "Russell 2000", "US"),
     _overview_index(5, "^GSPTSE", "S&P/TSX Composite", "Canada"),

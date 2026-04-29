@@ -295,32 +295,32 @@
       (warning) => !warning.toLowerCase().includes("benchmark") && !warning.toLowerCase().includes("monte carlo")
     );
   }
+
+  const signTone = (value: number | null | undefined): string =>
+    value == null || value === 0 ? "" : value > 0 ? "positive" : "negative";
 </script>
 
 <section class="view">
   <div class="workspace-grid">
     <div class="primary-column">
       <article class="panel method-panel monte-carlo-panel">
-        <div class="panel-header top-line">
-          <div>
-            <p class="eyebrow">Monte Carlo</p>
-            <h2>Scenario Envelope</h2>
-          </div>
-          <button on:click={() => submit("monteCarlo")} disabled={loading || !activeSnapshot}>
-            {loading && activeComputeMethod === "monteCarlo" ? "Running Monte Carlo..." : "Run Monte Carlo"}
+        <header class="panel-bar">
+          <h2>Monte Carlo · Scenario Envelope</h2>
+          <button class="action-btn" on:click={() => submit("monteCarlo")} disabled={loading || !activeSnapshot}>
+            {loading && activeComputeMethod === "monteCarlo" ? "Running…" : "Run Monte Carlo"}
           </button>
-        </div>
+        </header>
 
         <div class="kpi-grid mc-kpi-grid">
           <article class="metric">
             <span>MC VaR</span>
             <strong>{fmt(result?.metrics.monte_carlo_var)}</strong>
-            <small>Total est. {fmt(result?.metrics.monte_carlo_var_total_estimate)}</small>
+            <small>Total {fmt(result?.metrics.monte_carlo_var_total_estimate)}</small>
           </article>
           <article class="metric">
             <span>MC CVaR</span>
             <strong>{fmt(result?.metrics.monte_carlo_cvar)}</strong>
-            <small>Total est. {fmt(result?.metrics.monte_carlo_cvar_total_estimate)}</small>
+            <small>Total {fmt(result?.metrics.monte_carlo_cvar_total_estimate)}</small>
           </article>
           <article class="metric">
             <span>Model</span>
@@ -330,16 +330,13 @@
           <article class="metric">
             <span>Horizon</span>
             <strong>{result?.metrics.monte_carlo_horizon_days ?? mcHorizonDays}D</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} risk-basis coverage</small>
+            <small>{pct(result?.metrics.risk_coverage_ratio)} coverage</small>
           </article>
         </div>
 
         <div class="mc-grid">
           <section class="subsection fan-subsection">
-            <div class="section-head">
-              <h3>Monte Carlo Fan</h3>
-              <small>{result?.metrics.monte_carlo_horizon_days ?? mcHorizonDays}D percentile path projection</small>
-            </div>
+            <header class="section-bar">Monte Carlo Fan · {result?.metrics.monte_carlo_horizon_days ?? mcHorizonDays}D</header>
             <FanChart
               series={result?.monte_carlo.fan_percentiles ?? {}}
               history={fanHistory}
@@ -350,10 +347,7 @@
           </section>
 
           <section class="subsection">
-            <div class="section-head">
-              <h3>Terminal Distribution</h3>
-              <small>{result?.metrics.monte_carlo_model ?? mcSimulationModel} terminal returns</small>
-            </div>
+            <header class="section-bar">Terminal Distribution · {result?.metrics.monte_carlo_model ?? mcSimulationModel}</header>
             <DistributionChart
               values={result?.monte_carlo.terminal_returns ?? []}
               markers={monteCarloMarkers}
@@ -365,11 +359,8 @@
       </article>
 
       <article class="panel method-panel core-panel">
-        <div class="panel-header top-line">
-          <div>
-            <p class="eyebrow">Historical / Parametric</p>
-            <h2>Core VaR Deck</h2>
-          </div>
+        <header class="panel-bar">
+          <h2>Core VaR Deck</h2>
           <div class="header-actions">
             <label class="inline-field">
               <span>Chart</span>
@@ -379,27 +370,27 @@
                 {/each}
               </select>
             </label>
-            <button on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
-              {loading && activeComputeMethod === "core" ? "Computing Core..." : "Compute Core VaR"}
+            <button class="action-btn" on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
+              {loading && activeComputeMethod === "core" ? "Computing…" : "Compute Core VaR"}
             </button>
           </div>
-        </div>
+        </header>
 
         <div class="kpi-grid">
           <article class="metric">
             <span>Hist VaR</span>
             <strong>{fmt(result?.metrics.historical_var)}</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} risk-basis coverage</small>
+            <small>{pct(result?.metrics.risk_coverage_ratio)} coverage</small>
           </article>
           <article class="metric">
             <span>Hist CVaR</span>
             <strong>{fmt(result?.metrics.historical_cvar)}</strong>
-            <small>Total est. {fmt(result?.metrics.historical_cvar_total_estimate)}</small>
+            <small>Total {fmt(result?.metrics.historical_cvar_total_estimate)}</small>
           </article>
           <article class="metric">
             <span>Param VaR</span>
             <strong>{fmt(result?.metrics.parametric_var)}</strong>
-            <small>Total est. {fmt(result?.metrics.parametric_var_total_estimate)}</small>
+            <small>Total {fmt(result?.metrics.parametric_var_total_estimate)}</small>
           </article>
           <article class="metric">
             <span>Annual Vol</span>
@@ -409,12 +400,12 @@
           <article class="metric">
             <span>Beta / Corr</span>
             <strong class:elevated={(result?.metrics.beta ?? 0) > 1.2}>{fmt(result?.metrics.beta, 3)} / {fmt(result?.metrics.correlation, 3)}</strong>
-            <small>{result?.metrics.benchmark_overlap_count ?? 0} overlap obs</small>
+            <small>{result?.metrics.benchmark_overlap_count ?? 0} overlap</small>
           </article>
           <article class="metric">
             <span>Jensen Alpha</span>
-            <strong>{pct(result?.metrics.alpha_annual)}</strong>
-            <small>{lookbackDays}D lookback | {betaWindow}D window</small>
+            <strong class={signTone(result?.metrics.alpha_annual)}>{pct(result?.metrics.alpha_annual)}</strong>
+            <small>{lookbackDays}D / {betaWindow}D</small>
           </article>
         </div>
 
@@ -422,17 +413,14 @@
           <div class="chart-column">
             <TimeSeriesChart series={chartSeries} height={360} emptyMessage={chartEmptyMessage(chartMode)} />
             <div class="chart-foot">
-              <span>{chartModeLabels[chartMode]} on shared risk returns</span>
-              <strong>{benchmarkAvailable ? benchmarkSymbol.trim().toUpperCase() || "SPY" : "No benchmark series"}</strong>
+              <span>{chartModeLabels[chartMode]}</span>
+              <strong>{benchmarkAvailable ? benchmarkSymbol.trim().toUpperCase() || "SPY" : "No benchmark"}</strong>
             </div>
           </div>
 
           <div class="method-side">
             <section class="subsection">
-              <div class="section-head">
-                <h3>Coverage</h3>
-                <small>{activeSnapshot?.positions.length ?? 0} snapshot lines</small>
-              </div>
+              <header class="section-bar">Coverage</header>
               <div class="stack">
                 <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
                 <div class="row"><span>Modeled Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
@@ -444,16 +432,13 @@
             </section>
 
             <section class="subsection">
-              <div class="section-head">
-                <h3>Benchmark Context</h3>
-                <small>{benchmarkSymbol.trim().toUpperCase() || "SPY"}</small>
-              </div>
+              <header class="section-bar">Benchmark · {benchmarkSymbol.trim().toUpperCase() || "SPY"}</header>
               <div class="stack">
                 <div class="row"><span>Overlap</span><strong>{result?.metrics.benchmark_overlap_count ?? 0}</strong></div>
                 <div class="row"><span>Beta Window</span><strong>{betaWindow}D</strong></div>
-                <div class="row"><span>Beta</span><strong>{fmt(result?.metrics.beta, 3)}</strong></div>
+                <div class="row"><span>Beta</span><strong class:elevated={(result?.metrics.beta ?? 0) > 1.2}>{fmt(result?.metrics.beta, 3)}</strong></div>
                 <div class="row"><span>Correlation</span><strong>{fmt(result?.metrics.correlation, 3)}</strong></div>
-                <div class="row"><span>Annual Alpha</span><strong>{pct(result?.metrics.alpha_annual)}</strong></div>
+                <div class="row"><span>Annual Alpha</span><strong class={signTone(result?.metrics.alpha_annual)}>{pct(result?.metrics.alpha_annual)}</strong></div>
               </div>
             </section>
           </div>
@@ -461,10 +446,7 @@
 
         <div class="detail-split">
           <section class="subsection">
-            <div class="section-head">
-              <h3>Return Distribution</h3>
-              <small>Historical return stack with VaR markers</small>
-            </div>
+            <header class="section-bar">Return Distribution</header>
             <DistributionChart
               values={realizedReturns}
               markers={realizedMarkers}
@@ -474,10 +456,7 @@
           </section>
 
           <section class="subsection">
-            <div class="section-head">
-              <h3>Contribution Rank</h3>
-              <small>Largest variance contributors</small>
-            </div>
+            <header class="section-bar">Contribution Rank</header>
             <BarRankChart
               items={contributionItems}
               emptyMessage="Contribution ranking will appear after core risk"
@@ -488,54 +467,46 @@
       </article>
 
       <article class="panel table-panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Attribution</p>
-            <h3>Contribution Detail</h3>
-          </div>
-          <small>{result?.contributions?.length ?? 0} rows from the covered universe</small>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Symbol</th><th>Weight</th><th>Vol</th><th>Var %</th><th>MCTR</th><th>Component VaR</th></tr>
-            </thead>
-            <tbody>
-              {#if result?.contributions?.length}
-                {#each result.contributions as contribution}
-                  <tr>
-                    <td>{contribution.display_symbol ?? contribution.symbol}</td>
-                    <td>{pct(contribution.weight)}</td>
-                    <td>{pct(contribution.daily_vol)}</td>
-                    <td>{pct(contribution.variance_contribution_pct)}</td>
-                    <td>{fmt(contribution.marginal_contribution_to_risk, 6)}</td>
-                    <td>{fmt(contribution.component_var)}</td>
-                  </tr>
-                {/each}
-              {:else}
-                <tr><td colspan="6">No contribution data yet.</td></tr>
-              {/if}
-            </tbody>
-          </table>
-        </div>
+        <header class="table-panel-header">
+          <span>Contribution Detail</span>
+          <span class="row-count">{result?.contributions?.length ?? 0} rows</span>
+        </header>
+        <table>
+          <thead>
+            <tr><th>Symbol</th><th class="num">Weight</th><th class="num">Vol</th><th class="num">Var %</th><th class="num">MCTR</th><th class="num">Component VaR</th></tr>
+          </thead>
+          <tbody>
+            {#if result?.contributions?.length}
+              {#each result.contributions as contribution}
+                <tr>
+                  <td>{contribution.display_symbol ?? contribution.symbol}</td>
+                  <td class="num">{pct(contribution.weight)}</td>
+                  <td class="num">{pct(contribution.daily_vol)}</td>
+                  <td class="num {signTone(contribution.variance_contribution_pct)}">{pct(contribution.variance_contribution_pct)}</td>
+                  <td class="num">{fmt(contribution.marginal_contribution_to_risk, 6)}</td>
+                  <td class="num">{fmt(contribution.component_var)}</td>
+                </tr>
+              {/each}
+            {:else}
+              <tr><td colspan="6" class="empty">No contribution data yet.</td></tr>
+            {/if}
+          </tbody>
+        </table>
       </article>
     </div>
 
     <aside class="support-column">
       <article class="panel control-panel">
-        <div class="rail-header">
-          <div>
-            <p class="eyebrow">Run Setup</p>
-            <h3>Risk Inputs</h3>
-          </div>
-          <strong>{mode === "portfolio" ? "Portfolio Snapshot" : "Research Snapshot"}</strong>
-        </div>
+        <header class="rail-bar">
+          <h3>Risk Inputs</h3>
+          <span class="rail-context">{mode === "portfolio" ? "Portfolio" : "Research"}</span>
+        </header>
 
         <div class="control-section">
-          <small class="group-label">Monte Carlo Inputs</small>
+          <small class="group-label">Monte Carlo</small>
           <div class="field-grid mc-fields">
             <label>
-              <span>MC Horizon</span>
+              <span>Horizon</span>
               <select bind:value={mcHorizonDays}>
                 <option value={5}>5D</option>
                 <option value={10}>10D</option>
@@ -544,14 +515,14 @@
               </select>
             </label>
             <label>
-              <span>MC Model</span>
+              <span>Model</span>
               <select bind:value={mcSimulationModel}>
                 <option value="Gaussian">Gaussian</option>
                 <option value="Bootstrap">Bootstrap</option>
               </select>
             </label>
             <label>
-              <span>MC Sims</span>
+              <span>Sims</span>
               <select bind:value={mcNumSimulations}>
                 <option value={1000}>1,000</option>
                 <option value={2000}>2,000</option>
@@ -562,7 +533,7 @@
         </div>
 
         <div class="control-section">
-          <small class="group-label">Core Inputs</small>
+          <small class="group-label">Core</small>
           <div class="field-grid core-fields">
             <label>
               <span>Benchmark</span>
@@ -605,12 +576,9 @@
       </article>
 
       <article class="panel rail-panel">
-        <div class="rail-header">
-          <div>
-            <p class="eyebrow">Structure</p>
-            <h3>Coverage &amp; Concentration</h3>
-          </div>
-        </div>
+        <header class="rail-bar">
+          <h3>Coverage &amp; Concentration</h3>
+        </header>
         <div class="stack">
           <div class="row"><span>Snapshot Lines</span><strong>{activeSnapshot?.positions.length ?? 0}</strong></div>
           <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
@@ -619,17 +587,14 @@
           <div class="row"><span>Coverage Ratio</span><strong>{pct(result?.metrics.risk_coverage_ratio)}</strong></div>
           <div class="row"><span>HHI / Top-5</span><strong>{fmt(result?.metrics.concentration_hhi, 3)} / {pct(result?.metrics.top5_weight)}</strong></div>
           <div class="row"><span>Effective Bets</span><strong>{fmt(result?.metrics.effective_bets, 2)}</strong></div>
-          <div class="row"><span>Excluded Assets</span><strong>{excludedAssets.length}</strong></div>
+          <div class="row"><span>Excluded Assets</span><strong class:warning={excludedAssets.length > 0}>{excludedAssets.length}</strong></div>
         </div>
       </article>
 
       <article class="panel rail-panel">
-        <div class="rail-header">
-          <div>
-            <p class="eyebrow">Notes</p>
-            <h3>Warnings &amp; Exclusions</h3>
-          </div>
-        </div>
+        <header class="rail-bar">
+          <h3>Warnings &amp; Exclusions</h3>
+        </header>
 
         {#if benchmarkWarnings.length || generalWarnings.length || monteCarloWarnings.length || excludedAssets.length}
           <div class="notes-list">
@@ -695,53 +660,130 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 1.05rem;
+    padding: 0.65rem 0.85rem;
   }
 
   .method-panel,
   .control-panel,
-  .rail-panel,
-  .table-panel {
+  .rail-panel {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.55rem;
   }
 
-  .panel-header,
-  .rail-header,
+  .table-panel {
+    padding: 0;
+    overflow: hidden;
+    display: grid;
+    gap: 0;
+  }
+
+  /* ── Single-line panel + section headers ── */
+  .panel-bar,
+  .rail-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-height: 26px;
+  }
+
+  .panel-bar h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-0);
+    letter-spacing: 0.02em;
+  }
+
+  .rail-bar h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-0);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .rail-context {
+    color: var(--text-2);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .section-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--divider);
+    min-height: 22px;
+  }
+
+  .table-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3rem 0.75rem;
+    min-height: 26px;
+    border-bottom: 1px solid var(--divider);
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .table-panel-header .row-count {
+    color: var(--text-2);
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+  }
+
   .row,
-  .chart-foot,
-  .section-head {
+  .chart-foot {
     display: flex;
     justify-content: space-between;
-    gap: 0.85rem;
-  }
-
-  .top-line {
-    align-items: start;
+    gap: 0.75rem;
+    align-items: center;
   }
 
   .header-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: end;
-    gap: 0.75rem;
-    align-items: end;
-  }
-
-  .inline-field,
-  label {
-    display: grid;
-    gap: 0.4rem;
+    gap: 0.5rem;
+    align-items: center;
   }
 
   .inline-field {
-    min-width: 10rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
   }
 
+  .inline-field > span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+  }
+
+  label {
+    display: grid;
+    gap: 0.3rem;
+  }
+
+  /* ── KPI strip ── */
   .kpi-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 0;
-    padding-block: 0.2rem;
   }
 
   .mc-kpi-grid {
@@ -749,18 +791,32 @@
   }
 
   .metric {
-    padding: 0.2rem 1rem;
-    border-left: 1px solid rgba(46, 60, 74, 0.52);
+    padding: 0.2rem 0.85rem;
+    border-left: 1px solid var(--divider);
     background: none;
     min-width: 0;
     text-align: center;
   }
 
+  .metric span {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-2);
+  }
+
   .metric strong {
     display: block;
-    margin: 0.18rem 0 0.24rem;
-    font-size: 1rem;
-    line-height: 1.2;
+    margin: 0.12rem 0 0.14rem;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.15;
+    color: var(--text-0);
+  }
+
+  .metric small {
+    font-size: 10.5px;
+    color: var(--text-2);
   }
 
   .metric:first-child {
@@ -779,40 +835,26 @@
     align-items: start;
   }
 
-  .detail-split > .subsection,
-  .mc-grid > .subsection {
-    border-top: 0;
-    padding-top: 0;
-    align-content: start;
-  }
-
   .chart-column,
   .method-side,
   .control-section {
     display: grid;
-    gap: 0.85rem;
+    gap: 0.55rem;
   }
 
   .subsection {
     display: grid;
-    gap: 0.8rem;
-    padding-top: 0.15rem;
+    gap: 0.45rem;
   }
 
   .method-side > .subsection + .subsection {
-    border-top: 1px solid rgba(46, 60, 74, 0.45);
-    padding-top: 0.95rem;
+    margin-top: 0.25rem;
   }
 
-  .section-head {
-    align-items: baseline;
-  }
-
-  .chart-foot,
   .row {
-    align-items: center;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
-    padding-top: 0.72rem;
+    border-top: 1px solid var(--divider);
+    padding-top: 0.4rem;
+    font-size: 12.5px;
   }
 
   .row:first-child {
@@ -820,9 +862,33 @@
     padding-top: 0;
   }
 
+  .row span {
+    color: var(--text-2);
+  }
+
+  .row strong {
+    color: var(--text-0);
+  }
+
+  .chart-foot {
+    border-top: 1px solid var(--divider);
+    padding-top: 0.4rem;
+    font-size: 11px;
+  }
+
+  .chart-foot span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .chart-foot strong {
+    color: var(--text-0);
+  }
+
   .control-section + .control-section {
-    border-top: 1px solid rgba(46, 60, 74, 0.45);
-    padding-top: 0.95rem;
+    border-top: 1px solid var(--divider);
+    padding-top: 0.5rem;
   }
 
   .core-fields {
@@ -830,15 +896,17 @@
   }
 
   .mc-fields {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .note-row {
     display: grid;
-    grid-template-columns: 5.75rem minmax(0, 1fr);
-    gap: 0.8rem;
-    padding: 0.72rem 0;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 0.6rem;
+    padding: 0.4rem 0;
+    border-top: 1px solid var(--divider);
+    font-size: 11.5px;
+    line-height: 1.35;
   }
 
   .note-row:first-child {
@@ -849,8 +917,9 @@
   .note-tag {
     color: var(--warning);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    font-size: 10px;
+    font-weight: 600;
   }
 
   .note-row.info .note-tag,
@@ -863,11 +932,7 @@
     color: var(--accent-2);
   }
 
-  .table-wrap {
-    overflow: auto;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
-  }
-
+  /* ── Table ── */
   table {
     width: 100%;
     border-collapse: collapse;
@@ -875,32 +940,79 @@
 
   th,
   td {
-    padding: 0.72rem 0.55rem;
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
+    padding: 0.32rem 0.5rem;
+    border-bottom: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
+    font-size: 12px;
   }
 
   th {
     color: var(--text-2);
-    font-size: 0.7rem;
+    font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    background: var(--surface-0);
+    background: transparent;
+    font-weight: 600;
   }
 
+  td.num,
+  th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  td.empty {
+    color: var(--text-2);
+    text-align: center;
+    padding: 0.6rem;
+  }
+
+  tbody tr:hover {
+    background: rgba(122, 166, 200, 0.06);
+  }
+
+  /* ── Inputs / buttons ── */
   input,
-  select,
-  button {
+  select {
     border: 1px solid var(--panel-strong);
-    background: #0d0f12;
+    background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.68rem 0.78rem;
+    padding: 4px 8px;
+    height: 28px;
     font: inherit;
+    font-size: 12.5px;
   }
 
-  button {
+  input:focus,
+  select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .action-btn {
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-0);
+    padding: 4px 12px;
+    height: 28px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .action-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   h2,
@@ -910,39 +1022,39 @@
     margin: 0;
   }
 
-  span,
-  small,
   .muted {
     color: var(--text-2);
+    font-size: 12px;
+    padding: 0.25rem 0;
   }
 
-  strong {
-    color: var(--text-0);
-  }
-
-  .eyebrow,
   .group-label,
-  .inline-field > span,
   label > span {
     color: var(--text-2);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+    font-weight: 600;
   }
 
-  .muted,
-  .row span,
-  .row strong,
   .note-row p {
     overflow-wrap: anywhere;
+  }
+
+  .positive {
+    color: var(--positive);
   }
 
   .negative {
     color: var(--negative);
   }
 
+  .warning {
+    color: var(--warning);
+  }
+
   .elevated {
-    color: var(--data-warm);
+    color: var(--warning);
   }
 
   @media (max-width: 1220px) {
@@ -959,36 +1071,39 @@
 
     .kpi-grid,
     .mc-kpi-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 
   @media (max-width: 980px) {
     .support-column,
-    .core-fields {
+    .core-fields,
+    .mc-fields {
       grid-template-columns: 1fr;
     }
 
     .kpi-grid,
     .mc-kpi-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .metric {
-      padding: 0.7rem 0;
+      padding: 0.4rem 0;
       border-left: 0;
+      border-top: 1px solid var(--divider);
+      text-align: left;
     }
 
     .metric:first-child {
-      padding-top: 0;
+      border-top: 0;
     }
 
-    .panel-header,
-    .rail-header,
-    .section-head,
+    .panel-bar,
+    .rail-bar,
     .chart-foot {
       flex-direction: column;
       align-items: stretch;
+      gap: 0.4rem;
     }
 
     .header-actions {
@@ -1001,7 +1116,7 @@
 
     .note-row {
       grid-template-columns: 1fr;
-      gap: 0.35rem;
+      gap: 0.25rem;
     }
   }
 </style>

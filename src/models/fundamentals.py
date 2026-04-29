@@ -277,6 +277,20 @@ class FundamentalsDcfValuationSummary:
 
 
 @dataclass(frozen=True)
+class FundamentalsDcfBridgeRowRecord:
+    row_id: str
+    label: str
+    value: float | None = None
+    display_value: str | None = None
+    unit: str | None = None
+    note: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class FundamentalsDcfSensitivityCell:
     wacc_pct: float
     terminal_growth_pct: float
@@ -306,6 +320,8 @@ class FundamentalsDcfScenarioRecord:
     overrides: dict[str, list[float | None]] = field(default_factory=dict)
     assumption_rows: list[FundamentalsDcfRowRecord] = field(default_factory=list)
     projection_rows: list[FundamentalsDcfRowRecord] = field(default_factory=list)
+    cost_of_capital_rows: list[FundamentalsDcfBridgeRowRecord] = field(default_factory=list)
+    valuation_bridge_rows: list[FundamentalsDcfBridgeRowRecord] = field(default_factory=list)
     summary: FundamentalsDcfValuationSummary | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None

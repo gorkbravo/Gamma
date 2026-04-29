@@ -7,6 +7,7 @@ from typing import Any
 from src.models.fundamentals import (
     FundamentalsCoverageRecord,
     FundamentalsCompanyRecord,
+    FundamentalsDcfBridgeRowRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
     FundamentalsDcfScenarioRecord,
@@ -185,7 +186,7 @@ _DCF_ASSUMPTION_ORDER: tuple[tuple[str, str, str], ...] = (
     ("da_pct_revenue", "D&A / Revenue", "percent"),
     ("capex_pct_revenue", "Capex / Revenue", "percent"),
     ("nwc_pct_incremental_revenue", "NWC / Incremental Revenue", "percent"),
-    ("shares_outstanding", "Shares Outstanding", "shares"),
+    ("share_change_pct", "Share Count Change", "percent"),
 )
 
 _DCF_PROJECTION_LINE_ORDER: tuple[tuple[str, str, str], ...] = (
@@ -196,6 +197,7 @@ _DCF_PROJECTION_LINE_ORDER: tuple[tuple[str, str, str], ...] = (
     ("capital_expenditures", "Capex", "currency"),
     ("change_in_nwc", "Change In NWC", "currency"),
     ("free_cash_flow", "Free Cash Flow", "currency"),
+    ("shares_outstanding", "Shares Outstanding", "shares"),
     ("discount_factor", "Discount Factor", "ratio"),
     ("present_value_of_fcf", "PV of FCF", "currency"),
 )
@@ -1583,6 +1585,62 @@ class FundamentalsService:
             transformation_note=str(payload.get("transformation_note") or "Gamma restores a saved DCF model snapshot."),
         )
 
+    def _derive_wacc_bridge(
+        self,
+        sec_data: SecCompanyData,
+        market_context: dict[str, Any],
+        tax_rate: float,
+        revenue_growth_history: list[float],
+    ) -> dict[str, float | str]:
+        annual_income = self._statement_value_map(sec_data.annual_income_statement)
+        risk_free_rate = 0.045
+        equity_risk_premium = 0.05
+        market_cap = market_context.get("market_cap")
+        total_debt = market_context.get("total_debt")
+        ebit = _last_non_null(annual_income.get("operating_income", []))
+        debt_to_ebit = _safe_ratio(total_debt, ebit)
+        growth_volatility = _stdev(revenue_growth_history) or 0.0
+        leverage_beta = min(_safe_ratio(total_debt, market_cap) or 0.0, 1.5) * 0.25
+        size_adjustment = 0.0
+        if market_cap is not None:
+            if market_cap >= 500_000_000_000:
+                size_adjustment = -0.12
+            elif market_cap >= 100_000_000_000:
+                size_adjustment = -0.05
+            elif market_cap < 10_000_000_000:
+                size_adjustment = 0.12
+        beta = _bounded(1.0 + leverage_beta + (growth_volatility * 1.5) + size_adjustment, 0.65, 1.55)
+        cost_of_equity = risk_free_rate + beta * equity_risk_premium
+        credit_spread = 0.02
+        if debt_to_ebit is not None:
+            if debt_to_ebit <= 1.0:
+                credit_spread = 0.0125
+            elif debt_to_ebit <= 2.5:
+                credit_spread = 0.02
+            elif debt_to_ebit <= 4.0:
+                credit_spread = 0.0325
+            else:
+                credit_spread = 0.045
+        pre_tax_cost_of_debt = _bounded(risk_free_rate + credit_spread, 0.04, 0.11)
+        after_tax_cost_of_debt = pre_tax_cost_of_debt * (1.0 - _bounded(tax_rate, 0.0, 0.45))
+        invested_capital = _sum_nullable(market_cap, total_debt)
+        debt_weight = _safe_ratio(total_debt, invested_capital) or 0.0
+        equity_weight = 1.0 - debt_weight
+        wacc = (equity_weight * cost_of_equity) + (debt_weight * after_tax_cost_of_debt)
+        return {
+            "risk_free_rate": risk_free_rate,
+            "equity_risk_premium": equity_risk_premium,
+            "beta": beta,
+            "cost_of_equity": cost_of_equity,
+            "pre_tax_cost_of_debt": pre_tax_cost_of_debt,
+            "after_tax_cost_of_debt": after_tax_cost_of_debt,
+            "debt_weight": debt_weight,
+            "equity_weight": equity_weight,
+            "tax_rate": tax_rate,
+            "wacc_pct": _bounded(wacc, 0.045, 0.16),
+            "method": "Gamma heuristic WACC from filing debt, market-cap weights, tax rate, and a bounded beta proxy.",
+        }
+
     def _create_default_dcf_payload(
         self,
         sec_data: SecCompanyData,
@@ -1637,12 +1695,15 @@ class FundamentalsService:
         )
         base_da = _bounded(average_da if average_da is not None else 0.04, 0.00, 0.20)
         base_capex = _bounded(average_capex if average_capex is not None else 0.04, 0.00, 0.20)
-        base_nwc = _bounded(_median([value for value in actuals["nwc_intensity"] if value is not None]) or 0.02, -0.10, 0.20)
-        base_shares = _first_non_null(_last_non_null(actuals["shares"]), market_context.get("shares")) or 0.0
+        base_nwc = _bounded(_median([value for value in actuals["nwc_intensity"] if value is not None]) or 0.02, -0.05, 0.08)
+        share_growth_history = _recent_numeric(_series_growth(actuals["shares"]), 5)
+        base_share_change = _bounded(_average(share_growth_history) or 0.0, -0.05, 0.05)
+        wacc_bridge = self._derive_wacc_bridge(sec_data, market_context, base_tax, revenue_growth_history)
+        base_wacc = float(wacc_bridge.get("wacc_pct") or 0.10)
         scenario_specs = {
-            "bear": {"growth_shift": -0.03, "margin_shift": -0.03, "wacc": 0.11, "terminal": 0.02},
-            "base": {"growth_shift": 0.00, "margin_shift": 0.00, "wacc": 0.10, "terminal": 0.025},
-            "bull": {"growth_shift": 0.03, "margin_shift": 0.03, "wacc": 0.09, "terminal": 0.03},
+            "bear": {"growth_shift": -0.03, "margin_shift": -0.03, "wacc_shift": 0.01, "terminal": 0.02, "share_shift": 0.01},
+            "base": {"growth_shift": 0.00, "margin_shift": 0.00, "wacc_shift": 0.00, "terminal": 0.025, "share_shift": 0.00},
+            "bull": {"growth_shift": 0.03, "margin_shift": 0.03, "wacc_shift": -0.01, "terminal": 0.03, "share_shift": -0.01},
         }
         scenarios: dict[str, Any] = {}
         for scenario_id, spec in scenario_specs.items():
@@ -1659,9 +1720,9 @@ class FundamentalsService:
                     "tax_rate_pct": [_bounded(base_tax, 0.10, 0.35) for _ in projection_years],
                     "da_pct_revenue": [_bounded(base_da, 0.0, 0.20) for _ in projection_years],
                     "capex_pct_revenue": [_bounded(base_capex + max(spec["margin_shift"], 0.0) / 2.0, 0.0, 0.25) for _ in projection_years],
-                    "nwc_pct_incremental_revenue": [_bounded(base_nwc, -0.10, 0.20) for _ in projection_years],
-                    "shares_outstanding": [base_shares for _ in projection_years],
-                    "wacc_pct": spec["wacc"],
+                    "nwc_pct_incremental_revenue": [_bounded(base_nwc, -0.05, 0.08) for _ in projection_years],
+                    "share_change_pct": [_bounded(base_share_change + spec["share_shift"], -0.08, 0.05) for _ in projection_years],
+                    "wacc_pct": _bounded(base_wacc + spec["wacc_shift"], 0.045, 0.16),
                     "terminal_growth_pct": spec["terminal"],
                 },
                 "overrides": {},
@@ -1767,6 +1828,21 @@ class FundamentalsService:
                 overrides=overrides,
                 market_context=market_context,
             )
+            wacc_bridge = self._derive_wacc_bridge(
+                sec_data,
+                market_context,
+                _average_assumption(assumptions.get("tax_rate_pct")) or 0.21,
+                _recent_numeric(_series_growth(actuals["revenue"]), 5),
+            )
+            cost_of_capital_rows = self._build_cost_of_capital_rows(assumptions, wacc_bridge, market_context)
+            valuation_bridge_rows = self._build_valuation_bridge_rows(
+                assumptions=assumptions,
+                overrides=overrides,
+                actuals=actuals,
+                projection_years=projection_years,
+                market_context=market_context,
+                computed=computed,
+            )
             scenario_sensitivity_cells = self._sweep_scenario_sensitivity_cells(
                 assumptions=assumptions,
                 overrides=overrides,
@@ -1853,6 +1929,8 @@ class FundamentalsService:
                     overrides=overrides,
                     assumption_rows=assumption_rows,
                     projection_rows=projection_rows,
+                    cost_of_capital_rows=cost_of_capital_rows,
+                    valuation_bridge_rows=valuation_bridge_rows,
                     summary=summary,
                     source_provider="manual",
                     retrieved_at=datetime.now(timezone.utc),
@@ -1883,6 +1961,176 @@ class FundamentalsService:
             retrieved_at=datetime.now(timezone.utc),
             origin="fundamentals.dcf.model",
             transformation_note="Gamma builds the DCF model from normalized annual fundamentals, current market context, and locally persisted scenario inputs.",
+        )
+
+    def _build_cost_of_capital_rows(
+        self,
+        assumptions: dict[str, Any],
+        wacc_bridge: dict[str, float | str],
+        market_context: dict[str, Any],
+    ) -> list[FundamentalsDcfBridgeRowRecord]:
+        retrieved_at = market_context.get("retrieved_at") or datetime.now(timezone.utc)
+        selected_wacc = float(assumptions.get("wacc_pct") or wacc_bridge.get("wacc_pct") or 0.10)
+        derived_wacc = _optional_float(wacc_bridge.get("wacc_pct"))
+        rows = [
+            ("risk_free_rate", "Risk-Free Rate", wacc_bridge.get("risk_free_rate"), "percent", "Treasury fallback until a live curve input is wired."),
+            ("beta", "Beta Proxy", wacc_bridge.get("beta"), "ratio", "Bounded proxy from size, leverage, and revenue-growth volatility."),
+            ("equity_risk_premium", "Equity Risk Premium", wacc_bridge.get("equity_risk_premium"), "percent", "Static ERP assumption used by the local WACC bridge."),
+            ("cost_of_equity", "Cost of Equity", wacc_bridge.get("cost_of_equity"), "percent", "Risk-free rate plus beta proxy times ERP."),
+            ("pre_tax_cost_of_debt", "Pre-Tax Cost of Debt", wacc_bridge.get("pre_tax_cost_of_debt"), "percent", "Risk-free rate plus a leverage-spread proxy."),
+            ("after_tax_cost_of_debt", "After-Tax Cost of Debt", wacc_bridge.get("after_tax_cost_of_debt"), "percent", "Pre-tax debt cost after the scenario tax rate."),
+            ("equity_weight", "Equity Weight", wacc_bridge.get("equity_weight"), "percent", "Market-cap weight in the capital structure."),
+            ("debt_weight", "Debt Weight", wacc_bridge.get("debt_weight"), "percent", "Debt weight in the capital structure."),
+            ("derived_wacc", "Derived WACC", derived_wacc, "percent", str(wacc_bridge.get("method") or "")),
+            (
+                "scenario_adjustment",
+                "Scenario Adjustment",
+                _subtract_nullable(selected_wacc, derived_wacc),
+                "percent",
+                "Difference between selected scenario WACC and Gamma's derived WACC.",
+            ),
+            ("selected_wacc", "Selected WACC", selected_wacc, "percent", "The WACC used in the DCF discount factors."),
+        ]
+        return [
+            self._dcf_bridge_row(
+                row_id=row_id,
+                label=label,
+                value=_optional_float(value),
+                unit=unit,
+                note=note,
+                origin=f"fundamentals.dcf.cost_of_capital.{row_id}",
+                retrieved_at=retrieved_at,
+                transformation_note="Gamma derives this cost-of-capital bridge from SEC fundamentals, market capitalization, and local fallback assumptions.",
+            )
+            for row_id, label, value, unit, note in rows
+        ]
+
+    def _build_valuation_bridge_rows(
+        self,
+        *,
+        assumptions: dict[str, Any],
+        overrides: dict[str, list[float | None]],
+        actuals: dict[str, list[float | None] | list[str]],
+        projection_years: list[int],
+        market_context: dict[str, Any],
+        computed: dict[str, Any],
+    ) -> list[FundamentalsDcfBridgeRowRecord]:
+        retrieved_at = market_context.get("retrieved_at") or datetime.now(timezone.utc)
+        base_value = computed["summary"]["implied_value_per_share"]
+
+        def sensitivity(row_id: str, label: str, unit: str, note: str, mutator) -> FundamentalsDcfBridgeRowRecord:
+            swept_assumptions = deepcopy(assumptions)
+            mutator(swept_assumptions)
+            swept = _compute_dcf_projection(
+                actuals=actuals,
+                projection_years=projection_years,
+                assumptions=swept_assumptions,
+                overrides=overrides,
+                market_context=market_context,
+            )
+            value = _subtract_nullable(swept["summary"]["implied_value_per_share"], base_value)
+            return self._dcf_bridge_row(
+                row_id=row_id,
+                label=label,
+                value=value,
+                unit=unit,
+                note=note,
+                origin=f"fundamentals.dcf.valuation_bridge.{row_id}",
+                retrieved_at=retrieved_at,
+                transformation_note="Gamma re-runs the active DCF scenario with one assumption changed to estimate per-share valuation sensitivity.",
+            )
+
+        wacc = float(assumptions.get("wacc_pct") or 0.10)
+        terminal = float(assumptions.get("terminal_growth_pct") or 0.025)
+        nwc = _average_assumption(assumptions.get("nwc_pct_incremental_revenue")) or 0.0
+        capex = _average_assumption(assumptions.get("capex_pct_revenue")) or 0.0
+        share_change = _average_assumption(assumptions.get("share_change_pct")) or 0.0
+        rows = [
+            self._dcf_bridge_row(
+                row_id="pv_terminal_weight",
+                label="PV Terminal / EV",
+                value=_safe_ratio(computed["summary"]["discounted_terminal_value"], computed["summary"]["enterprise_value"]),
+                unit="percent",
+                note="Higher terminal weight means the valuation is more duration-sensitive.",
+                origin="fundamentals.dcf.valuation_bridge.pv_terminal_weight",
+                retrieved_at=retrieved_at,
+                transformation_note="Gamma compares discounted terminal value with computed enterprise value.",
+            ),
+            sensitivity(
+                "wacc_minus_100bp",
+                "Value If WACC -100bp",
+                "currency",
+                "Per-share lift from lowering only the discount rate by one percentage point.",
+                lambda item: item.update({"wacc_pct": max(wacc - 0.01, 0.005)}),
+            ),
+            sensitivity(
+                "terminal_plus_50bp",
+                "Value If Terminal +50bp",
+                "currency",
+                "Per-share lift from raising only terminal growth by half a percentage point.",
+                lambda item: item.update({"terminal_growth_pct": min(terminal + 0.005, wacc - 0.002)}),
+            ),
+            sensitivity(
+                "nwc_to_two_pct",
+                "Value If NWC = 2%",
+                "currency",
+                "Per-share impact from setting NWC intensity to 2% of incremental revenue.",
+                lambda item: item.update({"nwc_pct_incremental_revenue": [0.02 for _ in projection_years]}),
+            ),
+            sensitivity(
+                "capex_minus_100bp",
+                "Value If Capex -100bp",
+                "currency",
+                "Per-share lift from lowering capex/revenue by one percentage point.",
+                lambda item: item.update({"capex_pct_revenue": [max(capex - 0.01, 0.0) for _ in projection_years]}),
+            ),
+            sensitivity(
+                "margin_plus_100bp",
+                "Value If EBIT Margin +100bp",
+                "currency",
+                "Per-share lift from adding one percentage point to EBIT margin.",
+                lambda item: item.update(
+                    {
+                        "ebit_margin_pct": [
+                            _bounded(value + 0.01, 0.0, 0.75)
+                            for value in _ensure_list_length(item.get("ebit_margin_pct"), len(projection_years), 0.20)
+                        ]
+                    }
+                ),
+            ),
+            sensitivity(
+                "share_count_minus_200bp",
+                "Value If Shares -2%/yr",
+                "currency",
+                "Per-share lift from a 2% annual share-count reduction.",
+                lambda item: item.update({"share_change_pct": [min(share_change, -0.02) for _ in projection_years]}),
+            ),
+        ]
+        return rows
+
+    def _dcf_bridge_row(
+        self,
+        *,
+        row_id: str,
+        label: str,
+        value: float | None,
+        unit: str,
+        note: str,
+        origin: str,
+        retrieved_at: datetime | None,
+        transformation_note: str,
+    ) -> FundamentalsDcfBridgeRowRecord:
+        return FundamentalsDcfBridgeRowRecord(
+            row_id=row_id,
+            label=label,
+            value=value,
+            display_value=_format_dcf_value(value, unit),
+            unit=unit,
+            note=note,
+            source_provider="gamma",
+            retrieved_at=retrieved_at,
+            origin=origin,
+            transformation_note=transformation_note,
         )
 
     def _sweep_scenario_sensitivity_cells(
@@ -1989,8 +2237,8 @@ class FundamentalsService:
             change_in_nwc.append(None if previous is None or current is None else current - previous)
         nwc_intensity = []
         for nwc_change, prior_revenue, current_revenue in zip(
-            change_in_nwc,
-            revenue,
+            change_in_nwc[1:],
+            revenue[:-1],
             revenue[1:],
             strict=False,
         ):
@@ -2510,12 +2758,13 @@ def _compute_dcf_projection(
     da_pct = _ensure_list_length(assumptions.get("da_pct_revenue"), len(projection_years), 0.04)
     capex_pct = _ensure_list_length(assumptions.get("capex_pct_revenue"), len(projection_years), 0.04)
     nwc_pct = _ensure_list_length(assumptions.get("nwc_pct_incremental_revenue"), len(projection_years), 0.02)
-    shares_outstanding = _ensure_list_length(assumptions.get("shares_outstanding"), len(projection_years), last_shares)
+    share_change = _ensure_list_length(assumptions.get("share_change_pct"), len(projection_years), 0.0)
     wacc = float(assumptions.get("wacc_pct") or 0.10)
     terminal_growth = float(assumptions.get("terminal_growth_pct") or 0.025)
     projection_values: dict[str, list[float | None]] = {row[0]: [] for row in _DCF_PROJECTION_LINE_ORDER}
     override_flags: dict[str, list[bool]] = {row[0]: [] for row in _DCF_PROJECTION_LINE_ORDER}
     previous_revenue = last_revenue
+    previous_shares = last_shares
     for index, _year in enumerate(projection_years):
         computed_revenue = previous_revenue * (1.0 + revenue_growth[index])
         revenue = _override_or_value(overrides, "revenue", index, computed_revenue, override_flags)
@@ -2532,6 +2781,8 @@ def _compute_dcf_projection(
         nwc = _override_or_value(overrides, "change_in_nwc", index, computed_nwc, override_flags)
         computed_fcf = None if None in {ebit, taxes, da, capex, nwc} else (ebit - taxes + da - capex - nwc)
         fcf = _override_or_value(overrides, "free_cash_flow", index, computed_fcf, override_flags)
+        computed_shares = previous_shares * (1.0 + share_change[index])
+        shares = _override_or_value(overrides, "shares_outstanding", index, computed_shares, override_flags)
         projection_values["revenue"].append(revenue)
         projection_values["ebit"].append(ebit)
         projection_values["taxes"].append(taxes)
@@ -2539,6 +2790,7 @@ def _compute_dcf_projection(
         projection_values["capital_expenditures"].append(capex)
         projection_values["change_in_nwc"].append(nwc)
         projection_values["free_cash_flow"].append(fcf)
+        projection_values["shares_outstanding"].append(shares)
         discount_factor = 1.0 / ((1.0 + wacc) ** (index + 1))
         projection_values["discount_factor"].append(discount_factor)
         projection_values["present_value_of_fcf"].append(None if fcf is None else fcf * discount_factor)
@@ -2546,6 +2798,8 @@ def _compute_dcf_projection(
         override_flags["present_value_of_fcf"].append(False)
         if revenue is not None:
             previous_revenue = revenue
+        if shares is not None:
+            previous_shares = shares
     terminal_fcf = projection_values["free_cash_flow"][-1] if projection_values["free_cash_flow"] else None
     terminal_value = None
     if terminal_fcf is not None and wacc > terminal_growth:
@@ -2565,7 +2819,7 @@ def _compute_dcf_projection(
         else enterprise_value - market_context["net_debt"]
     )
     implied_value_per_share = None
-    final_shares = shares_outstanding[-1] if shares_outstanding else last_shares
+    final_shares = projection_values["shares_outstanding"][-1] if projection_values["shares_outstanding"] else last_shares
     if equity_value is not None and final_shares not in {None, 0}:
         implied_value_per_share = equity_value / final_shares
     current_price = market_context.get("current_price")

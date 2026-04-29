@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from src.models.fundamentals import (
     FundamentalsCoverageRecord,
     FundamentalsCompanyRecord,
+    FundamentalsDcfBridgeRowRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
     FundamentalsDcfScenarioRecord,
@@ -413,6 +414,23 @@ class FundamentalsDcfValuationSummaryModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class FundamentalsDcfBridgeRowModel(BaseModel):
+    row_id: str
+    label: str
+    value: float | None = None
+    display_value: str | None = None
+    unit: str | None = None
+    note: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsDcfBridgeRowRecord) -> "FundamentalsDcfBridgeRowModel":
+        return cls(**row.__dict__)
+
+
 class FundamentalsDcfSensitivityCellModel(BaseModel):
     wacc_pct: float
     terminal_growth_pct: float
@@ -456,6 +474,8 @@ class FundamentalsDcfScenarioModel(BaseModel):
     overrides: dict[str, list[float | None]] = Field(default_factory=dict)
     assumption_rows: list[FundamentalsDcfRowModel] = Field(default_factory=list)
     projection_rows: list[FundamentalsDcfRowModel] = Field(default_factory=list)
+    cost_of_capital_rows: list[FundamentalsDcfBridgeRowModel] = Field(default_factory=list)
+    valuation_bridge_rows: list[FundamentalsDcfBridgeRowModel] = Field(default_factory=list)
     summary: FundamentalsDcfValuationSummaryModel | None = None
     source_provider: str
     retrieved_at: datetime | None = None
@@ -469,6 +489,12 @@ class FundamentalsDcfScenarioModel(BaseModel):
                 **row.__dict__,
                 "assumption_rows": [FundamentalsDcfRowModel.from_domain(item) for item in row.assumption_rows],
                 "projection_rows": [FundamentalsDcfRowModel.from_domain(item) for item in row.projection_rows],
+                "cost_of_capital_rows": [
+                    FundamentalsDcfBridgeRowModel.from_domain(item) for item in row.cost_of_capital_rows
+                ],
+                "valuation_bridge_rows": [
+                    FundamentalsDcfBridgeRowModel.from_domain(item) for item in row.valuation_bridge_rows
+                ],
                 "summary": FundamentalsDcfValuationSummaryModel.from_domain(row.summary) if row.summary else None,
             }
         )

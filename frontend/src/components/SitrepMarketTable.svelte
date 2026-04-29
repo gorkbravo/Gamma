@@ -5,6 +5,8 @@
     group: string;
     last: string;
     change: string;
+    changePct?: string;
+    changePctTone?: string;
     secondary: string;
     secondaryTone?: string;
     tone: string;
@@ -19,12 +21,15 @@
   export let emptyLabel = "No data loaded.";
   export let hideGroup = false;
   export let hideSource = false;
+  export let changeLabel = "Move";
+  export let pctChangeLabel = "%CHG";
+  export let showPctChange = false;
   export let contextLabel = "Context";
   export let hideContext = false;
   export let contextTone = false;
   export let profile: "default" | "equities" | "indices" | "fx" | "yields" | "commodities" = "default";
 
-  $: colCount = 3 + (hideGroup ? 0 : 1) + (hideContext ? 0 : 1);
+  $: colCount = 3 + (hideGroup ? 0 : 1) + (showPctChange ? 1 : 0) + (hideContext ? 0 : 1);
 </script>
 
 <div class="table-wrap">
@@ -34,7 +39,8 @@
         <th class="market-cell">Market</th>
         {#if !hideGroup}<th class="group-cell">Group</th>{/if}
         <th class="num-cell last-cell">Last</th>
-        <th class="num-cell move-cell">Move</th>
+        <th class="num-cell move-cell">{changeLabel}</th>
+        {#if showPctChange}<th class="num-cell pct-cell">{pctChangeLabel}</th>{/if}
         {#if !hideContext}<th class="context-cell">{contextLabel}</th>{/if}
       </tr>
     </thead>
@@ -49,6 +55,9 @@
             {#if !hideGroup}<td class="group-cell">{row.group}</td>{/if}
             <td use:flashOnChange={{ value: row.last, direction: 'neutral' }} class="num-cell last-cell">{row.last}</td>
             <td use:flashOnChange={{ value: row.change, direction: row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral' }} class="num-cell move-cell {row.tone}">{row.change}</td>
+            {#if showPctChange}
+              <td use:flashOnChange={{ value: row.changePct ?? 'N/A', direction: (row.changePctTone ?? row.tone) === 'positive' ? 'up' : (row.changePctTone ?? row.tone) === 'negative' ? 'down' : 'neutral' }} class="num-cell pct-cell {row.changePctTone ?? row.tone}">{row.changePct ?? 'N/A'}</td>
+            {/if}
             {#if !hideContext}<td class="context-cell {contextTone ? row.secondaryTone ?? '' : ''}">{row.secondary}</td>{/if}
           </tr>
         {/each}
@@ -151,6 +160,10 @@
     width: 15.5%;
   }
 
+  .profile-indices .pct-cell {
+    width: 15.5%;
+  }
+
   .profile-fx {
     min-width: 20rem;
   }
@@ -162,12 +175,13 @@
   }
 
   .profile-fx .market-cell {
-    width: 38%;
+    width: 40%;
   }
 
   .profile-fx .last-cell,
-  .profile-fx .move-cell {
-    width: 31%;
+  .profile-fx .move-cell,
+  .profile-fx .pct-cell {
+    width: 20%;
     text-align: left;
   }
 
@@ -195,6 +209,27 @@
 
   .profile-commodities .context-cell {
     font-weight: 700;
+  }
+
+  .profile-commodities {
+    min-width: 34rem;
+  }
+
+  .profile-commodities .market-cell {
+    width: 34%;
+  }
+
+  .profile-commodities .group-cell {
+    width: 18%;
+  }
+
+  .profile-commodities .last-cell {
+    width: 18%;
+  }
+
+  .profile-commodities .move-cell,
+  .profile-commodities .pct-cell {
+    width: 15%;
   }
 
   .empty-cell {

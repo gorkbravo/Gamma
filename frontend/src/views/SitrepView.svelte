@@ -57,6 +57,8 @@
     group: string;
     last: string;
     change: string;
+    changePct?: string;
+    changePctTone?: string;
     secondary: string;
     secondaryTone?: string;
     tone: string;
@@ -197,6 +199,43 @@
     return `${sign}${scaled.toFixed(digits)}%`;
   }
 
+  function formatSignedNumber(value: number | null | undefined, digits = 2) {
+    if (value == null || !Number.isFinite(value)) {
+      return "N/A";
+    }
+    const formatted = formatNumber(value, digits);
+    return value > 0 ? `+${formatted}` : formatted;
+  }
+
+  function absoluteChangeFromReturn(latest: number | null | undefined, totalReturn: number | null | undefined) {
+    if (
+      latest == null ||
+      totalReturn == null ||
+      !Number.isFinite(latest) ||
+      !Number.isFinite(totalReturn) ||
+      totalReturn <= -1
+    ) {
+      return null;
+    }
+    return latest - latest / (1 + totalReturn);
+  }
+
+  function pctChangeFromDelta(current: number | null | undefined, delta: number | null | undefined) {
+    if (
+      current == null ||
+      delta == null ||
+      !Number.isFinite(current) ||
+      !Number.isFinite(delta)
+    ) {
+      return null;
+    }
+    const prior = current - delta;
+    if (!Number.isFinite(prior) || prior === 0) {
+      return null;
+    }
+    return delta / prior;
+  }
+
   function formatDateTime(value: string | null | undefined) {
     if (!value) {
       return "N/A";
@@ -303,12 +342,15 @@
   }
 
   function metricRow(metric: MacroMetric): SitrepMarketRow {
+    const changePct = pctChangeFromDelta(metric.value, metric.delta_value);
     return {
       id: metric.metric_id,
       label: metric.label,
       group: metric.series_id ?? "macro",
       last: metric.display_value ?? formatNumber(metric.value),
       change: metric.delta_display ?? "N/A",
+      changePct: formatPct(changePct),
+      changePctTone: toneFromValue(changePct ?? metric.delta_value),
       secondary: metric.gap_display ?? metric.comparison_display_value ?? metric.unit ?? "",
       tone: toneFromValue(metric.delta_value),
       source: metric.source_provider
@@ -464,7 +506,9 @@
       label: node.label,
       group: node.group ?? "Global",
       last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
-      change: formatPct(node.metrics.total_return),
+      change: formatSignedNumber(absoluteChangeFromReturn(node.metrics.latest_price, node.metrics.total_return), 2),
+      changePct: formatPct(node.metrics.total_return),
+      changePctTone: toneFromValue(node.metrics.total_return),
       secondary: node.symbol ?? "",
       tone: toneFromValue(node.metrics.total_return),
       source: node.source_provider
@@ -474,31 +518,80 @@
   function buildCommodityRows(data: CommodityWorkspaceResponse | null): SitrepMarketRow[] {
     const overviewRows = data?.overview?.matrix_rows ?? [];
     if (overviewRows.length) {
-      return overviewRows.slice(0, 12).map((row) => ({
+      return overviewRows
+        .filter((row) => row.latest_price != null || hasCommodityCurveSignal(row.curve_state))
+        .slice(0, 16)
+        .map((row) => ({
         id: row.instrument_id,
-        label: row.symbol,
+        label: formatCommodityLabel(row.name, row.symbol),
         group: humanize(row.family),
         last: row.latest_price == null ? "N/A" : formatNumber(row.latest_price, 2),
-        change: row.latest_change_pct == null
-          ? row.latest_change == null ? "N/A" : formatNumber(row.latest_change, 2)
-          : formatPct(row.latest_change_pct),
-        secondary: formatCommodityState(row.curve_state),
-        secondaryTone: toneFromCommodityState(row.curve_state),
+        change: formatSignedNumber(row.latest_change, 2),
+        changePct: formatPct(row.latest_change_pct),
+        changePctTone: toneFromValue(row.latest_change_pct ?? row.latest_change),
+        secondary: formatCommodityContext(row.curve_state, row.price_source_provider, row.latest_price),
+        secondaryTone: hasCommodityCurveSignal(row.curve_state) ? toneFromCommodityState(row.curve_state) : "",
         tone: toneFromValue(row.latest_change_pct ?? row.latest_change),
         source: row.price_source_provider ?? row.source_provider
       }));
     }
-    return (data?.market_summaries ?? []).slice(0, 12).map((summary) => ({
+    return (data?.market_summaries ?? [])
+      .filter((summary) => summary.latest_price != null || hasCommodityCurveSignal(summary.curve_state))
+      .slice(0, 16)
+      .map((summary) => ({
       id: summary.instrument.instrument_id,
-      label: summary.instrument.symbol,
+      label: formatCommodityLabel(summary.instrument.name, summary.instrument.symbol),
       group: humanize(summary.instrument.family),
       last: summary.latest_price == null ? "N/A" : formatNumber(summary.latest_price, 2),
-      change: summary.latest_change_pct == null ? "N/A" : formatPct(summary.latest_change_pct),
-      secondary: formatCommodityState(summary.curve_state),
-      secondaryTone: toneFromCommodityState(summary.curve_state),
-      tone: toneFromValue(summary.latest_change_pct),
+      change: formatSignedNumber(summary.latest_change, 2),
+      changePct: formatPct(summary.latest_change_pct),
+      changePctTone: toneFromValue(summary.latest_change_pct ?? summary.latest_change),
+      secondary: formatCommodityContext(summary.curve_state, summary.source_provider, summary.latest_price),
+      secondaryTone: hasCommodityCurveSignal(summary.curve_state) ? toneFromCommodityState(summary.curve_state) : "",
+      tone: toneFromValue(summary.latest_change_pct ?? summary.latest_change),
       source: summary.source_provider
     }));
+  }
+
+  function formatCommodityLabel(name: string | null | undefined, symbol: string | null | undefined) {
+    const cleanName = (name ?? "").trim();
+    if (cleanName) {
+      return cleanName;
+    }
+    return (symbol ?? "").trim() || "Commodity";
+  }
+
+  function hasCommodityCurveSignal(value: string | null | undefined) {
+    const normalized = (value ?? "").trim().toLowerCase();
+    return normalized === "backwardation" || normalized === "contango" || normalized === "flat";
+  }
+
+  function formatCommodityContext(
+    curveState: string | null | undefined,
+    priceSource: string | null | undefined,
+    latestPrice: number | null | undefined
+  ) {
+    if (hasCommodityCurveSignal(curveState)) {
+      return formatCommodityState(curveState);
+    }
+    if (latestPrice != null) {
+      return formatCommodityPriceSource(priceSource);
+    }
+    return formatCommodityState(curveState);
+  }
+
+  function formatCommodityPriceSource(value: string | null | undefined) {
+    const normalized = (value ?? "").trim().toLowerCase();
+    if (normalized === "eia") {
+      return "EIA spot";
+    }
+    if (normalized === "fred") {
+      return "FRED proxy";
+    }
+    if (normalized === "ibkr" || normalized === "ibkr_cached") {
+      return "IBKR front";
+    }
+    return "Price proxy";
   }
 
   function formatCommodityState(value: string | null | undefined) {
@@ -709,7 +802,7 @@
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={indexRows} profile="indices" hideSource contextLabel="Symbol" emptyLabel="No index overview loaded." />
+          <SitrepMarketTable rows={indexRows} profile="indices" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No index overview loaded." />
         </article>
 
         <article class="panel table-panel">
@@ -722,7 +815,7 @@
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext emptyLabel="No FX strip loaded." />
+          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No FX strip loaded." />
         </article>
 
         <article class="panel table-panel">
@@ -741,14 +834,14 @@
         <article class="panel table-panel">
           <div class="table-header">
             <div class="table-title">
-              <span>Futures</span>
+              <span>Commodities</span>
               <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
             </div>
             <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")} aria-label={refreshTitle("commodities")} title={refreshTitle("commodities")}>
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource contextTone emptyLabel="No commodities workspace loaded." />
+          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No commodities workspace loaded." />
         </article>
       </div>
 

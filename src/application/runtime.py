@@ -38,6 +38,7 @@ from src.services.cache import CacheService
 from src.services.copilot_provider import UnavailableCopilotProvider
 from src.services.copilot_store import CopilotStore
 from src.services.commodities_adapters import (
+    COMMODITY_INSTRUMENTS,
     EiaCommoditiesDataProvider,
     IBKR_FUTURES_ROOTS,
     IbkrCommoditiesDataProvider,
@@ -678,22 +679,22 @@ class LiveCommoditiesReferenceProvider:
             CommodityInstrument(
                 instrument_id=config.instrument_id,
                 symbol=config.symbol,
-                name=config.label,
-                family="energy" if config.instrument_id in {"wti", "brent", "henry_hub", "gasoline", "heating_oil"} else "metals",
-                subgroup="futures",
+                name=config.name,
+                family=config.family,
+                subgroup=config.subgroup,
                 quote_unit=config.quote_unit,
-                currency=config.currency,
+                currency="USD",
                 exchange=config.exchange,
-                front_symbol=config.symbol,
-                provider_symbols={"ibkr": config.symbol},
-                aliases=[config.label.lower(), config.symbol.lower()],
-                description=f"{config.label} read-only futures research instrument.",
+                front_symbol=config.front_symbol,
+                provider_symbols={"ibkr": config.front_symbol or ""},
+                aliases=[config.name.lower(), config.symbol.lower()],
+                description=f"{config.name} read-only commodity research instrument.",
                 source_provider="gamma",
                 retrieved_at=retrieved_at,
                 origin="gamma.live_commodities_reference.instruments",
                 transformation_note="Static Gamma instrument metadata used to request live commodities providers.",
             )
-            for config in IBKR_FUTURES_ROOTS
+            for config in COMMODITY_INSTRUMENTS
         ]
         coverage = CommodityCoverageMetadata(
             coverage_status="unavailable",

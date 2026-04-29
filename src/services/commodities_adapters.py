@@ -69,6 +69,26 @@ class FredPriceConfig:
 
 
 @dataclass(frozen=True)
+class EiaPriceConfig:
+    series_id: str
+    instrument_id: str
+    label: str
+    unit: str
+
+
+@dataclass(frozen=True)
+class CommodityInstrumentConfig:
+    instrument_id: str
+    symbol: str
+    name: str
+    family: str
+    subgroup: str
+    quote_unit: str
+    exchange: str | None = None
+    front_symbol: str | None = None
+
+
+@dataclass(frozen=True)
 class IbkrFutureRootConfig:
     instrument_id: str
     symbol: str
@@ -82,6 +102,26 @@ class IbkrFutureRootConfig:
 
 def _env_series_id(name: str, default: str) -> str:
     return (os.getenv(name) or default).strip()
+
+
+COMMODITY_INSTRUMENTS: tuple[CommodityInstrumentConfig, ...] = (
+    CommodityInstrumentConfig("wti", "CL", "WTI Crude Oil", "energy", "crude", "USD/bbl", "NYMEX", "CL"),
+    CommodityInstrumentConfig("brent", "BZ", "Brent Crude Oil", "energy", "crude", "USD/bbl", "ICE", "BZ"),
+    CommodityInstrumentConfig("henry_hub", "NG", "Henry Hub Natural Gas", "energy", "gas", "USD/MMBtu", "NYMEX", "NG"),
+    CommodityInstrumentConfig("gasoline", "RB", "RBOB Gasoline", "energy", "products", "USD/gal", "NYMEX", "RB"),
+    CommodityInstrumentConfig("heating_oil", "HO", "Heating Oil / Diesel", "energy", "products", "USD/gal", "NYMEX", "HO"),
+    CommodityInstrumentConfig("gold", "GC", "Gold", "metals", "precious", "USD/oz", "COMEX", "GC"),
+    CommodityInstrumentConfig("silver", "SI", "Silver", "metals", "precious", "USD/oz", "COMEX", "SI"),
+    CommodityInstrumentConfig("platinum", "PL", "Platinum", "metals", "precious", "USD/oz", "NYMEX", "PL"),
+    CommodityInstrumentConfig("copper", "HG", "Copper", "metals", "industrial", "USD/lb", "COMEX", "HG"),
+    CommodityInstrumentConfig("aluminum", "ALI", "Aluminum", "metals", "industrial", "USD/metric ton", "LME/COMEX", "ALI"),
+    CommodityInstrumentConfig("zinc", "ZS", "Zinc", "metals", "industrial", "USD/metric ton", "LME", "ZS"),
+    CommodityInstrumentConfig("nickel", "NI", "Nickel", "metals", "industrial", "USD/metric ton", "LME", None),
+    CommodityInstrumentConfig("lead", "PB", "Lead", "metals", "industrial", "USD/metric ton", "LME", None),
+    CommodityInstrumentConfig("tin", "SN", "Tin", "metals", "industrial", "USD/metric ton", "LME", None),
+    CommodityInstrumentConfig("iron_ore", "IO", "Iron Ore", "metals", "bulk", "USD/metric ton", "CFR China", None),
+    CommodityInstrumentConfig("uranium", "UX", "Uranium", "metals", "nuclear_fuel", "USD/lb", "Spot", None),
+)
 
 
 EIA_INVENTORY_SERIES: tuple[EiaSeriesConfig, ...] = (
@@ -174,6 +214,26 @@ FRED_PRICE_SERIES: tuple[FredPriceConfig, ...] = (
     FredPriceConfig("PCOPPUSDM", "copper", "Copper Price Proxy", "USD/metric ton"),
     FredPriceConfig("PALUMUSDM", "aluminum", "Aluminum Price Proxy", "USD/metric ton"),
     FredPriceConfig("PZINCUSDM", "zinc", "Zinc Price Proxy", "USD/metric ton"),
+    FredPriceConfig("PNICKUSDM", "nickel", "Nickel Price Proxy", "USD/metric ton"),
+    FredPriceConfig("PLEADUSDM", "lead", "Lead Price Proxy", "USD/metric ton"),
+    FredPriceConfig("PTINUSDM", "tin", "Tin Price Proxy", "USD/metric ton"),
+    FredPriceConfig("PIORECRUSDM", "iron_ore", "Iron Ore Price Proxy", "USD/metric ton"),
+    FredPriceConfig("PURANUSDM", "uranium", "Uranium Price Proxy", "USD/lb"),
+)
+
+EIA_PRICE_SERIES: tuple[EiaPriceConfig, ...] = (
+    EiaPriceConfig(
+        _env_series_id("EIA_RBOB_GASOLINE_PRICE_SERIES_ID", "PET.EER_EPMRU_PF4_Y35NY_DPG.D"),
+        "gasoline",
+        "RBOB Gasoline New York Harbor Spot",
+        "USD/gal",
+    ),
+    EiaPriceConfig(
+        _env_series_id("EIA_HEATING_OIL_PRICE_SERIES_ID", "PET.EER_EPD2F_PF4_Y35NY_DPG.D"),
+        "heating_oil",
+        "No. 2 Heating Oil New York Harbor Spot",
+        "USD/gal",
+    ),
 )
 
 IBKR_FUTURES_ROOTS: tuple[IbkrFutureRootConfig, ...] = (
@@ -329,6 +389,19 @@ class EiaCommoditiesDataProvider:
                 official_count += 1
 
         price_histories = {history.instrument_id: history for history in reference.price_histories}
+        eia_price_count = 0
+        for config in EIA_PRICE_SERIES:
+            if not config.series_id:
+                continue
+            try:
+                history = self._fetch_eia_price_history(config, force_refresh=force_refresh)
+            except Exception as exc:
+                warnings.append(f"EIA price series {config.series_id} failed: {exc.__class__.__name__}.")
+                continue
+            if history.points:
+                price_histories[history.instrument_id] = history
+                eia_price_count += 1
+
         fred_count = 0
         if self.fred_client is not None:
             for config in FRED_PRICE_SERIES:
@@ -341,7 +414,7 @@ class EiaCommoditiesDataProvider:
                     price_histories[history.instrument_id] = history
                     fred_count += 1
 
-        if official_count == 0 and fred_count == 0:
+        if official_count == 0 and eia_price_count == 0 and fred_count == 0:
             return _with_provider_warning(
                 reference,
                 "EIA/FRED enrichment returned no usable commodity series; "
@@ -372,6 +445,7 @@ class EiaCommoditiesDataProvider:
             ),
             caveats=[
                 "EIA enrichment covers configured official US energy inventories, storage, production, trade, refinery, and demand fundamentals where available.",
+                "EIA spot price enrichment covers selected US energy products for lightweight SITREP context without opening additional IBKR market-data lines.",
                 (
                     "FRED price histories are spot or proxy series where configured; futures curves remain sample unless a futures provider is added."
                     if reference_is_sample
@@ -381,7 +455,7 @@ class EiaCommoditiesDataProvider:
                 *warnings,
             ],
             credential_env_vars=["EIA_API_KEY", "FRED_API_KEY"],
-            supports_prices=fred_count > 0,
+            supports_prices=eia_price_count > 0 or fred_count > 0,
             supports_curves=bool(reference.curve_snapshots),
             supports_inventories=official_count > 0,
             supports_events=bool(reference.events),
@@ -407,6 +481,11 @@ class EiaCommoditiesDataProvider:
             warnings=_dedupe(
                 [
                     *warnings,
+                    (
+                        "Selected EIA daily product spot prices are used for gasoline/heating-oil SITREP context."
+                        if eia_price_count
+                        else ""
+                    ),
                     (
                         "Futures curves are still sample-derived in this provider slice; add IBKR/Databento-style futures-chain coverage for live curves."
                         if reference_is_sample
@@ -481,6 +560,48 @@ class EiaCommoditiesDataProvider:
             retrieved_at=retrieved_at,
             origin=f"eia.seriesid:{config.series_id}",
             transformation_note="Latest value, change, and seasonal context are computed by the Commodities service.",
+        )
+
+    def _fetch_eia_price_history(
+        self,
+        config: EiaPriceConfig,
+        *,
+        force_refresh: bool = False,
+    ) -> CommodityPriceHistory:
+        payload, retrieved_at = self._get_eia_payload(config.series_id, force_refresh=force_refresh)
+        rows = _extract_eia_rows(payload)
+        points: list[CommodityPricePoint] = []
+        for row in rows:
+            timestamp = _parse_period(row.get("period") or row.get("date"))
+            value = _float_value(row.get("value"))
+            if timestamp is None or value is None:
+                continue
+            points.append(
+                CommodityPricePoint(
+                    instrument_id=config.instrument_id,
+                    timestamp=timestamp,
+                    value=round(value, 6),
+                    unit=config.unit,
+                    source_provider="eia",
+                    retrieved_at=retrieved_at,
+                    origin=f"eia.seriesid:{config.series_id}",
+                    transformation_note=(
+                        "EIA daily spot price series mapped into Gamma's normalized commodity price-history model."
+                    ),
+                )
+            )
+        points.sort(key=lambda point: point.timestamp)
+        return CommodityPriceHistory(
+            instrument_id=config.instrument_id,
+            label=config.label,
+            unit=config.unit,
+            points=points,
+            source_provider="eia",
+            retrieved_at=retrieved_at,
+            origin=f"eia.seriesid:{config.series_id}",
+            transformation_note=(
+                "EIA product spot prices provide lightweight SITREP context; IBKR futures curves remain separate."
+            ),
         )
 
     def _get_eia_payload(self, series_id: str, *, force_refresh: bool) -> tuple[Any, datetime]:
@@ -1187,38 +1308,29 @@ class IbkrCommoditiesDataProvider:
 
 
 def _sample_instruments(retrieved_at: datetime) -> list[CommodityInstrument]:
-    rows = [
-        ("wti", "CL", "WTI Crude Oil", "energy", "crude", "USD/bbl", "NYMEX", "CL"),
-        ("brent", "BZ", "Brent Crude Oil", "energy", "crude", "USD/bbl", "ICE", "BZ"),
-        ("henry_hub", "NG", "Henry Hub Natural Gas", "energy", "gas", "USD/MMBtu", "NYMEX", "NG"),
-        ("gasoline", "RB", "RBOB Gasoline", "energy", "products", "USD/gal", "NYMEX", "RB"),
-        ("heating_oil", "HO", "Heating Oil / Diesel", "energy", "products", "USD/gal", "NYMEX", "HO"),
-        ("gold", "GC", "Gold", "metals", "precious", "USD/oz", "COMEX", "GC"),
-        ("silver", "SI", "Silver", "metals", "precious", "USD/oz", "COMEX", "SI"),
-        ("platinum", "PL", "Platinum", "metals", "precious", "USD/oz", "NYMEX", "PL"),
-        ("copper", "HG", "Copper", "metals", "industrial", "USD/lb", "COMEX", "HG"),
-        ("aluminum", "ALI", "Aluminum", "metals", "industrial", "USD/metric ton", "LME/COMEX", "ALI"),
-        ("zinc", "ZS", "Zinc", "metals", "industrial", "USD/metric ton", "LME", "ZS"),
-    ]
     return [
         CommodityInstrument(
-            instrument_id=instrument_id,
-            symbol=symbol,
-            name=name,
-            family=family,
-            subgroup=subgroup,
-            quote_unit=unit,
-            exchange=exchange,
-            front_symbol=front_symbol,
-            provider_symbols={"sample": symbol, "ibkr": front_symbol, "fred": _fred_symbol_for(instrument_id)},
-            aliases=[name.lower(), symbol.lower()],
-            description=f"{name} research instrument for read-only commodity analysis.",
+            instrument_id=config.instrument_id,
+            symbol=config.symbol,
+            name=config.name,
+            family=config.family,
+            subgroup=config.subgroup,
+            quote_unit=config.quote_unit,
+            exchange=config.exchange,
+            front_symbol=config.front_symbol,
+            provider_symbols={
+                "sample": config.symbol,
+                "ibkr": config.front_symbol or "",
+                "fred": _fred_symbol_for(config.instrument_id),
+            },
+            aliases=[config.name.lower(), config.symbol.lower()],
+            description=f"{config.name} research instrument for read-only commodity analysis.",
             source_provider="sample_data",
             retrieved_at=retrieved_at,
             origin="sample_commodities.instruments",
             transformation_note="Sample commodity universe normalized into Gamma instrument metadata.",
         )
-        for instrument_id, symbol, name, family, subgroup, unit, exchange, front_symbol in rows
+        for config in COMMODITY_INSTRUMENTS
     ]
 
 
@@ -1238,6 +1350,11 @@ def _sample_price_histories(
         "copper": (4.58, 0.17, 0.0015),
         "aluminum": (2560.0, 84.0, 0.85),
         "zinc": (2860.0, 96.0, 0.7),
+        "nickel": (15900.0, 640.0, 3.0),
+        "lead": (1980.0, 58.0, 0.35),
+        "tin": (31800.0, 950.0, 5.0),
+        "iron_ore": (105.0, 6.0, -0.02),
+        "uranium": (72.0, 4.4, 0.015),
     }
     histories: list[CommodityPriceHistory] = []
     for instrument in instruments:
@@ -1294,6 +1411,8 @@ def _sample_curves(
     }
     curves: list[CommodityCurveSnapshot] = []
     for instrument in instruments:
+        if instrument.instrument_id not in levels:
+            continue
         nodes: list[CommodityCurveNode] = []
         for index, price in enumerate(levels[instrument.instrument_id]):
             contract = _contract_for(instrument, retrieved_at, index)

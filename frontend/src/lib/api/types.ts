@@ -1280,6 +1280,19 @@ export interface FundamentalsDcfValuationSummary {
   transformation_note: string | null;
 }
 
+export interface FundamentalsDcfBridgeRow {
+  row_id: string;
+  label: string;
+  value: number | null;
+  display_value: string | null;
+  unit: string | null;
+  note: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface FundamentalsDcfSensitivityCell {
   wacc_pct: number;
   terminal_growth_pct: number;
@@ -1307,6 +1320,8 @@ export interface FundamentalsDcfScenario {
   overrides: Record<string, Array<number | null>>;
   assumption_rows: FundamentalsDcfRow[];
   projection_rows: FundamentalsDcfRow[];
+  cost_of_capital_rows: FundamentalsDcfBridgeRow[];
+  valuation_bridge_rows: FundamentalsDcfBridgeRow[];
   summary: FundamentalsDcfValuationSummary | null;
   source_provider: string;
   retrieved_at: string | null;

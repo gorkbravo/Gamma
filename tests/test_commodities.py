@@ -15,6 +15,7 @@ from src.models.commodities import CommodityCoverageMetadata
 from src.services.cache import CacheService
 from src.services.commodities_adapters import (
     EIA_INVENTORY_SERIES,
+    EIA_PRICE_SERIES,
     EiaCommoditiesDataProvider,
     IbkrCommoditiesDataProvider,
     SampleCommoditiesDataProvider,
@@ -44,8 +45,8 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert workspace.coverage.supports_curves is True
     assert workspace.coverage.supports_inventories is True
     assert {instrument.family for instrument in workspace.instruments} == {"energy", "metals"}
-    assert len(workspace.market_summaries) == 11
-    assert len(workspace.price_histories) == 11
+    assert len(workspace.market_summaries) == 16
+    assert len(workspace.price_histories) == 16
     assert len(workspace.curves) == 11
     assert len(workspace.spreads) >= 6
     assert len(workspace.inventories) >= 6
@@ -53,11 +54,14 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert len(workspace.cross_domain_links) >= 3
     assert any("read-only research" in warning for warning in workspace.warnings)
     assert workspace.overview is not None
-    assert workspace.overview.market_breadth.total_markets == 11
-    assert workspace.overview.market_breadth.counts_by_family == {"energy": 5, "metals": 6}
+    assert workspace.overview.market_breadth.total_markets == 16
+    assert workspace.overview.market_breadth.counts_by_family == {"energy": 5, "metals": 11}
     assert workspace.overview.market_breadth.backwardation_count >= 1
     assert workspace.overview.market_breadth.contango_count >= 1
-    assert len(workspace.overview.matrix_rows) == 11
+    assert len(workspace.overview.matrix_rows) == 16
+    nickel_row = next(row for row in workspace.overview.matrix_rows if row.instrument_id == "nickel")
+    assert nickel_row.curve_state == "unavailable"
+    assert nickel_row.latest_price is not None
     assert workspace.overview.scatter is not None
     assert workspace.overview.scatter.x_methodology_label == "Loaded-history momentum (%)"
     assert workspace.overview.scatter.points
@@ -126,7 +130,17 @@ def test_eia_provider_without_key_degrades_to_sample_with_warning():
 
 def test_eia_provider_enriches_energy_inventory_with_official_series():
     def fake_fetch_json(url: str, params: dict[str, object] | None):
-        del url, params
+        del params
+        if any(config.series_id in url for config in EIA_PRICE_SERIES):
+            return {
+                "response": {
+                    "data": [
+                        {"period": "2026-01-03", "value": 2.95},
+                        {"period": "2026-01-10", "value": 3.05},
+                        {"period": "2026-01-17", "value": 3.15},
+                    ]
+                }
+            }
         return {
             "response": {
                 "data": [
@@ -153,6 +167,9 @@ def test_eia_provider_enriches_energy_inventory_with_official_series():
     assert "US Crude Oil Imports" in configured_labels
     assert "US Refinery Utilization" in configured_labels
     assert "US Gasoline Product Supplied" in configured_labels
+    configured_price_labels = {config.label for config in EIA_PRICE_SERIES}
+    assert "RBOB Gasoline New York Harbor Spot" in configured_price_labels
+    assert "No. 2 Heating Oil New York Harbor Spot" in configured_price_labels
     crude = next(series for series in snapshot.inventory_series if series.metadata.series_id == "us-commercial-crude-stocks")
     assert crude.source_provider == "eia"
     assert crude.metadata.provider_series_id == "PET.WCESTUS1.W"
@@ -162,6 +179,13 @@ def test_eia_provider_enriches_energy_inventory_with_official_series():
     assert production.source_provider == "eia"
     assert production.metadata.category == "production"
     assert production.metadata.provider_series_id == "PET.WCRFPUS2.W"
+    gasoline_history = next(history for history in snapshot.price_histories if history.instrument_id == "gasoline")
+    assert gasoline_history.source_provider == "eia"
+    assert gasoline_history.origin == "eia.seriesid:PET.EER_EPMRU_PF4_Y35NY_DPG.D"
+    assert [point.value for point in gasoline_history.points] == [2.95, 3.05, 3.15]
+    heating_oil_history = next(history for history in snapshot.price_histories if history.instrument_id == "heating_oil")
+    assert heating_oil_history.source_provider == "eia"
+    assert heating_oil_history.origin == "eia.seriesid:PET.EER_EPD2F_PF4_Y35NY_DPG.D"
 
 
 class _FakeIb:
@@ -364,10 +388,10 @@ def test_commodities_api_routes_return_workspace_and_slices(tmp_path, monkeypatc
         workspace_payload = workspace_response.json()
         assert workspace_payload["mode"] == "curves_spreads"
         assert workspace_payload["coverage"]["coverage_status"] == "sample"
-        assert len(workspace_payload["market_summaries"]) == 11
+        assert len(workspace_payload["market_summaries"]) == 16
         assert len(workspace_payload["spreads"]) >= 6
         assert workspace_payload["cross_domain_links"]
-        assert workspace_payload["overview"]["market_breadth"]["total_markets"] == 11
+        assert workspace_payload["overview"]["market_breadth"]["total_markets"] == 16
         assert workspace_payload["overview"]["matrix_rows"]
         assert workspace_payload["overview"]["scatter"]["x_methodology_label"] == "Loaded-history momentum (%)"
 
