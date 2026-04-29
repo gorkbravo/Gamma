@@ -56,6 +56,12 @@ _DEFAULT_PEER_SEEDS: dict[str, tuple[str, ...]] = {
     "NVDA": ("AMD", "AVGO", "QCOM", "MU", "INTC"),
     "AMD": ("NVDA", "AVGO", "QCOM", "MU", "INTC"),
     "ASML": ("AMAT", "LRCX", "KLAC", "TER", "ONTO"),
+    "LMT": ("RTX", "NOC", "GD", "HII", "BA"),
+    "RTX": ("LMT", "NOC", "GD", "HII", "BA"),
+    "NOC": ("LMT", "RTX", "GD", "HII", "BA"),
+    "GD": ("LMT", "RTX", "NOC", "HII", "BA"),
+    "HII": ("LMT", "RTX", "NOC", "GD", "BA"),
+    "BA": ("LMT", "RTX", "NOC", "GD", "HII"),
     "GOOGL": ("META", "AMZN", "MSFT", "ORCL", "CRM"),
     "AMZN": ("GOOGL", "META", "MSFT", "ORCL", "WMT"),
     "META": ("GOOGL", "AMZN", "MSFT", "SNAP", "RDDT"),
@@ -718,6 +724,7 @@ class FundamentalsService:
             stored_focal = str(stored.get("focal_ticker") or "").strip().upper()
             if stored_focal and stored_focal != company.ticker:
                 stored = None
+        defaults = self._default_peer_seed(company)
         if stored:
             peer_tickers = [
                 value
@@ -728,13 +735,22 @@ class FundamentalsService:
                 )
                 if value != company.ticker
             ]
+            user_edited = bool(stored.get("user_edited"))
+            if defaults and not user_edited and tuple(peer_tickers) != defaults:
+                basket = self._build_peer_basket_record(
+                    company,
+                    peer_tickers=list(defaults),
+                    user_edited=False,
+                    transformation_note="Gamma refreshed the auto-generated peer basket from the current peer seed map because the stored basket had not been manually edited.",
+                )
+                self.store.save_peer_basket(company.ticker, self._peer_basket_to_payload(basket))
+                return basket
             return self._build_peer_basket_record(
                 company,
                 peer_tickers=peer_tickers,
-                user_edited=bool(stored.get("user_edited")),
+                user_edited=user_edited,
                 transformation_note="Gamma restores the peer basket from the persisted local research object.",
             )
-        defaults = self._default_peer_seed(company)
         basket = self._build_peer_basket_record(
             company,
             peer_tickers=list(defaults),

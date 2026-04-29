@@ -155,6 +155,57 @@ def test_fundamentals_peer_seed_handles_broad_non_tech_buckets(tmp_path):
     assert airline_peers.peer_basket.peer_tickers == ["UAL", "AAL", "LUV", "ALK"]
 
 
+def test_fundamentals_peer_seed_handles_defense_ticker_without_existing_basket(tmp_path):
+    service = _build_service(tmp_path)
+
+    peers = service.get_peers("LMT")
+
+    assert peers is not None
+    assert peers.peer_basket.peer_tickers == ["RTX", "NOC", "GD", "HII", "BA"]
+    assert peers.peer_heatmap is not None
+    assert peers.peer_heatmap.tickers[:3] == ["LMT", "RTX", "NOC"]
+
+
+def test_fundamentals_auto_peer_basket_refreshes_stale_unedited_store_payload(tmp_path):
+    service = _build_service(tmp_path)
+    service.store.save_peer_basket(
+        "LMT",
+        {
+            "focal_ticker": "LMT",
+            "peer_tickers": [],
+            "display_order": ["LMT"],
+            "user_edited": False,
+        },
+    )
+
+    peers = service.get_peers("LMT")
+    stored = service.store.load_peer_basket("LMT")
+
+    assert peers is not None
+    assert peers.peer_basket.peer_tickers == ["RTX", "NOC", "GD", "HII", "BA"]
+    assert stored is not None
+    assert stored["peer_tickers"] == ["RTX", "NOC", "GD", "HII", "BA"]
+
+
+def test_fundamentals_auto_peer_basket_preserves_user_edited_empty_payload(tmp_path):
+    service = _build_service(tmp_path)
+    service.store.save_peer_basket(
+        "LMT",
+        {
+            "focal_ticker": "LMT",
+            "peer_tickers": [],
+            "display_order": ["LMT"],
+            "user_edited": True,
+        },
+    )
+
+    peers = service.get_peers("LMT")
+
+    assert peers is not None
+    assert peers.peer_basket.peer_tickers == []
+    assert peers.peer_basket.user_edited is True
+
+
 def test_fundamentals_peer_basket_ignores_cross_ticker_cached_payload(tmp_path):
     service = _build_service(tmp_path)
     service.store.save_peer_basket(
@@ -485,6 +536,12 @@ def _build_service(tmp_path) -> FundamentalsService:
             ("AAL", "American Airlines Group Inc.", 0.10, 14.0),
             ("LUV", "Southwest Airlines Co.", 0.08, 31.0),
             ("ALK", "Alaska Air Group, Inc.", 0.03, 44.0),
+            ("LMT", "Lockheed Martin Corporation", 0.18, 470.0),
+            ("RTX", "RTX Corporation", 0.16, 115.0),
+            ("NOC", "Northrop Grumman Corporation", 0.12, 510.0),
+            ("GD", "General Dynamics Corporation", 0.14, 295.0),
+            ("HII", "Huntington Ingalls Industries, Inc.", 0.04, 255.0),
+            ("BA", "The Boeing Company", 0.20, 180.0),
         )
     }
     company_data["ALB"] = _cyclical_alb_data()
@@ -517,6 +574,12 @@ def _build_service(tmp_path) -> FundamentalsService:
             company_data[ticker],
             sic="4512",
             sic_description="Air Transportation, Scheduled",
+        )
+    for ticker in ("LMT", "RTX", "NOC", "GD", "HII", "BA"):
+        company_data[ticker] = _with_company_classification(
+            company_data[ticker],
+            sic="3760",
+            sic_description="Guided Missiles and Space Vehicles and Parts",
         )
     price_contexts = {
         ticker: _price_context(ticker, price, scale)
@@ -554,6 +617,12 @@ def _build_service(tmp_path) -> FundamentalsService:
             ("AAL", 14.0, 0.10),
             ("LUV", 31.0, 0.08),
             ("ALK", 44.0, 0.03),
+            ("LMT", 470.0, 0.18),
+            ("RTX", 115.0, 0.16),
+            ("NOC", 510.0, 0.12),
+            ("GD", 295.0, 0.14),
+            ("HII", 255.0, 0.04),
+            ("BA", 180.0, 0.20),
         )
     }
     return FundamentalsService(
