@@ -46,6 +46,7 @@
   const AIS_ZOOM_THRESHOLD = 4;
   const VIEWPORT_DEBOUNCE_MS = 1500;
   const MAX_LIVE_POSITIONS = 600;
+  const AISSTREAM_COVERAGE_URL = "https://aisstream.io/coverage";
   const VESSEL_GROUPS = ["tanker", "lng_carrier", "cargo", "container", "dry_bulk", "passenger", "fishing", "special", "unknown"];
   const VESSEL_COLORS: Record<string, string> = {
     tanker: "#e36f5a",
@@ -561,6 +562,16 @@
   function coverageLabel(value: string | null | undefined) {
     return String(value ?? "unknown").replace(/_/g, " ").toUpperCase();
   }
+
+  function isAisstreamProvider(meta: MaritimeCoverageMetadata | null) {
+    if (!meta) return false;
+    const haystack = `${meta.provider_id ?? ""} ${meta.provider_label ?? ""}`.toLowerCase();
+    return haystack.includes("aisstream");
+  }
+
+  $: coverageStatus = coverage?.coverage_status ?? null;
+  $: showCoverageChip = isAisstreamProvider(coverage) && coverageStatus !== "live" && coverageStatus !== null;
+  $: coverageChipTooltip = `${coverage?.provider_label ?? "AISstream"} feed has regional coverage gaps — open coverage map`;
 
   function shortDate(value: string | null | undefined) {
     return value
@@ -1353,6 +1364,18 @@
       <span class="hud-label">Zoom</span>
       <span class="hud-value">{mapZoom.toFixed(1)}</span>
     </div>
+    {#if showCoverageChip}
+      <a
+        class="hud-row coverage-chip"
+        href={AISSTREAM_COVERAGE_URL}
+        target="_blank"
+        rel="noreferrer"
+        title={coverageChipTooltip}
+      >
+        <span class="hud-label">Coverage</span>
+        <span class="hud-value coverage-chip-value">{coverageLabel(coverageStatus)} ↗</span>
+      </a>
+    {/if}
     {#if liveMessage}<div class="hud-note">{liveMessage}</div>{/if}
   </div>
 
@@ -1576,6 +1599,24 @@
     color: var(--warning, #c49a5a);
     font-size: 0.66rem;
     line-height: 1.35;
+  }
+
+  .coverage-chip {
+    color: inherit;
+    text-decoration: none;
+    border-top: 1px dashed color-mix(in srgb, var(--warning, #c49a5a) 35%, transparent);
+    padding-top: 0.25rem;
+    margin-top: 0.05rem;
+    cursor: pointer;
+  }
+
+  .coverage-chip:hover .coverage-chip-value,
+  .coverage-chip:focus-visible .coverage-chip-value {
+    color: var(--warning, #c49a5a);
+  }
+
+  .coverage-chip-value {
+    color: color-mix(in srgb, var(--warning, #c49a5a) 80%, var(--text-0, #f0f2f5));
   }
 
   /* ── Bottom-left: legend + 3D toggle ─────────────────────── */

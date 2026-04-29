@@ -1,0 +1,84 @@
+# List of Things I'd like to do in due time just listed
+
+## General things
+- For some odd reason, links that link to outside websites don't open the browser
+
+- Deepen handoffs and cross comunication between tabs
+
+- Cleanup 'Selected Equity' box
+
+- Add customisation to hero charts (candlestick options, technical indicators or volume overlays)
+
+- Take out logo from the top bar, and in something like 'Research and Analysis Platform' 
+
+- Add deeper navigation into the search bar, something like /tab/mode
+
+- Copilot button in a box, next to change view
+
+
+## Sitrep tab
+
+- Add more FX pairs
+
+- Add more Rates, and add a regional column
+
+- Eliminate irrelevant warnings
+
+## Research tab
+
+- Decide on wether I want to separate it into Equity Research and Strategy Lab 
+
+- Create a sandbox for running code inside of the app. (Either here or in the dedicated Strategy tab)
+
+- I'm sure there's more 
+
+- It would be pretty great if in the scope builder the preset portfolio were deeper, have more positions and be overall more interesting. 
+
+
+
+## Fundamentals 
+
+- It's fucking annoying that the tab autoloads AAPL
+
+- Harden weird name financials 
+
+- Harden peers 
+
+- DCF assumptions are too harsh 
+
+- Explore if we can backfill missing financial values with owned logic 
+
+- Clean up tables and charts
+
+## Commodities
+
+- Why the fuck don't we have curve data from anything other than WTI crude?
+
+- All modes need a styling and reordering pass
+
+## Prediction Markets 
+
+- Needs styling pass
+
+## SEALANES
+
+- Tooltip shows coverage unavailable but ignores that api only connects when zoom is >4
+
+## Copilot 
+
+- For some reason it gives the following error: 
+OpenAI request failed: Item with id 'rs_07cadee070d8a05f0169f24f255d0881a2afa1957ce7741ca3' not found. Items are not persisted when `store` is set to false. Try again with `store` set to true, or remove this item from your input.
+(needs solution)
+
+- Idk i'd probably want the default mode to just be a mode where I can just have the model help me build hypotheses. Idk current modes feel weird. 
+
+## Risk 
+
+- All modes need a styling pass
+
+- Efficient frontier doesn't work 
+
+- Mode bar looks weird AF
+
+
+

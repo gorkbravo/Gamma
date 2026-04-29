@@ -36,9 +36,9 @@
   export let selectedEquitySymbol: string | null = null;
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | null = null;
 
-  const bloombergChannelId = "UCIALMKvObZNtJ6AmdCLP7Lg";
-  const bloombergEmbedUrl = `https://www.youtube.com/embed/live_stream?channel=${bloombergChannelId}&autoplay=0&mute=1`;
-  const bloombergWatchUrl = "https://www.youtube.com/@markets/live";
+  const bloombergLiveVideoId = "iEpJwprxDdk";
+  const bloombergEmbedUrl = `https://www.youtube-nocookie.com/embed/${bloombergLiveVideoId}?autoplay=0&mute=1&playsinline=1&rel=0`;
+  const bloombergWatchUrl = `https://www.youtube.com/watch?v=${bloombergLiveVideoId}`;
 
   type TapeRow = {
     id: string;
