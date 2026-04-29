@@ -142,7 +142,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
 
             tool_calls = [item for item in response.get("output", []) if item.get("type") == "function_call"]
             if tool_calls:
-                input_items.extend(response.get("output", []))
+                input_items.extend(self._continuation_output_items(response))
                 for item in tool_calls:
                     tool_name = str(item.get("name") or "").strip()
                     arguments = self._parse_tool_arguments(item.get("arguments"))
@@ -318,6 +318,29 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         if isinstance(output, str):
             return output
         return OpenAIResponsesCopilotProvider._json_dumps(output)
+
+    def _continuation_output_items(self, response: dict[str, Any]) -> list[dict[str, Any]]:
+        output_items = response.get("output", [])
+        if self.store_responses:
+            return [
+                dict(item)
+                for item in output_items
+                if isinstance(item, dict)
+            ]
+
+        return [
+            self._stateless_function_call_item(item)
+            for item in output_items
+            if isinstance(item, dict) and item.get("type") == "function_call"
+        ]
+
+    @staticmethod
+    def _stateless_function_call_item(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: item[key]
+            for key in ("type", "call_id", "name", "arguments")
+            if key in item
+        }
 
     @staticmethod
     def _extract_refusal(response: dict[str, Any]) -> str | None:

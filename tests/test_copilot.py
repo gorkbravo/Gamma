@@ -11,6 +11,9 @@ from src.models.copilot import (
     CopilotContextBundle,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotSourceRef,
+    CopilotToolExecution,
+    CopilotToolTrace,
     ResearchCard,
     ResearchClaim,
 )
@@ -2127,6 +2130,109 @@ def test_openai_provider_omits_previous_response_id_when_response_storage_is_dis
 
     assert provider.payloads
     assert "previous_response_id" not in provider.payloads[0]
+
+
+def test_openai_provider_omits_reasoning_items_when_response_storage_is_disabled():
+    class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.payloads: list[dict] = []
+
+        def _post_json(self, payload):
+            self.payloads.append(payload)
+            if len(self.payloads) == 1:
+                return {
+                    "id": "resp_tool_round",
+                    "model": "gpt-test",
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "id": "rs_not_persisted",
+                            "summary": [],
+                        },
+                        {
+                            "type": "function_call",
+                            "id": "fc_not_persisted",
+                            "call_id": "call_123",
+                            "name": "get_macro_workspace_drilldown",
+                            "arguments": "{}",
+                        },
+                    ],
+                }
+            return {
+                "id": "resp_final",
+                "model": "gpt-test",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "title": "Test",
+                                        "hypothesis": "H",
+                                        "rationale": "R",
+                                        "required_data": [],
+                                        "proposed_test": "T",
+                                        "confounders": [],
+                                        "next_steps": [],
+                                        "caveats": [],
+                                        "source_backed_claims": [],
+                                        "inferred_claims": [],
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    provider = CaptureOpenAIProvider()
+    source = CopilotSourceRef(
+        source_id="macro.drilldown",
+        label="Macro drilldown",
+        kind="workspace",
+        provider="gamma",
+        origin="gamma.macro",
+    )
+
+    def execute_tool(*_args):
+        return CopilotToolExecution(
+            output={"ok": True},
+            trace=CopilotToolTrace(
+                tool_name="get_macro_workspace_drilldown",
+                summary="Expanded macro context.",
+                arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    result = provider.generate_research_card(
+        request=CopilotResearchCardRequest(domain="macro"),
+        context=CopilotContextBundle(domain="macro", current_tab="macro", summary_data={}),
+        tool_specs=[],
+        execute_tool=execute_tool,
+    )
+
+    assert result.status == "ready"
+    assert len(provider.payloads) == 2
+    second_input = provider.payloads[1]["input"]
+    assert not any(item.get("type") == "reasoning" for item in second_input)
+    function_call = next(item for item in second_input if item.get("type") == "function_call")
+    assert function_call == {
+        "type": "function_call",
+        "call_id": "call_123",
+        "name": "get_macro_workspace_drilldown",
+        "arguments": "{}",
+    }
+    assert "id" not in function_call
 
 
 def test_runtime_enables_openai_response_storage_by_default(tmp_path, monkeypatch):
