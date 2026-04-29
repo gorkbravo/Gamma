@@ -3,26 +3,41 @@
   import DistributionChart, { type DistributionMarker } from "../components/DistributionChart.svelte";
   import FanChart from "../components/FanChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import {
+    buildRiskWorkspaceModel,
+    type CandidateAllocationRow,
+    type DrawdownEpisode,
+    type ExposureBreakdownRow,
+    type HoldingRiskRow,
+    type ReturnFrequency,
+    type RiskKpi,
+    type RiskMode,
+    type RiskContributionRow,
+    type RiskTableRow,
+    type ScenarioImpactRow,
+    type ScenarioResult,
+  } from "../lib/risk-workspace";
   import type { IndexedValuePoint, PortfolioSnapshot, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions } from "../lib/stores/app";
 
-  export let mode: WorkspaceMode = "portfolio";
+  export let mode: WorkspaceMode | null = "portfolio";
+  export let activeMode: RiskMode = "overview";
   export let snapshot: PortfolioSnapshot | null = null;
   export let researchSnapshot: PortfolioSnapshot | null = null;
   export let result: RiskResult | null = null;
   export let loading = false;
   export let onCompute: (options: RiskComputeOptions) => Promise<void> | void;
 
-  type ChartMode = "drawdown" | "cumulative" | "rolling_vol" | "rolling_beta" | "rolling_corr";
   type ComputeMethod = "core" | "monteCarlo";
 
-  const chartModeLabels: Record<ChartMode, string> = {
-    drawdown: "Drawdown",
-    cumulative: "Cumulative",
-    rolling_vol: "Rolling Vol",
-    rolling_beta: "Rolling Beta",
-    rolling_corr: "Rolling Corr"
-  };
+  const modes: Array<{ id: RiskMode; label: string }> = [
+    { id: "overview", label: "Overview" },
+    { id: "exposures", label: "Exposures" },
+    { id: "drawdowns", label: "Drawdowns" },
+    { id: "correlation", label: "Correlation" },
+    { id: "scenarios", label: "Scenarios" },
+    { id: "optimization", label: "Optimization" },
+  ];
 
   let benchmarkSymbol = "SPY";
   let confidence = 0.95;
@@ -32,106 +47,47 @@
   let mcSimulationModel = "Gaussian";
   let mcNumSimulations = 2000;
   let betaWindow = 126;
-  let chartMode: ChartMode = "drawdown";
+  let returnFrequency: ReturnFrequency = "daily";
   let activeComputeMethod: ComputeMethod | null = null;
 
   let activeSnapshot: PortfolioSnapshot | null = snapshot;
-  let chartSeries: ChartSeries[] = [];
+  let workspace = buildRiskWorkspaceModel(null, null, {
+    sourceScope: "portfolio",
+    benchmarkSymbol,
+    returnFrequency,
+  });
+  let cumulativeChart: ChartSeries[] = [];
+  let rollingVolChart: ChartSeries[] = [];
+  let rollingBetaChart: ChartSeries[] = [];
+  let drawdownChart: ChartSeries[] = [];
+  let scenarioBars: RankBarItem[] = [];
+  let riskContributionBars: RankBarItem[] = [];
+  let weightBars: RankBarItem[] = [];
+  let exposureBars: RankBarItem[] = [];
+  let optimizationBars: RankBarItem[] = [];
   let realizedReturns: number[] = [];
   let realizedMarkers: DistributionMarker[] = [];
   let monteCarloMarkers: DistributionMarker[] = [];
-  let contributionItems: RankBarItem[] = [];
   let fanHistory: IndexedValuePoint[] = [];
-  let benchmarkAvailable = false;
-  let excludedAssets = result?.excluded_assets ?? [];
-  let benchmarkWarnings: string[] = [];
-  let monteCarloWarnings: string[] = [];
-  let generalWarnings: string[] = [];
-
-  $: activeSnapshot = mode === "research" ? researchSnapshot : snapshot;
 
   const fmt = (value: number | null | undefined, digits = 2) =>
-    value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
+    value == null || !Number.isFinite(value) ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
 
-  const pct = (value: number | null | undefined, digits = 2) =>
-    value == null ? "N/A" : `${(value * 100).toFixed(digits)}%`;
+  const pct = (value: number | null | undefined, digits = 1) =>
+    value == null || !Number.isFinite(value) ? "N/A" : `${(value * 100).toFixed(digits)}%`;
 
-  function cumulativeFromReturns(points: TimeSeriesPoint[]) {
-    let cumulative = 1;
-    return points.map((point) => {
-      cumulative *= 1 + point.value;
-      return {
-        time: Math.floor(new Date(point.timestamp).getTime() / 1000),
-        value: cumulative
-      };
-    });
-  }
+  const currency = (value: number | null | undefined, baseCurrency = workspace.context.baseCurrency) =>
+    value == null || !Number.isFinite(value) ? "N/A" : `${baseCurrency} ${Math.round(value).toLocaleString("en-US")}`;
 
-  function rollingStd(points: TimeSeriesPoint[], window = 21) {
-    return points
-      .map((point, index) => {
-        if (index + 1 < window) {
-          return null;
-        }
-        const slice = points.slice(index + 1 - window, index + 1).map((item) => item.value);
-        const mean = slice.reduce((sum, value) => sum + value, 0) / slice.length;
-        const variance = slice.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(slice.length - 1, 1);
-        return {
-          time: Math.floor(new Date(point.timestamp).getTime() / 1000),
-          value: Math.sqrt(variance) * Math.sqrt(252)
-        };
-      })
-      .filter((point): point is { time: number; value: number } => point !== null);
-  }
+  const toneClass = (tone: string | undefined | null) => tone ?? "";
+  const cellValue = (value: string | number | null) => value == null ? "N/A" : String(value);
 
-  function rollingBetaLike(
-    perfPoints: TimeSeriesPoint[],
-    benchmarkPoints: TimeSeriesPoint[],
-    modeId: "beta" | "corr",
-    window: number
-  ) {
-    const benchmarkByTs = new Map(benchmarkPoints.map((point) => [new Date(point.timestamp).getTime(), point.value]));
-    const aligned = perfPoints
-      .map((point) => {
-        const ts = new Date(point.timestamp).getTime();
-        const benchmark = benchmarkByTs.get(ts);
-        if (benchmark == null) {
-          return null;
-        }
-        return { ts, perf: point.value, benchmark };
-      })
-      .filter((point): point is { ts: number; perf: number; benchmark: number } => point !== null);
-
-    return aligned
-      .map((point, index) => {
-        if (index + 1 < window) {
-          return null;
-        }
-        const slice = aligned.slice(index + 1 - window, index + 1);
-        const perfMean = slice.reduce((sum, item) => sum + item.perf, 0) / slice.length;
-        const benchmarkMean = slice.reduce((sum, item) => sum + item.benchmark, 0) / slice.length;
-        const covariance =
-          slice.reduce((sum, item) => sum + (item.perf - perfMean) * (item.benchmark - benchmarkMean), 0) /
-          Math.max(slice.length - 1, 1);
-        const perfVariance =
-          slice.reduce((sum, item) => sum + (item.perf - perfMean) ** 2, 0) / Math.max(slice.length - 1, 1);
-        const benchmarkVariance =
-          slice.reduce((sum, item) => sum + (item.benchmark - benchmarkMean) ** 2, 0) /
-          Math.max(slice.length - 1, 1);
-        if (benchmarkVariance <= 0) {
-          return null;
-        }
-        const value =
-          modeId === "beta"
-            ? covariance / benchmarkVariance
-            : covariance / Math.sqrt(Math.max(perfVariance, 0) * benchmarkVariance || 1);
-        return {
-          time: Math.floor(point.ts / 1000),
-          value
-        };
-      })
-      .filter((point): point is { time: number; value: number } => point !== null);
-  }
+  $: activeSnapshot = mode === "research" ? researchSnapshot : snapshot;
+  $: workspace = buildRiskWorkspaceModel(activeSnapshot, result, {
+    sourceScope: mode === "research" ? "research" : "portfolio",
+    benchmarkSymbol: benchmarkSymbol.trim().toUpperCase() || "SPY",
+    returnFrequency,
+  });
 
   async function submit(method: ComputeMethod) {
     activeComputeMethod = method;
@@ -153,970 +109,685 @@
     }
   }
 
-  function riskBaseValue() {
-    const covered = result?.metrics.covered_portfolio_value ?? null;
-    const total = result?.metrics.portfolio_value ?? null;
-    if (covered && covered > 0) {
-      return covered;
-    }
-    if (total && total > 0) {
-      return total;
-    }
-    return null;
+  function cumulativeSeries(points: TimeSeriesPoint[], id: string, label: string, color: string, lineStyle?: "solid" | "dashed"): ChartSeries | null {
+    if (!points.length) return null;
+    let cumulative = 1;
+    return {
+      id,
+      label,
+      color,
+      type: "line",
+      lineStyle,
+      data: points.map((point) => {
+        cumulative *= 1 + point.value;
+        return { time: Math.floor(new Date(point.timestamp).getTime() / 1000), value: cumulative };
+      }),
+    };
   }
 
-  function chartEmptyMessage(modeId: ChartMode) {
-    if (!result?.portfolio_return_points?.length) {
-      return "Run a core risk pass to populate the interactive chart deck";
-    }
-    if (modeId === "rolling_beta" || modeId === "rolling_corr") {
-      return benchmarkAvailable
-        ? `Need at least ${betaWindow} aligned observations for the selected benchmark window`
-        : "Benchmark return history is unavailable for rolling beta/correlation";
-    }
-    if (modeId === "rolling_vol") {
-      return "Need enough aligned return history for rolling volatility";
-    }
-    return "No chart data available";
-  }
-
-  $: benchmarkAvailable = Boolean(result?.benchmark_return_points?.length);
-
-  $: chartSeries = (() => {
-    const perf = result?.portfolio_return_points ?? [];
-    const benchmark = result?.benchmark_return_points ?? [];
-    if (!perf.length) {
-      return [];
-    }
-    if (chartMode === "cumulative") {
-      return [{ id: "cumulative", label: "Cumulative", color: "#7aa6c8", type: "line", data: cumulativeFromReturns(perf) }];
-    }
-    if (chartMode === "rolling_vol") {
-      const volSeries = rollingStd(perf);
-      return volSeries.length
-        ? [{ id: "rolling_vol", label: "Rolling Vol", color: "#9bd19f", type: "line", data: volSeries }]
-        : [];
-    }
-    if (chartMode === "rolling_beta" || chartMode === "rolling_corr") {
-      const derived = rollingBetaLike(perf, benchmark, chartMode === "rolling_beta" ? "beta" : "corr", betaWindow);
-      return derived.length
-        ? [{
-            id: chartMode,
-            label: chartMode === "rolling_beta" ? "Rolling Beta" : "Rolling Corr",
-            color: chartMode === "rolling_beta" ? "#c49a5a" : "#d8c17a",
-            type: "line",
-            data: derived
-          }]
-        : [];
-    }
-
+  function drawdownSeries(points: TimeSeriesPoint[]): ChartSeries[] {
+    if (!points.length) return [];
     let cumulative = 1;
     let peak = 1;
     return [{
       id: "drawdown",
       label: "Drawdown",
-      color: "#d1645d",
+      color: "var(--chart-negative)",
       type: "area",
       invertFilledArea: true,
-      data: perf.map((point) => {
+      data: points.map((point) => {
         cumulative *= 1 + point.value;
         peak = Math.max(peak, cumulative);
-        return {
-          time: Math.floor(new Date(point.timestamp).getTime() / 1000),
-          value: cumulative / peak - 1
-        };
+        return { time: Math.floor(new Date(point.timestamp).getTime() / 1000), value: cumulative / peak - 1 };
       })
     }];
+  }
+
+  function rollingStd(points: TimeSeriesPoint[], window = 21) {
+    return points
+      .map((point, index) => {
+        if (index + 1 < window) return null;
+        const slice = points.slice(index + 1 - window, index + 1).map((item) => item.value);
+        const mean = slice.reduce((sum, value) => sum + value, 0) / slice.length;
+        const variance = slice.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(slice.length - 1, 1);
+        return { time: Math.floor(new Date(point.timestamp).getTime() / 1000), value: Math.sqrt(variance) * Math.sqrt(252) };
+      })
+      .filter((point): point is { time: number; value: number } => point !== null);
+  }
+
+  function rollingBeta(points: TimeSeriesPoint[], benchmark: TimeSeriesPoint[], window: number) {
+    const byDate = new Map(benchmark.map((point) => [point.timestamp, point.value]));
+    const aligned = points
+      .map((point) => ({ ts: point.timestamp, perf: point.value, benchmark: byDate.get(point.timestamp) }))
+      .filter((point): point is { ts: string; perf: number; benchmark: number } => point.benchmark != null);
+    return aligned
+      .map((point, index) => {
+        if (index + 1 < window) return null;
+        const slice = aligned.slice(index + 1 - window, index + 1);
+        const pm = slice.reduce((sum, item) => sum + item.perf, 0) / slice.length;
+        const bm = slice.reduce((sum, item) => sum + item.benchmark, 0) / slice.length;
+        const cov = slice.reduce((sum, item) => sum + (item.perf - pm) * (item.benchmark - bm), 0) / Math.max(slice.length - 1, 1);
+        const variance = slice.reduce((sum, item) => sum + (item.benchmark - bm) ** 2, 0) / Math.max(slice.length - 1, 1);
+        return variance > 0 ? { time: Math.floor(new Date(point.ts).getTime() / 1000), value: cov / variance } : null;
+      })
+      .filter((point): point is { time: number; value: number } => point !== null);
+  }
+
+  function riskBaseValue() {
+    return result?.metrics.covered_portfolio_value || result?.metrics.portfolio_value || null;
+  }
+
+  $: cumulativeChart = (() => {
+    const rows: ChartSeries[] = [];
+    const portfolio = cumulativeSeries(result?.portfolio_return_points ?? [], "portfolio", "Portfolio", "var(--chart-primary)");
+    const benchmark = cumulativeSeries(result?.benchmark_return_points ?? [], "benchmark", benchmarkSymbol.trim().toUpperCase() || "SPY", "var(--chart-secondary)", "dashed");
+    if (portfolio) rows.push(portfolio);
+    if (benchmark) rows.push(benchmark);
+    return rows;
   })();
 
+  $: rollingVolChart = (() => {
+    const data = rollingStd(result?.portfolio_return_points ?? []);
+    return data.length ? [{ id: "rolling-vol", label: "Rolling Vol", color: "var(--chart-primary)", type: "line", data }] : [];
+  })();
+
+  $: rollingBetaChart = (() => {
+    const data = rollingBeta(result?.portfolio_return_points ?? [], result?.benchmark_return_points ?? [], betaWindow);
+    return data.length ? [{ id: "rolling-beta", label: "Rolling Beta", color: "var(--chart-secondary)", type: "line", data }] : [];
+  })();
+
+  $: drawdownChart = drawdownSeries(result?.portfolio_return_points ?? []);
   $: realizedReturns = result?.portfolio_return_points?.map((point) => point.value) ?? [];
 
-  $: realizedMarkers = (() => {
-    const base = riskBaseValue();
-    if (!base) {
-      return [];
-    }
-    return [
-      { label: "Hist VaR", value: result?.metrics.historical_var == null ? null : -result.metrics.historical_var / base, color: "#d1645d" },
-      { label: "Hist CVaR", value: result?.metrics.historical_cvar == null ? null : -result.metrics.historical_cvar / base, color: "#ff8a65" },
-      { label: "Param VaR", value: result?.metrics.parametric_var == null ? null : -result.metrics.parametric_var / base, color: "#c49a5a" }
-    ];
-  })();
+  $: realizedMarkers = [
+    { label: "Hist VaR", value: riskBaseValue() ? -(result?.metrics.historical_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
+    { label: "Hist ES", value: riskBaseValue() ? -(result?.metrics.historical_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-secondary)" },
+  ];
 
-  $: monteCarloMarkers = (() => {
-    const base = riskBaseValue();
-    if (!base) {
-      return [];
-    }
-    return [
-      { label: "MC VaR", value: result?.metrics.monte_carlo_var == null ? null : -result.metrics.monte_carlo_var / base, color: "#6aa8ff" },
-      { label: "MC CVaR", value: result?.metrics.monte_carlo_cvar == null ? null : -result.metrics.monte_carlo_cvar / base, color: "#ff6760" }
-    ];
-  })();
-
-  $: contributionItems = (result?.contributions ?? [])
-    .filter((item) => Math.abs(item.variance_contribution_pct ?? 0) > 1e-4)
-    .slice(0, 6)
-    .map((item) => ({
-      label: item.display_symbol ?? item.symbol,
-      value: item.variance_contribution_pct ?? 0,
-      tone: (item.variance_contribution_pct ?? 0) < 0 ? "negative" : "positive",
-      meta: `${pct(item.weight)} wt | ${fmt(item.component_var)} Comp VaR`
-    }));
+  $: monteCarloMarkers = [
+    { label: "MC VaR", value: riskBaseValue() ? -(result?.metrics.monte_carlo_var ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-primary)" },
+    { label: "MC ES", value: riskBaseValue() ? -(result?.metrics.monte_carlo_cvar ?? 0) / (riskBaseValue() ?? 1) : null, color: "var(--chart-negative)" },
+  ];
 
   $: fanHistory = (() => {
     const perf = result?.portfolio_return_points ?? [];
-    if (perf.length < 2) {
-      return [];
-    }
+    if (perf.length < 2) return [];
     const recent = perf.slice(-40);
     let cumulative = 1;
     const points = recent.map((point, index) => {
       cumulative *= 1 + point.value;
-      return {
-        index: index - recent.length + 1,
-        value: cumulative
-      };
+      return { index: index - recent.length + 1, value: cumulative };
     });
     const terminal = points.at(-1)?.value ?? 1;
-    return points.map((point) => ({
-      index: point.index,
-      value: terminal !== 0 ? point.value / terminal : point.value
-    }));
+    return points.map((point) => ({ index: point.index, value: terminal !== 0 ? point.value / terminal : point.value }));
   })();
 
-  $: excludedAssets = result?.excluded_assets ?? [];
+  $: riskContributionBars = workspace.riskContributors.slice(0, 8).map((item) => ({
+    label: item.symbol,
+    value: item.contribution ?? 0,
+    tone: (item.contribution ?? 0) >= 0 ? "positive" : "negative",
+    meta: `${pct(item.weight)} wt | ${currency(item.componentVar)} component VaR`,
+  }));
 
-  $: {
-    const warnings = result?.warnings ?? [];
-    benchmarkWarnings = warnings.filter((warning) => warning.toLowerCase().includes("benchmark"));
-    monteCarloWarnings = warnings.filter((warning) => warning.toLowerCase().includes("monte carlo"));
-    generalWarnings = warnings.filter(
-      (warning) => !warning.toLowerCase().includes("benchmark") && !warning.toLowerCase().includes("monte carlo")
-    );
-  }
+  $: weightBars = workspace.holdings.slice(0, 10).map((item) => ({
+    label: item.symbol,
+    value: item.weight ?? 0,
+    tone: (item.weight ?? 0) >= 0 ? "positive" : "negative",
+    meta: `${currency(item.marketValue)} | ${item.qualityFlag}`,
+  }));
 
-  const signTone = (value: number | null | undefined): string =>
-    value == null || value === 0 ? "" : value > 0 ? "positive" : "negative";
+  $: exposureBars = workspace.exposureBreakdown.map((item) => ({
+    label: item.category,
+    value: item.weight,
+    tone: item.weight >= 0 ? "positive" : "negative",
+    meta: `${pct(item.volatilityContribution)} risk contribution`,
+  }));
+
+  $: scenarioBars = workspace.scenarioImpacts.slice(0, 10).map((item) => ({
+    label: item.symbol,
+    value: item.pnlImpact ?? 0,
+    tone: (item.pnlImpact ?? 0) >= 0 ? "positive" : "negative",
+    meta: `${pct(item.estimatedReturn)} shock | ${pct(item.weight)} weight`,
+  }));
+
+  $: optimizationBars = workspace.candidates.slice(0, 10).map((item) => ({
+    label: item.symbol,
+    value: item.delta ?? 0,
+    tone: (item.delta ?? 0) >= 0 ? "positive" : "negative",
+    meta: `${pct(item.currentWeight)} to ${pct(item.proposedWeight)} | ${item.constraintFlag}`,
+  }));
 </script>
 
 <section class="view">
-  <div class="workspace-grid">
-    <div class="primary-column">
-      <article class="panel method-panel monte-carlo-panel">
-        <header class="panel-bar">
-          <h2>Monte Carlo · Scenario Envelope</h2>
-          <button class="action-btn" on:click={() => submit("monteCarlo")} disabled={loading || !activeSnapshot}>
-            {loading && activeComputeMethod === "monteCarlo" ? "Running…" : "Run Monte Carlo"}
-          </button>
-        </header>
-
-        <div class="kpi-grid mc-kpi-grid">
-          <article class="metric">
-            <span>MC VaR</span>
-            <strong>{fmt(result?.metrics.monte_carlo_var)}</strong>
-            <small>Total {fmt(result?.metrics.monte_carlo_var_total_estimate)}</small>
-          </article>
-          <article class="metric">
-            <span>MC CVaR</span>
-            <strong>{fmt(result?.metrics.monte_carlo_cvar)}</strong>
-            <small>Total {fmt(result?.metrics.monte_carlo_cvar_total_estimate)}</small>
-          </article>
-          <article class="metric">
-            <span>Model</span>
-            <strong>{result?.metrics.monte_carlo_model ?? mcSimulationModel}</strong>
-            <small>{fmt(result?.metrics.monte_carlo_num_simulations ?? mcNumSimulations, 0)} sims</small>
-          </article>
-          <article class="metric">
-            <span>Horizon</span>
-            <strong>{result?.metrics.monte_carlo_horizon_days ?? mcHorizonDays}D</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} coverage</small>
-          </article>
-        </div>
-
-        <div class="mc-grid">
-          <section class="subsection fan-subsection">
-            <header class="section-bar">Monte Carlo Fan · {result?.metrics.monte_carlo_horizon_days ?? mcHorizonDays}D</header>
-            <FanChart
-              series={result?.monte_carlo.fan_percentiles ?? {}}
-              history={fanHistory}
-              samplePaths={result?.monte_carlo.sample_paths ?? {}}
-              height={280}
-              emptyMessage="Monte Carlo fan chart unavailable"
-            />
-          </section>
-
-          <section class="subsection">
-            <header class="section-bar">Terminal Distribution · {result?.metrics.monte_carlo_model ?? mcSimulationModel}</header>
-            <DistributionChart
-              values={result?.monte_carlo.terminal_returns ?? []}
-              markers={monteCarloMarkers}
-              height={280}
-              emptyMessage="Monte Carlo distribution unavailable"
-            />
-          </section>
-        </div>
-      </article>
-
-      <article class="panel method-panel core-panel">
-        <header class="panel-bar">
-          <h2>Core VaR Deck</h2>
-          <div class="header-actions">
-            <label class="inline-field">
-              <span>Chart</span>
-              <select bind:value={chartMode}>
-                {#each Object.entries(chartModeLabels) as [value, label]}
-                  <option value={value}>{label}</option>
-                {/each}
-              </select>
-            </label>
-            <button class="action-btn" on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
-              {loading && activeComputeMethod === "core" ? "Computing…" : "Compute Core VaR"}
-            </button>
-          </div>
-        </header>
-
-        <div class="kpi-grid">
-          <article class="metric">
-            <span>Hist VaR</span>
-            <strong>{fmt(result?.metrics.historical_var)}</strong>
-            <small>{pct(result?.metrics.risk_coverage_ratio)} coverage</small>
-          </article>
-          <article class="metric">
-            <span>Hist CVaR</span>
-            <strong>{fmt(result?.metrics.historical_cvar)}</strong>
-            <small>Total {fmt(result?.metrics.historical_cvar_total_estimate)}</small>
-          </article>
-          <article class="metric">
-            <span>Param VaR</span>
-            <strong>{fmt(result?.metrics.parametric_var)}</strong>
-            <small>Total {fmt(result?.metrics.parametric_var_total_estimate)}</small>
-          </article>
-          <article class="metric">
-            <span>Annual Vol</span>
-            <strong>{pct(result?.metrics.annual_vol)}</strong>
-            <small>Daily {pct(result?.metrics.daily_vol)}</small>
-          </article>
-          <article class="metric">
-            <span>Beta / Corr</span>
-            <strong class:elevated={(result?.metrics.beta ?? 0) > 1.2}>{fmt(result?.metrics.beta, 3)} / {fmt(result?.metrics.correlation, 3)}</strong>
-            <small>{result?.metrics.benchmark_overlap_count ?? 0} overlap</small>
-          </article>
-          <article class="metric">
-            <span>Jensen Alpha</span>
-            <strong class={signTone(result?.metrics.alpha_annual)}>{pct(result?.metrics.alpha_annual)}</strong>
-            <small>{lookbackDays}D / {betaWindow}D</small>
-          </article>
-        </div>
-
-        <div class="method-grid">
-          <div class="chart-column">
-            <TimeSeriesChart series={chartSeries} height={360} emptyMessage={chartEmptyMessage(chartMode)} />
-            <div class="chart-foot">
-              <span>{chartModeLabels[chartMode]}</span>
-              <strong>{benchmarkAvailable ? benchmarkSymbol.trim().toUpperCase() || "SPY" : "No benchmark"}</strong>
-            </div>
-          </div>
-
-          <div class="method-side">
-            <section class="subsection">
-              <header class="section-bar">Coverage</header>
-              <div class="stack">
-                <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
-                <div class="row"><span>Modeled Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
-                <div class="row"><span>Risk Basis</span><strong>{fmt(result?.metrics.risk_basis_value)}</strong></div>
-                <div class="row"><span>Coverage Ratio</span><strong>{pct(result?.metrics.risk_coverage_ratio)}</strong></div>
-                <div class="row"><span>Aligned Obs</span><strong>{result?.metrics.aligned_obs_count ?? 0}</strong></div>
-                <div class="row"><span>Max Drawdown</span><strong class:negative={(result?.metrics.max_drawdown ?? 0) < 0}>{pct(result?.metrics.max_drawdown)}</strong></div>
-              </div>
-            </section>
-
-            <section class="subsection">
-              <header class="section-bar">Benchmark · {benchmarkSymbol.trim().toUpperCase() || "SPY"}</header>
-              <div class="stack">
-                <div class="row"><span>Overlap</span><strong>{result?.metrics.benchmark_overlap_count ?? 0}</strong></div>
-                <div class="row"><span>Beta Window</span><strong>{betaWindow}D</strong></div>
-                <div class="row"><span>Beta</span><strong class:elevated={(result?.metrics.beta ?? 0) > 1.2}>{fmt(result?.metrics.beta, 3)}</strong></div>
-                <div class="row"><span>Correlation</span><strong>{fmt(result?.metrics.correlation, 3)}</strong></div>
-                <div class="row"><span>Annual Alpha</span><strong class={signTone(result?.metrics.alpha_annual)}>{pct(result?.metrics.alpha_annual)}</strong></div>
-              </div>
-            </section>
-          </div>
-        </div>
-
-        <div class="detail-split">
-          <section class="subsection">
-            <header class="section-bar">Return Distribution</header>
-            <DistributionChart
-              values={realizedReturns}
-              markers={realizedMarkers}
-              height={240}
-              emptyMessage="Historical return distribution unavailable"
-            />
-          </section>
-
-          <section class="subsection">
-            <header class="section-bar">Contribution Rank</header>
-            <BarRankChart
-              items={contributionItems}
-              emptyMessage="Contribution ranking will appear after core risk"
-              formatValue={(value) => pct(value)}
-            />
-          </section>
-        </div>
-      </article>
-
-      <article class="panel table-panel">
-        <header class="table-panel-header">
-          <span>Contribution Detail</span>
-          <span class="row-count">{result?.contributions?.length ?? 0} rows</span>
-        </header>
-        <table>
-          <thead>
-            <tr><th>Symbol</th><th class="num">Weight</th><th class="num">Vol</th><th class="num">Var %</th><th class="num">MCTR</th><th class="num">Component VaR</th></tr>
-          </thead>
-          <tbody>
-            {#if result?.contributions?.length}
-              {#each result.contributions as contribution}
-                <tr>
-                  <td>{contribution.display_symbol ?? contribution.symbol}</td>
-                  <td class="num">{pct(contribution.weight)}</td>
-                  <td class="num">{pct(contribution.daily_vol)}</td>
-                  <td class="num {signTone(contribution.variance_contribution_pct)}">{pct(contribution.variance_contribution_pct)}</td>
-                  <td class="num">{fmt(contribution.marginal_contribution_to_risk, 6)}</td>
-                  <td class="num">{fmt(contribution.component_var)}</td>
-                </tr>
-              {/each}
-            {:else}
-              <tr><td colspan="6" class="empty">No contribution data yet.</td></tr>
-            {/if}
-          </tbody>
-        </table>
-      </article>
+  <article class="panel header-panel">
+    <div class="header-top">
+      <div>
+        <p class="eyebrow">Risk</p>
+        <h2>Risk Workspace</h2>
+      </div>
+      <div class="header-actions">
+        <button class="action-btn" on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
+          {loading && activeComputeMethod === "core" ? "Computing" : "Compute Core"}
+        </button>
+        <button class="action-btn" on:click={() => submit("monteCarlo")} disabled={loading || !activeSnapshot}>
+          {loading && activeComputeMethod === "monteCarlo" ? "Running" : "Run MC"}
+        </button>
+      </div>
     </div>
 
-    <aside class="support-column">
-      <article class="panel control-panel">
-        <header class="rail-bar">
-          <h3>Risk Inputs</h3>
-          <span class="rail-context">{mode === "portfolio" ? "Portfolio" : "Research"}</span>
-        </header>
+    <div class="mode-bar" role="tablist" aria-label="Risk modes">
+      {#each modes as riskMode}
+        <button
+          type="button"
+          class:selected={activeMode === riskMode.id}
+          role="tab"
+          aria-selected={activeMode === riskMode.id}
+          on:click={() => (activeMode = riskMode.id)}
+        >
+          {riskMode.label}
+        </button>
+      {/each}
+    </div>
 
-        <div class="control-section">
-          <small class="group-label">Monte Carlo</small>
-          <div class="field-grid mc-fields">
-            <label>
-              <span>Horizon</span>
-              <select bind:value={mcHorizonDays}>
-                <option value={5}>5D</option>
-                <option value={10}>10D</option>
-                <option value={21}>21D</option>
-                <option value={63}>63D</option>
-              </select>
-            </label>
-            <label>
-              <span>Model</span>
-              <select bind:value={mcSimulationModel}>
-                <option value="Gaussian">Gaussian</option>
-                <option value="Bootstrap">Bootstrap</option>
-              </select>
-            </label>
-            <label>
-              <span>Sims</span>
-              <select bind:value={mcNumSimulations}>
-                <option value={1000}>1,000</option>
-                <option value={2000}>2,000</option>
-                <option value={5000}>5,000</option>
-              </select>
-            </label>
-          </div>
+    <div class="context-bar">
+      <div class="context-field"><span>Scope</span><strong>{workspace.context.sourceScope}</strong></div>
+      <label><span>Benchmark</span><input bind:value={benchmarkSymbol} /></label>
+      <div class="context-field"><span>Base</span><strong>{workspace.context.baseCurrency}</strong></div>
+      <label><span>Lookback</span>
+        <select bind:value={lookbackDays}>
+          <option value={126}>126D</option><option value={252}>252D</option><option value={504}>504D</option>
+        </select>
+      </label>
+      <label><span>Frequency</span>
+        <select bind:value={returnFrequency}>
+          <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+        </select>
+      </label>
+      <div class="context-field"><span>Coverage</span><strong class:warning={(result?.metrics.risk_coverage_ratio ?? 1) < 0.95}>{workspace.context.coverageLabel}</strong></div>
+    </div>
+
+    <div class="settings-row">
+      <label><span>Confidence</span><select bind:value={confidence}><option value={0.9}>90%</option><option value={0.95}>95%</option><option value={0.99}>99%</option></select></label>
+      <label><span>Horizon</span><select bind:value={horizonDays}><option value={1}>1D</option><option value={10}>10D</option><option value={21}>21D</option></select></label>
+      <label><span>Beta window</span><select bind:value={betaWindow}><option value={63}>63D</option><option value={126}>126D</option><option value={252}>252D</option></select></label>
+      <label><span>MC horizon</span><select bind:value={mcHorizonDays}><option value={5}>5D</option><option value={10}>10D</option><option value={21}>21D</option><option value={63}>63D</option></select></label>
+      <label><span>MC model</span><select bind:value={mcSimulationModel}><option value="Gaussian">Gaussian</option><option value="Bootstrap">Bootstrap</option></select></label>
+      <label><span>Sims</span><select bind:value={mcNumSimulations}><option value={1000}>1,000</option><option value={2000}>2,000</option><option value={5000}>5,000</option></select></label>
+    </div>
+  </article>
+
+  {#if activeMode === "overview"}
+    <div class="mode-shell">
+      {@render KpiStrip(workspace.overviewKpis)}
+      <div class="workspace-grid">
+        <div class="primary-column">
+        <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={280} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+        <div class="two-col">
+          <article class="panel chart-panel">{@render PanelTitle("Rolling Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need at least 21 observations" /></article>
+          <article class="panel chart-panel">{@render PanelTitle("Rolling Beta")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Need benchmark overlap for selected beta window" /></article>
         </div>
-
-        <div class="control-section">
-          <small class="group-label">Core</small>
-          <div class="field-grid core-fields">
-            <label>
-              <span>Benchmark</span>
-              <input bind:value={benchmarkSymbol} placeholder="SPY" />
-            </label>
-            <label>
-              <span>Confidence</span>
-              <select bind:value={confidence}>
-                <option value={0.9}>90%</option>
-                <option value={0.95}>95%</option>
-                <option value={0.99}>99%</option>
-              </select>
-            </label>
-            <label>
-              <span>Lookback</span>
-              <select bind:value={lookbackDays}>
-                <option value={126}>126D</option>
-                <option value={252}>252D</option>
-                <option value={504}>504D</option>
-              </select>
-            </label>
-            <label>
-              <span>Horizon</span>
-              <select bind:value={horizonDays}>
-                <option value={1}>1D</option>
-                <option value={10}>10D</option>
-                <option value={21}>21D</option>
-              </select>
-            </label>
-            <label>
-              <span>Beta Window</span>
-              <select bind:value={betaWindow}>
-                <option value={63}>63D</option>
-                <option value={126}>126D</option>
-                <option value={252}>252D</option>
-              </select>
-            </label>
-          </div>
+        <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
+        {@render RiskContributorsTable(workspace.riskContributors)}
         </div>
-      </article>
-
-      <article class="panel rail-panel">
-        <header class="rail-bar">
-          <h3>Coverage &amp; Concentration</h3>
-        </header>
-        <div class="stack">
-          <div class="row"><span>Snapshot Lines</span><strong>{activeSnapshot?.positions.length ?? 0}</strong></div>
-          <div class="row"><span>Portfolio Value</span><strong>{fmt(result?.metrics.portfolio_value)}</strong></div>
-          <div class="row"><span>Modeled Value</span><strong>{fmt(result?.metrics.covered_portfolio_value)}</strong></div>
-          <div class="row"><span>Risk Basis</span><strong>{fmt(result?.metrics.risk_basis_value)}</strong></div>
-          <div class="row"><span>Coverage Ratio</span><strong>{pct(result?.metrics.risk_coverage_ratio)}</strong></div>
-          <div class="row"><span>HHI / Top-5</span><strong>{fmt(result?.metrics.concentration_hhi, 3)} / {pct(result?.metrics.top5_weight)}</strong></div>
-          <div class="row"><span>Effective Bets</span><strong>{fmt(result?.metrics.effective_bets, 2)}</strong></div>
-          <div class="row"><span>Excluded Assets</span><strong class:warning={excludedAssets.length > 0}>{excludedAssets.length}</strong></div>
+        <aside class="support-column">
+        {@render RankPanel("Top Risk Contributors", riskContributionBars)}
+        {@render SimpleTable("Largest Movers", ["Symbol", "P&L", "Weight", "Flag"], workspace.largestMovers)}
+        {@render SimpleTable("Concentration Flags", ["Type", "Name", "Value", "Rule"], workspace.concentrationFlags)}
+        {@render ListPanel("What Changed", workspace.whatChanged)}
+        </aside>
+      </div>
+    </div>
+  {:else if activeMode === "exposures"}
+    <div class="mode-shell">
+      {@render KpiStrip(workspace.exposureKpis)}
+      <div class="workspace-grid">
+        <div class="primary-column">
+          {@render RankPanel("Position Weight", weightBars)}
+          {@render RankPanel("Sector / Asset-Class Exposure", exposureBars)}
+          {@render HoldingsTable(workspace.holdings)}
         </div>
-      </article>
+        <aside class="support-column">
+          {@render ExposureTable(workspace.exposureBreakdown)}
+          {@render SimpleTable("Currency Exposure", ["Currency", "Weight", "Contribution", "Status"], workspace.exposureBreakdown.map((row) => ({ cells: [row.category === "Cash" ? workspace.context.baseCurrency : "Mixed", pct(row.weight), pct(row.volatilityContribution), row.label] })))}
+          {@render ListPanel("Data Limits", ["Industry, geography, and factor exposures depend on provider metadata not yet present in the Risk payload.", "Asset-class and currency views use snapshot fields and coverage warnings."])}
+        </aside>
+      </div>
+    </div>
+  {:else if activeMode === "drawdowns"}
+    <div class="mode-shell">
+      {@render KpiStrip(workspace.drawdownKpis)}
+      <div class="workspace-grid">
+        <div class="primary-column">
+        <article class="panel chart-panel">{@render PanelTitle("Portfolio Equity Curve")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate equity curve" /></article>
+        <article class="panel chart-panel">{@render PanelTitle("Underwater Chart vs Benchmark")}<TimeSeriesChart series={drawdownChart} height={240} emptyMessage="Drawdown curve unavailable" /></article>
+        <div class="two-col">
+          <article class="panel chart-panel">{@render PanelTitle("Rolling Downside Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need enough observations" /></article>
+          <article class="panel chart-panel">{@render PanelTitle("Return Distribution")}<DistributionChart values={realizedReturns} markers={realizedMarkers} height={220} emptyMessage="Return distribution unavailable" /></article>
+        </div>
+        {@render DrawdownTable(workspace.drawdownEpisodes)}
+        </div>
+        <aside class="support-column">
+          {@render SimpleTable("Worst Single-Period Returns", ["Date", "Portfolio", "Benchmark", "Active", "Top losers"], workspace.worstReturns)}
+          {@render SimpleTable("Position Drawdown Contribution", ["Symbol", "Return", "Start weight", "Loss contribution"], workspace.positionDrawdownContributions)}
+        </aside>
+      </div>
+    </div>
+  {:else if activeMode === "correlation"}
+    <div class="mode-shell">
+      {@render KpiStrip(workspace.correlationKpis)}
+      <div class="workspace-grid">
+        <div class="primary-column">
+        <article class="panel heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render HeatmapPlaceholder(workspace.holdings)}</article>
+        <div class="two-col">
+          <article class="panel chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
+          <article class="panel chart-panel">{@render PanelTitle("Normal vs Stress Correlation")}<BarRankChart items={[{ label: "Normal", value: result?.metrics.correlation ?? 0, tone: "neutral" }, { label: "Stress proxy", value: Math.min(0.95, (result?.metrics.correlation ?? 0) + 0.15), tone: "negative" }]} formatValue={(value) => fmt(value, 2)} /></article>
+        </div>
+        {@render SimpleTable("Highest Correlated Pairs", ["Status"], workspace.correlatedPairs)}
+        </div>
+        <aside class="support-column">
+          {@render SimpleTable("Diversification Warnings", ["Cluster", "Members", "Weight", "Avg corr", "Risk contribution"], workspace.diversificationWarnings)}
+          {@render SimpleTable("Benchmark Sensitivity", ["Symbol", "Beta", "Corr", "R2", "Tracking contribution"], workspace.benchmarkSensitivity)}
+        </aside>
+      </div>
+    </div>
+  {:else if activeMode === "scenarios"}
+    <div class="mode-shell">
+      {@render KpiStrip(workspace.scenarioKpis)}
+      <div class="workspace-grid">
+        <div class="primary-column">
+          {@render RankPanel("Scenario Waterfall", scenarioBars, "currency")}
+          {@render ScenarioTable(workspace.scenarios)}
+          {@render ScenarioImpactTable(workspace.scenarioImpacts)}
+        </div>
+        <aside class="support-column">
+          {@render RankPanel("Shock Impact by Asset Class", exposureBars.map((item) => ({ ...item, value: item.value * (workspace.scenarios[0]?.portfolioReturn ?? 0) })))}
+          {@render ListPanel("Scenario Assumptions", workspace.scenarioAssumptions)}
+          {@render ListPanel("Historical Replay Coverage", ["COVID crash, 2022 rates shock, and 2008-style labels are exposed as proxy regimes until historical replay windows are provider-backed.", "Custom shocks remain bounded to read-only factor assumptions."])}
+        </aside>
+      </div>
+    </div>
+  {:else}
+    <div class="mode-shell">
+      {@render KpiStrip(workspace.optimizationKpis)}
+      <div class="workspace-grid">
+        <div class="primary-column">
+          <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierPlaceholder()}</article>
+          {@render RankPanel("Weight Changes Before / After", optimizationBars)}
+          {@render CandidateTable(workspace.candidates)}
+        </div>
+        <aside class="support-column">
+          {@render SimpleTable("Optimization Comparison", ["Candidate", "Vol", "Score", "Max wt", "Status"], workspace.optimizationComparison)}
+          {@render SimpleTable("Constraint Panel", ["Constraint", "Setting", "Note"], workspace.constraints)}
+          {@render ListPanel("Diagnostics", workspace.diagnostics)}
+        </aside>
+      </div>
+    </div>
+  {/if}
 
-      <article class="panel rail-panel">
-        <header class="rail-bar">
-          <h3>Warnings &amp; Exclusions</h3>
-        </header>
-
-        {#if benchmarkWarnings.length || generalWarnings.length || monteCarloWarnings.length || excludedAssets.length}
-          <div class="notes-list">
-            {#each generalWarnings as warning}
-              <div class="note-row">
-                <span class="note-tag">Risk</span>
-                <p>{warning}</p>
-              </div>
-            {/each}
-            {#each benchmarkWarnings as warning}
-              <div class="note-row info">
-                <span class="note-tag">Benchmark</span>
-                <p>{warning}</p>
-              </div>
-            {/each}
-            {#each monteCarloWarnings as warning}
-              <div class="note-row accent">
-                <span class="note-tag">MC</span>
-                <p>{warning}</p>
-              </div>
-            {/each}
-            {#each excludedAssets as asset}
-              <div class="note-row">
-                <span class="note-tag">{asset.display_symbol ?? asset.symbol}</span>
-                <p>{asset.reason}</p>
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <p class="muted">No active warnings or exclusions.</p>
-        {/if}
-      </article>
-    </aside>
+  <div class="shared-panels">
+    {@render ListPanel("Risk Alerts", workspace.alerts)}
+    {@render ListPanel("Provenance / Coverage", [...workspace.provenance, ...workspace.coverageWarnings.slice(0, 6)])}
   </div>
+
+  {#if activeMode === "overview" && result?.monte_carlo?.fan_percentiles}
+    <article class="panel mc-panel">
+      {@render PanelTitle("Monte Carlo Scenario Envelope")}
+      <div class="two-col">
+        <FanChart series={result.monte_carlo.fan_percentiles} history={fanHistory} samplePaths={result.monte_carlo.sample_paths} height={260} emptyMessage="Monte Carlo fan chart unavailable" />
+        <DistributionChart values={result.monte_carlo.terminal_returns} markers={monteCarloMarkers} height={260} emptyMessage="Monte Carlo distribution unavailable" />
+      </div>
+    </article>
+  {/if}
 </section>
+
+{#snippet KpiStrip(kpis: RiskKpi[])}
+  <div class="kpi-grid">
+    {#each kpis as kpi}
+      <article class="metric">
+        <span>{kpi.label}</span>
+        <strong class={toneClass(kpi.tone)}>{kpi.value}</strong>
+        {#if kpi.sublabel}<small>{kpi.sublabel}</small>{/if}
+      </article>
+    {/each}
+  </div>
+{/snippet}
+
+{#snippet PanelTitle(title: string)}
+  <header class="panel-title"><span>{title}</span></header>
+{/snippet}
+
+{#snippet RankPanel(title: string, items: RankBarItem[], format: "percent" | "currency" = "percent")}
+  <article class="panel">
+    {@render PanelTitle(title)}
+    <BarRankChart items={items} emptyMessage="No ranked data available" formatValue={(value) => format === "currency" ? currency(value) : pct(value)} />
+  </article>
+{/snippet}
+
+{#snippet ListPanel(title: string, rows: string[])}
+  <article class="panel list-panel">
+    {@render PanelTitle(title)}
+    {#if rows.length}
+      <div class="list">
+        {#each rows as row}<p>{row}</p>{/each}
+      </div>
+    {:else}
+      <p class="muted">No active items.</p>
+    {/if}
+  </article>
+{/snippet}
+
+{#snippet SimpleTable(title: string, headers: string[], rows: RiskTableRow[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">{title}<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr>{#each headers as header}<th>{header}</th>{/each}</tr></thead>
+      <tbody>
+        {#if rows.length}
+          {#each rows as row}
+            <tr class={toneClass(row.tone)}>{#each row.cells as cell}<td>{cellValue(cell)}</td>{/each}</tr>
+          {/each}
+        {:else}
+          <tr><td colspan={headers.length} class="empty">No rows available.</td></tr>
+        {/if}
+      </tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet HoldingsTable(rows: HoldingRiskRow[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">Holdings<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr><th>Symbol</th><th>Name</th><th>Asset class</th><th>Weight</th><th>Market value</th><th>P&L</th><th>Vol</th><th>Beta</th><th>Risk contribution</th><th>Flag</th></tr></thead>
+      <tbody>
+        {#each rows as row}
+          <tr><td>{row.symbol}</td><td>{row.name}</td><td>{row.assetClass}</td><td>{pct(row.weight)}</td><td>{currency(row.marketValue)}</td><td class={row.pnl == null ? "" : row.pnl >= 0 ? "positive" : "negative"}>{currency(row.pnl)}</td><td>{pct(row.volatility)}</td><td>{fmt(row.beta, 2)}</td><td>{pct(row.riskContribution)}</td><td class:warning={row.qualityFlag !== "OK"}>{row.qualityFlag}</td></tr>
+        {/each}
+      </tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet RiskContributorsTable(rows: RiskContributionRow[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">Contribution Detail<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr><th>Symbol</th><th>Weight</th><th>Vol</th><th>Var %</th><th>Component VaR</th></tr></thead>
+      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td>{pct(row.weight)}</td><td>{pct(row.volatility)}</td><td>{pct(row.contribution)}</td><td>{currency(row.componentVar)}</td></tr>{/each}</tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet ExposureTable(rows: ExposureBreakdownRow[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">Exposure Breakdown<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr><th>Sector/category</th><th>Weight</th><th>Vol contribution</th><th>Benchmark</th><th>Active</th><th>Label</th></tr></thead>
+      <tbody>{#each rows as row}<tr><td>{row.category}</td><td>{pct(row.weight)}</td><td>{pct(row.volatilityContribution)}</td><td>{pct(row.benchmarkWeight)}</td><td>{pct(row.activeWeight)}</td><td>{row.label}</td></tr>{/each}</tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet DrawdownTable(rows: DrawdownEpisode[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">Worst Drawdown Episodes<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr><th>Start</th><th>Trough</th><th>Recovery</th><th>Depth</th><th>Duration</th><th>Benchmark DD</th><th>Main contributors</th></tr></thead>
+      <tbody>{#each rows as row}<tr><td>{row.startDate}</td><td>{row.troughDate}</td><td>{row.recoveryDate}</td><td class="negative">{pct(row.depth)}</td><td>{row.duration}</td><td>{pct(row.benchmarkDrawdown)}</td><td>{row.contributors}</td></tr>{/each}</tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet ScenarioTable(rows: ScenarioResult[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">Scenario Results<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr><th>Scenario</th><th>Portfolio</th><th>Benchmark</th><th>Active</th><th>Worst contributor</th><th>Best hedge</th></tr></thead>
+      <tbody>{#each rows as row}<tr><td>{row.scenario}</td><td class={row.portfolioReturn == null ? "" : row.portfolioReturn >= 0 ? "positive" : "negative"}>{pct(row.portfolioReturn)}</td><td>{pct(row.benchmarkReturn)}</td><td>{pct(row.activeReturn)}</td><td>{row.worstContributor}</td><td>{row.bestHedge}</td></tr>{/each}</tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet ScenarioImpactTable(rows: ScenarioImpactRow[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">Position-Level Impact<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr><th>Symbol</th><th>Current weight</th><th>Shock assumption</th><th>Estimated return</th><th>P&L impact</th><th>Contribution %</th></tr></thead>
+      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td>{pct(row.weight)}</td><td>{row.shock}</td><td>{pct(row.estimatedReturn)}</td><td>{currency(row.pnlImpact)}</td><td>{pct(row.contributionPct)}</td></tr>{/each}</tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet CandidateTable(rows: CandidateAllocationRow[])}
+  <article class="panel table-panel">
+    <header class="table-panel-header">Candidate Allocation<span>{rows.length} rows</span></header>
+    <table>
+      <thead><tr><th>Symbol</th><th>Current weight</th><th>Proposed weight</th><th>Delta</th><th>Current risk</th><th>Proposed risk</th><th>Constraint</th></tr></thead>
+      <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td>{pct(row.currentWeight)}</td><td>{pct(row.proposedWeight)}</td><td class={row.delta == null ? "" : row.delta >= 0 ? "positive" : "negative"}>{pct(row.delta)}</td><td>{pct(row.currentRiskContribution)}</td><td>{pct(row.proposedRiskContribution)}</td><td>{row.constraintFlag}</td></tr>{/each}</tbody>
+    </table>
+  </article>
+{/snippet}
+
+{#snippet HeatmapPlaceholder(holdings: HoldingRiskRow[])}
+  <div class="heatmap">
+    {#each holdings.slice(0, 8) as row, rowIndex}
+      {#each holdings.slice(0, 8) as col, colIndex}
+        <div class:diag={rowIndex === colIndex} title={`${row.symbol} / ${col.symbol}`}>{rowIndex === colIndex ? "1.00" : "N/A"}</div>
+      {/each}
+    {/each}
+  </div>
+  <p class="muted">Position-level aligned return histories are not present in the current Risk API response, so cells stay unavailable instead of showing estimated precision.</p>
+{/snippet}
+
+{#snippet FrontierPlaceholder()}
+  <div class="frontier">
+    <span class="point current">Current</span>
+    <span class="point candidate">Min Vol</span>
+    <span class="point parity">Risk Parity</span>
+  </div>
+  <p class="muted">Frontier markers are research diagnostics from current risk metrics and candidate weights. They do not create account or broker actions.</p>
+{/snippet}
 
 <style>
   .view,
+  .mode-shell,
   .workspace-grid,
   .primary-column,
   .support-column,
-  .kpi-grid,
-  .method-grid,
-  .detail-split,
-  .mc-grid,
-  .stack,
-  .field-grid,
-  .notes-list {
+  .two-col,
+  .shared-panels,
+  .list {
     display: grid;
     gap: 0.5rem;
-  }
-
-  .workspace-grid {
-    grid-template-columns: minmax(0, 1.85fr) minmax(20rem, 0.9fr);
-    align-items: start;
-  }
-
-  .primary-column,
-  .support-column {
-    align-content: start;
   }
 
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.65rem 0.85rem;
-  }
-
-  .method-panel,
-  .control-panel,
-  .rail-panel {
+    padding: 0.75rem 0.85rem;
     display: grid;
-    gap: 0.55rem;
+    gap: 0.5rem;
   }
 
-  .table-panel {
-    padding: 0;
-    overflow: hidden;
-    display: grid;
-    gap: 0;
-  }
-
-  /* ── Single-line panel + section headers ── */
-  .panel-bar,
-  .rail-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    min-height: 26px;
-  }
-
-  .panel-bar h2 {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--text-0);
-    letter-spacing: 0.02em;
-  }
-
-  .rail-bar h3 {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-0);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .rail-context {
-    color: var(--text-2);
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-
-  .section-bar {
+  .header-panel { gap: 0.45rem; }
+  .header-top, .header-actions, .context-bar, .settings-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
-    color: var(--text-2);
-    font-size: 10.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding-bottom: 0.3rem;
-    border-bottom: 1px solid var(--divider);
-    min-height: 22px;
-  }
-
-  .table-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.3rem 0.75rem;
-    min-height: 26px;
-    border-bottom: 1px solid var(--divider);
-    color: var(--text-2);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .table-panel-header .row-count {
-    color: var(--text-2);
-    text-transform: none;
-    letter-spacing: 0;
-    font-weight: 400;
-  }
-
-  .row,
-  .chart-foot {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.75rem;
-    align-items: center;
-  }
-
-  .header-actions {
-    display: flex;
     flex-wrap: wrap;
-    justify-content: end;
-    gap: 0.5rem;
-    align-items: center;
   }
 
-  .inline-field {
+  .header-actions { justify-content: flex-end; }
+  .workspace-grid { grid-template-columns: minmax(0, 1.8fr) minmax(20rem, 0.85fr); align-items: start; }
+  .two-col, .shared-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .primary-column, .support-column { align-content: start; }
+
+  .mode-bar {
+    display: inline-grid;
+    grid-template-columns: repeat(6, auto);
+    width: fit-content;
+    border: 1px solid var(--panel-strong);
+    background: var(--surface-0);
+  }
+
+  .mode-bar button {
+    border: 0;
+    border-right: 1px solid var(--panel-strong);
+    background: transparent;
+    color: var(--text-1);
+    padding: 0.38rem 0.78rem;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .mode-bar button:last-child { border-right: 0; }
+  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+
+  .context-bar label,
+  .context-field,
+  .settings-row label {
+    display: grid;
+    gap: 0.18rem;
+    min-width: 5rem;
+  }
+
+  label span,
+  .context-field span,
+  .eyebrow,
+  .panel-title,
+  .table-panel-header {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+
+  .context-bar strong,
+  .context-field strong {
+    min-height: 28px;
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    min-width: 0;
-  }
-
-  .inline-field > span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 10.5px;
-  }
-
-  label {
-    display: grid;
-    gap: 0.3rem;
-  }
-
-  /* ── KPI strip ── */
-  .kpi-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 0;
-  }
-
-  .mc-kpi-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .metric {
-    padding: 0.2rem 0.85rem;
-    border-left: 1px solid var(--divider);
-    background: none;
-    min-width: 0;
-    text-align: center;
-  }
-
-  .metric span {
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-2);
-  }
-
-  .metric strong {
-    display: block;
-    margin: 0.12rem 0 0.14rem;
-    font-size: 14px;
-    font-weight: 700;
-    line-height: 1.15;
     color: var(--text-0);
+    text-transform: capitalize;
   }
 
-  .metric small {
-    font-size: 10.5px;
-    color: var(--text-2);
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .method-grid {
-    grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.8fr);
-    align-items: start;
-  }
-
-  .detail-split,
-  .mc-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-  }
-
-  .chart-column,
-  .method-side,
-  .control-section {
-    display: grid;
-    gap: 0.55rem;
-  }
-
-  .subsection {
-    display: grid;
-    gap: 0.45rem;
-  }
-
-  .method-side > .subsection + .subsection {
-    margin-top: 0.25rem;
-  }
-
-  .row {
-    border-top: 1px solid var(--divider);
-    padding-top: 0.4rem;
-    font-size: 12.5px;
-  }
-
-  .row:first-child {
-    border-top: 0;
-    padding-top: 0;
-  }
-
-  .row span {
-    color: var(--text-2);
-  }
-
-  .row strong {
-    color: var(--text-0);
-  }
-
-  .chart-foot {
-    border-top: 1px solid var(--divider);
-    padding-top: 0.4rem;
-    font-size: 11px;
-  }
-
-  .chart-foot span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .chart-foot strong {
-    color: var(--text-0);
-  }
-
-  .control-section + .control-section {
-    border-top: 1px solid var(--divider);
-    padding-top: 0.5rem;
-  }
-
-  .core-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .mc-fields {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .note-row {
-    display: grid;
-    grid-template-columns: 5.5rem minmax(0, 1fr);
-    gap: 0.6rem;
-    padding: 0.4rem 0;
-    border-top: 1px solid var(--divider);
-    font-size: 11.5px;
-    line-height: 1.35;
-  }
-
-  .note-row:first-child {
-    border-top: 0;
-    padding-top: 0;
-  }
-
-  .note-tag {
-    color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 10px;
-    font-weight: 600;
-  }
-
-  .note-row.info .note-tag,
-  .note-row.info p {
-    color: var(--accent);
-  }
-
-  .note-row.accent .note-tag,
-  .note-row.accent p {
-    color: var(--accent-2);
-  }
-
-  /* ── Table ── */
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    padding: 0.32rem 0.5rem;
-    border-bottom: 1px solid var(--divider);
-    text-align: left;
-    white-space: nowrap;
-    font-size: 12px;
-  }
-
-  th {
-    color: var(--text-2);
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    background: transparent;
-    font-weight: 600;
-  }
-
-  td.num,
-  th.num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-
-  td.empty {
-    color: var(--text-2);
-    text-align: center;
-    padding: 0.6rem;
-  }
-
-  tbody tr:hover {
-    background: rgba(122, 166, 200, 0.06);
-  }
-
-  /* ── Inputs / buttons ── */
   input,
-  select {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: 4px 8px;
-    height: 28px;
-    font: inherit;
-    font-size: 12.5px;
-  }
-
-  input:focus,
-  select:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
+  select,
   .action-btn {
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 4px 12px;
     height: 28px;
+    padding: 4px 8px;
     font: inherit;
     font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
     border-radius: 2px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
   }
 
-  .action-btn:hover:not(:disabled) {
-    border-color: var(--accent);
-    color: var(--accent);
+  input:focus,
+  select:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .action-btn { cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .action-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: 0;
+    border: 1px solid var(--divider);
+    border-bottom: 0;
   }
 
-  .action-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .metric {
+    padding: 0.35rem 0.65rem;
+    border-right: 1px solid var(--divider);
+    border-bottom: 1px solid var(--divider);
+    min-width: 0;
   }
 
-  h2,
-  h3,
-  p,
-  small {
+  .metric span { display: block; color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .metric strong { display: block; margin-top: 0.12rem; color: var(--text-0); font-size: 13.5px; line-height: 1.2; }
+  .metric small { color: var(--text-2); font-size: 10.5px; }
+
+  .table-panel { padding: 0; overflow: auto; }
+  .table-panel-header {
+    min-height: 26px;
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--divider);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 0.34rem 0.5rem; border-bottom: 1px solid var(--divider); text-align: left; white-space: nowrap; font-size: 12px; }
+  th { color: var(--text-2); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+  td.empty { color: var(--text-2); text-align: center; padding: 0.65rem; }
+
+  .list p {
     margin: 0;
+    color: var(--text-1);
+    line-height: 1.35;
+    padding-top: 0.38rem;
+    border-top: 1px solid var(--divider);
   }
+  .list p:first-child { padding-top: 0; border-top: 0; }
 
-  .muted {
+  h2, p, small { margin: 0; }
+  h2 { font-size: 16px; line-height: 1.2; }
+  .muted { color: var(--text-2); font-size: 12px; line-height: 1.35; }
+  .positive { color: var(--positive); }
+  .negative { color: var(--negative); }
+  .warning { color: var(--warning); }
+
+  .heatmap {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(2.8rem, 1fr));
+    border: 1px solid var(--divider);
+  }
+  .heatmap div {
+    min-height: 2rem;
+    display: grid;
+    place-items: center;
+    border-right: 1px solid var(--divider);
+    border-bottom: 1px solid var(--divider);
     color: var(--text-2);
-    font-size: 12px;
-    padding: 0.25rem 0;
+    font-size: 11px;
   }
+  .heatmap .diag { color: var(--accent); background: rgba(122, 166, 200, 0.08); }
 
-  .group-label,
-  label > span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 10.5px;
-    font-weight: 600;
+  .frontier {
+    min-height: 280px;
+    border: 1px solid var(--divider);
+    position: relative;
+    background: var(--bg-0);
   }
-
-  .note-row p {
-    overflow-wrap: anywhere;
+  .point {
+    position: absolute;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    padding: 0.22rem 0.35rem;
+    font-size: 11px;
   }
-
-  .positive {
-    color: var(--positive);
-  }
-
-  .negative {
-    color: var(--negative);
-  }
-
-  .warning {
-    color: var(--warning);
-  }
-
-  .elevated {
-    color: var(--warning);
-  }
+  .point.current { left: 58%; top: 46%; color: var(--chart-secondary); }
+  .point.candidate { left: 36%; top: 34%; color: var(--chart-primary); }
+  .point.parity { left: 44%; top: 42%; color: var(--text-1); }
 
   @media (max-width: 1220px) {
-    .workspace-grid,
-    .method-grid,
-    .detail-split,
-    .mc-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .support-column {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .kpi-grid,
-    .mc-kpi-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
+    .workspace-grid, .two-col, .shared-panels { grid-template-columns: 1fr; }
+    .mode-bar { grid-template-columns: repeat(3, auto); }
+    .mode-bar button:nth-child(3) { border-right: 0; }
+    .mode-bar button:nth-child(-n + 3) { border-bottom: 1px solid var(--panel-strong); }
   }
 
-  @media (max-width: 980px) {
-    .support-column,
-    .core-fields,
-    .mc-fields {
-      grid-template-columns: 1fr;
-    }
-
-    .kpi-grid,
-    .mc-kpi-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .metric {
-      padding: 0.4rem 0;
-      border-left: 0;
-      border-top: 1px solid var(--divider);
-      text-align: left;
-    }
-
-    .metric:first-child {
-      border-top: 0;
-    }
-
-    .panel-bar,
-    .rail-bar,
-    .chart-foot {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 0.4rem;
-    }
-
-    .header-actions {
-      justify-content: stretch;
-    }
-
-    .header-actions > * {
-      width: 100%;
-    }
-
-    .note-row {
-      grid-template-columns: 1fr;
-      gap: 0.25rem;
-    }
+  @media (max-width: 760px) {
+    .mode-bar { grid-template-columns: 1fr; width: 100%; }
+    .mode-bar button { border-right: 0; border-bottom: 1px solid var(--panel-strong); }
+    .mode-bar button:last-child { border-bottom: 0; }
+    .context-bar label, .context-field, .settings-row label, input, select { width: 100%; }
   }
 </style>

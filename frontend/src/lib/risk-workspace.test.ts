@@ -1,0 +1,200 @@
+import { describe, expect, it } from "vitest";
+import { buildRiskWorkspaceModel, type RiskMode } from "./risk-workspace";
+import type { PortfolioSnapshot, RiskResult } from "./api/types";
+
+const snapshot: PortfolioSnapshot = {
+  timestamp: "2026-04-29T10:00:00Z",
+  base_currency: "USD",
+  account_summary: {},
+  total_market_value: 100000,
+  total_cash: 5000,
+  net_liquidation: 105000,
+  day_pnl: -750,
+  day_pnl_pct: -0.0071,
+  day_pnl_source: "broker",
+  warnings: ["FX conversion uses latest available rate."],
+  positions: [
+    {
+      symbol: "AAPL",
+      sec_type: "STK",
+      currency: "USD",
+      quantity: 100,
+      avg_cost: 150,
+      market_price: 175,
+      market_value: 35000,
+      unrealized_pnl: 2500,
+      weight: 0.3333,
+      base_market_value: 35000,
+      fx_rate: 1,
+      instrument_id: "portfolio:stk:aapl",
+      display_symbol: "AAPL",
+      exchange: "SMART",
+      primary_exchange: "NASDAQ",
+      provider: "ibkr",
+      provider_id: "AAPL",
+    },
+    {
+      symbol: "MSFT",
+      sec_type: "STK",
+      currency: "USD",
+      quantity: 100,
+      avg_cost: 250,
+      market_price: 315,
+      market_value: 30000,
+      unrealized_pnl: -500,
+      weight: 0.2857,
+      base_market_value: 30000,
+      fx_rate: 1,
+      instrument_id: "portfolio:stk:msft",
+      display_symbol: "MSFT",
+      exchange: "SMART",
+      primary_exchange: "NASDAQ",
+      provider: "ibkr",
+      provider_id: "MSFT",
+    },
+    {
+      symbol: "CASH-USD",
+      sec_type: "CASH",
+      currency: "USD",
+      quantity: 5000,
+      avg_cost: null,
+      market_price: 1,
+      market_value: 5000,
+      unrealized_pnl: null,
+      weight: 0.0476,
+      base_market_value: 5000,
+      fx_rate: 1,
+      instrument_id: "cash:usd",
+      display_symbol: "USD Cash",
+      exchange: null,
+      primary_exchange: null,
+      provider: "portfolio",
+      provider_id: "USD",
+    },
+  ],
+};
+
+const riskResult: RiskResult = {
+  metrics: {
+    alpha: 0.95,
+    lookback_days: 252,
+    horizon_days: 1,
+    portfolio_value: 105000,
+    historical_var: -2200,
+    historical_cvar: -3100,
+    parametric_var: -2000,
+    daily_vol: 0.012,
+    annual_vol: 0.19,
+    max_drawdown: -0.16,
+    beta: 1.15,
+    correlation: 0.82,
+    alpha_annual: 0.03,
+    covered_portfolio_value: 70000,
+    covered_risk_basis_value: 65000,
+    risk_basis_value: 70000,
+    risk_coverage_ratio: 0.928,
+    historical_var_total_estimate: -2369,
+    historical_cvar_total_estimate: -3338,
+    parametric_var_total_estimate: -2153,
+    monte_carlo_model: "Gaussian",
+    monte_carlo_horizon_days: 10,
+    monte_carlo_num_simulations: 2000,
+    monte_carlo_var: null,
+    monte_carlo_cvar: null,
+    monte_carlo_var_total_estimate: null,
+    monte_carlo_cvar_total_estimate: null,
+    aligned_obs_count: 6,
+    benchmark_overlap_count: 6,
+    concentration_hhi: 0.21,
+    top5_weight: 0.666,
+    effective_bets: 4.76,
+  },
+  portfolio_return_points: [
+    { timestamp: "2026-04-22T00:00:00Z", value: 0.01 },
+    { timestamp: "2026-04-23T00:00:00Z", value: -0.02 },
+    { timestamp: "2026-04-24T00:00:00Z", value: -0.03 },
+    { timestamp: "2026-04-27T00:00:00Z", value: 0.015 },
+    { timestamp: "2026-04-28T00:00:00Z", value: -0.01 },
+    { timestamp: "2026-04-29T00:00:00Z", value: 0.005 },
+  ],
+  benchmark_return_points: [
+    { timestamp: "2026-04-22T00:00:00Z", value: 0.008 },
+    { timestamp: "2026-04-23T00:00:00Z", value: -0.015 },
+    { timestamp: "2026-04-24T00:00:00Z", value: -0.02 },
+    { timestamp: "2026-04-27T00:00:00Z", value: 0.01 },
+    { timestamp: "2026-04-28T00:00:00Z", value: -0.007 },
+    { timestamp: "2026-04-29T00:00:00Z", value: 0.004 },
+  ],
+  contributions: [
+    {
+      symbol: "AAPL",
+      instrument_id: "portfolio:stk:aapl",
+      display_symbol: "AAPL",
+      weight: 0.3333,
+      daily_vol: 0.015,
+      variance_contribution_pct: 0.58,
+      marginal_contribution_to_risk: 0.01,
+      component_var: 1200,
+    },
+    {
+      symbol: "MSFT",
+      instrument_id: "portfolio:stk:msft",
+      display_symbol: "MSFT",
+      weight: 0.2857,
+      daily_vol: 0.012,
+      variance_contribution_pct: 0.36,
+      marginal_contribution_to_risk: 0.009,
+      component_var: 900,
+    },
+  ],
+  monte_carlo: { terminal_returns: [], fan_percentiles: {}, sample_paths: {} },
+  excluded_assets: [{ symbol: "BND", instrument_id: null, display_symbol: "BND", reason: "No historical bars" }],
+  warnings: ["Risk coverage below 95%; headline risk estimates may be materially incomplete."],
+};
+
+describe("risk workspace view-model", () => {
+  it("builds shared context, alerts, and mode KPI strips from one risk result", () => {
+    const model = buildRiskWorkspaceModel(snapshot, riskResult, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+
+    expect(model.context.baseCurrency).toBe("USD");
+    expect(model.context.coverageLabel).toContain("92.8%");
+    expect(model.overviewKpis.map((kpi) => kpi.label)).toContain("VaR / expected shortfall");
+    expect(model.exposureKpis.map((kpi) => kpi.label)).toContain("Effective positions");
+    expect(model.drawdownEpisodes[0]?.contributors).toContain("AAPL");
+    expect(model.alerts.some((alert) => alert.includes("Concentration breach"))).toBe(true);
+    expect(model.alerts.some((alert) => alert.includes("Missing/stale data"))).toBe(true);
+  });
+
+  it("keeps optimization output as diagnostics-only candidate allocations", () => {
+    const model = buildRiskWorkspaceModel(snapshot, riskResult, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+
+    expect(model.candidates.length).toBeGreaterThan(0);
+    expect(model.diagnostics.join(" ")).toContain("No order, execution, broker mutation");
+    expect(model.constraints.map((row) => row.cells[0])).toContain("Long-only");
+    expect(model.optimizationComparison.map((row) => row.cells[0])).toContain("Risk Parity");
+  });
+
+  it("documents unavailable position-level correlation inputs instead of inventing precision", () => {
+    const model = buildRiskWorkspaceModel(snapshot, riskResult, {
+      sourceScope: "portfolio",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+
+    expect(model.correlationKpis[0].value).toBe("N/A");
+    expect(model.correlatedPairs[0].cells[0]).toContain("requires per-holding return histories");
+  });
+
+  it("declares the complete risk mode union", () => {
+    const modes: RiskMode[] = ["overview", "exposures", "drawdowns", "correlation", "scenarios", "optimization"];
+    expect(modes).toHaveLength(6);
+  });
+});

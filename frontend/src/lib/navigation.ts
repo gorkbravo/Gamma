@@ -82,6 +82,14 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
     { id: "distribution", label: "Implied Distribution", defaultIndex: 3 },
     { id: "source", label: "Source", defaultIndex: 4 },
   ]),
+  risk: defineTabModes([
+    { id: "overview", label: "Overview", defaultIndex: 0 },
+    { id: "exposures", label: "Exposures", defaultIndex: 1 },
+    { id: "drawdowns", label: "Drawdowns", defaultIndex: 2 },
+    { id: "correlation", label: "Correlation", defaultIndex: 3 },
+    { id: "scenarios", label: "Scenarios", defaultIndex: 4 },
+    { id: "optimization", label: "Optimization", defaultIndex: 5 },
+  ]),
 };
 
 export const DEFAULT_WORKSPACE_TAB_ORDER = {

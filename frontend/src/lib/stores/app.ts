@@ -350,6 +350,7 @@ export const sharedEquitySelection = writable<SharedEquitySelection | null>(null
 export const riskResult = writable<RiskResult | null>(null);
 export const riskSnapshotBasis = writable<PortfolioSnapshot | null>(null);
 export const riskWorkspaceBasis = writable<WorkspaceMode | null>(null);
+export const riskWorkspaceMode = writable<string>("overview");
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
 export const lastError = writable<string>("");
@@ -471,6 +472,11 @@ export function clearSharedEquitySelection() {
 export function setMacroContext(nextContext: Partial<MacroContextState>) {
   macroContext.update((current) => normalizeMacroContextState({ ...current, ...nextContext }));
   resetCopilotCard("macro");
+}
+
+export function setRiskWorkspaceMode(mode: string) {
+  riskWorkspaceMode.set(mode);
+  resetCopilotCard("risk");
 }
 
 function setError(error: unknown) {
@@ -663,6 +669,7 @@ function buildCopilotContextFingerprint(
     return JSON.stringify({
       domain,
       workspaceMode: get(riskWorkspaceBasis) ?? workspaceMode ?? null,
+      mode: get(riskWorkspaceMode),
       snapshotTimestamp: snapshot?.timestamp ?? null,
       positions: serializePositionSignature(snapshot),
       alpha: result?.metrics.alpha ?? null,
@@ -2081,6 +2088,7 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         current_tab: "risk",
         workspace_mode: get(riskWorkspaceBasis) ?? workspaceMode,
         risk_state: {
+          mode: get(riskWorkspaceMode),
           snapshot: get(riskSnapshotBasis),
           result: get(riskResult)
         }

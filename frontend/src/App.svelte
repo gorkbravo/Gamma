@@ -106,6 +106,7 @@
     researchResult,
     riskResult,
     riskWorkspaceBasis,
+    setRiskWorkspaceMode,
     loadPredictionMarketScreener,
     loadCryptoWorkspace,
     previewCopilotContextFingerprint,
@@ -185,6 +186,7 @@
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
   import type { OptionsMode } from "./lib/view-models/iv";
   import type { ResearchMode } from "./lib/view-models/research";
+  import type { RiskMode } from "./lib/risk-workspace";
 
   type ConsoleEntry = {
     label: string;
@@ -203,6 +205,7 @@
   let commoditiesMode: CommodityMode = "overview";
   let maritimeMode: MaritimeMode = "live_map";
   let optionsMode: OptionsMode = "surface";
+  let riskMode: RiskMode = "overview";
   let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
@@ -278,6 +281,7 @@
     fundamentals: $fundamentalsOverview,
     fundamentalsTicker: $selectedFundamentalsTicker,
   });
+  $: setRiskWorkspaceMode(riskMode);
   $: synthesisCopilotSurface = buildSynthesisCopilotSurface({
     activeTab: $activeTab,
     workspaceMode,
@@ -1620,6 +1624,11 @@
       return true;
     }
 
+    if ($activeTab === "risk") {
+      riskMode = nextMode.id as RiskMode;
+      return true;
+    }
+
     return false;
   }
 
@@ -1923,6 +1932,7 @@
         {:else if $activeTab === "risk"}
           <RiskView
             mode={workspaceMode}
+            bind:activeMode={riskMode}
             snapshot={$portfolioSnapshot}
             researchSnapshot={$researchResult?.snapshot ?? null}
             result={$riskResult}
