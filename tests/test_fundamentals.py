@@ -325,6 +325,33 @@ def test_sec_adapter_normalizes_quarterly_periods_and_derives_missing_quarters(t
     assert balance_view.transformation_note is None
 
 
+def test_sec_adapter_accepts_foreign_annual_forms_ifrs_and_non_usd_units(tmp_path):
+    adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
+    payload = pd.DataFrame(
+        [
+            _fact_row("ifrs-full:Revenue", 100.0, "EUR", "2024-01-01", "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+            _fact_row("ifrs-full:ProfitLossFromOperatingActivities", 25.0, "EUR", "2024-01-01", "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+            _fact_row("ifrs-full:ProfitLoss", 18.0, "EUR", "2024-01-01", "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+            _fact_row("ifrs-full:Assets", 250.0, "EUR", None, "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+            _fact_row("ifrs-full:Equity", 120.0, "EUR", None, "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+            _fact_row("ifrs-full:CashFlowsFromUsedInOperatingActivities", 30.0, "EUR", "2024-01-01", "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+            _fact_row("ifrs-full:PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", 8.0, "EUR", "2024-01-01", "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+            _fact_row("ifrs-full:AdjustedWeightedAverageShares", 10.0, "shares", "2024-01-01", "2024-12-31", 2024, "FY", "20-F", "2025-02-28"),
+        ]
+    )
+
+    income_view = adapter._build_statement_view(payload, statement="income", basis="annual", retrieved_at=NOW)
+    balance_view = adapter._build_statement_view(payload, statement="balance", basis="annual", retrieved_at=NOW)
+    cash_view = adapter._build_statement_view(payload, statement="cashflow", basis="annual", retrieved_at=NOW)
+
+    assert [period.label for period in income_view.periods] == ["FY 2024"]
+    assert next(line for line in income_view.lines if line.line_key == "revenue").cells[-1].value == 100.0
+    assert next(line for line in income_view.lines if line.line_key == "operating_income").cells[-1].value == 25.0
+    assert next(line for line in income_view.lines if line.line_key == "diluted_shares").cells[-1].value == 10.0
+    assert next(line for line in balance_view.lines if line.line_key == "total_assets").cells[-1].value == 250.0
+    assert next(line for line in cash_view.lines if line.line_key == "capital_expenditures").cells[-1].value == 8.0
+
+
 def test_fundamentals_dcf_and_reverse_do_not_assume_missing_shares(tmp_path):
     service = _build_service(tmp_path)
     sec_data = service.sec_adapter.company_data["AAPL"]

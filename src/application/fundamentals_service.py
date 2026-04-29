@@ -239,7 +239,11 @@ class FundamentalsService:
         peer_candidates = self._build_peer_candidates(sec_data.company, peer_basket)
         peer_heatmap = self._build_peer_heatmap(sec_data.company, peer_basket)
         dcf_model = self.get_dcf_model(ticker, force_refresh=force_refresh)
-        warnings = _dedupe_warnings(price_context.warnings, dcf_model.warnings if dcf_model else [])
+        warnings = _dedupe_warnings(
+            price_context.warnings,
+            dcf_model.warnings if dcf_model else [],
+            self._fundamentals_data_warnings(sec_data),
+        )
         return FundamentalsOverviewResult(
             company=sec_data.company,
             headline_metrics=self._build_headline_metrics(sec_data, market_context),
@@ -284,7 +288,7 @@ class FundamentalsService:
                 market_context=market_context,
             ),
             filings=sec_data.filings[:12],
-            warnings=_dedupe_warnings(price_context.warnings),
+            warnings=_dedupe_warnings(price_context.warnings, self._fundamentals_data_warnings(sec_data)),
         )
 
     def get_peers(
@@ -330,7 +334,7 @@ class FundamentalsService:
             return None
         inspection = self._build_raw_normalized_inspection(sec_data)
         provider_warnings = self._provider_config_warnings()
-        warnings = _dedupe_warnings(inspection.warnings, provider_warnings)
+        warnings = _dedupe_warnings(inspection.warnings, provider_warnings, self._fundamentals_data_warnings(sec_data))
         return FundamentalsReferenceResult(
             company=sec_data.company,
             filings=sec_data.filings,
@@ -500,6 +504,8 @@ class FundamentalsService:
         operating_cash_flow = _last_non_null(self._statement_value_map(sec_data.annual_cash_flow_statement).get("operating_cash_flow", []))
         capex = _last_non_null(self._statement_value_map(sec_data.annual_cash_flow_statement).get("capital_expenditures", []))
         fcf = _subtract_nullable(operating_cash_flow, capex)
+        equity = _last_non_null(balance.get("shareholders_equity", []))
+        net_income = _last_non_null(annual.get("net_income", []))
         diluted_shares = _first_non_null(
             _last_non_null(annual.get("diluted_shares", [])),
             _last_non_null(balance.get("shares_outstanding", [])),
@@ -557,6 +563,26 @@ class FundamentalsService:
                 market_context["retrieved_at"],
                 "fundamentals.analytics.ev_to_ebit",
                 "Gamma combines current enterprise value with the latest annual operating income from SEC filings.",
+            ),
+            _metric(
+                "price_to_book",
+                "P / Book",
+                _safe_ratio(market_context.get("market_cap"), equity),
+                "ratio",
+                "gamma",
+                market_context["retrieved_at"],
+                "fundamentals.analytics.price_to_book",
+                "Gamma combines current market capitalization with latest annual shareholder equity from SEC filings; this is often more useful than EV metrics for banks, insurers, and other balance-sheet-driven companies.",
+            ),
+            _metric(
+                "return_on_equity",
+                "ROE",
+                _safe_ratio(net_income, equity),
+                "percent",
+                "gamma",
+                sec_data.company.retrieved_at,
+                "fundamentals.analytics.return_on_equity",
+                "Gamma derives return on equity from latest annual net income and shareholder equity.",
             ),
             _metric(
                 "net_debt",
@@ -819,6 +845,7 @@ class FundamentalsService:
             ("ev_to_sales", "EV / Sales", "valuation"),
             ("ev_to_ebit", "EV / EBIT", "valuation"),
             ("price_to_earnings", "P / E", "valuation"),
+            ("price_to_book", "P / Book", "valuation"),
             ("fcf_yield", "FCF Yield", "valuation"),
             ("gross_margin", "Gross Margin", "profitability"),
             ("ebit_margin", "EBIT Margin", "profitability"),
@@ -912,6 +939,11 @@ class FundamentalsService:
                 _safe_ratio(market_context.get("market_cap"), _last_non_null(net_income)),
                 "ratio",
                 "Gamma combines current market capitalization with the latest annual net income from SEC filings.",
+            ),
+            "price_to_book": _heatmap_metric(
+                _safe_ratio(market_context.get("market_cap"), _last_non_null(equity)),
+                "ratio",
+                "Gamma combines current market capitalization with latest annual shareholder equity; this is especially relevant for banks, insurers, and balance-sheet-driven companies.",
             ),
             "fcf_yield": _heatmap_metric(
                 _safe_ratio(_last_non_null(fcf), market_context.get("market_cap")),
@@ -1018,6 +1050,7 @@ class FundamentalsService:
                     ("ev_to_sales", "EV / Sales", "ratio"),
                     ("ev_to_ebit", "EV / EBIT", "ratio"),
                     ("price_to_earnings", "P / E", "ratio"),
+                    ("price_to_book", "P / Book", "ratio"),
                     ("fcf_yield", "FCF Yield", "percent"),
                     ("gross_margin", "Gross Margin", "percent"),
                     ("ebit_margin", "EBIT Margin", "percent"),
@@ -1940,7 +1973,7 @@ class FundamentalsService:
             )
         active_scenario_id = str(raw_model.get("active_scenario_id") or "base").lower()
         sensitivity_matrix = self._build_sensitivity_matrix(scenarios, active_scenario_id, actuals, projection_years, market_context)
-        warnings = []
+        warnings = self._fundamentals_data_warnings(sec_data)
         if market_context.get("current_price") is None:
             warnings.append("Current price context is unavailable, so valuation upside/downside may be incomplete.")
         if _first_non_null(_last_non_null(actuals["shares"]), market_context.get("shares")) in {None, 0}:
@@ -2264,6 +2297,76 @@ class FundamentalsService:
             cell_map = {cell.period_key: cell.value for cell in line.cells}
             values[line.line_key] = [cell_map.get(period_key) for period_key in period_keys]
         return values
+
+    def _fundamentals_data_warnings(self, sec_data: SecCompanyData) -> list[str]:
+        warnings: list[str] = []
+        annual_forms = {filing.form for filing in sec_data.filings if filing.form in {"20-F", "20-F/A", "40-F", "40-F/A"}}
+        has_annual = bool(sec_data.annual_income_statement.periods)
+        has_quarterly = bool(sec_data.quarterly_income_statement.periods)
+        if not has_annual:
+            warnings.append(
+                "No normalized annual statement periods are available from SEC company facts for this ticker; the company may require a richer filing-level XBRL or external fundamentals provider path."
+            )
+        elif annual_forms and not has_quarterly:
+            warnings.append(
+                "This filer is covered through annual foreign-issuer filings, but usable quarterly company-facts statements are not available; quarterly views and TTM-style valuation inputs are limited."
+            )
+        elif not has_quarterly:
+            warnings.append(
+                "Quarterly SEC company-facts statements are unavailable or not mapped for this ticker; quarterly views may be empty while annual statements remain usable."
+            )
+        required_annual = (
+            (sec_data.annual_income_statement, "revenue", "annual revenue"),
+            (sec_data.annual_income_statement, "net_income", "annual net income"),
+            (sec_data.annual_balance_sheet, "total_assets", "annual total assets"),
+            (sec_data.annual_balance_sheet, "shareholders_equity", "annual shareholder equity"),
+            (sec_data.annual_cash_flow_statement, "operating_cash_flow", "annual operating cash flow"),
+        )
+        for view, line_key, label in required_annual:
+            if has_annual and self._observed_line_count(view, line_key) == 0:
+                warnings.append(f"SEC company facts did not provide a mapped {label} line in the retained periods.")
+        if has_annual and self._observed_line_count(sec_data.annual_income_statement, "operating_income") == 0:
+            if self._is_financial_or_insurance_company(sec_data.company):
+                warnings.append(
+                    "Operating income / EBIT is not a standard mapped line for this financial-sector filer; prefer book-value, ROE, net-income, and sector-specific reads over EV / EBIT or industrial DCF outputs."
+                )
+            else:
+                warnings.append("SEC company facts did not provide a mapped annual operating income / EBIT line in the retained periods.")
+        if has_annual and self._observed_line_count(sec_data.annual_cash_flow_statement, "capital_expenditures") == 0:
+            warnings.append(
+                "SEC company facts did not provide a mapped capital expenditures line; free-cash-flow and DCF values that depend on capex may be incomplete."
+            )
+        if has_annual and self._observed_line_count(sec_data.annual_income_statement, "diluted_shares") == 0 and self._observed_line_count(sec_data.annual_balance_sheet, "shares_outstanding") == 0:
+            warnings.append(
+                "SEC company facts did not provide a mapped share-count line in the retained annual periods; market cap, per-share DCF, and reverse valuation may be unavailable."
+            )
+        if self._is_financial_or_insurance_company(sec_data.company):
+            warnings.append(
+                "This company appears to be a bank, insurer, broker, asset manager, REIT, or other financial-sector filer; Gamma now includes P / Book and ROE, but industrial EV and DCF metrics should be treated as secondary diagnostics."
+            )
+        return _dedupe_warnings(warnings)
+
+    def _observed_line_count(self, view: FundamentalsStatementView, line_key: str) -> int:
+        line = next((item for item in view.lines if item.line_key == line_key), None)
+        if line is None:
+            return 0
+        return len([cell for cell in line.cells if cell.value is not None])
+
+    def _is_financial_or_insurance_company(self, company: FundamentalsCompanyRecord) -> bool:
+        sic = str(company.sic or "").strip()
+        if len(sic) >= 2 and sic[:2] in {"60", "61", "62", "63", "64", "67"}:
+            return True
+        description = str(company.sic_description or "").lower()
+        needles = (
+            "bank",
+            "insurance",
+            "broker",
+            "investment",
+            "asset management",
+            "real estate investment trust",
+            "reit",
+        )
+        return any(needle in description for needle in needles)
 
 
 def _metric(

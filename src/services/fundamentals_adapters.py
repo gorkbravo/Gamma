@@ -26,9 +26,30 @@ if TYPE_CHECKING:
     from edgar import Company
 
 
-_ANNUAL_FORMS = {"10-K", "10-K/A"}
-_QUARTERLY_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A"}
-_FILING_FORMS = ("10-K", "10-K/A", "10-Q", "10-Q/A")
+_ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+_QUARTERLY_FORMS = {"10-Q", "10-Q/A", "10-K", "10-K/A", "6-K"}
+_FILING_FORMS = ("10-K", "10-K/A", "10-Q", "10-Q/A", "20-F", "20-F/A", "40-F", "40-F/A", "6-K")
+_CURRENCY_UNIT_PREFIXES = (
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CNY",
+    "TWD",
+    "CAD",
+    "AUD",
+    "CHF",
+    "HKD",
+    "KRW",
+    "INR",
+    "BRL",
+    "MXN",
+    "SEK",
+    "DKK",
+    "NOK",
+    "SGD",
+    "ZAR",
+)
 
 _POPULAR_FUNDAMENTALS_TICKERS = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "ORCL", "SAP")
 
@@ -103,6 +124,7 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
             "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
             "us-gaap:Revenues",
             "us-gaap:SalesRevenueNet",
+            "ifrs-full:Revenue",
         ),
     ),
     StatementLineDefinition("gross_profit", "Gross Profit", "income", "currency", "duration", ("us-gaap:GrossProfit",)),
@@ -112,7 +134,7 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "income",
         "currency",
         "duration",
-        ("us-gaap:ResearchAndDevelopmentExpense",),
+        ("us-gaap:ResearchAndDevelopmentExpense", "ifrs-full:ResearchAndDevelopmentExpense"),
     ),
     StatementLineDefinition(
         "selling_general_and_administrative",
@@ -120,61 +142,66 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "income",
         "currency",
         "duration",
-        ("us-gaap:SellingGeneralAndAdministrativeExpense",),
+        ("us-gaap:SellingGeneralAndAdministrativeExpense", "ifrs-full:SellingGeneralAndAdministrativeExpense"),
     ),
-    StatementLineDefinition("operating_expenses", "Operating Expenses", "income", "currency", "duration", ("us-gaap:OperatingExpenses",)),
-    StatementLineDefinition("operating_income", "Operating Income", "income", "currency", "duration", ("us-gaap:OperatingIncomeLoss",)),
-    StatementLineDefinition("pretax_income", "Pre-Tax Income", "income", "currency", "duration", ("us-gaap:IncomeBeforeTaxExpenseBenefit",)),
-    StatementLineDefinition("income_tax", "Income Tax", "income", "currency", "duration", ("us-gaap:IncomeTaxExpenseBenefit",)),
-    StatementLineDefinition("net_income", "Net Income", "income", "currency", "duration", ("us-gaap:NetIncomeLoss",)),
+    StatementLineDefinition("operating_expenses", "Operating Expenses", "income", "currency", "duration", ("us-gaap:OperatingExpenses", "ifrs-full:OperatingExpense")),
+    StatementLineDefinition("operating_income", "Operating Income", "income", "currency", "duration", ("us-gaap:OperatingIncomeLoss", "ifrs-full:ProfitLossFromOperatingActivities")),
+    StatementLineDefinition("pretax_income", "Pre-Tax Income", "income", "currency", "duration", ("us-gaap:IncomeBeforeTaxExpenseBenefit", "ifrs-full:ProfitLossBeforeTax")),
+    StatementLineDefinition("income_tax", "Income Tax", "income", "currency", "duration", ("us-gaap:IncomeTaxExpenseBenefit", "ifrs-full:IncomeTaxExpenseContinuingOperations", "ifrs-full:TaxExpenseIncome")),
+    StatementLineDefinition("net_income", "Net Income", "income", "currency", "duration", ("us-gaap:NetIncomeLoss", "ifrs-full:ProfitLoss")),
     StatementLineDefinition(
         "diluted_shares",
         "Diluted Shares",
         "income",
         "shares",
         "duration",
-        ("us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",),
+        (
+            "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
+            "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+            "ifrs-full:DilutedWeightedAverageNumberOfOrdinaryShares",
+            "ifrs-full:AdjustedWeightedAverageShares",
+        ),
         quarterly_derivable=False,
     ),
-    StatementLineDefinition("cash_and_equivalents", "Cash & Equivalents", "balance", "currency", "instant", ("us-gaap:CashAndCashEquivalentsAtCarryingValue",)),
+    StatementLineDefinition("cash_and_equivalents", "Cash & Equivalents", "balance", "currency", "instant", ("us-gaap:CashAndCashEquivalentsAtCarryingValue", "ifrs-full:CashAndCashEquivalents")),
     StatementLineDefinition(
         "marketable_securities_current",
         "Current Marketable Securities",
         "balance",
         "currency",
         "instant",
-        ("us-gaap:MarketableSecuritiesCurrent", "us-gaap:AvailableForSaleSecuritiesCurrent"),
+        ("us-gaap:MarketableSecuritiesCurrent", "us-gaap:AvailableForSaleSecuritiesCurrent", "ifrs-full:CurrentFinancialAssets"),
     ),
-    StatementLineDefinition("accounts_receivable", "Accounts Receivable", "balance", "currency", "instant", ("us-gaap:AccountsReceivableNetCurrent",)),
-    StatementLineDefinition("inventory", "Inventory", "balance", "currency", "instant", ("us-gaap:InventoryNet",)),
-    StatementLineDefinition("current_assets", "Current Assets", "balance", "currency", "instant", ("us-gaap:AssetsCurrent",)),
-    StatementLineDefinition("total_assets", "Total Assets", "balance", "currency", "instant", ("us-gaap:Assets",)),
-    StatementLineDefinition("accounts_payable", "Accounts Payable", "balance", "currency", "instant", ("us-gaap:AccountsPayableCurrent",)),
+    StatementLineDefinition("accounts_receivable", "Accounts Receivable", "balance", "currency", "instant", ("us-gaap:AccountsReceivableNetCurrent", "ifrs-full:TradeAndOtherCurrentReceivables")),
+    StatementLineDefinition("inventory", "Inventory", "balance", "currency", "instant", ("us-gaap:InventoryNet", "ifrs-full:Inventories")),
+    StatementLineDefinition("current_assets", "Current Assets", "balance", "currency", "instant", ("us-gaap:AssetsCurrent", "ifrs-full:CurrentAssets")),
+    StatementLineDefinition("total_assets", "Total Assets", "balance", "currency", "instant", ("us-gaap:Assets", "ifrs-full:Assets")),
+    StatementLineDefinition("accounts_payable", "Accounts Payable", "balance", "currency", "instant", ("us-gaap:AccountsPayableCurrent", "ifrs-full:TradeAndOtherCurrentPayables")),
     StatementLineDefinition(
         "short_term_debt",
         "Short-Term Debt",
         "balance",
         "currency",
         "instant",
-        ("us-gaap:LongTermDebtCurrent", "us-gaap:ShortTermBorrowings", "us-gaap:CommercialPaper"),
+        ("us-gaap:LongTermDebtCurrent", "us-gaap:ShortTermBorrowings", "us-gaap:CommercialPaper", "ifrs-full:CurrentBorrowings", "ifrs-full:CurrentLeaseLiabilities"),
     ),
-    StatementLineDefinition("current_liabilities", "Current Liabilities", "balance", "currency", "instant", ("us-gaap:LiabilitiesCurrent",)),
+    StatementLineDefinition("current_liabilities", "Current Liabilities", "balance", "currency", "instant", ("us-gaap:LiabilitiesCurrent", "ifrs-full:CurrentLiabilities")),
     StatementLineDefinition(
         "long_term_debt",
         "Long-Term Debt",
         "balance",
         "currency",
         "instant",
-        ("us-gaap:LongTermDebtAndCapitalLeaseObligations", "us-gaap:LongTermDebtNoncurrent", "us-gaap:LongTermDebt"),
+        ("us-gaap:LongTermDebtAndCapitalLeaseObligations", "us-gaap:LongTermDebtNoncurrent", "us-gaap:LongTermDebt", "ifrs-full:NoncurrentBorrowings", "ifrs-full:NoncurrentLeaseLiabilities"),
     ),
-    StatementLineDefinition("total_liabilities", "Total Liabilities", "balance", "currency", "instant", ("us-gaap:Liabilities",)),
+    StatementLineDefinition("total_liabilities", "Total Liabilities", "balance", "currency", "instant", ("us-gaap:Liabilities", "ifrs-full:Liabilities")),
     StatementLineDefinition(
         "shareholders_equity",
         "Shareholders' Equity",
         "balance",
         "currency",
         "instant",
-        ("us-gaap:StockholdersEquity", "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+        ("us-gaap:StockholdersEquity", "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest", "ifrs-full:Equity", "ifrs-full:EquityAttributableToOwnersOfParent"),
     ),
     StatementLineDefinition(
         "shares_outstanding",
@@ -182,7 +209,7 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "balance",
         "shares",
         "instant",
-        ("dei:EntityCommonStockSharesOutstanding", "us-gaap:CommonStockSharesOutstanding"),
+        ("dei:EntityCommonStockSharesOutstanding", "us-gaap:CommonStockSharesOutstanding", "ifrs-full:NumberOfSharesOutstanding"),
     ),
     StatementLineDefinition(
         "operating_cash_flow",
@@ -190,7 +217,7 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "cashflow",
         "currency",
         "duration",
-        ("us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations", "us-gaap:NetCashProvidedByUsedInOperatingActivities"),
+        ("us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations", "us-gaap:NetCashProvidedByUsedInOperatingActivities", "ifrs-full:CashFlowsFromUsedInOperatingActivities"),
     ),
     StatementLineDefinition(
         "capital_expenditures",
@@ -198,7 +225,7 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "cashflow",
         "currency",
         "duration",
-        ("us-gaap:PaymentsToAcquirePropertyPlantAndEquipment", "us-gaap:PropertyPlantAndEquipmentAdditions"),
+        ("us-gaap:PaymentsToAcquirePropertyPlantAndEquipment", "us-gaap:PropertyPlantAndEquipmentAdditions", "ifrs-full:PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"),
     ),
     StatementLineDefinition(
         "depreciation_and_amortization",
@@ -206,7 +233,7 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "cashflow",
         "currency",
         "duration",
-        ("us-gaap:DepreciationDepletionAndAmortization", "us-gaap:Depreciation"),
+        ("us-gaap:DepreciationDepletionAndAmortization", "us-gaap:Depreciation", "ifrs-full:DepreciationAndAmortisationExpense"),
     ),
 )
 
@@ -623,14 +650,27 @@ class SecFundamentalsAdapter:
         limit: int = 12,
     ) -> list[FundamentalsFilingRecord]:
         rows: list[FundamentalsFilingRecord] = []
-        try:
-            filings = company.get_filings(form=list(_FILING_FORMS), amendments=True)
-        except Exception:
-            filings = []
+        filings = []
+        for forms, fetch_limit in (
+            (_FILING_FORMS, limit * 4),
+            (tuple(_ANNUAL_FORMS), limit),
+        ):
+            try:
+                filings.extend(company.get_filings(form=list(forms), amendments=True).head(fetch_limit))
+            except Exception:
+                continue
+        seen_accessions: set[str] = set()
         for filing in filings:
             form = _clean_text(getattr(filing, "form", None))
             if form not in _FILING_FORMS:
                 continue
+            accession = _clean_text(
+                getattr(filing, "accession_number", None) or getattr(filing, "accession_no", None)
+            )
+            if accession and accession in seen_accessions:
+                continue
+            if accession:
+                seen_accessions.add(accession)
             filing_date = _parse_datetime(getattr(filing, "filing_date", None))
             if filing_date is None:
                 continue
@@ -640,9 +680,7 @@ class SecFundamentalsAdapter:
                     filing_date=filing_date,
                     report_period=_parse_datetime(getattr(filing, "report_date", None)),
                     acceptance_datetime=_parse_datetime(getattr(filing, "acceptance_datetime", None)),
-                    accession_number=_clean_text(
-                        getattr(filing, "accession_number", None) or getattr(filing, "accession_no", None)
-                    ),
+                    accession_number=accession,
                     primary_document=_clean_text(getattr(filing, "primary_document", None)),
                     is_amendment=form.endswith("/A"),
                     source_provider="sec",
@@ -652,7 +690,18 @@ class SecFundamentalsAdapter:
                 )
             )
         rows.sort(key=lambda row: (row.filing_date, row.acceptance_datetime or row.filing_date), reverse=True)
-        return rows[:limit]
+        selected = rows[:limit]
+        selected_accessions = {row.accession_number for row in selected if row.accession_number}
+        for annual in [row for row in rows if row.form in _ANNUAL_FORMS]:
+            if annual.accession_number and annual.accession_number in selected_accessions:
+                continue
+            selected.append(annual)
+            if annual.accession_number:
+                selected_accessions.add(annual.accession_number)
+            if len([row for row in selected if row.form in _ANNUAL_FORMS]) >= 2:
+                break
+        selected.sort(key=lambda row: (row.filing_date, row.acceptance_datetime or row.filing_date), reverse=True)
+        return selected
 
     def _build_statement_view(
         self,
@@ -806,7 +855,8 @@ class SecFundamentalsAdapter:
     def _matches_fact_unit(self, unit: Any, expected_unit: str) -> bool:
         unit_text = str(unit or "").strip()
         if expected_unit == "currency":
-            return unit_text.upper().startswith("USD")
+            unit_upper = unit_text.upper()
+            return any(unit_upper.startswith(prefix) for prefix in _CURRENCY_UNIT_PREFIXES)
         if expected_unit == "shares":
             return unit_text.lower().startswith("shares")
         return bool(unit_text)
