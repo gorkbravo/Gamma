@@ -399,8 +399,8 @@ Provider behavior:
 - `COMMODITIES_PROVIDER=eia` enables selected EIA official energy fundamentals when `EIA_API_KEY` is present
 - optional `FRED_API_KEY` lets the EIA provider enrich selected spot/proxy price histories through existing FRED client infrastructure, including broad monthly metal proxies for aluminum, zinc, nickel, lead, tin, iron ore, uranium, and configured precious/industrial metals
 - `COMMODITIES_PROVIDER=ibkr` builds read-only futures curves from individual IBKR/TWS `FUT` contract details and market-data snapshots when TWS is connected and the account has the needed futures market-data entitlements
-- IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_STARTUP_ENABLED`, `IBKR_COMMODITIES_ON_DEMAND`, `IBKR_COMMODITIES_SELECTED_CACHE_SECONDS`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
-- when `COMMODITIES_PROVIDER=ibkr` and `EIA_API_KEY` is present, Gamma uses EIA/FRED as the low-cost SITREP reference layer and overlays IBKR futures curves only for warmed or selected roots; EIA product spot defaults cover RBOB gasoline and heating oil via `EIA_RBOB_GASOLINE_PRICE_SERIES_ID` and `EIA_HEATING_OIL_PRICE_SERIES_ID`
+- IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_STARTUP_ENABLED`, `IBKR_COMMODITIES_BREADTH_ENABLED`, `IBKR_COMMODITIES_ON_DEMAND`, `IBKR_COMMODITIES_SELECTED_CACHE_SECONDS`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_BREADTH_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
+- when `COMMODITIES_PROVIDER=ibkr` and `EIA_API_KEY` is present, Gamma uses EIA/FRED as the low-cost SITREP reference layer and overlays shallow IBKR breadth curves plus deeper selected-root coverage; EIA product spot defaults cover RBOB gasoline and heating oil via `EIA_RBOB_GASOLINE_PRICE_SERIES_ID` and `EIA_HEATING_OIL_PRICE_SERIES_ID`
 - if IBKR contract discovery, quotes, or entitlements are unavailable, Gamma keeps the sample or EIA/FRED fallback payload and returns explicit coverage warnings
 
 What Gamma computes:
@@ -634,12 +634,14 @@ $env:COMMODITIES_PROVIDER="ibkr"
 $env:IB_MARKET_DATA_MODE="delayed"
 $env:IBKR_COMMODITIES_ENABLED="wti,henry_hub,gold,copper"
 $env:IBKR_COMMODITIES_STARTUP_ENABLED="wti"
+$env:IBKR_COMMODITIES_BREADTH_ENABLED="__enabled__"
 $env:IBKR_COMMODITIES_ON_DEMAND="true"
 $env:IBKR_COMMODITIES_CONTRACT_DEPTH="12"
+$env:IBKR_COMMODITIES_BREADTH_CONTRACT_DEPTH="2"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-This path requires a running TWS session and futures market-data permissions. Gamma treats `IBKR_COMMODITIES_ENABLED` as the allowed universe, warms only `IBKR_COMMODITIES_STARTUP_ENABLED` at startup/default overview, and fetches another enabled curve on demand when the user selects it. Cached selected curves default to 300 seconds, contract discovery defaults to a longer cache, and fallback sample or EIA/FRED records remain visible when IBKR is disconnected, entitlement-limited, stale, or not selected.
+This path requires a running TWS session and futures market-data permissions. Gamma treats `IBKR_COMMODITIES_ENABLED` as the allowed universe, fetches shallow breadth curves for `IBKR_COMMODITIES_BREADTH_ENABLED` roots on the Commodities workspace, and deepens the selected enabled root to `IBKR_COMMODITIES_CONTRACT_DEPTH`. Set `IBKR_COMMODITIES_BREADTH_ENABLED=__enabled__` to request thin curves for every enabled root, or provide a comma-separated subset to reduce market-data-line pressure. Cached selected curves default to 300 seconds, contract discovery defaults to a longer cache, and fallback sample or EIA/FRED records remain visible when IBKR is disconnected, entitlement-limited, stale, or not selected.
 
 Optional Maritime AISstream prototype:
 

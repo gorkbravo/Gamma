@@ -692,10 +692,12 @@ class IbkrCommoditiesDataProvider:
         root_configs: tuple[IbkrFutureRootConfig, ...] | None = None,
         enabled_instrument_ids: list[str] | tuple[str, ...] | None = None,
         startup_instrument_ids: list[str] | tuple[str, ...] | None = None,
+        breadth_instrument_ids: list[str] | tuple[str, ...] | None = None,
         on_demand_enabled: bool = True,
         selected_cache_seconds: int = 300,
         contract_cache_seconds: int = 21_600,
         contract_depth: int = 6,
+        breadth_contract_depth: int = 2,
         history_days: int = 120,
         quote_timeout_seconds: float = 4.0,
         contract_details_timeout_seconds: float = 12.0,
@@ -722,10 +724,15 @@ class IbkrCommoditiesDataProvider:
         self.startup_instrument_ids = tuple(
             item for item in _dedupe([_slug(row) for row in startup]) if item in allowed
         ) or tuple(self.enabled_instrument_ids[:1])
+        breadth = breadth_instrument_ids
+        if breadth is None:
+            breadth = _parse_csv_env("IBKR_COMMODITIES_BREADTH_ENABLED", "__enabled__")
+        self.breadth_instrument_ids = self._normalize_breadth_instrument_ids(breadth)
         self.on_demand_enabled = bool(on_demand_enabled)
         self.selected_cache_seconds = max(0, int(selected_cache_seconds or 0))
         self.contract_cache_seconds = max(0, int(contract_cache_seconds or 0))
         self.contract_depth = max(1, int(contract_depth or 1))
+        self.breadth_contract_depth = max(1, min(int(breadth_contract_depth or 1), self.contract_depth))
         self.history_days = max(0, int(history_days or 0))
         self.quote_timeout_seconds = max(0.5, float(quote_timeout_seconds or 4.0))
         self.contract_details_timeout_seconds = max(1.0, float(contract_details_timeout_seconds or 12.0))
@@ -762,7 +769,7 @@ class IbkrCommoditiesDataProvider:
         cached_curve_ids: list[str] = []
         delayed_nodes = 0
         priced_nodes = 0
-        selected = _slug(selected_instrument_id or "")
+        selected = _slug(selected_instrument_id or (self.startup_instrument_ids[0] if self.startup_instrument_ids else ""))
         target_ids = self._target_instrument_ids(selected)
 
         for instrument in reference.instruments:
@@ -773,10 +780,12 @@ class IbkrCommoditiesDataProvider:
                 warnings.append(f"No IBKR futures root configured for {instrument.name}; keeping fallback curve.")
                 continue
             is_target = instrument.instrument_id in target_ids
+            requested_depth = self._requested_contract_depth(instrument.instrument_id, selected)
             cached_curve = None if force_refresh else self._cached_curve_snapshot(
                 instrument.instrument_id,
                 retrieved_at,
                 max_age_seconds=self.selected_cache_seconds if self.selected_cache_seconds > 0 else None,
+                min_nodes=self._min_cached_curve_nodes(instrument.instrument_id, selected),
             )
             if cached_curve is not None:
                 curve_by_id[instrument.instrument_id] = cached_curve
@@ -797,6 +806,7 @@ class IbkrCommoditiesDataProvider:
                 config,
                 retrieved_at,
                 force_refresh=force_refresh,
+                depth=requested_depth,
             )
             warnings.extend(detail_warnings)
             if not contracts:
@@ -913,11 +923,28 @@ class IbkrCommoditiesDataProvider:
     def _target_instrument_ids(self, selected_instrument_id: str | None) -> set[str]:
         if not self.on_demand_enabled:
             return set(self.enabled_instrument_ids)
-        targets = {item for item in self.startup_instrument_ids if item in self.enabled_instrument_ids}
+        targets = {item for item in self.breadth_instrument_ids if item in self.enabled_instrument_ids}
+        targets.update(item for item in self.startup_instrument_ids if item in self.enabled_instrument_ids)
         selected = _slug(selected_instrument_id or "")
         if selected and selected in self.enabled_instrument_ids:
             targets.add(selected)
         return targets
+
+    def _normalize_breadth_instrument_ids(self, items: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+        raw_items = [str(item or "").strip().lower() for item in items]
+        normalized = [_slug(item) for item in raw_items]
+        if any(item in {"*", "all", "__enabled__"} for item in raw_items) or "enabled" in normalized:
+            return tuple(self.enabled_instrument_ids)
+        allowed = set(self.enabled_instrument_ids)
+        return tuple(item for item in _dedupe(normalized) if item in allowed)
+
+    def _requested_contract_depth(self, instrument_id: str, selected_instrument_id: str | None) -> int:
+        return self.contract_depth if instrument_id == _slug(selected_instrument_id or "") else self.breadth_contract_depth
+
+    def _min_cached_curve_nodes(self, instrument_id: str, selected_instrument_id: str | None) -> int:
+        if instrument_id == _slug(selected_instrument_id or "") and self.contract_depth > self.breadth_contract_depth:
+            return self.breadth_contract_depth + 1
+        return self.breadth_contract_depth
 
     def _run_ib(self, fn, *, timeout: float | None = None):
         run_ib = getattr(self.client, "_run_ib", None)
@@ -934,11 +961,13 @@ class IbkrCommoditiesDataProvider:
         retrieved_at: datetime,
         *,
         force_refresh: bool = False,
+        depth: int | None = None,
     ) -> tuple[list[tuple[Contract, Any]], list[str]]:
         warnings: list[str] = []
+        requested_depth = max(1, int(depth or self.contract_depth))
         cached = None if force_refresh else self._cached_contracts(config)
-        if cached:
-            return cached[: self.contract_depth], [
+        if cached and len(cached) >= requested_depth:
+            return cached[:requested_depth], [
                 f"Using cached IBKR contract discovery for {config.label}; no reqContractDetails request was made."
             ]
         seed = Contract(
@@ -978,13 +1007,15 @@ class IbkrCommoditiesDataProvider:
             rows.append((contract, detail, month_key, expiry))
 
         rows.sort(key=lambda row: (row[2], row[3] or datetime.max))
-        selected = [(contract, detail) for contract, detail, _month_key, _expiry in rows[: self.contract_depth]]
-        if len(rows) > self.contract_depth:
+        cache_depth = max(requested_depth, self.contract_depth, self.breadth_contract_depth)
+        cached_selection = [(contract, detail) for contract, detail, _month_key, _expiry in rows[:cache_depth]]
+        selected = cached_selection[:requested_depth]
+        if len(rows) > requested_depth:
             warnings.append(
-                f"IBKR returned {len(rows)} active {config.label} contracts; Gamma kept the front {self.contract_depth} nodes."
+                f"IBKR returned {len(rows)} active {config.label} contracts; Gamma kept the front {requested_depth} nodes."
             )
-        if selected:
-            self._store_contracts(config, selected)
+        if cached_selection:
+            self._store_contracts(config, cached_selection)
         return selected, warnings
 
     def _contract_cache_key(self, instrument_id: str) -> str:
@@ -1217,6 +1248,7 @@ class IbkrCommoditiesDataProvider:
         retrieved_at: datetime,
         *,
         max_age_seconds: int | float | None,
+        min_nodes: int = 1,
     ) -> CommodityCurveSnapshot | None:
         history = self._load_curve_history(instrument_id)
         if not history:
@@ -1268,6 +1300,8 @@ class IbkrCommoditiesDataProvider:
                 )
             )
         if not nodes:
+            return None
+        if len([node for node in nodes if node.price is not None]) < max(1, int(min_nodes or 1)):
             return None
         return CommodityCurveSnapshot(
             instrument_id=instrument_id,
@@ -1631,10 +1665,12 @@ def _ibkr_credential_env_vars() -> list[str]:
         "IB_MARKET_DATA_MODE",
         "IBKR_COMMODITIES_ENABLED",
         "IBKR_COMMODITIES_STARTUP_ENABLED",
+        "IBKR_COMMODITIES_BREADTH_ENABLED",
         "IBKR_COMMODITIES_ON_DEMAND",
         "IBKR_COMMODITIES_SELECTED_CACHE_SECONDS",
         "IBKR_COMMODITIES_CONTRACT_CACHE_SECONDS",
         "IBKR_COMMODITIES_CONTRACT_DEPTH",
+        "IBKR_COMMODITIES_BREADTH_CONTRACT_DEPTH",
         "IBKR_COMMODITIES_HISTORY_DAYS",
         "IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS",
         "IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS",

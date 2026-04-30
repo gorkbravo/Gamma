@@ -551,10 +551,12 @@ def _build_commodities_provider(
             cache=cache,
             reference_provider=eia_provider or (live_reference_provider if live_mode else sample_provider),
             startup_instrument_ids=_parse_env_list("IBKR_COMMODITIES_STARTUP_ENABLED", "wti"),
+            breadth_instrument_ids=_parse_env_list("IBKR_COMMODITIES_BREADTH_ENABLED", "__enabled__"),
             on_demand_enabled=_parse_bool_env("IBKR_COMMODITIES_ON_DEMAND", True),
             selected_cache_seconds=int(os.getenv("IBKR_COMMODITIES_SELECTED_CACHE_SECONDS", "300") or 300),
             contract_cache_seconds=int(os.getenv("IBKR_COMMODITIES_CONTRACT_CACHE_SECONDS", "21600") or 21600),
             contract_depth=int(os.getenv("IBKR_COMMODITIES_CONTRACT_DEPTH", "12") or 12),
+            breadth_contract_depth=int(os.getenv("IBKR_COMMODITIES_BREADTH_CONTRACT_DEPTH", "2") or 2),
             history_days=int(os.getenv("IBKR_COMMODITIES_HISTORY_DAYS", "120") or 120),
             quote_timeout_seconds=float(
                 os.getenv("IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS", os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2"))

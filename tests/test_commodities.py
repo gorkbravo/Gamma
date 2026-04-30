@@ -305,48 +305,70 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
     assert enriched_curve.front_spread == 0.8
 
 
-def test_ibkr_provider_warms_startup_only_and_fetches_selected_on_demand(tmp_path):
+def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_path):
     details = {
         "CL": [
             _future_detail(2001, "202606", "CLM6"),
             _future_detail(2002, "202607", "CLN6"),
+            _future_detail(2003, "202608", "CLQ6"),
+            _future_detail(2004, "202609", "CLU6"),
         ],
         "GC": [
             _future_detail(3001, "202606", "GCM6", symbol="GC", exchange="COMEX"),
             _future_detail(3002, "202607", "GCN6", symbol="GC", exchange="COMEX"),
+            _future_detail(3003, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
+            _future_detail(3004, "202609", "GCU6", symbol="GC", exchange="COMEX"),
         ],
     }
     fake_client = _FakeIbkrClient(details)
     provider = IbkrCommoditiesDataProvider(
         client=fake_client,
-        market_data=_FakeMarketData({2001: 80.0, 2002: 79.0, 3001: 2400.0, 3002: 2404.0}),
+        market_data=_FakeMarketData(
+            {
+                2001: 80.0,
+                2002: 79.0,
+                2003: 78.5,
+                2004: 78.1,
+                3001: 2400.0,
+                3002: 2404.0,
+                3003: 2408.0,
+                3004: 2412.0,
+            }
+        ),
         cache=CacheService(tmp_path),
         reference_provider=SampleCommoditiesDataProvider(),
         enabled_instrument_ids=["wti", "gold"],
         startup_instrument_ids=["wti"],
         selected_cache_seconds=300,
-        contract_depth=2,
+        contract_depth=4,
+        breadth_contract_depth=2,
         history_days=0,
     )
 
     startup_snapshot = provider.get_snapshot(force_refresh=True)
 
-    assert fake_client.requests == ["CL"]
+    assert fake_client.requests == ["CL", "GC"]
+    startup_wti_curve = next(curve for curve in startup_snapshot.curve_snapshots if curve.instrument_id == "wti")
     startup_gold_curve = next(curve for curve in startup_snapshot.curve_snapshots if curve.instrument_id == "gold")
-    assert startup_gold_curve.source_provider == "sample_data"
-    assert any("Gold is outside the current IBKR warm/on-demand request set" in warning for warning in startup_snapshot.warnings)
+    assert startup_wti_curve.source_provider == "ibkr"
+    assert startup_gold_curve.source_provider == "ibkr"
+    assert [node.price for node in startup_wti_curve.nodes] == [80.0, 79.0, 78.5, 78.1]
+    assert [node.price for node in startup_gold_curve.nodes] == [2400.0, 2404.0]
 
     selected_snapshot = provider.get_snapshot(selected_instrument_id="gold")
 
     assert fake_client.requests == ["CL", "GC"]
     selected_gold_curve = next(curve for curve in selected_snapshot.curve_snapshots if curve.instrument_id == "gold")
     assert selected_gold_curve.source_provider == "ibkr"
-    assert [node.price for node in selected_gold_curve.nodes] == [2400.0, 2404.0]
+    assert [node.price for node in selected_gold_curve.nodes] == [2400.0, 2404.0, 2408.0, 2412.0]
 
     cached_snapshot = provider.get_snapshot(selected_instrument_id="wti")
 
     assert fake_client.requests == ["CL", "GC"]
+    selected_wti_curve = next(curve for curve in cached_snapshot.curve_snapshots if curve.instrument_id == "wti")
     cached_gold_curve = next(curve for curve in cached_snapshot.curve_snapshots if curve.instrument_id == "gold")
+    assert selected_wti_curve.source_provider == "ibkr_cached"
+    assert [node.price for node in selected_wti_curve.nodes] == [80.0, 79.0, 78.5, 78.1]
     assert cached_gold_curve.source_provider == "ibkr_cached"
     assert any("Using cached IBKR curve for Gold" in warning for warning in cached_snapshot.warnings)
 
