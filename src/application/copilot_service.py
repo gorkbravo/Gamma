@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime
 import logging
 from typing import Any, Callable
 
@@ -434,6 +435,7 @@ class CopilotService:
                     ]
                 ),
             )
+        result = self._normalize_result_sources(result)
         if self.store is not None:
             try:
                 self.store.record_turn(
@@ -459,6 +461,27 @@ class CopilotService:
                     ),
                 )
         return result
+
+    @classmethod
+    def _normalize_result_sources(cls, result: CopilotResearchCardResult) -> CopilotResearchCardResult:
+        return replace(
+            result,
+            sources=[
+                replace(source, retrieved_at=cls._coerce_source_datetime(source.retrieved_at))
+                for source in result.sources
+            ],
+        )
+
+    @staticmethod
+    def _coerce_source_datetime(value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
 
     def list_sessions(self, *, include_archived: bool = False, search: str | None = None) -> list[CopilotSession]:
         return self.store.list_sessions(include_archived=include_archived, search=search) if self.store is not None else []

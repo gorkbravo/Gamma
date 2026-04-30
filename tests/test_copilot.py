@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
+from src.application.copilot_service import CopilotService
 from src.application.runtime import build_runtime
 from src.models.copilot import (
     CopilotContextBundle,
@@ -66,6 +67,7 @@ from src.models.macro import (
 )
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
+from src.services.copilot_store import CopilotStore
 
 
 class _StubCopilotProvider:
@@ -2076,6 +2078,79 @@ def test_openai_provider_serializes_datetime_tool_outputs():
     )
 
     assert json.loads(rendered) == {"retrieved_at": "2026-04-05T10:52:00"}
+
+
+def test_copilot_store_persists_sources_with_serialized_timestamps(tmp_path):
+    store = CopilotStore(tmp_path / "copilot")
+    result = CopilotResearchCardResult(
+        domain="synthesis",
+        current_tab="copilot",
+        status="ready",
+        provider="stub",
+        model="stub-model",
+        response_id="resp_test",
+        card=ResearchCard(
+            title="Synthesis test",
+            hypothesis="H",
+            rationale="R",
+            required_data=[],
+            proposed_test="T",
+            confounders=[],
+            next_steps=[],
+            caveats=[],
+            source_backed_claims=[],
+            inferred_claims=[],
+        ),
+        sources=[
+            CopilotSourceRef(
+                source_id="synthesis.scope",
+                label="Synthesis scope",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.copilot.synthesis",
+                retrieved_at="2026-04-30T08:12:22",
+            )
+        ],
+    )
+
+    session, _snapshot, turn = store.record_turn(
+        session_id=None,
+        title=None,
+        domain="synthesis",
+        current_tab="copilot",
+        workspace_mode="research",
+        prompt="Connect these contexts.",
+        context_fingerprint="fp_test",
+        context_summary={"scope_size": 2},
+        result=result,
+    )
+
+    turns = store.list_turns(session.session_id)
+    assert [item.turn_id for item in turns] == [turn.turn_id]
+    assert turns[0].result.sources[0].retrieved_at == datetime(2026, 4, 30, 8, 12, 22)
+
+
+def test_copilot_service_normalizes_result_source_timestamps():
+    result = CopilotResearchCardResult(
+        domain="synthesis",
+        current_tab="copilot",
+        status="ready",
+        provider="stub",
+        sources=[
+            CopilotSourceRef(
+                source_id="synthesis.scope",
+                label="Synthesis scope",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.copilot.synthesis",
+                retrieved_at="2026-04-30T08:12:22Z",
+            )
+        ],
+    )
+
+    normalized = CopilotService._normalize_result_sources(result)
+
+    assert normalized.sources[0].retrieved_at == datetime(2026, 4, 30, 8, 12, 22)
 
 
 def test_openai_provider_omits_previous_response_id_when_response_storage_is_disabled():

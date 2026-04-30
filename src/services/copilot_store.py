@@ -393,13 +393,21 @@ class CopilotStore:
             "sources": [
                 {
                     **asdict(source),
-                    "retrieved_at": source.retrieved_at.isoformat() if source.retrieved_at else None,
+                    "retrieved_at": CopilotStore._datetime_to_json(source.retrieved_at),
                 }
                 for source in result.sources
             ],
             "tool_traces": [asdict(trace) for trace in result.tool_traces],
             "warnings": list(result.warnings),
         }
+
+    @staticmethod
+    def _datetime_to_json(value: Any) -> str | None:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if value:
+            return str(value)
+        return None
 
     @classmethod
     def _result_from_json(cls, payload: dict[str, Any]) -> CopilotResearchCardResult:
