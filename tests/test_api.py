@@ -354,6 +354,8 @@ def test_risk_compute_endpoint(tmp_path):
         assert len(payload["contributions"]) >= 1
         assert "monte_carlo" in payload
         assert "fan_percentiles" in payload["monte_carlo"]
+        assert "correlation_matrix" in payload
+        assert "assets" in payload["correlation_matrix"]
     finally:
         runtime.shutdown()
 

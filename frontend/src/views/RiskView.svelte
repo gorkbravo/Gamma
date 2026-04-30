@@ -13,6 +13,7 @@
     type RiskKpi,
     type RiskMode,
     type RiskContributionRow,
+    type RiskCorrelationMatrixView,
     type RiskTableRow,
     type ScenarioImpactRow,
     type ScenarioResult,
@@ -438,12 +439,12 @@
       {@render KpiStrip(workspace.correlationKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
-        <article class="panel heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render HeatmapPlaceholder(workspace.holdings)}</article>
+        <article class="panel heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render CorrelationHeatmap(workspace.correlationMatrix)}</article>
         <div class="two-col">
           <article class="panel chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
           <article class="panel chart-panel">{@render PanelTitle("Normal vs Stress Correlation")}<BarRankChart items={[{ label: "Normal", value: result?.metrics.correlation ?? 0, tone: "neutral" }, { label: "Stress proxy", value: Math.min(0.95, (result?.metrics.correlation ?? 0) + 0.15), tone: "negative" }]} formatValue={(value) => fmt(value, 2)} /></article>
         </div>
-        {@render SimpleTable("Highest Correlated Pairs", ["Status"], workspace.correlatedPairs)}
+        {@render SimpleTable("Highest Correlated Pairs", ["Pair", "Corr", "Read"], workspace.correlatedPairs)}
         </div>
         <aside class="support-column">
           {@render SimpleTable("Diversification Warnings", ["Cluster", "Members", "Weight", "Avg corr", "Risk contribution"], workspace.diversificationWarnings)}
@@ -629,15 +630,36 @@
   </article>
 {/snippet}
 
-{#snippet HeatmapPlaceholder(holdings: HoldingRiskRow[])}
-  <div class="heatmap">
-    {#each holdings.slice(0, 8) as row, rowIndex}
-      {#each holdings.slice(0, 8) as col, colIndex}
-        <div class:diag={rowIndex === colIndex} title={`${row.symbol} / ${col.symbol}`}>{rowIndex === colIndex ? "1.00" : "N/A"}</div>
+{#snippet CorrelationHeatmap(matrix: RiskCorrelationMatrixView)}
+  {@const assets = matrix.assets.slice(0, 8)}
+  {@const values = new Map(matrix.cells.map((cell) => [`${cell.row}|${cell.column}`, cell.correlation]))}
+  {#if assets.length >= 2}
+    <div class="heatmap" style={`grid-template-columns:minmax(4.2rem,0.85fr) repeat(${assets.length}, minmax(2.8rem,1fr));`}>
+      <div class="heatmap-corner"></div>
+      {#each assets as asset}
+        <div class="heatmap-label top" title={asset.label}>{asset.label}</div>
       {/each}
-    {/each}
-  </div>
-  <p class="muted">Position-level aligned return histories are not present in the current Risk API response, so cells stay unavailable instead of showing estimated precision.</p>
+      {#each assets as row}
+        <div class="heatmap-label side" title={row.label}>{row.label}</div>
+        {#each assets as col}
+          {@const value = values.get(`${row.key}|${col.key}`) ?? null}
+          {@const intensity = value == null ? 0 : Math.min(1, Math.abs(value))}
+          <div
+            class="heatmap-cell"
+            class:diag={row.key === col.key}
+            class:positive={value != null && value >= 0 && row.key !== col.key}
+            class:negative={value != null && value < 0 && row.key !== col.key}
+            style={`--corr-alpha:${0.08 + intensity * 0.38};`}
+            title={`${row.label} / ${col.label}: ${fmt(value, 2)}`}
+          >
+            {fmt(value, 2)}
+          </div>
+        {/each}
+      {/each}
+    </div>
+  {:else}
+    <div class="frontier-empty">Run a risk pass with at least two covered assets to populate the correlation heatmap.</div>
+  {/if}
 {/snippet}
 
 {#snippet FrontierChart(plot: FrontierPlotModel, emptyMessage: string | null)}
@@ -834,7 +856,6 @@
 
   .heatmap {
     display: grid;
-    grid-template-columns: repeat(8, minmax(2.8rem, 1fr));
     border: 1px solid var(--divider);
   }
   .heatmap div {
@@ -846,7 +867,23 @@
     color: var(--text-2);
     font-size: 11px;
   }
-  .heatmap .diag { color: var(--accent); background: rgba(122, 166, 200, 0.08); }
+  .heatmap-label,
+  .heatmap-corner {
+    color: var(--text-2);
+    background: var(--surface-0);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 0.35rem;
+  }
+  .heatmap-label.side { justify-items: start; }
+  .heatmap-cell { color: var(--text-1); }
+  .heatmap-cell.positive { background: rgba(75, 180, 116, var(--corr-alpha)); color: var(--text-0); }
+  .heatmap-cell.negative { background: rgba(198, 107, 97, var(--corr-alpha)); color: var(--text-0); }
+  .heatmap-cell.diag { color: var(--accent); background: rgba(122, 166, 200, 0.1); }
 
   .frontier {
     min-height: 280px;
@@ -884,6 +921,7 @@
   }
   .frontier-marker-dot.candidate { stroke: var(--chart-primary); }
   .frontier-marker-dot.current { stroke: var(--chart-secondary); fill: var(--chart-secondary); }
+  .frontier-marker-dot.risk_free { stroke: var(--positive); fill: var(--positive); }
   .axis {
     stroke: var(--divider);
     stroke-width: 1;
@@ -900,6 +938,7 @@
   }
   .frontier-label.current { color: var(--chart-secondary); }
   .frontier-label.candidate { color: var(--chart-primary); }
+  .frontier-label.risk_free { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
   .axis-label {
     position: absolute;
     color: var(--text-2);

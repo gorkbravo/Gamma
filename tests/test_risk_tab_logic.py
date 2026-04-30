@@ -558,6 +558,29 @@ def test_compute_builds_efficient_frontier_from_covered_risky_history():
     assert not any("Efficient frontier unavailable" in warning for warning in payload.results.warnings)
 
 
+def test_compute_exposes_position_correlation_matrix():
+    idx = pd.date_range("2026-01-02", periods=8, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 102, 101, 103, 104, 105, 106], index=idx),
+        "B": pd.Series([50, 50.5, 50.9, 50.7, 51.1, 51.8, 52.0, 52.5], index=idx),
+        "CASH_USD": pd.Series([1, 1, 1, 1, 1, 1, 1, 1], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=50.0),
+            PositionItem("B", "STK", "USD", 1, None, None, None, None, base_market_value=40.0),
+            PositionItem("CASH_USD", "CASH", "USD", 10, None, 1.0, 10.0, 0.0, base_market_value=10.0),
+        ],
+        net_liq=100.0,
+    )
+
+    payload = _compute_payload(prices, snapshot, recommended_min_obs=3)
+
+    assert list(payload.correlation_matrix.columns) == ["A", "B"]
+    assert payload.correlation_matrix.loc["A", "B"] is not None
+    assert "CASH_USD" not in payload.correlation_matrix.columns
+
+
 def test_compute_explains_frontier_unavailable_for_single_covered_asset():
     idx = pd.date_range("2026-01-02", periods=6, freq="B")
     prices = {

@@ -1,4 +1,4 @@
-import type { PortfolioSnapshot, Position, RiskContribution, RiskFrontierPoint, RiskResult, TimeSeriesPoint } from "./api/types";
+import type { PortfolioSnapshot, Position, RiskContribution, RiskCorrelationMatrix, RiskFrontierPoint, RiskResult, TimeSeriesPoint } from "./api/types";
 
 export type RiskMode = "overview" | "exposures" | "drawdowns" | "correlation" | "scenarios" | "optimization";
 export type ReturnFrequency = "daily" | "weekly" | "monthly";
@@ -43,6 +43,7 @@ export interface RiskWorkspaceModel {
   worstReturns: RiskTableRow[];
   positionDrawdownContributions: RiskTableRow[];
   correlatedPairs: RiskTableRow[];
+  correlationMatrix: RiskCorrelationMatrixView;
   diversificationWarnings: RiskTableRow[];
   benchmarkSensitivity: RiskTableRow[];
   scenarios: ScenarioResult[];
@@ -126,6 +127,11 @@ export interface CandidateAllocationRow {
   constraintFlag: string;
 }
 
+export interface RiskCorrelationMatrixView {
+  assets: Array<{ key: string; label: string }>;
+  cells: Array<{ row: string; column: string; correlation: number | null }>;
+}
+
 const UNKNOWN = "N/A";
 
 export function buildRiskWorkspaceModel(
@@ -145,6 +151,7 @@ export function buildRiskWorkspaceModel(
   const frontierPoints = result?.frontier_points ?? [];
   const frontierMessage = buildFrontierMessage(result, frontierPoints);
   const candidates = buildCandidateAllocations(holdings, frontierPoints);
+  const correlationMatrix = buildCorrelationMatrix(result?.correlation_matrix);
   const coverageWarnings = buildCoverageWarnings(snapshot, result);
   const largestWeight = maxNumber(holdings.map((row) => row.weight));
   const topFiveWeight = result?.metrics.top5_weight ?? sumTop(holdings.map((row) => Math.abs(row.weight ?? 0)), 5);
@@ -197,8 +204,8 @@ export function buildRiskWorkspaceModel(
       kpi("Downside volatility", formatPercent(downsideVol), "annualized"),
     ],
     correlationKpis: [
-      kpi("Average pairwise corr", UNKNOWN, "position-level returns unavailable", "warning"),
-      kpi("Highest pair corr", UNKNOWN, "needs per-position aligned returns", "warning"),
+      kpi("Average pairwise corr", formatNumber(averagePairwiseCorrelation(correlationMatrix), 2)),
+      kpi("Highest pair corr", formatNumber(highestPairwiseCorrelation(correlationMatrix)?.correlation, 2)),
       kpi("Diversification ratio", formatNumber(diversificationRatio(holdings), 2)),
       kpi("Independent bets", formatNumber(result?.metrics.effective_bets, 1)),
       kpi("Benchmark corr", formatNumber(result?.metrics.correlation, 2), options.benchmarkSymbol),
@@ -231,10 +238,8 @@ export function buildRiskWorkspaceModel(
     drawdownEpisodes: drawdowns,
     worstReturns: buildWorstReturns(returns, benchmarkReturns),
     positionDrawdownContributions: buildPositionDrawdownContributions(holdings),
-    correlatedPairs: buildUnavailableRows([
-      "Position-level correlation matrix requires per-holding return histories in the API payload.",
-      "Current payload exposes portfolio and benchmark return streams only.",
-    ]),
+    correlatedPairs: buildCorrelatedPairs(correlationMatrix),
+    correlationMatrix,
     diversificationWarnings: buildDiversificationWarnings(holdings, exposureBreakdown, result),
     benchmarkSensitivity: buildBenchmarkSensitivity(holdings, result),
     scenarios,
@@ -430,6 +435,60 @@ function buildPositionDrawdownContributions(holdings: HoldingRiskRow[]): RiskTab
 
 function buildUnavailableRows(messages: string[]): RiskTableRow[] {
   return messages.map((message) => ({ cells: [message], tone: "warning" }));
+}
+
+function buildCorrelationMatrix(matrix: RiskCorrelationMatrix | null | undefined): RiskCorrelationMatrixView {
+  const assets = (matrix?.assets ?? [])
+    .map((asset) => ({
+      key: asset.instrument_id ?? asset.symbol,
+      label: asset.display_symbol ?? asset.symbol,
+    }))
+    .filter((asset) => asset.key && asset.label)
+    .slice(0, 12);
+  const allowed = new Set(assets.map((asset) => asset.key));
+  const cells = (matrix?.cells ?? [])
+    .filter((cell) => allowed.has(cell.row) && allowed.has(cell.column))
+    .map((cell) => ({
+      row: cell.row,
+      column: cell.column,
+      correlation: cell.correlation,
+    }));
+  return { assets, cells };
+}
+
+function averagePairwiseCorrelation(matrix: RiskCorrelationMatrixView) {
+  const values = pairwiseCorrelations(matrix).map((item) => item.correlation);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function highestPairwiseCorrelation(matrix: RiskCorrelationMatrixView) {
+  return pairwiseCorrelations(matrix).sort((left, right) => right.correlation - left.correlation)[0] ?? null;
+}
+
+function pairwiseCorrelations(matrix: RiskCorrelationMatrixView) {
+  const order = new Map(matrix.assets.map((asset, index) => [asset.key, index]));
+  return matrix.cells
+    .filter((cell): cell is { row: string; column: string; correlation: number } => {
+      const rowIndex = order.get(cell.row);
+      const columnIndex = order.get(cell.column);
+      return rowIndex != null && columnIndex != null && rowIndex < columnIndex && cell.correlation != null && Number.isFinite(cell.correlation);
+    });
+}
+
+function buildCorrelatedPairs(matrix: RiskCorrelationMatrixView): RiskTableRow[] {
+  const labelByKey = new Map(matrix.assets.map((asset) => [asset.key, asset.label]));
+  const pairs = pairwiseCorrelations(matrix)
+    .sort((left, right) => Math.abs(right.correlation) - Math.abs(left.correlation))
+    .slice(0, 8)
+    .map((cell) => ({
+      cells: [
+        `${labelByKey.get(cell.row) ?? cell.row} / ${labelByKey.get(cell.column) ?? cell.column}`,
+        formatNumber(cell.correlation, 2),
+        Math.abs(cell.correlation) >= 0.75 ? "Cluster watch" : "Diversifying",
+      ],
+      tone: Math.abs(cell.correlation) >= 0.75 ? "warning" as const : "" as const,
+    }));
+  return pairs.length ? pairs : buildUnavailableRows(["Run a risk pass with at least two covered assets to populate pairwise correlations."]);
 }
 
 function buildDiversificationWarnings(holdings: HoldingRiskRow[], breakdown: ExposureBreakdownRow[], result: RiskResult | null): RiskTableRow[] {

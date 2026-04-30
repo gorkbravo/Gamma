@@ -598,11 +598,28 @@ export interface RiskFrontierWeight {
 
 export interface RiskFrontierPoint {
   label: string;
-  kind: "current" | "candidate" | "frontier" | string;
+  kind: "current" | "candidate" | "frontier" | "risk_free" | string;
   annual_return: number;
   annual_vol: number;
   sharpe: number | null;
   weights: RiskFrontierWeight[];
+}
+
+export interface RiskCorrelationAsset {
+  symbol: string;
+  instrument_id: string | null;
+  display_symbol: string | null;
+}
+
+export interface RiskCorrelationCell {
+  row: string;
+  column: string;
+  correlation: number | null;
+}
+
+export interface RiskCorrelationMatrix {
+  assets: RiskCorrelationAsset[];
+  cells: RiskCorrelationCell[];
 }
 
 export interface ExcludedAsset {
@@ -619,6 +636,7 @@ export interface RiskResult {
   contributions: RiskContribution[];
   monte_carlo: RiskMonteCarloCharts;
   frontier_points: RiskFrontierPoint[];
+  correlation_matrix: RiskCorrelationMatrix;
   excluded_assets: ExcludedAsset[];
   warnings: string[];
 }

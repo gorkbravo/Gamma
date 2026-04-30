@@ -172,6 +172,18 @@ const riskResult: RiskResult = {
       ],
     },
   ],
+  correlation_matrix: {
+    assets: [
+      { symbol: "AAPL", instrument_id: "portfolio:stk:aapl", display_symbol: "AAPL" },
+      { symbol: "MSFT", instrument_id: "portfolio:stk:msft", display_symbol: "MSFT" },
+    ],
+    cells: [
+      { row: "portfolio:stk:aapl", column: "portfolio:stk:aapl", correlation: 1 },
+      { row: "portfolio:stk:aapl", column: "portfolio:stk:msft", correlation: 0.68 },
+      { row: "portfolio:stk:msft", column: "portfolio:stk:aapl", correlation: 0.68 },
+      { row: "portfolio:stk:msft", column: "portfolio:stk:msft", correlation: 1 },
+    ],
+  },
   excluded_assets: [{ symbol: "BND", instrument_id: null, display_symbol: "BND", reason: "No historical bars" }],
   warnings: ["Risk coverage below 95%; headline risk estimates may be materially incomplete."],
 };
@@ -207,15 +219,16 @@ describe("risk workspace view-model", () => {
     expect(model.frontierPoints.length).toBeGreaterThan(0);
   });
 
-  it("documents unavailable position-level correlation inputs instead of inventing precision", () => {
+  it("populates correlation diagnostics from backend position-level returns", () => {
     const model = buildRiskWorkspaceModel(snapshot, riskResult, {
       sourceScope: "portfolio",
       benchmarkSymbol: "SPY",
       returnFrequency: "daily",
     });
 
-    expect(model.correlationKpis[0].value).toBe("N/A");
-    expect(model.correlatedPairs[0].cells[0]).toContain("requires per-holding return histories");
+    expect(model.correlationKpis[0].value).toBe("0.68");
+    expect(model.correlatedPairs[0].cells[0]).toContain("AAPL / MSFT");
+    expect(model.correlationMatrix.assets).toHaveLength(2);
   });
 
   it("surfaces the backend frontier reason when no frontier points are returned", () => {

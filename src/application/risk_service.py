@@ -75,6 +75,7 @@ class RiskComputationPayload:
     marginal_contribution_to_risk: pd.Series
     component_var: pd.Series
     frontier_points: list["RiskFrontierPoint"]
+    correlation_matrix: pd.DataFrame
 
 
 @dataclass(frozen=True)
@@ -382,10 +383,17 @@ class RiskService:
             else:
                 warnings.append("Risk contributions unavailable: non-positive portfolio variance")
 
+        risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
+            request=request,
+            returns_df=risk_returns_df,
+        )
+        warnings.extend(risk_free_warnings)
+
         frontier_points, frontier_warnings = self._build_efficient_frontier(
             snapshot=snapshot,
             returns_df=risk_returns_df,
             weights=weights_aligned,
+            risk_free_rate_annual=risk_free_rate_annual,
         )
         warnings.extend(frontier_warnings)
         results.warnings = warnings
@@ -401,6 +409,7 @@ class RiskService:
             marginal_contribution_to_risk=marginal_contribution_to_risk,
             component_var=component_var,
             frontier_points=frontier_points,
+            correlation_matrix=self._correlation_matrix(risk_returns_df, snapshot),
         )
 
     @staticmethod
@@ -420,6 +429,7 @@ class RiskService:
         snapshot: PortfolioSnapshot,
         returns_df: pd.DataFrame,
         weights: pd.Series,
+        risk_free_rate_annual: float | None = None,
     ) -> tuple[list[RiskFrontierPoint], list[str]]:
         warnings: list[str] = []
         if returns_df.empty or weights.empty:
@@ -488,7 +498,7 @@ class RiskService:
 
         candidates: list[tuple[np.ndarray, float, float, float | None]] = []
         for raw_weights in portfolios:
-            annual_return, annual_vol, sharpe = cls._frontier_stats(raw_weights, mean_returns, cov)
+            annual_return, annual_vol, sharpe = cls._frontier_stats(raw_weights, mean_returns, cov, risk_free_rate_annual)
             if annual_vol > 0 and np.isfinite(annual_return) and np.isfinite(annual_vol):
                 candidates.append((np.asarray(raw_weights, dtype=float), annual_return, annual_vol, sharpe))
 
@@ -513,7 +523,7 @@ class RiskService:
             frontier = [frontier[int(index)] for index in selected_indexes]
 
         points = [
-            cls._frontier_point("Current", "current", current, mean_returns, cov, eligible, positions_by_id),
+            cls._frontier_point("Current", "current", current, mean_returns, cov, eligible, positions_by_id, risk_free_rate_annual),
             cls._tuple_to_frontier_point("Min Vol", "candidate", min_vol, eligible, positions_by_id),
             cls._tuple_to_frontier_point("Max Sharpe", "candidate", max_sharpe, eligible, positions_by_id),
             cls._tuple_to_frontier_point("Equal Weight", "candidate", equal_weight, eligible, positions_by_id),
@@ -523,6 +533,17 @@ class RiskService:
             cls._tuple_to_frontier_point(f"Frontier {index + 1}", "frontier", candidate, eligible, positions_by_id)
             for index, candidate in enumerate(frontier)
         )
+        if risk_free_rate_annual is not None and np.isfinite(risk_free_rate_annual):
+            points.append(
+                RiskFrontierPoint(
+                    label="Risk-free",
+                    kind="risk_free",
+                    annual_return=float(risk_free_rate_annual),
+                    annual_vol=0.0,
+                    sharpe=None,
+                    weights=[],
+                )
+            )
         return points, []
 
     @classmethod
@@ -535,8 +556,9 @@ class RiskService:
         cov: np.ndarray,
         eligible: list[str],
         positions_by_id: dict[str, object],
+        risk_free_rate_annual: float | None = None,
     ) -> RiskFrontierPoint:
-        annual_return, annual_vol, sharpe = cls._frontier_stats(weights, mean_returns, cov)
+        annual_return, annual_vol, sharpe = cls._frontier_stats(weights, mean_returns, cov, risk_free_rate_annual)
         return RiskFrontierPoint(
             label=label,
             kind=kind,
@@ -545,6 +567,43 @@ class RiskService:
             sharpe=sharpe,
             weights=cls._frontier_weights(weights, eligible, positions_by_id),
         )
+
+    def _risk_free_rate_for_frontier(
+        self,
+        *,
+        request: RiskComputeRequest,
+        returns_df: pd.DataFrame,
+    ) -> tuple[float | None, list[str]]:
+        if self.risk_free_service is None or returns_df.empty:
+            return None, []
+        if str(request.base_currency or "").upper() != "USD":
+            return None, []
+        start = returns_df.index.min()
+        end = returns_df.index.max()
+        rf_series, warnings = self.risk_free_service.get_usd_daily_returns(start, end)
+        if rf_series is None or rf_series.empty:
+            return None, warnings
+        annual_rate = float((1.0 + rf_series.astype(float).mean()) ** 252.0 - 1.0)
+        if not np.isfinite(annual_rate):
+            return None, warnings
+        return annual_rate, warnings
+
+    @classmethod
+    def _correlation_matrix(cls, returns_df: pd.DataFrame, snapshot: PortfolioSnapshot) -> pd.DataFrame:
+        if returns_df.empty:
+            return pd.DataFrame()
+        positions_by_id = {position.resolved_instrument_id(): position for position in snapshot.positions}
+        eligible: list[str] = []
+        for instrument_id in returns_df.columns:
+            position = positions_by_id.get(str(instrument_id))
+            if cls._is_cash(position):
+                continue
+            series = pd.to_numeric(returns_df[instrument_id], errors="coerce").dropna()
+            if len(series) >= 3 and float(series.std() or 0.0) > 1e-10:
+                eligible.append(str(instrument_id))
+        if not eligible:
+            return pd.DataFrame()
+        return returns_df.reindex(columns=eligible).apply(pd.to_numeric, errors="coerce").corr(min_periods=3)
 
     @classmethod
     def _tuple_to_frontier_point(
@@ -570,13 +629,15 @@ class RiskService:
         weights: np.ndarray,
         mean_returns: np.ndarray,
         cov: np.ndarray,
+        risk_free_rate_annual: float | None = None,
     ) -> tuple[float, float, float | None]:
         annual_return = float(weights @ mean_returns)
         variance = float(weights.T @ cov @ weights)
         if variance < 0 and abs(variance) < 1e-12:
             variance = 0.0
         annual_vol = float(np.sqrt(variance)) if variance > 0 else 0.0
-        sharpe = annual_return / annual_vol if annual_vol > 0 else None
+        excess_return = annual_return - float(risk_free_rate_annual or 0.0)
+        sharpe = excess_return / annual_vol if annual_vol > 0 else None
         return annual_return, annual_vol, sharpe
 
     @staticmethod

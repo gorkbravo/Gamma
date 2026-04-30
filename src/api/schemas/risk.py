@@ -107,6 +107,23 @@ class RiskFrontierPointModel(BaseModel):
     weights: list[RiskFrontierWeightModel] = Field(default_factory=list)
 
 
+class RiskCorrelationAssetModel(BaseModel):
+    symbol: str
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+
+
+class RiskCorrelationCellModel(BaseModel):
+    row: str
+    column: str
+    correlation: float | None = None
+
+
+class RiskCorrelationMatrixModel(BaseModel):
+    assets: list[RiskCorrelationAssetModel] = Field(default_factory=list)
+    cells: list[RiskCorrelationCellModel] = Field(default_factory=list)
+
+
 class RiskComputeResponseModel(BaseModel):
     metrics: RiskMetricsModel
     portfolio_return_points: list[TimeSeriesPoint]
@@ -114,6 +131,7 @@ class RiskComputeResponseModel(BaseModel):
     contributions: list[RiskContributionModel]
     monte_carlo: MonteCarloChartsModel = Field(default_factory=MonteCarloChartsModel)
     frontier_points: list[RiskFrontierPointModel] = Field(default_factory=list)
+    correlation_matrix: RiskCorrelationMatrixModel = Field(default_factory=RiskCorrelationMatrixModel)
     excluded_assets: list[ExcludedAssetModel]
     warnings: list[str] = Field(default_factory=list)
 
@@ -168,6 +186,7 @@ class RiskComputeResponseModel(BaseModel):
                 )
                 for point in payload.frontier_points
             ],
+            correlation_matrix=_correlation_matrix_to_payload(payload),
             excluded_assets=[
                 ExcludedAssetModel(
                     symbol=_position_meta(payload.snapshot, symbol).get("symbol") or symbol,
@@ -198,6 +217,32 @@ def _series_to_float_list(series) -> list[float]:
         return []
     clean = series.dropna()
     return [float(value) for value in clean.tolist()]
+
+
+def _correlation_matrix_to_payload(payload: RiskComputationPayload) -> RiskCorrelationMatrixModel:
+    frame = payload.correlation_matrix
+    if frame is None or frame.empty:
+        return RiskCorrelationMatrixModel()
+    columns = [str(column) for column in frame.columns]
+    assets = [
+        RiskCorrelationAssetModel(
+            symbol=_position_meta(payload.snapshot, column).get("symbol") or column,
+            instrument_id=_position_meta(payload.snapshot, column).get("instrument_id"),
+            display_symbol=_position_meta(payload.snapshot, column).get("display_symbol"),
+        )
+        for column in columns
+    ]
+    cells: list[RiskCorrelationCellModel] = []
+    for row in columns:
+        for column in columns:
+            cells.append(
+                RiskCorrelationCellModel(
+                    row=row,
+                    column=column,
+                    correlation=_to_float(frame.loc[row, column]) if row in frame.index and column in frame.columns else None,
+                )
+            )
+    return RiskCorrelationMatrixModel(assets=assets, cells=cells)
 
 
 def _fan_percentiles_to_payload(frame) -> dict[str, list[IndexedValuePoint]]:
