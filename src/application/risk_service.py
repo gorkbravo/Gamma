@@ -98,6 +98,7 @@ class RiskFrontierPoint:
 
 class RiskService:
     _MC_RANDOM_SEED = 42
+    _DEFAULT_FRONTIER_UNIVERSE = ("SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC", "HYG")
 
     def __init__(
         self,
@@ -388,12 +389,18 @@ class RiskService:
             returns_df=risk_returns_df,
         )
         warnings.extend(risk_free_warnings)
+        frontier_universe_returns, frontier_universe_warnings = self._load_frontier_universe_returns(
+            request=request,
+            data_provider=data_provider,
+        )
+        warnings.extend(frontier_universe_warnings)
 
         frontier_points, frontier_warnings = self._build_efficient_frontier(
             snapshot=snapshot,
             returns_df=risk_returns_df,
             weights=weights_aligned,
             risk_free_rate_annual=risk_free_rate_annual,
+            reference_returns_df=frontier_universe_returns,
         )
         warnings.extend(frontier_warnings)
         results.warnings = warnings
@@ -430,10 +437,19 @@ class RiskService:
         returns_df: pd.DataFrame,
         weights: pd.Series,
         risk_free_rate_annual: float | None = None,
+        reference_returns_df: pd.DataFrame | None = None,
     ) -> tuple[list[RiskFrontierPoint], list[str]]:
         warnings: list[str] = []
+        def unavailable(message: str) -> tuple[list[RiskFrontierPoint], list[str]]:
+            reference_points, reference_warnings = cls._reference_frontier_points_with_cml(
+                reference_returns_df=reference_returns_df,
+                risk_free_rate_annual=risk_free_rate_annual,
+                include_risk_free_marker=False,
+            )
+            return reference_points, [message, *reference_warnings]
+
         if returns_df.empty or weights.empty:
-            return [], ["Efficient frontier unavailable: no covered return history and weights."]
+            return unavailable("Efficient frontier unavailable: no covered return history and weights.")
 
         positions_by_id = {position.resolved_instrument_id(): position for position in snapshot.positions}
         risky_snapshot_count = sum(
@@ -461,31 +477,31 @@ class RiskService:
                 eligible.append(str(instrument_id))
 
         if len(eligible) < 2:
-            return [], [
+            return unavailable(
                 "Efficient frontier unavailable: need at least two eligible non-cash long positions with usable return variance "
                 f"(eligible {len(eligible)}; positive covered risky {positive_covered_risky_count}; "
                 f"snapshot risky {risky_snapshot_count}; return columns {len(returns_df.columns)})."
-            ]
+            )
 
         aligned = returns_df.reindex(columns=eligible).apply(pd.to_numeric, errors="coerce").dropna(how="any")
         if len(aligned) < 3:
-            return [], [
+            return unavailable(
                 f"Efficient frontier unavailable: only {len(aligned)} overlapping observations after alignment."
-            ]
+            )
 
         mean_returns = aligned.mean().to_numpy(dtype=float) * 252.0
         cov = aligned.cov().to_numpy(dtype=float) * 252.0
         if cov.size == 0 or not np.isfinite(cov).all() or not np.isfinite(mean_returns).all():
-            return [], ["Efficient frontier unavailable: invalid expected-return or covariance inputs."]
+            return unavailable("Efficient frontier unavailable: invalid expected-return or covariance inputs.")
 
         variances = np.diag(cov)
         if np.any(variances <= 0):
-            return [], ["Efficient frontier unavailable: one or more eligible assets has non-positive variance."]
+            return unavailable("Efficient frontier unavailable: one or more eligible assets has non-positive variance.")
 
         current = weights.reindex(eligible).astype(float).clip(lower=0.0).to_numpy(dtype=float)
         current_sum = float(current.sum())
         if current_sum <= 0:
-            return [], ["Efficient frontier unavailable: covered risky weights sum to zero."]
+            return unavailable("Efficient frontier unavailable: covered risky weights sum to zero.")
         current = current / current_sum
 
         rng = np.random.default_rng(42)
@@ -503,7 +519,7 @@ class RiskService:
                 candidates.append((np.asarray(raw_weights, dtype=float), annual_return, annual_vol, sharpe))
 
         if not candidates:
-            return [], ["Efficient frontier unavailable: no valid candidate portfolios."]
+            return unavailable("Efficient frontier unavailable: no valid candidate portfolios.")
 
         min_vol = min(candidates, key=lambda item: item[2])
         max_sharpe = max(candidates, key=lambda item: item[3] if item[3] is not None else -np.inf)
@@ -530,10 +546,61 @@ class RiskService:
             cls._tuple_to_frontier_point("Risk Parity", "candidate", risk_parity, eligible, positions_by_id),
         ]
         points.extend(
+            cls._single_asset_frontier_point(
+                index=index,
+                instrument_id=instrument_id,
+                mean_returns=mean_returns,
+                cov=cov,
+                positions_by_id=positions_by_id,
+                risk_free_rate_annual=risk_free_rate_annual,
+            )
+            for index, instrument_id in enumerate(eligible)
+        )
+        points.extend(
             cls._tuple_to_frontier_point(f"Frontier {index + 1}", "frontier", candidate, eligible, positions_by_id)
             for index, candidate in enumerate(frontier)
         )
         if risk_free_rate_annual is not None and np.isfinite(risk_free_rate_annual):
+            points.extend(
+                [
+                    RiskFrontierPoint(
+                        label="Portfolio CML Risk-free",
+                        kind="portfolio_cml",
+                        annual_return=float(risk_free_rate_annual),
+                        annual_vol=0.0,
+                        sharpe=None,
+                        weights=[],
+                    ),
+                    cls._tuple_to_frontier_point(
+                        "Portfolio CML Tangency",
+                        "portfolio_cml",
+                        max_sharpe,
+                        eligible,
+                        positions_by_id,
+                    ),
+                ]
+            )
+        reference_points, reference_warnings = cls._reference_frontier_points_with_cml(
+            reference_returns_df=reference_returns_df,
+            risk_free_rate_annual=risk_free_rate_annual,
+            include_risk_free_marker=True,
+        )
+        points.extend(reference_points)
+        warnings.extend(reference_warnings)
+        return points, warnings
+
+    @classmethod
+    def _reference_frontier_points_with_cml(
+        cls,
+        *,
+        reference_returns_df: pd.DataFrame | None,
+        risk_free_rate_annual: float | None = None,
+        include_risk_free_marker: bool = True,
+    ) -> tuple[list[RiskFrontierPoint], list[str]]:
+        points: list[RiskFrontierPoint] = []
+        warnings: list[str] = []
+        has_risk_free = risk_free_rate_annual is not None and np.isfinite(risk_free_rate_annual)
+        if include_risk_free_marker and has_risk_free:
             points.append(
                 RiskFrontierPoint(
                     label="Risk-free",
@@ -544,7 +611,199 @@ class RiskService:
                     weights=[],
                 )
             )
-        return points, []
+        if reference_returns_df is None or reference_returns_df.empty:
+            return points, warnings
+        reference_points, reference_warnings, reference_tangency = cls._build_reference_frontier_points(
+            returns_df=reference_returns_df,
+            risk_free_rate_annual=risk_free_rate_annual,
+        )
+        points.extend(reference_points)
+        warnings.extend(reference_warnings)
+        if reference_tangency is not None and has_risk_free:
+            points.extend(
+                [
+                    RiskFrontierPoint(
+                        label="CML Risk-free",
+                        kind="cml",
+                        annual_return=float(risk_free_rate_annual),
+                        annual_vol=0.0,
+                        sharpe=None,
+                        weights=[],
+                    ),
+                    RiskFrontierPoint(
+                        label="CML Tangency",
+                        kind="cml",
+                        annual_return=reference_tangency.annual_return,
+                        annual_vol=reference_tangency.annual_vol,
+                        sharpe=reference_tangency.sharpe,
+                        weights=reference_tangency.weights,
+                    ),
+                ]
+            )
+        return points, warnings
+
+    @classmethod
+    def _build_reference_frontier_points(
+        cls,
+        *,
+        returns_df: pd.DataFrame,
+        risk_free_rate_annual: float | None = None,
+    ) -> tuple[list[RiskFrontierPoint], list[str], RiskFrontierPoint | None]:
+        eligible: list[str] = []
+        for column in returns_df.columns:
+            series = pd.to_numeric(returns_df[column], errors="coerce").dropna()
+            if len(series) >= 3 and float(series.std() or 0.0) > 1e-10:
+                eligible.append(str(column))
+        if len(eligible) < 2:
+            return [], ["Reference frontier unavailable: need at least two broad-universe assets with usable return variance."], None
+
+        aligned = returns_df.reindex(columns=eligible).apply(pd.to_numeric, errors="coerce").dropna(how="any")
+        if len(aligned) < 3:
+            return [], [f"Reference frontier unavailable: only {len(aligned)} overlapping broad-universe observations."], None
+
+        mean_returns = aligned.mean().to_numpy(dtype=float) * 252.0
+        cov = aligned.cov().to_numpy(dtype=float) * 252.0
+        if cov.size == 0 or not np.isfinite(cov).all() or not np.isfinite(mean_returns).all():
+            return [], ["Reference frontier unavailable: invalid broad-universe expected-return or covariance inputs."], None
+
+        variances = np.diag(cov)
+        if np.any(variances <= 0):
+            return [], ["Reference frontier unavailable: one or more broad-universe assets has non-positive variance."], None
+
+        rng = np.random.default_rng(84)
+        n_assets = len(eligible)
+        random_count = min(7000, max(2500, n_assets * 550))
+        inverse_vol = 1.0 / np.sqrt(variances)
+        portfolios = [
+            np.full(n_assets, 1.0 / n_assets),
+            inverse_vol / float(inverse_vol.sum()),
+            *rng.dirichlet(np.ones(n_assets), size=random_count),
+        ]
+
+        candidates: list[tuple[np.ndarray, float, float, float | None]] = []
+        for raw_weights in portfolios:
+            annual_return, annual_vol, sharpe = cls._frontier_stats(raw_weights, mean_returns, cov, risk_free_rate_annual)
+            if annual_vol > 0 and np.isfinite(annual_return) and np.isfinite(annual_vol):
+                candidates.append((np.asarray(raw_weights, dtype=float), annual_return, annual_vol, sharpe))
+        if not candidates:
+            return [], ["Reference frontier unavailable: no valid broad-universe candidate portfolios."], None
+
+        frontier_candidates = sorted(candidates, key=lambda item: (item[2], -item[1]))
+        frontier: list[tuple[np.ndarray, float, float, float | None]] = []
+        best_return = -np.inf
+        for candidate in frontier_candidates:
+            if candidate[1] > best_return + 1e-8:
+                frontier.append(candidate)
+                best_return = candidate[1]
+        if len(frontier) > 28:
+            selected_indexes = np.linspace(0, len(frontier) - 1, 28).round().astype(int)
+            frontier = [frontier[int(index)] for index in selected_indexes]
+
+        tangency_tuple = max(candidates, key=lambda item: item[3] if item[3] is not None else -np.inf)
+        tangency = cls._reference_tuple_to_frontier_point("Universe Max Sharpe", "universe_candidate", tangency_tuple, eligible)
+        points = [
+            cls._reference_single_asset_point(index, instrument_id, mean_returns, cov, eligible, risk_free_rate_annual)
+            for index, instrument_id in enumerate(eligible)
+        ]
+        points.extend(
+            cls._reference_tuple_to_frontier_point(
+                f"Universe Frontier {index + 1}",
+                "universe_frontier",
+                candidate,
+                eligible,
+            )
+            for index, candidate in enumerate(frontier)
+        )
+        points.append(tangency)
+        return points, [], tangency
+
+    @classmethod
+    def _single_asset_frontier_point(
+        cls,
+        *,
+        index: int,
+        instrument_id: str,
+        mean_returns: np.ndarray,
+        cov: np.ndarray,
+        positions_by_id: dict[str, object],
+        risk_free_rate_annual: float | None = None,
+    ) -> RiskFrontierPoint:
+        weights = np.zeros(len(mean_returns), dtype=float)
+        weights[index] = 1.0
+        position = positions_by_id.get(instrument_id)
+        label = str(getattr(position, "display_symbol", None) or getattr(position, "symbol", None) or instrument_id)
+        annual_return, annual_vol, sharpe = cls._frontier_stats(
+            weights,
+            mean_returns,
+            cov,
+            risk_free_rate_annual,
+        )
+        return RiskFrontierPoint(
+            label=label,
+            kind="asset",
+            annual_return=annual_return,
+            annual_vol=annual_vol,
+            sharpe=sharpe,
+            weights=cls._frontier_weights(np.array([1.0], dtype=float), [instrument_id], positions_by_id),
+        )
+
+    @classmethod
+    def _reference_single_asset_point(
+        cls,
+        index: int,
+        instrument_id: str,
+        mean_returns: np.ndarray,
+        cov: np.ndarray,
+        eligible: list[str],
+        risk_free_rate_annual: float | None = None,
+    ) -> RiskFrontierPoint:
+        weights = np.zeros(len(mean_returns), dtype=float)
+        weights[index] = 1.0
+        annual_return, annual_vol, sharpe = cls._frontier_stats(
+            weights,
+            mean_returns,
+            cov,
+            risk_free_rate_annual,
+        )
+        return RiskFrontierPoint(
+            label=instrument_id,
+            kind="universe_asset",
+            annual_return=annual_return,
+            annual_vol=annual_vol,
+            sharpe=sharpe,
+            weights=cls._reference_frontier_weights(np.array([1.0], dtype=float), [eligible[index]]),
+        )
+
+    @classmethod
+    def _reference_tuple_to_frontier_point(
+        cls,
+        label: str,
+        kind: str,
+        candidate: tuple[np.ndarray, float, float, float | None],
+        eligible: list[str],
+    ) -> RiskFrontierPoint:
+        weights, annual_return, annual_vol, sharpe = candidate
+        return RiskFrontierPoint(
+            label=label,
+            kind=kind,
+            annual_return=float(annual_return),
+            annual_vol=float(annual_vol),
+            sharpe=None if sharpe is None else float(sharpe),
+            weights=cls._reference_frontier_weights(weights, eligible),
+        )
+
+    @staticmethod
+    def _reference_frontier_weights(weights: np.ndarray, eligible: list[str]) -> list[RiskFrontierWeight]:
+        rows = [
+            RiskFrontierWeight(
+                symbol=instrument_id,
+                instrument_id=instrument_id,
+                display_symbol=instrument_id,
+                weight=float(weight),
+            )
+            for instrument_id, weight in zip(eligible, weights)
+        ]
+        return sorted(rows, key=lambda row: abs(row.weight), reverse=True)
 
     @classmethod
     def _frontier_point(
@@ -738,6 +997,86 @@ class RiskService:
             if progress_cb is not None:
                 progress_cb(index, total, identity.display_symbol)
         return prices, missing
+
+    def _load_frontier_universe_returns(
+        self,
+        *,
+        request: RiskComputeRequest,
+        data_provider: AppDataProvider | None = None,
+    ) -> tuple[pd.DataFrame | None, list[str]]:
+        prices: dict[str, pd.Series] = {}
+        unavailable: list[str] = []
+        conversion_warnings: list[str] = []
+        for symbol in self._DEFAULT_FRONTIER_UNIVERSE:
+            series = self._load_frontier_universe_history(symbol, request.lookback_days, data_provider)
+            if series is None or series.empty:
+                unavailable.append(symbol)
+                continue
+            converted, fx_warnings = self._convert_benchmark_to_base(
+                series.astype(float),
+                "USD",
+                request.base_currency,
+                request.lookback_days,
+                label=symbol,
+                context="Reference universe",
+            )
+            conversion_warnings.extend(fx_warnings)
+            if converted is None or converted.empty:
+                unavailable.append(symbol)
+                continue
+            prices[symbol] = converted.astype(float)
+
+        warnings = list(dict.fromkeys(conversion_warnings))
+        if len(prices) < 2:
+            if prices or unavailable:
+                warnings.append(
+                    "Reference frontier unavailable: broad ETF universe has fewer than two usable histories "
+                    f"({len(prices)} usable; missing {', '.join(unavailable[:6])}{'...' if len(unavailable) > 6 else ''})."
+                )
+            return None, warnings
+
+        returns = compute_returns(align_prices(prices))
+        if returns.empty or len(returns.columns) < 2:
+            warnings.append("Reference frontier unavailable: broad ETF universe histories did not produce overlapping returns.")
+            return None, warnings
+        return returns, warnings
+
+    def _load_frontier_universe_history(
+        self,
+        symbol: str,
+        lookback_days: int,
+        data_provider: AppDataProvider | None = None,
+    ) -> pd.Series | None:
+        instrument = InstrumentReference(symbol=symbol).with_defaults(self.benchmark_defaults)
+
+        load_instrument_history_result = getattr(data_provider, "load_instrument_history_result", None)
+        if callable(load_instrument_history_result):
+            try:
+                result = load_instrument_history_result(
+                    instrument,
+                    lookback_days,
+                    defaults=self.benchmark_defaults,
+                )
+                if result.series is not None and not result.series.empty:
+                    return result.series.astype(float)
+            except Exception:
+                return None
+
+        history_providers = getattr(data_provider, "history_providers", None)
+        for provider in history_providers or []:
+            try:
+                result = provider.load_history(instrument, lookback_days)
+            except Exception:
+                continue
+            if result.series is not None and not result.series.empty:
+                return result.series.astype(float)
+
+        if self.client.mock:
+            series = self.mock_service.load_history(symbol)
+        else:
+            contract = contract_for_instrument(instrument)
+            series = self.market_data.fetch_history(contract, lookback_days)
+        return None if series is None or series.empty else series.astype(float)
 
     @staticmethod
     def _ensure_cash_returns(snapshot: PortfolioSnapshot, returns_df: pd.DataFrame) -> pd.DataFrame:

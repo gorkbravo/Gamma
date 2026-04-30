@@ -46,6 +46,15 @@ class _StubFXService:
         return self._rate
 
 
+class _StubRiskFreeService:
+    def __init__(self, daily_return: float = 0.0001) -> None:
+        self.daily_return = daily_return
+
+    def get_usd_daily_returns(self, start, end):
+        index = pd.date_range(start, end, freq="B")
+        return pd.Series(self.daily_return, index=index), []
+
+
 class _StubHistoryStore:
     def append_snapshot(self, *args, **kwargs) -> None:
         return None
@@ -87,12 +96,12 @@ def _make_snapshot(positions, net_liq=100.0):
     )
 
 
-def _make_risk_service(market_data=None, mock_service=None, benchmark_defaults=None):
+def _make_risk_service(market_data=None, mock_service=None, benchmark_defaults=None, risk_free_service=None):
     return RiskService(
         client=_StubClient(),
         market_data=market_data or _StubMarketData(),
         mock_service=mock_service or _StubMockService(),
-        risk_free_service=None,
+        risk_free_service=risk_free_service,
         benchmark_defaults=benchmark_defaults,
     )
 
@@ -552,10 +561,59 @@ def test_compute_builds_efficient_frontier_from_covered_risky_history():
 
     assert {"Current", "Min Vol", "Max Sharpe", "Risk Parity"}.issubset(labels)
     assert any(point.kind == "frontier" for point in payload.frontier_points)
+    assert {point.label for point in payload.frontier_points if point.kind == "asset"} == {"A", "B", "C"}
     current = next(point for point in payload.frontier_points if point.label == "Current")
     assert abs(sum(weight.weight for weight in current.weights) - 1.0) < 1e-9
     assert current.annual_vol > 0
     assert not any("Efficient frontier unavailable" in warning for warning in payload.results.warnings)
+
+
+def test_compute_adds_reference_universe_frontier_and_cml_when_available():
+    idx = pd.date_range("2026-01-02", periods=14, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 102, 103, 104, 103, 105, 106, 107, 108, 109, 111, 110, 112], index=idx),
+        "B": pd.Series([50, 50.2, 50.8, 50.5, 51.0, 51.8, 52.0, 52.5, 53.0, 52.8, 53.5, 54.0, 54.4, 54.9], index=idx),
+    }
+    universe = {
+        "SPY": pd.Series([420, 421, 423, 422, 426, 428, 427, 431, 433, 435, 434, 438, 440, 443], index=idx),
+        "QQQ": pd.Series([360, 363, 366, 364, 369, 373, 371, 376, 379, 382, 381, 386, 389, 392], index=idx),
+        "TLT": pd.Series([92, 92.4, 92.1, 92.8, 93.2, 93.0, 93.6, 94.0, 93.8, 94.3, 94.7, 94.5, 95.1, 95.3], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=60.0),
+            PositionItem("B", "STK", "USD", 1, None, None, None, None, base_market_value=40.0),
+        ],
+        net_liq=100.0,
+    )
+    service = _make_risk_service(
+        mock_service=_StubMockService(universe),
+        risk_free_service=_StubRiskFreeService(),
+    )
+    request = RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=3,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        include_monte_carlo=False,
+        recommended_min_obs=3,
+    )
+
+    payload = service.compute(request, data_provider=_PriceProvider(prices))
+
+    kinds = {point.kind for point in payload.frontier_points}
+    assert "universe_frontier" in kinds
+    assert "universe_asset" in kinds
+    assert "universe_candidate" in kinds
+    assert sum(1 for point in payload.frontier_points if point.kind == "cml") == 2
+    assert sum(1 for point in payload.frontier_points if point.kind == "portfolio_cml") == 2
+    assert any(point.label == "Risk-free" and point.kind == "risk_free" for point in payload.frontier_points)
 
 
 def test_compute_exposes_position_correlation_matrix():

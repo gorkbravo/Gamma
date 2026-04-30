@@ -598,7 +598,7 @@ export interface RiskFrontierWeight {
 
 export interface RiskFrontierPoint {
   label: string;
-  kind: "current" | "candidate" | "frontier" | "risk_free" | string;
+  kind: "current" | "candidate" | "frontier" | "asset" | "risk_free" | "universe_frontier" | "universe_asset" | "universe_candidate" | "cml" | "portfolio_cml" | string;
   annual_return: number;
   annual_vol: number;
   sharpe: number | null;

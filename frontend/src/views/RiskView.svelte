@@ -89,6 +89,10 @@
   let monteCarloMarkers: DistributionMarker[] = [];
   let fanHistory: IndexedValuePoint[] = [];
   let frontierPlot: FrontierPlotModel = buildFrontierPlot([]);
+  let frontierW = 0;
+  let frontierH = 0;
+  let hoveredFrontierIdx: number | null = null;
+  const FRONTIER_PAD = { l: 38, r: 14, t: 14, b: 28 };
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value) ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
@@ -235,6 +239,27 @@
       .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
       .join(" ");
     return { points: plotted, frontierPath, xMin, xMax, yMin, yMax };
+  }
+
+  function smoothSvgPath(points: Array<{ px: number; py: number }>) {
+    if (points.length < 2) return "";
+    if (points.length === 2) {
+      return `M ${points[0].px.toFixed(1)} ${points[0].py.toFixed(1)} L ${points[1].px.toFixed(1)} ${points[1].py.toFixed(1)}`;
+    }
+    const tension = 0.22;
+    return points
+      .map((point, index) => {
+        if (index === 0) return `M ${point.px.toFixed(1)} ${point.py.toFixed(1)}`;
+        const previous = points[index - 1];
+        const beforePrevious = points[Math.max(0, index - 2)];
+        const next = points[Math.min(points.length - 1, index + 1)];
+        const cp1x = previous.px + (point.px - beforePrevious.px) * tension;
+        const cp1y = previous.py + (point.py - beforePrevious.py) * tension;
+        const cp2x = point.px - (next.px - previous.px) * tension;
+        const cp2y = point.py - (next.py - previous.py) * tension;
+        return `C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)} ${cp2x.toFixed(1)} ${cp2y.toFixed(1)} ${point.px.toFixed(1)} ${point.py.toFixed(1)}`;
+      })
+      .join(" ");
   }
 
   $: cumulativeChart = (() => {
@@ -663,39 +688,119 @@
 {/snippet}
 
 {#snippet FrontierChart(plot: FrontierPlotModel, emptyMessage: string | null)}
-  <div class="frontier">
-    {#if plot.points.length}
-      <svg class="frontier-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Efficient frontier risk return chart">
-        <line class="axis" x1="0" y1="100" x2="100" y2="100" />
-        <line class="axis" x1="0" y1="0" x2="0" y2="100" />
-        {#if plot.frontierPath}
-          <path class="frontier-line" d={plot.frontierPath} />
-        {/if}
-        {#each plot.points.filter((point) => point.kind === "frontier") as point}
-          <circle class="frontier-dot" cx={point.x} cy={point.y} r="1.05">
-            <title>{point.label}: vol {pct(point.annualVol)}, return {pct(point.annualReturn)}, Sharpe {fmt(point.sharpe, 2)}</title>
-          </circle>
+  <div class="frontier" bind:clientWidth={frontierW} bind:clientHeight={frontierH}>
+    {#if plot.points.length && frontierW > 0 && frontierH > 0}
+      {@const plotW = Math.max(frontierW - FRONTIER_PAD.l - FRONTIER_PAD.r, 1)}
+      {@const plotH = Math.max(frontierH - FRONTIER_PAD.t - FRONTIER_PAD.b, 1)}
+      {@const pixelPoints = plot.points.map((p, idx) => ({
+        ...p,
+        idx,
+        px: FRONTIER_PAD.l + (p.x / 100) * plotW,
+        py: FRONTIER_PAD.t + (p.y / 100) * plotH,
+      }))}
+      {@const frontierPx = pixelPoints
+        .filter((p) => p.kind === "frontier")
+        .sort((a, b) => a.annualVol - b.annualVol)}
+      {@const universeFrontierPx = pixelPoints
+        .filter((p) => p.kind === "universe_frontier")
+        .sort((a, b) => a.annualVol - b.annualVol)}
+      {@const cmlPx = pixelPoints
+        .filter((p) => p.kind === "cml")
+        .sort((a, b) => a.annualVol - b.annualVol)}
+      {@const portfolioCmlPx = pixelPoints
+        .filter((p) => p.kind === "portfolio_cml")
+        .sort((a, b) => a.annualVol - b.annualVol)}
+      {@const frontierLine = smoothSvgPath(frontierPx)}
+      {@const universeFrontierLine = smoothSvgPath(universeFrontierPx)}
+      {@const cmlLine = smoothSvgPath(cmlPx)}
+      {@const portfolioCmlLine = smoothSvgPath(portfolioCmlPx)}
+      {@const markerPx = pixelPoints.filter((p) => !["frontier", "universe_frontier", "cml", "portfolio_cml"].includes(p.kind))}
+      {@const labeledMarkerPx = markerPx.filter((p) => !["asset", "universe_asset"].includes(p.kind))}
+      {@const hovered = hoveredFrontierIdx != null ? pixelPoints[hoveredFrontierIdx] ?? null : null}
+      <svg width={frontierW} height={frontierH} aria-label="Efficient frontier risk return chart">
+        {#each [0.25, 0.5, 0.75] as t}
+          <line class="grid" x1={FRONTIER_PAD.l} y1={FRONTIER_PAD.t + t * plotH} x2={frontierW - FRONTIER_PAD.r} y2={FRONTIER_PAD.t + t * plotH} />
+          <line class="grid" x1={FRONTIER_PAD.l + t * plotW} y1={FRONTIER_PAD.t} x2={FRONTIER_PAD.l + t * plotW} y2={frontierH - FRONTIER_PAD.b} />
         {/each}
-        {#each plot.points.filter((point) => point.kind !== "frontier") as point}
-          <circle class={`frontier-marker-dot ${point.kind}`} cx={point.x} cy={point.y} r="1.8">
-            <title>{point.label}: vol {pct(point.annualVol)}, return {pct(point.annualReturn)}, Sharpe {fmt(point.sharpe, 2)}</title>
-          </circle>
+        <line class="axis" x1={FRONTIER_PAD.l} y1={frontierH - FRONTIER_PAD.b} x2={frontierW - FRONTIER_PAD.r} y2={frontierH - FRONTIER_PAD.b} />
+        <line class="axis" x1={FRONTIER_PAD.l} y1={FRONTIER_PAD.t} x2={FRONTIER_PAD.l} y2={frontierH - FRONTIER_PAD.b} />
+        {#if frontierLine}
+          <path class="frontier-line" d={frontierLine} />
+        {/if}
+        {#if universeFrontierLine}
+          <path class="universe-frontier-line" d={universeFrontierLine} />
+        {/if}
+        {#if cmlLine}
+          <path class="cml-line" d={cmlLine} />
+        {/if}
+        {#if portfolioCmlLine}
+          <path class="portfolio-cml-line" d={portfolioCmlLine} />
+        {/if}
+        {#each frontierPx as p}
+          <circle
+            class="frontier-dot"
+            class:hovered={hoveredFrontierIdx === p.idx}
+            cx={p.px}
+            cy={p.py}
+            r={hoveredFrontierIdx === p.idx ? 5 : 3}
+            role="button"
+            tabindex="0"
+            aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
+            on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
+            on:mouseleave={() => (hoveredFrontierIdx = null)}
+            on:focus={() => (hoveredFrontierIdx = p.idx)}
+            on:blur={() => (hoveredFrontierIdx = null)}
+          />
+        {/each}
+        {#each markerPx as p}
+          <circle
+            class={`frontier-marker-dot ${p.kind}`}
+            class:hovered={hoveredFrontierIdx === p.idx}
+            cx={p.px}
+            cy={p.py}
+            r={["asset", "universe_asset"].includes(p.kind) ? hoveredFrontierIdx === p.idx ? 5.5 : 4 : hoveredFrontierIdx === p.idx ? 7 : 5.5}
+            role="button"
+            tabindex="0"
+            aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
+            on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
+            on:mouseleave={() => (hoveredFrontierIdx = null)}
+            on:focus={() => (hoveredFrontierIdx = p.idx)}
+            on:blur={() => (hoveredFrontierIdx = null)}
+          />
         {/each}
       </svg>
+
       <div class="frontier-label-layer">
-        {#each plot.points.filter((point) => point.kind !== "frontier") as point}
-          <span class={`frontier-label ${point.kind}`} style={`left:${point.x}%; top:${point.y}%;`}>{point.label}</span>
+        {#each labeledMarkerPx as p}
+          <span
+            class={`frontier-label ${p.kind}`}
+            style={`left:${p.px}px; top:${p.py - 12}px;`}
+          >{p.label}</span>
         {/each}
       </div>
-      <span class="axis-label x-min">{pct(plot.xMin)}</span>
+
+      <span class="axis-label x-min">Vol {pct(plot.xMin)}</span>
       <span class="axis-label x-max">{pct(plot.xMax)}</span>
       <span class="axis-label y-min">{pct(plot.yMin)}</span>
-      <span class="axis-label y-max">{pct(plot.yMax)}</span>
+      <span class="axis-label y-max">Ret {pct(plot.yMax)}</span>
+
+      {#if hovered}
+        <div
+          class="frontier-tooltip"
+          style={`left:${Math.min(hovered.px + 12, frontierW - 180)}px; top:${Math.max(hovered.py - 4, 8)}px;`}
+        >
+          <strong>{hovered.label}</strong>
+          <span><em>Vol</em> {pct(hovered.annualVol)}</span>
+          <span><em>Return</em> {pct(hovered.annualReturn)}</span>
+          <span><em>Sharpe</em> {fmt(hovered.sharpe, 2)}</span>
+        </div>
+      {/if}
+    {:else if plot.points.length}
+      <!-- waiting for measurement -->
     {:else}
       <div class="frontier-empty">{emptyMessage ?? "Run a risk computation to populate the efficient frontier."}</div>
     {/if}
   </div>
-  <p class="muted">Frontier uses the current covered risky sleeve and backend historical returns. It is a read-only research diagnostic, not an account or broker action.</p>
 {/snippet}
 
 <style>
@@ -886,74 +991,126 @@
   .heatmap-cell.diag { color: var(--accent); background: rgba(122, 166, 200, 0.1); }
 
   .frontier {
-    min-height: 280px;
-    border: 1px solid var(--divider);
+    min-height: 320px;
     position: relative;
-    background: var(--bg-0);
     overflow: hidden;
   }
-  .frontier-svg {
-    position: absolute;
-    inset: 1.8rem 1rem 1.8rem 2.2rem;
-    width: calc(100% - 3.2rem);
-    height: calc(100% - 3.6rem);
+  .frontier > svg {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
   .frontier-label-layer {
     position: absolute;
-    inset: 1.8rem 1rem 1.8rem 2.2rem;
+    inset: 0;
+    pointer-events: none;
+  }
+  .grid {
+    stroke: var(--divider);
+    stroke-opacity: 0.36;
+    stroke-width: 1;
+    shape-rendering: crispEdges;
+  }
+  .axis {
+    stroke: var(--divider);
+    stroke-width: 1;
+    shape-rendering: crispEdges;
   }
   .frontier-line {
     fill: none;
     stroke: var(--chart-primary);
-    stroke-width: 1.4;
-    vector-effect: non-scaling-stroke;
+    stroke-width: 1.6;
+  }
+  .universe-frontier-line {
+    fill: none;
+    stroke: var(--chart-secondary);
+    stroke-width: 1.35;
+    stroke-dasharray: 5 4;
+  }
+  .cml-line {
+    fill: none;
+    stroke: var(--positive);
+    stroke-width: 1.2;
+    stroke-dasharray: 2 5;
+  }
+  .portfolio-cml-line {
+    fill: none;
+    stroke: var(--chart-primary);
+    stroke-width: 1.15;
+    stroke-dasharray: 2 4;
+    opacity: 0.85;
   }
   .frontier-dot {
     fill: var(--chart-primary);
-    opacity: 0.45;
-    vector-effect: non-scaling-stroke;
+    fill-opacity: 0.85;
+    stroke: var(--bg-0);
+    stroke-width: 1;
+    cursor: pointer;
+    transition: r 120ms ease, fill-opacity 120ms ease;
   }
+  .frontier-dot.hovered { fill-opacity: 1; }
   .frontier-marker-dot {
-    fill: var(--bg-1);
-    stroke: var(--chart-secondary);
-    stroke-width: 1.2;
-    vector-effect: non-scaling-stroke;
+    fill: var(--bg-0);
+    stroke-width: 2;
+    cursor: pointer;
+    transition: r 120ms ease;
   }
   .frontier-marker-dot.candidate { stroke: var(--chart-primary); }
   .frontier-marker-dot.current { stroke: var(--chart-secondary); fill: var(--chart-secondary); }
+  .frontier-marker-dot.asset { stroke: var(--text-2); fill: var(--bg-0); stroke-width: 1.4; }
+  .frontier-marker-dot.universe_asset { stroke: var(--chart-secondary); fill: var(--bg-0); stroke-width: 1.25; }
+  .frontier-marker-dot.universe_candidate { stroke: var(--positive); fill: var(--bg-0); stroke-width: 1.8; }
   .frontier-marker-dot.risk_free { stroke: var(--positive); fill: var(--positive); }
-  .axis {
-    stroke: var(--divider);
-    stroke-width: 1;
-    vector-effect: non-scaling-stroke;
-  }
   .frontier-label {
     position: absolute;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    padding: 0.22rem 0.35rem;
-    font-size: 11px;
-    transform: translate(-50%, -145%);
+    padding: 0.1rem 0.3rem;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    transform: translate(-50%, -100%);
     white-space: nowrap;
+    pointer-events: none;
+    background: var(--bg-1);
+    border: 1px solid var(--divider);
   }
-  .frontier-label.current { color: var(--chart-secondary); }
-  .frontier-label.candidate { color: var(--chart-primary); }
+  .frontier-label.current { color: var(--chart-secondary); border-color: rgba(196, 154, 90, 0.4); }
+  .frontier-label.candidate { color: var(--chart-primary); border-color: rgba(122, 166, 200, 0.4); }
+  .frontier-label.universe_candidate { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
   .frontier-label.risk_free { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
+
+  .frontier-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-2);
+    border: 1px solid var(--panel-strong);
+    padding: 0.4rem 0.55rem;
+    display: grid;
+    gap: 0.15rem;
+    min-width: 150px;
+    font-size: 11px;
+    z-index: 2;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+  .frontier-tooltip strong { color: var(--text-0); font-size: 11.5px; font-weight: 600; }
+  .frontier-tooltip span { color: var(--text-1); display: flex; justify-content: space-between; gap: 0.75rem; }
+  .frontier-tooltip em { color: var(--text-2); font-style: normal; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.08em; }
+
   .axis-label {
     position: absolute;
     color: var(--text-2);
     font-size: 10px;
+    pointer-events: none;
   }
-  .axis-label.x-min { left: 2.2rem; bottom: 0.45rem; }
-  .axis-label.x-max { right: 1rem; bottom: 0.45rem; }
-  .axis-label.y-min { left: 0.45rem; bottom: 1.55rem; }
-  .axis-label.y-max { left: 0.45rem; top: 1.35rem; }
+  .axis-label.x-min { left: 38px; bottom: 8px; }
+  .axis-label.x-max { right: 14px; bottom: 8px; }
+  .axis-label.y-min { left: 4px; bottom: 28px; }
+  .axis-label.y-max { left: 4px; top: 8px; }
   .frontier-empty {
-    min-height: 280px;
+    min-height: 320px;
     display: grid;
     place-items: center;
     color: var(--text-2);
-    font-size: 12px;
+    font-size: 11px;
     text-align: center;
     padding: 1rem;
   }
