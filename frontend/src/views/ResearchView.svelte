@@ -109,10 +109,58 @@
     rolling_corr: "Rolling Corr"
   };
   const timeframes: ResearchTimeframe[] = ["1M", "3M", "6M", "1Y", "MAX"];
+  const defaultPresetText = [
+    "SPY 0.20",
+    "QQQ 0.14",
+    "IWM 0.08",
+    "EFA 0.07",
+    "EEM 0.06",
+    "XLV 0.08",
+    "XLF 0.07",
+    "XLE 0.06",
+    "GLD 0.08",
+    "TLT 0.08",
+    "HYG 0.04",
+    "DBC 0.04"
+  ].join("\n");
   const presetBaskets: Array<{ id: string; label: string; text: string }> = [
-    { id: "index-core", label: "Index Core", text: "SPY 0.50\nQQQ 0.30\nIWM 0.20" },
-    { id: "mega-cap", label: "Mega Cap", text: "AAPL 0.35\nMSFT 0.35\nNVDA 0.30" },
-    { id: "defensive", label: "Defensive", text: "XLV 0.35\nXLP 0.35\nXLU 0.30" }
+    { id: "index-core", label: "Cross-Asset Core", text: defaultPresetText },
+    {
+      id: "ai-infra",
+      label: "AI Infrastructure",
+      text: [
+        "NVDA 0.18",
+        "MSFT 0.14",
+        "AVGO 0.11",
+        "AMD 0.09",
+        "TSM 0.08",
+        "ASML 0.07",
+        "AMZN 0.09",
+        "GOOGL 0.08",
+        "ANET 0.06",
+        "MU 0.05",
+        "SMH 0.05"
+      ].join("\n")
+    },
+    {
+      id: "defensive",
+      label: "Defensive Compounders",
+      text: [
+        "XLV 0.12",
+        "XLP 0.10",
+        "XLU 0.08",
+        "LLY 0.10",
+        "JNJ 0.08",
+        "PG 0.08",
+        "COST 0.08",
+        "MCD 0.07",
+        "KO 0.07",
+        "PEP 0.07",
+        "NEE 0.06",
+        "SO 0.05",
+        "WM 0.04"
+      ].join("\n")
+    }
   ];
 
   const initialDraft = get(researchDraft);
@@ -522,7 +570,7 @@
     primarySymbol = "AAPL";
     benchmarkSymbol = "SPY";
     lookbackDays = 252;
-    syntheticText = presetBaskets[0]?.text ?? "SPY 0.60\nQQQ 0.40";
+    syntheticText = presetBaskets[0]?.text ?? defaultPresetText;
     selectedPreset = presetBaskets[0]?.id ?? "index-core";
     inputWarning = "";
   }

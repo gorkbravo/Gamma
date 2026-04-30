@@ -344,7 +344,20 @@ export const researchDraft = writable<ResearchDraftState>({
   primarySymbol: "AAPL",
   benchmarkSymbol: "SPY",
   lookbackDays: 252,
-  syntheticText: "SPY 0.60\nQQQ 0.40",
+  syntheticText: [
+    "SPY 0.20",
+    "QQQ 0.14",
+    "IWM 0.08",
+    "EFA 0.07",
+    "EEM 0.06",
+    "XLV 0.08",
+    "XLF 0.07",
+    "XLE 0.06",
+    "GLD 0.08",
+    "TLT 0.08",
+    "HYG 0.04",
+    "DBC 0.04"
+  ].join("\n"),
   selectedPreset: "index-core"
 });
 export const sharedEquitySelection = writable<SharedEquitySelection | null>(null);
