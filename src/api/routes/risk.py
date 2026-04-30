@@ -15,6 +15,8 @@ def compute_risk(
     request: Request,
 ) -> RiskComputeResponseModel:
     runtime = request.app.state.runtime
+    source_scope = str(payload.source_scope or "portfolio").strip().lower()
+    data_provider = runtime.research_provider if source_scope == "research" else runtime.portfolio_provider
     result = runtime.risk_service.compute(
         RiskComputeRequest(
             snapshot=payload.snapshot.to_domain(),
@@ -28,6 +30,7 @@ def compute_risk(
             benchmark_symbol=payload.benchmark_symbol,
             base_currency=payload.snapshot.base_currency,
             include_monte_carlo=payload.include_monte_carlo,
-        )
+        ),
+        data_provider=data_provider,
     )
     return RiskComputeResponseModel.from_service_payload(result)

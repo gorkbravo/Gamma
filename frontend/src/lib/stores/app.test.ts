@@ -301,6 +301,7 @@ describe("app store orchestration", () => {
         fan_percentiles: {},
         sample_paths: {}
       },
+      frontier_points: [],
       excluded_assets: [],
       warnings: []
     };
@@ -322,6 +323,7 @@ describe("app store orchestration", () => {
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
     expect(requestBody.snapshot.positions[0].symbol).toBe("AAPL");
+    expect(requestBody.source_scope).toBe("research");
     expect(get(riskResult)?.metrics.historical_var).toBe(5);
   });
 
@@ -403,6 +405,7 @@ describe("app store orchestration", () => {
         fan_percentiles: {},
         sample_paths: {}
       },
+      frontier_points: [],
       excluded_assets: [],
       warnings: []
     });
@@ -469,6 +472,7 @@ describe("app store orchestration", () => {
         fan_percentiles: {},
         sample_paths: {}
       },
+      frontier_points: [],
       excluded_assets: [],
       warnings: []
     });
@@ -1062,6 +1066,7 @@ describe("app store orchestration", () => {
         fan_percentiles: {},
         sample_paths: {}
       },
+      frontier_points: [],
       excluded_assets: [],
       warnings: []
     });

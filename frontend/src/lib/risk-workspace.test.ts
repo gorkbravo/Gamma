@@ -148,6 +148,30 @@ const riskResult: RiskResult = {
     },
   ],
   monte_carlo: { terminal_returns: [], fan_percentiles: {}, sample_paths: {} },
+  frontier_points: [
+    {
+      label: "Current",
+      kind: "current",
+      annual_return: 0.08,
+      annual_vol: 0.19,
+      sharpe: 0.42,
+      weights: [
+        { symbol: "AAPL", instrument_id: "portfolio:stk:aapl", display_symbol: "AAPL", weight: 0.54 },
+        { symbol: "MSFT", instrument_id: "portfolio:stk:msft", display_symbol: "MSFT", weight: 0.46 },
+      ],
+    },
+    {
+      label: "Min Vol",
+      kind: "candidate",
+      annual_return: 0.07,
+      annual_vol: 0.16,
+      sharpe: 0.44,
+      weights: [
+        { symbol: "AAPL", instrument_id: "portfolio:stk:aapl", display_symbol: "AAPL", weight: 0.4 },
+        { symbol: "MSFT", instrument_id: "portfolio:stk:msft", display_symbol: "MSFT", weight: 0.6 },
+      ],
+    },
+  ],
   excluded_assets: [{ symbol: "BND", instrument_id: null, display_symbol: "BND", reason: "No historical bars" }],
   warnings: ["Risk coverage below 95%; headline risk estimates may be materially incomplete."],
 };
@@ -177,9 +201,10 @@ describe("risk workspace view-model", () => {
     });
 
     expect(model.candidates.length).toBeGreaterThan(0);
-    expect(model.diagnostics.join(" ")).toContain("No order, execution, broker mutation");
+    expect(model.diagnostics.join(" ")).toContain("backend efficient frontier");
     expect(model.constraints.map((row) => row.cells[0])).toContain("Long-only");
-    expect(model.optimizationComparison.map((row) => row.cells[0])).toContain("Risk Parity");
+    expect(model.optimizationComparison.map((row) => row.cells[0])).toContain("Min Vol");
+    expect(model.frontierPoints.length).toBeGreaterThan(0);
   });
 
   it("documents unavailable position-level correlation inputs instead of inventing precision", () => {

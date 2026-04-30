@@ -529,3 +529,46 @@ def test_compute_allows_offsetting_cash_balances_in_live_like_snapshot():
     assert results.monte_carlo_var is not None
     assert results.monte_carlo_fan_percentiles is not None
     assert not any("risky gross exposure exceeds" in warning for warning in results.warnings)
+
+
+def test_compute_builds_efficient_frontier_from_covered_risky_history():
+    idx = pd.date_range("2026-01-02", periods=12, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 102, 103, 104, 103, 105, 106, 107, 108, 109, 111], index=idx),
+        "B": pd.Series([50, 50.2, 50.8, 50.5, 51.0, 51.8, 52.0, 52.5, 53.0, 52.8, 53.5, 54.0], index=idx),
+        "C": pd.Series([30, 30.5, 30.2, 30.8, 31.2, 31.0, 31.8, 32.1, 31.9, 32.4, 32.8, 33.0], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=50.0),
+            PositionItem("B", "STK", "USD", 1, None, None, None, None, base_market_value=30.0),
+            PositionItem("C", "STK", "USD", 1, None, None, None, None, base_market_value=20.0),
+        ],
+        net_liq=100.0,
+    )
+
+    payload = _compute_payload(prices, snapshot, recommended_min_obs=3)
+    labels = {point.label for point in payload.frontier_points}
+
+    assert {"Current", "Min Vol", "Max Sharpe", "Risk Parity"}.issubset(labels)
+    assert any(point.kind == "frontier" for point in payload.frontier_points)
+    current = next(point for point in payload.frontier_points if point.label == "Current")
+    assert abs(sum(weight.weight for weight in current.weights) - 1.0) < 1e-9
+    assert current.annual_vol > 0
+    assert not any("Efficient frontier unavailable" in warning for warning in payload.results.warnings)
+
+
+def test_compute_explains_frontier_unavailable_for_single_covered_asset():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    prices = {
+        "A": pd.Series([100, 101, 102, 103, 104, 105], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=100.0)],
+        net_liq=100.0,
+    )
+
+    payload = _compute_payload(prices, snapshot, recommended_min_obs=3)
+
+    assert payload.frontier_points == []
+    assert any("Efficient frontier unavailable" in warning for warning in payload.results.warnings)

@@ -56,6 +56,8 @@ from src.api.schemas.risk import (
     RiskComputeRequestModel,
     RiskComputeResponseModel,
     RiskContributionModel,
+    RiskFrontierPointModel,
+    RiskFrontierWeightModel,
     RiskMetricsModel,
 )
 from src.api.schemas.system import (
@@ -119,6 +121,8 @@ __all__ = [
     "RiskComputeRequestModel",
     "RiskComputeResponseModel",
     "RiskContributionModel",
+    "RiskFrontierPointModel",
+    "RiskFrontierWeightModel",
     "RiskMetricsModel",
     "SyntheticPositionModel",
     "SystemStatusResponseModel",

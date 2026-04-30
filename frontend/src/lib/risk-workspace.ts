@@ -1,4 +1,4 @@
-import type { PortfolioSnapshot, Position, RiskContribution, RiskResult, TimeSeriesPoint } from "./api/types";
+import type { PortfolioSnapshot, Position, RiskContribution, RiskFrontierPoint, RiskResult, TimeSeriesPoint } from "./api/types";
 
 export type RiskMode = "overview" | "exposures" | "drawdowns" | "correlation" | "scenarios" | "optimization";
 export type ReturnFrequency = "daily" | "weekly" | "monthly";
@@ -48,6 +48,7 @@ export interface RiskWorkspaceModel {
   scenarios: ScenarioResult[];
   scenarioImpacts: ScenarioImpactRow[];
   scenarioAssumptions: string[];
+  frontierPoints: RiskFrontierPoint[];
   candidates: CandidateAllocationRow[];
   optimizationComparison: RiskTableRow[];
   constraints: RiskTableRow[];
@@ -140,7 +141,8 @@ export function buildRiskWorkspaceModel(
   const benchmarkReturns = result?.benchmark_return_points ?? [];
   const drawdowns = buildDrawdownEpisodes(returns, benchmarkReturns, riskContributors);
   const scenarios = buildScenarios(result, holdings, portfolioValue);
-  const candidates = buildCandidateAllocations(holdings);
+  const frontierPoints = result?.frontier_points ?? [];
+  const candidates = buildCandidateAllocations(holdings, frontierPoints);
   const coverageWarnings = buildCoverageWarnings(snapshot, result);
   const largestWeight = maxNumber(holdings.map((row) => row.weight));
   const topFiveWeight = result?.metrics.top5_weight ?? sumTop(holdings.map((row) => Math.abs(row.weight ?? 0)), 5);
@@ -152,7 +154,9 @@ export function buildRiskWorkspaceModel(
   const worstWeek = worstWindowReturn(returns, 5);
   const downsideVol = downsideVolatility(returns);
   const scenarioPnl = scenarios[0]?.portfolioReturn != null && portfolioValue != null ? scenarios[0].portfolioReturn * portfolioValue : null;
-  const optimizedVol = result?.metrics.annual_vol == null ? null : result.metrics.annual_vol * 0.9;
+  const minVolPoint = frontierPoints.find((point) => point.label === "Min Vol");
+  const maxSharpePoint = frontierPoints.find((point) => point.label === "Max Sharpe");
+  const optimizedVol = minVolPoint?.annual_vol ?? (result?.metrics.annual_vol == null ? null : result.metrics.annual_vol * 0.9);
 
   return {
     context: {
@@ -210,10 +214,10 @@ export function buildRiskWorkspaceModel(
       kpi("Current expected vol", formatPercent(result?.metrics.annual_vol)),
       kpi("Optimized expected vol", formatPercent(optimizedVol), "diagnostic candidate"),
       kpi("Current Sharpe / score", formatNumber(riskAdjustedScore(returns, result?.metrics.annual_vol), 2)),
-      kpi("Optimized Sharpe / score", formatNumber(riskAdjustedScore(returns, optimizedVol), 2)),
+      kpi("Optimized Sharpe / score", formatNumber(maxSharpePoint?.sharpe ?? riskAdjustedScore(returns, optimizedVol), 2)),
       kpi("Turnover required", formatPercent(candidateTurnover(candidates))),
       kpi("Max weight after", formatPercent(maxNumber(candidates.map((row) => row.proposedWeight)))),
-      kpi("Constraint count", "6", "research-only diagnostics"),
+      kpi("Frontier assets", frontierPoints.length ? String(frontierPoints[0]?.weights.length ?? 0) : UNKNOWN, "covered risky sleeve"),
     ],
     holdings,
     exposureBreakdown,
@@ -234,8 +238,9 @@ export function buildRiskWorkspaceModel(
     scenarios,
     scenarioImpacts: scenarios[0] ? buildScenarioImpacts(holdings, scenarios[0], portfolioValue) : [],
     scenarioAssumptions: buildScenarioAssumptions(result, coverage),
+    frontierPoints,
     candidates,
-    optimizationComparison: buildOptimizationComparison(result, returns),
+    optimizationComparison: buildOptimizationComparison(result, returns, frontierPoints),
     constraints: buildConstraints(),
     diagnostics: buildDiagnostics(result, holdings),
     alerts: buildAlerts(result, holdings, coverageWarnings),
@@ -491,7 +496,35 @@ function buildScenarioAssumptions(result: RiskResult | null, coverage: number | 
   ];
 }
 
-function buildCandidateAllocations(holdings: HoldingRiskRow[]): CandidateAllocationRow[] {
+function buildCandidateAllocations(holdings: HoldingRiskRow[], frontierPoints: RiskFrontierPoint[] = []): CandidateAllocationRow[] {
+  const minVolWeights = frontierPoints.find((point) => point.label === "Min Vol")?.weights ?? [];
+  const frontierWeightByKey = new Map<string, number>();
+  for (const weight of minVolWeights) {
+    frontierWeightByKey.set(weight.symbol, weight.weight);
+    if (weight.display_symbol) frontierWeightByKey.set(weight.display_symbol, weight.weight);
+    if (weight.instrument_id) frontierWeightByKey.set(weight.instrument_id, weight.weight);
+  }
+  if (frontierWeightByKey.size) {
+    const riskyScale = holdings
+      .filter((row) => row.assetClass !== "Cash" && (row.weight ?? 0) > 0)
+      .reduce((sum, row) => sum + (row.weight ?? 0), 0) || 1;
+    return holdings.map((row) => {
+      const frontierWeight = frontierWeightByKey.get(row.symbol);
+      const proposed = frontierWeight == null
+        ? row.assetClass === "Cash" ? row.weight ?? 0 : 0
+        : frontierWeight * riskyScale;
+      return {
+        symbol: row.symbol,
+        currentWeight: row.weight,
+        proposedWeight: proposed,
+        delta: row.weight == null ? null : proposed - row.weight,
+        currentRiskContribution: row.riskContribution,
+        proposedRiskContribution: row.riskContribution == null ? null : row.riskContribution * (proposed / Math.max(row.weight ?? proposed, 0.0001)),
+        constraintFlag: row.qualityFlag !== "OK" ? row.qualityFlag : "Min-vol candidate",
+      };
+    }).sort((left, right) => Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0));
+  }
+
   const risky = holdings.filter((row) => row.assetClass !== "Cash" && (row.weight ?? 0) > 0);
   const inverseRisk = risky.map((row) => ({ row, score: 1 / Math.max(row.volatility ?? Math.abs(row.riskContribution ?? 0.1), 0.03) }));
   const totalScore = inverseRisk.reduce((sum, item) => sum + item.score, 0) || 1;
@@ -512,7 +545,17 @@ function buildCandidateAllocations(holdings: HoldingRiskRow[]): CandidateAllocat
   }).sort((left, right) => Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0));
 }
 
-function buildOptimizationComparison(result: RiskResult | null, returns: TimeSeriesPoint[]): RiskTableRow[] {
+function buildOptimizationComparison(result: RiskResult | null, returns: TimeSeriesPoint[], frontierPoints: RiskFrontierPoint[] = []): RiskTableRow[] {
+  if (frontierPoints.length) {
+    const preferred = ["Current", "Min Vol", "Max Sharpe", "Equal Weight", "Risk Parity"];
+    const rows = preferred
+      .map((label) => frontierPoints.find((point) => point.label === label))
+      .filter((point): point is RiskFrontierPoint => point != null)
+      .map((point) => ({
+        cells: [point.label, formatPercent(point.annual_vol), formatNumber(point.sharpe, 2), formatPercent(maxNumber(point.weights.map((weight) => weight.weight))), point.kind === "current" ? "Observed risky sleeve" : "Backend candidate"],
+      }));
+    if (rows.length) return rows;
+  }
   const vol = result?.metrics.annual_vol ?? null;
   const score = riskAdjustedScore(returns, vol);
   return [
@@ -539,7 +582,11 @@ function buildConstraints(): RiskTableRow[] {
 
 function buildDiagnostics(result: RiskResult | null, holdings: HoldingRiskRow[]) {
   return [
-    result ? "Solver status: diagnostic candidates generated with deterministic frontend helper." : "Solver status: waiting for a risk computation.",
+    result?.frontier_points?.length
+      ? `Solver status: backend efficient frontier generated ${result.frontier_points.length} risk-return points.`
+      : result
+        ? "Solver status: frontier unavailable; candidate rows fall back to deterministic frontend diagnostics."
+        : "Solver status: waiting for a risk computation.",
     "No order, execution, broker mutation, account mutation, or automated trading path is exposed.",
     `${holdings.filter((row) => row.qualityFlag !== "OK").length} assets have coverage or data-quality flags.`,
     "Ill-conditioned covariance checks are limited to backend VaR warnings in the current payload.",

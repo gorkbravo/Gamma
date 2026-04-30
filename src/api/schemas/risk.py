@@ -11,6 +11,7 @@ from src.models.portfolio import RiskResults
 
 class RiskComputeRequestModel(BaseModel):
     snapshot: PortfolioSnapshotModel
+    source_scope: str = "portfolio"
     alpha: float = 0.95
     lookback_days: int = 252
     horizon_days: int = 1
@@ -90,12 +91,29 @@ class ExcludedAssetModel(BaseModel):
     reason: str
 
 
+class RiskFrontierWeightModel(BaseModel):
+    symbol: str
+    instrument_id: str | None = None
+    display_symbol: str | None = None
+    weight: float
+
+
+class RiskFrontierPointModel(BaseModel):
+    label: str
+    kind: str
+    annual_return: float
+    annual_vol: float
+    sharpe: float | None = None
+    weights: list[RiskFrontierWeightModel] = Field(default_factory=list)
+
+
 class RiskComputeResponseModel(BaseModel):
     metrics: RiskMetricsModel
     portfolio_return_points: list[TimeSeriesPoint]
     benchmark_return_points: list[TimeSeriesPoint] = Field(default_factory=list)
     contributions: list[RiskContributionModel]
     monte_carlo: MonteCarloChartsModel = Field(default_factory=MonteCarloChartsModel)
+    frontier_points: list[RiskFrontierPointModel] = Field(default_factory=list)
     excluded_assets: list[ExcludedAssetModel]
     warnings: list[str] = Field(default_factory=list)
 
@@ -131,6 +149,25 @@ class RiskComputeResponseModel(BaseModel):
                 fan_percentiles=_fan_percentiles_to_payload(results.monte_carlo_fan_percentiles),
                 sample_paths=_fan_percentiles_to_payload(results.monte_carlo_sample_paths),
             ),
+            frontier_points=[
+                RiskFrontierPointModel(
+                    label=point.label,
+                    kind=point.kind,
+                    annual_return=float(point.annual_return),
+                    annual_vol=float(point.annual_vol),
+                    sharpe=_to_float(point.sharpe),
+                    weights=[
+                        RiskFrontierWeightModel(
+                            symbol=weight.symbol,
+                            instrument_id=weight.instrument_id,
+                            display_symbol=weight.display_symbol,
+                            weight=float(weight.weight),
+                        )
+                        for weight in point.weights
+                    ],
+                )
+                for point in payload.frontier_points
+            ],
             excluded_assets=[
                 ExcludedAssetModel(
                     symbol=_position_meta(payload.snapshot, symbol).get("symbol") or symbol,

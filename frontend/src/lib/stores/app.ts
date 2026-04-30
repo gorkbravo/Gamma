@@ -146,6 +146,7 @@ export interface RiskComputeOptions {
   benchmarkSymbol: string;
   includeMonteCarlo?: boolean;
   snapshot?: PortfolioSnapshot | null;
+  sourceScope?: WorkspaceMode;
 }
 
 export interface IvLoadOptions {
@@ -1939,6 +1940,7 @@ export async function computeRisk(options: RiskComputeOptions) {
     riskResult.set(
       await postJson<RiskResult>("/risk/compute", {
         snapshot,
+        source_scope: options.sourceScope ?? snapshotWorkspace,
         alpha: options.alpha,
         lookback_days: options.lookbackDays,
         horizon_days: options.horizonDays,

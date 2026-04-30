@@ -192,6 +192,8 @@ class PortfolioDataProvider:
     client: IBKRClient
     market_data: MarketDataService
     mock_service: MockDataService
+    history_providers: List[ListedMarketHistoryProvider] | None = None
+    _last_history_warnings: list[str] = field(default_factory=list, init=False)
 
     def load_prices(
         self,
@@ -199,6 +201,7 @@ class PortfolioDataProvider:
         lookback_days: int,
         progress_cb=None,
     ) -> Tuple[Dict[str, pd.Series], List[str]]:
+        self._last_history_warnings = []
         if self.client.mock:
             prices: Dict[str, pd.Series] = {}
             missing: List[str] = []
@@ -213,6 +216,9 @@ class PortfolioDataProvider:
                 else:
                     prices[instrument_id] = series.astype(float)
             return prices, missing
+
+        if self.history_providers:
+            return self._load_prices_from_provider_chain(snapshot, lookback_days, progress_cb)
 
         contracts: List[Contract] = []
         keys: List[str] = []
@@ -229,6 +235,54 @@ class PortfolioDataProvider:
             progress_cb=progress_cb,
             keys=keys,
             labels=labels,
+        )
+
+    def drain_history_warnings(self) -> list[str]:
+        warnings = list(dict.fromkeys(self._last_history_warnings))
+        self._last_history_warnings = []
+        return warnings
+
+    def _load_prices_from_provider_chain(
+        self,
+        snapshot: PortfolioSnapshot,
+        lookback_days: int,
+        progress_cb=None,
+    ) -> Tuple[Dict[str, pd.Series], List[str]]:
+        prices: Dict[str, pd.Series] = {}
+        missing: List[str] = []
+        positions = [position for position in snapshot.positions if not position.symbol.startswith("CASH")]
+        total = len(positions)
+        for index, position in enumerate(positions, start=1):
+            instrument = self._instrument_for_position(position)
+            instrument_id = position.resolved_instrument_id()
+            display_symbol = position.resolved_display_symbol()
+            provider_warnings: list[str] = []
+            for provider in self.history_providers or []:
+                result = provider.load_history(instrument, lookback_days)
+                provider_warnings.extend(result.warnings)
+                if result.series is not None and not result.series.empty:
+                    prices[instrument_id] = result.series.astype(float)
+                    self._last_history_warnings.extend(provider_warnings)
+                    break
+            else:
+                missing.append(display_symbol)
+                self._last_history_warnings.extend(provider_warnings)
+            if progress_cb:
+                progress_cb(index, total, display_symbol)
+        return prices, missing
+
+    @staticmethod
+    def _instrument_for_position(position: PositionItem) -> InstrumentReference:
+        return InstrumentReference(
+            symbol=position.symbol,
+            instrument_id=position.instrument_id,
+            display_symbol=position.display_symbol,
+            sec_type=position.sec_type,
+            currency=position.currency,
+            exchange=position.exchange,
+            primary_exchange=position.primary_exchange,
+            provider=position.provider,
+            provider_id=position.provider_id,
         )
 
 

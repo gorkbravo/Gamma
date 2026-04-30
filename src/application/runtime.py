@@ -233,7 +233,18 @@ def build_runtime(
     copilot_store = CopilotStore(base_dir=resolved_history_dir / "copilot")
     risk_free_service = RiskFreeRateService(cache=cache)
 
-    portfolio_provider = PortfolioDataProvider(client, market_data, mock_service)
+    portfolio_provider = PortfolioDataProvider(
+        client,
+        market_data,
+        mock_service,
+        history_providers=_build_research_history_providers(
+            client,
+            market_data,
+            mock_service,
+            env_var="PORTFOLIO_RISK_HISTORY_PROVIDERS",
+            live_default="ibkr,yfinance",
+        ),
+    )
     research_provider = ResearchDataProvider(
         client=client,
         market_data=market_data,

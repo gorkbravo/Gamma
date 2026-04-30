@@ -17,7 +17,7 @@
     type ScenarioImpactRow,
     type ScenarioResult,
   } from "../lib/risk-workspace";
-  import type { IndexedValuePoint, PortfolioSnapshot, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
+  import type { IndexedValuePoint, PortfolioSnapshot, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions } from "../lib/stores/app";
 
   export let mode: WorkspaceMode | null = "portfolio";
@@ -29,6 +29,24 @@
   export let onCompute: (options: RiskComputeOptions) => Promise<void> | void;
 
   type ComputeMethod = "core" | "monteCarlo";
+  type FrontierPlotPoint = {
+    label: string;
+    kind: string;
+    annualReturn: number;
+    annualVol: number;
+    sharpe: number | null;
+    x: number;
+    y: number;
+  };
+
+  type FrontierPlotModel = {
+    points: FrontierPlotPoint[];
+    frontierPath: string;
+    xMin: number;
+    xMax: number;
+    yMin: number;
+    yMax: number;
+  };
 
   const modes: Array<{ id: RiskMode; label: string }> = [
     { id: "overview", label: "Overview" },
@@ -69,6 +87,7 @@
   let realizedMarkers: DistributionMarker[] = [];
   let monteCarloMarkers: DistributionMarker[] = [];
   let fanHistory: IndexedValuePoint[] = [];
+  let frontierPlot: FrontierPlotModel = buildFrontierPlot([]);
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value) ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
@@ -177,6 +196,46 @@
     return result?.metrics.covered_portfolio_value || result?.metrics.portfolio_value || null;
   }
 
+  function buildFrontierPlot(points: RiskFrontierPoint[]): FrontierPlotModel {
+    const clean = points
+      .filter((point) => Number.isFinite(point.annual_vol) && Number.isFinite(point.annual_return))
+      .map((point) => ({
+        label: point.label,
+        kind: point.kind,
+        annualReturn: point.annual_return,
+        annualVol: point.annual_vol,
+        sharpe: point.sharpe,
+        x: 0,
+        y: 0,
+      }));
+    if (!clean.length) return { points: [], frontierPath: "", xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
+    const xValues = clean.map((point) => point.annualVol);
+    const yValues = clean.map((point) => point.annualReturn);
+    const xMinRaw = Math.min(...xValues);
+    const xMaxRaw = Math.max(...xValues);
+    const yMinRaw = Math.min(...yValues);
+    const yMaxRaw = Math.max(...yValues);
+    const xPad = Math.max((xMaxRaw - xMinRaw) * 0.08, 0.01);
+    const yPad = Math.max((yMaxRaw - yMinRaw) * 0.12, 0.02);
+    const xMin = Math.max(0, xMinRaw - xPad);
+    const xMax = xMaxRaw + xPad;
+    const yMin = yMinRaw - yPad;
+    const yMax = yMaxRaw + yPad;
+    const width = Math.max(xMax - xMin, 1e-9);
+    const height = Math.max(yMax - yMin, 1e-9);
+    const plotted = clean.map((point) => ({
+      ...point,
+      x: ((point.annualVol - xMin) / width) * 100,
+      y: 100 - ((point.annualReturn - yMin) / height) * 100,
+    }));
+    const frontierPath = plotted
+      .filter((point) => point.kind === "frontier")
+      .sort((left, right) => left.annualVol - right.annualVol)
+      .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+      .join(" ");
+    return { points: plotted, frontierPath, xMin, xMax, yMin, yMax };
+  }
+
   $: cumulativeChart = (() => {
     const rows: ChartSeries[] = [];
     const portfolio = cumulativeSeries(result?.portfolio_return_points ?? [], "portfolio", "Portfolio", "var(--chart-primary)");
@@ -221,6 +280,8 @@
     const terminal = points.at(-1)?.value ?? 1;
     return points.map((point) => ({ index: point.index, value: terminal !== 0 ? point.value / terminal : point.value }));
   })();
+
+  $: frontierPlot = buildFrontierPlot(workspace.frontierPoints);
 
   $: riskContributionBars = workspace.riskContributors.slice(0, 8).map((item) => ({
     label: item.symbol,
@@ -411,7 +472,7 @@
       {@render KpiStrip(workspace.optimizationKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
-          <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierPlaceholder()}</article>
+          <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot)}</article>
           {@render RankPanel("Weight Changes Before / After", optimizationBars)}
           {@render CandidateTable(workspace.candidates)}
         </div>
@@ -579,13 +640,40 @@
   <p class="muted">Position-level aligned return histories are not present in the current Risk API response, so cells stay unavailable instead of showing estimated precision.</p>
 {/snippet}
 
-{#snippet FrontierPlaceholder()}
+{#snippet FrontierChart(plot: FrontierPlotModel)}
   <div class="frontier">
-    <span class="point current">Current</span>
-    <span class="point candidate">Min Vol</span>
-    <span class="point parity">Risk Parity</span>
+    {#if plot.points.length}
+      <svg class="frontier-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Efficient frontier risk return chart">
+        <line class="axis" x1="0" y1="100" x2="100" y2="100" />
+        <line class="axis" x1="0" y1="0" x2="0" y2="100" />
+        {#if plot.frontierPath}
+          <path class="frontier-line" d={plot.frontierPath} />
+        {/if}
+        {#each plot.points.filter((point) => point.kind === "frontier") as point}
+          <circle class="frontier-dot" cx={point.x} cy={point.y} r="1.05">
+            <title>{point.label}: vol {pct(point.annualVol)}, return {pct(point.annualReturn)}, Sharpe {fmt(point.sharpe, 2)}</title>
+          </circle>
+        {/each}
+        {#each plot.points.filter((point) => point.kind !== "frontier") as point}
+          <circle class={`frontier-marker-dot ${point.kind}`} cx={point.x} cy={point.y} r="1.8">
+            <title>{point.label}: vol {pct(point.annualVol)}, return {pct(point.annualReturn)}, Sharpe {fmt(point.sharpe, 2)}</title>
+          </circle>
+        {/each}
+      </svg>
+      <div class="frontier-label-layer">
+        {#each plot.points.filter((point) => point.kind !== "frontier") as point}
+          <span class={`frontier-label ${point.kind}`} style={`left:${point.x}%; top:${point.y}%;`}>{point.label}</span>
+        {/each}
+      </div>
+      <span class="axis-label x-min">{pct(plot.xMin)}</span>
+      <span class="axis-label x-max">{pct(plot.xMax)}</span>
+      <span class="axis-label y-min">{pct(plot.yMin)}</span>
+      <span class="axis-label y-max">{pct(plot.yMax)}</span>
+    {:else}
+      <div class="frontier-empty">Need at least two covered non-cash positions with overlapping return history.</div>
+    {/if}
   </div>
-  <p class="muted">Frontier markers are research diagnostics from current risk metrics and candidate weights. They do not create account or broker actions.</p>
+  <p class="muted">Frontier uses the current covered risky sleeve and backend historical returns. It is a read-only research diagnostic, not an account or broker action.</p>
 {/snippet}
 
 <style>
@@ -765,17 +853,71 @@
     border: 1px solid var(--divider);
     position: relative;
     background: var(--bg-0);
+    overflow: hidden;
   }
-  .point {
+  .frontier-svg {
+    position: absolute;
+    inset: 1.8rem 1rem 1.8rem 2.2rem;
+    width: calc(100% - 3.2rem);
+    height: calc(100% - 3.6rem);
+  }
+  .frontier-label-layer {
+    position: absolute;
+    inset: 1.8rem 1rem 1.8rem 2.2rem;
+  }
+  .frontier-line {
+    fill: none;
+    stroke: var(--chart-primary);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+  }
+  .frontier-dot {
+    fill: var(--chart-primary);
+    opacity: 0.45;
+    vector-effect: non-scaling-stroke;
+  }
+  .frontier-marker-dot {
+    fill: var(--bg-1);
+    stroke: var(--chart-secondary);
+    stroke-width: 1.2;
+    vector-effect: non-scaling-stroke;
+  }
+  .frontier-marker-dot.candidate { stroke: var(--chart-primary); }
+  .frontier-marker-dot.current { stroke: var(--chart-secondary); fill: var(--chart-secondary); }
+  .axis {
+    stroke: var(--divider);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .frontier-label {
     position: absolute;
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     padding: 0.22rem 0.35rem;
     font-size: 11px;
+    transform: translate(-50%, -145%);
+    white-space: nowrap;
   }
-  .point.current { left: 58%; top: 46%; color: var(--chart-secondary); }
-  .point.candidate { left: 36%; top: 34%; color: var(--chart-primary); }
-  .point.parity { left: 44%; top: 42%; color: var(--text-1); }
+  .frontier-label.current { color: var(--chart-secondary); }
+  .frontier-label.candidate { color: var(--chart-primary); }
+  .axis-label {
+    position: absolute;
+    color: var(--text-2);
+    font-size: 10px;
+  }
+  .axis-label.x-min { left: 2.2rem; bottom: 0.45rem; }
+  .axis-label.x-max { right: 1rem; bottom: 0.45rem; }
+  .axis-label.y-min { left: 0.45rem; bottom: 1.55rem; }
+  .axis-label.y-max { left: 0.45rem; top: 1.35rem; }
+  .frontier-empty {
+    min-height: 280px;
+    display: grid;
+    place-items: center;
+    color: var(--text-2);
+    font-size: 12px;
+    text-align: center;
+    padding: 1rem;
+  }
 
   @media (max-width: 1220px) {
     .workspace-grid, .two-col, .shared-panels { grid-template-columns: 1fr; }

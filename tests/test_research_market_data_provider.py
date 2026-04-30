@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pandas as pd
 
 from src.models.instruments import InstrumentDefaults, InstrumentReference
+from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.models.provenance import FreshnessLabel
-from src.services.data_providers import ResearchDataProvider
+from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.research_cache import ResearchHistoryCache
 from src.services.research_market_data import (
     ResearchHistoryResult,
@@ -82,6 +83,47 @@ def test_research_data_provider_falls_back_to_next_history_provider():
     assert result.source_provider == "yfinance"
     assert result.source_label == "Yahoo Finance/yfinance daily history"
     assert any("ibkr unavailable" in warning.lower() for warning in result.warnings)
+
+
+def test_portfolio_data_provider_can_fall_back_to_public_history_provider():
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    fallback_history = pd.Series([100.0, 101.0, 102.0, 103.0], index=idx)
+    snapshot = PortfolioSnapshot(
+        timestamp=pd.Timestamp("2026-01-06").to_pydatetime(),
+        base_currency="USD",
+        account_summary={},
+        positions=[
+            PositionItem(
+                symbol="AAPL",
+                sec_type="STK",
+                currency="USD",
+                quantity=1.0,
+                avg_cost=None,
+                market_price=None,
+                market_value=100.0,
+                unrealized_pnl=None,
+                base_market_value=100.0,
+                instrument_id="portfolio:stk:aapl",
+                display_symbol="AAPL",
+            )
+        ],
+        net_liquidation=100.0,
+    )
+    provider = PortfolioDataProvider(
+        client=SimpleNamespace(mock=False),
+        market_data=_NoopMarketData(),
+        mock_service=_NoopMockService(),
+        history_providers=[
+            _FakeHistoryProvider("ibkr", "IBKR/TWS daily historical bars", {}),
+            _FakeHistoryProvider("yfinance", "Yahoo Finance/yfinance daily history", {"AAPL": fallback_history}),
+        ],
+    )
+
+    prices, missing = provider.load_prices(snapshot, 30)
+
+    assert missing == []
+    assert prices["portfolio:stk:aapl"].equals(fallback_history)
+    assert any("ibkr unavailable" in warning.lower() for warning in provider.drain_history_warnings())
 
 
 def test_research_data_provider_preserves_history_source_metadata_from_cache():

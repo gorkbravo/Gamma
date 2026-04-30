@@ -7,6 +7,7 @@ export function buildRiskRequestFromResearch(research: ResearchResult | null): R
   }
   return {
     snapshot: research.snapshot,
+    sourceScope: "research",
     alpha: 0.95,
     lookbackDays: 252,
     horizonDays: 1,

@@ -8,6 +8,7 @@ describe("workspace context forwarding", () => {
 
     expect(request?.snapshot?.positions[0].symbol).toBe("AAPL");
     expect(request?.benchmarkSymbol).toBe("SPY");
+    expect(request?.sourceScope).toBe("research");
   });
 
   it("forwards the latest synthetic research snapshot to risk", () => {

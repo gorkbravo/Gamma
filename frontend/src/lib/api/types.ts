@@ -589,6 +589,22 @@ export interface RiskMonteCarloCharts {
   sample_paths: Record<string, IndexedValuePoint[]>;
 }
 
+export interface RiskFrontierWeight {
+  symbol: string;
+  instrument_id: string | null;
+  display_symbol: string | null;
+  weight: number;
+}
+
+export interface RiskFrontierPoint {
+  label: string;
+  kind: "current" | "candidate" | "frontier" | string;
+  annual_return: number;
+  annual_vol: number;
+  sharpe: number | null;
+  weights: RiskFrontierWeight[];
+}
+
 export interface ExcludedAsset {
   symbol: string;
   instrument_id: string | null;
@@ -602,6 +618,7 @@ export interface RiskResult {
   benchmark_return_points: TimeSeriesPoint[];
   contributions: RiskContribution[];
   monte_carlo: RiskMonteCarloCharts;
+  frontier_points: RiskFrontierPoint[];
   excluded_assets: ExcludedAsset[];
   warnings: string[];
 }
