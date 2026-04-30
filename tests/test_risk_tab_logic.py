@@ -571,4 +571,6 @@ def test_compute_explains_frontier_unavailable_for_single_covered_asset():
     payload = _compute_payload(prices, snapshot, recommended_min_obs=3)
 
     assert payload.frontier_points == []
-    assert any("Efficient frontier unavailable" in warning for warning in payload.results.warnings)
+    warning = next(warning for warning in payload.results.warnings if "Efficient frontier unavailable" in warning)
+    assert "eligible 1" in warning
+    assert "snapshot risky 1" in warning

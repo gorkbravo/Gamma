@@ -426,6 +426,17 @@ class RiskService:
             return [], ["Efficient frontier unavailable: no covered return history and weights."]
 
         positions_by_id = {position.resolved_instrument_id(): position for position in snapshot.positions}
+        risky_snapshot_count = sum(
+            1
+            for position in snapshot.positions
+            if not cls._is_cash(position) and float(position.base_market_value or 0.0) > 0
+        )
+        positive_covered_risky_count = sum(
+            1
+            for instrument_id in weights.index
+            if not cls._is_cash(positions_by_id.get(str(instrument_id)))
+            and float(weights.get(instrument_id, 0.0) or 0.0) > 0
+        )
         eligible: list[str] = []
         for instrument_id in weights.index:
             position = positions_by_id.get(str(instrument_id))
@@ -441,7 +452,9 @@ class RiskService:
 
         if len(eligible) < 2:
             return [], [
-                "Efficient frontier unavailable: need at least two non-cash long positions with overlapping return history."
+                "Efficient frontier unavailable: need at least two eligible non-cash long positions with usable return variance "
+                f"(eligible {len(eligible)}; positive covered risky {positive_covered_risky_count}; "
+                f"snapshot risky {risky_snapshot_count}; return columns {len(returns_df.columns)})."
             ]
 
         aligned = returns_df.reindex(columns=eligible).apply(pd.to_numeric, errors="coerce").dropna(how="any")
@@ -820,6 +833,8 @@ class RiskService:
 
     @staticmethod
     def _is_cash(position) -> bool:
+        if position is None:
+            return False
         return position.sec_type == "CASH" or position.symbol.startswith("CASH")
 
     @classmethod

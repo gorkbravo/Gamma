@@ -472,7 +472,7 @@
       {@render KpiStrip(workspace.optimizationKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
-          <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot)}</article>
+          <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot, workspace.frontierMessage)}</article>
           {@render RankPanel("Weight Changes Before / After", optimizationBars)}
           {@render CandidateTable(workspace.candidates)}
         </div>
@@ -640,7 +640,7 @@
   <p class="muted">Position-level aligned return histories are not present in the current Risk API response, so cells stay unavailable instead of showing estimated precision.</p>
 {/snippet}
 
-{#snippet FrontierChart(plot: FrontierPlotModel)}
+{#snippet FrontierChart(plot: FrontierPlotModel, emptyMessage: string | null)}
   <div class="frontier">
     {#if plot.points.length}
       <svg class="frontier-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Efficient frontier risk return chart">
@@ -670,7 +670,7 @@
       <span class="axis-label y-min">{pct(plot.yMin)}</span>
       <span class="axis-label y-max">{pct(plot.yMax)}</span>
     {:else}
-      <div class="frontier-empty">Need at least two covered non-cash positions with overlapping return history.</div>
+      <div class="frontier-empty">{emptyMessage ?? "Run a risk computation to populate the efficient frontier."}</div>
     {/if}
   </div>
   <p class="muted">Frontier uses the current covered risky sleeve and backend historical returns. It is a read-only research diagnostic, not an account or broker action.</p>

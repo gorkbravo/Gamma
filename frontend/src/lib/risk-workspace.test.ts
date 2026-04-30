@@ -218,6 +218,28 @@ describe("risk workspace view-model", () => {
     expect(model.correlatedPairs[0].cells[0]).toContain("requires per-holding return histories");
   });
 
+  it("surfaces the backend frontier reason when no frontier points are returned", () => {
+    const model = buildRiskWorkspaceModel(
+      snapshot,
+      {
+        ...riskResult,
+        frontier_points: [],
+        warnings: [
+          ...riskResult.warnings,
+          "Efficient frontier unavailable: need at least two eligible non-cash long positions with usable return variance (eligible 1; positive covered risky 2; snapshot risky 2; return columns 2).",
+        ],
+      },
+      {
+        sourceScope: "portfolio",
+        benchmarkSymbol: "SPY",
+        returnFrequency: "daily",
+      }
+    );
+
+    expect(model.frontierMessage).toContain("eligible 1");
+    expect(model.diagnostics[0]).toContain("eligible 1");
+  });
+
   it("declares the complete risk mode union", () => {
     const modes: RiskMode[] = ["overview", "exposures", "drawdowns", "correlation", "scenarios", "optimization"];
     expect(modes).toHaveLength(6);

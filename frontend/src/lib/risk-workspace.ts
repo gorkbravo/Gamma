@@ -49,6 +49,7 @@ export interface RiskWorkspaceModel {
   scenarioImpacts: ScenarioImpactRow[];
   scenarioAssumptions: string[];
   frontierPoints: RiskFrontierPoint[];
+  frontierMessage: string | null;
   candidates: CandidateAllocationRow[];
   optimizationComparison: RiskTableRow[];
   constraints: RiskTableRow[];
@@ -142,6 +143,7 @@ export function buildRiskWorkspaceModel(
   const drawdowns = buildDrawdownEpisodes(returns, benchmarkReturns, riskContributors);
   const scenarios = buildScenarios(result, holdings, portfolioValue);
   const frontierPoints = result?.frontier_points ?? [];
+  const frontierMessage = buildFrontierMessage(result, frontierPoints);
   const candidates = buildCandidateAllocations(holdings, frontierPoints);
   const coverageWarnings = buildCoverageWarnings(snapshot, result);
   const largestWeight = maxNumber(holdings.map((row) => row.weight));
@@ -239,6 +241,7 @@ export function buildRiskWorkspaceModel(
     scenarioImpacts: scenarios[0] ? buildScenarioImpacts(holdings, scenarios[0], portfolioValue) : [],
     scenarioAssumptions: buildScenarioAssumptions(result, coverage),
     frontierPoints,
+    frontierMessage,
     candidates,
     optimizationComparison: buildOptimizationComparison(result, returns, frontierPoints),
     constraints: buildConstraints(),
@@ -581,17 +584,32 @@ function buildConstraints(): RiskTableRow[] {
 }
 
 function buildDiagnostics(result: RiskResult | null, holdings: HoldingRiskRow[]) {
+  const frontierMessage = buildFrontierMessage(result, result?.frontier_points ?? []);
   return [
     result?.frontier_points?.length
       ? `Solver status: backend efficient frontier generated ${result.frontier_points.length} risk-return points.`
       : result
-        ? "Solver status: frontier unavailable; candidate rows fall back to deterministic frontend diagnostics."
+        ? `Solver status: ${frontierMessage ?? "frontier unavailable; candidate rows fall back to deterministic frontend diagnostics."}`
         : "Solver status: waiting for a risk computation.",
     "No order, execution, broker mutation, account mutation, or automated trading path is exposed.",
     `${holdings.filter((row) => row.qualityFlag !== "OK").length} assets have coverage or data-quality flags.`,
     "Ill-conditioned covariance checks are limited to backend VaR warnings in the current payload.",
     "Candidate allocations are research diagnostics, not instructions.",
   ];
+}
+
+function buildFrontierMessage(result: RiskResult | null, frontierPoints: RiskFrontierPoint[]) {
+  if (!result || frontierPoints.length) return null;
+  const responseHasFrontierField = Object.prototype.hasOwnProperty.call(result, "frontier_points");
+  if (!responseHasFrontierField) {
+    return "Risk API response did not include frontier data; restart the backend and run Compute Core again.";
+  }
+  const frontierWarning = result.warnings.find((warning) => warning.includes("Efficient frontier unavailable"));
+  if (frontierWarning) return frontierWarning;
+  if ((result.contributions?.length ?? 0) >= 2) {
+    return "Risk has multiple modeled contributors, but the backend returned no frontier points; recompute risk and check provider warnings.";
+  }
+  return "Efficient frontier unavailable until at least two covered positions have usable return history.";
 }
 
 function buildAlerts(result: RiskResult | null, holdings: HoldingRiskRow[], warnings: string[]) {
