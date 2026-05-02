@@ -1,11 +1,11 @@
 # List of Things I'd like to do in due time just listed
 
 ## General things
-- For some odd reason, links that link to outside websites don't open the browser
+- `Solved` For some odd reason, links that link to outside websites don't open the browser
 
 - Deepen handoffs and cross comunication between tabs
 
-- Cleanup 'Selected Equity' box
+- Cleanup 'Selected Equity' box and add the ability so that if there's a porfolio in scope, it also shows as a 'Selected Portfolio' 
 
 - Add customisation to hero charts (candlestick options, technical indicators or volume overlays)
 
@@ -32,13 +32,13 @@
 
 - I'm sure there's more 
 
-- It would be pretty great if in the scope builder the preset portfolio were deeper, have more positions and be overall more interesting. 
+- `Solved` It would be pretty great if in the scope builder the preset portfolio were deeper, have more positions and be overall more interesting. 
 
 
 
 ## Fundamentals 
 
-- It's fucking annoying that the tab autoloads AAPL
+- `Solved` It's fucking annoying that the tab autoloads AAPL
 
 - Harden weird name financials 
 
@@ -62,23 +62,23 @@
 
 ## SEALANES
 
-- Tooltip shows coverage unavailable but ignores that api only connects when zoom is >4
+- `Solved` Tooltip shows coverage unavailable but ignores that api only connects when zoom is >4
 
 ## Copilot 
 
-- For some reason it gives the following error: 
+- `Solved` For some reason it gives the following error: 
 OpenAI request failed: Item with id 'rs_07cadee070d8a05f0169f24f255d0881a2afa1957ce7741ca3' not found. Items are not persisted when `store` is set to false. Try again with `store` set to true, or remove this item from your input.
-(needs solution)
+
 
 - Idk i'd probably want the default mode to just be a mode where I can just have the model help me build hypotheses. Idk current modes feel weird. 
 
 ## Risk 
 
-- All modes need a styling pass
+- `Solved` All modes need a styling pass $
 
-- Efficient frontier doesn't work 
+- Efficient frontier dots should have a vidris look depeding on E[r]/sigma. 
 
-- Mode bar looks weird AF
+- `Mostly Solved` Mode bar looks weird AF
 
 
 
