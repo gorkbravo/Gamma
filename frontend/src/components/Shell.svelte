@@ -60,7 +60,7 @@
           <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
         </svg>
       </button>
-      <h1>Gamma Research and Analysis Platform</h1>
+      <h1><strong>Gamma</strong><span>Research and Analysis Platform</span></h1>
       <span class="topbar-divider" aria-hidden="true"></span>
       <div class="tab-search">
         <SearchDropdown
@@ -224,12 +224,26 @@
   }
 
   h1 {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
     margin: 0;
-    font-size: 0.72rem;
-    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  h1 strong {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--text-0);
+    text-transform: uppercase;
+  }
+
+  h1 span {
+    font-size: 0.63rem;
+    font-weight: 400;
     letter-spacing: 0.02em;
     color: var(--warning);
-    white-space: nowrap;
   }
 
   .copilot-trigger {
