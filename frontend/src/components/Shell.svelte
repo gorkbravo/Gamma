@@ -10,15 +10,21 @@
     updatedAt: string;
   };
 
+  type SelectedPortfolio = {
+    variant: "live" | "research";
+  };
+
   export let title = "Gamma";
   export let activeTab: TabId = "portfolio";
   export let tabs: TabBarItem[] = [];
   export let selectedEquity: SharedEquitySelection | null = null;
+  export let selectedPortfolio: SelectedPortfolio | null = null;
   export let copilotOpen = false;
   export let onToggleSidebar: () => void = () => {};
   export let onToggleCopilot: () => void = () => {};
   export let onSelectTab: (tab: TabId) => void = () => {};
   export let onClearSelectedEquity: () => void = () => {};
+  export let onClearSelectedPortfolio: () => void = () => {};
 
   let searchValue = "";
   let previousActiveTab: TabId = activeTab;
@@ -75,13 +81,16 @@
         />
       </div>
       {#if selectedEquity}
-        <div class="asset-chip" title="Shared equity lens">
+        <div class="asset-chip" title="Equity in focus">
           <span>Equity</span>
           <strong>{selectedEquity.symbol}</strong>
-          {#if selectedEquity.label}
-            <small>{selectedEquity.label}</small>
-          {/if}
-          <button type="button" aria-label="Clear selected equity" on:click={onClearSelectedEquity}>x</button>
+          <button type="button" aria-label="Clear equity focus" on:click={onClearSelectedEquity}>×</button>
+        </div>
+      {:else if selectedPortfolio}
+        <div class="asset-chip" title="Portfolio in focus">
+          <span>Portfolio</span>
+          <strong>{selectedPortfolio.variant === "research" ? "Research" : "Live"}</strong>
+          <button type="button" aria-label="Clear portfolio focus" on:click={onClearSelectedPortfolio}>×</button>
         </div>
       {/if}
       <button
@@ -145,8 +154,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.32rem;
-    min-width: 0;
-    max-width: 17rem;
+    flex-shrink: 0;
+    white-space: nowrap;
     height: 1.75rem;
     padding: 0.12rem 0.18rem 0.12rem 0.46rem;
     border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--panel-border));
@@ -181,6 +190,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     width: 1.2rem;
     height: 1.2rem;
     border: 1px solid transparent;

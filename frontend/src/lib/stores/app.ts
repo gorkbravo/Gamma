@@ -483,6 +483,10 @@ export function clearSharedEquitySelection() {
   sharedEquitySelection.set(null);
 }
 
+export function clearPortfolioSnapshot() {
+  portfolioSnapshot.set(null);
+}
+
 export function setMacroContext(nextContext: Partial<MacroContextState>) {
   macroContext.update((current) => normalizeMacroContextState({ ...current, ...nextContext }));
   resetCopilotCard("macro");

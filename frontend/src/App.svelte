@@ -132,6 +132,7 @@
     setResearchDraft,
     setSharedEquitySelection,
     clearSharedEquitySelection,
+    clearPortfolioSnapshot,
     setBaseCurrency,
     setMarketDataMode,
     startIvSession,
@@ -1740,9 +1741,11 @@
     activeTab={$activeTab}
     tabs={tabBarTabs}
     selectedEquity={$sharedEquitySelection}
+    selectedPortfolio={$portfolioSnapshot ? { variant: "live" } : null}
     copilotOpen={copilotOpen}
     onSelectTab={selectTab}
     onClearSelectedEquity={clearSharedEquitySelection}
+    onClearSelectedPortfolio={clearPortfolioSnapshot}
     onToggleCopilot={handleToggleCopilot}
     onToggleSidebar={handleToggleSidebar}
   >
