@@ -475,8 +475,24 @@
 
 <section class="view">
   <article class="panel header-panel">
-    <div class="header-row">
-      <span class="title">Risk Workspace · <em>{workspace.context.sourceScope} / {workspace.context.baseCurrency}</em></span>
+    <div class="header-top">
+      <span class="title">Risk Workspace</span>
+      <span class="subtitle">{workspace.context.sourceScope} · {workspace.context.baseCurrency}</span>
+    </div>
+    <div class="mode-kpi-row">
+      <div class="mode-bar" role="tablist" aria-label="Risk modes">
+        {#each modes as riskMode}
+          <button
+            type="button"
+            class:selected={activeMode === riskMode.id}
+            role="tab"
+            aria-selected={activeMode === riskMode.id}
+            on:click={() => (activeMode = riskMode.id)}
+          >
+            {riskMode.label}
+          </button>
+        {/each}
+      </div>
       <div class="header-kpis">
         {#each headerKpis as kpi}
           <div class="header-kpi">
@@ -485,19 +501,6 @@
           </div>
         {/each}
       </div>
-    </div>
-    <div class="mode-bar" role="tablist" aria-label="Risk modes">
-      {#each modes as riskMode}
-        <button
-          type="button"
-          class:selected={activeMode === riskMode.id}
-          role="tab"
-          aria-selected={activeMode === riskMode.id}
-          on:click={() => (activeMode = riskMode.id)}
-        >
-          {riskMode.label}
-        </button>
-      {/each}
     </div>
   </article>
 
@@ -1021,35 +1024,35 @@
   }
 
   .header-panel {
-    gap: 0.45rem;
-    padding: 0.5rem 0.65rem 0.4rem;
+    gap: 0.35rem;
+    padding: 0.5rem 0.65rem;
   }
 
-  .header-row {
+  .header-top {
     display: flex;
-    align-items: stretch;
-    justify-content: space-between;
-    gap: 0.85rem;
-    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
   }
 
   .title {
     color: var(--text-0);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
     font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-    align-self: center;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
 
-  .title em {
+  .subtitle {
     color: var(--text-2);
-    font-style: normal;
     font-size: 10.5px;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    margin-left: 0.3rem;
+    letter-spacing: 0.04em;
+  }
+
+  .mode-kpi-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
   }
 
   .header-kpis {
@@ -1095,23 +1098,19 @@
 
   /* ── Mode bar ── */
   .mode-bar {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    width: 100%;
-    border-top: 1px solid var(--divider);
+    display: inline-grid;
+    grid-template-columns: repeat(6, auto);
+    border: 1px solid var(--panel-strong);
   }
 
   .mode-bar button {
     border: 0;
-    border-right: 1px solid var(--divider);
+    border-right: 1px solid var(--panel-strong);
     background: transparent;
-    color: var(--text-2);
-    padding: 0;
-    height: 26px;
+    color: var(--text-1);
+    padding: 0.28rem 0.65rem;
     font: inherit;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 0.79rem;
     white-space: nowrap;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
@@ -1501,14 +1500,14 @@
 
   @media (max-width: 1220px) {
     .workspace-grid, .two-col { grid-template-columns: 1fr; }
-    .header-row { gap: 0.5rem; }
+    .mode-kpi-row { flex-wrap: wrap; gap: 0.5rem; }
     .header-kpis { border-left: 0; padding-top: 0.3rem; border-top: 1px solid var(--divider); flex: 1 1 100%; }
   }
 
   @media (max-width: 760px) {
-    .mode-bar { grid-template-columns: repeat(3, 1fr); }
+    .mode-bar { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
     .mode-bar button:nth-child(3) { border-right: 0; }
-    .mode-bar button:nth-child(-n + 3) { border-bottom: 1px solid var(--divider); }
+    .mode-bar button:nth-child(-n + 3) { border-bottom: 1px solid var(--panel-strong); }
     .control, input, select { width: 100%; }
     .actions { margin-left: 0; border-left: 0; padding-left: 0; flex: 1 1 100%; }
   }
