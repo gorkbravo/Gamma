@@ -598,11 +598,29 @@ export interface RiskFrontierWeight {
 
 export interface RiskFrontierPoint {
   label: string;
-  kind: "current" | "candidate" | "frontier" | "asset" | "risk_free" | "universe_frontier" | "universe_asset" | "universe_candidate" | "cml" | "portfolio_cml" | string;
+  kind:
+    | "current"
+    | "candidate"
+    | "frontier"
+    | "asset"
+    | "risk_free"
+    | "universe_frontier"
+    | "universe_asset"
+    | "universe_candidate"
+    | "cached_equity_asset"
+    | "cached_equity_frontier"
+    | "cached_equity_candidate"
+    | "cml"
+    | "portfolio_cml"
+    | string;
   annual_return: number;
   annual_vol: number;
   sharpe: number | null;
   weights: RiskFrontierWeight[];
+  history_rows?: number | null;
+  history_start?: string | null;
+  history_end?: string | null;
+  source_provider?: string | null;
 }
 
 export interface RiskCorrelationAsset {

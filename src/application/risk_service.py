@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from statistics import NormalDist
 from typing import Dict, List, Tuple
@@ -94,11 +95,31 @@ class RiskFrontierPoint:
     annual_vol: float
     sharpe: float | None
     weights: list[RiskFrontierWeight]
+    history_rows: int | None = None
+    history_start: str | None = None
+    history_end: str | None = None
+    source_provider: str | None = None
+
+
+@dataclass(frozen=True)
+class CachedEquityHistory:
+    symbol: str
+    series: pd.Series
+    lookback_days: int
+    rows: int
+    start: str
+    end: str
+    source_provider: str = "market_data_cache"
 
 
 class RiskService:
     _MC_RANDOM_SEED = 42
     _DEFAULT_FRONTIER_UNIVERSE = ("SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC", "HYG")
+    _CACHE_STK_HISTORY_RE = re.compile(
+        r"^(?P<symbol>.+)_stk_(?P<currency>[a-z]{3})(?:_(?P<exchange>[a-z0-9]+))?_lookback_(?P<lookback>\d+)\.csv$",
+        re.IGNORECASE,
+    )
+    _MAX_CACHED_EQUITY_FRONTIER_SYMBOLS = 160
 
     def __init__(
         self,
@@ -394,6 +415,10 @@ class RiskService:
             data_provider=data_provider,
         )
         warnings.extend(frontier_universe_warnings)
+        cached_equity_returns, cached_equity_metadata, cached_equity_warnings = self._load_cached_equity_reference_returns(
+            request=request,
+        )
+        warnings.extend(cached_equity_warnings)
 
         frontier_points, frontier_warnings = self._build_efficient_frontier(
             snapshot=snapshot,
@@ -401,6 +426,8 @@ class RiskService:
             weights=weights_aligned,
             risk_free_rate_annual=risk_free_rate_annual,
             reference_returns_df=frontier_universe_returns,
+            cached_equity_returns_df=cached_equity_returns,
+            cached_equity_metadata=cached_equity_metadata,
         )
         warnings.extend(frontier_warnings)
         results.warnings = warnings
@@ -438,6 +465,8 @@ class RiskService:
         weights: pd.Series,
         risk_free_rate_annual: float | None = None,
         reference_returns_df: pd.DataFrame | None = None,
+        cached_equity_returns_df: pd.DataFrame | None = None,
+        cached_equity_metadata: dict[str, CachedEquityHistory] | None = None,
     ) -> tuple[list[RiskFrontierPoint], list[str]]:
         warnings: list[str] = []
         def unavailable(message: str) -> tuple[list[RiskFrontierPoint], list[str]]:
@@ -446,7 +475,18 @@ class RiskService:
                 risk_free_rate_annual=risk_free_rate_annual,
                 include_risk_free_marker=False,
             )
-            return reference_points, [message, *reference_warnings]
+            cached_points, cached_warnings, _cached_tangency = cls._build_reference_frontier_points(
+                returns_df=cached_equity_returns_df if cached_equity_returns_df is not None else pd.DataFrame(),
+                risk_free_rate_annual=risk_free_rate_annual,
+                asset_kind="cached_equity_asset",
+                frontier_kind="cached_equity_frontier",
+                candidate_kind="cached_equity_candidate",
+                frontier_label_prefix="Cached Equity Frontier",
+                tangency_label="Cached Equity Max Sharpe",
+                unavailable_label="Cached equity reference frontier",
+                history_metadata=cached_equity_metadata or {},
+            )
+            return [*reference_points, *cached_points], [message, *reference_warnings, *cached_warnings]
 
         if returns_df.empty or weights.empty:
             return unavailable("Efficient frontier unavailable: no covered return history and weights.")
@@ -587,6 +627,19 @@ class RiskService:
         )
         points.extend(reference_points)
         warnings.extend(reference_warnings)
+        cached_points, cached_warnings, _cached_tangency = cls._build_reference_frontier_points(
+            returns_df=cached_equity_returns_df if cached_equity_returns_df is not None else pd.DataFrame(),
+            risk_free_rate_annual=risk_free_rate_annual,
+            asset_kind="cached_equity_asset",
+            frontier_kind="cached_equity_frontier",
+            candidate_kind="cached_equity_candidate",
+            frontier_label_prefix="Cached Equity Frontier",
+            tangency_label="Cached Equity Max Sharpe",
+            unavailable_label="Cached equity reference frontier",
+            history_metadata=cached_equity_metadata or {},
+        )
+        points.extend(cached_points)
+        warnings.extend(cached_warnings)
         return points, warnings
 
     @classmethod
@@ -648,6 +701,13 @@ class RiskService:
         *,
         returns_df: pd.DataFrame,
         risk_free_rate_annual: float | None = None,
+        asset_kind: str = "universe_asset",
+        frontier_kind: str = "universe_frontier",
+        candidate_kind: str = "universe_candidate",
+        frontier_label_prefix: str = "Universe Frontier",
+        tangency_label: str = "Universe Max Sharpe",
+        unavailable_label: str = "Reference frontier",
+        history_metadata: dict[str, CachedEquityHistory] | None = None,
     ) -> tuple[list[RiskFrontierPoint], list[str], RiskFrontierPoint | None]:
         eligible: list[str] = []
         for column in returns_df.columns:
@@ -655,20 +715,20 @@ class RiskService:
             if len(series) >= 3 and float(series.std() or 0.0) > 1e-10:
                 eligible.append(str(column))
         if len(eligible) < 2:
-            return [], ["Reference frontier unavailable: need at least two broad-universe assets with usable return variance."], None
+            return [], [f"{unavailable_label} unavailable: need at least two assets with usable return variance."], None
 
         aligned = returns_df.reindex(columns=eligible).apply(pd.to_numeric, errors="coerce").dropna(how="any")
         if len(aligned) < 3:
-            return [], [f"Reference frontier unavailable: only {len(aligned)} overlapping broad-universe observations."], None
+            return [], [f"{unavailable_label} unavailable: only {len(aligned)} overlapping observations."], None
 
         mean_returns = aligned.mean().to_numpy(dtype=float) * 252.0
         cov = aligned.cov().to_numpy(dtype=float) * 252.0
         if cov.size == 0 or not np.isfinite(cov).all() or not np.isfinite(mean_returns).all():
-            return [], ["Reference frontier unavailable: invalid broad-universe expected-return or covariance inputs."], None
+            return [], [f"{unavailable_label} unavailable: invalid expected-return or covariance inputs."], None
 
         variances = np.diag(cov)
         if np.any(variances <= 0):
-            return [], ["Reference frontier unavailable: one or more broad-universe assets has non-positive variance."], None
+            return [], [f"{unavailable_label} unavailable: one or more assets has non-positive variance."], None
 
         rng = np.random.default_rng(84)
         n_assets = len(eligible)
@@ -686,7 +746,7 @@ class RiskService:
             if annual_vol > 0 and np.isfinite(annual_return) and np.isfinite(annual_vol):
                 candidates.append((np.asarray(raw_weights, dtype=float), annual_return, annual_vol, sharpe))
         if not candidates:
-            return [], ["Reference frontier unavailable: no valid broad-universe candidate portfolios."], None
+            return [], [f"{unavailable_label} unavailable: no valid candidate portfolios."], None
 
         frontier_candidates = sorted(candidates, key=lambda item: (item[2], -item[1]))
         frontier: list[tuple[np.ndarray, float, float, float | None]] = []
@@ -700,15 +760,24 @@ class RiskService:
             frontier = [frontier[int(index)] for index in selected_indexes]
 
         tangency_tuple = max(candidates, key=lambda item: item[3] if item[3] is not None else -np.inf)
-        tangency = cls._reference_tuple_to_frontier_point("Universe Max Sharpe", "universe_candidate", tangency_tuple, eligible)
+        tangency = cls._reference_tuple_to_frontier_point(tangency_label, candidate_kind, tangency_tuple, eligible)
         points = [
-            cls._reference_single_asset_point(index, instrument_id, mean_returns, cov, eligible, risk_free_rate_annual)
+            cls._reference_single_asset_point(
+                index,
+                instrument_id,
+                mean_returns,
+                cov,
+                eligible,
+                risk_free_rate_annual,
+                kind=asset_kind,
+                history_metadata=history_metadata or {},
+            )
             for index, instrument_id in enumerate(eligible)
         ]
         points.extend(
             cls._reference_tuple_to_frontier_point(
-                f"Universe Frontier {index + 1}",
-                "universe_frontier",
+                f"{frontier_label_prefix} {index + 1}",
+                frontier_kind,
                 candidate,
                 eligible,
             )
@@ -756,6 +825,9 @@ class RiskService:
         cov: np.ndarray,
         eligible: list[str],
         risk_free_rate_annual: float | None = None,
+        *,
+        kind: str = "universe_asset",
+        history_metadata: dict[str, CachedEquityHistory] | None = None,
     ) -> RiskFrontierPoint:
         weights = np.zeros(len(mean_returns), dtype=float)
         weights[index] = 1.0
@@ -767,11 +839,19 @@ class RiskService:
         )
         return RiskFrontierPoint(
             label=instrument_id,
-            kind="universe_asset",
+            kind=kind,
             annual_return=annual_return,
             annual_vol=annual_vol,
             sharpe=sharpe,
             weights=cls._reference_frontier_weights(np.array([1.0], dtype=float), [eligible[index]]),
+            history_rows=history_metadata.get(instrument_id).rows if history_metadata and instrument_id in history_metadata else None,
+            history_start=history_metadata.get(instrument_id).start if history_metadata and instrument_id in history_metadata else None,
+            history_end=history_metadata.get(instrument_id).end if history_metadata and instrument_id in history_metadata else None,
+            source_provider=(
+                history_metadata.get(instrument_id).source_provider
+                if history_metadata and instrument_id in history_metadata
+                else None
+            ),
         )
 
     @classmethod
@@ -1040,6 +1120,150 @@ class RiskService:
             warnings.append("Reference frontier unavailable: broad ETF universe histories did not produce overlapping returns.")
             return None, warnings
         return returns, warnings
+
+    def _load_cached_equity_reference_returns(
+        self,
+        *,
+        request: RiskComputeRequest,
+    ) -> tuple[pd.DataFrame | None, dict[str, CachedEquityHistory], list[str]]:
+        histories, warnings = self._discover_cached_equity_histories(
+            lookback_days=request.lookback_days,
+            base_currency=request.base_currency,
+        )
+        if len(histories) < 2:
+            if histories or warnings:
+                warnings.append(
+                    "Cached equity reference frontier unavailable: fewer than two usable file-backed STK histories."
+                )
+            return None, histories, warnings
+
+        prices = {symbol: row.series.astype(float) for symbol, row in histories.items()}
+        returns = compute_returns(align_prices(prices))
+        if returns.empty or len(returns.columns) < 2:
+            warnings.append("Cached equity reference frontier unavailable: cached histories did not produce overlapping returns.")
+            return None, histories, warnings
+        return returns, histories, warnings
+
+    def _discover_cached_equity_histories(
+        self,
+        *,
+        lookback_days: int,
+        base_currency: str,
+    ) -> tuple[dict[str, CachedEquityHistory], list[str]]:
+        cache = getattr(self.market_data, "cache", None)
+        base_dir = getattr(cache, "base_dir", None)
+        if cache is None or base_dir is None:
+            return {}, []
+
+        try:
+            cache_dir = getattr(cache, "base_dir")
+            files = sorted(cache_dir.glob("*_stk_*_lookback_*.csv"))
+        except Exception:
+            return {}, ["Cached equity reference cloud unavailable: market-data cache directory could not be scanned."]
+
+        target_currency = str(base_currency or "USD").strip().upper() or "USD"
+        min_rows = max(30, min(int(lookback_days or 0), 63))
+        skipped_numeric = 0
+        skipped_currency = 0
+        skipped_invalid = 0
+        skipped_shallow = 0
+        expired_used = 0
+        candidates: dict[str, CachedEquityHistory] = {}
+
+        for path in files:
+            match = self._CACHE_STK_HISTORY_RE.match(path.name)
+            if not match:
+                continue
+            symbol = str(match.group("symbol") or "").strip().upper()
+            if not symbol or symbol.isdigit():
+                skipped_numeric += 1
+                continue
+            currency = str(match.group("currency") or "").strip().upper()
+            if currency != target_currency:
+                skipped_currency += 1
+                continue
+            try:
+                lookback = int(match.group("lookback"))
+            except Exception:
+                skipped_invalid += 1
+                continue
+
+            source_provider = "market_data_cache"
+            series = cache.get(path.stem)
+            if series is None or series.empty:
+                series = self._read_expired_cache_series(path)
+                if series is None or series.empty:
+                    skipped_invalid += 1
+                    continue
+                source_provider = "market_data_cache_expired"
+                expired_used += 1
+            clean = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+            if len(clean) < min_rows or float(clean.std() or 0.0) <= 1e-10:
+                skipped_shallow += 1
+                continue
+
+            index = pd.to_datetime(clean.index, errors="coerce")
+            clean = pd.Series(clean.to_numpy(dtype=float), index=index).dropna()
+            clean = clean[~clean.index.isna()].sort_index()
+            if len(clean) < min_rows:
+                skipped_shallow += 1
+                continue
+
+            history = CachedEquityHistory(
+                symbol=symbol,
+                series=clean.astype(float),
+                lookback_days=lookback,
+                rows=int(len(clean)),
+                start=clean.index.min().date().isoformat(),
+                end=clean.index.max().date().isoformat(),
+                source_provider=source_provider,
+            )
+            existing = candidates.get(symbol)
+            if existing is None or (history.rows, history.lookback_days) > (existing.rows, existing.lookback_days):
+                candidates[symbol] = history
+
+        selected = dict(
+            sorted(
+                candidates.items(),
+                key=lambda item: (item[1].rows, item[1].lookback_days, item[0]),
+                reverse=True,
+            )[: self._MAX_CACHED_EQUITY_FRONTIER_SYMBOLS]
+        )
+
+        warnings: list[str] = []
+        skipped = skipped_numeric + skipped_currency + skipped_invalid + skipped_shallow
+        if skipped:
+            warnings.append(
+                "Cached equity reference cloud skipped "
+                f"{skipped} cache file(s) ({skipped_numeric} numeric ids, {skipped_currency} non-{target_currency}, "
+                f"{skipped_invalid} invalid/unreadable, {skipped_shallow} shallow/flat)."
+            )
+        if expired_used:
+            warnings.append(
+                "Cached equity reference cloud included "
+                f"{expired_used} expired file-backed history file(s) as stale visual context only."
+            )
+        if len(candidates) > len(selected):
+            warnings.append(
+                "Cached equity reference cloud capped at "
+                f"{len(selected)} deepest symbols from {len(candidates)} usable file-backed STK histories."
+            )
+        return selected, warnings
+
+    @staticmethod
+    def _read_expired_cache_series(path) -> pd.Series | None:
+        try:
+            df = pd.read_csv(path, parse_dates=["date"], index_col="date")
+            if "close" not in df:
+                return None
+            series = pd.to_numeric(df["close"], errors="coerce").dropna()
+        except Exception:
+            return None
+        if series.empty:
+            return None
+        if getattr(series.index, "tz", None) is not None:
+            series.index = series.index.tz_convert(None)
+        return series.sort_index()
 
     def _load_frontier_universe_history(
         self,

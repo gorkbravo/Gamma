@@ -219,6 +219,47 @@ describe("risk workspace view-model", () => {
     expect(model.frontierPoints.length).toBeGreaterThan(0);
   });
 
+  it("passes cached equity frontier points through without using them for candidate allocations", () => {
+    const model = buildRiskWorkspaceModel(
+      snapshot,
+      {
+        ...riskResult,
+        frontier_points: [
+          ...riskResult.frontier_points,
+          {
+            label: "CACHEA",
+            kind: "cached_equity_asset",
+            annual_return: 0.18,
+            annual_vol: 0.32,
+            sharpe: 0.56,
+            weights: [{ symbol: "CACHEA", instrument_id: "CACHEA", display_symbol: "CACHEA", weight: 1 }],
+            history_rows: 90,
+            history_start: "2026-01-02",
+            history_end: "2026-05-07",
+            source_provider: "market_data_cache",
+          },
+          {
+            label: "Cached Equity Max Sharpe",
+            kind: "cached_equity_candidate",
+            annual_return: 0.15,
+            annual_vol: 0.24,
+            sharpe: 0.62,
+            weights: [{ symbol: "CACHEA", instrument_id: "CACHEA", display_symbol: "CACHEA", weight: 1 }],
+          },
+        ],
+      },
+      {
+        sourceScope: "portfolio",
+        benchmarkSymbol: "SPY",
+        returnFrequency: "daily",
+      }
+    );
+
+    expect(model.frontierPoints.some((point) => point.kind === "cached_equity_asset")).toBe(true);
+    expect(model.candidates.map((row) => row.symbol)).not.toContain("CACHEA");
+    expect(model.optimizationKpis.find((kpi) => kpi.label === "Frontier assets")?.sublabel).toBe("covered risky sleeve");
+  });
+
   it("populates correlation diagnostics from backend position-level returns", () => {
     const model = buildRiskWorkspaceModel(snapshot, riskResult, {
       sourceScope: "portfolio",

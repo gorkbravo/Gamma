@@ -36,6 +36,10 @@
     annualReturn: number;
     annualVol: number;
     sharpe: number | null;
+    historyRows: number | null;
+    historyStart: string | null;
+    historyEnd: string | null;
+    sourceProvider: string | null;
     x: number;
     y: number;
   };
@@ -242,7 +246,7 @@
   }
 
   function buildFrontierPlot(points: RiskFrontierPoint[]): FrontierPlotModel {
-    const clean = points
+    const raw = points
       .filter((point) => Number.isFinite(point.annual_vol) && Number.isFinite(point.annual_return))
       .map((point) => ({
         label: point.label,
@@ -250,12 +254,35 @@
         annualReturn: point.annual_return,
         annualVol: point.annual_vol,
         sharpe: point.sharpe,
+        historyRows: point.history_rows ?? null,
+        historyStart: point.history_start ?? null,
+        historyEnd: point.history_end ?? null,
+        sourceProvider: point.source_provider ?? null,
         x: 0,
         y: 0,
       }));
+    const portfolioLabels = new Set(
+      raw
+        .filter((point) => point.kind === "asset" || point.kind === "candidate" || point.kind === "current")
+        .map((point) => normalizeFrontierLabel(point.label))
+        .filter(Boolean)
+    );
+    const seen = new Set<string>();
+    const clean = raw.filter((point) => {
+      if (!isVisibleFrontierKind(point.kind)) return false;
+      if (point.kind === "cached_equity_asset" && portfolioLabels.has(normalizeFrontierLabel(point.label))) {
+        return false;
+      }
+      const dedupeKey = `${point.kind}:${normalizeFrontierLabel(point.label)}`;
+      if (seen.has(dedupeKey)) return false;
+      seen.add(dedupeKey);
+      return true;
+    });
     if (!clean.length) return { points: [], frontierPath: "", xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
-    const xValues = clean.map((point) => point.annualVol);
-    const yValues = clean.map((point) => point.annualReturn);
+    const core = clean.filter((point) => !isCachedEquityKind(point.kind));
+    const cached = clean.filter((point) => isCachedEquityKind(point.kind));
+    const xValues = boundedDomainValues(core.map((point) => point.annualVol), cached.map((point) => point.annualVol));
+    const yValues = boundedDomainValues(core.map((point) => point.annualReturn), cached.map((point) => point.annualReturn));
     const xMinRaw = Math.min(...xValues);
     const xMaxRaw = Math.max(...xValues);
     const yMinRaw = Math.min(...yValues);
@@ -270,15 +297,56 @@
     const height = Math.max(yMax - yMin, 1e-9);
     const plotted = clean.map((point) => ({
       ...point,
-      x: ((point.annualVol - xMin) / width) * 100,
-      y: 100 - ((point.annualReturn - yMin) / height) * 100,
+      x: clamp(((point.annualVol - xMin) / width) * 100, 0, 100),
+      y: clamp(100 - ((point.annualReturn - yMin) / height) * 100, 0, 100),
     }));
     const frontierPath = plotted
-      .filter((point) => point.kind === "frontier")
+      .filter((point) => point.kind === "cached_equity_frontier")
       .sort((left, right) => left.annualVol - right.annualVol)
       .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
       .join(" ");
     return { points: plotted, frontierPath, xMin, xMax, yMin, yMax };
+  }
+
+  function isVisibleFrontierKind(kind: string) {
+    return kind === "current" || kind === "candidate" || kind === "risk_free" || kind === "cached_equity_asset" || kind === "cached_equity_frontier";
+  }
+
+  function isCachedEquityKind(kind: string) {
+    return kind === "cached_equity_asset" || kind === "cached_equity_frontier" || kind === "cached_equity_candidate";
+  }
+
+  function normalizeFrontierLabel(value: string) {
+    return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  function boundedDomainValues(core: number[], cached: number[]) {
+    const finiteCore = core.filter(Number.isFinite);
+    const finiteCached = cached.filter(Number.isFinite);
+    if (!finiteCached.length) return finiteCore.length ? finiteCore : [0];
+    const boundedCached =
+      finiteCached.length >= 8
+        ? [
+            quantile(finiteCached, 0.05),
+            quantile(finiteCached, 0.95),
+          ]
+        : finiteCached;
+    return finiteCore.length ? [...finiteCore, ...boundedCached] : boundedCached;
+  }
+
+  function quantile(values: number[], q: number) {
+    const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (!sorted.length) return 0;
+    const position = (sorted.length - 1) * q;
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    if (lower === upper) return sorted[lower];
+    const weight = position - lower;
+    return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+  }
+
+  function clamp(value: number, min: number, max: number) {
+    return Math.min(Math.max(value, min), max);
   }
 
   function smoothSvgPath(points: Array<{ px: number; py: number }>) {
@@ -754,24 +822,12 @@
         px: FRONTIER_PAD.l + (p.x / 100) * plotW,
         py: FRONTIER_PAD.t + (p.y / 100) * plotH,
       }))}
-      {@const frontierPx = pixelPoints
-        .filter((p) => p.kind === "frontier")
+      {@const cachedEquityFrontierPx = pixelPoints
+        .filter((p) => p.kind === "cached_equity_frontier")
         .sort((a, b) => a.annualVol - b.annualVol)}
-      {@const universeFrontierPx = pixelPoints
-        .filter((p) => p.kind === "universe_frontier")
-        .sort((a, b) => a.annualVol - b.annualVol)}
-      {@const cmlPx = pixelPoints
-        .filter((p) => p.kind === "cml")
-        .sort((a, b) => a.annualVol - b.annualVol)}
-      {@const portfolioCmlPx = pixelPoints
-        .filter((p) => p.kind === "portfolio_cml")
-        .sort((a, b) => a.annualVol - b.annualVol)}
-      {@const frontierLine = smoothSvgPath(frontierPx)}
-      {@const universeFrontierLine = smoothSvgPath(universeFrontierPx)}
-      {@const cmlLine = smoothSvgPath(cmlPx)}
-      {@const portfolioCmlLine = smoothSvgPath(portfolioCmlPx)}
-      {@const markerPx = pixelPoints.filter((p) => !["frontier", "universe_frontier", "cml", "portfolio_cml"].includes(p.kind))}
-      {@const labeledMarkerPx = markerPx.filter((p) => !["asset", "universe_asset"].includes(p.kind))}
+      {@const cachedEquityFrontierLine = smoothSvgPath(cachedEquityFrontierPx)}
+      {@const markerPx = pixelPoints.filter((p) => p.kind !== "cached_equity_frontier")}
+      {@const labeledMarkerPx = markerPx.filter((p) => ["current", "candidate", "risk_free"].includes(p.kind))}
       {@const hovered = hoveredFrontierIdx != null ? pixelPoints[hoveredFrontierIdx] ?? null : null}
       <svg width={frontierW} height={frontierH} aria-label="Efficient frontier risk return chart">
         {#each [0.25, 0.5, 0.75] as t}
@@ -780,41 +836,16 @@
         {/each}
         <line class="axis" x1={FRONTIER_PAD.l} y1={frontierH - FRONTIER_PAD.b} x2={frontierW - FRONTIER_PAD.r} y2={frontierH - FRONTIER_PAD.b} />
         <line class="axis" x1={FRONTIER_PAD.l} y1={FRONTIER_PAD.t} x2={FRONTIER_PAD.l} y2={frontierH - FRONTIER_PAD.b} />
-        {#if frontierLine}
-          <path class="frontier-line" d={frontierLine} />
+        {#if cachedEquityFrontierLine}
+          <path class="cached-equity-frontier-line" d={cachedEquityFrontierLine} />
         {/if}
-        {#if universeFrontierLine}
-          <path class="universe-frontier-line" d={universeFrontierLine} />
-        {/if}
-        {#if cmlLine}
-          <path class="cml-line" d={cmlLine} />
-        {/if}
-        {#if portfolioCmlLine}
-          <path class="portfolio-cml-line" d={portfolioCmlLine} />
-        {/if}
-        {#each frontierPx as p}
-          <circle
-            class="frontier-dot"
-            class:hovered={hoveredFrontierIdx === p.idx}
-            cx={p.px}
-            cy={p.py}
-            r={hoveredFrontierIdx === p.idx ? 5 : 3}
-            role="button"
-            tabindex="0"
-            aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
-            on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
-            on:mouseleave={() => (hoveredFrontierIdx = null)}
-            on:focus={() => (hoveredFrontierIdx = p.idx)}
-            on:blur={() => (hoveredFrontierIdx = null)}
-          />
-        {/each}
         {#each markerPx as p}
           <circle
             class={`frontier-marker-dot ${p.kind}`}
             class:hovered={hoveredFrontierIdx === p.idx}
             cx={p.px}
             cy={p.py}
-            r={["asset", "universe_asset"].includes(p.kind) ? hoveredFrontierIdx === p.idx ? 5.5 : 4 : hoveredFrontierIdx === p.idx ? 7 : 5.5}
+            r={p.kind === "cached_equity_asset" ? hoveredFrontierIdx === p.idx ? 4.4 : 2.7 : p.kind === "risk_free" ? hoveredFrontierIdx === p.idx ? 6.5 : 5 : hoveredFrontierIdx === p.idx ? 7 : 5.8}
             role="button"
             tabindex="0"
             aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
@@ -849,6 +880,15 @@
           <span><em>Vol</em> {pct(hovered.annualVol)}</span>
           <span><em>Return</em> {pct(hovered.annualReturn)}</span>
           <span><em>Sharpe</em> {fmt(hovered.sharpe, 2)}</span>
+          {#if hovered.historyRows}
+            <span><em>Rows</em> {hovered.historyRows}</span>
+          {/if}
+          {#if hovered.historyStart && hovered.historyEnd}
+            <span><em>Window</em> {hovered.historyStart} - {hovered.historyEnd}</span>
+          {/if}
+          {#if hovered.sourceProvider}
+            <span><em>Source</em> {hovered.sourceProvider}</span>
+          {/if}
         </div>
       {/if}
     {:else if plot.points.length}
@@ -1244,18 +1284,27 @@
     fill: none;
     stroke: var(--chart-primary);
     stroke-width: 1.6;
+    display: none;
   }
   .universe-frontier-line {
     fill: none;
     stroke: var(--chart-secondary);
     stroke-width: 1.35;
     stroke-dasharray: 5 4;
+    display: none;
+  }
+  .cached-equity-frontier-line {
+    fill: none;
+    stroke: var(--chart-primary);
+    stroke-width: 1.45;
+    opacity: 0.82;
   }
   .cml-line {
     fill: none;
     stroke: var(--positive);
     stroke-width: 1.2;
     stroke-dasharray: 2 5;
+    display: none;
   }
   .portfolio-cml-line {
     fill: none;
@@ -1263,6 +1312,7 @@
     stroke-width: 1.15;
     stroke-dasharray: 2 4;
     opacity: 0.85;
+    display: none;
   }
   .frontier-dot {
     fill: var(--chart-primary);
@@ -1279,11 +1329,14 @@
     cursor: pointer;
     transition: r 120ms ease;
   }
-  .frontier-marker-dot.candidate { stroke: var(--chart-primary); }
+  .frontier-marker-dot.candidate { stroke: var(--chart-primary); fill: var(--chart-primary); stroke-width: 1.2; }
   .frontier-marker-dot.current { stroke: var(--chart-secondary); fill: var(--chart-secondary); }
-  .frontier-marker-dot.asset { stroke: var(--text-2); fill: var(--bg-0); stroke-width: 1.4; }
-  .frontier-marker-dot.universe_asset { stroke: var(--chart-secondary); fill: var(--bg-0); stroke-width: 1.25; }
-  .frontier-marker-dot.universe_candidate { stroke: var(--positive); fill: var(--bg-0); stroke-width: 1.8; }
+  .frontier-marker-dot.asset { stroke: var(--chart-primary); fill: var(--chart-primary); stroke-width: 1.2; }
+  .frontier-marker-dot.universe_asset { display: none; }
+  .frontier-marker-dot.universe_candidate { display: none; }
+  .frontier-marker-dot.cached_equity_asset { stroke: var(--text-2); fill: var(--text-2); stroke-width: 0.8; opacity: 0.48; }
+  .frontier-marker-dot.cached_equity_asset.hovered { opacity: 0.95; }
+  .frontier-marker-dot.cached_equity_candidate { display: none; }
   .frontier-marker-dot.risk_free { stroke: var(--positive); fill: var(--positive); }
   .frontier-label {
     position: absolute;
@@ -1300,6 +1353,7 @@
   .frontier-label.current { color: var(--chart-secondary); border-color: rgba(196, 154, 90, 0.4); }
   .frontier-label.candidate { color: var(--chart-primary); border-color: rgba(122, 166, 200, 0.4); }
   .frontier-label.universe_candidate { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
+  .frontier-label.cached_equity_candidate { color: var(--text-1); border-color: var(--divider); }
   .frontier-label.risk_free { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
 
   .frontier-tooltip {

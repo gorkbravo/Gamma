@@ -105,6 +105,10 @@ class RiskFrontierPointModel(BaseModel):
     annual_vol: float
     sharpe: float | None = None
     weights: list[RiskFrontierWeightModel] = Field(default_factory=list)
+    history_rows: int | None = None
+    history_start: str | None = None
+    history_end: str | None = None
+    source_provider: str | None = None
 
 
 class RiskCorrelationAssetModel(BaseModel):
@@ -174,6 +178,10 @@ class RiskComputeResponseModel(BaseModel):
                     annual_return=float(point.annual_return),
                     annual_vol=float(point.annual_vol),
                     sharpe=_to_float(point.sharpe),
+                    history_rows=point.history_rows,
+                    history_start=point.history_start,
+                    history_end=point.history_end,
+                    source_provider=point.source_provider,
                     weights=[
                         RiskFrontierWeightModel(
                             symbol=weight.symbol,

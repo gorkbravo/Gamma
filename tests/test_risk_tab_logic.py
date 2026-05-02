@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -9,6 +10,7 @@ from src.application.portfolio_service import PortfolioPerformanceRequest, Portf
 from src.application.risk_service import RiskComputeRequest, RiskService
 from src.models.instruments import InstrumentDefaults
 from src.models.portfolio import PortfolioSnapshot, PositionItem
+from src.services.cache import CacheService
 
 
 class _StubClient:
@@ -16,9 +18,10 @@ class _StubClient:
 
 
 class _StubMarketData:
-    def __init__(self, fx_history: pd.Series | None = None, fx_rate: float | None = None) -> None:
+    def __init__(self, fx_history: pd.Series | None = None, fx_rate: float | None = None, cache=None) -> None:
         self._fx_history = fx_history
         self._fx_rate = fx_rate
+        self.cache = cache
 
     def drain_errors(self):
         return []
@@ -614,6 +617,82 @@ def test_compute_adds_reference_universe_frontier_and_cml_when_available():
     assert sum(1 for point in payload.frontier_points if point.kind == "cml") == 2
     assert sum(1 for point in payload.frontier_points if point.kind == "portfolio_cml") == 2
     assert any(point.label == "Risk-free" and point.kind == "risk_free" for point in payload.frontier_points)
+
+
+def test_cached_equity_history_discovery_dedupes_deepest_and_includes_expired_context(tmp_path):
+    cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
+    idx_short = pd.date_range("2026-01-02", periods=80, freq="B")
+    idx_deep = pd.date_range("2025-01-02", periods=180, freq="B")
+    short = pd.Series(range(100, 180), index=idx_short, dtype=float)
+    deep = pd.Series(range(200, 380), index=idx_deep, dtype=float)
+    stale = pd.Series(range(50, 230), index=idx_deep, dtype=float)
+    flat = pd.Series([10.0] * len(idx_deep), index=idx_deep)
+
+    cache.set("aaa_stk_usd_smart_lookback_63", short)
+    cache.set("aaa_stk_usd_smart_lookback_252", deep)
+    cache.set("123456_stk_usd_lookback_252", deep)
+    cache.set("eurx_stk_eur_smart_lookback_252", deep)
+    cache.set("flat_stk_usd_smart_lookback_252", flat)
+    cache.set("old_stk_usd_smart_lookback_252", stale)
+    (tmp_path / "cache" / "old_stk_usd_smart_lookback_252.json").write_text(
+        json.dumps({"timestamp": "2020-01-01T00:00:00"})
+    )
+
+    service = _make_risk_service(market_data=_StubMarketData(cache=cache))
+    histories, warnings = service._discover_cached_equity_histories(lookback_days=252, base_currency="USD")
+
+    assert set(histories) == {"AAA", "OLD"}
+    assert histories["AAA"].rows == len(deep)
+    assert histories["AAA"].lookback_days == 252
+    assert histories["OLD"].source_provider == "market_data_cache_expired"
+    assert any("numeric ids" in warning and "non-USD" in warning for warning in warnings)
+    assert any("expired file-backed history" in warning for warning in warnings)
+
+
+def test_compute_adds_cached_equity_reference_cloud_without_changing_portfolio_candidates(tmp_path):
+    cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
+    idx = pd.date_range("2026-01-02", periods=90, freq="B")
+    prices = {
+        "A": pd.Series([100 + i * 0.8 + (i % 5) * 0.2 for i in range(len(idx))], index=idx),
+        "B": pd.Series([80 + i * 0.4 - (i % 4) * 0.15 for i in range(len(idx))], index=idx),
+    }
+    cache.set("cachea_stk_usd_smart_lookback_252", pd.Series([40 + i * 0.35 + (i % 3) * 0.1 for i in range(len(idx))], index=idx))
+    cache.set("cacheb_stk_usd_smart_lookback_252", pd.Series([70 + i * 0.15 - (i % 6) * 0.08 for i in range(len(idx))], index=idx))
+    cache.set("cachec_stk_usd_smart_lookback_252", pd.Series([25 + i * 0.5 + (i % 7) * 0.12 for i in range(len(idx))], index=idx))
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=60.0),
+            PositionItem("B", "STK", "USD", 1, None, None, None, None, base_market_value=40.0),
+        ],
+        net_liq=100.0,
+    )
+    service = _make_risk_service(market_data=_StubMarketData(cache=cache))
+    request = RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=3,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        include_monte_carlo=False,
+        recommended_min_obs=3,
+    )
+
+    payload = service.compute(request, data_provider=_PriceProvider(prices))
+
+    kinds = {point.kind for point in payload.frontier_points}
+    assert "cached_equity_asset" in kinds
+    assert "cached_equity_frontier" in kinds
+    assert "cached_equity_candidate" in kinds
+    cached_assets = [point for point in payload.frontier_points if point.kind == "cached_equity_asset"]
+    assert {point.label for point in cached_assets} == {"CACHEA", "CACHEB", "CACHEC"}
+    assert all(point.history_rows == len(idx) for point in cached_assets)
+    min_vol = next(point for point in payload.frontier_points if point.label == "Min Vol")
+    assert {weight.symbol for weight in min_vol.weights}.issubset({"A", "B"})
 
 
 def test_compute_exposes_position_correlation_matrix():
