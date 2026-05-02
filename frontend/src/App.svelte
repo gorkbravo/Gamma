@@ -17,6 +17,7 @@
   import RiskView from "./views/RiskView.svelte";
   import SitrepView from "./views/SitrepView.svelte";
   import IvView from "./views/IvView.svelte";
+  import { installExternalLinkHandler } from "./lib/external-links";
   import { matchesActionKeybinding, isEditableEventTarget } from "./lib/keybindings";
   import { openKeyBindingsWindow } from "./lib/keybindings-window";
   import {
@@ -975,11 +976,15 @@
     const handleGlobalKeydown = (event: KeyboardEvent) => {
       void handleAppKeydown(event);
     };
+    const uninstallExternalLinkHandler = installExternalLinkHandler(document, {
+      logger: console,
+    });
     window.addEventListener("keydown", handleGlobalKeydown);
     pollHandle = setInterval(() => {
       void refreshSystemStatus();
     }, 5000);
     return () => {
+      uninstallExternalLinkHandler();
       window.removeEventListener("keydown", handleGlobalKeydown);
       if (pollHandle) {
         clearInterval(pollHandle);

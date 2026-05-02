@@ -68,6 +68,7 @@ impl Default for DesktopState {
 fn main() {
     let app = tauri::Builder::default()
         .manage(DesktopState::default())
+        .invoke_handler(tauri::generate_handler![open_external_url])
         .on_page_load(|window, _payload| {
             if window.label() != "main" {
                 return;
@@ -99,6 +100,42 @@ fn main() {
         RunEvent::ExitRequested { .. } => kill_backend(app_handle),
         _ => {}
     });
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    if !(lowered.starts_with("https://") || lowered.starts_with("http://")) {
+        return Err("Only http and https URLs can be opened externally.".to_string());
+    }
+
+    let mut command = external_url_command(trimmed);
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Failed to open external URL: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn external_url_command(url: &str) -> Command {
+    let mut command = Command::new("rundll32");
+    command.arg("url.dll,FileProtocolHandler").arg(url);
+    command
+}
+
+#[cfg(target_os = "macos")]
+fn external_url_command(url: &str) -> Command {
+    let mut command = Command::new("open");
+    command.arg(url);
+    command
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn external_url_command(url: &str) -> Command {
+    let mut command = Command::new("xdg-open");
+    command.arg(url);
+    command
 }
 
 fn bootstrap_backend(app: &AppHandle) -> Result<(), String> {
