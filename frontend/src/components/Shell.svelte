@@ -14,7 +14,6 @@
     variant: "live" | "research";
   };
 
-  export let title = "Gamma";
   export let activeTab: TabId = "portfolio";
   export let tabs: TabBarItem[] = [];
   export let selectedEquity: SharedEquitySelection | null = null;
@@ -61,8 +60,7 @@
           <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
         </svg>
       </button>
-      <img class="mark" src="/gamma-mark.svg" alt="" aria-hidden="true" />
-      <h1>{title}</h1>
+      <h1>Research and Analysis Platform</h1>
       <span class="topbar-divider" aria-hidden="true"></span>
       <div class="tab-search">
         <SearchDropdown
@@ -225,19 +223,14 @@
     border-color: rgba(122, 166, 200, 0.32);
   }
 
-  .mark {
-    display: block;
-    width: 1.15rem;
-    height: auto;
-    opacity: 0.85;
-  }
-
   h1 {
     margin: 0;
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
+    color: var(--warning);
+    white-space: nowrap;
   }
 
   .copilot-trigger {
