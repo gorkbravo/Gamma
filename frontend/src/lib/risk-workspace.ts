@@ -441,7 +441,7 @@ function buildCorrelationMatrix(matrix: RiskCorrelationMatrix | null | undefined
   const assets = (matrix?.assets ?? [])
     .map((asset) => ({
       key: asset.instrument_id ?? asset.symbol,
-      label: asset.display_symbol ?? asset.symbol,
+      label: asset.symbol,
     }))
     .filter((asset) => asset.key && asset.label)
     .slice(0, 12);
