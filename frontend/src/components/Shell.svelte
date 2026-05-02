@@ -60,7 +60,7 @@
           <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
         </svg>
       </button>
-      <h1>Research and Analysis Platform</h1>
+      <h1>Gamma Research and Analysis Platform</h1>
       <span class="topbar-divider" aria-hidden="true"></span>
       <div class="tab-search">
         <SearchDropdown
@@ -227,8 +227,7 @@
     margin: 0;
     font-size: 0.72rem;
     font-weight: 500;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    letter-spacing: 0.02em;
     color: var(--warning);
     white-space: nowrap;
   }
