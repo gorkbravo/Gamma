@@ -349,12 +349,32 @@
     return Math.min(Math.max(value, min), max);
   }
 
+  function viridisColor(t: number): string {
+    const v = Math.max(0, Math.min(1, t));
+    const stops: [number, [number, number, number]][] = [
+      [0.0,  [68,   1,  84]],
+      [0.25, [59,  82, 139]],
+      [0.5,  [33, 145, 140]],
+      [0.75, [94, 201,  98]],
+      [1.0,  [253, 231,  37]],
+    ];
+    for (let i = 1; i < stops.length; i++) {
+      if (v <= stops[i][0]) {
+        const [t0, [r0, g0, b0]] = stops[i - 1];
+        const [t1, [r1, g1, b1]] = stops[i];
+        const f = (v - t0) / (t1 - t0);
+        return `rgb(${Math.round(r0 + f * (r1 - r0))},${Math.round(g0 + f * (g1 - g0))},${Math.round(b0 + f * (b1 - b0))})`;
+      }
+    }
+    return "rgb(253,231,37)";
+  }
+
   function smoothSvgPath(points: Array<{ px: number; py: number }>) {
     if (points.length < 2) return "";
     if (points.length === 2) {
       return `M ${points[0].px.toFixed(1)} ${points[0].py.toFixed(1)} L ${points[1].px.toFixed(1)} ${points[1].py.toFixed(1)}`;
     }
-    const tension = 0.22;
+    const tension = 0.15;
     return points
       .map((point, index) => {
         if (index === 0) return `M ${point.px.toFixed(1)} ${point.py.toFixed(1)}`;
@@ -826,44 +846,125 @@
         .filter((p) => p.kind === "cached_equity_frontier")
         .sort((a, b) => a.annualVol - b.annualVol)}
       {@const cachedEquityFrontierLine = smoothSvgPath(cachedEquityFrontierPx)}
-      {@const markerPx = pixelPoints.filter((p) => p.kind !== "cached_equity_frontier")}
-      {@const labeledMarkerPx = markerPx.filter((p) => ["current", "candidate", "risk_free"].includes(p.kind))}
+      {@const cachedAssetPx = pixelPoints.filter((p) => p.kind === "cached_equity_asset")}
+      {@const namedMarkerPx = pixelPoints.filter((p) => ["current", "candidate", "risk_free"].includes(p.kind))}
+      {@const minVolFrontierPt = cachedEquityFrontierPx.length
+        ? cachedEquityFrontierPx.reduce((a, b) => (a.annualVol <= b.annualVol ? a : b))
+        : null}
+      {@const maxSharpeFrontierPt = cachedEquityFrontierPx.length
+        ? cachedEquityFrontierPx.reduce((a, b) => ((a.sharpe ?? -Infinity) >= (b.sharpe ?? -Infinity) ? a : b))
+        : null}
+      {@const specialFrontierMarkers = [
+        ...(minVolFrontierPt ? [{ ...minVolFrontierPt, label: "Min Vol", markerKind: "min-vol" }] : []),
+        ...(maxSharpeFrontierPt && maxSharpeFrontierPt.idx !== minVolFrontierPt?.idx
+          ? [{ ...maxSharpeFrontierPt, label: "Max Sharpe", markerKind: "max-sharpe" }]
+          : []),
+      ]}
+      {@const specialFrontierIdxs = new Set(
+        [minVolFrontierPt?.idx, maxSharpeFrontierPt?.idx].filter((n): n is number => n != null)
+      )}
+      {@const assetSharpes = cachedAssetPx
+        .map((p) => p.sharpe)
+        .filter((s): s is number => Number.isFinite(s))}
+      {@const sharpeMin = assetSharpes.length ? Math.min(...assetSharpes) : 0}
+      {@const sharpeRange = Math.max((assetSharpes.length ? Math.max(...assetSharpes) : 1) - sharpeMin, 0.001)}
+      {@const rfPt = pixelPoints.find((p) => p.kind === "risk_free") ?? null}
+      {@const cmlCoords = (() => {
+        if (!rfPt || !maxSharpeFrontierPt) return null;
+        const dVol = maxSharpeFrontierPt.annualVol - rfPt.annualVol;
+        if (dVol <= 0) return null;
+        const slope = (maxSharpeFrontierPt.annualReturn - rfPt.annualReturn) / dVol;
+        const yRange = Math.max(plot.yMax - plot.yMin, 1e-9);
+        const endReturn = rfPt.annualReturn + slope * (plot.xMax - rfPt.annualVol);
+        return {
+          x1: rfPt.px, y1: rfPt.py,
+          x2: FRONTIER_PAD.l + plotW,
+          y2: FRONTIER_PAD.t + (1 - (endReturn - plot.yMin) / yRange) * plotH,
+        };
+      })()}
+      {@const zeroReturnY = plot.yMin < 0 && plot.yMax > 0
+        ? FRONTIER_PAD.t + (1 - (0 - plot.yMin) / Math.max(plot.yMax - plot.yMin, 1e-9)) * plotH
+        : null}
       {@const hovered = hoveredFrontierIdx != null ? pixelPoints[hoveredFrontierIdx] ?? null : null}
       <svg width={frontierW} height={frontierH} aria-label="Efficient frontier risk return chart">
+        <defs>
+          <clipPath id="fp-clip">
+            <rect x={FRONTIER_PAD.l} y={FRONTIER_PAD.t} width={plotW} height={plotH} />
+          </clipPath>
+        </defs>
         {#each [0.25, 0.5, 0.75] as t}
           <line class="grid" x1={FRONTIER_PAD.l} y1={FRONTIER_PAD.t + t * plotH} x2={frontierW - FRONTIER_PAD.r} y2={FRONTIER_PAD.t + t * plotH} />
           <line class="grid" x1={FRONTIER_PAD.l + t * plotW} y1={FRONTIER_PAD.t} x2={FRONTIER_PAD.l + t * plotW} y2={frontierH - FRONTIER_PAD.b} />
         {/each}
+        {#if zeroReturnY != null}
+          <line class="zero-return-line"
+            x1={FRONTIER_PAD.l} y1={zeroReturnY}
+            x2={frontierW - FRONTIER_PAD.r} y2={zeroReturnY} />
+        {/if}
         <line class="axis" x1={FRONTIER_PAD.l} y1={frontierH - FRONTIER_PAD.b} x2={frontierW - FRONTIER_PAD.r} y2={frontierH - FRONTIER_PAD.b} />
         <line class="axis" x1={FRONTIER_PAD.l} y1={FRONTIER_PAD.t} x2={FRONTIER_PAD.l} y2={frontierH - FRONTIER_PAD.b} />
-        {#if cachedEquityFrontierLine}
-          <path class="cached-equity-frontier-line" d={cachedEquityFrontierLine} />
-        {/if}
-        {#each markerPx as p}
-          <circle
-            class={`frontier-marker-dot ${p.kind}`}
-            class:hovered={hoveredFrontierIdx === p.idx}
-            cx={p.px}
-            cy={p.py}
-            r={p.kind === "cached_equity_asset" ? hoveredFrontierIdx === p.idx ? 4.4 : 2.7 : p.kind === "risk_free" ? hoveredFrontierIdx === p.idx ? 6.5 : 5 : hoveredFrontierIdx === p.idx ? 7 : 5.8}
-            role="button"
-            tabindex="0"
-            aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
-            on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
-            on:mouseleave={() => (hoveredFrontierIdx = null)}
-            on:focus={() => (hoveredFrontierIdx = p.idx)}
-            on:blur={() => (hoveredFrontierIdx = null)}
-          />
-        {/each}
+        <g clip-path="url(#fp-clip)">
+          {#if cmlCoords}
+            <line class="cml-line"
+              x1={cmlCoords.x1} y1={cmlCoords.y1}
+              x2={cmlCoords.x2} y2={cmlCoords.y2} />
+          {/if}
+          {#if cachedEquityFrontierLine}
+            <path class="cached-equity-frontier-line" d={cachedEquityFrontierLine} />
+          {/if}
+          {#each cachedAssetPx as p}
+            <circle
+              class="frontier-marker-dot cached_equity_asset"
+              class:hovered={hoveredFrontierIdx === p.idx}
+              cx={p.px} cy={p.py}
+              r={hoveredFrontierIdx === p.idx ? 4.4 : 2.7}
+              style="fill:{viridisColor(((p.sharpe ?? sharpeMin) - sharpeMin) / sharpeRange)};stroke:none;opacity:{hoveredFrontierIdx === p.idx ? 0.9 : 0.65};"
+              role="button" tabindex="0"
+              aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
+              on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
+              on:mouseleave={() => (hoveredFrontierIdx = null)}
+              on:focus={() => (hoveredFrontierIdx = p.idx)}
+              on:blur={() => (hoveredFrontierIdx = null)}
+            />
+          {/each}
+          {#each namedMarkerPx as p}
+            <circle
+              class={`frontier-marker-dot ${p.kind}`}
+              class:hovered={hoveredFrontierIdx === p.idx}
+              cx={p.px} cy={p.py}
+              r={p.kind === "risk_free" ? (hoveredFrontierIdx === p.idx ? 6.5 : 5) : (hoveredFrontierIdx === p.idx ? 7 : 5.8)}
+              role="button" tabindex="0"
+              aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
+              on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
+              on:mouseleave={() => (hoveredFrontierIdx = null)}
+              on:focus={() => (hoveredFrontierIdx = p.idx)}
+              on:blur={() => (hoveredFrontierIdx = null)}
+            />
+          {/each}
+          {#each specialFrontierMarkers as p}
+            <circle
+              class={`frontier-marker-dot special-frontier ${p.markerKind}`}
+              class:hovered={hoveredFrontierIdx === p.idx}
+              cx={p.px} cy={p.py}
+              r={hoveredFrontierIdx === p.idx ? 6.5 : 5}
+              role="button" tabindex="0"
+              aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
+              on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
+              on:mouseleave={() => (hoveredFrontierIdx = null)}
+              on:focus={() => (hoveredFrontierIdx = p.idx)}
+              on:blur={() => (hoveredFrontierIdx = null)}
+            />
+          {/each}
+        </g>
       </svg>
 
       <div class="frontier-label-layer">
-        {#each labeledMarkerPx as p}
+        {#if hovered && (["current", "candidate", "risk_free"].includes(hovered.kind) || specialFrontierIdxs.has(hovered.idx))}
           <span
-            class={`frontier-label ${p.kind}`}
-            style={`left:${p.px}px; top:${p.py - 12}px;`}
-          >{p.label}</span>
-        {/each}
+            class={`frontier-label ${hovered.kind}`}
+            style={`left:${hovered.px}px; top:${hovered.py - 14}px;`}
+          >{hovered.label}</span>
+        {/if}
       </div>
 
       <span class="axis-label x-min">Vol {pct(plot.xMin)}</span>
@@ -1302,17 +1403,16 @@
   .cml-line {
     fill: none;
     stroke: var(--positive);
-    stroke-width: 1.2;
-    stroke-dasharray: 2 5;
-    display: none;
+    stroke-width: 1.1;
+    stroke-dasharray: 4 5;
+    opacity: 0.55;
   }
-  .portfolio-cml-line {
-    fill: none;
-    stroke: var(--chart-primary);
-    stroke-width: 1.15;
+  .zero-return-line {
+    stroke: var(--text-2);
+    stroke-width: 1;
     stroke-dasharray: 2 4;
-    opacity: 0.85;
-    display: none;
+    opacity: 0.35;
+    shape-rendering: crispEdges;
   }
   .frontier-dot {
     fill: var(--chart-primary);
@@ -1334,8 +1434,9 @@
   .frontier-marker-dot.asset { stroke: var(--chart-primary); fill: var(--chart-primary); stroke-width: 1.2; }
   .frontier-marker-dot.universe_asset { display: none; }
   .frontier-marker-dot.universe_candidate { display: none; }
-  .frontier-marker-dot.cached_equity_asset { stroke: var(--text-2); fill: var(--text-2); stroke-width: 0.8; opacity: 0.48; }
-  .frontier-marker-dot.cached_equity_asset.hovered { opacity: 0.95; }
+  .frontier-marker-dot.cached_equity_asset { cursor: pointer; }
+  .frontier-marker-dot.special-frontier { fill: var(--bg-0); stroke: var(--chart-primary); stroke-width: 2; }
+  .frontier-marker-dot.special-frontier.max-sharpe { stroke: var(--positive); }
   .frontier-marker-dot.cached_equity_candidate { display: none; }
   .frontier-marker-dot.risk_free { stroke: var(--positive); fill: var(--positive); }
   .frontier-label {
@@ -1355,6 +1456,7 @@
   .frontier-label.universe_candidate { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
   .frontier-label.cached_equity_candidate { color: var(--text-1); border-color: var(--divider); }
   .frontier-label.risk_free { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
+  .frontier-label.cached_equity_frontier { color: var(--chart-primary); border-color: rgba(122, 166, 200, 0.4); }
 
   .frontier-tooltip {
     position: absolute;
