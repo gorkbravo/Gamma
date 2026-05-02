@@ -619,6 +619,51 @@ def test_compute_adds_reference_universe_frontier_and_cml_when_available():
     assert any(point.label == "Risk-free" and point.kind == "risk_free" for point in payload.frontier_points)
 
 
+def test_frontier_inputs_share_common_return_window_with_references():
+    portfolio_idx = pd.date_range("2026-01-02", periods=12, freq="B")
+    reference_idx = pd.date_range("2026-01-08", periods=8, freq="B")
+    prices = {
+        "A": pd.Series([100, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150], index=portfolio_idx),
+        "B": pd.Series([50, 51, 52, 54, 55, 57, 58, 60, 61, 63, 64, 66], index=portfolio_idx),
+    }
+    universe = {
+        "SPY": pd.Series([420, 421, 423, 426, 428, 431, 433, 435], index=reference_idx),
+        "QQQ": pd.Series([360, 363, 366, 369, 373, 376, 379, 382], index=reference_idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem("A", "STK", "USD", 1, None, None, None, None, base_market_value=60.0),
+            PositionItem("B", "STK", "USD", 1, None, None, None, None, base_market_value=40.0),
+        ],
+        net_liq=100.0,
+    )
+    service = _make_risk_service(
+        mock_service=_StubMockService(universe),
+        risk_free_service=_StubRiskFreeService(),
+    )
+    request = RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=3,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        include_monte_carlo=False,
+        recommended_min_obs=3,
+    )
+
+    payload = service.compute(request, data_provider=_PriceProvider(prices))
+
+    assert any("common return window" in warning for warning in payload.results.warnings)
+    asset_a = next(point for point in payload.frontier_points if point.kind == "asset" and point.label == "A")
+    expected_a_return = prices["A"].pct_change().dropna().loc[reference_idx[1] : reference_idx[-1]].mean() * 252.0
+    assert abs(asset_a.annual_return - expected_a_return) < 1e-12
+
+
 def test_cached_equity_history_discovery_dedupes_deepest_and_includes_expired_context(tmp_path):
     cache = CacheService(base_dir=tmp_path / "cache", ttl_hours=24)
     idx_short = pd.date_range("2026-01-02", periods=80, freq="B")

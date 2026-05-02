@@ -42,6 +42,7 @@
     sourceProvider: string | null;
     x: number;
     y: number;
+    clipped: boolean;
   };
 
   type FrontierPlotModel = {
@@ -260,6 +261,7 @@
         sourceProvider: point.source_provider ?? null,
         x: 0,
         y: 0,
+        clipped: false,
       }));
     const portfolioLabels = new Set(
       raw
@@ -279,8 +281,9 @@
       return true;
     });
     if (!clean.length) return { points: [], frontierPath: "", xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
-    const core = clean.filter((point) => !isCachedEquityKind(point.kind));
-    const cached = clean.filter((point) => isCachedEquityKind(point.kind));
+    const domainClean = clean.filter((point) => !isHiddenReferenceAsset(point));
+    const core = domainClean.filter((point) => !isCachedEquityKind(point.kind));
+    const cached = domainClean.filter((point) => isCachedEquityKind(point.kind));
     const xValues = boundedDomainValues(core.map((point) => point.annualVol), cached.map((point) => point.annualVol));
     const yValues = boundedDomainValues(core.map((point) => point.annualReturn), cached.map((point) => point.annualReturn));
     const xMinRaw = Math.min(...xValues);
@@ -299,9 +302,10 @@
       ...point,
       x: clamp(((point.annualVol - xMin) / width) * 100, 0, 100),
       y: clamp(100 - ((point.annualReturn - yMin) / height) * 100, 0, 100),
+      clipped: point.annualVol < xMin || point.annualVol > xMax || point.annualReturn < yMin || point.annualReturn > yMax,
     }));
     const frontierPath = plotted
-      .filter((point) => point.kind === "cached_equity_frontier")
+      .filter((point) => point.kind === "frontier")
       .sort((left, right) => left.annualVol - right.annualVol)
       .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
       .join(" ");
@@ -309,11 +313,15 @@
   }
 
   function isVisibleFrontierKind(kind: string) {
-    return kind === "current" || kind === "candidate" || kind === "risk_free" || kind === "cached_equity_asset" || kind === "cached_equity_frontier";
+    return kind === "current" || kind === "candidate" || kind === "frontier" || kind === "asset" || kind === "risk_free" || kind === "cached_equity_asset" || kind === "cached_equity_frontier";
   }
 
   function isCachedEquityKind(kind: string) {
     return kind === "cached_equity_asset" || kind === "cached_equity_frontier" || kind === "cached_equity_candidate";
+  }
+
+  function isHiddenReferenceAsset(point: Pick<FrontierPlotPoint, "kind" | "annualReturn">) {
+    return point.kind === "cached_equity_asset" && point.annualReturn < 0;
   }
 
   function normalizeFrontierLabel(value: string) {
@@ -327,8 +335,8 @@
     const boundedCached =
       finiteCached.length >= 8
         ? [
-            quantile(finiteCached, 0.05),
-            quantile(finiteCached, 0.95),
+            quantile(finiteCached, 0.1),
+            quantile(finiteCached, 0.9),
           ]
         : finiteCached;
     return finiteCore.length ? [...finiteCore, ...boundedCached] : boundedCached;
@@ -386,6 +394,44 @@
         const cp2x = point.px - (next.px - previous.px) * tension;
         const cp2y = point.py - (next.py - previous.py) * tension;
         return `C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)} ${cp2x.toFixed(1)} ${cp2y.toFixed(1)} ${point.px.toFixed(1)} ${point.py.toFixed(1)}`;
+      })
+      .join(" ");
+  }
+
+  function frontierEnvelopePath(points: Array<{ px: number; py: number; annualVol: number; annualReturn: number }>) {
+    const clean = points
+      .filter((point) => Number.isFinite(point.px) && Number.isFinite(point.py))
+      .sort((left, right) => left.annualVol - right.annualVol);
+    if (clean.length < 2) return smoothSvgPath(clean);
+
+    const upper: typeof clean = [];
+    for (const point of clean) {
+      const previous = upper.at(-1);
+      if (!previous) {
+        upper.push(point);
+        continue;
+      }
+      if (point.px - previous.px < 18) {
+        if (point.annualReturn >= previous.annualReturn) {
+          upper[upper.length - 1] = point;
+        }
+        continue;
+      }
+      upper.push(point);
+    }
+
+    const first = clean[0];
+    const last = clean[clean.length - 1];
+    const displayPoints = [first, ...upper.filter((point) => point !== first && point !== last), last];
+    const deduped = displayPoints.filter((point, index, rows) => index === 0 || point.px !== rows[index - 1].px || point.py !== rows[index - 1].py);
+    if (deduped.length < 3) return smoothSvgPath(deduped);
+
+    return deduped
+      .map((point, index) => {
+        if (index === 0) return `M ${point.px.toFixed(1)} ${point.py.toFixed(1)}`;
+        const previous = deduped[index - 1];
+        const dx = point.px - previous.px;
+        return `C ${(previous.px + dx * 0.45).toFixed(1)} ${previous.py.toFixed(1)} ${(point.px - dx * 0.45).toFixed(1)} ${point.py.toFixed(1)} ${point.px.toFixed(1)} ${point.py.toFixed(1)}`;
       })
       .join(" ");
   }
@@ -783,10 +829,10 @@
     <div class="heatmap" style={`grid-template-columns:minmax(4.2rem,0.85fr) repeat(${assets.length}, minmax(2.8rem,1fr));`}>
       <div class="heatmap-corner"></div>
       {#each assets as asset}
-        <div class="heatmap-label top" title={asset.label}>{asset.key}</div>
+        <div class="heatmap-label top" title={asset.key}>{asset.label}</div>
       {/each}
       {#each assets as row}
-        <div class="heatmap-label side" title={row.label}>{row.key}</div>
+        <div class="heatmap-label side" title={row.key}>{row.label}</div>
         {#each assets as col}
           {@const value = row.key === col.key ? 1 : (values.get(`${row.key}|${col.key}`) ?? values.get(`${col.key}|${row.key}`) ?? null)}
           <div
@@ -849,7 +895,12 @@
         .filter((p) => p.kind === "cached_equity_frontier")
         .sort((a, b) => a.annualVol - b.annualVol)}
       {@const cachedEquityFrontierLine = smoothSvgPath(cachedEquityFrontierPx)}
-      {@const cachedAssetPx = pixelPoints.filter((p) => p.kind === "cached_equity_asset")}
+      {@const portfolioFrontierPx = pixelPoints
+        .filter((p) => p.kind === "frontier")
+        .sort((a, b) => a.annualVol - b.annualVol)}
+      {@const portfolioFrontierLine = frontierEnvelopePath(portfolioFrontierPx)}
+      {@const portfolioAssetPx = pixelPoints.filter((p) => p.kind === "asset" && !p.clipped)}
+      {@const cachedAssetPx = pixelPoints.filter((p) => p.kind === "cached_equity_asset" && !p.clipped && !isHiddenReferenceAsset(p))}
       {@const namedMarkerPx = pixelPoints.filter((p) => ["current", "candidate", "risk_free"].includes(p.kind))}
       {@const minVolFrontierPt = cachedEquityFrontierPx.length
         ? cachedEquityFrontierPx.reduce((a, b) => (a.annualVol <= b.annualVol ? a : b))
@@ -872,11 +923,13 @@
       {@const sharpeMin = assetSharpes.length ? Math.min(...assetSharpes) : 0}
       {@const sharpeRange = Math.max((assetSharpes.length ? Math.max(...assetSharpes) : 1) - sharpeMin, 0.001)}
       {@const rfPt = pixelPoints.find((p) => p.kind === "risk_free") ?? null}
+      {@const portfolioMaxSharpePt = namedMarkerPx.find((p) => p.kind === "candidate" && p.label === "Max Sharpe") ?? null}
       {@const cmlCoords = (() => {
-        if (!rfPt || !maxSharpeFrontierPt) return null;
-        const dVol = maxSharpeFrontierPt.annualVol - rfPt.annualVol;
+        const tangencyPt = portfolioMaxSharpePt ?? maxSharpeFrontierPt;
+        if (!rfPt || !tangencyPt) return null;
+        const dVol = tangencyPt.annualVol - rfPt.annualVol;
         if (dVol <= 0) return null;
-        const slope = (maxSharpeFrontierPt.annualReturn - rfPt.annualReturn) / dVol;
+        const slope = (tangencyPt.annualReturn - rfPt.annualReturn) / dVol;
         const yRange = Math.max(plot.yMax - plot.yMin, 1e-9);
         const endReturn = rfPt.annualReturn + slope * (plot.xMax - rfPt.annualVol);
         return {
@@ -915,6 +968,23 @@
           {#if cachedEquityFrontierLine}
             <path class="cached-equity-frontier-line" d={cachedEquityFrontierLine} />
           {/if}
+          {#if portfolioFrontierLine}
+            <path class="frontier-line" d={portfolioFrontierLine} />
+          {/if}
+          {#each portfolioAssetPx as p}
+            <circle
+              class="frontier-marker-dot asset"
+              class:hovered={hoveredFrontierIdx === p.idx}
+              cx={p.px} cy={p.py}
+              r={hoveredFrontierIdx === p.idx ? 4.8 : 3}
+              role="button" tabindex="0"
+              aria-label={`${p.label}: vol ${pct(p.annualVol)}, return ${pct(p.annualReturn)}, Sharpe ${fmt(p.sharpe, 2)}`}
+              on:mouseenter={() => (hoveredFrontierIdx = p.idx)}
+              on:mouseleave={() => (hoveredFrontierIdx = null)}
+              on:focus={() => (hoveredFrontierIdx = p.idx)}
+              on:blur={() => (hoveredFrontierIdx = null)}
+            />
+          {/each}
           {#each cachedAssetPx as p}
             <circle
               class="frontier-marker-dot cached_equity_asset"
@@ -1383,8 +1453,10 @@
   .frontier-line {
     fill: none;
     stroke: var(--chart-primary);
-    stroke-width: 1.6;
-    display: none;
+    stroke-width: 2.2;
+    opacity: 0.96;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .universe-frontier-line {
     fill: none;
@@ -1395,9 +1467,10 @@
   }
   .cached-equity-frontier-line {
     fill: none;
-    stroke: var(--chart-primary);
-    stroke-width: 1.45;
-    opacity: 0.82;
+    stroke: var(--text-2);
+    stroke-width: 1.1;
+    stroke-dasharray: 3 4;
+    opacity: 0.42;
   }
   .cml-line {
     fill: none;
@@ -1430,7 +1503,7 @@
   }
   .frontier-marker-dot.candidate { stroke: var(--chart-primary); fill: var(--chart-primary); stroke-width: 1.2; }
   .frontier-marker-dot.current { stroke: var(--chart-secondary); fill: var(--chart-secondary); }
-  .frontier-marker-dot.asset { stroke: var(--chart-primary); fill: var(--chart-primary); stroke-width: 1.2; }
+  .frontier-marker-dot.asset { stroke: var(--chart-primary); fill: var(--chart-primary); stroke-width: 1.2; opacity: 0.72; }
   .frontier-marker-dot.universe_asset { display: none; }
   .frontier-marker-dot.universe_candidate { display: none; }
   .frontier-marker-dot.cached_equity_asset { cursor: pointer; }

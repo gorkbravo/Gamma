@@ -270,6 +270,10 @@ describe("risk workspace view-model", () => {
     expect(model.correlationKpis[0].value).toBe("0.68");
     expect(model.correlatedPairs[0].cells[0]).toContain("AAPL / MSFT");
     expect(model.correlationMatrix.assets).toHaveLength(2);
+    expect(model.correlationMatrix.assets).toEqual([
+      { key: "portfolio:stk:aapl", label: "AAPL" },
+      { key: "portfolio:stk:msft", label: "MSFT" },
+    ]);
   });
 
   it("surfaces the backend frontier reason when no frontier points are returned", () => {

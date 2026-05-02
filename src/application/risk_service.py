@@ -405,11 +405,6 @@ class RiskService:
             else:
                 warnings.append("Risk contributions unavailable: non-positive portfolio variance")
 
-        risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
-            request=request,
-            returns_df=risk_returns_df,
-        )
-        warnings.extend(risk_free_warnings)
         frontier_universe_returns, frontier_universe_warnings = self._load_frontier_universe_returns(
             request=request,
             data_provider=data_provider,
@@ -419,10 +414,26 @@ class RiskService:
             request=request,
         )
         warnings.extend(cached_equity_warnings)
+        (
+            frontier_risk_returns_df,
+            frontier_universe_returns,
+            cached_equity_returns,
+            frontier_window_warnings,
+        ) = self._align_frontier_return_windows(
+            portfolio_returns_df=risk_returns_df,
+            reference_returns_df=frontier_universe_returns,
+            cached_equity_returns_df=cached_equity_returns,
+        )
+        warnings.extend(frontier_window_warnings)
+        risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
+            request=request,
+            returns_df=frontier_risk_returns_df,
+        )
+        warnings.extend(risk_free_warnings)
 
         frontier_points, frontier_warnings = self._build_efficient_frontier(
             snapshot=snapshot,
-            returns_df=risk_returns_df,
+            returns_df=frontier_risk_returns_df,
             weights=weights_aligned,
             risk_free_rate_annual=risk_free_rate_annual,
             reference_returns_df=frontier_universe_returns,
@@ -641,6 +652,69 @@ class RiskService:
         points.extend(cached_points)
         warnings.extend(cached_warnings)
         return points, warnings
+
+    @classmethod
+    def _align_frontier_return_windows(
+        cls,
+        *,
+        portfolio_returns_df: pd.DataFrame,
+        reference_returns_df: pd.DataFrame | None = None,
+        cached_equity_returns_df: pd.DataFrame | None = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame | None, pd.DataFrame | None, list[str]]:
+        warnings: list[str] = []
+        if portfolio_returns_df.empty:
+            return portfolio_returns_df, reference_returns_df, cached_equity_returns_df, warnings
+
+        frames = [
+            ("portfolio", portfolio_returns_df),
+            ("reference universe", reference_returns_df),
+            ("cached equity reference", cached_equity_returns_df),
+        ]
+        usable = [(label, frame) for label, frame in frames if frame is not None and not frame.empty]
+        if len(usable) <= 1:
+            return portfolio_returns_df, reference_returns_df, cached_equity_returns_df, warnings
+
+        starts = [frame.index.min() for _, frame in usable]
+        ends = [frame.index.max() for _, frame in usable]
+        common_start = max(starts)
+        common_end = min(ends)
+        if common_start > common_end:
+            warnings.append(
+                "Efficient frontier reference series excluded: no overlapping return window with the portfolio."
+            )
+            return portfolio_returns_df, None, None, warnings
+
+        def trim(frame: pd.DataFrame | None) -> pd.DataFrame | None:
+            if frame is None or frame.empty:
+                return frame
+            trimmed = frame.loc[(frame.index >= common_start) & (frame.index <= common_end)]
+            return trimmed.dropna(how="all")
+
+        portfolio_aligned = trim(portfolio_returns_df)
+        if portfolio_aligned is None or len(portfolio_aligned) < 3:
+            warnings.append(
+                "Efficient frontier references excluded: common return window leaves fewer than three portfolio observations."
+            )
+            return portfolio_returns_df, None, None, warnings
+
+        reference_aligned = trim(reference_returns_df)
+        cached_aligned = trim(cached_equity_returns_df)
+        if reference_returns_df is not None and (reference_aligned is None or len(reference_aligned) < 3):
+            warnings.append(
+                "Reference frontier unavailable: common return window leaves fewer than three observations."
+            )
+            reference_aligned = None
+        if cached_equity_returns_df is not None and (cached_aligned is None or len(cached_aligned) < 3):
+            warnings.append(
+                "Cached equity reference frontier unavailable: common return window leaves fewer than three observations."
+            )
+            cached_aligned = None
+        if reference_aligned is not None or cached_aligned is not None:
+            warnings.append(
+                "Efficient frontier inputs aligned to common return window "
+                f"{common_start.date()} through {common_end.date()}."
+            )
+        return portfolio_aligned, reference_aligned, cached_aligned, warnings
 
     @classmethod
     def _reference_frontier_points_with_cml(
