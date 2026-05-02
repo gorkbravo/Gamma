@@ -232,7 +232,7 @@
   }
 
   h1 strong {
-    font-size: 0.78rem;
+    font-size: 0.88rem;
     font-weight: 600;
     letter-spacing: 0.05em;
     color: var(--text-0);
@@ -240,7 +240,7 @@
   }
 
   h1 span {
-    font-size: 0.63rem;
+    font-size: 0.72rem;
     font-weight: 400;
     letter-spacing: 0.02em;
     color: var(--warning);
