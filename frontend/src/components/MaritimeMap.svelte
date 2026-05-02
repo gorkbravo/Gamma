@@ -570,8 +570,31 @@
   }
 
   $: coverageStatus = coverage?.coverage_status ?? null;
-  $: showCoverageChip = isAisstreamProvider(coverage) && coverageStatus !== "live" && coverageStatus !== null;
-  $: coverageChipTooltip = `${coverage?.provider_label ?? "AISstream"} feed has regional coverage gaps — open coverage map`;
+
+  let showCoverageChip = false;
+  let coverageChipTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $: {
+    const subscribed = liveStatus === "subscribed" || liveStatus === "live";
+    const noVessels = displayPositions.length === 0;
+    const shouldShow = isAisstreamProvider(coverage) && mapZoom >= AIS_ZOOM_THRESHOLD && subscribed && noVessels;
+    if (shouldShow) {
+      if (!coverageChipTimer && !showCoverageChip) {
+        coverageChipTimer = setTimeout(() => {
+          showCoverageChip = true;
+          coverageChipTimer = null;
+        }, 3000);
+      }
+    } else {
+      if (coverageChipTimer) {
+        clearTimeout(coverageChipTimer);
+        coverageChipTimer = null;
+      }
+      showCoverageChip = false;
+    }
+  }
+
+  $: coverageChipTooltip = `Subscribed but no vessels detected — ${coverage?.provider_label ?? "AISstream"} may have limited coverage here — open coverage map`;
 
   function shortDate(value: string | null | undefined) {
     return value
@@ -1158,6 +1181,7 @@
 
   onDestroy(() => {
     closeLiveSocket("component destroyed", "idle", true);
+    if (coverageChipTimer) clearTimeout(coverageChipTimer);
     popup?.remove();
     map?.remove();
   });

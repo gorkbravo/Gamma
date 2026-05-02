@@ -40,27 +40,32 @@ function barWidth(value: number, maxAbs: number) {
 {/if}
 
 <style>
-  .chart,
+  .chart {
+    display: grid;
+    gap: 0.4rem;
+  }
+
   .row {
     display: grid;
-    gap: 0.45rem;
+    gap: 0.2rem;
   }
 
   .head {
     display: flex;
     justify-content: space-between;
     gap: 0.75rem;
+    font-size: 12px;
   }
 
   .track {
-    height: 0.7rem;
-    background: rgba(19, 32, 44, 0.8);
+    height: 0.55rem;
+    background: rgba(39, 53, 68, 0.8);
     overflow: hidden;
   }
 
   .fill {
     height: 100%;
-    background: rgba(106, 168, 255, 0.86);
+    background: rgba(122, 166, 200, 0.76);
   }
 
   .fill.positive {
@@ -77,6 +82,10 @@ function barWidth(value: number, maxAbs: number) {
     color: var(--text-2);
   }
 
+  small {
+    font-size: 10.5px;
+  }
+
   strong {
     color: var(--text-0);
   }
@@ -84,6 +93,7 @@ function barWidth(value: number, maxAbs: number) {
   .empty {
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.78rem;
+    font-size: 11px;
+    padding: 0.5rem 0.75rem;
   }
 </style>
