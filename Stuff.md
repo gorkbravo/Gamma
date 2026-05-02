@@ -5,11 +5,11 @@
 
 - Deepen handoffs and cross comunication between tabs
 
-- Cleanup 'Selected Equity' box and add the ability so that if there's a porfolio in scope, it also shows as a 'Selected Portfolio' 
+- `Solved` Cleanup 'Selected Equity' box and add the ability so that if there's a porfolio in scope, it also shows as a 'Selected Portfolio' 
 
 - Add customisation to hero charts (candlestick options, technical indicators or volume overlays)
 
-- Take out logo from the top bar, and in something like 'Research and Analysis Platform' 
+- `Solved` Take out logo from the top bar, and in something like 'Research and Analysis Platform' 
 
 - Add deeper navigation into the search bar, something like /tab/mode
 
@@ -52,7 +52,7 @@
 
 ## Commodities
 
-- Why the fuck don't we have curve data from anything other than WTI crude?
+- `Somewhat Solved` Why the fuck don't we have curve data from anything other than WTI crude?
 
 - All modes need a styling and reordering pass
 
@@ -76,7 +76,7 @@ OpenAI request failed: Item with id 'rs_07cadee070d8a05f0169f24f255d0881a2afa195
 
 - `Solved` All modes need a styling pass $
 
-- Efficient frontier dots should have a vidris look depeding on E[r]/sigma. 
+- `Solved` Efficient frontier dots should have a vidris look depeding on E[r]/sigma. 
 
 - `Mostly Solved` Mode bar looks weird AF
 
