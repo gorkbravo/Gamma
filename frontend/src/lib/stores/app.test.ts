@@ -9,6 +9,7 @@ import type {
   CryptoToken,
   CryptoWorkspaceResponse,
   DiagnosticsResponse,
+  FundamentalsSearchResponse,
   IvSessionStatus,
   MacroDivergenceListResponse,
   MacroEventsResponse,
@@ -45,11 +46,13 @@ import {
   cryptoTokenDetail,
   cryptoWorkspace,
   diagnostics,
+  fundamentalsSearch,
   ivSession,
   ivSurface,
   lastError,
   loadCopilotResearchCard,
   loadCryptoWorkspace,
+  loadFundamentalsSearch,
   loadIvSession,
   loadMacroWorkspace,
   loadNewsFeed,
@@ -88,6 +91,7 @@ import {
   setMacroContext,
   setSharedEquitySelection,
   selectedCryptoTokenId,
+  selectedFundamentalsTicker,
   sharedEquitySelection,
   selectedPredictionMarketId,
   strategyLabResult,
@@ -110,6 +114,7 @@ describe("app store orchestration", () => {
     savedResearchItems.set([]);
     selectedPredictionMarketId.set(null);
     selectedCryptoTokenId.set(null);
+    selectedFundamentalsTicker.set(null);
     predictionMarketScreener.set(null);
     predictionMarketDetail.set(null);
     predictionMarketHistory.set(null);
@@ -165,6 +170,65 @@ describe("app store orchestration", () => {
       iv: false,
       ivSession: false
     });
+  });
+
+  it("does not auto-select the first fundamentals result for an empty search", async () => {
+    const searchResponse: FundamentalsSearchResponse = {
+      results: [
+        {
+          ticker: "AAPL",
+          name: "Apple Inc.",
+          cik: "0000320193",
+          exchange: "Nasdaq",
+          source_provider: "sec",
+          retrieved_at: "2026-04-30T00:00:00Z",
+          origin: "fixture",
+          transformation_note: null
+        }
+      ]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(ok(searchResponse));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadFundamentalsSearch();
+
+    expect(get(fundamentalsSearch)?.results[0]?.ticker).toBe("AAPL");
+    expect(get(selectedFundamentalsTicker)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/fundamentals/search?");
+  });
+
+  it("selects the first fundamentals result for an explicit search", async () => {
+    const searchResponse: FundamentalsSearchResponse = {
+      results: [
+        {
+          ticker: "MSFT",
+          name: "Microsoft Corporation",
+          cik: "0000789019",
+          exchange: "Nasdaq",
+          source_provider: "sec",
+          retrieved_at: "2026-04-30T00:00:00Z",
+          origin: "fixture",
+          transformation_note: null
+        }
+      ]
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(searchResponse))
+      .mockResolvedValue(ok({ warnings: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadFundamentalsSearch({ query: "msft" });
+
+    expect(get(selectedFundamentalsTicker)).toBe("MSFT");
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/overview"));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/financials"));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/dcf"));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/peers"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/fundamentals/MSFT/reverse-valuation")
+    );
   });
 
   it("loads snapshot, history, and shared performance together", async () => {

@@ -119,6 +119,16 @@ describe("navigation tab ordering", () => {
     ]);
     expect(getModeByShortcutIndex("iv", 2)?.id).toBe("skew_term");
     expect(getModeShortcutHint("iv", "distribution")).toBe("Shift+4");
+    expect(getTabModes("risk").map((mode) => mode.id)).toEqual([
+      "overview",
+      "exposures",
+      "drawdowns",
+      "correlation",
+      "scenarios",
+      "optimization",
+    ]);
+    expect(getModeByShortcutIndex("risk", 6)?.id).toBe("optimization");
+    expect(getModeShortcutHint("risk", "scenarios")).toBe("Shift+5");
   });
 
   it("exposes a reusable mode registry snapshot for current mode-bearing tabs", () => {
@@ -135,6 +145,7 @@ describe("navigation tab ordering", () => {
       "macro",
       "maritime",
       "research",
+      "risk",
     ]);
     expect(snapshot.commodities?.map((mode) => mode.id)).toEqual([
       "overview",
@@ -172,6 +183,14 @@ describe("navigation tab ordering", () => {
       "realized_implied",
       "distribution",
       "source",
+    ]);
+    expect(snapshot.risk?.map((mode) => mode.id)).toEqual([
+      "overview",
+      "exposures",
+      "drawdowns",
+      "correlation",
+      "scenarios",
+      "optimization",
     ]);
     expect(getTabLabel("sitrep")).toBe("SITREP");
     expect(getTabLabel("commodities")).toBe("COMMODITIES");

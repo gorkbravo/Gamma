@@ -1696,12 +1696,14 @@ export async function loadFundamentalsSearch(options: FundamentalsSearchOptions 
     });
     const response = await getJson<FundamentalsSearchResponse>(`/fundamentals/search?${params.toString()}`);
     fundamentalsSearch.set(response);
+    const explicitQuery = Boolean(options.query?.trim());
     const currentSelection = get(selectedFundamentalsTicker);
     const selectedStillVisible = response.results.some((result) => result.ticker === currentSelection);
-    const nextSelection =
-      selectedStillVisible
-        ? currentSelection
-        : (response.results[0]?.ticker ?? currentSelection);
+    const nextSelection = selectedStillVisible
+      ? currentSelection
+      : explicitQuery
+        ? response.results[0]?.ticker ?? currentSelection
+        : currentSelection;
     if (nextSelection) {
       await selectFundamentalsCompany(nextSelection, {
         resetThread: nextSelection !== currentSelection || get(fundamentalsOverview) == null,
