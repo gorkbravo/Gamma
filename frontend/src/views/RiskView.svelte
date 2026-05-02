@@ -10,8 +10,8 @@
     type ExposureBreakdownRow,
     type HoldingRiskRow,
     type ReturnFrequency,
-    type RiskKpi,
     type RiskMode,
+    type RiskKpi,
     type RiskContributionRow,
     type RiskCorrelationMatrixView,
     type RiskTableRow,
@@ -97,6 +97,22 @@
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value) ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
 
+  function corrColor(value: number | null | undefined) {
+    if (value == null || !Number.isFinite(value)) return "transparent";
+    const clamped = Math.max(-1, Math.min(1, value));
+    if (clamped >= 0) {
+      const a = 0.06 + clamped * clamped * 0.62;
+      return `rgba(198, 107, 97, ${a.toFixed(3)})`;
+    }
+    const a = 0.06 + clamped * clamped * 0.45;
+    return `rgba(75, 180, 116, ${a.toFixed(3)})`;
+  }
+
+  function corrTextColor(value: number | null | undefined) {
+    if (value == null || !Number.isFinite(value)) return "var(--text-2)";
+    return Math.abs(value) > 0.55 ? "var(--text-0)" : "var(--text-1)";
+  }
+
   const pct = (value: number | null | undefined, digits = 1) =>
     value == null || !Number.isFinite(value) ? "N/A" : `${(value * 100).toFixed(digits)}%`;
 
@@ -112,6 +128,30 @@
     benchmarkSymbol: benchmarkSymbol.trim().toUpperCase() || "SPY",
     returnFrequency,
   });
+
+  $: headerKpis = (() => {
+    const coverage: RiskKpi = {
+      label: "Coverage",
+      value: workspace.context.coverageLabel,
+      tone: (result?.metrics.risk_coverage_ratio ?? 1) < 0.95 ? "warning" : undefined,
+    } as RiskKpi;
+    let modeKpis: RiskKpi[] = [];
+    if (activeMode === "overview") modeKpis = workspace.overviewKpis;
+    else if (activeMode === "exposures") modeKpis = workspace.exposureKpis;
+    else if (activeMode === "drawdowns") modeKpis = workspace.drawdownKpis;
+    else if (activeMode === "correlation") modeKpis = workspace.correlationKpis;
+    else if (activeMode === "scenarios") modeKpis = workspace.scenarioKpis;
+    else modeKpis = workspace.optimizationKpis;
+    return [coverage, ...modeKpis.slice(0, 4)];
+  })();
+
+  $: correlationMatrix = workspace.correlationMatrix;
+  $: stressCorrelation = (() => {
+    const normal = result?.metrics.correlation ?? null;
+    if (normal == null || !Number.isFinite(normal)) return { normal: null, stress: null, delta: null };
+    const stress = Math.min(0.99, normal + 0.15);
+    return { normal, stress, delta: stress - normal };
+  })();
 
   async function submit(method: ComputeMethod) {
     activeComputeMethod = method;
@@ -347,21 +387,17 @@
 
 <section class="view">
   <article class="panel header-panel">
-    <div class="header-top">
-      <div>
-        <p class="eyebrow">Risk</p>
-        <h2>Risk Workspace</h2>
-      </div>
-      <div class="header-actions">
-        <button class="action-btn" on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
-          {loading && activeComputeMethod === "core" ? "Computing" : "Compute Core"}
-        </button>
-        <button class="action-btn" on:click={() => submit("monteCarlo")} disabled={loading || !activeSnapshot}>
-          {loading && activeComputeMethod === "monteCarlo" ? "Running" : "Run MC"}
-        </button>
+    <div class="header-row">
+      <span class="title">Risk Workspace · <em>{workspace.context.sourceScope} / {workspace.context.baseCurrency}</em></span>
+      <div class="header-kpis">
+        {#each headerKpis as kpi}
+          <div class="header-kpi">
+            <span>{kpi.label}</span>
+            <strong class={toneClass(kpi.tone)}>{kpi.value}</strong>
+          </div>
+        {/each}
       </div>
     </div>
-
     <div class="mode-bar" role="tablist" aria-label="Risk modes">
       {#each modes as riskMode}
         <button
@@ -375,45 +411,62 @@
         </button>
       {/each}
     </div>
+  </article>
 
-    <div class="context-bar">
-      <div class="context-field"><span>Scope</span><strong>{workspace.context.sourceScope}</strong></div>
-      <label><span>Benchmark</span><input bind:value={benchmarkSymbol} /></label>
-      <div class="context-field"><span>Base</span><strong>{workspace.context.baseCurrency}</strong></div>
-      <label><span>Lookback</span>
+  <article class="panel controls-card">
+    <div class="controls-bar">
+      <label class="control"><span>Benchmark</span><input bind:value={benchmarkSymbol} /></label>
+      <label class="control"><span>Lookback</span>
         <select bind:value={lookbackDays}>
           <option value={126}>126D</option><option value={252}>252D</option><option value={504}>504D</option>
         </select>
       </label>
-      <label><span>Frequency</span>
+      <label class="control"><span>Frequency</span>
         <select bind:value={returnFrequency}>
           <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
         </select>
       </label>
-      <div class="context-field"><span>Coverage</span><strong class:warning={(result?.metrics.risk_coverage_ratio ?? 1) < 0.95}>{workspace.context.coverageLabel}</strong></div>
-    </div>
-
-    <div class="settings-row">
-      <label><span>Confidence</span><select bind:value={confidence}><option value={0.9}>90%</option><option value={0.95}>95%</option><option value={0.99}>99%</option></select></label>
-      <label><span>Horizon</span><select bind:value={horizonDays}><option value={1}>1D</option><option value={10}>10D</option><option value={21}>21D</option></select></label>
-      <label><span>Beta window</span><select bind:value={betaWindow}><option value={63}>63D</option><option value={126}>126D</option><option value={252}>252D</option></select></label>
-      <label><span>MC horizon</span><select bind:value={mcHorizonDays}><option value={5}>5D</option><option value={10}>10D</option><option value={21}>21D</option><option value={63}>63D</option></select></label>
-      <label><span>MC model</span><select bind:value={mcSimulationModel}><option value="Gaussian">Gaussian</option><option value="Bootstrap">Bootstrap</option></select></label>
-      <label><span>Sims</span><select bind:value={mcNumSimulations}><option value={1000}>1,000</option><option value={2000}>2,000</option><option value={5000}>5,000</option></select></label>
+      <label class="control"><span>Confidence</span><select bind:value={confidence}><option value={0.9}>90%</option><option value={0.95}>95%</option><option value={0.99}>99%</option></select></label>
+      <label class="control"><span>Horizon</span><select bind:value={horizonDays}><option value={1}>1D</option><option value={10}>10D</option><option value={21}>21D</option></select></label>
+      <label class="control"><span>Beta win.</span><select bind:value={betaWindow}><option value={63}>63D</option><option value={126}>126D</option><option value={252}>252D</option></select></label>
+      <label class="control"><span>MC horiz.</span><select bind:value={mcHorizonDays}><option value={5}>5D</option><option value={10}>10D</option><option value={21}>21D</option><option value={63}>63D</option></select></label>
+      <label class="control"><span>MC model</span><select bind:value={mcSimulationModel}><option value="Gaussian">Gaussian</option><option value="Bootstrap">Bootstrap</option></select></label>
+      <label class="control"><span>Sims</span><select bind:value={mcNumSimulations}><option value={1000}>1k</option><option value={2000}>2k</option><option value={5000}>5k</option></select></label>
+      <div class="actions">
+        <button class="action-btn" on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
+          {loading && activeComputeMethod === "core" ? "Computing" : "Compute Core"}
+        </button>
+        <button class="action-btn primary" on:click={() => submit("monteCarlo")} disabled={loading || !activeSnapshot}>
+          {loading && activeComputeMethod === "monteCarlo" ? "Running" : "Run MC"}
+        </button>
+      </div>
     </div>
   </article>
 
   {#if activeMode === "overview"}
     <div class="mode-shell">
-      {@render KpiStrip(workspace.overviewKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
-        <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={280} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+        {#if result?.monte_carlo?.fan_percentiles}
+          <div class="two-col">
+            <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={240} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+            <article class="panel chart-panel">{@render PanelTitle("Forward Path Envelope")}<FanChart series={result.monte_carlo.fan_percentiles} history={fanHistory} samplePaths={result.monte_carlo.sample_paths} height={240} emptyMessage="Monte Carlo fan chart unavailable" /></article>
+          </div>
+        {:else}
+          <article class="panel chart-panel">{@render PanelTitle("Cumulative Return vs Benchmark")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate portfolio and benchmark return history" /></article>
+        {/if}
         <div class="two-col">
           <article class="panel chart-panel">{@render PanelTitle("Rolling Volatility")}<TimeSeriesChart series={rollingVolChart} height={220} emptyMessage="Need at least 21 observations" /></article>
           <article class="panel chart-panel">{@render PanelTitle("Rolling Beta")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Need benchmark overlap for selected beta window" /></article>
         </div>
-        <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
+        {#if result?.monte_carlo?.terminal_returns}
+          <div class="two-col">
+            <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={200} emptyMessage="Drawdown history unavailable" /></article>
+            <article class="panel chart-panel">{@render PanelTitle("MC Terminal Distribution")}<DistributionChart values={result.monte_carlo.terminal_returns} markers={monteCarloMarkers} height={200} emptyMessage="Monte Carlo distribution unavailable" /></article>
+          </div>
+        {:else}
+          <article class="panel chart-panel">{@render PanelTitle("Drawdown Strip")}<TimeSeriesChart series={drawdownChart} height={180} emptyMessage="Drawdown history unavailable" /></article>
+        {/if}
         {@render RiskContributorsTable(workspace.riskContributors)}
         </div>
         <aside class="support-column">
@@ -421,12 +474,12 @@
         {@render SimpleTable("Largest Movers", ["Symbol", "P&L", "Weight", "Flag"], workspace.largestMovers)}
         {@render SimpleTable("Concentration Flags", ["Type", "Name", "Value", "Rule"], workspace.concentrationFlags)}
         {@render ListPanel("What Changed", workspace.whatChanged)}
+        {@render SharedAlerts()}
         </aside>
       </div>
     </div>
   {:else if activeMode === "exposures"}
     <div class="mode-shell">
-      {@render KpiStrip(workspace.exposureKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
           {@render RankPanel("Position Weight", weightBars)}
@@ -436,13 +489,12 @@
         <aside class="support-column">
           {@render ExposureTable(workspace.exposureBreakdown)}
           {@render SimpleTable("Currency Exposure", ["Currency", "Weight", "Contribution", "Status"], workspace.exposureBreakdown.map((row) => ({ cells: [row.category === "Cash" ? workspace.context.baseCurrency : "Mixed", pct(row.weight), pct(row.volatilityContribution), row.label] })))}
-          {@render ListPanel("Data Limits", ["Industry, geography, and factor exposures depend on provider metadata not yet present in the Risk payload.", "Asset-class and currency views use snapshot fields and coverage warnings."])}
+          {@render SharedAlerts()}
         </aside>
       </div>
     </div>
   {:else if activeMode === "drawdowns"}
     <div class="mode-shell">
-      {@render KpiStrip(workspace.drawdownKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
         <article class="panel chart-panel">{@render PanelTitle("Portfolio Equity Curve")}<TimeSeriesChart series={cumulativeChart} height={260} emptyMessage="Run a risk pass to populate equity curve" /></article>
@@ -456,30 +508,30 @@
         <aside class="support-column">
           {@render SimpleTable("Worst Single-Period Returns", ["Date", "Portfolio", "Benchmark", "Active", "Top losers"], workspace.worstReturns)}
           {@render SimpleTable("Position Drawdown Contribution", ["Symbol", "Return", "Start weight", "Loss contribution"], workspace.positionDrawdownContributions)}
+          {@render SharedAlerts()}
         </aside>
       </div>
     </div>
   {:else if activeMode === "correlation"}
     <div class="mode-shell">
-      {@render KpiStrip(workspace.correlationKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
         <article class="panel heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render CorrelationHeatmap(workspace.correlationMatrix)}</article>
         <div class="two-col">
           <article class="panel chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
-          <article class="panel chart-panel">{@render PanelTitle("Normal vs Stress Correlation")}<BarRankChart items={[{ label: "Normal", value: result?.metrics.correlation ?? 0, tone: "neutral" }, { label: "Stress proxy", value: Math.min(0.95, (result?.metrics.correlation ?? 0) + 0.15), tone: "negative" }]} formatValue={(value) => fmt(value, 2)} /></article>
+          <article class="panel">{@render PanelTitle("Normal vs Stress Correlation")}{@render StressCompare(stressCorrelation)}</article>
         </div>
         {@render SimpleTable("Highest Correlated Pairs", ["Pair", "Corr", "Read"], workspace.correlatedPairs)}
         </div>
         <aside class="support-column">
           {@render SimpleTable("Diversification Warnings", ["Cluster", "Members", "Weight", "Avg corr", "Risk contribution"], workspace.diversificationWarnings)}
           {@render SimpleTable("Benchmark Sensitivity", ["Symbol", "Beta", "Corr", "R2", "Tracking contribution"], workspace.benchmarkSensitivity)}
+          {@render SharedAlerts()}
         </aside>
       </div>
     </div>
   {:else if activeMode === "scenarios"}
     <div class="mode-shell">
-      {@render KpiStrip(workspace.scenarioKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
           {@render RankPanel("Scenario Waterfall", scenarioBars, "currency")}
@@ -489,13 +541,12 @@
         <aside class="support-column">
           {@render RankPanel("Shock Impact by Asset Class", exposureBars.map((item) => ({ ...item, value: item.value * (workspace.scenarios[0]?.portfolioReturn ?? 0) })))}
           {@render ListPanel("Scenario Assumptions", workspace.scenarioAssumptions)}
-          {@render ListPanel("Historical Replay Coverage", ["COVID crash, 2022 rates shock, and 2008-style labels are exposed as proxy regimes until historical replay windows are provider-backed.", "Custom shocks remain bounded to read-only factor assumptions."])}
+          {@render SharedAlerts()}
         </aside>
       </div>
     </div>
   {:else}
     <div class="mode-shell">
-      {@render KpiStrip(workspace.optimizationKpis)}
       <div class="workspace-grid">
         <div class="primary-column">
           <article class="panel chart-panel">{@render PanelTitle("Efficient Frontier")}{@render FrontierChart(frontierPlot, workspace.frontierMessage)}</article>
@@ -506,45 +557,24 @@
           {@render SimpleTable("Optimization Comparison", ["Candidate", "Vol", "Score", "Max wt", "Status"], workspace.optimizationComparison)}
           {@render SimpleTable("Constraint Panel", ["Constraint", "Setting", "Note"], workspace.constraints)}
           {@render ListPanel("Diagnostics", workspace.diagnostics)}
+          {@render SharedAlerts()}
         </aside>
       </div>
     </div>
   {/if}
-
-  <div class="shared-panels">
-    {@render ListPanel("Risk Alerts", workspace.alerts)}
-    {@render ListPanel("Provenance / Coverage", [...workspace.provenance, ...workspace.coverageWarnings.slice(0, 6)])}
-  </div>
-
-  {#if activeMode === "overview" && result?.monte_carlo?.fan_percentiles}
-    <article class="panel mc-panel">
-      {@render PanelTitle("Monte Carlo Scenario Envelope")}
-      <div class="two-col">
-        <FanChart series={result.monte_carlo.fan_percentiles} history={fanHistory} samplePaths={result.monte_carlo.sample_paths} height={260} emptyMessage="Monte Carlo fan chart unavailable" />
-        <DistributionChart values={result.monte_carlo.terminal_returns} markers={monteCarloMarkers} height={260} emptyMessage="Monte Carlo distribution unavailable" />
-      </div>
-    </article>
-  {/if}
 </section>
-
-{#snippet KpiStrip(kpis: RiskKpi[])}
-  <div class="kpi-grid">
-    {#each kpis as kpi}
-      <article class="metric">
-        <span>{kpi.label}</span>
-        <strong class={toneClass(kpi.tone)}>{kpi.value}</strong>
-        {#if kpi.sublabel}<small>{kpi.sublabel}</small>{/if}
-      </article>
-    {/each}
-  </div>
-{/snippet}
 
 {#snippet PanelTitle(title: string)}
   <header class="panel-title"><span>{title}</span></header>
 {/snippet}
 
+{#snippet SharedAlerts()}
+  {@render ListPanel("Risk Alerts", workspace.alerts)}
+  {@render ListPanel("Provenance / Coverage", [...workspace.provenance, ...workspace.coverageWarnings.slice(0, 6)])}
+{/snippet}
+
 {#snippet RankPanel(title: string, items: RankBarItem[], format: "percent" | "currency" = "percent")}
-  <article class="panel">
+  <article class="panel rank-panel">
     {@render PanelTitle(title)}
     <BarRankChart items={items} emptyMessage="No ranked data available" formatValue={(value) => format === "currency" ? currency(value) : pct(value)} />
   </article>
@@ -656,35 +686,61 @@
 {/snippet}
 
 {#snippet CorrelationHeatmap(matrix: RiskCorrelationMatrixView)}
-  {@const assets = matrix.assets.slice(0, 8)}
+  {@const assets = matrix.assets.slice(0, 10)}
   {@const values = new Map(matrix.cells.map((cell) => [`${cell.row}|${cell.column}`, cell.correlation]))}
   {#if assets.length >= 2}
     <div class="heatmap" style={`grid-template-columns:minmax(4.2rem,0.85fr) repeat(${assets.length}, minmax(2.8rem,1fr));`}>
       <div class="heatmap-corner"></div>
       {#each assets as asset}
-        <div class="heatmap-label top" title={asset.label}>{asset.label}</div>
+        <div class="heatmap-label top" title={asset.label}>{asset.key}</div>
       {/each}
       {#each assets as row}
-        <div class="heatmap-label side" title={row.label}>{row.label}</div>
+        <div class="heatmap-label side" title={row.label}>{row.key}</div>
         {#each assets as col}
-          {@const value = values.get(`${row.key}|${col.key}`) ?? null}
-          {@const intensity = value == null ? 0 : Math.min(1, Math.abs(value))}
+          {@const value = row.key === col.key ? 1 : (values.get(`${row.key}|${col.key}`) ?? values.get(`${col.key}|${row.key}`) ?? null)}
           <div
             class="heatmap-cell"
             class:diag={row.key === col.key}
-            class:positive={value != null && value >= 0 && row.key !== col.key}
-            class:negative={value != null && value < 0 && row.key !== col.key}
-            style={`--corr-alpha:${0.08 + intensity * 0.38};`}
-            title={`${row.label} / ${col.label}: ${fmt(value, 2)}`}
+            style={`background:${corrColor(value)}; color:${corrTextColor(value)};`}
+            title={value == null ? `${row.label} / ${col.label}: unavailable` : `${row.label} / ${col.label}: ${value.toFixed(3)}`}
           >
-            {fmt(value, 2)}
+            {value == null ? "—" : value.toFixed(2)}
           </div>
         {/each}
       {/each}
     </div>
+    <div class="heatmap-scale">
+      <span class="scale-end">−1</span>
+      <div class="scale-track">
+        {#each Array(21) as _, i}
+          <span class="scale-step" style={`background:${corrColor((i - 10) / 10)};`}></span>
+        {/each}
+      </div>
+      <span class="scale-end">+1</span>
+      <span class="scale-note">closer to +1 = redder · negative = green</span>
+    </div>
   {:else}
     <div class="frontier-empty">Run a risk pass with at least two covered assets to populate the correlation heatmap.</div>
   {/if}
+{/snippet}
+
+{#snippet StressCompare(values: { normal: number | null; stress: number | null; delta: number | null })}
+  <div class="stress-compare">
+    <div class="sc-row">
+      <span class="sc-lbl">Normal</span>
+      <div class="sc-track"><div class="sc-fill" style={`width:${values.normal != null ? Math.abs(values.normal) * 100 : 0}%; background:${corrColor(values.normal)};`}></div></div>
+      <strong class="sc-val">{fmt(values.normal, 2)}</strong>
+    </div>
+    <div class="sc-row">
+      <span class="sc-lbl">Stress</span>
+      <div class="sc-track"><div class="sc-fill" style={`width:${values.stress != null ? Math.abs(values.stress) * 100 : 0}%; background:${corrColor(values.stress)};`}></div></div>
+      <strong class="sc-val">{fmt(values.stress, 2)}</strong>
+    </div>
+    <div class="sc-delta">
+      <span>Δ Stress</span>
+      <strong class={values.delta != null && values.delta >= 0 ? "negative" : "positive"}>{values.delta == null ? "N/A" : (values.delta >= 0 ? "+" : "") + fmt(values.delta, 2)}</strong>
+    </div>
+  </div>
 {/snippet}
 
 {#snippet FrontierChart(plot: FrontierPlotModel, emptyMessage: string | null)}
@@ -810,7 +866,6 @@
   .primary-column,
   .support-column,
   .two-col,
-  .shared-panels,
   .list {
     display: grid;
     gap: 0.5rem;
@@ -819,77 +874,161 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.75rem 0.85rem;
+    padding: 0.65rem 0.75rem;
     display: grid;
     gap: 0.5rem;
   }
 
-  .header-panel { gap: 0.45rem; }
-  .header-top, .header-actions, .context-bar, .settings-row {
+  .header-panel {
+    gap: 0.45rem;
+    padding: 0.5rem 0.65rem 0.4rem;
+  }
+
+  .header-row {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: 0.85rem;
     flex-wrap: wrap;
   }
 
-  .header-actions { justify-content: flex-end; }
+  .title {
+    color: var(--text-0);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    align-self: center;
+  }
+
+  .title em {
+    color: var(--text-2);
+    font-style: normal;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    margin-left: 0.3rem;
+  }
+
+  .header-kpis {
+    display: flex;
+    gap: 0;
+    flex-wrap: wrap;
+    border-left: 1px solid var(--divider);
+  }
+
+  .header-kpi {
+    display: grid;
+    gap: 0.05rem;
+    padding: 0.1rem 0.7rem;
+    border-right: 1px solid var(--divider);
+    min-width: 5.5rem;
+  }
+
+  .header-kpi span {
+    color: var(--text-2);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    line-height: 1.1;
+  }
+
+  .header-kpi strong {
+    color: var(--text-0);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .header-kpi strong.warning { color: var(--warning); }
+  .header-kpi strong.positive { color: var(--positive); }
+  .header-kpi strong.negative { color: var(--negative); }
+
+  .controls-card { padding: 0.45rem 0.65rem; }
+
   .workspace-grid { grid-template-columns: minmax(0, 1.8fr) minmax(20rem, 0.85fr); align-items: start; }
-  .two-col, .shared-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .primary-column, .support-column { align-content: start; }
 
+  /* ── Mode bar ── */
   .mode-bar {
-    display: inline-grid;
-    grid-template-columns: repeat(6, auto);
-    width: fit-content;
-    border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    width: 100%;
+    border-top: 1px solid var(--divider);
   }
 
   .mode-bar button {
     border: 0;
-    border-right: 1px solid var(--panel-strong);
+    border-right: 1px solid var(--divider);
     background: transparent;
-    color: var(--text-1);
-    padding: 0.38rem 0.78rem;
+    color: var(--text-2);
+    padding: 0;
+    height: 26px;
     font: inherit;
-    font-size: 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
     cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
   }
 
   .mode-bar button:last-child { border-right: 0; }
   .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
-  .context-bar label,
-  .context-field,
-  .settings-row label {
-    display: grid;
-    gap: 0.18rem;
-    min-width: 5rem;
+  /* ── Controls bar ── */
+  .controls-bar {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
   }
 
-  label span,
-  .context-field span,
-  .eyebrow,
-  .panel-title,
-  .table-panel-header {
+  .actions {
+    margin-left: auto;
+    display: flex;
+    gap: 0.35rem;
+    align-items: flex-end;
+    padding-left: 0.5rem;
+    border-left: 1px solid var(--divider);
+    align-self: stretch;
+  }
+
+  .actions .action-btn { align-self: flex-end; }
+
+  .control {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 4.5rem;
+    flex: 1 1 4.5rem;
+  }
+
+  .control:has(input) { flex: 1 1 5rem; min-width: 5rem; }
+
+  .control > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 10.5px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 500;
   }
 
-  .context-bar strong,
-  .context-field strong {
-    min-height: 28px;
+  .control > strong {
+    height: 28px;
     display: flex;
     align-items: center;
     color: var(--text-0);
+    font-size: 12px;
+    font-weight: 500;
     text-transform: capitalize;
   }
 
+  /* ── Inputs / buttons ── */
   input,
   select,
   .action-btn {
@@ -905,30 +1044,24 @@
 
   input:focus,
   select:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .action-btn { cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .action-btn {
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    padding: 0 0.7rem;
+  }
   .action-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-    gap: 0;
-    border: 1px solid var(--divider);
-    border-bottom: 0;
+  .action-btn.primary {
+    background: rgba(122, 166, 200, 0.1);
+    border-color: rgba(122, 166, 200, 0.5);
+    color: var(--accent);
   }
+  .action-btn.primary:hover:not(:disabled) { background: rgba(122, 166, 200, 0.18); }
 
-  .metric {
-    padding: 0.35rem 0.65rem;
-    border-right: 1px solid var(--divider);
-    border-bottom: 1px solid var(--divider);
-    min-width: 0;
-  }
-
-  .metric span { display: block; color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
-  .metric strong { display: block; margin-top: 0.12rem; color: var(--text-0); font-size: 13.5px; line-height: 1.2; }
-  .metric small { color: var(--text-2); font-size: 10.5px; }
-
-  .table-panel { padding: 0; overflow: auto; }
+  /* ── Panel headers ── */
+  .panel-title,
   .table-panel-header {
     min-height: 26px;
     padding: 0.3rem 0.75rem;
@@ -936,32 +1069,50 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.5rem;
+    color: var(--text-1);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 11px;
+    font-weight: 600;
   }
 
+  .table-panel-header span { color: var(--text-2); font-weight: 400; font-size: 10px; }
+
+  /* Chart, heatmap, table panels: edge-to-edge content under a 26px header */
+  .table-panel,
+  .chart-panel,
+  .heatmap-panel { padding: 0; }
+  .table-panel { overflow: auto; }
+  .chart-panel { gap: 0; }
+
+  /* ── Tables ── */
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 0.34rem 0.5rem; border-bottom: 1px solid var(--divider); text-align: left; white-space: nowrap; font-size: 12px; }
-  th { color: var(--text-2); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+  th { color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
   td.empty { color: var(--text-2); text-align: center; padding: 0.65rem; }
+  tbody tr:hover { background: rgba(122, 166, 200, 0.06); }
 
+  /* ── Lists ── */
+  .list-panel { padding: 0; }
+  .list-panel .list { padding: 0.5rem 0.75rem; gap: 0.4rem; }
   .list p {
     margin: 0;
     color: var(--text-1);
-    line-height: 1.35;
-    padding-top: 0.38rem;
-    border-top: 1px solid var(--divider);
+    font-size: 12px;
+    line-height: 1.4;
   }
-  .list p:first-child { padding-top: 0; border-top: 0; }
+  .list-panel > p.muted { padding: 0.5rem 0.75rem; }
 
-  h2, p, small { margin: 0; }
-  h2 { font-size: 16px; line-height: 1.2; }
-  .muted { color: var(--text-2); font-size: 12px; line-height: 1.35; }
+  p { margin: 0; }
+  .muted { color: var(--text-2); font-size: 11px; line-height: 1.35; }
   .positive { color: var(--positive); }
   .negative { color: var(--negative); }
   .warning { color: var(--warning); }
 
+  /* ── Heatmap ── */
   .heatmap {
     display: grid;
-    border: 1px solid var(--divider);
   }
   .heatmap div {
     min-height: 2rem;
@@ -984,12 +1135,85 @@
     white-space: nowrap;
     padding: 0 0.35rem;
   }
-  .heatmap-label.side { justify-items: start; }
-  .heatmap-cell { color: var(--text-1); }
-  .heatmap-cell.positive { background: rgba(75, 180, 116, var(--corr-alpha)); color: var(--text-0); }
-  .heatmap-cell.negative { background: rgba(198, 107, 97, var(--corr-alpha)); color: var(--text-0); }
-  .heatmap-cell.diag { color: var(--accent); background: rgba(122, 166, 200, 0.1); }
+  .heatmap-label.side {
+    justify-items: start;
+  }
+  .heatmap-cell {
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+  .heatmap-cell.diag { font-weight: 600; }
 
+  .heatmap-scale {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    border-top: 1px solid var(--divider);
+    font-size: 10px;
+    color: var(--text-2);
+  }
+  .heatmap-scale .scale-end { font-variant-numeric: tabular-nums; }
+  .scale-track {
+    display: flex;
+    flex: 0 1 220px;
+    height: 8px;
+    border: 1px solid var(--divider);
+  }
+  .scale-step { flex: 1; }
+  .scale-note { margin-left: auto; color: var(--text-2); }
+
+  /* ── Stress compare ── */
+  .stress-compare {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.7rem 0.75rem;
+  }
+  .sc-row {
+    display: grid;
+    grid-template-columns: 4.2rem minmax(0, 1fr) 3rem;
+    align-items: center;
+    gap: 0.65rem;
+  }
+  .sc-lbl {
+    color: var(--text-2);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .sc-track {
+    height: 0.6rem;
+    background: rgba(39, 53, 68, 0.8);
+    overflow: hidden;
+  }
+  .sc-fill { height: 100%; transition: width 200ms ease; }
+  .sc-val {
+    color: var(--text-0);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .sc-delta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 0.45rem;
+    border-top: 1px solid var(--divider);
+    font-size: 11px;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .sc-delta strong {
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    font-weight: 600;
+    text-transform: none;
+  }
+
+  /* ── Frontier chart ── */
   .frontier {
     min-height: 320px;
     position: relative;
@@ -1115,17 +1339,21 @@
     padding: 1rem;
   }
 
+  /* Padding inside RankPanel (BarRankChart sits inside .panel default padding) */
+  :global(.panel.rank-panel) { padding: 0; }
+  :global(.panel.rank-panel) > :global(.chart) { padding: 0.5rem 0.75rem; }
+
   @media (max-width: 1220px) {
-    .workspace-grid, .two-col, .shared-panels { grid-template-columns: 1fr; }
-    .mode-bar { grid-template-columns: repeat(3, auto); }
-    .mode-bar button:nth-child(3) { border-right: 0; }
-    .mode-bar button:nth-child(-n + 3) { border-bottom: 1px solid var(--panel-strong); }
+    .workspace-grid, .two-col { grid-template-columns: 1fr; }
+    .header-row { gap: 0.5rem; }
+    .header-kpis { border-left: 0; padding-top: 0.3rem; border-top: 1px solid var(--divider); flex: 1 1 100%; }
   }
 
   @media (max-width: 760px) {
-    .mode-bar { grid-template-columns: 1fr; width: 100%; }
-    .mode-bar button { border-right: 0; border-bottom: 1px solid var(--panel-strong); }
-    .mode-bar button:last-child { border-bottom: 0; }
-    .context-bar label, .context-field, .settings-row label, input, select { width: 100%; }
+    .mode-bar { grid-template-columns: repeat(3, 1fr); }
+    .mode-bar button:nth-child(3) { border-right: 0; }
+    .mode-bar button:nth-child(-n + 3) { border-bottom: 1px solid var(--divider); }
+    .control, input, select { width: 100%; }
+    .actions { margin-left: 0; border-left: 0; padding-left: 0; flex: 1 1 100%; }
   }
 </style>
