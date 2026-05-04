@@ -33,6 +33,11 @@ export interface TabModeDefinition {
   defaultIndex: number;
 }
 
+export interface NavigationRouteMatch {
+  tab: WorkspaceTabDefinition;
+  mode: TabModeDefinition | null;
+}
+
 export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinition[]>> = {
   research: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
@@ -139,6 +144,30 @@ export const ACTION_KEYBINDINGS: readonly ActionKeybindingDefinition[] = [
     label: "Switch to Research workspace",
     description: "Jump to the Research workspace home tab.",
     combos: [{ id: "switch-research-primary", label: "Ctrl+Shift+R", key: "r", ctrl: true, shift: true }],
+  },
+  {
+    id: "previous_tab",
+    label: "Previous tab",
+    description: "Move to the previous tab in the current workspace order.",
+    combos: [{ id: "previous-tab-primary", label: "Ctrl+Left", key: "arrowleft", ctrl: true }],
+  },
+  {
+    id: "next_tab",
+    label: "Next tab",
+    description: "Move to the next tab in the current workspace order.",
+    combos: [{ id: "next-tab-primary", label: "Ctrl+Right", key: "arrowright", ctrl: true }],
+  },
+  {
+    id: "previous_mode",
+    label: "Previous mode",
+    description: "Move to the previous mode inside the active tab.",
+    combos: [{ id: "previous-mode-primary", label: "Shift+Left", key: "arrowleft", shift: true }],
+  },
+  {
+    id: "next_mode",
+    label: "Next mode",
+    description: "Move to the next mode inside the active tab.",
+    combos: [{ id: "next-mode-primary", label: "Shift+Right", key: "arrowright", shift: true }],
   },
 ] as const;
 
@@ -261,6 +290,98 @@ export function getModeShortcutHint(tabId: TabId, modeId: string) {
 
 export function getModeByShortcutIndex(tabId: TabId, shortcutIndex: number): TabModeDefinition | null {
   return getTabModes(tabId)[shortcutIndex - 1] ?? null;
+}
+
+export function normalizeNavigationSearchTerm(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[_\-/]+/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function matchesNavigationSegment(definition: { id: string; label: string }, segment: string) {
+  const normalizedSegment = normalizeNavigationSearchTerm(segment);
+  if (!normalizedSegment) {
+    return false;
+  }
+  const normalizedLabel = normalizeNavigationSearchTerm(definition.label);
+  const normalizedId = normalizeNavigationSearchTerm(definition.id);
+  return (
+    normalizedLabel === normalizedSegment ||
+    normalizedId === normalizedSegment ||
+    normalizedLabel.includes(normalizedSegment) ||
+    normalizedId.includes(normalizedSegment) ||
+    isCloseNavigationSegment(normalizedLabel, normalizedSegment) ||
+    isCloseNavigationSegment(normalizedId, normalizedSegment)
+  );
+}
+
+function isCloseNavigationSegment(candidate: string, segment: string) {
+  if (segment.length < 4 || Math.abs(candidate.length - segment.length) > 2) {
+    return false;
+  }
+  return boundedEditDistance(candidate, segment, 2) <= 2;
+}
+
+function boundedEditDistance(left: string, right: string, maxDistance: number) {
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = current[0];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      const value = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + substitutionCost
+      );
+      current[rightIndex] = value;
+      rowMinimum = Math.min(rowMinimum, value);
+    }
+    if (rowMinimum > maxDistance) {
+      return maxDistance + 1;
+    }
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+export function resolveNavigationPath(
+  mode: WorkspaceMode,
+  orders: WorkspaceTabOrderState,
+  path: string
+): NavigationRouteMatch | null {
+  const trimmed = path.trim();
+  if (!trimmed.startsWith("/")) {
+    return null;
+  }
+
+  const [tabSegment, modeSegment] = trimmed
+    .split("/")
+    .slice(1)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (!tabSegment) {
+    return null;
+  }
+
+  const tab = getOrderedWorkspaceTabs(mode, orders).find((candidate) => matchesNavigationSegment(candidate, tabSegment));
+  if (!tab) {
+    return null;
+  }
+
+  if (!modeSegment) {
+    return { tab, mode: null };
+  }
+
+  const tabMode = getTabModes(tab.id).find((candidate) => matchesNavigationSegment(candidate, modeSegment));
+  return tabMode ? { tab, mode: tabMode } : null;
 }
 
 export function defineTabModes(modes: readonly TabModeDefinition[]): readonly TabModeDefinition[] {

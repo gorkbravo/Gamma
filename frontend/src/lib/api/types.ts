@@ -29,7 +29,11 @@ export type ActionKeybindingId =
   | "open_settings"
   | "dismiss_surface"
   | "switch_portfolio_workspace"
-  | "switch_research_workspace";
+  | "switch_research_workspace"
+  | "previous_tab"
+  | "next_tab"
+  | "previous_mode"
+  | "next_mode";
 
 export interface ShortcutCombo {
   id: string;

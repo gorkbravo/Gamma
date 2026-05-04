@@ -14,6 +14,7 @@ import {
   moveWorkspaceTab,
   normalizeWorkspaceTabOrder,
   normalizeWorkspaceTabOrderState,
+  resolveNavigationPath,
 } from "./navigation";
 import { createWorkspaceTabOrderStore, type StorageLike } from "./stores/navigation";
 
@@ -129,6 +130,18 @@ describe("navigation tab ordering", () => {
     ]);
     expect(getModeByShortcutIndex("risk", 6)?.id).toBe("optimization");
     expect(getModeShortcutHint("risk", "scenarios")).toBe("Shift+5");
+  });
+
+  it("resolves slash navigation paths to tabs and modes", () => {
+    const orderState = normalizeWorkspaceTabOrderState(null);
+
+    expect(resolveNavigationPath("research", orderState, "/Research")?.tab.id).toBe("research");
+    expect(resolveNavigationPath("research", orderState, "/Research/Scope")?.mode?.id).toBe("scope_analysis");
+    expect(resolveNavigationPath("research", orderState, "/Rearch/Scope")?.mode?.id).toBe("scope_analysis");
+    expect(resolveNavigationPath("research", orderState, "/macro/rates")?.mode?.id).toBe("rates_policy");
+    expect(resolveNavigationPath("research", orderState, "/Prediction")?.tab.id).toBe("prediction_markets");
+    expect(resolveNavigationPath("research", orderState, "/Research/Unknown")).toBeNull();
+    expect(resolveNavigationPath("portfolio", orderState, "/Research/Scope")).toBeNull();
   });
 
   it("exposes a reusable mode registry snapshot for current mode-bearing tabs", () => {

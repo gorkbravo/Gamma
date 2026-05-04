@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { TabId } from "../lib/api/types";
+  import type { WorkspaceMode, WorkspaceTabOrderState } from "../lib/api/types";
+  import { DEFAULT_WORKSPACE_TAB_ORDER, resolveNavigationPath, type NavigationRouteMatch } from "../lib/navigation";
   import type { TabBarItem } from "./TabBar.svelte";
   import SearchDropdown from "./SearchDropdown.svelte";
 
@@ -15,6 +17,8 @@
   };
 
   export let activeTab: TabId = "portfolio";
+  export let workspaceMode: WorkspaceMode = "portfolio";
+  export let workspaceTabOrders: WorkspaceTabOrderState = DEFAULT_WORKSPACE_TAB_ORDER;
   export let tabs: TabBarItem[] = [];
   export let selectedEquity: SharedEquitySelection | null = null;
   export let selectedPortfolio: SelectedPortfolio | null = null;
@@ -22,6 +26,7 @@
   export let onToggleSidebar: () => void = () => {};
   export let onToggleCopilot: () => void = () => {};
   export let onSelectTab: (tab: TabId) => void = () => {};
+  export let onSelectRoute: (route: NavigationRouteMatch) => void = () => {};
   export let onClearSelectedEquity: () => void = () => {};
   export let onClearSelectedPortfolio: () => void = () => {};
 
@@ -33,14 +38,39 @@
   }
 
   $: normalizedSearchValue = normalizeSearchTerm(searchValue);
+  $: pathMatch = searchValue.trim().startsWith("/")
+    ? resolveNavigationPath(workspaceMode, workspaceTabOrders, searchValue)
+    : null;
   $: matchingTabs =
-    normalizedSearchValue.length === 0
+    searchValue.trim().startsWith("/")
+      ? pathMatch
+        ? [pathMatch]
+        : []
+      : normalizedSearchValue.length === 0
       ? []
       : tabs.filter((tab) => {
           const label = normalizeSearchTerm(tab.label);
           const id = normalizeSearchTerm(tab.id);
           return label.includes(normalizedSearchValue) || id.includes(normalizedSearchValue);
         });
+  $: searchResults = matchingTabs.map((item) => {
+    if ("mode" in item) {
+      return {
+        id: routeResultId(item),
+        primary: item.tab.label,
+        secondary: item.mode?.label ?? null,
+        state: item.tab.id === activeTab ? "Current" : null,
+        selected: item.tab.id === activeTab,
+      };
+    }
+
+    return {
+      id: item.id,
+      primary: item.label,
+      state: item.id === activeTab ? "Current" : null,
+      selected: item.id === activeTab,
+    };
+  });
   $: if (activeTab !== previousActiveTab) {
     previousActiveTab = activeTab;
     searchValue = "";
@@ -49,6 +79,20 @@
   function handleSearchSelect(tabId: TabId) {
     onSelectTab(tabId);
     searchValue = "";
+  }
+
+  function routeResultId(route: NavigationRouteMatch) {
+    return `route:${route.tab.id}:${route.mode?.id ?? ""}`;
+  }
+
+  function handleSearchResultSelect(id: string) {
+    if (id.startsWith("route:") && pathMatch && id === routeResultId(pathMatch)) {
+      onSelectRoute(pathMatch);
+      searchValue = "";
+      return;
+    }
+
+    handleSearchSelect(id as TabId);
   }
 </script>
 
@@ -69,13 +113,8 @@
           ariaLabel="Search tabs"
           emptyLabel="No matching tabs"
           enterBehavior="select-first"
-          results={matchingTabs.map((tab) => ({
-            id: tab.id,
-            primary: tab.label,
-            state: tab.id === activeTab ? "Current" : null,
-            selected: tab.id === activeTab
-          }))}
-          on:select={(event) => handleSearchSelect(event.detail.id as TabId)}
+          results={searchResults}
+          on:select={(event) => handleSearchResultSelect(event.detail.id)}
         />
       </div>
       {#if selectedEquity}

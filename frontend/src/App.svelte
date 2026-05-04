@@ -23,9 +23,11 @@
   import {
     getModeByShortcutIndex,
     getOrderedWorkspaceTabs,
+    getTabModes,
     getTabByShortcutIndex,
     getWorkspaceHomeTab,
     isWorkspaceTab,
+    type NavigationRouteMatch,
   } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
   import {
@@ -1587,8 +1589,16 @@
       return false;
     }
 
-    if ($activeTab === "research") {
-      researchMode = nextMode.id as ResearchMode;
+    return selectModeById($activeTab, nextMode.id);
+  }
+
+  async function selectModeById(tabId: TabId, modeId: string) {
+    if (!getTabModes(tabId).some((mode) => mode.id === modeId)) {
+      return false;
+    }
+
+    if (tabId === "research") {
+      researchMode = modeId as ResearchMode;
       if (researchMode === "overview" && !$researchOverview) {
         await loadResearchOverview();
       }
@@ -1598,44 +1608,88 @@
       return true;
     }
 
-    if ($activeTab === "macro") {
-      await loadMacroWorkspace({ mode: nextMode.id as MacroContextState["mode"] });
+    if (tabId === "macro") {
+      await loadMacroWorkspace({ mode: modeId as MacroContextState["mode"] });
       return true;
     }
 
-    if ($activeTab === "crypto") {
-      cryptoMode = nextMode.id as CryptoMode;
+    if (tabId === "crypto") {
+      cryptoMode = modeId as CryptoMode;
       return true;
     }
 
-    if ($activeTab === "fundamentals") {
-      fundamentalsMode = nextMode.id as FundamentalsMode;
+    if (tabId === "fundamentals") {
+      fundamentalsMode = modeId as FundamentalsMode;
       return true;
     }
 
-    if ($activeTab === "commodities") {
-      commoditiesMode = nextMode.id as CommodityMode;
+    if (tabId === "commodities") {
+      commoditiesMode = modeId as CommodityMode;
       await loadCommoditiesWorkspace({ mode: commoditiesMode });
       return true;
     }
 
-    if ($activeTab === "maritime") {
-      maritimeMode = nextMode.id as MaritimeMode;
+    if (tabId === "maritime") {
+      maritimeMode = modeId as MaritimeMode;
       await loadMaritimeWorkspace({ mode: maritimeMode });
       return true;
     }
 
-    if ($activeTab === "iv") {
-      optionsMode = nextMode.id as OptionsMode;
+    if (tabId === "iv") {
+      optionsMode = modeId as OptionsMode;
       return true;
     }
 
-    if ($activeTab === "risk") {
-      riskMode = nextMode.id as RiskMode;
+    if (tabId === "risk") {
+      riskMode = modeId as RiskMode;
       return true;
     }
 
     return false;
+  }
+
+  function getCurrentModeId(tabId: TabId) {
+    if (tabId === "research") return researchMode;
+    if (tabId === "macro") return $macroContext.mode;
+    if (tabId === "crypto") return cryptoMode;
+    if (tabId === "fundamentals") return fundamentalsMode;
+    if (tabId === "commodities") return commoditiesMode;
+    if (tabId === "maritime") return maritimeMode;
+    if (tabId === "iv") return optionsMode;
+    if (tabId === "risk") return riskMode;
+    return null;
+  }
+
+  async function selectAdjacentTab(direction: -1 | 1) {
+    if (!workspaceMode) {
+      return false;
+    }
+    const tabs = getOrderedWorkspaceTabs(workspaceMode, $workspaceTabOrders);
+    const currentIndex = tabs.findIndex((tab) => tab.id === $activeTab);
+    if (currentIndex < 0 || tabs.length < 2) {
+      return false;
+    }
+    const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
+    await selectTab(tabs[nextIndex].id);
+    return true;
+  }
+
+  async function selectAdjacentMode(direction: -1 | 1) {
+    const modes = getTabModes($activeTab);
+    if (modes.length < 2) {
+      return false;
+    }
+    const currentModeId = getCurrentModeId($activeTab);
+    const currentIndex = Math.max(0, modes.findIndex((mode) => mode.id === currentModeId));
+    const nextIndex = (currentIndex + direction + modes.length) % modes.length;
+    return selectModeById($activeTab, modes[nextIndex].id);
+  }
+
+  async function selectNavigationRoute(route: NavigationRouteMatch) {
+    await selectTab(route.tab.id);
+    if (route.mode) {
+      await selectModeById(route.tab.id, route.mode.id);
+    }
   }
 
   async function handleAppKeydown(event: KeyboardEvent) {
@@ -1694,6 +1748,38 @@
       return;
     }
 
+    if (matchesActionKeybinding(event, "previous_tab")) {
+      if (workspaceMode != null) {
+        event.preventDefault();
+        await selectAdjacentTab(-1);
+      }
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "next_tab")) {
+      if (workspaceMode != null) {
+        event.preventDefault();
+        await selectAdjacentTab(1);
+      }
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "previous_mode")) {
+      if (workspaceMode != null) {
+        event.preventDefault();
+        await selectAdjacentMode(-1);
+      }
+      return;
+    }
+
+    if (matchesActionKeybinding(event, "next_mode")) {
+      if (workspaceMode != null) {
+        event.preventDefault();
+        await selectAdjacentMode(1);
+      }
+      return;
+    }
+
     const numberShortcutIndex = getNumberShortcutIndex(event);
 
     if (
@@ -1739,11 +1825,14 @@
 {:else}
   <Shell
     activeTab={$activeTab}
+    workspaceMode={workspaceMode}
+    workspaceTabOrders={$workspaceTabOrders}
     tabs={tabBarTabs}
     selectedEquity={$sharedEquitySelection}
     selectedPortfolio={$portfolioSnapshot ? { variant: "live" } : null}
     copilotOpen={copilotOpen}
     onSelectTab={selectTab}
+    onSelectRoute={selectNavigationRoute}
     onClearSelectedEquity={clearSharedEquitySelection}
     onClearSelectedPortfolio={clearPortfolioSnapshot}
     onToggleCopilot={handleToggleCopilot}
