@@ -1463,6 +1463,14 @@
     }
   }
 
+  function handleClearSelectedPortfolio() {
+    if ($researchResult?.scope_type === "synthetic_portfolio") {
+      researchResult.set(null);
+      return;
+    }
+    clearPortfolioSnapshot();
+  }
+
   function handleToggleCopilot() {
     if (workspaceMode == null) {
       return;
@@ -1829,12 +1837,16 @@
     workspaceTabOrders={$workspaceTabOrders}
     tabs={tabBarTabs}
     selectedEquity={$sharedEquitySelection}
-    selectedPortfolio={$portfolioSnapshot ? { variant: "live" } : null}
+    selectedPortfolio={$researchResult?.scope_type === "synthetic_portfolio"
+      ? { variant: "research" }
+      : $portfolioSnapshot
+      ? { variant: "live" }
+      : null}
     copilotOpen={copilotOpen}
     onSelectTab={selectTab}
     onSelectRoute={selectNavigationRoute}
     onClearSelectedEquity={clearSharedEquitySelection}
-    onClearSelectedPortfolio={clearPortfolioSnapshot}
+    onClearSelectedPortfolio={handleClearSelectedPortfolio}
     onToggleCopilot={handleToggleCopilot}
     onToggleSidebar={handleToggleSidebar}
   >

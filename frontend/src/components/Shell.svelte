@@ -124,10 +124,10 @@
           <button type="button" aria-label="Clear equity focus" on:click={onClearSelectedEquity}>×</button>
         </div>
       {:else if selectedPortfolio}
-        <div class="asset-chip" title="Portfolio in focus">
+        <div class="asset-chip" title={selectedPortfolio.variant === "research" ? "Research scope portfolio" : "User portfolio (IBKR)"}>
           <span>Portfolio</span>
-          <strong>{selectedPortfolio.variant === "research" ? "Research" : "Live"}</strong>
-          <button type="button" aria-label="Clear portfolio focus" on:click={onClearSelectedPortfolio}>×</button>
+          <strong>{selectedPortfolio.variant === "research" ? "Scope" : "User"}</strong>
+          <button type="button" aria-label={selectedPortfolio.variant === "research" ? "Clear research scope" : "Clear portfolio focus"} on:click={onClearSelectedPortfolio}>×</button>
         </div>
       {/if}
       <button

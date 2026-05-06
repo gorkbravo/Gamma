@@ -197,6 +197,10 @@
     return toneClass(value);
   }
 
+  function isGammaDerivedStatementCell(sourceProvider: string | null | undefined) {
+    return statementKind !== "ratios" && sourceProvider === "gamma";
+  }
+
   function sensitivityHeatClass(value: number | null | undefined, range: { min: number; max: number }) {
     if (value == null || !Number.isFinite(value)) return "";
     if (range.max === range.min) return "sens-heat-mid";
@@ -220,9 +224,13 @@
   function editableValue(value: number | null | undefined, unit: string) {
     if (value == null) return "";
     if (unit === "percent") return (value * 100).toFixed(1);
-    if (unit === "shares") return Math.round(value).toString();
     if (unit === "ratio") return value.toFixed(3);
-    return value.toFixed(2);
+    // Currency / shares: thousand separators + accounting parens for negatives.
+    const magnitude = Math.abs(value).toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    });
+    return value < 0 ? `(${magnitude})` : magnitude;
   }
 
   function parseAssumptionInput(rawValue: string, unit: string) {
@@ -1114,7 +1122,12 @@
                   <tr>
                     <td class="statement-label-cell"><strong>{line.label}</strong></td>
                     {#each line.cells as cell}
-                      <td><strong>{cell.display_value ?? "N/A"}</strong></td>
+                      <td
+                        class:gamma-derived-cell={isGammaDerivedStatementCell(cell.source_provider)}
+                        title={isGammaDerivedStatementCell(cell.source_provider) ? (cell.transformation_note ?? "Gamma derived this value from adjacent normalized statement rows.") : undefined}
+                      >
+                        <strong>{cell.display_value ?? "N/A"}</strong>
+                      </td>
                     {/each}
                   </tr>
                 {/each}
@@ -1124,6 +1137,12 @@
             </tbody>
           </table>
         </div>
+        {#if currentStatement?.lines?.some((line) => line.cells.some((cell) => isGammaDerivedStatementCell(cell.source_provider)))}
+          <div class="statement-legend">
+            <span class="legend-swatch gamma-derived-swatch"></span>
+            <span>Teal cells are Gamma-derived values backfilled from normalized statement relationships or cumulative filing math.</span>
+          </div>
+        {/if}
       </article>
 
       <div class="financials-support-grid">
@@ -2511,6 +2530,33 @@
 
   .statement-label-cell {
     min-width: 14rem;
+  }
+
+  .gamma-derived-cell {
+    color: var(--data-cool);
+    background: color-mix(in srgb, var(--data-cool) 10%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--data-cool) 24%, transparent);
+  }
+
+  .statement-legend {
+    display: flex;
+    align-items: center;
+    gap: 0.42rem;
+    color: var(--text-2);
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
+  .legend-swatch {
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 1px solid var(--divider);
+    flex: 0 0 auto;
+  }
+
+  .gamma-derived-swatch {
+    background: color-mix(in srgb, var(--data-cool) 22%, transparent);
+    border-color: color-mix(in srgb, var(--data-cool) 38%, var(--divider));
   }
 
   .statement-label-cell strong,

@@ -222,8 +222,14 @@ export function parseEditableNumber(value: string): number | null {
   if (!trimmed) {
     return null;
   }
-  const numeric = Number(trimmed.replace(/,/g, ""));
-  return Number.isFinite(numeric) ? numeric : null;
+  // Accept Excel-style accounting parens for negatives: "(1,234.50)" -> -1234.5
+  const parenMatch = /^\((.*)\)$/.exec(trimmed);
+  const body = parenMatch ? parenMatch[1] : trimmed;
+  const numeric = Number(body.replace(/,/g, ""));
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return parenMatch ? -numeric : numeric;
 }
 
 export function driverTone(driver: FundamentalsReverseValuationDriver | null | undefined) {

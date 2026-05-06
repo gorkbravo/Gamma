@@ -344,6 +344,48 @@ def test_fundamentals_default_dcf_mean_reverts_cyclical_trough_margins(tmp_path)
     assert ebit_margin[-1] > 0.10
 
 
+def test_fundamentals_dcf_wacc_uses_live_treasury_curve_when_available(tmp_path):
+    service = _build_service(tmp_path, treasury_adapter=StubTreasuryCurveAdapter())
+
+    model = service.get_dcf_model("AAPL")
+
+    assert model is not None
+    base = next(scenario for scenario in model.scenarios if scenario.scenario_id == "base")
+    risk_free_row = next(row for row in base.cost_of_capital_rows if row.row_id == "risk_free_rate")
+    derived_wacc_row = next(row for row in base.cost_of_capital_rows if row.row_id == "derived_wacc")
+
+    assert risk_free_row.value == 0.0375
+    assert "Macro treasury 10Y" in (risk_free_row.note or "")
+    assert derived_wacc_row.value is not None
+
+
+def test_fundamentals_ratios_and_dcf_align_sparse_statement_periods(tmp_path):
+    service = _build_service(tmp_path)
+    sec_data = service.sec_adapter.company_data["AAPL"]
+    service.sec_adapter.company_data["AAPL"] = replace(
+        sec_data,
+        annual_cash_flow_statement=_without_statement_period(sec_data.annual_cash_flow_statement, "FY-2023"),
+    )
+
+    financials = service.get_financials("AAPL")
+    dcf = service.get_dcf_model("AAPL")
+
+    assert financials is not None
+    assert dcf is not None
+
+    fcf_margin = next(line for line in financials.annual_ratio_view.lines if line.line_key == "fcf_margin")
+    assert [period.label for period in financials.annual_ratio_view.periods] == ["FY 2022", "FY 2023", "FY 2024"]
+    assert len(fcf_margin.cells) == 3
+    assert fcf_margin.cells[1].value is None
+    assert fcf_margin.cells[2].value is not None
+
+    fcf_actual = next(row for row in dcf.actual_rows if row.line_key == "free_cash_flow")
+    assert dcf.historical_year_labels == ["FY 2022", "FY 2023", "FY 2024"]
+    assert len(fcf_actual.values) == 3
+    assert fcf_actual.values[1] is None
+    assert fcf_actual.values[2] == 123_500_000_000.0
+
+
 def test_sec_adapter_normalizes_quarterly_periods_and_derives_missing_quarters(tmp_path):
     adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
     payload = _facts_dataframe_for_quarterly_normalization()
@@ -401,6 +443,39 @@ def test_sec_adapter_accepts_foreign_annual_forms_ifrs_and_non_usd_units(tmp_pat
     assert next(line for line in income_view.lines if line.line_key == "diluted_shares").cells[-1].value == 10.0
     assert next(line for line in balance_view.lines if line.line_key == "total_assets").cells[-1].value == 250.0
     assert next(line for line in cash_view.lines if line.line_key == "capital_expenditures").cells[-1].value == 8.0
+
+
+def test_sec_adapter_backfills_safe_statement_values_with_gamma_provenance(tmp_path):
+    adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
+    payload = pd.DataFrame(
+        [
+            _fact_row("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", 200.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:GrossProfit", 120.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:ResearchAndDevelopmentExpense", 30.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:SellingGeneralAndAdministrativeExpense", 20.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:NetIncomeLoss", 55.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:IncomeTaxExpenseBenefit", 15.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:Assets", 500.0, "USD", None, "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:StockholdersEquity", 220.0, "USD", None, "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+        ]
+    )
+
+    income_view = adapter._build_statement_view(payload, statement="income", basis="annual", retrieved_at=NOW)
+    balance_view = adapter._build_statement_view(payload, statement="balance", basis="annual", retrieved_at=NOW)
+
+    operating_expenses = next(line for line in income_view.lines if line.line_key == "operating_expenses").cells[-1]
+    operating_income = next(line for line in income_view.lines if line.line_key == "operating_income").cells[-1]
+    pretax_income = next(line for line in income_view.lines if line.line_key == "pretax_income").cells[-1]
+    total_liabilities = next(line for line in balance_view.lines if line.line_key == "total_liabilities").cells[-1]
+
+    assert operating_expenses.value == 50.0
+    assert operating_income.value == 70.0
+    assert pretax_income.value == 70.0
+    assert total_liabilities.value == 280.0
+    assert operating_income.source_provider == "gamma"
+    assert total_liabilities.source_provider == "gamma"
+    assert "backfills" in (operating_income.transformation_note or "")
+    assert income_view.source_provider == "gamma"
 
 
 def test_fundamentals_dcf_and_reverse_do_not_assume_missing_shares(tmp_path):
@@ -500,7 +575,15 @@ class FailingPeerValuationAdapter(StubIbkrValuationAdapter):
         return super().get_price_context(ticker, lookback_days=lookback_days, force_refresh=force_refresh)
 
 
-def _build_service(tmp_path) -> FundamentalsService:
+class StubTreasuryCurveAdapter:
+    def get_curve_history(self, curve_kind: str, *, years: list[int], ttl, force_refresh: bool = False):
+        del curve_kind, years, ttl, force_refresh
+        return {
+            datetime(2026, 3, 12, tzinfo=timezone.utc): {"10Y": 3.75},
+        }, NOW
+
+
+def _build_service(tmp_path, *, treasury_adapter=None) -> FundamentalsService:
     company_data = {
         ticker: _company_data(ticker, name, revenue_scale, price)
         for ticker, name, revenue_scale, price in (
@@ -629,6 +712,7 @@ def _build_service(tmp_path) -> FundamentalsService:
         sec_adapter=StubSecFundamentalsAdapter(company_data),
         valuation_adapter=StubIbkrValuationAdapter(price_contexts),
         store=FundamentalsResearchStore(tmp_path / "fundamentals"),
+        treasury_adapter=treasury_adapter,
     )
 
 
@@ -637,6 +721,20 @@ def _without_statement_lines(
     line_keys: set[str],
 ) -> FundamentalsStatementView:
     return replace(view, lines=[line for line in view.lines if line.line_key not in line_keys])
+
+
+def _without_statement_period(
+    view: FundamentalsStatementView,
+    period_key: str,
+) -> FundamentalsStatementView:
+    return replace(
+        view,
+        periods=[period for period in view.periods if period.period_key != period_key],
+        lines=[
+            replace(line, cells=[cell for cell in line.cells if cell.period_key != period_key])
+            for line in view.lines
+        ],
+    )
 
 
 def _with_company_classification(

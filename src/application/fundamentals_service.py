@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.analytics.research_overview import beta_to_benchmark, returns_from_price_series
+from src.models.instruments import InstrumentReference
 from src.models.fundamentals import (
     FundamentalsCoverageRecord,
     FundamentalsCompanyRecord,
@@ -45,6 +47,7 @@ from src.services.fundamentals_adapters import (
     SecFundamentalsAdapter,
 )
 from src.services.fundamentals_store import FundamentalsResearchStore
+from src.services.macro_adapters import TreasuryCurveAdapter
 
 
 _DEFAULT_PEER_SEEDS: dict[str, tuple[str, ...]] = {
@@ -216,10 +219,14 @@ class FundamentalsService:
         sec_adapter: SecFundamentalsAdapter,
         valuation_adapter: IbkrValuationAdapter,
         store: FundamentalsResearchStore,
+        treasury_adapter: TreasuryCurveAdapter | None = None,
+        beta_benchmark_symbol: str = "SPY",
     ) -> None:
         self.sec_adapter = sec_adapter
         self.valuation_adapter = valuation_adapter
         self.store = store
+        self.treasury_adapter = treasury_adapter
+        self.beta_benchmark_symbol = str(beta_benchmark_symbol or "SPY").strip().upper() or "SPY"
 
     def search_companies(
         self,
@@ -661,9 +668,10 @@ class FundamentalsService:
         balance_view = sec_data.annual_balance_sheet if basis == "annual" else sec_data.quarterly_balance_sheet
         cash_view = sec_data.annual_cash_flow_statement if basis == "annual" else sec_data.quarterly_cash_flow_statement
         periods = list(income_view.periods)
-        income = self._statement_value_map(income_view)
-        balance = self._statement_value_map(balance_view)
-        cash = self._statement_value_map(cash_view)
+        period_keys = [period.period_key for period in periods]
+        income = self._statement_value_map(income_view, period_keys=period_keys)
+        balance = self._statement_value_map(balance_view, period_keys=period_keys)
+        cash = self._statement_value_map(cash_view, period_keys=period_keys)
         revenues = income.get("revenue", [])
         gross_profit = income.get("gross_profit", [])
         ebit = income.get("operating_income", [])
@@ -1642,23 +1650,29 @@ class FundamentalsService:
         revenue_growth_history: list[float],
     ) -> dict[str, float | str]:
         annual_income = self._statement_value_map(sec_data.annual_income_statement)
-        risk_free_rate = 0.045
+        risk_free_rate, risk_free_note, risk_free_source = self._live_risk_free_rate()
         equity_risk_premium = 0.05
         market_cap = market_context.get("market_cap")
         total_debt = market_context.get("total_debt")
         ebit = _last_non_null(annual_income.get("operating_income", []))
         debt_to_ebit = _safe_ratio(total_debt, ebit)
-        growth_volatility = _stdev(revenue_growth_history) or 0.0
-        leverage_beta = min(_safe_ratio(total_debt, market_cap) or 0.0, 1.5) * 0.25
-        size_adjustment = 0.0
-        if market_cap is not None:
-            if market_cap >= 500_000_000_000:
-                size_adjustment = -0.12
-            elif market_cap >= 100_000_000_000:
-                size_adjustment = -0.05
-            elif market_cap < 10_000_000_000:
-                size_adjustment = 0.12
-        beta = _bounded(1.0 + leverage_beta + (growth_volatility * 1.5) + size_adjustment, 0.65, 1.55)
+        beta, beta_note, beta_source = self._market_beta(sec_data.company.ticker)
+        if beta is None:
+            growth_volatility = _stdev(revenue_growth_history) or 0.0
+            leverage_beta = min(_safe_ratio(total_debt, market_cap) or 0.0, 1.5) * 0.25
+            size_adjustment = 0.0
+            if market_cap is not None:
+                if market_cap >= 500_000_000_000:
+                    size_adjustment = -0.12
+                elif market_cap >= 100_000_000_000:
+                    size_adjustment = -0.05
+                elif market_cap < 10_000_000_000:
+                    size_adjustment = 0.12
+            beta = _bounded(1.0 + leverage_beta + (growth_volatility * 1.5) + size_adjustment, 0.65, 1.55)
+            beta_note = "Fallback beta proxy from size, leverage, and revenue-growth volatility."
+            beta_source = "gamma"
+        else:
+            beta = _bounded(beta, 0.50, 1.80)
         cost_of_equity = risk_free_rate + beta * equity_risk_premium
         credit_spread = 0.02
         if debt_to_ebit is not None:
@@ -1687,8 +1701,70 @@ class FundamentalsService:
             "equity_weight": equity_weight,
             "tax_rate": tax_rate,
             "wacc_pct": _bounded(wacc, 0.045, 0.16),
-            "method": "Gamma heuristic WACC from filing debt, market-cap weights, tax rate, and a bounded beta proxy.",
+            "risk_free_note": risk_free_note,
+            "risk_free_source": risk_free_source,
+            "beta_note": beta_note,
+            "beta_source": beta_source,
+            "method": "Gamma derives WACC from live Treasury context when available, market beta when available, filing debt, market-cap weights, and scenario tax rate.",
         }
+
+    def _live_risk_free_rate(self) -> tuple[float, str, str]:
+        fallback = 0.045
+        if self.treasury_adapter is None:
+            return fallback, "Fallback 10Y Treasury assumption until Macro treasury data is available.", "gamma"
+        current_year = datetime.now(timezone.utc).year
+        try:
+            rows, retrieved_at = self.treasury_adapter.get_curve_history(
+                "daily_treasury_yield_curve",
+                years=[current_year - 1, current_year],
+                ttl=timedelta(hours=12),
+                force_refresh=False,
+            )
+        except Exception as exc:
+            return fallback, f"Fallback 10Y Treasury assumption; live Treasury fetch failed: {exc}", "gamma"
+        latest_date = max((date for date, row in rows.items() if row.get("10Y") is not None), default=None)
+        if latest_date is None:
+            return fallback, "Fallback 10Y Treasury assumption; Macro treasury curve has no 10Y observation.", "gamma"
+        raw_value = rows[latest_date].get("10Y")
+        rate = _optional_float(raw_value)
+        if rate is None:
+            return fallback, "Fallback 10Y Treasury assumption; latest 10Y observation is not numeric.", "gamma"
+        normalized = rate / 100.0 if rate > 1.0 else rate
+        return (
+            _bounded(normalized, 0.005, 0.08),
+            f"Latest Macro treasury 10Y yield from {latest_date.date().isoformat()}, retrieved {retrieved_at.date().isoformat()}.",
+            "treasury",
+        )
+
+    def _market_beta(self, ticker: str) -> tuple[float | None, str, str]:
+        provider = getattr(self.valuation_adapter, "research_provider", None)
+        if provider is None:
+            return None, "Market beta unavailable because no research history provider is wired.", "gamma"
+        normalized = str(ticker or "").strip().upper()
+        if not normalized:
+            return None, "Market beta unavailable because the ticker is empty.", "gamma"
+        lookback_days = 756
+        try:
+            instrument = InstrumentReference(symbol=normalized).with_defaults(provider.instrument_defaults)
+            company_prices = provider.load_instrument_history(
+                instrument,
+                lookback_days,
+                defaults=provider.instrument_defaults,
+                provider_policy="research_overview",
+            )
+            benchmark_prices = provider.load_benchmark_history(
+                self.beta_benchmark_symbol,
+                lookback_days,
+                provider_policy="research_overview",
+            )
+        except Exception as exc:
+            return None, f"Market beta unavailable; research history fetch failed: {exc}", "gamma"
+        company_returns = returns_from_price_series(company_prices, lookback_days)
+        benchmark_returns = returns_from_price_series(benchmark_prices, lookback_days)
+        beta = beta_to_benchmark(company_returns, benchmark_returns)
+        if beta is None:
+            return None, f"Market beta unavailable against {self.beta_benchmark_symbol}; falling back to Gamma proxy.", "gamma"
+        return beta, f"Beta computed from listed-market return history versus {self.beta_benchmark_symbol}.", "research"
 
     def _create_default_dcf_payload(
         self,
@@ -1707,21 +1783,51 @@ class FundamentalsService:
         )
         average_growth = _average(revenue_growth_history)
         median_growth = _median(revenue_growth_history)
+        latest_growth = _last_non_null(revenue_growth_history)
+        historical_revenue_cagr = _projected_cagr(actuals["revenue"])
         base_growth = _bounded(
-            average_growth if average_growth is not None else median_growth if median_growth is not None else 0.05,
-            -0.05,
-            0.20,
+            _weighted_average(
+                (
+                    (latest_growth, 0.40),
+                    (historical_revenue_cagr, 0.30),
+                    (average_growth, 0.20),
+                    (median_growth, 0.10),
+                )
+            )
+            or average_growth
+            or median_growth
+            or 0.05,
+            -0.02,
+            0.25,
         )
         average_ebit_margin = _average(ebit_margin_history)
-        base_ebit_margin = _bounded(average_ebit_margin if average_ebit_margin is not None else 0.20, 0.02, 0.50)
         current_ebit_margin = _last_non_null(ebit_margin_history)
+        base_ebit_margin = _bounded(
+            _weighted_average(
+                (
+                    (current_ebit_margin, 0.65),
+                    (average_ebit_margin, 0.35),
+                )
+            )
+            or average_ebit_margin
+            or 0.20,
+            0.02,
+            0.55,
+        )
         margin_stdev = _stdev(ebit_margin_history) or 0.0
-        mean_revert_margin = (
+        recover_trough_margin = (
             current_ebit_margin is not None
             and len(ebit_margin_history) >= 3
             and margin_stdev >= 0.04
-            and abs(current_ebit_margin - base_ebit_margin) >= 0.03
+            and average_ebit_margin is not None
+            and current_ebit_margin < average_ebit_margin - 0.03
         )
+        if recover_trough_margin:
+            base_ebit_margin = _bounded(
+                max(base_ebit_margin, max(ebit_margin_history) * 0.75),
+                0.02,
+                0.55,
+            )
         pretax = _last_non_null(self._statement_value_map(sec_data.annual_income_statement).get("pretax_income", []))
         base_tax = _bounded(_safe_ratio(_last_non_null(actuals["taxes"]), pretax) or 0.21, 0.10, 0.35)
         average_da = _average(
@@ -1750,21 +1856,21 @@ class FundamentalsService:
         wacc_bridge = self._derive_wacc_bridge(sec_data, market_context, base_tax, revenue_growth_history)
         base_wacc = float(wacc_bridge.get("wacc_pct") or 0.10)
         scenario_specs = {
-            "bear": {"growth_shift": -0.03, "margin_shift": -0.03, "wacc_shift": 0.01, "terminal": 0.02, "share_shift": 0.01},
+            "bear": {"growth_shift": -0.04, "margin_shift": -0.04, "wacc_shift": 0.015, "terminal": 0.0175, "share_shift": 0.01},
             "base": {"growth_shift": 0.00, "margin_shift": 0.00, "wacc_shift": 0.00, "terminal": 0.025, "share_shift": 0.00},
-            "bull": {"growth_shift": 0.03, "margin_shift": 0.03, "wacc_shift": -0.01, "terminal": 0.03, "share_shift": -0.01},
+            "bull": {"growth_shift": 0.035, "margin_shift": 0.025, "wacc_shift": -0.01, "terminal": 0.03, "share_shift": -0.01},
         }
         scenarios: dict[str, Any] = {}
         for scenario_id, spec in scenario_specs.items():
             target_margin = _bounded(base_ebit_margin + spec["margin_shift"], 0.01, 0.60)
-            if mean_revert_margin:
+            if recover_trough_margin:
                 start_margin = _bounded((current_ebit_margin or target_margin) + spec["margin_shift"], 0.01, 0.60)
                 margin_series = [_bounded(value, 0.01, 0.60) for value in _linear_series(start_margin, target_margin, len(projection_years))]
             else:
                 margin_series = [target_margin for _ in projection_years]
             scenarios[scenario_id] = {
                 "assumptions": {
-                    "revenue_growth_pct": [_bounded(base_growth + spec["growth_shift"], -0.10, 0.30) for _ in projection_years],
+                    "revenue_growth_pct": [_bounded(base_growth + spec["growth_shift"], -0.12, 0.35) for _ in projection_years],
                     "ebit_margin_pct": margin_series,
                     "tax_rate_pct": [_bounded(base_tax, 0.10, 0.35) for _ in projection_years],
                     "da_pct_revenue": [_bounded(base_da, 0.0, 0.20) for _ in projection_years],
@@ -2022,8 +2128,8 @@ class FundamentalsService:
         selected_wacc = float(assumptions.get("wacc_pct") or wacc_bridge.get("wacc_pct") or 0.10)
         derived_wacc = _optional_float(wacc_bridge.get("wacc_pct"))
         rows = [
-            ("risk_free_rate", "Risk-Free Rate", wacc_bridge.get("risk_free_rate"), "percent", "Treasury fallback until a live curve input is wired."),
-            ("beta", "Beta Proxy", wacc_bridge.get("beta"), "ratio", "Bounded proxy from size, leverage, and revenue-growth volatility."),
+            ("risk_free_rate", "Risk-Free Rate", wacc_bridge.get("risk_free_rate"), "percent", str(wacc_bridge.get("risk_free_note") or "10Y Treasury input used by the WACC bridge.")),
+            ("beta", "Beta", wacc_bridge.get("beta"), "ratio", str(wacc_bridge.get("beta_note") or "Market beta input used by the WACC bridge.")),
             ("equity_risk_premium", "Equity Risk Premium", wacc_bridge.get("equity_risk_premium"), "percent", "Static ERP assumption used by the local WACC bridge."),
             ("cost_of_equity", "Cost of Equity", wacc_bridge.get("cost_of_equity"), "percent", "Risk-free rate plus beta proxy times ERP."),
             ("pre_tax_cost_of_debt", "Pre-Tax Cost of Debt", wacc_bridge.get("pre_tax_cost_of_debt"), "percent", "Risk-free rate plus a leverage-spread proxy."),
@@ -2253,10 +2359,12 @@ class FundamentalsService:
         )
 
     def _dcf_actual_series(self, sec_data: SecCompanyData) -> dict[str, list[float | None] | list[str]]:
-        income = self._statement_value_map(sec_data.annual_income_statement)
-        balance = self._statement_value_map(sec_data.annual_balance_sheet)
-        cash = self._statement_value_map(sec_data.annual_cash_flow_statement)
-        labels = [period.label for period in sec_data.annual_income_statement.periods]
+        periods = list(sec_data.annual_income_statement.periods)
+        period_keys = [period.period_key for period in periods]
+        income = self._statement_value_map(sec_data.annual_income_statement, period_keys=period_keys)
+        balance = self._statement_value_map(sec_data.annual_balance_sheet, period_keys=period_keys)
+        cash = self._statement_value_map(sec_data.annual_cash_flow_statement, period_keys=period_keys)
+        labels = [period.label for period in periods]
         revenue = income.get("revenue", [])
         ebit = income.get("operating_income", [])
         taxes = income.get("income_tax", [])
@@ -2306,12 +2414,17 @@ class FundamentalsService:
             "nwc_intensity": nwc_intensity,
         }
 
-    def _statement_value_map(self, view: FundamentalsStatementView) -> dict[str, list[float | None]]:
-        period_keys = [period.period_key for period in view.periods]
+    def _statement_value_map(
+        self,
+        view: FundamentalsStatementView,
+        *,
+        period_keys: list[str] | None = None,
+    ) -> dict[str, list[float | None]]:
+        resolved_period_keys = period_keys if period_keys is not None else [period.period_key for period in view.periods]
         values: dict[str, list[float | None]] = {}
         for line in view.lines:
             cell_map = {cell.period_key: cell.value for cell in line.cells}
-            values[line.line_key] = [cell_map.get(period_key) for period_key in period_keys]
+            values[line.line_key] = [cell_map.get(period_key) for period_key in resolved_period_keys]
         return values
 
     def _fundamentals_data_warnings(self, sec_data: SecCompanyData) -> list[str]:
@@ -2607,6 +2720,17 @@ def _recent_numeric(values: list[float | None], limit: int) -> list[float]:
 
 def _average(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
+
+
+def _weighted_average(items: tuple[tuple[float | None, float], ...]) -> float | None:
+    numerator = 0.0
+    denominator = 0.0
+    for value, weight in items:
+        if value is None:
+            continue
+        numerator += float(value) * float(weight)
+        denominator += float(weight)
+    return numerator / denominator if denominator > 0 else None
 
 
 def _stdev(values: list[float]) -> float | None:

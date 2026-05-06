@@ -59,8 +59,11 @@ describe("fundamentals view-model helpers", () => {
 
   it("parses editable numeric input conservatively", () => {
     expect(parseEditableNumber(" 1,250.5 ")).toBe(1250.5);
+    expect(parseEditableNumber("(1,234.50)")).toBe(-1234.5);
+    expect(parseEditableNumber("(0)")).toBe(-0);
     expect(parseEditableNumber("")).toBeNull();
     expect(parseEditableNumber("abc")).toBeNull();
+    expect(parseEditableNumber("(abc)")).toBeNull();
   });
 
   it("registers the V2 mode order", () => {

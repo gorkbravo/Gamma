@@ -316,6 +316,7 @@ def build_runtime(
             market_data=market_data,
         ),
         store=FundamentalsResearchStore(base_dir=resolved_history_dir / "fundamentals"),
+        treasury_adapter=macro_service.treasury_adapter,
     )
     news_service = NewsService(_build_news_providers(live_mode=not bool(mock_mode)))
     copilot_service = CopilotService(

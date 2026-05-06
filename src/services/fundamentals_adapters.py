@@ -797,8 +797,19 @@ class SecFundamentalsAdapter:
             periods,
         )
         keep_keys = [row.period_key for row in (anchor_periods[-6:] if basis == "annual" else anchor_periods[-8:])]
-        normalized_lines = [self._ensure_line_cells(line, keep_keys) for line in lines]
         trimmed_periods = [row for row in anchor_periods if row.period_key in set(keep_keys)]
+        normalized_lines = self._backfill_statement_lines(
+            statement=statement,
+            basis=basis,
+            periods=trimmed_periods,
+            lines=[self._ensure_line_cells(line, keep_keys) for line in lines],
+            retrieved_at=retrieved_at,
+        )
+        statement_has_gamma_cells = statement_has_gamma_cells or any(
+            cell.source_provider == "gamma"
+            for line in normalized_lines
+            for cell in line.cells
+        )
         return FundamentalsStatementView(
             statement=statement,
             basis=basis,
@@ -812,10 +823,153 @@ class SecFundamentalsAdapter:
                 else f"fundamentals.sec.company_facts.{statement}.{basis}"
             ),
             transformation_note=(
-                "Gamma normalizes SEC company facts into explicit quarterly statement periods, deriving missing standalone quarter values from cumulative filings when necessary."
+                "Gamma normalizes SEC company facts into retained statement periods and marks Gamma-derived cells when it derives standalone quarters or backfills safe line-item relationships."
                 if statement_has_gamma_cells
                 else None
             ),
+        )
+
+    def _backfill_statement_lines(
+        self,
+        *,
+        statement: str,
+        basis: str,
+        periods: list[FundamentalsPeriodRecord],
+        lines: list[FundamentalsStatementLine],
+        retrieved_at: datetime,
+    ) -> list[FundamentalsStatementLine]:
+        line_map = {line.line_key: line for line in lines}
+        if statement == "income":
+            self._backfill_line_from_formula(
+                line_map,
+                periods=periods,
+                target_key="operating_expenses",
+                source_keys=("research_and_development", "selling_general_and_administrative"),
+                formula=lambda values: values[0] + values[1],
+                formula_note="R&D plus SG&A",
+                retrieved_at=retrieved_at,
+                basis=basis,
+                unit="currency",
+            )
+            self._backfill_line_from_formula(
+                line_map,
+                periods=periods,
+                target_key="operating_income",
+                source_keys=("gross_profit", "operating_expenses"),
+                formula=lambda values: values[0] - values[1],
+                formula_note="gross profit minus operating expenses",
+                retrieved_at=retrieved_at,
+                basis=basis,
+                unit="currency",
+            )
+            self._backfill_line_from_formula(
+                line_map,
+                periods=periods,
+                target_key="pretax_income",
+                source_keys=("net_income", "income_tax"),
+                formula=lambda values: values[0] + values[1],
+                formula_note="net income plus income tax expense",
+                retrieved_at=retrieved_at,
+                basis=basis,
+                unit="currency",
+            )
+        if statement == "balance":
+            self._backfill_line_from_formula(
+                line_map,
+                periods=periods,
+                target_key="total_liabilities",
+                source_keys=("total_assets", "shareholders_equity"),
+                formula=lambda values: values[0] - values[1],
+                formula_note="total assets minus shareholders' equity",
+                retrieved_at=retrieved_at,
+                basis=basis,
+                unit="currency",
+            )
+            self._backfill_line_from_formula(
+                line_map,
+                periods=periods,
+                target_key="shareholders_equity",
+                source_keys=("total_assets", "total_liabilities"),
+                formula=lambda values: values[0] - values[1],
+                formula_note="total assets minus total liabilities",
+                retrieved_at=retrieved_at,
+                basis=basis,
+                unit="currency",
+            )
+            self._backfill_line_from_formula(
+                line_map,
+                periods=periods,
+                target_key="total_assets",
+                source_keys=("total_liabilities", "shareholders_equity"),
+                formula=lambda values: values[0] + values[1],
+                formula_note="total liabilities plus shareholders' equity",
+                retrieved_at=retrieved_at,
+                basis=basis,
+                unit="currency",
+            )
+        return [line_map.get(line.line_key, line) for line in lines]
+
+    def _backfill_line_from_formula(
+        self,
+        line_map: dict[str, FundamentalsStatementLine],
+        *,
+        periods: list[FundamentalsPeriodRecord],
+        target_key: str,
+        source_keys: tuple[str, ...],
+        formula: Any,
+        formula_note: str,
+        retrieved_at: datetime,
+        basis: str,
+        unit: str,
+    ) -> None:
+        target = line_map.get(target_key)
+        sources = [line_map.get(source_key) for source_key in source_keys]
+        if target is None or any(source is None for source in sources):
+            return
+        source_maps = [
+            {cell.period_key: cell for cell in source.cells}
+            for source in sources
+            if source is not None
+        ]
+        next_cells: list[FundamentalsStatementCell] = []
+        derived_any = False
+        for period, cell in zip(periods, target.cells, strict=False):
+            if cell.value is not None:
+                next_cells.append(cell)
+                continue
+            source_cells = [source_map.get(period.period_key) for source_map in source_maps]
+            source_values = [source_cell.value if source_cell is not None else None for source_cell in source_cells]
+            if any(value is None for value in source_values):
+                next_cells.append(cell)
+                continue
+            derived_value = formula([float(value) for value in source_values if value is not None])
+            derived_any = True
+            next_cells.append(
+                FundamentalsStatementCell(
+                    period_key=period.period_key,
+                    value=derived_value,
+                    display_value=_format_statement_value(derived_value, unit),
+                    start_date=cell.start_date or period.start_date,
+                    end_date=cell.end_date or period.end_date,
+                    filing_date=cell.filing_date or period.filing_date,
+                    form=cell.form or period.form,
+                    accession_number=cell.accession_number or period.accession_number,
+                    is_amendment=cell.is_amendment or period.is_amendment,
+                    concept_name=None,
+                    source_provider="gamma",
+                    retrieved_at=retrieved_at,
+                    origin=f"fundamentals.analytics.backfill.{basis}.{target_key}",
+                    transformation_note=f"Gamma backfills this retained statement value from {formula_note} when SEC company facts do not provide a directly mapped cell.",
+                )
+            )
+        if not derived_any:
+            return
+        line_map[target_key] = replace(
+            target,
+            cells=next_cells,
+            source_provider="gamma",
+            origin=f"fundamentals.analytics.backfill.{basis}.{target_key}",
+            transformation_note=f"Gamma backfills missing {target.label} values from {formula_note} where the source statement rows are available.",
         )
 
     def _select_observations(
