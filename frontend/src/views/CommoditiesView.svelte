@@ -66,8 +66,6 @@
     (link) => !selectedInstrumentId || link.linked_instrument_ids.includes(selectedInstrumentId)
   );
   $: eventRows = selectedEvents;
-  $: coverageNotices = [...(workspace?.coverage.caveats ?? []), ...(workspace?.warnings ?? [])].slice(0, 3);
-  $: instrumentGroups = buildInstrumentGroups(workspace?.instruments ?? []);
   $: modeInstrumentOptions = buildModeInstrumentOptions(workspace, mode);
   $: curveInstrumentOptions = buildCurveInstrumentOptions(workspace);
   $: availableModeIds = new Set(workspace?.available_modes ?? modes.map((item) => item.id));
@@ -1092,22 +1090,16 @@
     return "warning";
   }
 
-  function modeTitle(activeMode: CommodityMode) {
-    return modes.find((item) => item.id === activeMode)?.label ?? "Commodities";
-  }
-
 </script>
 
 <section class="view">
-  <article class="header-panel panel">
+  <article class="panel header-panel">
     <div class="header-top">
-      <div class="headline-block">
-        <p class="eyebrow">Commodities</p>
-        <div class="headline-title-row">
-          <h2>Commodities Research</h2>
-          {#if loading}<span class="loading-pill">Refreshing</span>{/if}
-        </div>
-      </div>
+      <span class="title">Commodities</span>
+      {#if workspace}
+        <span class="subtitle">{workspace.coverage.provider_label} · as of {formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)}</span>
+      {/if}
+      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
       <button type="button" class="refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>
         {loading ? "LOADING..." : "Refresh"}
       </button>
@@ -1129,105 +1121,39 @@
         {/each}
       </div>
       {#if workspace}
-        <div class="headline-strip">
-          <div class="headline-kpi">
-            <span class="headline-kpi-label">Markets</span>
-            <strong class="headline-kpi-value">{workspace.market_summaries.length}</strong>
-            <small>{workspace.coverage.regions.join(", ") || "Region N/A"}</small>
+        <div class="header-kpis">
+          <div class="header-kpi">
+            <span>Markets</span>
+            <strong>{workspace.market_summaries.length}</strong>
           </div>
-          <div class="headline-kpi">
-            <span class="headline-kpi-label">Curves</span>
-            <strong class="headline-kpi-value">{curveBreadth.backwardation}/{curveBreadth.contango}</strong>
-            <small>Backward / contango</small>
+          <div class="header-kpi">
+            <span>Back/Cont</span>
+            <strong>{curveBreadth.backwardation}/{curveBreadth.contango}</strong>
           </div>
-          <div class="headline-kpi">
-            <span class="headline-kpi-label">Provider</span>
-            <strong class="headline-kpi-value {coverageTone(workspace.coverage.coverage_status)}">
+          <div class="header-kpi">
+            <span>Status</span>
+            <strong class={coverageTone(workspace.coverage.coverage_status)}>
               {displayStatus(workspace.coverage.coverage_status)}
             </strong>
-            <small>{workspace.coverage.provider_label}</small>
+          </div>
+          <div class="header-kpi">
+            <span>Region</span>
+            <strong>{workspace.coverage.regions[0] ?? "N/A"}</strong>
           </div>
         </div>
       {/if}
     </div>
-
-    {#if workspace}
-      <p class="coverage-note">
-        {workspace.coverage.freshness_label} | as of {formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)} | {workspace.transformation_note}
-      </p>
-    {/if}
   </article>
 
   {#if workspace}
-    {#if mode !== "overview"}
-    <section class="coverage-strip panel" aria-label="Commodities provider coverage">
-      <div>
-        <span>Provider</span>
-        <strong>{workspace.coverage.provider_label}</strong>
-        <small>{displayStatus(workspace.coverage.freshness_label)}</small>
-      </div>
-      <div>
-        <span>Status</span>
-        <strong class={coverageTone(workspace.coverage.coverage_status)}>
-          {displayStatus(workspace.coverage.coverage_status)}
-        </strong>
-        <small>{formatDate(workspace.coverage.source_timestamp ?? workspace.retrieved_at)}</small>
-      </div>
-      <div>
-        <span>Coverage</span>
-        <strong>{workspace.coverage.instruments.length} markets</strong>
-        <small>{workspace.coverage.regions.join(", ") || "Region unavailable"}</small>
-      </div>
-      <div class="notice-cell">
-        <span>Warnings</span>
-        {#if coverageNotices.length}
-          <ul>
-            {#each coverageNotices as notice}
-              <li>{notice}</li>
-            {/each}
-          </ul>
-        {:else}
-          <strong>No active caveats</strong>
-        {/if}
-      </div>
-    </section>
-    {/if}
 
     {#if mode === "overview"}
       <section class="overview-grid">
-        <article class="panel chart-panel span-2">
-          <div class="section-head control-head">
-            <div>
-              <h2>Term Structure Stack</h2>
-            </div>
-            <label>
-              Curve Market
-              <select bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !curveInstrumentOptions.length}>
-                {#each curveInstrumentOptions as instrument}
-                  <option value={instrument.instrument_id}>{instrument.name}</option>
-                {/each}
-              </select>
-            </label>
-          </div>
-          <div class="inline-stats">
-            <div>
-              <span>Shape</span>
-              <strong>{selectedCurve?.shape_label ?? "N/A"}</strong>
-            </div>
-            <div>
-              <span>M1-M6</span>
-              <strong>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
-            </div>
-            <div>
-              <span>Roll</span>
-              <strong>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
-            </div>
-          </div>
-          <TimeSeriesChart series={curveSeries} height={340} emptyMessage="NO CURVE NODES" showLegend={true} />
-        </article>
-
-        <article class="panel table-panel matrix-panel span-2">
-          <div class="table-panel-hdr">Commodity Matrix</div>
+        <article class="panel table-panel matrix-panel span-4">
+          <header class="panel-title">
+            <span>Commodity Matrix</span>
+            <span class="header-meta">{overviewRows.length} markets · click row to drill</span>
+          </header>
           <div class="table-wrap">
             <table class="matrix-table">
               <colgroup>
@@ -1278,12 +1204,38 @@
           </div>
         </article>
 
-        <article class="panel scatter-panel span-2">
-          <div class="section-head">
+        <article class="panel chart-panel span-2">
+          <header class="panel-title">
+            <span>Term Structure Stack</span>
+            <span class="header-meta">
+              <select class="inline-select" bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !curveInstrumentOptions.length}>
+                {#each curveInstrumentOptions as instrument}
+                  <option value={instrument.instrument_id}>{instrument.name}</option>
+                {/each}
+              </select>
+            </span>
+          </header>
+          <div class="inline-stats">
             <div>
-              <h2>Momentum / Roll Scatter</h2>
+              <span>Shape</span>
+              <strong class={curveTone(selectedCurve?.shape_label ?? selectedSummary?.curve_state)}>{selectedCurve?.shape_label ?? "N/A"}</strong>
+            </div>
+            <div>
+              <span>M1-M6</span>
+              <strong class={valueClass(selectedCurve?.m1_m6_spread)}>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
+            </div>
+            <div>
+              <span>Roll</span>
+              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
+          <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
+        </article>
+
+        <article class="panel scatter-panel span-2">
+          <header class="panel-title">
+            <span>Momentum / Roll Scatter</span>
+          </header>
           {#if scatterState.points.length}
             <div class="scatter-shell" bind:this={scatterShellEl}
                  role="presentation"
@@ -1330,47 +1282,10 @@
           {/if}
         </article>
 
-        <article class="panel event-panel span-2">
-          <div class="section-head">
-            <div>
-              <h2>Event Tape</h2>
-            </div>
-          </div>
-          <div class="table-wrap">
-            {#if workspace.events.length}
-              <table class="event-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Event</th>
-                    <th>Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each workspace.events.slice(0, 6) as event}
-                    <tr>
-                      <td>{formatDate(event.scheduled_at)}</td>
-                      <td><strong>{event.title}</strong></td>
-                      <td>
-                        <span>{event.relative_label ?? humanize(event.category)}</span>
-                        <span>{displayStatus(event.importance)}</span>
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            {:else}
-              <p class="empty-hint">No event rows are linked to the selected commodity.</p>
-            {/if}
-          </div>
-        </article>
-
-        <article class="panel rankers-panel span-4">
-          <div class="section-head">
-            <div>
-              <h2>Market Regime Ranks</h2>
-            </div>
-          </div>
+        <article class="panel table-panel rankers-panel span-4">
+          <header class="panel-title">
+            <span>Market Regime Ranks</span>
+          </header>
           <div class="rank-grid">
             <div class="rank-block">
               <h3>Strongest Backwardation</h3>
@@ -1471,105 +1386,139 @@
           </div>
         </article>
 
-        <article class="panel span-4">
-          <div class="section-head">
-            <div>
-              <h2>Cross-Domain Notes</h2>
-            </div>
+        <article class="panel table-panel span-2">
+          <header class="panel-title">
+            <span>Event Tape</span>
+            <span class="header-meta">{workspace.events.length} events</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table event-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Event</th>
+                  <th class="num">Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if workspace.events.length}
+                  {#each workspace.events.slice(0, 8) as event}
+                    <tr>
+                      <td class="mono">{formatDate(event.scheduled_at)}</td>
+                      <td><strong>{event.title}</strong></td>
+                      <td class="num"><span class="tag">{displayStatus(event.importance)}</span></td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="3">No event rows linked.</td></tr>
+                {/if}
+              </tbody>
+            </table>
           </div>
-          <div class="note-list compact-notes four-col-notes">
-            {#if workspace.cross_domain_links.length}
-              {#each workspace.cross_domain_links.slice(0, 8) as link}
-                <div class="note-row">
-                  <strong>{link.target_label}</strong>
-                  <span>{humanize(link.target_domain)} | confidence {formatNumber(link.confidence, 2)}</span>
-                </div>
-              {/each}
-            {:else}
-              <p class="empty-hint">No cross-domain links are available for this payload.</p>
-            {/if}
+        </article>
+
+        <article class="panel table-panel span-2">
+          <header class="panel-title">
+            <span>Cross-Domain Links</span>
+            <span class="header-meta">{workspace.cross_domain_links.length} links</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Target</th>
+                  <th>Domain</th>
+                  <th class="num">Conf</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if workspace.cross_domain_links.length}
+                  {#each workspace.cross_domain_links.slice(0, 8) as link}
+                    <tr>
+                      <td><strong>{link.target_label}</strong></td>
+                      <td>{humanize(link.target_domain)}</td>
+                      <td class="num">{formatNumber(link.confidence, 2)}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="3">No cross-domain links.</td></tr>
+                {/if}
+              </tbody>
+            </table>
           </div>
         </article>
       </section>
     {:else}
-      <section class="mode-context panel">
-        <div>
-          <p class="eyebrow">{modeTitle(mode)}</p>
-          <h2>{selectedInstrument?.name ?? "Select a commodity"}</h2>
+      <article class="panel controls-card">
+        <div class="controls-bar">
+          <label class="control"><span>Market</span>
+            <select bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !modeInstrumentOptions.length}>
+              {#each modeInstrumentOptions as instrument}
+                <option value={instrument.instrument_id}>{instrument.name}</option>
+              {/each}
+            </select>
+          </label>
+          <div class="ctx-kpis">
+            <div class="ctx-kpi">
+              <span>Symbol</span>
+              <strong>{selectedSummary?.instrument.symbol ?? selectedInstrumentId.toUpperCase()}</strong>
+            </div>
+            <div class="ctx-kpi">
+              <span>Last</span>
+              <strong>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
+            </div>
+            <div class="ctx-kpi">
+              <span>Chg</span>
+              <strong class={valueClass(selectedSummary?.latest_change)}>{formatPct(selectedSummary?.latest_change_pct)}</strong>
+            </div>
+            <div class="ctx-kpi">
+              <span>Curve</span>
+              <strong class={curveTone(selectedSummary?.curve_state)}>{selectedCurve?.shape_label ?? selectedSummary?.curve_state ?? "N/A"}</strong>
+            </div>
+            <div class="ctx-kpi">
+              <span>M1-M2</span>
+              <strong class={valueClass(selectedCurve?.front_spread)}>{formatNumber(selectedCurve?.front_spread, 3)}</strong>
+            </div>
+            <div class="ctx-kpi">
+              <span>Roll</span>
+              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
+            </div>
+            <div class="ctx-kpi">
+              <span>Inv Pctl</span>
+              <strong>{selectedInventory ? formatPercentile(selectedInventory.seasonal_percentile) : "N/A"}</strong>
+            </div>
+            <div class="ctx-kpi">
+              <span>Unit</span>
+              <strong>{selectedSummary?.instrument.quote_unit ?? "N/A"}</strong>
+            </div>
+          </div>
         </div>
-        <label>
-          Mode Market
-          <select bind:value={selectedInstrumentId} on:change={handleInstrumentChange} disabled={loading || !modeInstrumentOptions.length}>
-            {#each modeInstrumentOptions as instrument}
-              <option value={instrument.instrument_id}>{instrument.name}</option>
-            {/each}
-          </select>
-        </label>
-      </section>
-
-      <section class="kpi-strip panel" aria-label="Selected commodity metrics">
-        <div class="metric">
-          <span>Selected</span>
-          <strong>{selectedSummary?.instrument.symbol ?? selectedInstrumentId.toUpperCase()}</strong>
-          <small>{selectedSummary?.instrument.quote_unit ?? "unit unavailable"}</small>
-        </div>
-        <div class="metric">
-          <span>Last</span>
-          <strong>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
-          <small class={valueClass(selectedSummary?.latest_change)}>
-            {formatNumber(selectedSummary?.latest_change, 2)} | {formatPct(selectedSummary?.latest_change_pct)}
-          </small>
-        </div>
-        <div class="metric">
-          <span>Curve</span>
-          <strong>{selectedCurve?.shape_label ?? selectedSummary?.curve_state ?? "unavailable"}</strong>
-          <small>Front {formatNumber(selectedCurve?.front_spread, 3)}</small>
-        </div>
-        <div class="metric">
-          <span>Roll Proxy</span>
-          <strong>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
-          <small>Front-spread heuristic</small>
-        </div>
-        <div class="metric">
-          <span>Inventory</span>
-          <strong>{selectedInventory ? formatPercentile(selectedInventory.seasonal_percentile) : "N/A"}</strong>
-          <small>{selectedInventory ? inventoryValue(selectedInventory) : "no linked series"}</small>
-        </div>
-        <div class="metric">
-          <span>As Of</span>
-          <strong>{formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)}</strong>
-          <small>{workspace.source_provider}</small>
-        </div>
-      </section>
+      </article>
     {/if}
 
     {#if mode === "energy" || mode === "metals"}
       <section class="split">
         <article class="panel chart-panel">
-          <div class="section-head">
-            <div>
-              <h2>Price History</h2>
-              {#if historyPointCount}
-                <p>{historyPointCount} observations | latest {formatDate(latestHistoryDate)}</p>
-              {:else}
-                <p>No price history loaded for the selected market.</p>
-              {/if}
-            </div>
-          </div>
-          <TimeSeriesChart series={priceSeries} height={270} emptyMessage="CHART UNAVAILABLE" />
+          <header class="panel-title">
+            <span>{selectedInstrument?.name ?? "Price"} · Price History</span>
+            <span class="header-meta">{historyPointCount ? `${historyPointCount} obs · ${formatDate(latestHistoryDate)}` : "—"}</span>
+          </header>
+          <TimeSeriesChart series={priceSeries} height={260} emptyMessage="CHART UNAVAILABLE" />
         </article>
 
         <article class="panel table-panel">
-          <div class="table-panel-hdr">{mode === "metals" ? "Metals Snapshot" : mode === "energy" ? "Energy Snapshot" : "Market Snapshot"}</div>
+          <header class="panel-title">
+            <span>{mode === "metals" ? "Metals Snapshot" : "Energy Snapshot"}</span>
+            <span class="header-meta">{visibleSummaries.length} markets</span>
+          </header>
           <div class="table-wrap">
-            <table class="market-table">
+            <table class="compact-table market-table">
               <thead>
                 <tr>
                   <th>Market</th>
-                  <th>Last</th>
-                  <th>Chg</th>
+                  <th class="num">Last</th>
+                  <th class="num">Chg</th>
                   <th>Curve</th>
-                  <th>Inventory</th>
                 </tr>
               </thead>
               <tbody>
@@ -1584,19 +1533,18 @@
                           on:click={() => selectInstrument(summary.instrument.instrument_id)}
                           disabled={loading}
                         >
-                          <strong>{summary.instrument.name}</strong>
-                          <span>{summary.instrument.symbol} | {summary.instrument.quote_unit}</span>
+                          <strong>{summary.instrument.symbol}</strong>
+                          <span>{summary.instrument.name}</span>
                         </button>
                       </td>
-                      <td>{formatNumber(summary.latest_price, 2)}</td>
-                      <td class={valueClass(summary.latest_change)}>{formatPct(summary.latest_change_pct)}</td>
-                      <td>{humanize(summary.curve_state)}</td>
-                      <td>{summary.inventory_signal ?? "N/A"}</td>
+                      <td class="num">{formatNumber(summary.latest_price, 2)}</td>
+                      <td class="num {valueClass(summary.latest_change)}">{formatPct(summary.latest_change_pct)}</td>
+                      <td><span class="tag {curveTone(summary.curve_state)}">{humanize(summary.curve_state)}</span></td>
                     </tr>
                   {/each}
                 {:else}
                   <tr class="empty-row">
-                    <td colspan="5">No commodity summaries available for this mode.</td>
+                    <td colspan="4">No commodity summaries available.</td>
                   </tr>
                 {/if}
               </tbody>
@@ -1609,7 +1557,7 @@
     {#if mode === "energy"}
       <section class="deep-grid">
         <article class="panel table-panel">
-          <div class="table-panel-hdr">Crack Spread Matrix</div>
+          <header class="panel-title"><span>Crack Spread Matrix</span></header>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
@@ -1624,77 +1572,63 @@
                 {#if crackMatrixRows.length}
                   {#each crackMatrixRows as row}
                     <tr>
-                      <td>
-                        <strong>{row.label}</strong>
-                        <span>{row.formula}</span>
-                      </td>
-                      <td>{formatNumber(row.value, 2)} USD/bbl</td>
-                      <td class={row.tone}>{formatNumber(row.change, 2)}</td>
-                      <td>{formatPercentile(row.percentile)}</td>
+                      <td><strong>{row.label}</strong><span class="meta">{row.formula}</span></td>
+                      <td class="num">{formatNumber(row.value, 2)}</td>
+                      <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
+                      <td class="num">{formatPercentile(row.percentile)}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row"><td colspan="4">No crack-spread rows are available.</td></tr>
+                  <tr class="empty-row"><td colspan="4">No crack-spread rows.</td></tr>
                 {/if}
               </tbody>
             </table>
           </div>
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Term Structure Heatmap</h2>
-            </div>
-          </div>
+        <article class="panel rows-panel">
+          <header class="panel-title"><span>Term Structure Heatmap</span></header>
           {#if termSpreadHeatmapRows.length}
             <div class="heatmap-list">
               {#each termSpreadHeatmapRows as row}
                 <div class="heatmap-row">
-                  <span>{row.label}</span>
+                  <span class="row-label">{row.label}</span>
                   <div class="heatmap-track">
                     <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
                   </div>
-                  <strong class={row.tone}>{formatNumber(row.value, 3)}</strong>
-                  <small>{row.left} / {row.right}</small>
+                  <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
                 </div>
               {/each}
             </div>
           {:else}
-            <p class="empty-hint">No adjacent curve nodes for calendar-spread heatmap.</p>
+            <div class="empty-state-inline">No adjacent curve nodes.</div>
           {/if}
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Inventory vs Seasonality Cloud</h2>
-            </div>
-          </div>
+        <article class="panel rows-panel">
+          <header class="panel-title"><span>Inventory vs Seasonality</span></header>
           <div class="seasonality-list">
             {#if inventoryCloudRows.length}
               {#each inventoryCloudRows as row}
                 <div class="seasonality-row">
-                  <div>
-                    <strong>{row.label}</strong>
-                    <span>{row.methodology}</span>
-                  </div>
+                  <span class="row-label" title={row.label}>{row.label}</span>
                   <div class="seasonality-band">
                     {#if row.position != null}
                       <span class="seasonality-dot" style={`left:${row.position}%`}></span>
                     {/if}
                   </div>
-                  <small>{formatNumber(row.min, 1)} / {formatNumber(row.latest, 1)} / {formatNumber(row.max, 1)} {row.unit}</small>
+                  <strong class="num">{formatNumber(row.latest, 1)}</strong>
+                  <span class="num meta">{formatNumber(row.min, 1)}/{formatNumber(row.max, 1)}</span>
                 </div>
               {/each}
             {:else}
-              <p class="empty-hint">No inventory series for the selected energy market.</p>
+              <div class="empty-state-inline">No inventory series.</div>
             {/if}
           </div>
         </article>
 
         <article class="panel table-panel">
-          <div class="table-panel-hdr">Vessel / Flow Proxy</div>
+          <header class="panel-title"><span>Vessel / Flow Proxy</span></header>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
@@ -1707,9 +1641,9 @@
               <tbody>
                 {#each flowProxyRows as row}
                   <tr>
-                    <td>{row.hub}</td>
+                    <td><strong>{row.hub}</strong></td>
                     <td>{row.metric}</td>
-                    <td>{row.source}</td>
+                    <td class="meta">{row.source}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -1722,92 +1656,79 @@
     {#if mode === "metals"}
       <section class="deep-grid">
         <article class="panel table-panel">
-          <div class="table-panel-hdr">Macro Driver Correlation</div>
+          <header class="panel-title"><span>Macro Driver Correlation</span></header>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
                 <tr>
                   <th>Metal</th>
                   <th>Driver</th>
-                  <th>Corr</th>
-                  <th>Read</th>
+                  <th class="num">30D Corr</th>
                 </tr>
               </thead>
               <tbody>
                 {#if metalsCorrelationRows.length}
                   {#each metalsCorrelationRows as row}
                     <tr>
-                      <td>{row.metal}</td>
+                      <td><strong>{row.metal}</strong></td>
                       <td>{row.driver}</td>
-                      <td><span class="tag {row.tone}">{formatNumber(row.value, 2)}</span></td>
-                      <td>{row.note}</td>
+                      <td class="num"><span class="tag {row.tone}">{formatNumber(row.value, 2)}</span></td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row"><td colspan="4">No gold/copper histories are available for macro correlation.</td></tr>
+                  <tr class="empty-row"><td colspan="3">No gold/copper macro histories.</td></tr>
                 {/if}
               </tbody>
             </table>
           </div>
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Precious Ratio Gauges</h2>
-            </div>
-          </div>
+        <article class="panel rows-panel">
+          <header class="panel-title"><span>Precious Ratio Gauges</span></header>
           <div class="ratio-gauge-list">
             {#if metalRatioGaugeRows.length}
               {#each metalRatioGaugeRows as row}
-                <div class="ratio-gauge-row">
-                  <div>
-                    <strong>{row.label}</strong>
-                    <span>{row.methodology} | mean {formatNumber(row.mean, 2)}</span>
-                  </div>
+                <div class="seasonality-row">
+                  <span class="row-label" title={row.label}>{row.label}</span>
                   <div class="gauge-track">
                     {#if row.position != null}
                       <span class="gauge-marker" style={`left:${row.position}%`}></span>
                     {/if}
                   </div>
-                  <small>{formatNumber(row.current, 2)}x | {formatPercentile(row.percentile)}</small>
+                  <strong class="num">{formatNumber(row.current, 2)}x</strong>
+                  <span class="num meta">{formatPercentile(row.percentile)}</span>
                 </div>
               {/each}
             {:else}
-              <p class="empty-hint">No precious-metal ratio rows are available.</p>
+              <div class="empty-state-inline">No precious-metal ratios.</div>
             {/if}
           </div>
         </article>
 
         <article class="panel table-panel">
-          <div class="table-panel-hdr">LME / COMEX Warehouse Stocks</div>
+          <header class="panel-title"><span>LME / COMEX Warehouse Stocks</span></header>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
                 <tr>
                   <th>Series</th>
                   <th>Market</th>
-                  <th>Latest</th>
-                  <th>Chg</th>
-                  <th>Signal</th>
+                  <th class="num">Latest</th>
+                  <th class="num">Chg</th>
                 </tr>
               </thead>
               <tbody>
                 {#if warehouseStockRows.length}
                   {#each warehouseStockRows as row}
                     <tr>
-                      <td>
-                        <strong>{row.label}</strong>
-                        <span>{row.source}</span>
-                      </td>
+                      <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
                       <td>{row.market}</td>
-                      <td>{formatNumber(row.latest, 1)} {row.unit}</td>
-                      <td class={valueClass(row.change)}>{formatNumber(row.change, 1)}</td>
-                      <td>{row.signal}</td>
+                      <td class="num">{formatNumber(row.latest, 1)} {row.unit}</td>
+                      <td class="num {valueClass(row.change)}">{formatNumber(row.change, 1)}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row"><td colspan="5">No exchange warehouse rows are available.</td></tr>
+                  <tr class="empty-row"><td colspan="4">No exchange warehouse rows.</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1815,31 +1736,31 @@
         </article>
 
         <article class="panel table-panel">
-          <div class="table-panel-hdr">Substitution Spreads</div>
+          <header class="panel-title"><span>Substitution Spreads</span></header>
           <div class="table-wrap">
             <table class="compact-table">
               <thead>
                 <tr>
                   <th>Spread</th>
-                  <th>Value</th>
-                  <th>Chg</th>
-                  <th>Z</th>
-                  <th>Read</th>
+                  <th class="num">Value</th>
+                  <th class="num">Chg</th>
+                  <th class="num">Z</th>
+                  <th class="num">Pctl</th>
                 </tr>
               </thead>
               <tbody>
                 {#if substitutionSpreadRows.length}
                   {#each substitutionSpreadRows as row}
                     <tr>
-                      <td>{row.label}</td>
-                      <td>{formatNumber(row.value, 1)} USD/mt</td>
-                      <td class={valueClass(row.change)}>{formatNumber(row.change, 1)}</td>
-                      <td class={valueClass(row.zScore)}>{formatNumber(row.zScore, 2)}</td>
-                      <td>{row.interpretation}</td>
+                      <td><strong>{row.label}</strong></td>
+                      <td class="num">{formatNumber(row.value, 1)}</td>
+                      <td class="num {valueClass(row.change)}">{formatNumber(row.change, 1)}</td>
+                      <td class="num {valueClass(row.zScore)}">{formatNumber(row.zScore, 2)}</td>
+                      <td class="num">{formatPercentile(row.percentile)}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row"><td colspan="5">No copper/aluminum spread row is available.</td></tr>
+                  <tr class="empty-row"><td colspan="5">No copper/aluminum spread row.</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1851,37 +1772,33 @@
     {#if (mode === "energy" || mode === "inventories_fundamentals") && fundamentalTapeRows.length}
       <section class="split">
         <article class="panel chart-panel">
-          <div class="section-head">
-            <div>
-              <h2>EIA Fundamental Stack</h2>
-            </div>
-          </div>
-          <TimeSeriesChart series={fundamentalStackSeries} height={260} emptyMessage="NO FUNDAMENTAL HISTORY" showLegend={true} />
+          <header class="panel-title">
+            <span>EIA Fundamental Stack</span>
+            <span class="header-meta">indexed to 100</span>
+          </header>
+          <TimeSeriesChart series={fundamentalStackSeries} height={240} emptyMessage="NO FUNDAMENTAL HISTORY" showLegend={true} />
         </article>
 
         <article class="panel table-panel">
-          <div class="table-panel-hdr">Fundamental Tape</div>
+          <header class="panel-title"><span>Fundamental Tape</span></header>
           <div class="table-wrap">
             <table class="compact-table fundamental-table">
               <thead>
                 <tr>
                   <th>Series</th>
                   <th>Type</th>
-                  <th>Latest</th>
-                  <th>Chg</th>
-                  <th>Path</th>
+                  <th class="num">Latest</th>
+                  <th class="num">Chg</th>
+                  <th class="num">Path</th>
                 </tr>
               </thead>
               <tbody>
                 {#each fundamentalTapeRows as row}
                   <tr>
-                    <td>
-                      <strong>{row.label}</strong>
-                      <span>{row.source}</span>
-                    </td>
+                    <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
                     <td>{row.category}</td>
-                    <td>{formatNumber(row.latest, 2)} {row.unit}</td>
-                    <td class={row.tone}>{formatNumber(row.change, 2)}</td>
+                    <td class="num">{formatNumber(row.latest, 2)} {row.unit}</td>
+                    <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
                     <td class="sparkline-cell">
                       {#if row.path}
                         <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${row.label} recent path`}>
@@ -1903,96 +1820,115 @@
     {#if mode === "energy" || mode === "metals" || mode === "curves_spreads"}
       <section class="split">
         <article class="panel chart-panel">
-          <div class="section-head">
-            <div>
-              <h2>Curve</h2>
-            </div>
-          </div>
+          <header class="panel-title">
+            <span>{selectedInstrument?.symbol ?? "Curve"} · Forward Curve</span>
+            <span class="header-meta">{selectedCurve?.shape_label ?? "N/A"}</span>
+          </header>
           <div class="inline-stats">
             <div>
-              <span>Shape</span>
-              <strong>{selectedCurve?.shape_label ?? "N/A"}</strong>
-            </div>
-            <div>
               <span>M1-M6</span>
-              <strong>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
+              <strong class={valueClass(selectedCurve?.m1_m6_spread)}>{formatNumber(selectedCurve?.m1_m6_spread, 3)}</strong>
             </div>
             <div>
               <span>Slope</span>
-              <strong>{formatNumber(selectedCurve?.curve_slope, 3)}</strong>
+              <strong class={valueClass(selectedCurve?.curve_slope)}>{formatNumber(selectedCurve?.curve_slope, 3)}</strong>
+            </div>
+            <div>
+              <span>Roll</span>
+              <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={285} emptyMessage="NO CURVE NODES" showLegend={true} />
+          <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
         <article class="panel table-panel">
-          <div class="table-panel-hdr">Curve Nodes</div>
+          <header class="panel-title">
+            <span>Curve Nodes</span>
+            <span class="header-meta">{selectedCurve?.nodes.length ?? 0} contracts</span>
+          </header>
           <div class="table-wrap">
-            <table>
+            <table class="compact-table">
               <thead>
                 <tr>
                   <th>Contract</th>
                   <th>Month</th>
-                  <th>DTE</th>
-                  <th>Price</th>
-                  <th>Chg</th>
+                  <th class="num">DTE</th>
+                  <th class="num">Price</th>
+                  <th class="num">Chg</th>
                 </tr>
               </thead>
               <tbody>
                 {#if selectedCurve?.nodes.length}
                   {#each selectedCurve.nodes as node}
                     <tr>
-                      <td>{node.contract.symbol}</td>
+                      <td><strong>{node.contract.symbol}</strong></td>
                       <td>{node.contract.contract_month}</td>
-                      <td>{node.days_to_expiry == null ? "N/A" : `${node.days_to_expiry}d`}</td>
-                      <td>{formatNumber(node.price, 3)}</td>
-                      <td class={valueClass(node.change)}>{formatNumber(node.change, 3)}</td>
+                      <td class="num">{node.days_to_expiry == null ? "N/A" : `${node.days_to_expiry}d`}</td>
+                      <td class="num">{formatNumber(node.price, 3)}</td>
+                      <td class="num {valueClass(node.change)}">{formatNumber(node.change, 3)}</td>
                     </tr>
                   {/each}
                 {:else}
-                  <tr class="empty-row">
-                    <td colspan="5">No curve nodes available for the selected market.</td>
-                  </tr>
+                  <tr class="empty-row"><td colspan="5">No curve nodes.</td></tr>
                 {/if}
               </tbody>
             </table>
           </div>
         </article>
       </section>
+
+      {#if mode === "curves_spreads"}
+        <section class="panel rows-panel">
+          <header class="panel-title"><span>Term Structure Heatmap</span></header>
+          {#if termSpreadHeatmapRows.length}
+            <div class="heatmap-list">
+              {#each termSpreadHeatmapRows as row}
+                <div class="heatmap-row">
+                  <span class="row-label">{row.label}</span>
+                  <div class="heatmap-track">
+                    <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
+                  </div>
+                  <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="empty-state-inline">No adjacent curve nodes.</div>
+          {/if}
+        </section>
+      {/if}
     {/if}
 
     {#if mode === "curves_spreads" || mode === "metals" || mode === "energy"}
       <section class="panel table-panel">
-        <div class="table-panel-hdr">Spreads</div>
+        <header class="panel-title">
+          <span>Spreads</span>
+          <span class="header-meta">{selectedSpreads.length} linked</span>
+        </header>
         <div class="table-wrap">
-          <table class="spread-table">
+          <table class="compact-table spread-table">
             <thead>
               <tr>
                 <th>Spread</th>
-                <th>Value</th>
-                <th>Change</th>
-                <th>Z</th>
-                <th>Percentile</th>
+                <th class="num">Value</th>
+                <th class="num">Chg</th>
+                <th class="num">Z</th>
+                <th class="num">Pctl</th>
               </tr>
             </thead>
             <tbody>
               {#if selectedSpreads.length}
                 {#each selectedSpreads as spread}
                   <tr>
-                    <td>
-                      <strong>{spread.definition.label}</strong>
-                      <span>{spread.definition.formula}</span>
-                    </td>
-                    <td>{formatNumber(spread.value, 3)} {spreadUnit(spread)}</td>
-                    <td class={valueClass(spread.change)}>{formatNumber(spread.change, 3)}</td>
-                    <td class={valueClass(spread.z_score)}>{formatNumber(spread.z_score, 2)}</td>
-                    <td>{formatPercentile(spread.percentile)}</td>
+                    <td><strong>{spread.definition.label}</strong><span class="meta">{spread.definition.formula}</span></td>
+                    <td class="num">{formatNumber(spread.value, 3)} {spreadUnit(spread)}</td>
+                    <td class="num {valueClass(spread.change)}">{formatNumber(spread.change, 3)}</td>
+                    <td class="num {valueClass(spread.z_score)}">{formatNumber(spread.z_score, 2)}</td>
+                    <td class="num">{formatPercentile(spread.percentile)}</td>
                   </tr>
                 {/each}
               {:else}
-                <tr class="empty-row">
-                  <td colspan="5">No spread rows are linked to the selected market.</td>
-                </tr>
+                <tr class="empty-row"><td colspan="5">No spread rows linked.</td></tr>
               {/if}
             </tbody>
           </table>
@@ -2001,108 +1937,131 @@
     {/if}
 
     {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
-      <section class="inventory-grid">
-        {#if visibleInventories.length}
-          {#each visibleInventories as series}
-            <article class="panel inventory-panel">
-              <div>
-                <h2>{series.metadata.label}</h2>
-                <p>{series.metadata.source_provider} | {series.metadata.frequency}</p>
-              </div>
-              <dl>
-                <div>
-                  <dt>Latest</dt>
-                  <dd>{inventoryValue(series)}</dd>
-                </div>
-                <div>
-                  <dt>Change</dt>
-                  <dd class={valueClass(series.latest_change)}>{formatNumber(series.latest_change, 2)}</dd>
-                </div>
-                <div>
-                  <dt>Percentile</dt>
-                  <dd>{formatPercentile(series.seasonal_percentile)}</dd>
-                </div>
-                <div>
-                  <dt>Signal</dt>
-                  <dd>{series.interpretation ?? "N/A"}</dd>
-                </div>
-              </dl>
-              {#if sparklinePath(series.points, 120, 32)}
-                <svg class="inventory-sparkline" viewBox="0 0 120 32" aria-label={`${series.metadata.label} recent history`}>
-                  <path d={sparklinePath(series.points, 120, 32)}></path>
-                </svg>
+      <section class="panel table-panel">
+        <header class="panel-title">
+          <span>Inventory Series</span>
+          <span class="header-meta">{visibleInventories.length} series</span>
+        </header>
+        <div class="table-wrap">
+          <table class="compact-table inventory-table">
+            <thead>
+              <tr>
+                <th>Series</th>
+                <th>Frequency</th>
+                <th class="num">Latest</th>
+                <th class="num">Chg</th>
+                <th class="num">Pctl</th>
+                <th class="num">Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#if visibleInventories.length}
+                {#each visibleInventories as series}
+                  <tr>
+                    <td><strong>{series.metadata.label}</strong><span class="meta">{series.metadata.source_provider}</span></td>
+                    <td>{series.metadata.frequency}</td>
+                    <td class="num">{formatNumber(series.latest_value, 2)} {series.metadata.unit}</td>
+                    <td class="num {valueClass(series.latest_change)}">{formatNumber(series.latest_change, 2)}</td>
+                    <td class="num">{formatPercentile(series.seasonal_percentile)}</td>
+                    <td class="sparkline-cell">
+                      {#if sparklinePath(series.points, 96, 28)}
+                        <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${series.metadata.label} recent history`}>
+                          <path d={sparklinePath(series.points, 96, 28)}></path>
+                        </svg>
+                      {:else}
+                        <span class="sparkline-empty">N/A</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
               {:else}
-                <p class="sparkline-empty">No loaded history path</p>
+                <tr class="empty-row"><td colspan="6">No inventory series linked.</td></tr>
               {/if}
-            </article>
-          {/each}
-        {:else}
-          <article class="panel inventory-panel empty-state">
-            <h2>No Inventory Series</h2>
-            <p>No linked inventory or fundamental series is available for the selected market and provider payload.</p>
-          </article>
-        {/if}
+            </tbody>
+          </table>
+        </div>
       </section>
     {/if}
 
     {#if mode === "events_cross_domain"}
       <section class="split">
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Events</h2>
-            </div>
-          </div>
-          <div class="note-list">
-            {#if eventRows.length}
-              {#each eventRows as event}
-                <div class="note-row">
-                  <strong>{event.title}</strong>
-                  <span>{event.relative_label ?? humanize(event.category)} | {formatDate(event.scheduled_at)}</span>
-                  <p>{event.summary ?? "No event summary available."}</p>
-                </div>
-              {/each}
-            {:else}
-              <p class="empty-hint">No event rows are linked to the selected commodity.</p>
-            {/if}
+        <article class="panel table-panel">
+          <header class="panel-title">
+            <span>Linked Events</span>
+            <span class="header-meta">{eventRows.length} events</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Event</th>
+                  <th>Category</th>
+                  <th class="num">Importance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if eventRows.length}
+                  {#each eventRows as event}
+                    <tr>
+                      <td class="mono">{formatDate(event.scheduled_at)}</td>
+                      <td><strong>{event.title}</strong><span class="meta">{event.relative_label ?? ""}</span></td>
+                      <td>{humanize(event.category)}</td>
+                      <td class="num"><span class="tag">{displayStatus(event.importance)}</span></td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="4">No event rows linked.</td></tr>
+                {/if}
+              </tbody>
+            </table>
           </div>
         </article>
 
-        <article class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Cross-Domain</h2>
-            </div>
-          </div>
-          <div class="note-list">
-            {#if selectedCrossDomainLinks.length}
-              {#each selectedCrossDomainLinks as link}
-                <div class="note-row">
-                  <strong>{link.target_label}</strong>
-                  <span>{humanize(link.target_domain)} | confidence {formatNumber(link.confidence, 2)}</span>
-                  <p>{link.summary ?? "No cross-domain note available."}</p>
-                </div>
-              {/each}
-            {:else}
-              <p class="empty-hint">No cross-domain links are available for the selected commodity.</p>
-            {/if}
+        <article class="panel table-panel">
+          <header class="panel-title">
+            <span>Cross-Domain Links</span>
+            <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Target</th>
+                  <th>Domain</th>
+                  <th>Relationship</th>
+                  <th class="num">Conf</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if selectedCrossDomainLinks.length}
+                  {#each selectedCrossDomainLinks as link}
+                    <tr>
+                      <td><strong>{link.target_label}</strong></td>
+                      <td>{humanize(link.target_domain)}</td>
+                      <td>{humanize(link.relationship)}</td>
+                      <td class="num">{formatNumber(link.confidence, 2)}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="4">No cross-domain links.</td></tr>
+                {/if}
+              </tbody>
+            </table>
           </div>
         </article>
       </section>
     {/if}
 
     <footer class="panel provenance">
-      <div class="provenance-head">
-        <strong>Source & Method</strong>
-        <span>{workspace.source_provider} | {workspace.origin}</span>
-      </div>
-      <span>{workspace.transformation_note}</span>
+      <span class="prov-label">Source</span>
+      <span>{workspace.source_provider} · {workspace.origin}</span>
+      <span class="prov-sep">|</span>
+      <span class="meta">{workspace.transformation_note}</span>
       {#if workspace.coverage.caveats.length}
-        <ul>
-          {#each workspace.coverage.caveats.slice(0, 6) as caveat}
-            <li>{caveat}</li>
-          {/each}
-        </ul>
+        <span class="prov-sep">|</span>
+        <span class="prov-label">Caveats</span>
+        <span class="meta">{workspace.coverage.caveats.slice(0, 3).join(" · ")}</span>
       {/if}
     </footer>
   {:else}
@@ -2117,116 +2076,53 @@
   .view {
     display: grid;
     gap: 0.5rem;
-    padding-bottom: 1rem;
+    padding-bottom: 0.75rem;
   }
 
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: 0.75rem;
     min-width: 0;
   }
 
+  /* ── Header panel ── */
   .header-panel {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.45rem;
+    padding: 0.55rem 0.75rem;
   }
 
-  .header-top,
-  .mode-kpi-row,
-  .headline-title-row,
-  .section-head,
-  .control-head {
+  .header-top {
     display: flex;
-    gap: 0.5rem;
-  }
-
-  .header-top,
-  .mode-kpi-row,
-  .section-head,
-  .control-head {
-    justify-content: space-between;
-  }
-
-  .header-top,
-  .mode-kpi-row {
-    align-items: flex-start;
-  }
-
-  .headline-title-row {
     align-items: baseline;
+    gap: 0.6rem;
   }
 
-  .headline-block,
-  .section-head > div,
-  .control-head > div,
-  .mode-context > div {
-    min-width: 0;
-  }
-
-  .header-panel h2,
-  .mode-context h2,
-  .section-head h2,
-  .inventory-panel h2,
-  .empty-state h2 {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 650;
-    letter-spacing: 0;
+  .title {
     color: var(--text-0);
-  }
-
-  .header-panel h2,
-  .mode-context h2,
-  .metric strong,
-  .coverage-strip strong,
-  .note-row strong {
-    overflow-wrap: anywhere;
-  }
-
-  .eyebrow,
-  .subtle,
-  .coverage-note,
-  .mode-context p,
-  .section-head p,
-  .inventory-panel p,
-  .note-row span,
-  .provenance span,
-  td span,
-  small {
-    color: var(--text-2);
-  }
-
-  .eyebrow,
-  .subtle,
-  .coverage-note,
-  .mode-context p,
-  .section-head p,
-  .inventory-panel p {
-    margin: 0.25rem 0 0;
-  }
-
-  .eyebrow {
-    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.68rem;
   }
 
-  .subtle,
-  .section-head p,
-  .inventory-panel p,
-  .note-row p,
-  .empty-hint,
-  .empty-state p {
-    line-height: 1.45;
+  .subtitle {
+    color: var(--text-2);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .loading-pill {
     color: var(--accent);
     border: 1px solid var(--panel-strong);
-    padding: 0.15rem 0.45rem;
-    font-size: 0.64rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 9.5px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
   }
@@ -2235,334 +2131,287 @@
     flex: 0 0 auto;
     min-height: 25px;
     padding: 4px 9px;
-    font-size: 0.72rem;
+    font-size: 11px;
   }
 
-  label {
-    display: grid;
-    gap: 0.25rem;
-    color: var(--text-2);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+  .mode-kpi-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
   }
 
-  select,
-  button {
-    min-height: 2rem;
-    border: 1px solid var(--panel-strong);
-    border-radius: 2px;
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: 0.35rem 0.55rem;
-  }
-
-  button {
-    cursor: pointer;
-  }
-
-  button:not(:disabled):hover,
-  select:not(:disabled):hover {
-    border-color: var(--accent);
-  }
-
-  button:disabled,
-  select:disabled {
-    cursor: default;
-    color: var(--text-2);
-  }
-
+  /* ── Mode bar (Risk pattern) ── */
   .mode-bar {
-    display: inline-flex;
-    width: auto;
-    max-width: 100%;
-    overflow-x: auto;
+    display: inline-grid;
+    grid-template-columns: repeat(6, auto);
     border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
+    width: fit-content;
   }
 
   .mode-bar button {
     border: 0;
     border-right: 1px solid var(--panel-strong);
-    border-radius: 0;
     background: transparent;
-    min-height: 27px;
-    padding: 0.3rem 0.75rem;
+    color: var(--text-1);
+    padding: 0.28rem 0.65rem;
+    font: inherit;
+    font-size: 0.79rem;
     white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .mode-bar button:last-child { border-right: 0; }
+  .mode-bar button:hover:not(:disabled) { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+  .mode-bar button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* ── Header KPIs (Risk pattern) ── */
+  .header-kpis {
+    display: flex;
+    gap: 0;
+    flex-wrap: wrap;
+    border-left: 1px solid var(--divider);
+  }
+
+  .header-kpi {
+    display: grid;
+    gap: 0.05rem;
+    padding: 0.1rem 0.7rem;
+    border-right: 1px solid var(--divider);
+    min-width: 5rem;
+  }
+
+  .header-kpi span {
+    color: var(--text-2);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    line-height: 1.1;
+  }
+
+  .header-kpi strong {
+    color: var(--text-0);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .header-kpi strong.warning { color: var(--warning); }
+  .header-kpi strong.positive { color: var(--positive); }
+  .header-kpi strong.negative { color: var(--negative); }
+
+  /* ── Controls card (non-overview) ── */
+  .controls-card { padding: 0.45rem 0.65rem; }
+
+  .controls-bar {
+    display: flex;
+    gap: 0.55rem;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .control {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 8rem;
+  }
+
+  .control > span {
+    color: var(--text-2);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    line-height: 1.1;
+  }
+
+  .ctx-kpis {
+    display: flex;
+    gap: 0;
+    margin-left: auto;
+    border-left: 1px solid var(--divider);
+    flex-wrap: wrap;
+  }
+
+  .ctx-kpi {
+    display: grid;
+    gap: 0.05rem;
+    padding: 0.1rem 0.65rem;
+    border-right: 1px solid var(--divider);
+    min-width: 4.5rem;
+  }
+
+  .ctx-kpi span {
+    color: var(--text-2);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    line-height: 1.1;
+  }
+
+  .ctx-kpi strong {
+    color: var(--text-0);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .ctx-kpi strong.positive { color: var(--positive); }
+  .ctx-kpi strong.negative { color: var(--negative); }
+  .ctx-kpi strong.warning { color: var(--warning); }
+
+  /* ── Form controls (default) ── */
+  select {
+    height: 28px;
+    border: 1px solid var(--panel-strong);
+    border-radius: 2px;
+    background: var(--bg-1);
+    color: var(--text-0);
+    padding: 0 0.5rem;
+    font: inherit;
+    font-size: 11.5px;
+  }
+
+  select:hover:not(:disabled) { border-color: var(--accent); }
+  select:disabled { color: var(--text-2); cursor: default; }
+
+  button {
+    border: 1px solid var(--panel-strong);
+    border-radius: 2px;
+    background: var(--bg-1);
+    color: var(--text-0);
+    cursor: pointer;
+  }
+
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { cursor: default; color: var(--text-2); }
+
+  .inline-select {
+    height: 22px;
+    padding: 0 0.4rem;
+    border-color: var(--divider);
+    background: transparent;
+    font-size: 10.5px;
     color: var(--text-1);
   }
 
-  .mode-bar button:last-child {
-    border-right: 0;
-  }
-
-  .mode-bar button.selected {
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-  }
-
-  .headline-strip {
+  /* ── Panel title (single 26px header, Risk pattern) ── */
+  .panel-title {
+    min-height: 26px;
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid var(--divider);
     display: flex;
-    gap: 0;
-    justify-content: flex-end;
-    min-width: 0;
-  }
-
-  .headline-kpi {
-    display: grid;
-    gap: 0.08rem;
-    min-width: 6.5rem;
-    padding: 0.1rem 0.65rem;
-    border-left: 1px solid var(--divider);
-    text-align: right;
-  }
-
-  .headline-kpi-label {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 0.6rem;
-  }
-
-  .headline-kpi-value {
-    color: var(--text-0);
-    font-weight: 650;
-    line-height: 1.2;
-    overflow-wrap: anywhere;
-  }
-
-  .coverage-strip {
-    display: grid;
-    grid-template-columns: minmax(8rem, 0.8fr) minmax(8rem, 0.7fr) minmax(8rem, 0.7fr) minmax(0, 2fr);
-    gap: 0;
-    padding: 0;
-  }
-
-  .coverage-strip > div,
-  .metric {
-    display: grid;
-    gap: 0.22rem;
-    min-width: 0;
-    padding: 0.65rem 0.75rem;
-    border-right: 1px solid var(--divider);
-  }
-
-  .coverage-strip > div:last-child,
-  .metric:last-child {
-    border-right: 0;
-  }
-
-  .coverage-strip span,
-  .metric span,
-  dt {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 0.66rem;
-  }
-
-  .coverage-strip strong,
-  .metric strong {
-    color: var(--text-0);
-    font-weight: 650;
-    line-height: 1.25;
-  }
-
-  .coverage-strip small,
-  .metric small {
-    line-height: 1.35;
-  }
-
-  .notice-cell ul {
-    display: grid;
-    gap: 0.16rem;
-    margin: 0.1rem 0 0;
-    padding-left: 1rem;
-    color: var(--text-2);
-    line-height: 1.35;
-  }
-
-  .kpi-strip {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 0;
-    padding: 0;
-  }
-
-  .metric strong {
-    font-size: 1rem;
-  }
-
-  .mode-context {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(12rem, auto);
-    align-items: end;
+    align-items: center;
+    justify-content: space-between;
     gap: 0.5rem;
+    color: var(--text-1);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 11px;
+    font-weight: 600;
   }
 
+  .panel-title .header-meta {
+    color: var(--text-2);
+    font-weight: 400;
+    font-size: 10px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  /* Edge-to-edge panels */
+  .table-panel,
+  .chart-panel,
+  .rows-panel,
+  .scatter-panel { padding: 0; }
+
+  .chart-panel { display: flex; flex-direction: column; gap: 0; }
+
+  /* ── Layout grids ── */
   .overview-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.5rem;
   }
 
-  .span-2 {
-    grid-column: span 2;
-  }
+  .span-2 { grid-column: span 2; }
+  .span-4 { grid-column: span 4; }
 
   .split {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(21rem, 0.8fr);
+    grid-template-columns: minmax(0, 1.4fr) minmax(20rem, 0.6fr);
     gap: 0.5rem;
   }
 
-  .chart-panel {
-    min-height: 24rem;
-  }
-
-  .section-head {
-    display: flex;
-    justify-content: space-between;
+  .deep-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.5rem;
-    margin-bottom: 0.5rem;
   }
 
-  .section-head > div {
-    min-width: 0;
-  }
-
+  /* ── Inline stats strip (under chart panel headers) ── */
   .inline-stats {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0;
-    margin-bottom: 0.5rem;
-    border-top: 1px solid var(--divider);
     border-bottom: 1px solid var(--divider);
   }
 
   .inline-stats > div {
-    display: grid;
-    gap: 0.12rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
     min-width: 0;
-    padding: 0.45rem 0.6rem;
+    padding: 0.32rem 0.65rem;
     border-right: 1px solid var(--divider);
   }
 
-  .inline-stats > div:last-child {
-    border-right: 0;
-  }
+  .inline-stats > div:last-child { border-right: 0; }
 
   .inline-stats span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.64rem;
+    font-size: 9.5px;
   }
 
   .inline-stats strong {
     color: var(--text-0);
-    font-weight: 650;
-    overflow-wrap: anywhere;
-  }
-
-  .table-panel {
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .table-panel-hdr {
-    display: flex;
-    align-items: center;
-    padding: 0.3rem 0.75rem;
-    min-height: 26px;
-    border-bottom: 1px solid var(--divider);
-    font-size: 0.68rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.15;
   }
 
-  .table-wrap {
-    overflow: auto;
-    max-width: 100%;
-  }
+  /* ── Tables ── */
+  .table-panel { overflow: hidden; }
+  .table-wrap { overflow: auto; max-width: 100%; }
 
   table {
     width: 100%;
-    min-width: 42rem;
     border-collapse: collapse;
   }
 
-  .market-table,
-  .matrix-table {
-    table-layout: fixed;
-  }
+  .compact-table { min-width: 100%; }
+  .matrix-table { min-width: 42rem; table-layout: fixed; }
+  .market-table { table-layout: fixed; }
+  .spread-table { min-width: 36rem; }
+  .fundamental-table { min-width: 36rem; }
+  .inventory-table { min-width: 38rem; }
+  .event-table { min-width: 100%; }
 
-  .market-table {
-    min-width: 100%;
-  }
-
-  .matrix-table {
-    min-width: 42rem;
-  }
-
-  .market-table th:nth-child(1),
-  .market-table td:nth-child(1) {
-    width: 28%;
-  }
-
-  .market-table th:nth-child(2),
-  .market-table td:nth-child(2),
-  .market-table th:nth-child(3),
-  .market-table td:nth-child(3) {
-    width: 13%;
-  }
-
-  .market-table th:nth-child(4),
-  .market-table td:nth-child(4) {
-    width: 18%;
-  }
-
-  .matrix-table .sector-col {
-    width: 10%;
-  }
-
-  .matrix-table .market-col {
-    width: 23%;
-  }
-
-  .matrix-table .last-col {
-    width: 11%;
-  }
-
-  .matrix-table .change-col {
-    width: 10%;
-  }
-
-  .matrix-table .curve-col {
-    width: 17%;
-  }
-
-  .matrix-table .basis-col {
-    width: 11%;
-  }
-
-  .matrix-table .inventory-col {
-    width: 18%;
-  }
-
-  .spread-table {
-    min-width: 40rem;
-  }
-
-  th,
-  td {
-    padding: 0.42rem 0.45rem;
+  th, td {
+    padding: 0.32rem 0.55rem;
     border-bottom: 1px solid var(--divider);
     text-align: left;
-    vertical-align: top;
-    line-height: 1.35;
+    vertical-align: middle;
+    line-height: 1.3;
+    font-size: 12px;
+    color: var(--text-1);
   }
 
   th {
@@ -2570,101 +2419,80 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.66rem;
+    font-size: 10px;
+    white-space: nowrap;
   }
 
-  td strong,
-  td span {
-    display: block;
-  }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.mono { font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
 
-  .matrix-table td {
-    overflow-wrap: anywhere;
-  }
+  td strong { color: var(--text-0); font-weight: 600; }
+  td .meta { display: block; color: var(--text-2); font-size: 10px; line-height: 1.25; margin-top: 1px; }
 
+  tbody tr:hover { background: rgba(122, 166, 200, 0.06); }
+  tr.selected { background: rgba(122, 166, 200, 0.12); }
+
+  .empty-row td { color: var(--text-2); text-align: center; padding: 0.65rem; text-transform: none; letter-spacing: 0; font-size: 11px; }
+
+  /* Matrix-specific column hints */
+  .matrix-table .sector-col { width: 9%; }
+  .matrix-table .market-col { width: 24%; }
+  .matrix-table .last-col { width: 10%; }
+  .matrix-table .change-col { width: 9%; }
+  .matrix-table .curve-col { width: 17%; }
+  .matrix-table .basis-col { width: 11%; }
+  .matrix-table .inventory-col { width: 14%; }
   .sector-cell {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.66rem;
+    font-size: 10px;
+    font-weight: 600;
+    border-right: 1px solid var(--divider);
+    background: rgba(122, 166, 200, 0.03);
   }
 
-  tr.selected {
-    background: color-mix(in srgb, var(--accent) 7%, transparent);
-  }
-
-  .matrix-table tbody tr:hover {
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
-    cursor: default;
-  }
-
+  /* Market button (used inside snapshot table) */
   .market-button {
     display: grid;
-    gap: 0.1rem;
+    gap: 0;
     width: 100%;
-    min-height: 0;
     padding: 0;
     border: 0;
-    border-radius: 0;
     background: transparent;
     color: inherit;
     text-align: left;
+    cursor: pointer;
   }
 
-  .market-button strong {
-    color: var(--text-0);
-  }
-
-  .market-button span {
-    color: var(--text-2);
-    font-size: 0.72rem;
-  }
-
+  .market-button strong { color: var(--text-0); font-size: 12px; }
+  .market-button span { color: var(--text-2); font-size: 10px; line-height: 1.2; }
   .market-button.active-market strong,
-  .market-button:not(:disabled):hover strong {
-    color: var(--accent);
-  }
+  .market-button:not(:disabled):hover strong { color: var(--accent); }
 
-  .positive {
-    color: var(--positive);
-  }
+  /* ── Semantic colors ── */
+  .positive { color: var(--positive); }
+  .negative { color: var(--negative); }
+  .warning { color: var(--warning); }
 
-  .negative {
-    color: var(--negative);
-  }
-
-  .warning {
-    color: var(--warning);
-  }
-
+  /* ── Tag chip ── */
   .tag {
     display: inline-block;
     max-width: 100%;
     border: 1px solid var(--divider);
-    padding: 0.05rem 0.3rem;
+    padding: 0.04rem 0.35rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.62rem;
+    font-size: 10px;
+    color: var(--text-1);
   }
 
-  .tag.positive {
-    border-color: color-mix(in srgb, var(--positive) 55%, var(--divider));
-  }
-
-  .tag.negative {
-    border-color: color-mix(in srgb, var(--negative) 55%, var(--divider));
-  }
-
-  .tag.warning {
-    border-color: color-mix(in srgb, var(--warning) 55%, var(--divider));
-  }
-
-  .span-4 {
-    grid-column: span 4;
-  }
+  .tag.positive { border-color: color-mix(in srgb, var(--positive) 55%, var(--divider)); color: var(--positive); }
+  .tag.negative { border-color: color-mix(in srgb, var(--negative) 55%, var(--divider)); color: var(--negative); }
+  .tag.warning { border-color: color-mix(in srgb, var(--warning) 55%, var(--divider)); color: var(--warning); }
 
   .scatter-shell {
     position: relative;
@@ -2765,57 +2593,25 @@
     color: var(--text-1);
   }
 
-  .event-table {
-    min-width: 100%;
-    table-layout: fixed;
-  }
-
-  .event-table th:nth-child(1),
-  .event-table td:nth-child(1) {
-    width: 25%;
-  }
-
-  .event-table th:nth-child(2),
-  .event-table td:nth-child(2) {
-    width: 50%;
-  }
-
-  .event-table th:nth-child(3),
-  .event-table td:nth-child(3) {
-    width: 25%;
-  }
-
-  .event-table td {
-    overflow-wrap: anywhere;
-  }
-
+  /* ── Rank panel grid ── */
   .rank-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
-    border-top: 1px solid var(--divider);
-    margin-top: 0.25rem;
   }
 
   .rank-block {
     min-width: 0;
-    padding: 0.75rem 1rem 0.5rem 0.75rem;
+    padding: 0.55rem 0.75rem;
     border-right: 1px solid var(--divider);
   }
 
-  .rank-block:last-child {
-    border-right: 0;
-    padding-right: 0;
-  }
-
-  .rank-block:first-child {
-    padding-left: 0;
-  }
+  .rank-block:last-child { border-right: 0; }
 
   .rank-block h3 {
-    margin: 0 0 0.45rem;
+    margin: 0 0 0.4rem;
     color: var(--text-2);
-    font-size: 0.66rem;
+    font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -2823,7 +2619,7 @@
 
   .rank-list {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.32rem;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -2831,7 +2627,7 @@
 
   .rank-list li {
     display: grid;
-    grid-template-columns: minmax(2.5rem, 0.7fr) minmax(0, 2fr) minmax(3rem, auto);
+    grid-template-columns: minmax(2.5rem, 0.7fr) minmax(0, 2fr) minmax(2.8rem, auto);
     align-items: center;
     gap: 0.45rem;
     min-width: 0;
@@ -2842,18 +2638,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.8rem;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
   }
 
-  .rank-label {
-    color: var(--text-1);
-  }
+  .rank-label { color: var(--text-1); }
+  .rank-value { color: var(--text-0); text-align: right; }
 
   .rank-bar-shell {
     position: relative;
-    height: 0.7rem;
+    height: 0.55rem;
     border-left: 1px solid var(--divider);
-    background: var(--surface-soft);
+    background: rgba(39, 53, 68, 0.6);
     min-width: 0;
     overflow: hidden;
   }
@@ -2903,104 +2699,75 @@
     opacity: 0.8;
   }
 
-  .inventory-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.5rem;
-  }
+  /* ── Sparkline ── */
+  .sparkline-cell { width: 7rem; padding: 0.2rem 0.5rem; }
 
-  .deep-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
-  }
-
-  .compact-table {
-    min-width: 100%;
-    table-layout: fixed;
-  }
-
-  .fundamental-table {
-    min-width: 38rem;
-  }
-
-  .sparkline-cell {
-    width: 7rem;
-  }
-
-  .sparkline,
-  .inventory-sparkline {
+  .sparkline {
     display: block;
     width: 100%;
-    height: 2rem;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    height: 1.6rem;
   }
 
-  .sparkline path,
-  .inventory-sparkline path {
+  .sparkline path {
     fill: none;
     stroke: var(--chart-primary);
-    stroke-width: 1.6;
+    stroke-width: 1.4;
     vector-effect: non-scaling-stroke;
   }
 
   .sparkline-empty {
-    margin: 0;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.68rem;
+    font-size: 10px;
   }
 
+  /* ── Heatmap / seasonality / ratio rows ── */
   .heatmap-list,
   .seasonality-list,
   .ratio-gauge-list {
     display: grid;
     gap: 0;
-    border-top: 1px solid var(--divider);
   }
 
   .heatmap-row,
-  .seasonality-row,
-  .ratio-gauge-row {
+  .seasonality-row {
     display: grid;
+    grid-template-columns: 4.5rem minmax(0, 1fr) 4.5rem 5rem;
     align-items: center;
     gap: 0.5rem;
     min-width: 0;
-    padding: 0.48rem 0;
+    padding: 0.32rem 0.75rem;
     border-bottom: 1px solid var(--divider);
   }
 
-  .heatmap-row {
-    grid-template-columns: 4.5rem minmax(0, 1fr) 4.5rem 6.5rem;
+  .heatmap-row { grid-template-columns: 4.5rem minmax(0, 1fr) 5.5rem; }
+
+  .heatmap-row:last-child,
+  .seasonality-row:last-child { border-bottom: 0; }
+
+  .row-label {
+    color: var(--text-1);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .seasonality-row,
-  .ratio-gauge-row {
-    grid-template-columns: minmax(0, 1.1fr) minmax(8rem, 1fr) minmax(8rem, auto);
+  .heatmap-row strong,
+  .seasonality-row strong {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 
-  .seasonality-row strong,
-  .seasonality-row span,
-  .ratio-gauge-row strong,
-  .ratio-gauge-row span {
-    display: block;
-    overflow-wrap: anywhere;
-  }
-
-  .seasonality-row span,
-  .ratio-gauge-row span {
-    color: var(--text-2);
-    font-size: 0.72rem;
-  }
+  .seasonality-row .meta { color: var(--text-2); font-size: 10px; text-align: right; }
 
   .heatmap-track,
   .seasonality-band,
   .gauge-track {
     position: relative;
-    height: 0.75rem;
-    background: var(--surface-soft);
+    height: 0.6rem;
+    background: rgba(39, 53, 68, 0.6);
     border-left: 1px solid var(--divider);
     border-right: 1px solid var(--divider);
     overflow: hidden;
@@ -3022,24 +2789,16 @@
     opacity: 0.78;
   }
 
-  .heatmap-bar.positive {
-    background: var(--positive);
-  }
-
-  .heatmap-bar.negative {
-    background: var(--negative);
-  }
-
-  .heatmap-bar.neutral {
-    background: var(--text-2);
-  }
+  .heatmap-bar.positive { background: var(--positive); }
+  .heatmap-bar.negative { background: var(--negative); }
+  .heatmap-bar.neutral { background: var(--text-2); }
 
   .seasonality-dot,
   .gauge-marker {
     position: absolute;
     top: -0.15rem;
     width: 2px;
-    height: 1.05rem;
+    height: 0.9rem;
     background: var(--accent);
   }
 
@@ -3047,7 +2806,7 @@
   .gauge-marker::after {
     content: "";
     position: absolute;
-    top: 0.28rem;
+    top: 0.22rem;
     left: -0.2rem;
     width: 0.42rem;
     height: 0.42rem;
@@ -3055,168 +2814,66 @@
     background: var(--bg-0);
   }
 
-  .inventory-panel {
-    display: grid;
-    gap: 0.5rem;
-    align-content: start;
-  }
-
-  dl {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0;
-    margin: 0;
-    border-top: 1px solid var(--divider);
-  }
-
-  dt,
-  dd {
-    margin: 0;
-  }
-
-  dd {
-    margin-top: 0.2rem;
-    color: var(--text-0);
-    overflow-wrap: anywhere;
-  }
-
-  dl > div {
-    min-width: 0;
-    padding: 0.45rem 0.5rem 0.45rem 0;
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .note-list {
-    display: grid;
-    gap: 0;
-  }
-
-  .note-row {
-    border-top: 1px solid var(--divider);
-    padding: 0.55rem 0;
-  }
-
-  .note-row:first-child {
-    border-top: 0;
-    padding-top: 0;
-  }
-
-  .compact-notes .note-row {
-    padding: 0.45rem 0;
-  }
-
-  .four-col-notes {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-  }
-
-  .four-col-notes .note-row {
-    border-top: 1px solid var(--divider);
-    border-right: 1px solid var(--divider);
-    padding: 0.45rem 0.65rem 0.45rem 0;
-  }
-
-  .four-col-notes .note-row:nth-child(4n) {
-    border-right: 0;
-  }
-
-  .four-col-notes .note-row:nth-child(-n+4) {
-    border-top: 0;
-  }
-
-  .four-col-notes .note-row:nth-child(n+2) {
-    padding-left: 0.65rem;
-  }
-
-  .four-col-notes .note-row:nth-child(4n+1) {
-    padding-left: 0;
-  }
-
-  .note-row strong,
-  .note-row span {
-    display: block;
-  }
-
-  .note-row p {
-    margin: 0.3rem 0 0;
-    color: var(--text-1);
-  }
-
-  .empty-row td,
+  /* ── Empty state ── */
+  .empty-state-inline,
   .empty-hint {
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.72rem;
-  }
-
-  .empty-hint {
+    font-size: 11px;
+    padding: 0.65rem 0.75rem;
     margin: 0;
-    padding: 0.45rem 0;
-  }
-
-  .provenance {
-    display: grid;
-    gap: 0.35rem;
-  }
-
-  .provenance-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.5rem;
-    align-items: baseline;
-  }
-
-  .provenance ul {
-    margin: 0.25rem 0 0;
-    padding-left: 1.1rem;
-    color: var(--text-2);
-    line-height: 1.4;
   }
 
   .empty-state {
-    min-height: 8rem;
+    min-height: 7rem;
     align-content: center;
+    text-align: center;
   }
 
+  .empty-state h2 {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-1);
+    font-weight: 600;
+  }
+
+  .empty-state p {
+    margin: 0.3rem 0 0;
+    color: var(--text-2);
+    font-size: 11px;
+  }
+
+  /* ── Provenance footer ── */
+  .provenance {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    color: var(--text-1);
+    font-size: 10.5px;
+  }
+
+  .provenance .prov-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 9.5px;
+    font-weight: 600;
+  }
+
+  .provenance .prov-sep { color: var(--divider); }
+  .provenance .meta { color: var(--text-2); }
+
+  /* ── Responsive ── */
   @media (max-width: 1200px) {
-    .headline-strip {
-      display: none;
-    }
-
-    .coverage-strip,
-    .kpi-strip {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .coverage-strip > div:nth-child(3n),
-    .metric:nth-child(3n) {
-      border-right: 0;
-    }
-
     .overview-grid,
     .rank-grid,
-    .inventory-grid,
     .deep-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .span-2 {
-      grid-column: span 2;
-    }
-
-    .span-4 {
-      grid-column: span 2;
-    }
-
-    .rank-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .four-col-notes {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    .span-4 { grid-column: span 2; }
+    .header-kpi:nth-child(n+3) { display: none; }
   }
 
   @media (max-width: 1100px) {
@@ -3227,102 +2884,40 @@
 
   @media (max-width: 720px) {
     .header-top,
-    .mode-kpi-row,
-    .mode-context,
-    .control-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
+    .mode-kpi-row {
+      flex-direction: column;
       align-items: stretch;
     }
 
     .mode-bar {
       width: 100%;
+      grid-template-columns: repeat(3, 1fr);
     }
 
-    .mode-bar button {
-      border-right: 1px solid var(--panel-strong);
-      border-bottom: 0;
-      white-space: nowrap;
-      text-align: center;
-    }
+    .mode-bar button:nth-child(3) { border-right: 0; }
+    .mode-bar button:nth-child(-n+3) { border-bottom: 1px solid var(--panel-strong); }
 
-    .mode-bar button:last-child {
-      border-right: 0;
-    }
-
-    .coverage-strip,
-    .kpi-strip {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    .header-kpis { width: 100%; border-left: 0; border-top: 1px solid var(--divider); padding-top: 0.4rem; }
 
     .overview-grid,
     .rank-grid,
-    .inventory-grid,
-    .deep-grid,
-    dl {
+    .deep-grid {
       grid-template-columns: minmax(0, 1fr);
     }
 
     .heatmap-row,
-    .seasonality-row,
-    .ratio-gauge-row {
+    .seasonality-row {
       grid-template-columns: minmax(0, 1fr);
       align-items: stretch;
+      gap: 0.25rem;
     }
 
-    .span-2 {
-      grid-column: span 1;
-    }
+    .span-2, .span-4 { grid-column: span 1; }
 
-    .span-4 {
-      grid-column: span 1;
-    }
+    .inline-stats { grid-template-columns: minmax(0, 1fr); }
+    .inline-stats > div { border-right: 0; border-bottom: 1px solid var(--divider); }
+    .inline-stats > div:last-child { border-bottom: 0; }
 
-    .four-col-notes {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .coverage-strip > div,
-    .coverage-strip > div:nth-child(3n),
-    .metric,
-    .inline-stats > div {
-      border-right: 0;
-    }
-
-    .coverage-strip > div:nth-child(odd),
-    .metric:nth-child(odd) {
-      border-right: 1px solid var(--divider);
-    }
-
-    .coverage-strip > div.notice-cell {
-      grid-column: 1 / -1;
-      border-right: 0;
-    }
-
-    .coverage-strip > div,
-    .metric {
-      border-bottom: 1px solid var(--divider);
-    }
-
-    .coverage-strip > div:last-child,
-    .metric:nth-last-child(-n + 2) {
-      border-bottom: 0;
-    }
-
-    .inline-stats {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .inline-stats > div {
-      border-bottom: 1px solid var(--divider);
-    }
-
-    .inline-stats > div:last-child {
-      border-bottom: 0;
-    }
-
-    .provenance-head {
-      display: grid;
-    }
+    .ctx-kpis { margin-left: 0; border-left: 0; border-top: 1px solid var(--divider); width: 100%; padding-top: 0.4rem; }
   }
 </style>

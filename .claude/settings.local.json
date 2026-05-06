@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(mkdir -p /c/Users/User/.claude/skills/gamma-ui)",
-      "Bash(cp \"/c/Users/User/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/local-agent-mode-sessions/skills-plugin/452a1549-7580-45bb-986d-53a5f29317c7/29542072-c0c4-4d79-9c40-96fcb594ad77/skills/gamma-ui/SKILL.md\" \"/c/Users/User/.claude/skills/gamma-ui/SKILL.md\")"
+      "Bash(cp \"/c/Users/User/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/local-agent-mode-sessions/skills-plugin/452a1549-7580-45bb-986d-53a5f29317c7/29542072-c0c4-4d79-9c40-96fcb594ad77/skills/gamma-ui/SKILL.md\" \"/c/Users/User/.claude/skills/gamma-ui/SKILL.md\")",
+      "Bash(wc -l C:/Users/User/Desktop/Gamma/frontend/src/views/CommoditiesView.svelte C:/Users/User/Desktop/Gamma/frontend/src/views/RiskView.svelte C:/Users/User/Desktop/Gamma/frontend/src/views/MacroView.svelte C:/Users/User/Desktop/Gamma/frontend/src/views/IvView.svelte)",
+      "Bash(cat C:/Users/User/Desktop/Gamma/.claude/launch.json 2>/dev/null || echo \"no launch.json\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(ls C:/Users/User/Desktop/Gamma/.claude/worktrees/kind-pascal-cd586c/frontend/node_modules/.bin/vite* 2>/dev/null; ls C:/Users/User/Desktop/Gamma/frontend/node_modules/vite/bin/vite.js 2>/dev/null && echo \"main has vite\")"
     ]
   }
 }
