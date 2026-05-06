@@ -42,11 +42,11 @@
 
 - Harden weird name financials 
 
-- Harden peers 
+- `Solved`Harden peers 
 
-- DCF assumptions are too harsh 
+- `Touched on` DCF assumptions are too harsh 
 
-- Explore if we can backfill missing financial values with owned logic 
+- `Touched on` Explore if we can backfill missing financial values with owned logic 
 
 - Clean up tables and charts
 
