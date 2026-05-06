@@ -54,6 +54,13 @@
     yMax: number;
   };
   type DependencyPlotNode = RiskDependencyNetwork["nodes"][number] & { x: number; y: number; r: number };
+  type DependencyDragState = {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+  };
 
   const modes: Array<{ id: RiskMode; label: string }> = [
     { id: "overview", label: "Overview" },
@@ -101,7 +108,14 @@
   let dependencyW = 0;
   let dependencyH = 0;
   let hoveredDependencySymbol: string | null = null;
+  let dependencyZoom = 1.28;
+  let dependencyPanX = 0;
+  let dependencyPanY = 0;
+  let dependencyDrag: DependencyDragState | null = null;
   const FRONTIER_PAD = { l: 38, r: 14, t: 14, b: 28 };
+  const DEPENDENCY_MIN_ZOOM = 0.62;
+  const DEPENDENCY_MAX_ZOOM = 4.2;
+  const DEPENDENCY_DEFAULT_ZOOM = 1.28;
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value) ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
@@ -367,6 +381,61 @@
         r: node.is_portfolio ? 5.8 + weightBoost : 2.7 + centralBoost,
       };
     });
+  }
+
+  function zoomDependency(multiplier: number, originX = dependencyW / 2, originY = Math.max(260, dependencyH - 27) / 2) {
+    const nextZoom = clamp(dependencyZoom * multiplier, DEPENDENCY_MIN_ZOOM, DEPENDENCY_MAX_ZOOM);
+    if (Math.abs(nextZoom - dependencyZoom) < 0.001) return;
+    const graphH = Math.max(260, dependencyH - 27);
+    const centerX = dependencyW / 2;
+    const centerY = graphH / 2;
+    const scale = nextZoom / dependencyZoom;
+    dependencyPanX = originX - centerX - scale * (originX - centerX - dependencyPanX);
+    dependencyPanY = originY - centerY - scale * (originY - centerY - dependencyPanY);
+    dependencyZoom = nextZoom;
+  }
+
+  function resetDependencyViewport() {
+    dependencyZoom = DEPENDENCY_DEFAULT_ZOOM;
+    dependencyPanX = 0;
+    dependencyPanY = 0;
+    dependencyDrag = null;
+  }
+
+  function handleDependencyWheel(event: WheelEvent, graphH: number) {
+    const target = event.currentTarget as SVGSVGElement;
+    const rect = target.getBoundingClientRect();
+    const originX = event.clientX - rect.left;
+    const originY = event.clientY - rect.top;
+    zoomDependency(event.deltaY < 0 ? 1.14 : 0.88, clamp(originX, 0, dependencyW), clamp(originY, 0, graphH));
+  }
+
+  function startDependencyPan(event: PointerEvent) {
+    if (event.button !== 0) return;
+    const target = event.currentTarget as SVGSVGElement;
+    target.setPointerCapture(event.pointerId);
+    dependencyDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: dependencyPanX,
+      panY: dependencyPanY,
+    };
+  }
+
+  function moveDependencyPan(event: PointerEvent) {
+    if (!dependencyDrag || dependencyDrag.pointerId !== event.pointerId) return;
+    dependencyPanX = dependencyDrag.panX + event.clientX - dependencyDrag.startX;
+    dependencyPanY = dependencyDrag.panY + event.clientY - dependencyDrag.startY;
+  }
+
+  function endDependencyPan(event: PointerEvent) {
+    if (dependencyDrag?.pointerId !== event.pointerId) return;
+    const target = event.currentTarget as SVGSVGElement;
+    if (target.hasPointerCapture(event.pointerId)) {
+      target.releasePointerCapture(event.pointerId);
+    }
+    dependencyDrag = null;
   }
 
   function isCachedEquityKind(kind: string) {
@@ -885,62 +954,89 @@
       {@const nodes = buildDependencyLayout(network, dependencyW, graphH)}
       {@const bySymbol = new Map(nodes.map((node) => [node.symbol, node]))}
       {@const hoveredNode = hoveredDependencySymbol ? bySymbol.get(hoveredDependencySymbol) ?? null : null}
-      <svg width={dependencyW} height={graphH} aria-label="Sparse dependency network">
-        {#each network.edges as edge}
-          {@const source = bySymbol.get(edge.source)}
-          {@const target = bySymbol.get(edge.target)}
-          {#if source && target}
-            <line
-              class="dependency-edge"
-              class:negative={edge.sign < 0}
-              class:highlighted={hoveredDependencySymbol === edge.source || hoveredDependencySymbol === edge.target}
-              x1={source.x}
-              y1={source.y}
-              x2={target.x}
-              y2={target.y}
-              stroke-width={Math.max(0.7, Math.min(3.2, edge.strength * 9))}
-            />
-          {/if}
-        {/each}
-        {#each nodes as node}
-          <g
-            class="dependency-node"
-            class:portfolio={node.is_portfolio}
-            class:muted={hoveredDependencySymbol != null && hoveredDependencySymbol !== node.symbol}
-            transform={`translate(${node.x},${node.y})`}
-            role="button"
-            tabindex="0"
-            aria-label={`${node.symbol}: cluster ${node.cluster_id + 1}, weight ${pct(node.portfolio_weight)}, centrality ${fmt(node.centrality, 2)}`}
-            on:mouseenter={() => (hoveredDependencySymbol = node.symbol)}
-            on:mouseleave={() => (hoveredDependencySymbol = null)}
-            on:focus={() => (hoveredDependencySymbol = node.symbol)}
-            on:blur={() => (hoveredDependencySymbol = null)}
-          >
-            {#if node.is_portfolio}
-              <circle class="dependency-halo" r={node.r + 4.5} />
+      <div class="dependency-controls" aria-label="Dependency graph controls">
+        <button type="button" title="Zoom in" aria-label="Zoom in" on:click={() => zoomDependency(1.2)}>+</button>
+        <button type="button" title="Zoom out" aria-label="Zoom out" on:click={() => zoomDependency(0.84)}>-</button>
+        <button type="button" title="Reset view" aria-label="Reset view" on:click={resetDependencyViewport}>1:1</button>
+      </div>
+      <svg
+        class:dragging={dependencyDrag != null}
+        width={dependencyW}
+        height={graphH}
+        role="application"
+        aria-label="Sparse dependency network"
+        on:wheel={(event) => {
+          event.preventDefault();
+          handleDependencyWheel(event, graphH);
+        }}
+        on:pointerdown={startDependencyPan}
+        on:pointermove={moveDependencyPan}
+        on:pointerup={endDependencyPan}
+        on:pointercancel={endDependencyPan}
+      >
+        <g
+          class="dependency-viewport"
+          transform={`translate(${dependencyW / 2 + dependencyPanX},${graphH / 2 + dependencyPanY}) scale(${dependencyZoom}) translate(${-dependencyW / 2},${-graphH / 2})`}
+        >
+          {#each network.edges as edge}
+            {@const source = bySymbol.get(edge.source)}
+            {@const target = bySymbol.get(edge.target)}
+            {#if source && target}
+              <line
+                class="dependency-edge"
+                class:negative={edge.sign < 0}
+                class:highlighted={hoveredDependencySymbol === edge.source || hoveredDependencySymbol === edge.target}
+                x1={source.x}
+                y1={source.y}
+                x2={target.x}
+                y2={target.y}
+                stroke-width={Math.max(0.7, Math.min(3.2, edge.strength * 9))}
+              />
             {/if}
-            <circle
-              class="dependency-dot"
-              r={node.r}
-              style={`fill:${clusterColor(node.cluster_id, node.is_portfolio ? 0.95 : 0.62)}; stroke:${node.is_portfolio ? "var(--text-0)" : clusterColor(node.cluster_id, 0.85)};`}
-            />
-            {#if node.is_portfolio || node.centrality >= 0.7}
-              <text y={-(node.r + 5)} text-anchor="middle">{node.symbol}</text>
-            {/if}
-          </g>
-        {/each}
+          {/each}
+          {#each nodes as node}
+            <g
+              class="dependency-node"
+              class:portfolio={node.is_portfolio}
+              class:muted={hoveredDependencySymbol != null && hoveredDependencySymbol !== node.symbol}
+              transform={`translate(${node.x},${node.y})`}
+              role="button"
+              tabindex="0"
+              aria-label={`${node.symbol}: cluster ${node.cluster_id + 1}, weight ${pct(node.portfolio_weight)}, centrality ${fmt(node.centrality, 2)}`}
+              on:mouseenter={() => (hoveredDependencySymbol = node.symbol)}
+              on:mouseleave={() => (hoveredDependencySymbol = null)}
+              on:focus={() => (hoveredDependencySymbol = node.symbol)}
+              on:blur={() => (hoveredDependencySymbol = null)}
+            >
+              {#if node.is_portfolio}
+                <circle class="dependency-halo" r={node.r + 4.5} />
+              {/if}
+              <circle
+                class="dependency-dot"
+                r={node.r}
+                style={`fill:${clusterColor(node.cluster_id, node.is_portfolio ? 0.95 : 0.62)}; stroke:${node.is_portfolio ? "var(--text-0)" : clusterColor(node.cluster_id, 0.85)};`}
+              />
+              {#if node.is_portfolio || node.centrality >= 0.7}
+                <text y={-(node.r + 5)} text-anchor="middle">{node.symbol}</text>
+              {/if}
+            </g>
+          {/each}
+        </g>
       </svg>
       <div class="dependency-meta">
         <span>{network.universe_size} nodes</span>
         <span>{network.edges.length} links</span>
         <span>{network.clusters.length} clusters</span>
         <span>{network.observation_count} obs</span>
+        <span>{dependencyZoom.toFixed(2)}x</span>
         <span>{network.methodology ?? "Dependency graph"}</span>
       </div>
       {#if hoveredNode}
+        {@const tooltipX = dependencyW / 2 + dependencyPanX + dependencyZoom * (hoveredNode.x - dependencyW / 2)}
+        {@const tooltipY = graphH / 2 + dependencyPanY + dependencyZoom * (hoveredNode.y - graphH / 2)}
         <div
           class="dependency-tooltip"
-          style={`left:${Math.min(hoveredNode.x + 12, dependencyW - 180)}px; top:${Math.max(hoveredNode.y - 8, 8)}px;`}
+          style={`left:${Math.min(tooltipX + 12, dependencyW - 180)}px; top:${Math.max(tooltipY - 8, 8)}px;`}
         >
           <strong>{hoveredNode.symbol}</strong>
           <span><em>Cluster</em> {hoveredNode.cluster_id + 1}</span>
@@ -1465,6 +1561,44 @@
     width: 100%;
     height: calc(100% - 27px);
     min-height: 390px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+  }
+  .dependency-network > svg.dragging { cursor: grabbing; }
+  .dependency-controls {
+    position: absolute;
+    z-index: 2;
+    top: 0.45rem;
+    right: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+  }
+  .dependency-controls button {
+    width: 28px;
+    height: 25px;
+    border: 0;
+    border-right: 1px solid var(--divider);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-1);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .dependency-controls button:last-child {
+    width: 34px;
+    border-right: 0;
+    font-size: 10px;
+  }
+  .dependency-controls button:hover,
+  .dependency-controls button:focus-visible {
+    background: var(--bg-3);
+    color: var(--text-0);
+    outline: none;
   }
   .dependency-edge {
     stroke: var(--chart-primary);
