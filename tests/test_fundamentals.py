@@ -18,7 +18,12 @@ from src.models.fundamentals import (
     FundamentalsStatementView,
 )
 from src.services.cache import CacheService
-from src.services.fundamentals_adapters import IbkrPriceContext, SecCompanyData, SecFundamentalsAdapter
+from src.services.fundamentals_adapters import (
+    IbkrPriceContext,
+    SecCompanyData,
+    SecFundamentalsAdapter,
+    _extract_item_1_business_text,
+)
 from src.services.fundamentals_store import FundamentalsResearchStore
 
 
@@ -35,6 +40,9 @@ def test_fundamentals_overview_builds_company_context_and_peer_heatmap(tmp_path)
     assert overview is not None
     assert overview.company.ticker == "AAPL"
     assert overview.company.source_provider == "sec"
+    assert overview.company_summary is not None
+    assert overview.company_summary.summary is not None
+    assert overview.company_summary.model_provider == "none"
     assert overview.peer_basket is not None
     assert overview.peer_heatmap is not None
     assert overview.peer_heatmap.tickers[0] == "AAPL"
@@ -476,6 +484,30 @@ def test_sec_adapter_backfills_safe_statement_values_with_gamma_provenance(tmp_p
     assert total_liabilities.source_provider == "gamma"
     assert "backfills" in (operating_income.transformation_note or "")
     assert income_view.source_provider == "gamma"
+
+
+def test_sec_adapter_extracts_item_1_business_text_from_annual_html():
+    business_sentence = (
+        "We design, manufacture, and sell products and services to consumers, businesses, and governments. "
+        "Our reportable segments include product platforms, services, and regional distribution channels. "
+        "Revenue is generated from direct and indirect sales, subscriptions, and support arrangements. "
+    )
+    html = f"""
+    <html><body>
+      <div>Table of Contents</div>
+      <h1>Item 1. Business</h1>
+      <p>{business_sentence * 6}</p>
+      <h1>Item 1A. Risk Factors</h1>
+      <p>This risk section should not be included.</p>
+    </body></html>
+    """
+
+    section = _extract_item_1_business_text(html)
+
+    assert section is not None
+    assert "Item 1. Business" in section
+    assert "Revenue is generated" in section
+    assert "Risk Factors" not in section
 
 
 def test_fundamentals_dcf_and_reverse_do_not_assume_missing_shares(tmp_path):

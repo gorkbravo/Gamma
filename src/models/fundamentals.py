@@ -79,6 +79,28 @@ class FundamentalsCompanyRecord:
 
 
 @dataclass(frozen=True)
+class FundamentalsCompanySummaryRecord:
+    ticker: str
+    summary: str | None = None
+    source_form: str | None = None
+    accession_number: str | None = None
+    filing_date: datetime | None = None
+    report_period: datetime | None = None
+    primary_document: str | None = None
+    section: str | None = None
+    source_url: str | None = None
+    model_provider: str | None = None
+    model: str | None = None
+    generated_at: datetime | None = None
+    confidence: float | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class FundamentalsPeriodRecord:
     period_key: str
     label: str
@@ -495,6 +517,7 @@ class FundamentalsReverseValuationResult:
 @dataclass(frozen=True)
 class FundamentalsOverviewResult:
     company: FundamentalsCompanyRecord
+    company_summary: FundamentalsCompanySummaryRecord | None = None
     headline_metrics: list[FundamentalsMetricRecord] = field(default_factory=list)
     price_history: list[FundamentalsPricePoint] = field(default_factory=list)
     filings: list[FundamentalsFilingRecord] = field(default_factory=list)

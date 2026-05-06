@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from src.models.fundamentals import (
     FundamentalsCoverageRecord,
     FundamentalsCompanyRecord,
+    FundamentalsCompanySummaryRecord,
     FundamentalsDcfBridgeRowRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
@@ -133,6 +134,31 @@ class FundamentalsCompanyModel(BaseModel):
 
     @classmethod
     def from_domain(cls, row: FundamentalsCompanyRecord) -> "FundamentalsCompanyModel":
+        return cls(**row.__dict__)
+
+
+class FundamentalsCompanySummaryModel(BaseModel):
+    ticker: str
+    summary: str | None = None
+    source_form: str | None = None
+    accession_number: str | None = None
+    filing_date: datetime | None = None
+    report_period: datetime | None = None
+    primary_document: str | None = None
+    section: str | None = None
+    source_url: str | None = None
+    model_provider: str | None = None
+    model: str | None = None
+    generated_at: datetime | None = None
+    confidence: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsCompanySummaryRecord) -> "FundamentalsCompanySummaryModel":
         return cls(**row.__dict__)
 
 
@@ -765,6 +791,7 @@ class FundamentalsReverseValuationResponseModel(BaseModel):
 
 class FundamentalsOverviewResponseModel(BaseModel):
     company: FundamentalsCompanyModel
+    company_summary: FundamentalsCompanySummaryModel | None = None
     headline_metrics: list[FundamentalsMetricModel] = Field(default_factory=list)
     price_history: list[FundamentalsPricePointModel] = Field(default_factory=list)
     filings: list[FundamentalsFilingModel] = Field(default_factory=list)
@@ -778,6 +805,9 @@ class FundamentalsOverviewResponseModel(BaseModel):
     def from_domain(cls, row: FundamentalsOverviewResult) -> "FundamentalsOverviewResponseModel":
         return cls(
             company=FundamentalsCompanyModel.from_domain(row.company),
+            company_summary=FundamentalsCompanySummaryModel.from_domain(row.company_summary)
+            if row.company_summary
+            else None,
             headline_metrics=[FundamentalsMetricModel.from_domain(item) for item in row.headline_metrics],
             price_history=[FundamentalsPricePointModel.from_domain(item) for item in row.price_history],
             filings=[FundamentalsFilingModel.from_domain(item) for item in row.filings],

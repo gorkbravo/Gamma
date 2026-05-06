@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
+from html import unescape
+from html.parser import HTMLParser
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import pandas as pd
 
@@ -111,6 +116,50 @@ class IbkrPriceContext:
     retrieved_at: datetime | None = None
     origin: str = ""
     transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class SecFilingBusinessSection:
+    filing: FundamentalsFilingRecord
+    section_text: str
+    source_url: str
+    section: str = "Item 1. Business"
+    source_provider: str = "sec"
+    retrieved_at: datetime | None = None
+    origin: str = "fundamentals.sec.filing.item_1"
+    transformation_note: str | None = None
+
+
+class _SecHtmlTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        normalized = tag.lower()
+        if normalized in {"script", "style", "head", "noscript"}:
+            self._skip_depth += 1
+        if normalized in {"p", "div", "br", "tr", "li", "table", "h1", "h2", "h3", "h4"}:
+            self._chunks.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.lower()
+        if normalized in {"script", "style", "head", "noscript"} and self._skip_depth > 0:
+            self._skip_depth -= 1
+        if normalized in {"p", "div", "tr", "li", "table", "h1", "h2", "h3", "h4"}:
+            self._chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        text = unescape(data or "").strip()
+        if text:
+            self._chunks.append(text)
+
+    def text(self) -> str:
+        return _normalize_filing_text(" ".join(self._chunks))
 
 
 _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
@@ -331,6 +380,57 @@ def _format_statement_value(value: float | None, unit: str) -> str:
     return f"{value:,.0f}"
 
 
+def _normalize_filing_text(value: str) -> str:
+    text = unescape(value or "")
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"(?i)\btable of contents\b", " ", text)
+    return text.strip()
+
+
+def _extract_visible_text_from_html(html: str) -> str:
+    parser = _SecHtmlTextParser()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except Exception:
+        return _normalize_filing_text(re.sub(r"<[^>]+>", " ", html or ""))
+    return parser.text()
+
+
+def _extract_item_1_business_text(html: str, *, max_chars: int = 24_000) -> str | None:
+    text = _extract_visible_text_from_html(html)
+    if not text:
+        return None
+    start_patterns = (
+        r"(?i)\bitem\s+1[\.\-:\s]+business\b",
+        r"(?i)\bpart\s+i[\.\-:\s]+item\s+1[\.\-:\s]+business\b",
+        r"(?i)\bbusiness\s+overview\b",
+    )
+    end_patterns = (
+        r"(?i)\bitem\s+1a[\.\-:\s]+risk\s+factors\b",
+        r"(?i)\bitem\s+1b[\.\-:\s]+unresolved\b",
+        r"(?i)\bitem\s+2[\.\-:\s]+properties\b",
+    )
+    start_matches = sorted(
+        [match for pattern in start_patterns for match in re.finditer(pattern, text)],
+        key=lambda match: match.start(),
+    )
+    for start_match in start_matches:
+        section_start = start_match.start()
+        section_body_start = start_match.end()
+        end_indexes = [
+            section_body_start + match.start()
+            for pattern in end_patterns
+            if (match := re.search(pattern, text[section_body_start:]))
+        ]
+        section_end = min(end_indexes) if end_indexes else len(text)
+        section = _normalize_filing_text(text[section_start:section_end])
+        if len(section) >= 800:
+            return section[:max_chars]
+    return None
+
+
 def _load_edgar_tools() -> tuple[Any, Any, Any]:
     from edgar import Company, set_identity
     from edgar.reference.tickers import get_company_tickers
@@ -485,6 +585,63 @@ class SecFundamentalsAdapter:
         )
         self._company_cache[requested_ticker] = result
         return result
+
+    def load_business_section(
+        self,
+        company: FundamentalsCompanyRecord,
+        filings: list[FundamentalsFilingRecord],
+        *,
+        force_refresh: bool = False,
+    ) -> SecFilingBusinessSection | None:
+        del force_refresh
+        annual = next(
+            (
+                filing
+                for filing in filings
+                if filing.form in _ANNUAL_FORMS
+                and filing.accession_number
+                and filing.primary_document
+            ),
+            None,
+        )
+        if annual is None:
+            return None
+        source_url = self._filing_document_url(company.cik, annual.accession_number, annual.primary_document)
+        if source_url is None:
+            return None
+        retrieved_at = now_utc()
+        try:
+            request = Request(
+                source_url,
+                headers={
+                    "User-Agent": f"{self.identity_name} {self.identity_email}".strip(),
+                    "Accept-Encoding": "identity",
+                },
+            )
+            with urlopen(request, timeout=20) as response:
+                raw = response.read()
+        except (HTTPError, URLError, TimeoutError, OSError):
+            return None
+        section_text = _extract_item_1_business_text(raw.decode("utf-8", errors="ignore"))
+        if not section_text:
+            return None
+        return SecFilingBusinessSection(
+            filing=annual,
+            section_text=section_text,
+            source_url=source_url,
+            retrieved_at=retrieved_at,
+            transformation_note="Gamma extracts Item 1. Business text from the latest annual SEC filing HTML before any model summary is generated.",
+        )
+
+    @staticmethod
+    def _filing_document_url(cik: str | None, accession_number: str | None, primary_document: str | None) -> str | None:
+        cik_digits = re.sub(r"\D+", "", str(cik or "")).lstrip("0")
+        accession = re.sub(r"[^0-9A-Za-z-]+", "", str(accession_number or ""))
+        document = str(primary_document or "").strip().lstrip("/")
+        if not cik_digits or not accession or not document:
+            return None
+        accession_path = accession.replace("-", "")
+        return f"https://www.sec.gov/Archives/edgar/data/{cik_digits}/{accession_path}/{document}"
 
     def _load_reference_rows(self, *, force_refresh: bool) -> list[dict[str, str | None]]:
         if self._reference_rows is not None and not force_refresh:

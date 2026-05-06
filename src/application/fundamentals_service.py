@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import json
+import os
+import re
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from src.analytics.research_overview import beta_to_benchmark, returns_from_price_series
 from src.models.instruments import InstrumentReference
 from src.models.fundamentals import (
     FundamentalsCoverageRecord,
     FundamentalsCompanyRecord,
+    FundamentalsCompanySummaryRecord,
     FundamentalsDcfBridgeRowRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
@@ -44,6 +50,7 @@ from src.services.fundamentals_adapters import (
     IbkrPriceContext,
     IbkrValuationAdapter,
     SecCompanyData,
+    SecFilingBusinessSection,
     SecFundamentalsAdapter,
 )
 from src.services.fundamentals_store import FundamentalsResearchStore
@@ -211,6 +218,19 @@ _DCF_PROJECTION_LINE_ORDER: tuple[tuple[str, str, str], ...] = (
     ("present_value_of_fcf", "PV of FCF", "currency"),
 )
 
+_COMPANY_SUMMARY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "summary": {"type": "string"},
+        "confidence": {"type": "number"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["summary", "confidence", "warnings"],
+}
+
+_ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+
 
 class FundamentalsService:
     def __init__(
@@ -227,6 +247,14 @@ class FundamentalsService:
         self.store = store
         self.treasury_adapter = treasury_adapter
         self.beta_benchmark_symbol = str(beta_benchmark_symbol or "SPY").strip().upper() or "SPY"
+        # Company summaries reuse the same OPENAI_API_KEY as Copilot, but keep a separate
+        # model knob so short filing summaries can stay on a smaller model by default.
+        self.summary_model_provider = (os.getenv("GAMMA_FUNDAMENTALS_SUMMARY_PROVIDER", "openai") or "openai").strip().lower()
+        self.summary_model = (os.getenv("GAMMA_FUNDAMENTALS_SUMMARY_MODEL", "gpt-5.4-nano") or "gpt-5.4-nano").strip()
+        self.summary_api_url = (
+            os.getenv("GAMMA_FUNDAMENTALS_SUMMARY_API_URL", "https://api.openai.com/v1/responses")
+            or "https://api.openai.com/v1/responses"
+        ).strip()
 
     def search_companies(
         self,
@@ -257,8 +285,12 @@ class FundamentalsService:
             dcf_model.warnings if dcf_model else [],
             self._fundamentals_data_warnings(sec_data),
         )
+        company_summary = self._build_company_summary(sec_data, force_refresh=force_refresh)
+        if company_summary is not None:
+            warnings = _dedupe_warnings(warnings, company_summary.warnings)
         return FundamentalsOverviewResult(
             company=sec_data.company,
+            company_summary=company_summary,
             headline_metrics=self._build_headline_metrics(sec_data, market_context),
             price_history=price_context.price_history[-180:],
             filings=sec_data.filings[:8],
@@ -269,6 +301,196 @@ class FundamentalsService:
             if dcf_model
             else [],
             warnings=warnings,
+        )
+
+    def _build_company_summary(
+        self,
+        sec_data: SecCompanyData,
+        *,
+        force_refresh: bool = False,
+    ) -> FundamentalsCompanySummaryRecord | None:
+        annual = self._latest_summary_filing(sec_data.filings)
+        accession = annual.accession_number if annual else None
+        if not force_refresh:
+            cached = self.store.load_company_summary(sec_data.company.ticker, accession)
+            if cached is not None:
+                return _company_summary_from_payload(cached)
+
+        section = self._load_business_section(sec_data, force_refresh=force_refresh)
+        if section is not None:
+            summary = self._summarize_business_section(sec_data.company, section)
+            self.store.save_company_summary(
+                sec_data.company.ticker,
+                summary.accession_number,
+                _company_summary_to_payload(summary),
+            )
+            return summary
+
+        fallback_text = str(sec_data.company.description or "").strip()
+        if not fallback_text:
+            return None
+        retrieved_at = now_utc()
+        warnings = ["Latest annual filing business section could not be extracted; using SEC company metadata fallback."]
+        summary = FundamentalsCompanySummaryRecord(
+            ticker=sec_data.company.ticker,
+            summary=fallback_text,
+            source_form=annual.form if annual else None,
+            accession_number=accession,
+            filing_date=annual.filing_date if annual else None,
+            report_period=annual.report_period if annual else None,
+            primary_document=annual.primary_document if annual else None,
+            section="SEC company metadata",
+            model_provider="none",
+            model=None,
+            generated_at=retrieved_at,
+            confidence=0.35,
+            warnings=warnings,
+            source_provider=sec_data.company.source_provider,
+            retrieved_at=sec_data.company.retrieved_at or retrieved_at,
+            origin="fundamentals.company_summary.metadata_fallback",
+            transformation_note="Gamma falls back to SEC company metadata when it cannot extract Item 1. Business from the latest annual filing.",
+        )
+        self.store.save_company_summary(sec_data.company.ticker, accession, _company_summary_to_payload(summary))
+        return summary
+
+    def _latest_summary_filing(self, filings: list[Any]) -> Any | None:
+        return next((filing for filing in filings if getattr(filing, "form", None) in _ANNUAL_FORMS), None)
+
+    def _load_business_section(
+        self,
+        sec_data: SecCompanyData,
+        *,
+        force_refresh: bool,
+    ) -> SecFilingBusinessSection | None:
+        loader = getattr(self.sec_adapter, "load_business_section", None)
+        if loader is None:
+            return None
+        try:
+            return loader(sec_data.company, sec_data.filings, force_refresh=force_refresh)
+        except Exception:
+            return None
+
+    def _summarize_business_section(
+        self,
+        company: FundamentalsCompanyRecord,
+        section: SecFilingBusinessSection,
+    ) -> FundamentalsCompanySummaryRecord:
+        model_summary = self._summarize_business_section_with_model(company, section)
+        if model_summary is not None:
+            return model_summary
+        generated_at = now_utc()
+        summary_text = _extractive_business_summary(section.section_text)
+        warnings = ["OpenAI summary provider is unavailable or failed; Gamma used an extractive filing-text fallback."]
+        return FundamentalsCompanySummaryRecord(
+            ticker=company.ticker,
+            summary=summary_text,
+            source_form=section.filing.form,
+            accession_number=section.filing.accession_number,
+            filing_date=section.filing.filing_date,
+            report_period=section.filing.report_period,
+            primary_document=section.filing.primary_document,
+            section=section.section,
+            source_url=section.source_url,
+            model_provider="extractive",
+            model="gamma.extractive.v1",
+            generated_at=generated_at,
+            confidence=0.55,
+            warnings=warnings,
+            source_provider=section.source_provider,
+            retrieved_at=section.retrieved_at,
+            origin="fundamentals.company_summary.extractive",
+            transformation_note="Gamma summarizes the extracted annual filing business section with a deterministic fallback because the configured model provider was unavailable.",
+        )
+
+    def _summarize_business_section_with_model(
+        self,
+        company: FundamentalsCompanyRecord,
+        section: SecFilingBusinessSection,
+    ) -> FundamentalsCompanySummaryRecord | None:
+        if self.summary_model_provider in {"disabled", "none", "off", "extractive"}:
+            return None
+        api_key = (os.getenv("OPENAI_API_KEY", "") or "").strip()
+        if self.summary_model_provider != "openai" or not api_key:
+            return None
+        payload = {
+            "model": self.summary_model,
+            "instructions": (
+                "You write dense company business summaries for Gamma, a read-only investment research app. "
+                "Use only the supplied SEC filing excerpt. Do not add outside facts. "
+                "Return 3 to 5 concise sentences covering business model, products or segments, geography or customer base, revenue drivers, and one caveat if the excerpt supports it."
+            ),
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": json.dumps(
+                                {
+                                    "company": company.name,
+                                    "ticker": company.ticker,
+                                    "source_form": section.filing.form,
+                                    "section": section.section,
+                                    "excerpt": section.section_text[:20_000],
+                                },
+                                ensure_ascii=True,
+                            ),
+                        }
+                    ],
+                }
+            ],
+            "max_output_tokens": 600,
+            "reasoning": {"effort": "low"},
+            "text": {
+                "verbosity": "low",
+                "format": {
+                    "type": "json_schema",
+                    "name": "gamma_company_summary",
+                    "strict": True,
+                    "schema": _COMPANY_SUMMARY_SCHEMA,
+                },
+            },
+            "store": False,
+            "prompt_cache_key": f"gamma-fundamentals:company-summary:{company.ticker}",
+            "metadata": {"app": "gamma", "domain": "fundamentals", "ticker": company.ticker},
+        }
+        try:
+            request = Request(
+                self.summary_api_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urlopen(request, timeout=45) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+            parsed = _parse_openai_summary_payload(response_payload)
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
+            return None
+        summary_text = str(parsed.get("summary") or "").strip()
+        if not summary_text:
+            return None
+        generated_at = now_utc()
+        return FundamentalsCompanySummaryRecord(
+            ticker=company.ticker,
+            summary=summary_text,
+            source_form=section.filing.form,
+            accession_number=section.filing.accession_number,
+            filing_date=section.filing.filing_date,
+            report_period=section.filing.report_period,
+            primary_document=section.filing.primary_document,
+            section=section.section,
+            source_url=section.source_url,
+            model_provider="openai_responses",
+            model=str(response_payload.get("model") or self.summary_model),
+            generated_at=generated_at,
+            confidence=_bounded_confidence(parsed.get("confidence")),
+            warnings=[str(item) for item in parsed.get("warnings", []) if str(item).strip()],
+            source_provider=section.source_provider,
+            retrieved_at=section.retrieved_at,
+            origin="fundamentals.company_summary.openai",
+            transformation_note="Gamma extracted Item 1. Business from the latest annual SEC filing, then used a structured OpenAI Responses request to summarize only that excerpt.",
         )
 
     def get_financials(
@@ -2877,6 +3099,101 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
         return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except ValueError:
         return None
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _company_summary_to_payload(summary: FundamentalsCompanySummaryRecord) -> dict[str, Any]:
+    payload = dict(summary.__dict__)
+    for key in ("filing_date", "report_period", "generated_at", "retrieved_at"):
+        value = payload.get(key)
+        if isinstance(value, datetime):
+            payload[key] = value.isoformat()
+    return payload
+
+
+def _company_summary_from_payload(payload: dict[str, Any]) -> FundamentalsCompanySummaryRecord:
+    return FundamentalsCompanySummaryRecord(
+        ticker=str(payload.get("ticker") or ""),
+        summary=str(payload.get("summary") or "").strip() or None,
+        source_form=str(payload.get("source_form") or "").strip() or None,
+        accession_number=str(payload.get("accession_number") or "").strip() or None,
+        filing_date=_parse_iso_datetime(payload.get("filing_date")),
+        report_period=_parse_iso_datetime(payload.get("report_period")),
+        primary_document=str(payload.get("primary_document") or "").strip() or None,
+        section=str(payload.get("section") or "").strip() or None,
+        source_url=str(payload.get("source_url") or "").strip() or None,
+        model_provider=str(payload.get("model_provider") or "").strip() or None,
+        model=str(payload.get("model") or "").strip() or None,
+        generated_at=_parse_iso_datetime(payload.get("generated_at")),
+        confidence=_bounded_confidence(payload.get("confidence")),
+        warnings=[str(item) for item in payload.get("warnings", []) if str(item).strip()],
+        source_provider=str(payload.get("source_provider") or ""),
+        retrieved_at=_parse_iso_datetime(payload.get("retrieved_at")),
+        origin=str(payload.get("origin") or ""),
+        transformation_note=str(payload.get("transformation_note") or "").strip() or None,
+    )
+
+
+def _extractive_business_summary(section_text: str) -> str:
+    text = re.sub(r"\s+", " ", str(section_text or "")).strip()
+    text = re.sub(r"(?i)^item\s+1[\.\-:\s]+business\s*", "", text).strip()
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", text)
+        if 60 <= len(sentence.strip()) <= 420
+    ]
+    selected: list[str] = []
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if any(
+            needle in lowered
+            for needle in (
+                "we ",
+                "company",
+                "business",
+                "products",
+                "services",
+                "revenue",
+                "customers",
+                "segment",
+                "markets",
+            )
+        ):
+            selected.append(sentence)
+        if len(selected) >= 4:
+            break
+    if not selected:
+        selected = sentences[:4]
+    return " ".join(selected)[:1_200].strip()
+
+
+def _parse_openai_summary_payload(response: dict[str, Any]) -> dict[str, Any]:
+    text_chunks: list[str] = []
+    for item in response.get("output", []):
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if content.get("type") == "refusal":
+                raise ValueError(str(content.get("refusal") or "OpenAI refused the summary request."))
+            if content.get("type") in {"output_text", "text"}:
+                text_chunks.append(str(content.get("text") or ""))
+    raw_text = "\n".join(chunk for chunk in text_chunks if chunk.strip()).strip()
+    if not raw_text:
+        raise ValueError("OpenAI returned no company summary text.")
+    parsed = json.loads(raw_text)
+    if not isinstance(parsed, dict):
+        raise ValueError("OpenAI company summary payload was not an object.")
+    return parsed
+
+
+def _bounded_confidence(value: Any) -> float | None:
+    numeric = _optional_float(value)
+    if numeric is None:
+        return None
+    return max(0.0, min(1.0, numeric))
 
 
 def _summary_to_payload(summary: FundamentalsDcfValuationSummary) -> dict[str, Any]:

@@ -122,21 +122,15 @@
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A";
 
-  function companySummary(company: FundamentalsOverview["company"] | FundamentalsFinancials["company"] | null) {
+  function companySummary(currentOverview: FundamentalsOverview | null, company: FundamentalsOverview["company"] | FundamentalsFinancials["company"] | null) {
     if (!company) {
       return "Select a company to load the SEC profile, filings, statements, and DCF context.";
     }
-    const description = String(company.description ?? "").trim();
-    const syntheticDescription = [
-      description.startsWith(company.name),
-      description.includes("listed on"),
-      description.includes("files as a"),
-      description.includes(" in ")
-    ].filter(Boolean).length >= 2;
-    if (description && !syntheticDescription) {
-      return description;
+    const sourcedSummary = String(currentOverview?.company_summary?.summary ?? "").trim();
+    if (sourcedSummary) {
+      return sourcedSummary;
     }
-    return "A proper business summary is not available in the current SEC-native company payload yet.";
+    return "Business summary unavailable for the current company payload.";
   }
 
   function heatmapScore(metricId: string, value: number | null | undefined, rowValues: Array<number | null | undefined>) {
@@ -541,7 +535,8 @@
   }
   $: filingCount = overview?.filings?.length ?? financials?.filings?.length ?? 0;
   $: dilutedSharesMetric = headlineMetrics.find((metric) => metric.metric_id === "diluted_shares") ?? null;
-  $: companyAbout = companySummary(currentCompany);
+  $: companyAbout = companySummary(overview, currentCompany);
+  $: companySummarySource = overview?.company_summary ?? null;
   $: companyInfoRows = [
     { label: "Exchange", value: currentCompany?.exchange ?? "N/A" },
     { label: "SIC", value: currentCompany?.sic_description ?? currentCompany?.sic ?? "N/A" },
@@ -600,13 +595,9 @@
           {#if loading}<span class="loading-pill">Refreshing</span>{/if}
           {#if saving}<span class="loading-pill secondary-pill">Saving</span>{/if}
         </div>
-        <p class="subtitle">
-          {#if currentCompany}
-            {currentCompany.name} ({currentCompany.ticker}) {currentCompany.exchange ? `| ${currentCompany.exchange}` : ""}
-          {:else}
-            US SEC-filer research with filing-native statements, stable peer baskets, and Gamma-owned DCF logic.
-          {/if}
-        </p>
+        {#if currentCompany}
+          <p class="subtitle">{currentCompany.name} ({currentCompany.ticker}){currentCompany.exchange ? ` | ${currentCompany.exchange}` : ""}</p>
+        {/if}
       </div>
     </div>
 
@@ -681,8 +672,14 @@
 
           <div class="profile-grid">
             <div class="profile-about">
-              <span class="section-label">About</span>
               <p>{companyAbout}</p>
+              {#if companySummarySource}
+                <div class="summary-source-row">
+                  <span>{companySummarySource.section ?? "Summary"}</span>
+                  <strong>{companySummarySource.source_form ?? companySummarySource.source_provider}</strong>
+                  <small>{shortDate(companySummarySource.filing_date)} | {companySummarySource.model_provider ?? "no model"}</small>
+                </div>
+              {/if}
             </div>
             <div class="meta-flat">
               {#each companyInfoRows as row}
@@ -709,7 +706,7 @@
               <TimeSeriesChart series={priceSeries} height={240} emptyMessage="No price history available." />
             </div>
           {:else}
-            <div class="empty-panel">Price history appears once Gamma resolves the selected ticker through the IBKR-aware valuation path.</div>
+            <div class="empty-panel">No price history</div>
           {/if}
 
           <div class="kpi-grid valuation-kpi-grid">
@@ -760,7 +757,7 @@
                     {/each}
                   {/each}
                 {:else}
-                  <tr><td colspan={(overview?.peer_heatmap?.tickers.length ?? 0) + 2}>Peer heatmap appears once Gamma can load the focal company and at least one comparable peer.</td></tr>
+                  <tr><td colspan={(overview?.peer_heatmap?.tickers.length ?? 0) + 2}>No peer heatmap data</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -815,7 +812,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="4">Peer candidates appear once Gamma loads a focal company.</td></tr>
+                  <tr><td colspan="4">No peer candidates</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -869,7 +866,6 @@
               <div class="focus-row compact-focus">
                 <span class="focus-label">DCF</span>
                 <strong>No model yet</strong>
-                <p>The DCF workbench will populate once Gamma builds or restores a fundamentals model for the selected company.</p>
               </div>
             {/if}
           </div>
@@ -888,17 +884,22 @@
             <div class="focus-row compact-focus">
               <span class="focus-label">Company</span>
               <strong>{currentCompany?.source_provider ?? "N/A"}</strong>
-              <p>{currentCompany?.origin ?? "No company context loaded."}</p>
+              <p>{currentCompany?.origin ?? "N/A"}</p>
+            </div>
+            <div class="focus-row compact-focus">
+              <span class="focus-label">Business Summary</span>
+              <strong>{companySummarySource?.model_provider ?? "N/A"}</strong>
+              <p>{companySummarySource?.origin ?? "N/A"}</p>
             </div>
             <div class="focus-row compact-focus">
               <span class="focus-label">Price Context</span>
               <strong>{overview?.headline_metrics.find((metric) => metric.metric_id === "current_price")?.source_provider ?? "N/A"}</strong>
-              <p>{overview?.headline_metrics.find((metric) => metric.metric_id === "current_price")?.origin ?? "No market context loaded."}</p>
+              <p>{overview?.headline_metrics.find((metric) => metric.metric_id === "current_price")?.origin ?? "N/A"}</p>
             </div>
             <div class="focus-row compact-focus">
               <span class="focus-label">Derived Analytics</span>
               <strong>Gamma-owned</strong>
-              <p>{overview?.peer_heatmap?.transformation_note ?? dcfModel?.transformation_note ?? "Derived values will describe their transformation note here."}</p>
+              <p>{overview?.peer_heatmap?.transformation_note ?? dcfModel?.transformation_note ?? "N/A"}</p>
             </div>
           </div>
 
@@ -918,7 +919,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="4">Recent SEC filings appear here for the selected company.</td></tr>
+                  <tr><td colspan="4">No filings</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -975,7 +976,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="5">Peer candidates appear once Gamma loads the focal company classification and peer universe.</td></tr>
+                  <tr><td colspan="5">No peer candidates</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -985,7 +986,7 @@
             <div class="focus-row compact-focus">
               <span class="focus-label">Stable Order</span>
               <strong>{(peers?.peer_basket.display_order ?? overview?.peer_basket?.display_order ?? []).join(" | ") || "N/A"}</strong>
-              <p>{peers?.peer_basket.transformation_note ?? overview?.peer_basket?.transformation_note ?? "Saved peer baskets reuse Gamma's persistent peer concept."}</p>
+              <p>{peers?.peer_basket.transformation_note ?? overview?.peer_basket?.transformation_note ?? "N/A"}</p>
             </div>
             {#each peers?.diagnostics ?? [] as diagnostic}
               <div class="focus-row compact-focus">
@@ -1032,7 +1033,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan="4">Peer comparisons appear once Gamma can build the V2 peer payload.</td></tr>
+                <tr><td colspan="4">No peer comparison data</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1077,7 +1078,7 @@
                   {/each}
                 {/each}
               {:else}
-                <tr><td colspan={(peerHeatmap?.tickers.length ?? 0) + 2}>Peer heatmap appears once Gamma has comparable metrics.</td></tr>
+                <tr><td colspan={(peerHeatmap?.tickers.length ?? 0) + 2}>No peer heatmap data</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1086,7 +1087,7 @@
     </div>
   {:else if mode === "financials"}
     <div class="financials-shell">
-      <article class="panel">
+      <article class="panel table-panel">
         <div class="panel-header">
           <div>
             <p class="eyebrow">Statement Viewer</p>
@@ -1132,7 +1133,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan={(currentStatement?.periods.length ?? 0) + 1}>Statement data appears once Gamma loads a valid SEC-filer history for the selected ticker.</td></tr>
+                <tr><td colspan={(currentStatement?.periods.length ?? 0) + 1}>No statement data</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1140,7 +1141,7 @@
         {#if currentStatement?.lines?.some((line) => line.cells.some((cell) => isGammaDerivedStatementCell(cell.source_provider)))}
           <div class="statement-legend">
             <span class="legend-swatch gamma-derived-swatch"></span>
-            <span>Teal cells are Gamma-derived values backfilled from normalized statement relationships or cumulative filing math.</span>
+            <span>Gamma-derived</span>
           </div>
         {/if}
       </article>
@@ -1176,7 +1177,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan={(currentRatioView?.periods.length ?? 0) + 1}>Ratio rows appear once Gamma derives the normalized statement history.</td></tr>
+                  <tr><td colspan={(currentRatioView?.periods.length ?? 0) + 1}>No ratio data</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1210,7 +1211,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="6">Source trace appears once the Reference payload loads the matching statement and basis.</td></tr>
+                  <tr><td colspan="6">No source trace</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1242,7 +1243,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="4">Filing chronology appears once Gamma loads the SEC submission history.</td></tr>
+                  <tr><td colspan="4">No filings</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1323,7 +1324,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="3">WACC bridge appears once Gamma computes the active DCF scenario.</td></tr>
+                  <tr><td colspan="3">No WACC bridge data</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1354,7 +1355,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="3">Valuation bridge appears once Gamma computes the active DCF scenario.</td></tr>
+                  <tr><td colspan="3">No valuation bridge data</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1392,7 +1393,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan="5">Saved DCF snapshots appear here after the first checkpoint.</td></tr>
+                <tr><td colspan="5">No saved snapshots</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1429,7 +1430,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan={(dcfModel?.historical_year_labels.length ?? 0) + 1}>Historical actuals appear once Gamma can map enough annual SEC facts into the DCF history block.</td></tr>
+                <tr><td colspan={(dcfModel?.historical_year_labels.length ?? 0) + 1}>No historical actuals</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1479,7 +1480,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan={(dcfModel?.projection_years.length ?? 0) + 1}>Scenario assumption rows appear once Gamma builds the DCF model.</td></tr>
+                <tr><td colspan={(dcfModel?.projection_years.length ?? 0) + 1}>No scenario assumptions</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1522,7 +1523,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan={(dcfModel?.projection_years.length ?? 0) + 1}>Projection rows appear once Gamma computes the active DCF scenario.</td></tr>
+                <tr><td colspan={(dcfModel?.projection_years.length ?? 0) + 1}>No projection rows</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1559,7 +1560,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan={(dcfModel?.sensitivity_matrix?.wacc_values.length ?? 0) + 1}>Sensitivity values appear once Gamma computes the active DCF scenario grid.</td></tr>
+                <tr><td colspan={(dcfModel?.sensitivity_matrix?.wacc_values.length ?? 0) + 1}>No sensitivity data</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1629,7 +1630,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan="7">Reverse valuation appears once Gamma has current price, shares, net debt, statements, and a Base DCF case.</td></tr>
+                <tr><td colspan="7">No reverse valuation drivers</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1689,7 +1690,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan={(reverseValuation?.sensitivity_matrix?.wacc_values.length ?? 0) + 1}>Reverse sensitivity appears once Gamma solves the implied expectation grid.</td></tr>
+                  <tr><td colspan={(reverseValuation?.sensitivity_matrix?.wacc_values.length ?? 0) + 1}>No reverse sensitivity data</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1726,7 +1727,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan="6">SEC filing chronology appears once the selected company loads.</td></tr>
+                <tr><td colspan="6">No filings</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1760,7 +1761,7 @@
                     </tr>
                   {/each}
                 {:else}
-                  <tr><td colspan="6">Coverage diagnostics appear once Gamma maps normalized rows to SEC concepts.</td></tr>
+                  <tr><td colspan="6">No coverage data</td></tr>
                 {/if}
               </tbody>
             </table>
@@ -1779,7 +1780,7 @@
             <div class="focus-row compact-focus">
               <span class="focus-label">Source</span>
               <strong>{reference?.source_provider ?? currentCompany?.source_provider ?? "N/A"}</strong>
-              <p>{reference?.origin ?? currentCompany?.origin ?? "No provider context loaded."}</p>
+              <p>{reference?.origin ?? currentCompany?.origin ?? "N/A"}</p>
             </div>
             {#each reference?.provider_warnings ?? [] as warning}
               <div class="focus-row compact-focus">
@@ -1791,7 +1792,7 @@
             <div class="focus-row compact-focus">
               <span class="focus-label">Inspection</span>
               <strong>{referenceInspection?.source_provider ?? "N/A"}</strong>
-              <p>{referenceInspection?.transformation_note ?? "Raw-versus-normalized inspection will document derived rows here."}</p>
+              <p>{referenceInspection?.transformation_note ?? "N/A"}</p>
             </div>
           </div>
         </article>
@@ -1824,7 +1825,7 @@
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan="7">Source trace appears once Gamma has normalized statement rows and filing source metadata.</td></tr>
+                <tr><td colspan="7">No trace data</td></tr>
               {/if}
             </tbody>
           </table>
@@ -1893,9 +1894,30 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.9rem;
+    padding: 0.85rem;
     display: grid;
     gap: 0.5rem;
+  }
+
+  /* Panels whose primary content is a single table fill edge-to-edge:
+     the panel border is the table's container, no inner frame. */
+  .panel.table-panel,
+  .panel:has(> .panel-header + .table-wrap:last-child) {
+    padding: 0;
+    gap: 0;
+  }
+
+  .panel.table-panel > .panel-header,
+  .panel:has(> .panel-header + .table-wrap:last-child) > .panel-header {
+    padding: 0.3rem 0.7rem;
+    border-bottom: 1px solid var(--divider);
+    min-height: 26px;
+  }
+
+  .panel.table-panel > .table-wrap,
+  .panel:has(> .panel-header + .table-wrap:last-child) > .table-wrap {
+    border: 0;
+    background: transparent;
   }
 
   .header-panel {
@@ -1921,6 +1943,27 @@
   .mode-kpi-row {
     justify-content: space-between;
     align-items: flex-start;
+  }
+
+  /* Sub-panel headers: collapse eyebrow + h3 stack into a single 26px row.
+     The mode bar already names the section context, so the eyebrow is redundant. */
+  .panel:not(.header-panel) > .panel-header {
+    align-items: center;
+    min-height: 26px;
+  }
+
+  .panel:not(.header-panel) > .panel-header > div:first-child {
+    display: contents;
+  }
+
+  .panel:not(.header-panel) > .panel-header .eyebrow {
+    display: none;
+  }
+
+  .panel:not(.header-panel) > .panel-header h3 {
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0;
   }
 
   .headline-title-row,
@@ -2009,9 +2052,10 @@
     border: 1px solid var(--panel-strong);
     background: var(--surface-0);
     color: var(--text-0);
-    padding: 0.42rem 0.72rem;
+    padding: 0.3rem 0.62rem;
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 0.74rem;
+    border-radius: 0;
     cursor: pointer;
   }
 
@@ -2052,8 +2096,12 @@
     text-align: left;
   }
 
+  .scenario-card {
+    padding: 0.4rem 0.6rem;
+  }
+
   .scenario-card strong {
-    font-size: 0.92rem;
+    font-size: 0.86rem;
   }
 
   .loading-pill {
@@ -2126,10 +2174,11 @@
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.42rem 0.62rem;
+    padding: 0.32rem 0.55rem;
     font: inherit;
-    font-size: 0.82rem;
-    min-height: 2rem;
+    font-size: 0.78rem;
+    min-height: 1.75rem;
+    border-radius: 0;
   }
 
   .search-strip {
@@ -2143,8 +2192,8 @@
   }
 
   .search-strip button {
-    min-height: 1.9rem;
-    padding: 0.28rem 0.56rem;
+    min-height: 1.75rem;
+    padding: 0.25rem 0.55rem;
     font-size: 0.74rem;
   }
 
@@ -2278,7 +2327,6 @@
   }
 
   .eyebrow,
-  .section-label,
   .focus-label,
   .headline-kpi-label,
   label > span {
@@ -2297,11 +2345,13 @@
   }
 
   h2 {
-    font-size: 1rem;
+    font-size: 0.95rem;
+    font-weight: 700;
   }
 
   h3 {
-    font-size: 0.94rem;
+    font-size: 0.86rem;
+    font-weight: 700;
   }
 
   .headline-kpi {
@@ -2356,16 +2406,14 @@
 
   .scenario-range .range-track {
     position: relative;
-    height: 0.45rem;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--text-2) 22%, transparent);
+    height: 0.4rem;
+    background: color-mix(in srgb, var(--text-2) 18%, transparent);
   }
 
   .scenario-range .range-fill {
     position: absolute;
     top: 0;
     bottom: 0;
-    border-radius: 999px;
     background: color-mix(in srgb, var(--text-1) 55%, transparent);
   }
 
@@ -2380,12 +2428,10 @@
   .scenario-range .range-point {
     position: absolute;
     top: 50%;
-    width: 0.55rem;
-    height: 0.55rem;
-    margin-left: -0.275rem;
-    border-radius: 50%;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-left: -0.25rem;
     background: var(--text-0);
-    box-shadow: 0 0 0 2px var(--bg-0);
     transform: translateY(-50%);
   }
 
@@ -2411,19 +2457,47 @@
     line-height: 1.45;
   }
 
-  .chart-panel,
-  .empty-panel {
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
-    padding: 0.6rem;
+  .summary-source-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 0.55rem;
+    align-items: baseline;
+    margin-top: 0.45rem;
+    padding-top: 0.45rem;
+    border-top: 1px solid var(--divider);
+    color: var(--text-2);
+    font-size: 0.68rem;
+  }
+
+  .summary-source-row span {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .summary-source-row strong {
+    color: var(--text-1);
+    font-size: 0.72rem;
+  }
+
+  .summary-source-row small {
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+
+  .chart-panel {
+    padding: 0;
+    background: transparent;
   }
 
   .empty-panel {
+    border: 1px solid var(--divider);
     color: var(--text-2);
-    min-height: 7rem;
+    font-size: 0.78rem;
+    min-height: 5rem;
     display: grid;
     place-items: center;
     text-align: center;
+    padding: 0.6rem;
   }
 
   .kpi-grid {
@@ -2508,8 +2582,9 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.6rem;
-    padding: 0.45rem 0.55rem;
+    font-size: 0.64rem;
+    font-weight: 500;
+    padding: 0.32rem 0.55rem;
     border-bottom: 1px solid var(--divider);
     position: sticky;
     top: 0;
@@ -2518,9 +2593,10 @@
   }
 
   tbody td {
-    padding: 0.5rem 0.55rem;
+    padding: 0.34rem 0.55rem;
     border-top: 1px solid var(--divider);
-    vertical-align: top;
+    vertical-align: middle;
+    font-size: 0.78rem;
   }
 
   .period-head {
@@ -2543,8 +2619,10 @@
     align-items: center;
     gap: 0.42rem;
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     line-height: 1.35;
+    padding: 0.3rem 0.7rem;
+    border-top: 1px solid var(--divider);
   }
 
   .legend-swatch {

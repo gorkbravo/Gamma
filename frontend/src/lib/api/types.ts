@@ -1200,6 +1200,27 @@ export interface FundamentalsCompany {
   transformation_note: string | null;
 }
 
+export interface FundamentalsCompanySummary {
+  ticker: string;
+  summary: string | null;
+  source_form: string | null;
+  accession_number: string | null;
+  filing_date: string | null;
+  report_period: string | null;
+  primary_document: string | null;
+  section: string | null;
+  source_url: string | null;
+  model_provider: string | null;
+  model: string | null;
+  generated_at: string | null;
+  confidence: number | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface FundamentalsPeriod {
   period_key: string;
   label: string;
@@ -1592,6 +1613,7 @@ export interface FundamentalsReverseValuation {
 
 export interface FundamentalsOverview {
   company: FundamentalsCompany;
+  company_summary: FundamentalsCompanySummary | null;
   headline_metrics: FundamentalsMetric[];
   price_history: FundamentalsPricePoint[];
   filings: FundamentalsFiling[];

@@ -11,9 +11,11 @@ class FundamentalsResearchStore:
         self.peer_dir = self.base_dir / "peer_baskets"
         self.dcf_dir = self.base_dir / "dcf_models"
         self.dcf_snapshot_dir = self.base_dir / "dcf_snapshots"
+        self.summary_dir = self.base_dir / "company_summaries"
         self.peer_dir.mkdir(parents=True, exist_ok=True)
         self.dcf_dir.mkdir(parents=True, exist_ok=True)
         self.dcf_snapshot_dir.mkdir(parents=True, exist_ok=True)
+        self.summary_dir.mkdir(parents=True, exist_ok=True)
 
     def load_peer_basket(self, ticker: str) -> dict[str, Any] | None:
         return self._load_json(self.peer_dir / f"{self._safe_key(ticker)}.json")
@@ -46,6 +48,14 @@ class FundamentalsResearchStore:
     def save_dcf_snapshot(self, ticker: str, snapshot_id: str, payload: dict[str, Any]) -> None:
         safe_snapshot_id = self._safe_key(snapshot_id)
         self._write_json(self.dcf_snapshot_dir / self._safe_key(ticker) / f"{safe_snapshot_id}.json", payload)
+
+    def load_company_summary(self, ticker: str, accession_number: str | None) -> dict[str, Any] | None:
+        safe_accession = self._safe_key(accession_number or "metadata")
+        return self._load_json(self.summary_dir / self._safe_key(ticker) / f"{safe_accession}.json")
+
+    def save_company_summary(self, ticker: str, accession_number: str | None, payload: dict[str, Any]) -> None:
+        safe_accession = self._safe_key(accession_number or "metadata")
+        self._write_json(self.summary_dir / self._safe_key(ticker) / f"{safe_accession}.json", payload)
 
     def _load_json(self, path: Path) -> dict[str, Any] | None:
         if not path.exists():

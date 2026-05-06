@@ -1370,6 +1370,15 @@ class CopilotService:
                 "latest_report_period": overview.company.latest_report_period.isoformat() if overview.company.latest_report_period else None,
                 "latest_filing_date": overview.company.latest_filing_date.isoformat() if overview.company.latest_filing_date else None,
             },
+            "company_summary": {
+                "summary": overview.company_summary.summary if overview.company_summary else None,
+                "source_form": overview.company_summary.source_form if overview.company_summary else None,
+                "accession_number": overview.company_summary.accession_number if overview.company_summary else None,
+                "section": overview.company_summary.section if overview.company_summary else None,
+                "model_provider": overview.company_summary.model_provider if overview.company_summary else None,
+                "origin": overview.company_summary.origin if overview.company_summary else None,
+                "warnings": list(overview.company_summary.warnings) if overview.company_summary else [],
+            },
             "headline_metrics": headline_metrics,
             "peer_basket": {
                 "label": peers.peer_basket.basket_label if peers else overview.peer_basket.basket_label if overview.peer_basket else None,
@@ -1404,6 +1413,18 @@ class CopilotService:
                 retrieved_at=overview.company.retrieved_at,
             )
         ]
+        if overview.company_summary is not None:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="fundamentals.company_summary",
+                    label="Fundamentals company business summary",
+                    kind="filing",
+                    provider=overview.company_summary.source_provider,
+                    origin=overview.company_summary.origin,
+                    description="Business summary sourced from the latest annual filing business section, with metadata fallback when extraction is unavailable.",
+                    retrieved_at=overview.company_summary.retrieved_at,
+                )
+            )
         if dcf is not None:
             sources.append(
                 CopilotSourceRef(
