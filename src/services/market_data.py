@@ -27,6 +27,8 @@ _FX_PRIORITY = {
     "CAD": 50,
     "CHF": 40,
     "JPY": 30,
+    "CNH": 25,
+    "CNY": 25,
     "NOK": 20,
     "SEK": 10,
 }

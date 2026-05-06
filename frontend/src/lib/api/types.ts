@@ -644,6 +644,52 @@ export interface RiskCorrelationMatrix {
   cells: RiskCorrelationCell[];
 }
 
+export interface RiskDependencyNetworkNode {
+  symbol: string;
+  label: string;
+  cluster_id: number;
+  is_portfolio: boolean;
+  portfolio_weight: number | null;
+  risk_contribution: number | null;
+  annual_vol: number | null;
+  degree: number;
+  strength: number;
+  centrality: number;
+  source_provider: string | null;
+}
+
+export interface RiskDependencyNetworkEdge {
+  source: string;
+  target: string;
+  partial_correlation: number;
+  strength: number;
+  sign: number;
+}
+
+export interface RiskDependencyNetworkCluster {
+  cluster_id: number;
+  label: string;
+  node_count: number;
+  portfolio_node_count: number;
+  portfolio_weight: number;
+  average_annual_vol: number | null;
+  density: number;
+  top_symbols: string[];
+  central_symbols: string[];
+}
+
+export interface RiskDependencyNetwork {
+  nodes: RiskDependencyNetworkNode[];
+  edges: RiskDependencyNetworkEdge[];
+  clusters: RiskDependencyNetworkCluster[];
+  methodology: string | null;
+  universe_size: number;
+  observation_count: number;
+  edge_threshold: number | null;
+  warnings: string[];
+  source_provider: string;
+}
+
 export interface ExcludedAsset {
   symbol: string;
   instrument_id: string | null;
@@ -659,6 +705,7 @@ export interface RiskResult {
   monte_carlo: RiskMonteCarloCharts;
   frontier_points: RiskFrontierPoint[];
   correlation_matrix: RiskCorrelationMatrix;
+  dependency_network: RiskDependencyNetwork;
   excluded_assets: ExcludedAsset[];
   warnings: string[];
 }

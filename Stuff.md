@@ -11,14 +11,14 @@
 
 - `Solved` Take out logo from the top bar, and in something like 'Research and Analysis Platform' 
 
-- Add deeper navigation into the search bar, something like /tab/mode
+- `Solved` Add deeper navigation into the search bar, something like /tab/mode
 
 - Copilot button in a box, next to change view
 
 
 ## Sitrep tab
 
-- Add more FX pairs
+- `Solved`  Add more FX pairs
 
 - Add more Rates, and add a regional column
 
@@ -58,7 +58,7 @@
 
 ## Prediction Markets 
 
-- Needs styling pass
+- `Solved` Needs styling pass
 
 ## SEALANES
 

@@ -77,6 +77,7 @@ class RiskComputationPayload:
     component_var: pd.Series
     frontier_points: list["RiskFrontierPoint"]
     correlation_matrix: pd.DataFrame
+    dependency_network: "RiskDependencyNetwork"
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,56 @@ class CachedEquityHistory:
     source_provider: str = "market_data_cache"
 
 
+@dataclass(frozen=True)
+class RiskDependencyNetworkNode:
+    symbol: str
+    label: str
+    cluster_id: int
+    is_portfolio: bool
+    portfolio_weight: float | None
+    risk_contribution: float | None
+    annual_vol: float | None
+    degree: int
+    strength: float
+    centrality: float
+    source_provider: str | None = None
+
+
+@dataclass(frozen=True)
+class RiskDependencyNetworkEdge:
+    source: str
+    target: str
+    partial_correlation: float
+    strength: float
+    sign: int
+
+
+@dataclass(frozen=True)
+class RiskDependencyNetworkCluster:
+    cluster_id: int
+    label: str
+    node_count: int
+    portfolio_node_count: int
+    portfolio_weight: float
+    average_annual_vol: float | None
+    density: float
+    top_symbols: list[str]
+    central_symbols: list[str]
+
+
+@dataclass(frozen=True)
+class RiskDependencyNetwork:
+    nodes: list[RiskDependencyNetworkNode]
+    edges: list[RiskDependencyNetworkEdge]
+    clusters: list[RiskDependencyNetworkCluster]
+    methodology: str | None = None
+    universe_size: int = 0
+    observation_count: int = 0
+    edge_threshold: float | None = None
+    warnings: list[str] | None = None
+    source_provider: str = "gamma.risk.dependency_network"
+
+
 class RiskService:
     _MC_RANDOM_SEED = 42
     _DEFAULT_FRONTIER_UNIVERSE = ("SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC", "HYG")
@@ -120,6 +171,10 @@ class RiskService:
         re.IGNORECASE,
     )
     _MAX_CACHED_EQUITY_FRONTIER_SYMBOLS = 160
+    _MAX_DEPENDENCY_NETWORK_NODES = 120
+    _DEPENDENCY_NETWORK_EDGE_TARGET = 260
+    _DEPENDENCY_NETWORK_MIN_OBS = 60
+    _DEPENDENCY_NETWORK_MIN_ABS_PARTIAL = 0.05
 
     def __init__(
         self,
@@ -441,6 +496,17 @@ class RiskService:
             cached_equity_metadata=cached_equity_metadata,
         )
         warnings.extend(frontier_warnings)
+        dependency_network = self._build_dependency_network(
+            snapshot=snapshot,
+            portfolio_returns_df=frontier_risk_returns_df,
+            weights=weights_aligned,
+            contributions=contributions,
+            reference_returns_df=frontier_universe_returns,
+            cached_equity_returns_df=cached_equity_returns,
+            cached_equity_metadata=cached_equity_metadata,
+        )
+        if dependency_network.warnings:
+            warnings.extend(dependency_network.warnings)
         results.warnings = warnings
 
         return RiskComputationPayload(
@@ -455,6 +521,7 @@ class RiskService:
             component_var=component_var,
             frontier_points=frontier_points,
             correlation_matrix=self._correlation_matrix(risk_returns_df, snapshot),
+            dependency_network=dependency_network,
         )
 
     @staticmethod
@@ -466,6 +533,447 @@ class RiskService:
             return list(drain())
         except Exception:
             return []
+
+    @classmethod
+    def _build_dependency_network(
+        cls,
+        *,
+        snapshot: PortfolioSnapshot,
+        portfolio_returns_df: pd.DataFrame,
+        weights: pd.Series,
+        contributions: pd.Series,
+        reference_returns_df: pd.DataFrame | None = None,
+        cached_equity_returns_df: pd.DataFrame | None = None,
+        cached_equity_metadata: dict[str, CachedEquityHistory] | None = None,
+    ) -> RiskDependencyNetwork:
+        warnings: list[str] = []
+        portfolio_map = cls._portfolio_symbol_map(snapshot)
+        portfolio_symbols = set(portfolio_map)
+        portfolio_frame = cls._display_symbol_returns(portfolio_returns_df, portfolio_map)
+        reference_frame = cls._plain_symbol_returns(reference_returns_df)
+        cached_frame = cls._plain_symbol_returns(cached_equity_returns_df)
+
+        combined = cls._combine_dependency_return_frames(
+            portfolio_frame=portfolio_frame,
+            reference_frame=reference_frame,
+            cached_frame=cached_frame,
+            portfolio_symbols=portfolio_symbols,
+        )
+        if combined.empty or len(combined.columns) < 3:
+            return RiskDependencyNetwork(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                methodology="Unavailable",
+                warnings=["Dependency network unavailable: fewer than three usable return series."],
+            )
+
+        selected_columns = cls._select_dependency_universe(combined, portfolio_symbols)
+        selected = combined.reindex(columns=selected_columns).apply(pd.to_numeric, errors="coerce")
+        min_obs = max(20, min(cls._DEPENDENCY_NETWORK_MIN_OBS, max(20, int(len(selected) * 0.35))))
+        selected = selected.dropna(axis=1, thresh=min_obs).dropna(how="all")
+        selected = selected.loc[:, selected.std(skipna=True) > 1e-10]
+        if selected.empty or len(selected.columns) < 3:
+            return RiskDependencyNetwork(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                methodology="Unavailable",
+                warnings=["Dependency network unavailable: insufficient overlapping non-flat return histories."],
+            )
+        if len(selected.columns) > cls._MAX_DEPENDENCY_NETWORK_NODES:
+            selected = selected.reindex(columns=cls._select_dependency_universe(selected, portfolio_symbols))
+
+        imputed = selected.copy()
+        imputed = imputed.fillna(imputed.mean()).dropna(how="any")
+        if len(imputed) < 20:
+            return RiskDependencyNetwork(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                methodology="Unavailable",
+                warnings=[f"Dependency network unavailable: only {len(imputed)} overlapping observations."],
+            )
+
+        partial_corr, methodology, pcorr_warnings = cls._estimate_dependency_partial_correlations(imputed)
+        warnings.extend(pcorr_warnings)
+        if partial_corr is None or partial_corr.empty:
+            return RiskDependencyNetwork(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                methodology=methodology,
+                warnings=[*warnings, "Dependency network unavailable: partial-correlation estimation failed."],
+            )
+
+        edges, edge_threshold = cls._dependency_edges(partial_corr)
+        if not edges:
+            return RiskDependencyNetwork(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                methodology=methodology,
+                universe_size=int(len(partial_corr.columns)),
+                observation_count=int(len(imputed)),
+                edge_threshold=edge_threshold,
+                warnings=[*warnings, "Dependency network unavailable: no sparse links survived the threshold."],
+            )
+
+        communities = cls._dependency_communities(list(partial_corr.columns), edges)
+        degree, strength = cls._dependency_node_scores(list(partial_corr.columns), edges)
+        max_strength = max(strength.values()) if strength else 0.0
+        annual_vol = selected.reindex(columns=partial_corr.columns).std(skipna=True) * np.sqrt(252.0)
+        weight_by_symbol = cls._display_symbol_series(weights, portfolio_map)
+        contribution_by_symbol = cls._display_symbol_series(contributions, portfolio_map)
+
+        nodes: list[RiskDependencyNetworkNode] = []
+        for symbol in partial_corr.columns:
+            portfolio_row = portfolio_map.get(str(symbol))
+            metadata = (cached_equity_metadata or {}).get(str(symbol))
+            node_strength = float(strength.get(str(symbol), 0.0))
+            nodes.append(
+                RiskDependencyNetworkNode(
+                    symbol=str(symbol),
+                    label=str(symbol),
+                    cluster_id=int(communities.get(str(symbol), -1)),
+                    is_portfolio=str(symbol) in portfolio_symbols,
+                    portfolio_weight=cls._series_value(weight_by_symbol, str(symbol)),
+                    risk_contribution=cls._series_value(contribution_by_symbol, str(symbol)),
+                    annual_vol=cls._series_value(annual_vol, str(symbol)),
+                    degree=int(degree.get(str(symbol), 0)),
+                    strength=node_strength,
+                    centrality=float(node_strength / max_strength) if max_strength > 0 else 0.0,
+                    source_provider=(
+                        "portfolio_scope"
+                        if portfolio_row is not None
+                        else metadata.source_provider if metadata is not None else "reference_universe"
+                    ),
+                )
+            )
+
+        clusters = cls._dependency_cluster_summaries(nodes, edges)
+        if len(partial_corr.columns) >= cls._MAX_DEPENDENCY_NETWORK_NODES:
+            warnings.append(
+                "Dependency network capped at "
+                f"{cls._MAX_DEPENDENCY_NETWORK_NODES} nodes, prioritizing portfolio names and deepest reference histories."
+            )
+        return RiskDependencyNetwork(
+            nodes=nodes,
+            edges=edges,
+            clusters=clusters,
+            methodology=methodology,
+            universe_size=int(len(nodes)),
+            observation_count=int(len(imputed)),
+            edge_threshold=float(edge_threshold),
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _portfolio_symbol_map(snapshot: PortfolioSnapshot) -> dict[str, object]:
+        rows: dict[str, object] = {}
+        for position in snapshot.positions:
+            if RiskService._is_cash(position):
+                continue
+            symbol = str(position.resolved_display_symbol() or position.resolved_symbol()).strip().upper()
+            if symbol:
+                rows[symbol] = position
+        return rows
+
+    @classmethod
+    def _display_symbol_returns(cls, returns_df: pd.DataFrame, portfolio_map: dict[str, object]) -> pd.DataFrame:
+        if returns_df is None or returns_df.empty:
+            return pd.DataFrame()
+        by_instrument = {
+            str(getattr(position, "resolved_instrument_id")()): symbol
+            for symbol, position in portfolio_map.items()
+            if callable(getattr(position, "resolved_instrument_id", None))
+        }
+        columns: dict[str, pd.Series] = {}
+        for column in returns_df.columns:
+            label = by_instrument.get(str(column), str(column).strip().upper())
+            if not label or label.startswith("CASH"):
+                continue
+            series = pd.to_numeric(returns_df[column], errors="coerce")
+            columns[label] = series if label not in columns else columns[label].combine_first(series)
+        return pd.DataFrame(columns)
+
+    @staticmethod
+    def _plain_symbol_returns(returns_df: pd.DataFrame | None) -> pd.DataFrame:
+        if returns_df is None or returns_df.empty:
+            return pd.DataFrame()
+        columns: dict[str, pd.Series] = {}
+        for column in returns_df.columns:
+            symbol = str(column).strip().upper()
+            if not symbol or symbol.startswith("CASH"):
+                continue
+            columns[symbol] = pd.to_numeric(returns_df[column], errors="coerce")
+        return pd.DataFrame(columns)
+
+    @classmethod
+    def _combine_dependency_return_frames(
+        cls,
+        *,
+        portfolio_frame: pd.DataFrame,
+        reference_frame: pd.DataFrame,
+        cached_frame: pd.DataFrame,
+        portfolio_symbols: set[str],
+    ) -> pd.DataFrame:
+        ordered_frames = [cached_frame, reference_frame, portfolio_frame]
+        columns: dict[str, pd.Series] = {}
+        for frame in ordered_frames:
+            if frame is None or frame.empty:
+                continue
+            for column in frame.columns:
+                symbol = str(column).strip().upper()
+                series = pd.to_numeric(frame[column], errors="coerce")
+                if symbol in columns:
+                    columns[symbol] = columns[symbol].combine_first(series)
+                else:
+                    columns[symbol] = series
+        for symbol in portfolio_symbols:
+            if symbol in portfolio_frame.columns:
+                columns[symbol] = pd.to_numeric(portfolio_frame[symbol], errors="coerce")
+        if not columns:
+            return pd.DataFrame()
+        combined = pd.DataFrame(columns).sort_index()
+        return combined.loc[:, ~combined.columns.duplicated()]
+
+    @classmethod
+    def _select_dependency_universe(cls, returns_df: pd.DataFrame, portfolio_symbols: set[str]) -> list[str]:
+        stats = []
+        for column in returns_df.columns:
+            series = pd.to_numeric(returns_df[column], errors="coerce").dropna()
+            if len(series) < 20 or float(series.std() or 0.0) <= 1e-10:
+                continue
+            symbol = str(column)
+            stats.append((symbol in portfolio_symbols, len(series), float(series.std() or 0.0), symbol))
+        stats.sort(key=lambda row: (row[0], row[1], row[2], row[3]), reverse=True)
+        selected = [row[3] for row in stats[: cls._MAX_DEPENDENCY_NETWORK_NODES]]
+        for symbol in sorted(portfolio_symbols):
+            if symbol in returns_df.columns and symbol not in selected:
+                selected.insert(0, symbol)
+        return selected[: cls._MAX_DEPENDENCY_NETWORK_NODES]
+
+    @classmethod
+    def _estimate_dependency_partial_correlations(
+        cls,
+        returns_df: pd.DataFrame,
+    ) -> tuple[pd.DataFrame | None, str, list[str]]:
+        clean = returns_df.apply(pd.to_numeric, errors="coerce")
+        clean = clean.loc[:, clean.std(skipna=True) > 1e-10]
+        if clean.empty or len(clean.columns) < 3:
+            return None, "Unavailable", []
+        standardized = (clean - clean.mean()) / clean.std(ddof=1)
+        standardized = standardized.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        emp_cov = np.cov(standardized.to_numpy(dtype=float), rowvar=False, ddof=1)
+        emp_cov = np.atleast_2d(np.asarray(emp_cov, dtype=float))
+        if emp_cov.shape[0] != len(clean.columns) or not np.isfinite(emp_cov).all():
+            return None, "Unavailable", ["Dependency network covariance was invalid."]
+
+        warnings: list[str] = []
+        precision = None
+        methodology = "Shrinkage inverse covariance partial correlations"
+        try:
+            from sklearn.covariance import graphical_lasso
+
+            alpha = cls._dependency_glasso_alpha(emp_cov)
+            _, precision = graphical_lasso(emp_cov, alpha=alpha, max_iter=300, tol=1e-4)
+            methodology = f"Graphical LASSO partial correlations (alpha={alpha:.4f})"
+        except Exception as exc:
+            warnings.append(
+                "Dependency network used shrinkage inverse covariance fallback; "
+                f"Graphical LASSO unavailable or failed ({type(exc).__name__})."
+            )
+            shrink = 0.15
+            target = np.diag(np.diag(emp_cov))
+            shrunk = (1.0 - shrink) * emp_cov + shrink * target
+            ridge = np.eye(shrunk.shape[0]) * 1e-4
+            try:
+                precision = np.linalg.pinv(shrunk + ridge)
+            except Exception:
+                return None, methodology, warnings
+
+        if precision is None or not np.isfinite(precision).all():
+            return None, methodology, warnings
+        diag = np.diag(precision)
+        if np.any(diag <= 0):
+            precision = precision + np.eye(precision.shape[0]) * (abs(float(diag.min())) + 1e-6)
+            diag = np.diag(precision)
+        denom = np.sqrt(np.outer(diag, diag))
+        partial = -precision / denom
+        partial = np.clip(partial, -0.999, 0.999)
+        np.fill_diagonal(partial, 1.0)
+        return pd.DataFrame(partial, index=clean.columns, columns=clean.columns), methodology, warnings
+
+    @staticmethod
+    def _dependency_glasso_alpha(emp_cov: np.ndarray) -> float:
+        mask = ~np.eye(emp_cov.shape[0], dtype=bool)
+        offdiag_abs = np.abs(emp_cov[mask])
+        alpha_max = float(np.percentile(offdiag_abs, 90)) if offdiag_abs.size else 0.05
+        return max(alpha_max * 0.18, 0.015)
+
+    @classmethod
+    def _dependency_edges(cls, partial_corr: pd.DataFrame) -> tuple[list[RiskDependencyNetworkEdge], float]:
+        candidates: list[RiskDependencyNetworkEdge] = []
+        columns = list(partial_corr.columns)
+        values = partial_corr.to_numpy(dtype=float)
+        for i, source in enumerate(columns):
+            for j in range(i + 1, len(columns)):
+                value = float(values[i, j])
+                if not np.isfinite(value):
+                    continue
+                strength = abs(value)
+                if strength < cls._DEPENDENCY_NETWORK_MIN_ABS_PARTIAL:
+                    continue
+                candidates.append(
+                    RiskDependencyNetworkEdge(
+                        source=str(source),
+                        target=str(columns[j]),
+                        partial_correlation=value,
+                        strength=strength,
+                        sign=1 if value >= 0 else -1,
+                    )
+                )
+        candidates.sort(key=lambda edge: (edge.strength, edge.source, edge.target), reverse=True)
+        selected = candidates[: cls._DEPENDENCY_NETWORK_EDGE_TARGET]
+        threshold = selected[-1].strength if selected else cls._DEPENDENCY_NETWORK_MIN_ABS_PARTIAL
+        return selected, float(threshold)
+
+    @staticmethod
+    def _dependency_node_scores(
+        symbols: list[str],
+        edges: list[RiskDependencyNetworkEdge],
+    ) -> tuple[dict[str, int], dict[str, float]]:
+        degree = {symbol: 0 for symbol in symbols}
+        strength = {symbol: 0.0 for symbol in symbols}
+        for edge in edges:
+            degree[edge.source] = degree.get(edge.source, 0) + 1
+            degree[edge.target] = degree.get(edge.target, 0) + 1
+            strength[edge.source] = strength.get(edge.source, 0.0) + edge.strength
+            strength[edge.target] = strength.get(edge.target, 0.0) + edge.strength
+        return degree, strength
+
+    @classmethod
+    def _dependency_communities(
+        cls,
+        symbols: list[str],
+        edges: list[RiskDependencyNetworkEdge],
+    ) -> dict[str, int]:
+        try:
+            import networkx as nx
+
+            graph = nx.Graph()
+            graph.add_nodes_from(symbols)
+            graph.add_weighted_edges_from((edge.source, edge.target, edge.strength) for edge in edges)
+            if hasattr(nx.algorithms.community, "louvain_communities"):
+                communities = nx.algorithms.community.louvain_communities(graph, weight="weight", seed=42)
+            else:
+                communities = nx.algorithms.community.greedy_modularity_communities(graph, weight="weight")
+            return {
+                symbol: cluster_id
+                for cluster_id, community in enumerate(sorted([sorted(item) for item in communities], key=lambda row: (-len(row), row)))
+                for symbol in community
+            }
+        except Exception:
+            return cls._label_propagation_communities(symbols, edges)
+
+    @staticmethod
+    def _label_propagation_communities(
+        symbols: list[str],
+        edges: list[RiskDependencyNetworkEdge],
+    ) -> dict[str, int]:
+        neighbors: dict[str, list[tuple[str, float]]] = {symbol: [] for symbol in symbols}
+        for edge in edges:
+            neighbors.setdefault(edge.source, []).append((edge.target, edge.strength))
+            neighbors.setdefault(edge.target, []).append((edge.source, edge.strength))
+        labels = {symbol: symbol for symbol in symbols}
+        for _ in range(24):
+            changed = False
+            for symbol in sorted(symbols):
+                scores: dict[str, float] = {}
+                for neighbor, weight in neighbors.get(symbol, []):
+                    scores[labels.get(neighbor, neighbor)] = scores.get(labels.get(neighbor, neighbor), 0.0) + weight
+                if not scores:
+                    continue
+                best = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[0][0]
+                if labels[symbol] != best:
+                    labels[symbol] = best
+                    changed = True
+            if not changed:
+                break
+        groups: dict[str, list[str]] = {}
+        for symbol, label in labels.items():
+            groups.setdefault(label, []).append(symbol)
+        ordered_labels = sorted(groups, key=lambda label: (-len(groups[label]), sorted(groups[label])[0]))
+        label_ids = {label: index for index, label in enumerate(ordered_labels)}
+        return {symbol: label_ids[label] for symbol, label in labels.items()}
+
+    @classmethod
+    def _dependency_cluster_summaries(
+        cls,
+        nodes: list[RiskDependencyNetworkNode],
+        edges: list[RiskDependencyNetworkEdge],
+    ) -> list[RiskDependencyNetworkCluster]:
+        nodes_by_cluster: dict[int, list[RiskDependencyNetworkNode]] = {}
+        for node in nodes:
+            nodes_by_cluster.setdefault(node.cluster_id, []).append(node)
+        edge_counts: dict[int, int] = {cluster_id: 0 for cluster_id in nodes_by_cluster}
+        for edge in edges:
+            source = next((node for node in nodes if node.symbol == edge.source), None)
+            target = next((node for node in nodes if node.symbol == edge.target), None)
+            if source is not None and target is not None and source.cluster_id == target.cluster_id:
+                edge_counts[source.cluster_id] = edge_counts.get(source.cluster_id, 0) + 1
+        clusters: list[RiskDependencyNetworkCluster] = []
+        for cluster_id, cluster_nodes in nodes_by_cluster.items():
+            ranked = sorted(cluster_nodes, key=lambda node: (node.is_portfolio, node.strength, node.symbol), reverse=True)
+            vols = [node.annual_vol for node in cluster_nodes if node.annual_vol is not None and np.isfinite(node.annual_vol)]
+            portfolio_weight = sum(abs(float(node.portfolio_weight or 0.0)) for node in cluster_nodes)
+            n = len(cluster_nodes)
+            max_edges = n * (n - 1) / 2
+            clusters.append(
+                RiskDependencyNetworkCluster(
+                    cluster_id=int(cluster_id),
+                    label=f"Cluster {cluster_id + 1}",
+                    node_count=n,
+                    portfolio_node_count=sum(1 for node in cluster_nodes if node.is_portfolio),
+                    portfolio_weight=float(portfolio_weight),
+                    average_annual_vol=float(np.mean(vols)) if vols else None,
+                    density=float(edge_counts.get(cluster_id, 0) / max_edges) if max_edges > 0 else 0.0,
+                    top_symbols=[node.symbol for node in ranked[:8]],
+                    central_symbols=[node.symbol for node in sorted(cluster_nodes, key=lambda node: node.strength, reverse=True)[:5]],
+                )
+            )
+        return sorted(clusters, key=lambda row: (row.portfolio_weight, row.node_count), reverse=True)
+
+    @staticmethod
+    def _display_symbol_series(series: pd.Series, portfolio_map: dict[str, object]) -> pd.Series:
+        if series is None or series.empty:
+            return pd.Series(dtype=float)
+        by_instrument = {
+            str(getattr(position, "resolved_instrument_id")()): symbol
+            for symbol, position in portfolio_map.items()
+            if callable(getattr(position, "resolved_instrument_id", None))
+        }
+        values: dict[str, float] = {}
+        for key, value in series.items():
+            symbol = by_instrument.get(str(key), str(key).strip().upper())
+            try:
+                numeric = float(value)
+            except Exception:
+                continue
+            if np.isfinite(numeric):
+                values[symbol] = values.get(symbol, 0.0) + numeric
+        return pd.Series(values, dtype=float)
+
+    @staticmethod
+    def _series_value(series: pd.Series, key: str) -> float | None:
+        if series is None or series.empty or key not in series.index:
+            return None
+        try:
+            value = float(series.loc[key])
+        except Exception:
+            return None
+        return value if np.isfinite(value) else None
 
     @classmethod
     def _build_efficient_frontier(

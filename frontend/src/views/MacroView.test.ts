@@ -49,7 +49,10 @@ describe("MacroView", () => {
     expect(body.match(/fx-select/g)?.length ?? 0).toBe(3);
     expect(body).toContain('option value="eurusd"');
     expect(body).toContain('option value="gbpusd"');
+    expect(body).toContain('option value="eurgbp"');
+    expect(body).toContain('option value="eurchf"');
     expect(body).toContain('option value="usdjpy"');
+    expect(body).toContain('option value="usdcnh"');
   });
 
   it("renders snapshot focus items and drilldown targets", () => {

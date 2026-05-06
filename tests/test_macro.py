@@ -478,8 +478,11 @@ def test_macro_service_snapshot_and_divergences_preserve_provenance(monkeypatch)
     assert [metric.series_id for metric in dollar_card.metrics if metric.series_id and metric.series_id.startswith("fx-")] == [
         "fx-eurusd",
         "fx-gbpusd",
+        "fx-eurgbp",
+        "fx-eurchf",
         "fx-usdjpy",
         "fx-usdchf",
+        "fx-usdcnh",
         "fx-usdcad",
         "fx-audusd",
         "fx-nzdusd",
@@ -1074,8 +1077,11 @@ def _build_fx_series_map() -> dict[tuple[str, str], list[MacroSeriesPoint]]:
     return {
         ("EUR", "USD"): _fx_points([220, 120, 60, 20, 0], [1.05, 1.07, 1.09, 1.06, 1.08], pair_code="EURUSD"),
         ("GBP", "USD"): _fx_points([220, 120, 60, 20, 0], [1.24, 1.26, 1.28, 1.27, 1.29], pair_code="GBPUSD"),
+        ("EUR", "GBP"): _fx_points([220, 120, 60, 20, 0], [0.85, 0.85, 0.85, 0.83, 0.84], pair_code="EURGBP"),
+        ("EUR", "CHF"): _fx_points([220, 120, 60, 20, 0], [0.96, 0.97, 0.98, 0.97, 0.98], pair_code="EURCHF"),
         ("USD", "JPY"): _fx_points([220, 120, 60, 20, 0], [147.0, 149.0, 151.5, 149.8, 150.6], pair_code="USDJPY"),
         ("USD", "CHF"): _fx_points([220, 120, 60, 20, 0], [0.88, 0.89, 0.90, 0.89, 0.91], pair_code="USDCHF"),
+        ("USD", "CNH"): _fx_points([220, 120, 60, 20, 0], [7.16, 7.18, 7.22, 7.19, 7.21], pair_code="USDCNH"),
         ("USD", "CAD"): _fx_points([220, 120, 60, 20, 0], [1.34, 1.35, 1.36, 1.37, 1.36], pair_code="USDCAD"),
         ("AUD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.64, 0.66, 0.67, 0.65, 0.66], pair_code="AUDUSD"),
         ("NZD", "USD"): _fx_points([220, 120, 60, 20, 0], [0.58, 0.60, 0.61, 0.60, 0.62], pair_code="NZDUSD"),

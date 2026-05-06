@@ -18,7 +18,7 @@
     type ScenarioImpactRow,
     type ScenarioResult,
   } from "../lib/risk-workspace";
-  import type { IndexedValuePoint, PortfolioSnapshot, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
+  import type { IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
   import type { RiskComputeOptions } from "../lib/stores/app";
 
   export let mode: WorkspaceMode | null = "portfolio";
@@ -53,6 +53,7 @@
     yMin: number;
     yMax: number;
   };
+  type DependencyPlotNode = RiskDependencyNetwork["nodes"][number] & { x: number; y: number; r: number };
 
   const modes: Array<{ id: RiskMode; label: string }> = [
     { id: "overview", label: "Overview" },
@@ -97,6 +98,9 @@
   let frontierW = 0;
   let frontierH = 0;
   let hoveredFrontierIdx: number | null = null;
+  let dependencyW = 0;
+  let dependencyH = 0;
+  let hoveredDependencySymbol: string | null = null;
   const FRONTIER_PAD = { l: 38, r: 14, t: 14, b: 28 };
 
   const fmt = (value: number | null | undefined, digits = 2) =>
@@ -116,6 +120,21 @@
   function corrTextColor(value: number | null | undefined) {
     if (value == null || !Number.isFinite(value)) return "var(--text-2)";
     return Math.abs(value) > 0.55 ? "var(--text-0)" : "var(--text-1)";
+  }
+
+  function clusterColor(clusterId: number, alpha = 1) {
+    const colors = [
+      [122, 166, 200],
+      [196, 154, 90],
+      [75, 180, 116],
+      [198, 107, 97],
+      [107, 163, 196],
+      [138, 145, 154],
+      [212, 160, 84],
+      [87, 135, 176],
+    ];
+    const rgb = colors[Math.abs(clusterId) % colors.length];
+    return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
   }
 
   const pct = (value: number | null | undefined, digits = 1) =>
@@ -314,6 +333,40 @@
 
   function isVisibleFrontierKind(kind: string) {
     return kind === "current" || kind === "candidate" || kind === "frontier" || kind === "asset" || kind === "risk_free" || kind === "cached_equity_asset" || kind === "cached_equity_frontier";
+  }
+
+  function buildDependencyLayout(network: RiskDependencyNetwork | null, width: number, height: number): DependencyPlotNode[] {
+    if (!network?.nodes?.length || width <= 0 || height <= 0) {
+      return [];
+    }
+    const w = Math.max(width, 320);
+    const h = Math.max(height, 280);
+    const cx = w / 2;
+    const cy = h / 2;
+    const clusterIds = [...new Set(network.nodes.map((node) => node.cluster_id))].sort((a, b) => a - b);
+    const clusterIndex = new Map(clusterIds.map((id, index) => [id, index]));
+    const maxWeight = Math.max(...network.nodes.map((node) => Math.abs(node.portfolio_weight ?? 0)), 0.0001);
+    const maxCentrality = Math.max(...network.nodes.map((node) => node.centrality ?? 0), 0.0001);
+    return network.nodes.map((node, index) => {
+      const ci = clusterIndex.get(node.cluster_id) ?? 0;
+      const clusterAngle = (ci / Math.max(clusterIds.length, 1)) * Math.PI * 2 - Math.PI / 2;
+      const clusterRadius = Math.min(w, h) * 0.28;
+      const members = network.nodes.filter((candidate) => candidate.cluster_id === node.cluster_id);
+      const memberIndex = Math.max(0, members.findIndex((candidate) => candidate.symbol === node.symbol));
+      const memberAngle = (memberIndex / Math.max(members.length, 1)) * Math.PI * 2 + clusterAngle;
+      const localRadius = Math.min(86, Math.max(22, members.length * 3.1));
+      const jitter = ((index % 5) - 2) * 3;
+      const baseX = cx + Math.cos(clusterAngle) * clusterRadius;
+      const baseY = cy + Math.sin(clusterAngle) * clusterRadius * 0.78;
+      const weightBoost = node.is_portfolio ? 4.5 * Math.sqrt(Math.abs(node.portfolio_weight ?? 0) / maxWeight) : 0;
+      const centralBoost = 2.5 * Math.sqrt((node.centrality ?? 0) / maxCentrality);
+      return {
+        ...node,
+        x: Math.max(18, Math.min(w - 18, baseX + Math.cos(memberAngle) * (localRadius + jitter))),
+        y: Math.max(18, Math.min(h - 18, baseY + Math.sin(memberAngle) * (localRadius * 0.68 + jitter))),
+        r: node.is_portfolio ? 5.8 + weightBoost : 2.7 + centralBoost,
+      };
+    });
   }
 
   function isCachedEquityKind(kind: string) {
@@ -653,6 +706,7 @@
     <div class="mode-shell">
       <div class="workspace-grid">
         <div class="primary-column">
+        <article class="panel dependency-panel">{@render PanelTitle("Dependency Network")}{@render DependencyNetwork(workspace.dependencyNetwork)}</article>
         <article class="panel heatmap-panel">{@render PanelTitle("Correlation Heatmap")}{@render CorrelationHeatmap(workspace.correlationMatrix)}</article>
         <div class="two-col">
           <article class="panel chart-panel">{@render PanelTitle("Rolling Correlation To Benchmark")}<TimeSeriesChart series={rollingBetaChart} height={220} emptyMessage="Correlation series requires benchmark overlap" /></article>
@@ -661,6 +715,8 @@
         {@render SimpleTable("Highest Correlated Pairs", ["Pair", "Corr", "Read"], workspace.correlatedPairs)}
         </div>
         <aside class="support-column">
+          {@render SimpleTable("Dependency Clusters", ["Cluster", "Held", "Weight", "Vol", "Density", "Central"], workspace.dependencyClusterRows)}
+          {@render SimpleTable("Portfolio Neighbors", ["Held", "Neighbor", "Partial", "Cluster", "Centrality"], workspace.dependencyNeighborRows)}
           {@render SimpleTable("Diversification Warnings", ["Cluster", "Members", "Weight", "Avg corr", "Risk contribution"], workspace.diversificationWarnings)}
           {@render SimpleTable("Benchmark Sensitivity", ["Symbol", "Beta", "Corr", "R2", "Tracking contribution"], workspace.benchmarkSensitivity)}
           {@render SharedAlerts()}
@@ -820,6 +876,84 @@
       <tbody>{#each rows as row}<tr><td>{row.symbol}</td><td>{pct(row.currentWeight)}</td><td>{pct(row.proposedWeight)}</td><td class={row.delta == null ? "" : row.delta >= 0 ? "positive" : "negative"}>{pct(row.delta)}</td><td>{pct(row.currentRiskContribution)}</td><td>{pct(row.proposedRiskContribution)}</td><td>{row.constraintFlag}</td></tr>{/each}</tbody>
     </table>
   </article>
+{/snippet}
+
+{#snippet DependencyNetwork(network: RiskDependencyNetwork | null)}
+  <div class="dependency-network" bind:clientWidth={dependencyW} bind:clientHeight={dependencyH}>
+    {#if network?.nodes?.length && dependencyW > 0 && dependencyH > 0}
+      {@const graphH = Math.max(260, dependencyH - 27)}
+      {@const nodes = buildDependencyLayout(network, dependencyW, graphH)}
+      {@const bySymbol = new Map(nodes.map((node) => [node.symbol, node]))}
+      {@const hoveredNode = hoveredDependencySymbol ? bySymbol.get(hoveredDependencySymbol) ?? null : null}
+      <svg width={dependencyW} height={graphH} aria-label="Sparse dependency network">
+        {#each network.edges as edge}
+          {@const source = bySymbol.get(edge.source)}
+          {@const target = bySymbol.get(edge.target)}
+          {#if source && target}
+            <line
+              class="dependency-edge"
+              class:negative={edge.sign < 0}
+              class:highlighted={hoveredDependencySymbol === edge.source || hoveredDependencySymbol === edge.target}
+              x1={source.x}
+              y1={source.y}
+              x2={target.x}
+              y2={target.y}
+              stroke-width={Math.max(0.7, Math.min(3.2, edge.strength * 9))}
+            />
+          {/if}
+        {/each}
+        {#each nodes as node}
+          <g
+            class="dependency-node"
+            class:portfolio={node.is_portfolio}
+            class:muted={hoveredDependencySymbol != null && hoveredDependencySymbol !== node.symbol}
+            transform={`translate(${node.x},${node.y})`}
+            role="button"
+            tabindex="0"
+            aria-label={`${node.symbol}: cluster ${node.cluster_id + 1}, weight ${pct(node.portfolio_weight)}, centrality ${fmt(node.centrality, 2)}`}
+            on:mouseenter={() => (hoveredDependencySymbol = node.symbol)}
+            on:mouseleave={() => (hoveredDependencySymbol = null)}
+            on:focus={() => (hoveredDependencySymbol = node.symbol)}
+            on:blur={() => (hoveredDependencySymbol = null)}
+          >
+            {#if node.is_portfolio}
+              <circle class="dependency-halo" r={node.r + 4.5} />
+            {/if}
+            <circle
+              class="dependency-dot"
+              r={node.r}
+              style={`fill:${clusterColor(node.cluster_id, node.is_portfolio ? 0.95 : 0.62)}; stroke:${node.is_portfolio ? "var(--text-0)" : clusterColor(node.cluster_id, 0.85)};`}
+            />
+            {#if node.is_portfolio || node.centrality >= 0.7}
+              <text y={-(node.r + 5)} text-anchor="middle">{node.symbol}</text>
+            {/if}
+          </g>
+        {/each}
+      </svg>
+      <div class="dependency-meta">
+        <span>{network.universe_size} nodes</span>
+        <span>{network.edges.length} links</span>
+        <span>{network.clusters.length} clusters</span>
+        <span>{network.observation_count} obs</span>
+        <span>{network.methodology ?? "Dependency graph"}</span>
+      </div>
+      {#if hoveredNode}
+        <div
+          class="dependency-tooltip"
+          style={`left:${Math.min(hoveredNode.x + 12, dependencyW - 180)}px; top:${Math.max(hoveredNode.y - 8, 8)}px;`}
+        >
+          <strong>{hoveredNode.symbol}</strong>
+          <span><em>Cluster</em> {hoveredNode.cluster_id + 1}</span>
+          <span><em>Weight</em> {pct(hoveredNode.portfolio_weight)}</span>
+          <span><em>Vol</em> {pct(hoveredNode.annual_vol)}</span>
+          <span><em>Degree</em> {hoveredNode.degree}</span>
+          <span><em>Strength</em> {fmt(hoveredNode.strength, 2)}</span>
+        </div>
+      {/if}
+    {:else}
+      <div class="frontier-empty">Run risk with usable equity histories to populate the dependency network.</div>
+    {/if}
+  </div>
 {/snippet}
 
 {#snippet CorrelationHeatmap(matrix: RiskCorrelationMatrixView)}
@@ -1319,6 +1453,92 @@
   .positive { color: var(--positive); }
   .negative { color: var(--negative); }
   .warning { color: var(--warning); }
+
+  .dependency-panel { padding: 0; }
+  .dependency-network {
+    min-height: 420px;
+    position: relative;
+    overflow: hidden;
+  }
+  .dependency-network > svg {
+    display: block;
+    width: 100%;
+    height: calc(100% - 27px);
+    min-height: 390px;
+  }
+  .dependency-edge {
+    stroke: var(--chart-primary);
+    stroke-opacity: 0.2;
+    vector-effect: non-scaling-stroke;
+  }
+  .dependency-edge.negative {
+    stroke: var(--positive);
+    stroke-dasharray: 3 3;
+  }
+  .dependency-edge.highlighted { stroke-opacity: 0.72; }
+  .dependency-node { cursor: pointer; }
+  .dependency-node.muted { opacity: 0.38; }
+  .dependency-dot { stroke-width: 1.1; }
+  .dependency-node.portfolio .dependency-dot { stroke-width: 1.8; }
+  .dependency-halo {
+    fill: none;
+    stroke: var(--text-0);
+    stroke-opacity: 0.22;
+    stroke-width: 1.2;
+  }
+  .dependency-node text {
+    fill: var(--text-1);
+    font-size: 9.5px;
+    font-weight: 600;
+    paint-order: stroke;
+    stroke: var(--bg-0);
+    stroke-width: 2px;
+    pointer-events: none;
+  }
+  .dependency-node.portfolio text { fill: var(--text-0); }
+  .dependency-meta {
+    min-height: 27px;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.3rem 0.75rem;
+    border-top: 1px solid var(--divider);
+    color: var(--text-2);
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .dependency-meta span:not(:last-child) { color: var(--text-1); }
+  .dependency-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-2);
+    border: 1px solid var(--panel-strong);
+    padding: 0.4rem 0.55rem;
+    display: grid;
+    gap: 0.15rem;
+    min-width: 150px;
+    font-size: 11px;
+    z-index: 2;
+  }
+  .dependency-tooltip strong {
+    color: var(--text-0);
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .dependency-tooltip span {
+    color: var(--text-1);
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .dependency-tooltip em {
+    color: var(--text-2);
+    font-style: normal;
+    text-transform: uppercase;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+  }
 
   /* ── Heatmap ── */
   .heatmap {

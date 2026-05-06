@@ -1,4 +1,4 @@
-import type { PortfolioSnapshot, Position, RiskContribution, RiskCorrelationMatrix, RiskFrontierPoint, RiskResult, TimeSeriesPoint } from "./api/types";
+import type { PortfolioSnapshot, Position, RiskContribution, RiskCorrelationMatrix, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint } from "./api/types";
 
 export type RiskMode = "overview" | "exposures" | "drawdowns" | "correlation" | "scenarios" | "optimization";
 export type ReturnFrequency = "daily" | "weekly" | "monthly";
@@ -44,6 +44,9 @@ export interface RiskWorkspaceModel {
   positionDrawdownContributions: RiskTableRow[];
   correlatedPairs: RiskTableRow[];
   correlationMatrix: RiskCorrelationMatrixView;
+  dependencyNetwork: RiskDependencyNetwork | null;
+  dependencyClusterRows: RiskTableRow[];
+  dependencyNeighborRows: RiskTableRow[];
   diversificationWarnings: RiskTableRow[];
   benchmarkSensitivity: RiskTableRow[];
   scenarios: ScenarioResult[];
@@ -152,6 +155,7 @@ export function buildRiskWorkspaceModel(
   const frontierMessage = buildFrontierMessage(result, frontierPoints);
   const candidates = buildCandidateAllocations(holdings, frontierPoints);
   const correlationMatrix = buildCorrelationMatrix(result?.correlation_matrix);
+  const dependencyNetwork = result?.dependency_network ?? null;
   const coverageWarnings = buildCoverageWarnings(snapshot, result);
   const largestWeight = maxNumber(holdings.map((row) => row.weight));
   const topFiveWeight = result?.metrics.top5_weight ?? sumTop(holdings.map((row) => Math.abs(row.weight ?? 0)), 5);
@@ -240,6 +244,9 @@ export function buildRiskWorkspaceModel(
     positionDrawdownContributions: buildPositionDrawdownContributions(holdings),
     correlatedPairs: buildCorrelatedPairs(correlationMatrix),
     correlationMatrix,
+    dependencyNetwork,
+    dependencyClusterRows: buildDependencyClusterRows(dependencyNetwork),
+    dependencyNeighborRows: buildDependencyNeighborRows(dependencyNetwork),
     diversificationWarnings: buildDiversificationWarnings(holdings, exposureBreakdown, result),
     benchmarkSensitivity: buildBenchmarkSensitivity(holdings, result),
     scenarios,
@@ -491,7 +498,58 @@ function buildCorrelatedPairs(matrix: RiskCorrelationMatrixView): RiskTableRow[]
   return pairs.length ? pairs : buildUnavailableRows(["Run a risk pass with at least two covered assets to populate pairwise correlations."]);
 }
 
+function buildDependencyClusterRows(network: RiskDependencyNetwork | null): RiskTableRow[] {
+  if (!network?.clusters?.length) {
+    return buildUnavailableRows(["Run risk with usable equity histories to populate dependency clusters."]);
+  }
+  return network.clusters.slice(0, 12).map((cluster) => ({
+    cells: [
+      cluster.label,
+      `${cluster.portfolio_node_count}/${cluster.node_count}`,
+      formatPercent(cluster.portfolio_weight),
+      formatPercent(cluster.average_annual_vol),
+      formatPercent(cluster.density),
+      cluster.central_symbols.slice(0, 4).join(", ") || UNKNOWN,
+    ],
+    tone: cluster.portfolio_weight >= 0.35 ? "warning" : "",
+  }));
+}
+
+function buildDependencyNeighborRows(network: RiskDependencyNetwork | null): RiskTableRow[] {
+  if (!network?.nodes?.length || !network.edges.length) {
+    return buildUnavailableRows(["No sparse dependency links are available yet."]);
+  }
+  const nodes = new Map(network.nodes.map((node) => [node.symbol, node]));
+  const rows = network.edges
+    .map((edge) => {
+      const source = nodes.get(edge.source);
+      const target = nodes.get(edge.target);
+      const portfolioNode = source?.is_portfolio ? source : target?.is_portfolio ? target : null;
+      const otherNode = portfolioNode?.symbol === source?.symbol ? target : source;
+      if (!portfolioNode || !otherNode || otherNode.is_portfolio) {
+        return null;
+      }
+      return {
+        cells: [
+          portfolioNode.symbol,
+          otherNode.symbol,
+          formatNumber(edge.partial_correlation, 2),
+          `Cluster ${otherNode.cluster_id + 1}`,
+          formatNumber(otherNode.centrality, 2),
+        ],
+        tone: edge.strength >= 0.25 ? "warning" as const : "" as const,
+        strength: edge.strength,
+      };
+    })
+    .filter((row): row is RiskTableRow & { strength: number } => row != null)
+    .sort((left, right) => right.strength - left.strength)
+    .slice(0, 12)
+    .map((row) => ({ cells: row.cells, tone: row.tone }));
+  return rows.length ? rows : buildUnavailableRows(["No non-held neighbors link directly to current portfolio names."]);
+}
+
 function buildDiversificationWarnings(holdings: HoldingRiskRow[], breakdown: ExposureBreakdownRow[], result: RiskResult | null): RiskTableRow[] {
+  const networkRows = buildNetworkConcentrationWarnings(result?.dependency_network ?? null);
   const rows = breakdown
     .filter((row) => Math.abs(row.weight) > 0.25)
     .map((row) => ({
@@ -499,7 +557,26 @@ function buildDiversificationWarnings(holdings: HoldingRiskRow[], breakdown: Exp
       tone: "warning" as const,
     }));
   if ((result?.metrics.correlation ?? 0) > 0.8) rows.unshift({ cells: ["Benchmark cluster", "Portfolio aggregate", UNKNOWN, formatNumber(result?.metrics.correlation, 2), "High benchmark sensitivity"], tone: "warning" });
-  return rows;
+  return [...networkRows, ...rows];
+}
+
+function buildNetworkConcentrationWarnings(network: RiskDependencyNetwork | null): RiskTableRow[] {
+  if (!network?.clusters?.length) {
+    return [];
+  }
+  return network.clusters
+    .filter((cluster) => cluster.portfolio_weight >= 0.25 || cluster.portfolio_node_count >= 3)
+    .slice(0, 4)
+    .map((cluster) => ({
+      cells: [
+        cluster.label,
+        cluster.top_symbols.slice(0, 5).join(", "),
+        formatPercent(cluster.portfolio_weight),
+        formatPercent(cluster.density),
+        `${cluster.portfolio_node_count} held names`,
+      ],
+      tone: cluster.portfolio_weight >= 0.35 ? "warning" as const : "" as const,
+    }));
 }
 
 function buildBenchmarkSensitivity(holdings: HoldingRiskRow[], result: RiskResult | null): RiskTableRow[] {

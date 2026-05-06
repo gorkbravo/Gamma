@@ -424,7 +424,7 @@ export const loading = writable<Record<string, boolean>>({
 const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = [
-  "fx-eurusd", "fx-gbpusd", "fx-usdjpy", "fx-usdchf",
+  "fx-eurusd", "fx-gbpusd", "fx-eurgbp", "fx-eurchf", "fx-usdjpy", "fx-usdchf", "fx-usdcnh",
   "fx-usdcad", "fx-audusd", "fx-nzdusd"
 ] as const;
 const MACRO_CROSS_ASSET_SERIES: Record<MacroContextState["region"], readonly string[]> = {

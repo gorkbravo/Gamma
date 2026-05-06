@@ -1244,14 +1244,28 @@ describe("app store orchestration", () => {
       .mockResolvedValueOnce(ok(events))
       .mockResolvedValueOnce(ok(fxHistory("fx-eurusd", "EUR/USD")))
       .mockResolvedValueOnce(ok(fxHistory("fx-gbpusd", "GBP/USD")))
-      .mockResolvedValueOnce(ok(fxHistory("fx-usdjpy", "USD/JPY")));
+      .mockResolvedValueOnce(ok(fxHistory("fx-eurgbp", "EUR/GBP")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-eurchf", "EUR/CHF")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-usdjpy", "USD/JPY")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-usdchf", "USD/CHF")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-usdcnh", "USD/CNH")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-usdcad", "USD/CAD")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-audusd", "AUD/USD")))
+      .mockResolvedValueOnce(ok(fxHistory("fx-nzdusd", "NZD/USD")));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadMacroWorkspace();
 
     expect(get(macroSnapshot)?.region).toBe("US");
     expect(Object.keys(get(macroSeriesHistories))).toEqual(
-      expect.arrayContaining(["US:3M:fx-eurusd", "US:3M:fx-gbpusd", "US:3M:fx-usdjpy"])
+      expect.arrayContaining([
+        "US:3M:fx-eurusd",
+        "US:3M:fx-gbpusd",
+        "US:3M:fx-eurgbp",
+        "US:3M:fx-eurchf",
+        "US:3M:fx-usdjpy",
+        "US:3M:fx-usdcnh"
+      ])
     );
     expect(fetchMock.mock.calls.some(([url]) =>
       String(url).includes("/macro/series/fx-eurusd/history?region=US&timeframe=3M")
@@ -1261,6 +1275,15 @@ describe("app store orchestration", () => {
     )).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) =>
       String(url).includes("/macro/series/fx-usdjpy/history?region=US&timeframe=3M")
+    )).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/macro/series/fx-eurgbp/history?region=US&timeframe=3M")
+    )).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/macro/series/fx-eurchf/history?region=US&timeframe=3M")
+    )).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/macro/series/fx-usdcnh/history?region=US&timeframe=3M")
     )).toBe(true);
   });
 

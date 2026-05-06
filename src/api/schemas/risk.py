@@ -128,6 +128,52 @@ class RiskCorrelationMatrixModel(BaseModel):
     cells: list[RiskCorrelationCellModel] = Field(default_factory=list)
 
 
+class RiskDependencyNetworkNodeModel(BaseModel):
+    symbol: str
+    label: str
+    cluster_id: int
+    is_portfolio: bool
+    portfolio_weight: float | None = None
+    risk_contribution: float | None = None
+    annual_vol: float | None = None
+    degree: int
+    strength: float
+    centrality: float
+    source_provider: str | None = None
+
+
+class RiskDependencyNetworkEdgeModel(BaseModel):
+    source: str
+    target: str
+    partial_correlation: float
+    strength: float
+    sign: int
+
+
+class RiskDependencyNetworkClusterModel(BaseModel):
+    cluster_id: int
+    label: str
+    node_count: int
+    portfolio_node_count: int
+    portfolio_weight: float
+    average_annual_vol: float | None = None
+    density: float
+    top_symbols: list[str] = Field(default_factory=list)
+    central_symbols: list[str] = Field(default_factory=list)
+
+
+class RiskDependencyNetworkModel(BaseModel):
+    nodes: list[RiskDependencyNetworkNodeModel] = Field(default_factory=list)
+    edges: list[RiskDependencyNetworkEdgeModel] = Field(default_factory=list)
+    clusters: list[RiskDependencyNetworkClusterModel] = Field(default_factory=list)
+    methodology: str | None = None
+    universe_size: int = 0
+    observation_count: int = 0
+    edge_threshold: float | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str = "gamma.risk.dependency_network"
+
+
 class RiskComputeResponseModel(BaseModel):
     metrics: RiskMetricsModel
     portfolio_return_points: list[TimeSeriesPoint]
@@ -136,6 +182,7 @@ class RiskComputeResponseModel(BaseModel):
     monte_carlo: MonteCarloChartsModel = Field(default_factory=MonteCarloChartsModel)
     frontier_points: list[RiskFrontierPointModel] = Field(default_factory=list)
     correlation_matrix: RiskCorrelationMatrixModel = Field(default_factory=RiskCorrelationMatrixModel)
+    dependency_network: RiskDependencyNetworkModel = Field(default_factory=RiskDependencyNetworkModel)
     excluded_assets: list[ExcludedAssetModel]
     warnings: list[str] = Field(default_factory=list)
 
@@ -195,6 +242,17 @@ class RiskComputeResponseModel(BaseModel):
                 for point in payload.frontier_points
             ],
             correlation_matrix=_correlation_matrix_to_payload(payload),
+            dependency_network=RiskDependencyNetworkModel(
+                nodes=[RiskDependencyNetworkNodeModel(**row.__dict__) for row in payload.dependency_network.nodes],
+                edges=[RiskDependencyNetworkEdgeModel(**row.__dict__) for row in payload.dependency_network.edges],
+                clusters=[RiskDependencyNetworkClusterModel(**row.__dict__) for row in payload.dependency_network.clusters],
+                methodology=payload.dependency_network.methodology,
+                universe_size=payload.dependency_network.universe_size,
+                observation_count=payload.dependency_network.observation_count,
+                edge_threshold=payload.dependency_network.edge_threshold,
+                warnings=list(payload.dependency_network.warnings or []),
+                source_provider=payload.dependency_network.source_provider,
+            ),
             excluded_assets=[
                 ExcludedAssetModel(
                     symbol=_position_meta(payload.snapshot, symbol).get("symbol") or symbol,

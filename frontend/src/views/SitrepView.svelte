@@ -370,14 +370,14 @@
   }
 
   const FX_SERIES_ORDER = [
-    "fx-eurusd", "fx-gbpusd", "fx-usdjpy", "fx-usdchf",
+    "fx-eurusd", "fx-gbpusd", "fx-eurgbp", "fx-eurchf", "fx-usdjpy", "fx-usdchf", "fx-usdcnh",
     "fx-usdcad", "fx-audusd", "fx-nzdusd"
   ];
 
   function buildFxRows(data: MacroSnapshot | null): SitrepMarketRow[] {
     const allFx = uniqueMetrics(
       allMacroMetrics(data).filter((m) =>
-        metricMatches(m, ["fx-", "eur/usd", "gbp/usd", "usd/jpy", "usd/chf", "usd/cad", "aud/usd", "nzd/usd"])
+        metricMatches(m, ["fx-", "eur/usd", "gbp/usd", "eur/gbp", "eur/chf", "usd/jpy", "usd/chf", "usd/cnh", "usd/cad", "aud/usd", "nzd/usd"])
       )
     );
     const ordered = [
@@ -808,7 +808,7 @@
         <article class="panel table-panel">
           <div class="table-header">
             <div class="table-title">
-              <span>G10 Pairs</span>
+              <span>FX Pairs</span>
               <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
             </div>
             <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")} aria-label={refreshTitle("fx")} title={refreshTitle("fx")}>
