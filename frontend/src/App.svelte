@@ -188,6 +188,7 @@
   } from "./lib/api/types";
   import type { CryptoMode } from "./lib/view-models/crypto";
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
+  import type { SitrepHandoffRequest } from "./lib/view-models/sitrep";
   import type { OptionsMode } from "./lib/view-models/iv";
   import type { ResearchMode } from "./lib/view-models/research";
   import type { RiskMode } from "./lib/risk-workspace";
@@ -1716,6 +1717,36 @@
     }
   }
 
+  async function openSitrepHandoff(handoff: SitrepHandoffRequest) {
+    workspaceMode = "research";
+    if (handoff.symbol) {
+      selectSharedEquity(handoff.symbol, handoff.label ?? null, "sitrep");
+    }
+
+    await selectTab(handoff.targetTab);
+
+    if (handoff.targetTab === "commodities") {
+      const nextMode = (handoff.targetMode ?? "overview") as CommodityMode;
+      commoditiesMode = nextMode;
+      await loadCommoditiesWorkspace({
+        mode: nextMode,
+        selectedInstrumentId: handoff.commodityId ?? undefined
+      });
+      return;
+    }
+
+    if (handoff.targetTab === "prediction_markets") {
+      if (handoff.marketId) {
+        await selectPredictionMarket(handoff.marketId);
+      }
+      return;
+    }
+
+    if (handoff.targetMode) {
+      await selectModeById(handoff.targetTab, handoff.targetMode);
+    }
+  }
+
   async function handleAppKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) {
       return;
@@ -1932,6 +1963,7 @@
             onLoadPrediction={loadPredictionMarketScreener}
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
+            onOpenHandoff={openSitrepHandoff}
           />
         {:else if $activeTab === "research"}
           <ResearchView

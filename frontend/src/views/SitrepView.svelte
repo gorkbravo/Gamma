@@ -18,6 +18,12 @@
     PredictionMarketScreenerOptions,
     ResearchOverviewLoadOptions
   } from "../lib/stores/app";
+  import {
+    resolveSitrepMarketHandoff,
+    resolveSitrepTapeHandoff,
+    type SitrepHandoffRequest,
+    type SitrepMarketHandoffProfile,
+  } from "../lib/view-models/sitrep";
 
   export let system: SystemStatus | null = null;
   export let overview: ResearchOverviewResponse | null = null;
@@ -35,6 +41,7 @@
   export let onLoadPrediction: (options?: PredictionMarketScreenerOptions) => Promise<unknown> | void;
   export let selectedEquitySymbol: string | null = null;
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | null = null;
+  export let onOpenHandoff: ((handoff: SitrepHandoffRequest) => Promise<unknown> | void) | null = null;
 
   const bloombergLiveVideoId = "iEpJwprxDdk";
   const bloombergEmbedUrl = `https://www.youtube-nocookie.com/embed/${bloombergLiveVideoId}?autoplay=0&mute=1&playsinline=1&rel=0`;
@@ -47,6 +54,7 @@
     title: string;
     detail: string;
     meta: string;
+    handoff?: SitrepHandoffRequest | null;
   };
 
   type SitrepMarketRow = {
@@ -490,6 +498,29 @@
     onSelectEquity?.(symbol, row.selectionLabel ?? row.label);
   }
 
+  function openEquityRow(row: SitrepMarketRow) {
+    selectEquityRow(row);
+    openMarketRow("equities", row);
+  }
+
+  function openMarketRow(profile: SitrepMarketHandoffProfile, row: SitrepMarketRow) {
+    const handoff = resolveSitrepMarketHandoff(profile, row);
+    if (handoff) {
+      void onOpenHandoff?.(handoff);
+    }
+  }
+
+  function openTapeRow(row: TapeRow) {
+    const handoff = resolveSitrepTapeHandoff(row);
+    if (handoff) {
+      void onOpenHandoff?.(handoff);
+    }
+  }
+
+  function hasTapeHandoff(row: TapeRow) {
+    return Boolean(resolveSitrepTapeHandoff(row));
+  }
+
   function isSelectedEquityRow(row: SitrepMarketRow) {
     const selected = selectedEquitySymbol?.trim().toUpperCase();
     const symbol = (row.symbol ?? row.label).trim().toUpperCase();
@@ -645,7 +676,11 @@
       tone: item.signal_label?.toLowerCase().includes("risk") ? "warning" : "neutral",
       title: item.title,
       detail: item.why_now || item.summary,
-      meta: item.source_provider
+      meta: item.source_provider,
+      handoff: {
+        targetTab: "macro",
+        targetMode: item.mode_target ?? "snapshot"
+      }
     }));
     const eventRows: TapeRow[] = (macroData?.upcoming_events ?? []).slice(0, 4).map((event) => ({
       id: event.event_id,
@@ -653,7 +688,11 @@
       tone: event.importance === "high" ? "warning" : "neutral",
       title: event.title,
       detail: `${humanize(event.category)} / ${event.region}`,
-      meta: event.relative_label ?? shortDate(event.scheduled_at)
+      meta: event.relative_label ?? shortDate(event.scheduled_at),
+      handoff: {
+        targetTab: "macro",
+        targetMode: "events_regimes"
+      }
     }));
     const marketRows: TapeRow[] = (predictionData?.markets ?? []).slice(0, 4).map((market) => ({
       id: market.market_id,
@@ -665,7 +704,11 @@
           : "negative",
       title: market.title,
       detail: market.probability_label ?? (market.current_probability == null ? "No probability" : formatPct(market.current_probability)),
-      meta: market.freshness?.status ?? market.status
+      meta: market.freshness?.status ?? market.status,
+      handoff: {
+        targetTab: "prediction_markets",
+        marketId: market.market_id
+      }
     }));
     const commodityRows: TapeRow[] = (commodityData?.events ?? []).slice(0, 3).map((event) => ({
       id: event.event_id,
@@ -673,7 +716,11 @@
       tone: event.importance === "high" ? "warning" : "neutral",
       title: event.title,
       detail: event.summary ?? humanize(event.category),
-      meta: event.relative_label ?? shortDate(event.scheduled_at)
+      meta: event.relative_label ?? shortDate(event.scheduled_at),
+      handoff: {
+        targetTab: "commodities",
+        targetMode: "events_cross_domain"
+      }
     }));
     return [...newsRows, ...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 14);
   }
@@ -689,7 +736,11 @@
       tone: item.label === "high" ? "warning" : item.score > 0 ? "neutral" : "negative",
       title: item.headline,
       detail: item.research_focus ?? item.summary,
-      meta: `score ${item.score.toFixed(1)} / ${item.label}`
+      meta: `score ${item.score.toFixed(1)} / ${item.label}`,
+      handoff: {
+        targetTab: "macro",
+        targetMode: "cross_asset"
+      }
     }));
     const movers: TapeRow[] = buildCommodityRows(commodityData)
       .filter((row) => row.change !== "N/A")
@@ -700,7 +751,8 @@
         tone: row.tone === "positive" ? "positive" : row.tone === "negative" ? "negative" : "neutral",
         title: `${row.label} ${row.change}`,
         detail: `${row.group} / ${row.secondary}`,
-        meta: row.source
+        meta: row.source,
+        handoff: resolveSitrepMarketHandoff("commodities", row)
       }));
     const equityLeader = overviewData?.rankings.leaders?.[0];
     const equityLaggard = overviewData?.rankings.laggards?.[0];
@@ -712,7 +764,11 @@
         tone: (item.value ?? 0) >= 0 ? "positive" : "negative",
         title: `${item.symbol ?? item.label} ${formatPct(item.value)}`,
         detail: item.group ?? "Market overview",
-        meta: overviewData?.freshness_label ?? "research overview"
+        meta: overviewData?.freshness_label ?? "research overview",
+        handoff: {
+          targetTab: "research",
+          targetMode: "overview"
+        }
       }));
     return [...divergenceRows, ...equityRows, ...movers].slice(0, 10);
   }
@@ -766,10 +822,10 @@
               type="button"
               class:selected={isSelectedEquityRow(row)}
               class="strip-item"
-              on:click={() => selectEquityRow(row)}
-              aria-label={`Select ${row.label} as selected equity`}
+              on:click={() => openEquityRow(row)}
+              aria-label={`Open ${row.label} in Research`}
               aria-pressed={isSelectedEquityRow(row)}
-              title={`Select ${row.label}`}
+              title={`Open ${row.label} in Research`}
             >
               <strong>{row.label}</strong>
               <em>{row.last}</em>
@@ -802,7 +858,7 @@
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={indexRows} profile="indices" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No index overview loaded." />
+          <SitrepMarketTable rows={indexRows} profile="indices" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -815,7 +871,7 @@
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No FX strip loaded." />
+          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -828,7 +884,7 @@
               <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." />
+          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -841,7 +897,7 @@
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No commodities workspace loaded." />
+          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
       </div>
 
@@ -852,12 +908,19 @@
         <div class="tape-list">
           {#if changedRows.length}
             {#each changedRows as row (row.id)}
-              <div use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'} class="tape-row {row.tone}">
+              <button
+                type="button"
+                use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'}
+                class="tape-row {row.tone}"
+                class:clickable={hasTapeHandoff(row)}
+                disabled={!hasTapeHandoff(row)}
+                on:click={() => openTapeRow(row)}
+              >
                 <span>{row.source}</span>
                 <strong>{row.title}</strong>
                 <p>{row.detail}</p>
                 <small>{row.meta}</small>
-              </div>
+              </button>
             {/each}
           {:else}
             <p class="empty-state">LOAD MARKET CONTEXT TO POPULATE CHANGE TRIAGE.</p>
@@ -1244,13 +1307,38 @@
   }
 
   .tape-row {
+    appearance: none;
+    width: 100%;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
     display: grid;
     grid-template-columns: 5.8rem minmax(0, 0.9fr) minmax(0, 1.7fr) minmax(5.5rem, 0.45fr);
     gap: 0.5rem;
     align-items: baseline;
     padding: 0.5rem 0;
+    border: 0;
     border-bottom: 1px solid var(--divider);
     min-width: 0;
+  }
+
+  .tape-row.clickable {
+    cursor: pointer;
+  }
+
+  .tape-row.clickable:hover,
+  .tape-row.clickable:focus-visible {
+    background: var(--bg-1);
+  }
+
+  .tape-row:disabled {
+    cursor: default;
+  }
+
+  .tape-row:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   .tape-row strong,

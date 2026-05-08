@@ -44,7 +44,7 @@ That means provider adapters, data models, reusable analytics, provenance, cross
 
 ## Current App State Snapshot
 
-_Updated: 2026-04-27_
+_Updated: 2026-05-08_
 
 Gamma is now a broad read-only research application with two primary workspaces:
 
@@ -58,7 +58,7 @@ The implemented app state is materially ahead of the original V2 starting point:
 - `Options` now has a registered multi-mode IV workspace with Surface, Skew & Term, Realized vs Implied, Implied Distribution, and Source views. It has live/mock IV surface collection, session start/stop/status routes, market-data mode controls, option-chain quality metadata, derived skew/term/realized/distribution analytics, and Copilot tools.
 - `SITREP` is the locked Research home and cross-domain triage surface. It reuses Research, Macro, Commodities, Prediction Markets, and News payloads, plus media/provider/status context, rather than acting as a standalone provider.
 - `Research` is a full multi-mode hub with Overview, Scope Analysis, Strategy Lab, Compare / Scenario, and Saved Research. It supports provider-neutral overview payloads, imported return-stream analytics, saved normalized research objects, and historical comparison without arbitrary code execution.
-- `Macro` remains a four-mode workspace with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes. It has FRED, Treasury, DB.nomics, IBKR FX proxy, US event, prediction-market linkage, coherence/lead-lag, policy path, and event-study logic.
+- `Macro` is now a six-mode workspace with Snapshot, Cross-Asset, Rates & Policy, Events / Regimes, Trade Partners, and Country Compare. It has FRED, Treasury, DB.nomics, Census trade-partner, IBKR FX proxy, US event, prediction-market linkage, coherence/lead-lag, policy path, event-study, bilateral trade-context, and country-comparison logic.
 - `Prediction Markets` remains first-pass complete with Polymarket/Kalshi adapters, screener/detail/history/wallet/related/calibration routes, venue status, filtering, canonicalization, freshness, and research ranking.
 - `Crypto` is a substantial first-pass workspace with CoinGecko and GeckoTerminal adapters, token overview/deep-dive/flows-liquidity modes, narratives, synthetic portfolios, DEX liquidity, flow proxies, comparison analytics, and Copilot grounding.
 - `Fundamentals` is a deep V2 workspace with Overview, Financials, Peers, DCF, Reverse Valuation, and Reference / Filings modes. It uses SEC/EdgarTools ingestion, IBKR market context, local peer/DCF persistence, raw-versus-normalized inspection, DCF snapshots, reverse solves, and Copilot tools.
@@ -69,6 +69,25 @@ The implemented app state is materially ahead of the original V2 starting point:
 - `News` has a first-pass sample/RSS provider boundary and `/news/latest` feed route for lightweight event context.
 
 The main remaining V2 gaps are no longer "make the tabs exist." They are provider depth, provenance adoption consistency, real cross-tab handoff actions, saved workflow depth, live-provider smoke coverage, installer/first-run readiness, tutorial flows, and richer beta-facing diagnostics/error states.
+
+### Current Tab Progress Snapshot
+
+This table tracks the visible app tabs as of 2026-05-08. Percentages are pragmatic implementation snapshots, not release promises.
+
+| Workspace | Tab | Current completion | What is left |
+| --- | --- | ---: | --- |
+| Portfolio | `Portfolio` | ~72% | Harden account/history persistence, improve first-run provider setup, broaden diagnostics around IBKR subscriptions, and add beta-facing empty/error states. |
+| Portfolio / Research | `Risk` | ~76% | Improve cross-tab handoffs from Research/Portfolio, validate optimization/scenario assumptions more deeply, add richer stress/regime slices, and expand interactive test coverage. |
+| Portfolio / Research | `Options` | ~58% | Add historical IV/skew persistence, better expiry/strike filtering, more durable underlying history, richer source/Greeks inspection, and deeper Research/Fundamentals/Copilot handoffs. |
+| Research | `SITREP` | ~62% | Harden the aggregator into a backend-owned SITREP contract over time, improve media/provider resilience, deepen saved triage/follow-up behavior, and expand handoffs beyond the current first-pass row targets. |
+| Research | `Research` | ~76% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, regime slicing, and explicit provider selection. |
+| Research | `Macro` | ~86% | Deepen Trade Partners and Country Compare beyond first-pass US/curated coverage, expand EU/global official data, improve source citations, and wire real handoffs to Commodities, Sealanes, Prediction Markets, and Copilot memos. |
+| Research | `Prediction Markets` | First-pass complete / targeted V2 | Keep enhancements opportunistic: better event taxonomy, commodity/maritime links, saved market clusters, calibration depth, and Copilot summaries where other tabs need them. |
+| Research | `Crypto` | ~74% | Add real wallet/transfer adapters, persistent narrative baskets, deeper pool monitoring, transaction-level DEX context, derivatives overlays, and saved crypto research sessions. |
+| Research | `Fundamentals` | ~82% | Broaden market/reference providers, improve statement trend overlays and restatement handling, add optional terminal-multiple framing, polish cross-tab handoffs, and harden regional expansion choices. |
+| Research | `Commodities` | ~73% | Add vendor-grade futures-chain history, continuous/roll-adjusted mapping, historical curve snapshots, real metals warehouse data, seasonal inventory surprise models, and live cross-domain handoff flows. |
+| Research | `Sealanes` | Paused ~45% | Evaluate AIS/historical data providers, add durable AIS caching, improve chokepoint baselines, build real event replay, enrich vessel metadata, and avoid risk labels until methodology is validated. |
+| Research | `Copilot` | ~64% | Replace wrapper streaming with provider-level streaming, improve session archive/search/title handling, add memo editing/export, strengthen source-backed versus inferred labels, and expand Sealanes/news drilldowns. |
 
 ---
 
@@ -467,9 +486,9 @@ At the end of this workstream, Gamma should have a clearer platform layer for pr
 
 ## Workstream 1A - SITREP
 
-_Status: In progress (~48%)_
+_Status: In progress (~62%)_
 _Dependency marker: Cross-domain aggregator; improves with provider foundation_
-_Recent progress: A first-pass locked `SITREP` tab is now the Research workspace home. It aggregates Research Overview, Macro Snapshot, Commodities Overview, Prediction Markets screener, and News payloads into a dense situation-report surface with a Bloomberg Television YouTube embed, cross-domain change triage, an event/news tape, equities, FX, yields, commodities tables, provider caveats, system/provider mode context, and all-uppercase tab navigation labels._
+_Recent progress: A first-pass locked `SITREP` tab is now the Research workspace home. It aggregates Research Overview, Macro Snapshot, Commodities Overview, Prediction Markets screener, and News payloads into a dense situation-report surface with a Bloomberg Television YouTube embed, cross-domain change triage, an event/news tape, equities, FX, yields, commodities tables, provider caveats, system/provider mode context, all-uppercase tab navigation labels, and first-pass row handoffs into Research, Macro, Commodities, and Prediction Markets._
 
 ### Why this workstream matters
 
@@ -497,22 +516,23 @@ This is useful immediately, but it is still an aggregator over existing tab data
 
 Required for the next meaningful step:
 
-- `RSS/news adapter`: normalized source, URL, publication time, detected tickers/entities, tags, summary snippets, and provenance. The current News / Events panel is an event-market proxy, not real news coverage.
-- `SITREP response model`: a backend-owned payload that ranks cross-domain items consistently instead of letting the Svelte view assemble everything ad hoc.
+- `News hardening`: normalized source, URL, publication time, detected tickers/entities, tags, summary snippets, provenance, and RSS/sample fallback behavior are now usable. Remaining work is breadth, resilience, and better source/ticker/entity enrichment rather than making news exist.
+- `SITREP response model`: a backend-owned payload should eventually own the cross-domain situation-report contract. The current Svelte composition is acceptable for the first pass, but a service-owned model would make saved triage, Copilot synthesis, and test coverage cleaner.
 - `Provider-neutral listed-market data`: broader and fresher equity/index/ETF coverage beyond the current narrow Research Overview seeds.
 - `FX and rates freshness policy`: clearer distinction between delayed IBKR, FRED/public daily series, and unavailable intraday context.
 - `Media embed fallback`: YouTube embeds can be blocked by remote policy, so the UI should keep a fallback link and avoid treating the video as guaranteed infrastructure.
-- `Cross-tab handoff wiring`: SITREP rows should eventually open the relevant target tab/mode/lens directly.
+- `Cross-tab handoff wiring`: first-pass row handoffs now open relevant target tabs/modes for listed markets, FX/rates, commodities, Macro triage/events, prediction markets, and equity scope analysis. Remaining work is richer entity/lens preservation and explicit saved handoff history.
 - `Copilot context`: SITREP should eventually provide a compact cross-domain context bundle or launch a synthesis flow from loaded constituent domains.
 
 ### Completion snapshot
 
 - `Locked navigation home`: ~90% complete. SITREP is now pinned as the first Research workspace tab and the old Research tab is no longer the locked home.
-- `Dense visual shell`: ~65% complete. The first pass follows Gamma's flat, dense panel language, but responsive polish and row-level handoffs remain open.
-- `Cross-domain aggregation`: ~45% complete. Existing tab payloads are reused effectively, but there is no dedicated backend SITREP schema or ranking service yet.
-- `News`: ~15% complete. The current surface shows Macro events, prediction-market items, and commodity events as a proxy tape; a real RSS/news adapter is still needed.
+- `Dense visual shell`: ~72% complete. The first pass follows Gamma's flat, dense panel language and now has row-level drilldowns; remaining work is responsive polish, state persistence, and richer action affordances.
+- `Cross-domain aggregation`: ~58% complete. Existing tab payloads are reused effectively and first-pass handoff metadata exists, but there is no dedicated backend SITREP schema yet.
+- `News`: ~62% complete. The News provider boundary and RSS/sample feed path are usable in SITREP. Remaining work is broader source coverage, entity/ticker tagging, deduping, richer summaries, and better source reliability handling.
 - `Bloomberg TV`: ~45% complete. YouTube embed is wired on a best-effort basis, but external embed availability cannot be controlled by Gamma.
-- `Provider transparency`: ~55% complete. Provider caveats and warnings are visible, but SITREP-specific freshness and source ranking are not yet normalized.
+- `Provider transparency`: ~60% complete. Provider caveats, warnings, provider mode, and feed freshness are visible, but SITREP-specific freshness grouping and source quality labels are not yet normalized.
+- `Cross-tab handoffs`: ~55% complete. Tables and triage rows can now route into Research, Macro, Commodities, and Prediction Markets. Remaining work is durable handoff envelopes, richer lens/entity preservation, and saved follow-up actions.
 
 ### Deliverable
 
@@ -740,10 +760,10 @@ At the end of Research V2, Gamma should have a genuine research hub that can ins
 
 ## Workstream 3 - Macro V2
 
-_Status: In progress (~84%)_
+_Status: In progress (~86%)_
 _Dependency marker: Parallelizable_
 _Parallelization note: Most Macro V2 work can proceed independently, but provider foundation helps EU/global expansion and cross-tab handoffs._
-_Recent progress: Macro remains a real four-mode workspace with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes; FRED, Treasury, DB.nomics, IBKR FX proxy, and US event adapters; ranked divergence/coherence and lead-lag interpretation; linked prediction-market context; policy-path and meeting-ladder proxies; event-study framing; deep-link style mode navigation; and Copilot drilldown tools._
+_Recent progress: Macro is now a six-mode workspace with Snapshot, Cross-Asset, Rates & Policy, Events / Regimes, Trade Partners, and Country Compare; FRED, Treasury, DB.nomics, Census trade-partner, IBKR FX proxy, and US event adapters; ranked divergence/coherence and lead-lag interpretation; linked prediction-market context; policy-path and meeting-ladder proxies; event-study framing; bilateral trade-partner context; country-comparison context; deep-link style mode navigation; and Copilot drilldown tools._
 
 #### Completion snapshot
 
@@ -751,6 +771,8 @@ _Recent progress: Macro remains a real four-mode workspace with Snapshot, Cross-
 - `Cross-Asset mode`: ~80% complete. Ranked divergences, driver/counter-signal framing, comparison overlays, linked contracts, coherence profiles, and lead/lag caveats are implemented. Remaining work: broader theme taxonomy, credit/stress proxies, provider-backed commodity links, and more explicit score component displays.
 - `Rates & Policy mode`: ~88% complete. Curve nodes, front-end/path proxies, real-yield/breakeven style interpretation where series exist, linked policy contracts, meeting-ladder proxies, and event-aware context are live. Remaining work: deeper EU/ECB coverage, better official policy calendar breadth, and clearer methodology for path proxies.
 - `Events / Regimes mode`: ~82% complete. Public event coverage, event windows, event-study summaries, pre/post-event coherence, and regime framing are implemented. Remaining work: richer official calendars, EU/global breadth, saved event studies, and real cross-tab event handoffs.
+- `Trade Partners mode`: ~58% complete. The mode has registered navigation, a dedicated view, normalized trade-partner summary rows, first-pass radial/table visualization, Census-backed US goods-trade rows where configured, and curated fallback rows. Remaining work: services trade, revisions, commodity drilldowns, non-US official adapters, country-group treatment, and direct links into Commodities and Sealanes.
+- `Country Compare mode`: ~45% complete. The mode has registered navigation, a dedicated comparison view, curated first-pass rows, and comparison-region context. Remaining work: live IMF/OECD/Eurostat-backed country series, broader indicator coverage, vintage/unit normalization, and clearer methodology/caveat panels.
 - `Macro coherence engine`: ~80% complete. The engine is service-owned and produces transparent heuristic divergence, agreement/disagreement, lead/lag, and source warning context. Remaining work: reusable cross-domain extraction, stronger validation, and avoiding over-interpretation as causal inference.
 - `Copilot integration`: ~78% complete. Macro context and read-only drilldown tools are exposed to Copilot. Remaining work: richer source-citation paths and saved memo/context linkage.
 
@@ -764,6 +786,8 @@ The current Macro workspace has:
 - `Cross-Asset`
 - `Rates & Policy`
 - `Events / Regimes`
+- `Trade Partners`
+- `Country Compare`
 
 V2 should deepen these modes rather than add a large number of new pages. If Commodities becomes a top-level tab, Macro should link into it instead of trying to duplicate a full commodity research desk internally.
 
@@ -781,14 +805,16 @@ It should help answer:
 
 ### Product structure
 
-Macro should retain its four-mode structure:
+Macro should retain a compact mode structure:
 
 - `Snapshot`
 - `Cross-Asset`
 - `Rates & Policy`
 - `Events / Regimes`
+- `Trade Partners`
+- `Country Compare`
 
-The main V2 expansion should be better US depth, meaningfully improved EU coverage, clearer Global comparisons, stronger event coverage, better coherence/lead-lag interpretation, and richer cross-tab links into Commodities and Prediction Markets.
+The main V2 expansion should be better US depth, meaningfully improved EU coverage, clearer Global comparisons, stronger event coverage, trade-partner and country-comparison depth, better coherence/lead-lag interpretation, and richer cross-tab links into Commodities, Sealanes, and Prediction Markets.
 
 #### 1. Snapshot V2
 
@@ -871,7 +897,41 @@ V2 improvements:
 
 Event categories can include inflation releases, labor releases, growth releases, central-bank meetings, Treasury/refunding events where relevant, major geopolitical catalysts, and commodity inventory releases where linked to Commodities.
 
-#### 5. Macro coherence engine V2
+#### 5. Trade Partners V2
+
+Trade Partners should explain how external demand, supply chains, imports, exports, FX, and commodity exposure shape a region's macro sensitivity.
+
+V2 improvements:
+
+- official partner-trade adapters beyond the first US Census goods slice,
+- clearer country-group handling,
+- services-trade and revisions context where available,
+- commodity-linked trade drilldowns,
+- partner concentration and trade-balance interpretation,
+- links into Commodities, Sealanes, and country comparison context.
+
+This mode should answer:
+
+**Which bilateral trade links could explain or pressure the current macro view?**
+
+#### 6. Country Compare V2
+
+Country Compare should make cross-country macro context explicit instead of hiding it inside regional labels.
+
+V2 improvements:
+
+- IMF/OECD/Eurostat-backed indicator rows,
+- harmonized units and frequencies,
+- vintage/revision caveats where providers expose them,
+- clearer comparison-region controls,
+- external-balance, growth, inflation, labor, policy, and reserves context,
+- links back into Cross-Asset and Events / Regimes.
+
+This mode should answer:
+
+**Is the current region-specific signal actually local, or part of a broader country divergence?**
+
+#### 7. Macro coherence engine V2
 
 The coherence engine should become a reusable service rather than tab-local logic.
 
@@ -889,7 +949,7 @@ The engine should still be transparent and heuristic unless a later statistical 
 
 ### Data requirements
 
-Macro V2 needs macro time series, yield-curve histories, real-yield and breakeven histories, FX and dollar proxies, credit/stress proxies where available, official event calendars, linked prediction-market metadata, linked commodity-market context, region and concept mappings, and provenance for every transformed series.
+Macro V2 needs macro time series, yield-curve histories, real-yield and breakeven histories, FX and dollar proxies, credit/stress proxies where available, official event calendars, trade-partner and country-comparison datasets, linked prediction-market metadata, linked commodity-market context, region and concept mappings, and provenance for every transformed series.
 
 ### Data sources / APIs
 
@@ -921,7 +981,7 @@ Suggested progression:
 
 ### Deliverable
 
-At the end of Macro V2, Gamma should have a more globally useful macro workspace with stronger event interpretation, better rates/policy depth, richer cross-asset coherence, and cleaner links to commodities and prediction markets.
+At the end of Macro V2, Gamma should have a more globally useful macro workspace with stronger event interpretation, better rates/policy depth, richer cross-asset coherence, explicit trade/country comparison context, and cleaner links to commodities, sealanes, and prediction markets.
 
 ---
 

@@ -1,7 +1,9 @@
 <script lang="ts" context="module">
   export interface SitrepMarketRow {
     id: string;
+    symbol?: string | null;
     label: string;
+    selectionLabel?: string | null;
     group: string;
     last: string;
     change: string;
@@ -28,8 +30,17 @@
   export let hideContext = false;
   export let contextTone = false;
   export let profile: "default" | "equities" | "indices" | "fx" | "yields" | "commodities" = "default";
+  export let onSelect: ((row: SitrepMarketRow) => void) | null = null;
 
   $: colCount = 3 + (hideGroup ? 0 : 1) + (showPctChange ? 1 : 0) + (hideContext ? 0 : 1);
+
+  function handleRowKeydown(event: KeyboardEvent, row: SitrepMarketRow) {
+    if (!onSelect || (event.key !== "Enter" && event.key !== " ")) {
+      return;
+    }
+    event.preventDefault();
+    onSelect(row);
+  }
 </script>
 
 <div class="table-wrap">
@@ -47,7 +58,13 @@
     <tbody>
       {#if rows.length}
         {#each rows as row (row.id)}
-          <tr>
+          <tr
+            class:clickable={Boolean(onSelect)}
+            tabindex={onSelect ? 0 : undefined}
+            role={onSelect ? "button" : undefined}
+            on:click={() => onSelect?.(row)}
+            on:keydown={(event) => handleRowKeydown(event, row)}
+          >
             <td class="market-cell">
               <strong>{row.label}</strong>
               {#if !hideSource && row.source}<span>{row.source}</span>{/if}
@@ -237,6 +254,20 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-size: 0.72rem;
+  }
+
+  tr.clickable {
+    cursor: pointer;
+  }
+
+  tr.clickable:hover,
+  tr.clickable:focus-visible {
+    background: var(--bg-1);
+  }
+
+  tr.clickable:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   .positive {
