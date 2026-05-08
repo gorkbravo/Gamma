@@ -590,17 +590,12 @@
 <section class="view">
   <article class="panel header-panel">
     <div class="header-top">
-      <div class="headline-block">
-        <p class="eyebrow">Fundamentals</p>
-        <div class="headline-title-row">
-          <h2>Fundamentals Research</h2>
-          {#if loading}<span class="loading-pill">Refreshing</span>{/if}
-          {#if saving}<span class="loading-pill secondary-pill">Saving</span>{/if}
-        </div>
-        {#if currentCompany}
-          <p class="subtitle">{currentCompany.name} ({currentCompany.ticker}){currentCompany.exchange ? ` | ${currentCompany.exchange}` : ""}</p>
-        {/if}
-      </div>
+      <span class="title">Fundamentals Research</span>
+      {#if currentCompany}
+        <span class="subtitle">{currentCompany.name} ({currentCompany.ticker}){currentCompany.exchange ? ` · ${currentCompany.exchange}` : ""}</span>
+      {/if}
+      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if saving}<span class="loading-pill secondary-pill">Saving</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -1953,6 +1948,7 @@
 
   .header-panel {
     gap: 0.35rem;
+    padding: 0.5rem 0.65rem;
   }
 
   .header-top,
@@ -1969,11 +1965,28 @@
     gap: 0.5rem;
   }
 
-  .header-top,
+  .header-top {
+    align-items: baseline;
+  }
+
   .panel-header,
   .mode-kpi-row {
     justify-content: space-between;
     align-items: flex-start;
+  }
+
+  .header-panel .title {
+    color: var(--text-0);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .header-panel .subtitle {
+    color: var(--text-2);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
   }
 
   /* Sub-panel headers: collapse eyebrow + h3 stack into a single 26px row.
@@ -2033,7 +2046,6 @@
 
   .mode-bar {
     display: inline-grid;
-    background: var(--surface-0);
     border: 1px solid var(--panel-strong);
     grid-template-columns: repeat(6, auto);
   }
@@ -2077,7 +2089,6 @@
     padding: 0.22rem 0.48rem;
   }
 
-  .mode-bar button,
   button,
   .scenario-card {
     border: 1px solid var(--panel-strong);
@@ -2093,19 +2104,26 @@
   .mode-bar button {
     border: 0;
     border-right: 1px solid var(--panel-strong);
+    background: transparent;
+    color: var(--text-1);
+    padding: 0.28rem 0.65rem;
+    font: inherit;
+    font-size: 0.79rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
   }
 
-  .mode-bar button:last-child {
-    border-right: 0;
-  }
+  .mode-bar button:last-child { border-right: 0; }
+  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); border-color: var(--panel-strong); }
+  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
-  .mode-bar button.selected,
   .scenario-card.selected-scenario {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
   }
 
-  .mode-bar button:hover,
   button:hover,
   .scenario-card:hover {
     border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
@@ -2159,11 +2177,11 @@
   }
 
   .filter-wide {
-    flex: 0 1 16rem;
+    flex: 1 1 14rem;
   }
 
   .search-control {
-    min-width: min(16rem, 100%);
+    min-width: 10rem;
     max-width: 18rem;
   }
 
@@ -2177,10 +2195,10 @@
   .header-note {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 0.6rem;
-    align-items: baseline;
+    gap: 0.5rem;
+    align-items: center;
     min-width: 0;
-    max-width: 34rem;
+    max-width: 32rem;
     padding-left: 0.75rem;
     border-left: 1px solid var(--divider);
   }
@@ -2192,12 +2210,18 @@
   }
 
   .header-note p {
-    font-size: 0.76rem;
-    line-height: 1.35;
+    font-size: 11px;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    min-width: 0;
   }
 
   .header-note small {
-    font-size: 0.7rem;
+    font-size: 10px;
     white-space: nowrap;
   }
 
@@ -2220,12 +2244,15 @@
   .search-actions {
     align-items: end;
     min-width: 0;
+    flex-wrap: nowrap;
   }
 
   .search-strip button {
     min-height: 1.75rem;
     padding: 0.25rem 0.55rem;
     font-size: 0.74rem;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .grid-input {
@@ -2359,12 +2386,19 @@
 
   .eyebrow,
   .focus-label,
-  .headline-kpi-label,
   label > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 0.62rem;
+  }
+
+  .headline-kpi-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 9.5px;
+    line-height: 1.1;
   }
 
   h2,
@@ -2385,20 +2419,25 @@
     font-weight: 700;
   }
 
-  .headline-kpi {
-    padding: 0.12rem 0.65rem 0.2rem 0.65rem;
+  .headline-strip {
     border-left: 1px solid var(--divider);
-    text-align: right;
   }
 
-  .headline-kpi:first-child {
-    border-left: 0;
+  .headline-kpi {
+    display: grid;
+    gap: 0.05rem;
+    padding: 0.1rem 0.7rem;
+    border-right: 1px solid var(--divider);
+    min-width: 5.5rem;
+    text-align: left;
   }
 
   .headline-kpi-value {
     display: block;
-    font-size: 0.9rem;
-    line-height: 1.2;
+    color: var(--text-0);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.15;
   }
 
   .profile-grid {

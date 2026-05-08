@@ -1196,13 +1196,9 @@
 <section class="view">
   <article class="panel header-panel">
     <div class="header-top">
-      <div class="headline-block">
-        <p class="eyebrow">Research</p>
-        <div class="headline-title-row">
-          <h2>Research Workspace</h2>
-          {#if loading || overviewLoading || strategyLoading || compareLoading || savedLoading}<span class="loading-pill">Refreshing</span>{/if}
-        </div>
-      </div>
+      <span class="title">Research Workspace</span>
+      <span class="subtitle">Strategy backtests · saved screens</span>
+      {#if loading || overviewLoading || strategyLoading || compareLoading || savedLoading}<span class="loading-pill">Refreshing</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -2097,6 +2093,21 @@
 
   .header-panel {
     gap: 0.35rem;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .header-panel .title {
+    color: var(--text-0);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .header-panel .subtitle {
+    color: var(--text-2);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
   }
 
   .performance-panel,
@@ -2113,9 +2124,8 @@
   /* ── Header panel internals ── */
   .header-top {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.8rem;
+    align-items: baseline;
+    gap: 0.5rem;
   }
 
   .headline-block {
@@ -2150,11 +2160,10 @@
     flex-wrap: wrap;
   }
 
-  /* ── Mode bar (segmented control, Macro pattern) ── */
+  /* ── Mode bar (Risk pattern) ── */
   .mode-bar {
     display: inline-flex;
     border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
   }
 
   .mode-bar button {
@@ -2162,9 +2171,9 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.4rem 0.85rem;
+    padding: 0.28rem 0.65rem;
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 0.79rem;
     line-height: 1.2;
     display: inline-flex;
     align-items: baseline;
@@ -2176,24 +2185,10 @@
     transition: background 120ms ease, color 120ms ease;
   }
 
-  .mode-bar button:last-child {
-    border-right: 0;
-  }
-
-  .mode-bar button:hover {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-    color: var(--text-0);
-  }
-
-  .mode-bar button:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-  }
-
-  .mode-bar button.selected {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
-  }
+  .mode-bar button:last-child { border-right: 0; }
+  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   /* ── Treemap panel header with inline controls ── */
   .treemap-header {

@@ -3,6 +3,8 @@
   import MacroCrossAsset from "../components/MacroCrossAsset.svelte";
   import MacroRatesPolicy from "../components/MacroRatesPolicy.svelte";
   import MacroEventsRegimes from "../components/MacroEventsRegimes.svelte";
+  import MacroTradePartners from "../components/MacroTradePartners.svelte";
+  import MacroCountryCompare from "../components/MacroCountryCompare.svelte";
   import type { ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
     MacroContextState,
@@ -29,6 +31,8 @@
     { id: "cross_asset", label: "Cross-Asset" },
     { id: "rates_policy", label: "Rates & Policy" },
     { id: "events_regimes", label: "Events / Regimes" },
+    { id: "trade_partners", label: "Trade Partners" },
+    { id: "country_compare", label: "Country Compare" },
   ];
   const themeLabels: Record<MacroTheme, string> = {
     all: "All", growth: "Growth", inflation: "Inflation",
@@ -41,16 +45,22 @@
       snapshot: [], cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
       rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
       events_regimes: [],
+      trade_partners: [],
+      country_compare: [],
     },
     EU: {
       snapshot: [], cross_asset: ["eu-hicp-yoy", "eu-eurusd", "eu-10y-yield", "eu-industrial-production-yoy"],
       rates_policy: ["eu-policy-rate", "eu-3m-rate", "eu-10y-yield", "eu-hicp-yoy", "eu-eurusd"],
       events_regimes: [],
+      trade_partners: [],
+      country_compare: [],
     },
     Global: {
       snapshot: [], cross_asset: ["us-cpi-yoy", "us-5y-breakeven", "us-dollar-broad", "us-hy-oas"],
       rates_policy: ["us-fed-funds", "us-2y-yield", "us-10y-yield", "us-real-10y-yield", "us-5y-breakeven"],
       events_regimes: [],
+      trade_partners: [],
+      country_compare: [],
     },
   };
   const chartComparisonPairs: Record<string, string> = {
@@ -229,13 +239,16 @@
   <!-- ── Header shell ── -->
   <article class="panel header-panel">
     <div class="header-top">
-      <div class="headline-block">
-        <p class="eyebrow">Macro</p>
-        <div class="headline-title-row">
-          <h2>Macro Research</h2>
-          {#if loading}<span class="loading-pill">Refreshing</span>{/if}
-        </div>
-      </div>
+      <span class="title">Macro Research</span>
+      <span class="subtitle">{$macroContext.region} · {$macroContext.timeframe} · {themeLabels[$macroContext.theme] ?? $macroContext.theme}</span>
+      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if nextEvent}
+        <span class="next-event">
+          <span class="next-event-label">Next</span>
+          <span class="next-event-title">{nextEvent.title}</span>
+          <span class="next-event-date">{shortDate(nextEvent.scheduled_at)}</span>
+        </span>
+      {/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -246,26 +259,16 @@
           </button>
         {/each}
       </div>
-      <div class="header-right">
-        {#if headlineKPIs.length}
-          <div class="headline-strip">
-            {#each headlineKPIs as kpi}
-              <div class="headline-kpi">
-                <span class="headline-kpi-label">{kpi.label}</span>
-                <strong class="headline-kpi-value">{kpi.displayValue}</strong>
-                {#if kpi.delta}<small class="headline-kpi-delta {kpi.deltaClass}">{kpi.delta}</small>{/if}
-              </div>
-            {/each}
-          </div>
-          {#if nextEvent}
-            <div class="next-event">
-              <span class="next-event-label">Next</span>
-              <span class="next-event-title">{nextEvent.title}</span>
-              <span class="next-event-date">{shortDate(nextEvent.scheduled_at)}</span>
+      {#if headlineKPIs.length}
+        <div class="headline-strip">
+          {#each headlineKPIs as kpi}
+            <div class="headline-kpi">
+              <span class="headline-kpi-label">{kpi.label}</span>
+              <strong class="headline-kpi-value">{kpi.displayValue}{#if kpi.delta} <small class="headline-kpi-delta {kpi.deltaClass}">{kpi.delta}</small>{/if}</strong>
             </div>
-          {/if}
-        {/if}
-      </div>
+          {/each}
+        </div>
+      {/if}
     </div>
 
     <div class="context-bar">
@@ -315,6 +318,10 @@
     <MacroRatesPolicy {snapshot} {ratesChart} {inflationChart} region={$macroContext.region} />
   {:else if $macroContext.mode === "events_regimes"}
     <MacroEventsRegimes {snapshot} {events} />
+  {:else if $macroContext.mode === "trade_partners"}
+    <MacroTradePartners {snapshot} />
+  {:else if $macroContext.mode === "country_compare"}
+    <MacroCountryCompare {snapshot} />
   {/if}
 </section>
 
@@ -333,101 +340,94 @@
     gap: 0.5rem;
   }
 
-  .header-panel { gap: 0.35rem; }
+  .header-panel { gap: 0.35rem; padding: 0.5rem 0.65rem; }
 
   .header-top {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.8rem;
-  }
-
-  .headline-block {
-    display: grid;
-    gap: 0.1rem;
-    flex-shrink: 0;
-  }
-
-  .headline-title-row {
-    display: flex;
     align-items: baseline;
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
 
-  .header-right {
-    position: absolute;
-    right: 0;
-    top: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0;
+  .title {
+    color: var(--text-0);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .subtitle {
+    color: var(--text-2);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
   }
 
   /* ── Headline KPI strip ── */
-  .headline-strip { display: flex; gap: 0; }
+  .headline-strip { display: flex; gap: 0; border-left: 1px solid var(--divider); }
 
   .headline-kpi {
-    padding: 0.2rem 0.65rem;
-    border-left: 1px solid rgba(46, 60, 74, 0.42);
-    text-align: right;
+    display: grid;
+    gap: 0.05rem;
+    padding: 0.1rem 0.7rem;
+    border-right: 1px solid var(--divider);
+    min-width: 5.5rem;
+    text-align: left;
   }
-
-  .headline-kpi:first-child { border-left: 0; }
 
   .headline-kpi-label {
     display: block;
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.52rem;
+    font-size: 9.5px;
+    line-height: 1.1;
     white-space: nowrap;
   }
 
   .headline-kpi-value {
     display: block;
-    font-size: 0.92rem;
-    line-height: 1.2;
-    margin-top: 0.06rem;
+    color: var(--text-0);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.15;
     white-space: nowrap;
   }
 
   .headline-kpi-delta {
-    display: block;
     color: var(--text-2);
-    font-size: 0.62rem;
-    margin-top: 0.02rem;
+    font-size: 10px;
+    font-weight: 400;
+    margin-left: 0.2rem;
     white-space: nowrap;
   }
 
   .headline-kpi-delta.positive { color: var(--positive); }
   .headline-kpi-delta.negative { color: var(--negative); }
 
-  /* ── Next event ── */
+  /* ── Next event (inline in header-top) ── */
   .next-event {
-    display: flex;
+    display: inline-flex;
     align-items: baseline;
-    justify-content: flex-end;
-    gap: 0.6rem;
+    gap: 0.35rem;
     white-space: nowrap;
-    margin-top: 0.1rem;
-    padding-top: 0.2rem;
-    border-top: 1px solid rgba(46, 60, 74, 0.25);
+    margin-left: auto;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--divider);
+    color: var(--text-2);
   }
 
   .next-event-label {
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.6rem;
+    font-size: 9.5px;
     color: var(--text-2);
-    opacity: 0.7;
   }
 
-  .next-event-title { color: var(--text-1); font-size: 0.84rem; }
+  .next-event-title { color: var(--text-1); font-size: 11px; }
 
-  .next-event-date { color: var(--text-2); font-size: 0.8rem; }
+  .next-event-date { color: var(--text-2); font-size: 10.5px; }
 
-  .next-event-date::before { content: "·"; margin-right: 0.5rem; opacity: 0.5; }
+  .next-event-date::before { content: "·"; margin-right: 0.35rem; opacity: 0.5; }
 
   /* ── Loading pill ── */
   .loading-pill {
@@ -458,9 +458,8 @@
 
   .mode-bar {
     display: inline-grid;
-    grid-template-columns: repeat(4, auto);
+    grid-template-columns: repeat(6, auto);
     border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
   }
 
   .mode-bar button {
@@ -468,9 +467,9 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.4rem 0.85rem;
+    padding: 0.28rem 0.65rem;
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 0.79rem;
     white-space: nowrap;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
@@ -482,25 +481,28 @@
   .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   /* ── Context bar ── */
-  .context-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .context-group { display: flex; gap: 0.5rem; }
-  .context-bar label { display: grid; gap: 0.2rem; }
+  .context-bar { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .context-group { display: flex; gap: 0.4rem; }
+  .context-bar label { display: grid; gap: 0.15rem; }
 
   .context-bar label > span {
     color: var(--text-2);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    font-size: 10px;
+    font-weight: 500;
   }
 
   .context-bar select {
     border: 1px solid var(--panel-strong);
-    background: #0d0f12;
+    background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.4rem 0.6rem;
+    height: 24px;
+    padding: 2px 6px;
     font: inherit;
-    font-size: 0.82rem;
-    min-width: 6rem;
+    font-size: 12px;
+    border-radius: 2px;
+    min-width: 5rem;
     cursor: pointer;
     transition: border-color 120ms ease;
   }

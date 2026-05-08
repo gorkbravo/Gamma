@@ -755,8 +755,8 @@
 <section class="view">
   <article class="panel header-panel">
     <div class="header-identity">
-      <p class="eyebrow">SITREP</p>
-      <h2>Situation Report</h2>
+      <span class="title">SITREP</span>
+      <span class="subtitle">Situation Report</span>
     </div>
     <div class="equity-strip" aria-label="US equity tape">
       {#if equityRows.length}
@@ -1040,11 +1040,25 @@
 
   .header-identity {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    align-items: baseline;
+    gap: 0.5rem;
     padding: 0.52rem 0.85rem;
     flex-shrink: 0;
     white-space: nowrap;
+  }
+
+  .header-identity .title {
+    color: var(--text-0);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .header-identity .subtitle {
+    color: var(--text-2);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
   }
 
   .title-line {

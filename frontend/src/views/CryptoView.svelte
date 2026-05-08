@@ -286,19 +286,17 @@
 <section class="view">
   <article class="panel header-panel">
     <div class="header-top">
-      <div class="headline-block">
-        <p class="eyebrow">Crypto</p>
-        <div class="headline-title-row">
-          <h2>Crypto Research</h2>
-          {#if loading}<span class="loading-pill">Refreshing</span>{/if}
-          {#if portfolioLoading}<span class="loading-pill secondary-pill">Building basket</span>{/if}
-        </div>
-      </div>
-      <div class="header-badges">
-        {#if detail?.layer_bucket}<span>{detail.layer_bucket}</span>{/if}
-        {#if detail?.chain && !detail.chain.startsWith(detail.layer_bucket ?? "")}<span>{detail.chain}</span>{/if}
-        {#if strongestNarrative}<span>{strongestNarrative.label} leads</span>{/if}
-      </div>
+      <span class="title">Crypto Research</span>
+      {#if detail}
+        <span class="subtitle">
+          {detail.symbol ?? detail.token_id}
+          {#if detail.layer_bucket} · {detail.layer_bucket}{/if}
+          {#if detail.chain && !detail.chain.startsWith(detail.layer_bucket ?? "")} · {detail.chain}{/if}
+          {#if strongestNarrative} · {strongestNarrative.label} leads{/if}
+        </span>
+      {/if}
+      {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if portfolioLoading}<span class="loading-pill secondary-pill">Building basket</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
@@ -311,8 +309,7 @@
         {#each headlineMetrics as metric}
           <div class="headline-kpi">
             <span class="headline-kpi-label">{metric.label}</span>
-            <strong class="headline-kpi-value">{metric.value}</strong>
-            {#if metric.meta}<small class={`headline-kpi-meta ${metric.metaTone ?? ""}`}>{metric.meta}</small>{/if}
+            <strong class="headline-kpi-value">{metric.value}{#if metric.meta} <small class={`headline-kpi-meta ${metric.metaTone ?? ""}`}>· {metric.meta}</small>{/if}</strong>
           </div>
         {/each}
       </div>
@@ -1149,7 +1146,28 @@
   }
 
   .header-panel {
-    gap: 0.3rem;
+    gap: 0.35rem;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .header-panel .header-top {
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  .header-panel .title {
+    color: var(--text-0);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .header-panel .subtitle {
+    color: var(--text-2);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
   }
 
   .table-panel {
@@ -1243,7 +1261,6 @@
   .mode-bar,
   .canvas-toggle {
     display: inline-grid;
-    background: var(--surface-0);
     border: 1px solid var(--panel-strong);
   }
 
@@ -1260,11 +1277,24 @@
     border: 0;
     border-right: 1px solid var(--panel-strong);
     background: transparent;
+    color: var(--text-1);
+    padding: 0.28rem 0.65rem;
+    font: inherit;
+    font-size: 0.79rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
   }
 
   .mode-bar button:last-child,
   .canvas-toggle button:last-child {
     border-right: 0;
+  }
+
+  .mode-bar button:focus-visible,
+  .canvas-toggle button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
 
   button {
@@ -1279,12 +1309,17 @@
 
   .mode-bar button.selected,
   .canvas-toggle button.selected {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: rgba(122, 166, 200, 0.12);
     color: var(--accent);
   }
 
-  .mode-bar button:hover,
-  .canvas-toggle button:hover,
+  .mode-bar button:hover:not(:disabled),
+  .canvas-toggle button:hover:not(:disabled) {
+    background: rgba(122, 166, 200, 0.06);
+    color: var(--text-0);
+    border-color: var(--panel-strong);
+  }
+
   button:hover {
     border-color: color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
   }
@@ -1348,13 +1383,20 @@
 
   label > span,
   .eyebrow,
-  .headline-kpi-label,
   .section-label,
   .focus-label {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 0.62rem;
+  }
+
+  .headline-kpi-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 9.5px;
+    line-height: 1.1;
   }
 
   h2,
@@ -1372,6 +1414,40 @@
   h3 {
     font-size: 0.94rem;
   }
+
+  .header-panel .headline-strip {
+    border-left: 1px solid var(--divider);
+  }
+
+  .header-panel .headline-kpi {
+    display: grid;
+    gap: 0.05rem;
+    padding: 0.1rem 0.7rem;
+    border-right: 1px solid var(--divider);
+    border-left: 0;
+    min-width: 5.5rem;
+    text-align: left;
+  }
+
+  .header-panel .headline-kpi-value {
+    display: block;
+    color: var(--text-0);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.15;
+  }
+
+  .header-panel .headline-kpi-value .headline-kpi-meta {
+    color: var(--text-2);
+    font-size: 10px;
+    font-weight: 400;
+    margin-left: 0.15rem;
+    line-height: 1.15;
+  }
+
+  .header-panel .headline-kpi-value .headline-kpi-meta.positive { color: var(--positive); }
+  .header-panel .headline-kpi-value .headline-kpi-meta.negative { color: var(--negative); }
+  .header-panel .headline-kpi-value .headline-kpi-meta.warning { color: var(--warning); }
 
   .headline-kpi {
     padding: 0.12rem 0.65rem 0.2rem 0.65rem;

@@ -404,10 +404,23 @@
 
 <section class="view">
   <article class="panel header-panel">
-    <div class="workspace-header">
-      <div class="header-title">
-        <span class="eyebrow">OPTIONS</span>
-        <h2>{result?.symbol ?? symbol}</h2>
+    <div class="header-top">
+      <span class="title">Options Workspace</span>
+      <span class="subtitle">{result?.symbol ?? symbol}</span>
+    </div>
+    <div class="mode-kpi-row">
+      <div class="mode-bar" role="tablist" aria-label="Options modes">
+      {#each optionsModes as optionMode}
+        <button
+          class:selected={optionMode.id === mode}
+          role="tab"
+          aria-selected={optionMode.id === mode}
+          type="button"
+          on:click={() => chooseMode(optionMode.id)}
+        >
+          {optionMode.label}
+        </button>
+      {/each}
       </div>
       <div class="surface-actions">
         <button class="primary-action" on:click={submit} disabled={loading}>
@@ -436,19 +449,6 @@
           {/if}
         </div>
       </div>
-    </div>
-    <div class="mode-bar" role="tablist" aria-label="Options modes">
-      {#each optionsModes as optionMode}
-        <button
-          class:selected={optionMode.id === mode}
-          role="tab"
-          aria-selected={optionMode.id === mode}
-          type="button"
-          on:click={() => chooseMode(optionMode.id)}
-        >
-          {optionMode.label}
-        </button>
-      {/each}
     </div>
   </article>
 
@@ -907,8 +907,43 @@
 
   .header-panel {
     display: grid;
+    gap: 0.35rem;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .header-panel .header-top {
+    display: flex;
+    align-items: baseline;
     gap: 0.5rem;
-    padding: 0.65rem 0.85rem;
+  }
+
+  .header-panel .title {
+    color: var(--text-0);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .header-panel .subtitle {
+    color: var(--text-2);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+  }
+
+  .header-panel .mode-kpi-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .header-panel .surface-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
   .workspace-grid {
@@ -982,7 +1017,6 @@
     display: inline-grid;
     grid-template-columns: repeat(5, auto);
     border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
     width: fit-content;
   }
 
@@ -991,24 +1025,18 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.55rem;
-    font-size: 0.8rem;
+    padding: 0.28rem 0.65rem;
+    font: inherit;
+    font-size: 0.79rem;
+    white-space: nowrap;
     cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
   }
 
-  .mode-bar button:last-child {
-    border-right: 0;
-  }
-
-  .mode-bar button:hover {
-    background: rgba(122, 166, 200, 0.06);
-    color: var(--text-0);
-  }
-
-  .mode-bar button.selected {
-    background: rgba(122, 166, 200, 0.12);
-    color: var(--accent);
-  }
+  .mode-bar button:last-child { border-right: 0; }
+  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   .controls-panel {
     display: grid;
