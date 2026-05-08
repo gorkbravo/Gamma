@@ -7,6 +7,12 @@
       "runtimeArgs": ["C:/Users/User/Desktop/Gamma/frontend/node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5174"],
       "port": 5174,
       "cwd": "frontend"
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "C:/Users/User/Desktop/Gamma/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "src.api.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
     }
   ]
 }

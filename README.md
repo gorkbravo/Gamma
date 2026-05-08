@@ -110,6 +110,7 @@ Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 - `EIA`: optional selected official US energy fundamentals for the Commodities tab when `EIA_API_KEY` is configured
 - `US Treasury`: Treasury curve snapshots for the US rates view
 - official macro event adapters: policy and macro calendar coverage used in `Events / Regimes`
+- planned macro depth providers: `BLS`, `BEA`, `ECB`, `Eurostat`, `IMF`, `OECD`, `UN Comtrade`, and `WTO` are represented in provider capability metadata for country comparison and trade-partner adapter work; the first UI pass uses explicit curated placeholders until live adapters are added
 - `Polymarket`: Gamma API, Data API, and CLOB history endpoints
 - `Kalshi`: public market, event, history, and trade endpoints
 - `CoinGecko`: broad token market coverage, token metadata, categories, and price history
@@ -309,6 +310,8 @@ Macro is paused at the roadmap's first-pass checkpoint and is the densest resear
 - `Cross-Asset`
 - `Rates & Policy`
 - `Events / Regimes`
+- `Trade Partners`
+- `Country Compare`
 
 Shared context:
 
@@ -334,6 +337,8 @@ What Gamma adds on top:
 - lead/lag annotations
 - linked prediction-market context
 - policy-path and meeting-ladder proxies
+- bilateral trade-partner rows for US/EU first, with Global kept as a lighter context lens
+- country comparison rows across growth, inflation, labor, policy, and trade-balance metrics
 
 The key Macro math is heuristic and transparent:
 
@@ -367,7 +372,8 @@ Important caveats:
 - Macro is not a statistical factor model
 - comparison overlays only exist where Gamma has curated counterpart mappings
 - `Global` is a lighter comparative lens, not a fully independent region stack
-- EU coverage is intentionally lighter than US coverage in v1
+- EU coverage is now a first-class target for trade and country-compare context, while some underlying live adapters remain planned
+- trade-partner and country-compare rows are read-only research scaffolds until official BEA/Census, Eurostat, IMF/OECD, UN Comtrade, and WTO adapter paths replace the curated placeholders
 
 #### Commodities tab
 
