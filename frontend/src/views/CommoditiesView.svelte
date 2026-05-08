@@ -735,8 +735,7 @@
       return instruments.filter((instrument) => instrument.family === activeMode);
     }
     if (activeMode === "overview" || activeMode === "curves_spreads") {
-      const curveIds = new Set(data.curves.map((curve) => curve.instrument_id));
-      return instruments.filter((instrument) => curveIds.has(instrument.instrument_id));
+      return instruments;
     }
     if (activeMode === "inventories_fundamentals") {
       const inventoryIds = new Set(data.inventories.map((series) => series.metadata.instrument_id).filter(Boolean));

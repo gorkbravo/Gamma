@@ -16,7 +16,9 @@ from src.services.cache import CacheService
 from src.services.commodities_adapters import (
     EIA_INVENTORY_SERIES,
     EIA_PRICE_SERIES,
+    IBKR_FUTURES_ROOTS,
     EiaCommoditiesDataProvider,
+    IbkrFutureRootConfig,
     IbkrCommoditiesDataProvider,
     SampleCommoditiesDataProvider,
 )
@@ -106,6 +108,14 @@ def test_sample_commodities_workspace_contains_research_analytics():
     copper_aluminum = next(spread for spread in workspace.spreads if spread.definition.spread_id == "copper-aluminum-spread")
     assert copper_aluminum.value is not None
     assert copper_aluminum.definition.unit == "USD/mt"
+
+
+def test_ibkr_default_roots_cover_curve_capable_sample_commodities():
+    snapshot = SampleCommoditiesDataProvider().get_snapshot()
+    curve_capable_ids = {curve.instrument_id for curve in snapshot.curve_snapshots}
+    configured_root_ids = {config.instrument_id for config in IBKR_FUTURES_ROOTS}
+
+    assert curve_capable_ids <= configured_root_ids
 
 
 def test_eia_provider_without_key_degrades_to_sample_with_warning():
@@ -371,6 +381,57 @@ def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_pat
     assert [node.price for node in selected_wti_curve.nodes] == [80.0, 79.0, 78.5, 78.1]
     assert cached_gold_curve.source_provider == "ibkr_cached"
     assert any("Using cached IBKR curve for Gold" in warning for warning in cached_snapshot.warnings)
+
+
+def test_ibkr_provider_defaults_to_shallow_breadth_for_all_configured_roots(tmp_path, monkeypatch):
+    monkeypatch.delenv("IBKR_COMMODITIES_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_BREADTH_ENABLED", raising=False)
+    monkeypatch.delenv("IBKR_COMMODITIES_STARTUP_ENABLED", raising=False)
+    details = {
+        "CL": [
+            _future_detail(4001, "202606", "CLM6"),
+            _future_detail(4002, "202607", "CLN6"),
+            _future_detail(4003, "202608", "CLQ6"),
+        ],
+        "GC": [
+            _future_detail(5001, "202606", "GCM6", symbol="GC", exchange="COMEX"),
+            _future_detail(5002, "202607", "GCN6", symbol="GC", exchange="COMEX"),
+            _future_detail(5003, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
+        ],
+    }
+    fake_client = _FakeIbkrClient(details)
+    provider = IbkrCommoditiesDataProvider(
+        client=fake_client,
+        market_data=_FakeMarketData(
+            {
+                4001: 80.0,
+                4002: 79.0,
+                4003: 78.5,
+                5001: 2400.0,
+                5002: 2405.0,
+                5003: 2410.0,
+            }
+        ),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        root_configs=(
+            IbkrFutureRootConfig("wti", "CL", "NYMEX", "USD", "USD/bbl", "WTI Crude Oil", trading_class="CL"),
+            IbkrFutureRootConfig("gold", "GC", "COMEX", "USD", "USD/oz", "Gold", trading_class="GC"),
+        ),
+        contract_depth=3,
+        breadth_contract_depth=2,
+        history_days=0,
+    )
+
+    snapshot = provider.get_snapshot(force_refresh=True)
+
+    assert fake_client.requests == ["CL", "GC"]
+    assert provider.enabled_instrument_ids == ("wti", "gold")
+    assert provider.breadth_instrument_ids == ("wti", "gold")
+    wti_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "wti")
+    gold_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "gold")
+    assert [node.price for node in wti_curve.nodes] == [80.0, 79.0, 78.5]
+    assert [node.price for node in gold_curve.nodes] == [2400.0, 2405.0]
 
 
 def test_ibkr_provider_degrades_to_sample_when_disconnected():

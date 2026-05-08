@@ -14,7 +14,7 @@ describe("CommoditiesView", () => {
       }
     });
 
-    expect(body).toContain("Commodities Research");
+    expect(body).toContain("Commodities");
     expect(body).toContain("Overview");
     expect(body).toContain("Energy");
     expect(body).toContain("Metals");
@@ -51,8 +51,7 @@ describe("CommoditiesView", () => {
 
     expect(body).toContain("OFFICIAL PARTIAL");
     expect(body).toContain("EIA coverage is official but partial and release-lagged.");
-    expect(body).toContain("IBKR futures curve unavailable; using fallback payload.");
-    expect(body).toContain("No Inventory Series");
+    expect(body).toContain("No inventory series linked.");
   });
 
   it("renders the deep energy flow modules", () => {
@@ -70,7 +69,7 @@ describe("CommoditiesView", () => {
 
     expect(body).toContain("Crack Spread Matrix");
     expect(body).toContain("Term Structure Heatmap");
-    expect(body).toContain("Inventory vs Seasonality Cloud");
+    expect(body).toContain("Inventory vs Seasonality");
     expect(body).toContain("Vessel / Flow Proxy");
     expect(body).toContain("EIA Fundamental Stack");
     expect(body).toContain("Fundamental Tape");
@@ -95,6 +94,40 @@ describe("CommoditiesView", () => {
     expect(body).toContain("Precious Ratio Gauges");
     expect(body).toContain("LME / COMEX Warehouse Stocks");
     expect(body).toContain("Substitution Spreads");
+  });
+
+  it("keeps instruments without loaded curves selectable for on-demand curve pulls", () => {
+    const workspace = makeWorkspace();
+    workspace.mode = "curves_spreads";
+    workspace.instruments.push({
+      ...workspace.instruments[1],
+      instrument_id: "nickel",
+      symbol: "NI",
+      name: "Nickel",
+      subgroup: "industrial",
+      quote_unit: "USD/metric ton",
+      exchange: "LME",
+      front_symbol: null
+    });
+    workspace.market_summaries.push({
+      ...workspace.market_summaries[1],
+      instrument: workspace.instruments[2],
+      latest_price: 15900,
+      curve_state: "unavailable",
+      front_spread: null,
+      summary: "Nickel curve unavailable."
+    });
+
+    const { body } = render(CommoditiesView, {
+      props: {
+        workspace,
+        loading: false,
+        mode: "curves_spreads",
+        onLoadWorkspace: vi.fn()
+      }
+    });
+
+    expect(body).toContain('value="nickel"');
   });
 });
 

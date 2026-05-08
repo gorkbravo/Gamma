@@ -244,7 +244,10 @@ IBKR_FUTURES_ROOTS: tuple[IbkrFutureRootConfig, ...] = (
     IbkrFutureRootConfig("heating_oil", "HO", "NYMEX", "USD", "USD/gal", "Heating Oil / Diesel", trading_class="HO"),
     IbkrFutureRootConfig("gold", "GC", "COMEX", "USD", "USD/oz", "Gold", trading_class="GC"),
     IbkrFutureRootConfig("silver", "SI", "COMEX", "USD", "USD/oz", "Silver", trading_class="SI"),
+    IbkrFutureRootConfig("platinum", "PL", "NYMEX", "USD", "USD/oz", "Platinum", trading_class="PL"),
     IbkrFutureRootConfig("copper", "HG", "COMEX", "USD", "USD/lb", "Copper", trading_class="HG"),
+    IbkrFutureRootConfig("aluminum", "ALI", "COMEX", "USD", "USD/metric ton", "Aluminum", trading_class="ALI"),
+    IbkrFutureRootConfig("zinc", "ZS", "LME", "USD", "USD/metric ton", "Zinc", trading_class="ZS"),
 )
 
 MONTH_CODES = "FGHJKMNQUVXZ"
