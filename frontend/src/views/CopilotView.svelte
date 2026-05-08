@@ -517,30 +517,27 @@
   }
 
   .mode-tabs {
-    display: flex;
-    border: 1px solid var(--divider);
+    display: inline-flex;
+    border: 1px solid var(--panel-strong);
   }
 
   .mode-tabs button {
-    flex: 1;
     border: 0;
-    border-right: 1px solid var(--divider);
+    border-right: 1px solid var(--panel-strong);
     background: transparent;
-    color: var(--text-2);
-    padding: 0.42rem 0.75rem;
-    font-size: 0.74rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: var(--text-1);
+    padding: 0.28rem 0.65rem;
+    font: inherit;
+    font-size: 0.79rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
   }
 
-  .mode-tabs button:last-child {
-    border-right: 0;
-  }
-
-  .mode-tabs button.active {
-    color: var(--accent);
-    background: rgba(122, 166, 200, 0.08);
-  }
+  .mode-tabs button:last-child { border-right: 0; }
+  .mode-tabs button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-tabs button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .mode-tabs button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   textarea {
     min-height: 8rem;

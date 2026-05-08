@@ -749,19 +749,25 @@
     display: inline-flex;
     flex-wrap: wrap;
     border: 1px solid var(--panel-strong);
-    background: var(--surface-0);
   }
 
   .segmented button {
     border: 0;
+    border-right: 1px solid var(--panel-strong);
     background: transparent;
-    padding-inline: 0.8rem;
+    color: var(--text-1);
+    padding: 0.28rem 0.65rem;
+    font: inherit;
+    font-size: 0.79rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
   }
 
-  .segmented button.active {
-    background: rgba(122, 166, 200, 0.14);
-    color: var(--accent);
-  }
+  .segmented button:last-child { border-right: 0; }
+  .segmented button:hover:not(:disabled) { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .segmented button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .segmented button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   .chart-foot,
   .row {
