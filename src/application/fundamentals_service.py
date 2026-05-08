@@ -326,7 +326,7 @@ class FundamentalsService:
             )
             return summary
 
-        fallback_text = str(sec_data.company.description or "").strip()
+        fallback_text = _limit_company_summary_words(sec_data.company.description)
         if not fallback_text:
             return None
         retrieved_at = now_utc()
@@ -379,7 +379,7 @@ class FundamentalsService:
         if model_summary is not None:
             return model_summary
         generated_at = now_utc()
-        summary_text = _extractive_business_summary(section.section_text)
+        summary_text = _limit_company_summary_words(_extractive_business_summary(section.section_text))
         warnings = ["OpenAI summary provider is unavailable or failed; Gamma used an extractive filing-text fallback."]
         return FundamentalsCompanySummaryRecord(
             ticker=company.ticker,
@@ -417,7 +417,7 @@ class FundamentalsService:
             "instructions": (
                 "You write dense company business summaries for Gamma, a read-only investment research app. "
                 "Use only the supplied SEC filing excerpt. Do not add outside facts. "
-                "Return 3 to 5 concise sentences covering business model, products or segments, geography or customer base, revenue drivers, and one caveat if the excerpt supports it."
+                "Return no more than 150 words in 2 to 4 concise sentences covering business model, products or segments, geography or customer base, revenue drivers, and one caveat if the excerpt supports it."
             ),
             "input": [
                 {
@@ -439,7 +439,7 @@ class FundamentalsService:
                     ],
                 }
             ],
-            "max_output_tokens": 600,
+            "max_output_tokens": 360,
             "reasoning": {"effort": "low"},
             "text": {
                 "verbosity": "low",
@@ -468,7 +468,7 @@ class FundamentalsService:
             parsed = _parse_openai_summary_payload(response_payload)
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
             return None
-        summary_text = str(parsed.get("summary") or "").strip()
+        summary_text = _limit_company_summary_words(parsed.get("summary"))
         if not summary_text:
             return None
         generated_at = now_utc()
@@ -738,7 +738,7 @@ class FundamentalsService:
         ebit = _last_non_null(annual.get("operating_income", []))
         operating_cash_flow = _last_non_null(self._statement_value_map(sec_data.annual_cash_flow_statement).get("operating_cash_flow", []))
         capex = _last_non_null(self._statement_value_map(sec_data.annual_cash_flow_statement).get("capital_expenditures", []))
-        fcf = _subtract_nullable(operating_cash_flow, capex)
+        fcf = _derive_free_cash_flow_value(operating_cash_flow, capex)
         equity = _last_non_null(balance.get("shareholders_equity", []))
         net_income = _last_non_null(annual.get("net_income", []))
         diluted_shares = _first_non_null(
@@ -907,7 +907,7 @@ class FundamentalsService:
         cash_values = _series_sum(balance.get("cash_and_equivalents", []), balance.get("marketable_securities_current", []))
         operating_cash_flow = cash.get("operating_cash_flow", [])
         capex = cash.get("capital_expenditures", [])
-        fcf = [_subtract_nullable(ocf, cx) for ocf, cx in zip(operating_cash_flow, capex, strict=False)]
+        fcf = _derive_free_cash_flow_series(operating_cash_flow, capex)
         gross_margin = [_safe_ratio(gp, rev) for gp, rev in zip(gross_profit, revenues, strict=False)]
         ebit_margin = [_safe_ratio(value, rev) for value, rev in zip(ebit, revenues, strict=False)]
         fcf_margin = [_safe_ratio(value, rev) for value, rev in zip(fcf, revenues, strict=False)]
@@ -1169,7 +1169,7 @@ class FundamentalsService:
         )
         operating_cash_flow = annual_cash.get("operating_cash_flow", [])
         capex = annual_cash.get("capital_expenditures", [])
-        fcf = [_subtract_nullable(ocf, cx) for ocf, cx in zip(operating_cash_flow, capex, strict=False)]
+        fcf = _derive_free_cash_flow_series(operating_cash_flow, capex)
         metrics = {
             "ev_to_sales": _heatmap_metric(
                 _safe_ratio(market_context.get("enterprise_value"), _last_non_null(revenue)),
@@ -2622,7 +2622,7 @@ class FundamentalsService:
                 strict=False,
             )
         ]
-        free_cash_flow = [_subtract_nullable(ocf, cx) for ocf, cx in zip(operating_cash_flow, capex, strict=False)]
+        free_cash_flow = _derive_free_cash_flow_series(operating_cash_flow, capex)
         working_capital = [
             _subtract_nullable(_sum_nullable(ar, inv), ap)
             for ar, inv, ap in zip(
@@ -2853,6 +2853,22 @@ def _subtract_nullable(left: float | None, right: float | None) -> float | None:
     if left is None or right is None:
         return None
     return left - right
+
+
+def _derive_free_cash_flow_value(operating_cash_flow: float | None, capex: float | None) -> float | None:
+    if operating_cash_flow is None or capex is None:
+        return None
+    return operating_cash_flow - abs(capex)
+
+
+def _derive_free_cash_flow_series(
+    operating_cash_flow: list[float | None],
+    capex: list[float | None],
+) -> list[float | None]:
+    return [
+        _derive_free_cash_flow_value(ocf, cx)
+        for ocf, cx in zip(operating_cash_flow, capex, strict=False)
+    ]
 
 
 def _multiply_nullable(left: float | None, right: float | None) -> float | None:
@@ -3189,6 +3205,19 @@ def _extractive_business_summary(section_text: str) -> str:
     if not selected:
         selected = sentences[:4]
     return " ".join(selected)[:1_200].strip()
+
+
+def _limit_company_summary_words(value: Any, *, max_words: int = 150) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return ""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    trimmed = " ".join(words[:max_words]).rstrip(" ,;:")
+    if trimmed and trimmed[-1] not in ".!?":
+        trimmed = f"{trimmed}."
+    return trimmed
 
 
 def _parse_openai_summary_payload(response: dict[str, Any]) -> dict[str, Any]:

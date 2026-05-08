@@ -61,7 +61,7 @@ _POPULAR_FUNDAMENTALS_TICKERS = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META"
 _STATEMENT_PERIOD_ANCHORS: dict[str, tuple[str, ...]] = {
     "income": ("revenue", "operating_income", "net_income"),
     "balance": ("current_assets", "total_assets", "shareholders_equity"),
-    "cashflow": ("operating_cash_flow", "capital_expenditures", "depreciation_and_amortization"),
+    "cashflow": ("operating_cash_flow", "capital_expenditures", "net_change_in_cash"),
 }
 
 
@@ -274,7 +274,14 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "cashflow",
         "currency",
         "duration",
-        ("us-gaap:PaymentsToAcquirePropertyPlantAndEquipment", "us-gaap:PropertyPlantAndEquipmentAdditions", "ifrs-full:PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"),
+        (
+            "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+            "us-gaap:PaymentsToAcquireProductiveAssets",
+            "us-gaap:PaymentsToAcquireBusinessesAndInterestInAffiliatesAndPropertyPlantAndEquipment",
+            "us-gaap:CapitalExpendituresIncurredButNotYetPaid",
+            "us-gaap:PropertyPlantAndEquipmentAdditions",
+            "ifrs-full:PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+        ),
     ),
     StatementLineDefinition(
         "depreciation_and_amortization",
@@ -282,7 +289,69 @@ _STATEMENT_LINE_DEFINITIONS: tuple[StatementLineDefinition, ...] = (
         "cashflow",
         "currency",
         "duration",
-        ("us-gaap:DepreciationDepletionAndAmortization", "us-gaap:Depreciation", "ifrs-full:DepreciationAndAmortisationExpense"),
+        (
+            "us-gaap:DepreciationDepletionAndAmortization",
+            "us-gaap:DepreciationDepletionAndAmortizationExpense",
+            "us-gaap:DepreciationAmortizationAndAccretionNet",
+            "us-gaap:DepreciationAndAmortization",
+            "us-gaap:Depreciation",
+            "us-gaap:AmortizationOfIntangibleAssets",
+            "ifrs-full:DepreciationAndAmortisationExpense",
+        ),
+    ),
+    StatementLineDefinition(
+        "net_change_in_cash",
+        "Net Change In Cash",
+        "cashflow",
+        "currency",
+        "duration",
+        (
+            "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
+            "us-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
+            "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect",
+            "ifrs-full:IncreaseDecreaseInCashAndCashEquivalents",
+        ),
+    ),
+    StatementLineDefinition(
+        "investing_cash_flow",
+        "Investing Cash Flow",
+        "cashflow",
+        "currency",
+        "duration",
+        ("us-gaap:NetCashProvidedByUsedInInvestingActivities", "ifrs-full:CashFlowsFromUsedInInvestingActivities"),
+    ),
+    StatementLineDefinition(
+        "financing_cash_flow",
+        "Financing Cash Flow",
+        "cashflow",
+        "currency",
+        "duration",
+        ("us-gaap:NetCashProvidedByUsedInFinancingActivities", "ifrs-full:CashFlowsFromUsedInFinancingActivities"),
+    ),
+    StatementLineDefinition(
+        "dividends_paid",
+        "Dividends Paid",
+        "cashflow",
+        "currency",
+        "duration",
+        (
+            "us-gaap:PaymentsOfDividends",
+            "us-gaap:PaymentsOfDividendsCommonStock",
+            "us-gaap:PaymentsOfOrdinaryDividends",
+            "ifrs-full:DividendsPaidClassifiedAsFinancingActivities",
+        ),
+    ),
+    StatementLineDefinition(
+        "share_repurchases",
+        "Share Repurchases",
+        "cashflow",
+        "currency",
+        "duration",
+        (
+            "us-gaap:PaymentsForRepurchaseOfCommonStock",
+            "us-gaap:PaymentsForRepurchaseOfEquity",
+            "us-gaap:PaymentsForRepurchaseOfPreferredStockAndPreferenceStock",
+        ),
     ),
 )
 

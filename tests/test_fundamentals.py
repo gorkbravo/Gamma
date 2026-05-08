@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from src.application.fundamentals_service import FundamentalsService
+from src.application.fundamentals_service import FundamentalsService, _limit_company_summary_words
 from src.models.fundamentals import (
     FundamentalsCompanyRecord,
     FundamentalsFilingRecord,
@@ -394,6 +394,46 @@ def test_fundamentals_ratios_and_dcf_align_sparse_statement_periods(tmp_path):
     assert fcf_actual.values[2] == 123_500_000_000.0
 
 
+def test_fundamentals_fcf_normalizes_negative_capex_outflow_sign(tmp_path):
+    service = _build_service(tmp_path)
+    sec_data = service.sec_adapter.company_data["AAPL"]
+    cash_lines = []
+    for line in sec_data.annual_cash_flow_statement.lines:
+        if line.line_key == "capital_expenditures":
+            cash_lines.append(
+                replace(
+                    line,
+                    cells=[
+                        replace(cell, value=None if cell.value is None else -abs(cell.value))
+                        for cell in line.cells
+                    ],
+                )
+            )
+        else:
+            cash_lines.append(line)
+    service.sec_adapter.company_data["AAPL"] = replace(
+        sec_data,
+        annual_cash_flow_statement=replace(sec_data.annual_cash_flow_statement, lines=cash_lines),
+    )
+
+    overview = service.get_overview("AAPL")
+    financials = service.get_financials("AAPL")
+    dcf = service.get_dcf_model("AAPL")
+
+    assert overview is not None
+    assert financials is not None
+    assert dcf is not None
+
+    headline_fcf = next(metric for metric in overview.headline_metrics if metric.metric_id == "free_cash_flow")
+    fcf_margin = next(line for line in financials.annual_ratio_view.lines if line.line_key == "fcf_margin")
+    revenue = next(line for line in financials.annual_income_statement.lines if line.line_key == "revenue")
+    fcf_actual = next(row for row in dcf.actual_rows if row.line_key == "free_cash_flow")
+
+    assert headline_fcf.value == 123_500_000_000.0
+    assert fcf_margin.cells[-1].value == headline_fcf.value / revenue.cells[-1].value
+    assert fcf_actual.values[-1] == 123_500_000_000.0
+
+
 def test_sec_adapter_normalizes_quarterly_periods_and_derives_missing_quarters(tmp_path):
     adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
     payload = _facts_dataframe_for_quarterly_normalization()
@@ -453,6 +493,34 @@ def test_sec_adapter_accepts_foreign_annual_forms_ifrs_and_non_usd_units(tmp_pat
     assert next(line for line in cash_view.lines if line.line_key == "capital_expenditures").cells[-1].value == 8.0
 
 
+def test_sec_adapter_maps_common_cash_flow_statement_concepts(tmp_path):
+    adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
+    payload = pd.DataFrame(
+        [
+            _fact_row("us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations", 125.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:PaymentsToAcquireProductiveAssets", 35.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:DepreciationAmortizationAndAccretionNet", 22.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect", 14.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInInvestingActivities", -40.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:NetCashProvidedByUsedInFinancingActivities", -70.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:PaymentsOfDividends", 8.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+            _fact_row("us-gaap:PaymentsForRepurchaseOfCommonStock", 16.0, "USD", "2024-01-01", "2024-12-31", 2024, "FY", "10-K", "2025-02-28"),
+        ]
+    )
+
+    cash_view = adapter._build_statement_view(payload, statement="cashflow", basis="annual", retrieved_at=NOW)
+    latest_values = {line.line_key: line.cells[-1].value for line in cash_view.lines}
+
+    assert latest_values["operating_cash_flow"] == 125.0
+    assert latest_values["capital_expenditures"] == 35.0
+    assert latest_values["depreciation_and_amortization"] == 22.0
+    assert latest_values["net_change_in_cash"] == 14.0
+    assert latest_values["investing_cash_flow"] == -40.0
+    assert latest_values["financing_cash_flow"] == -70.0
+    assert latest_values["dividends_paid"] == 8.0
+    assert latest_values["share_repurchases"] == 16.0
+
+
 def test_sec_adapter_backfills_safe_statement_values_with_gamma_provenance(tmp_path):
     adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
     payload = pd.DataFrame(
@@ -508,6 +576,17 @@ def test_sec_adapter_extracts_item_1_business_text_from_annual_html():
     assert "Item 1. Business" in section
     assert "Revenue is generated" in section
     assert "Risk Factors" not in section
+
+
+def test_company_summary_word_limit_preserves_short_profile_and_trims_long_profile():
+    short = "Gamma sells research software to investment teams."
+    long = " ".join(f"word{i}" for i in range(175))
+
+    assert _limit_company_summary_words(short) == short
+
+    trimmed = _limit_company_summary_words(long)
+    assert len(trimmed.split()) == 150
+    assert trimmed.endswith(".")
 
 
 def test_fundamentals_dcf_and_reverse_do_not_assume_missing_shares(tmp_path):
