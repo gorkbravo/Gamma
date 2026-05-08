@@ -1249,6 +1249,9 @@ function seriesForMacroMode(context: MacroContextState) {
   if (context.mode === "events_regimes") {
     return [];
   }
+  if (context.mode === "trade_partners" || context.mode === "country_compare") {
+    return [];
+  }
   if (context.mode === "cross_asset") {
     return [...MACRO_CROSS_ASSET_SERIES[context.region]];
   }

@@ -7,6 +7,8 @@ from typing import Any
 
 from src.models.macro import (
     MacroCoherenceProfile,
+    MacroCountryCompareRow,
+    MacroCountryCompareSummary,
     MacroCurveNode,
     MacroDivergenceRecord,
     MacroDivergenceSignal,
@@ -25,6 +27,8 @@ from src.models.macro import (
     MacroSnapshotFocusItem,
     MacroSnapshotPayload,
     MacroThemeComparison,
+    MacroTradePartnerRow,
+    MacroTradePartnerSummary,
 )
 from src.application.prediction_market_service import PredictionMarketScreenerRequest, PredictionMarketService
 from src.models.prediction_markets import PredictionMarketRecord
@@ -714,6 +718,55 @@ REGION_SNAPSHOT_SERIES = {
     ],
 }
 
+TRADE_PARTNER_FIXTURES = {
+    "US": [
+        ("EU", "European Union", 1, 420.0, 610.0, "bea"),
+        ("CN", "China", 2, 150.0, 520.0, "census"),
+        ("MX", "Mexico", 3, 340.0, 450.0, "census"),
+        ("CA", "Canada", 4, 355.0, 410.0, "census"),
+        ("JP", "Japan", 5, 85.0, 155.0, "census"),
+    ],
+    "EU": [
+        ("US", "United States", 1, 520.0, 360.0, "eurostat"),
+        ("CN", "China", 2, 250.0, 585.0, "eurostat"),
+        ("UK", "United Kingdom", 3, 340.0, 215.0, "eurostat"),
+        ("CH", "Switzerland", 4, 190.0, 140.0, "eurostat"),
+        ("NO", "Norway", 5, 70.0, 130.0, "eurostat"),
+    ],
+}
+
+COUNTRY_COMPARE_FIXTURES = {
+    "US": {
+        "real_gdp_growth": 2.4,
+        "inflation": 3.1,
+        "unemployment": 4.1,
+        "policy_rate": 4.5,
+        "trade_balance": -3.1,
+    },
+    "EU": {
+        "real_gdp_growth": 1.1,
+        "inflation": 2.3,
+        "unemployment": 6.3,
+        "policy_rate": 2.75,
+        "trade_balance": 1.5,
+    },
+    "Global": {
+        "real_gdp_growth": 2.8,
+        "inflation": 3.5,
+        "unemployment": None,
+        "policy_rate": None,
+        "trade_balance": None,
+    },
+}
+
+COUNTRY_COMPARE_METRICS = [
+    ("real_gdp_growth", "Real GDP growth", "pct", "imf"),
+    ("inflation", "Inflation", "pct", "oecd"),
+    ("unemployment", "Unemployment", "pct", "oecd"),
+    ("policy_rate", "Policy rate", "pct", "fred"),
+    ("trade_balance", "Trade balance / GDP", "pct", "imf"),
+]
+
 SERIES_BY_COMPARISON_KEY: dict[str, dict[str, str]] = {}
 for _series_id, _meta in SERIES_REGISTRY.items():
     comparison_key = _meta.get("comparison_key")
@@ -817,6 +870,8 @@ class MacroService:
             timeframe=timeframe,
             force_refresh=request.force_refresh,
         )
+        trade_partners = self._build_trade_partners(region=region, timeframe=timeframe)
+        country_compare = self._build_country_compare(region=region, comparison_region=comparison_region)
         retrieved_at = _max_timestamp(
             [row.retrieved_at for row in histories.values()]
             + [row.retrieved_at for row in comparison_histories.values()]
@@ -862,6 +917,8 @@ class MacroService:
                 linked_markets=linked_markets,
                 timeframe=timeframe,
             ),
+            trade_partners=trade_partners,
+            country_compare=country_compare,
             top_divergences=divergences[:3],
             event_studies=event_studies,
             upcoming_events=events[:5],
@@ -870,6 +927,115 @@ class MacroService:
             retrieved_at=retrieved_at,
             origin="macro_service.snapshot",
             transformation_note="Snapshot combines normalized FRED series histories, Treasury curve snapshots where available, comparison-aware metric overlays, event-window studies, and official calendar events into a mode-oriented macro workspace.",
+        )
+
+    def _build_trade_partners(self, *, region: str, timeframe: str) -> MacroTradePartnerSummary:
+        data_region = self._data_region(region)
+        raw_rows = TRADE_PARTNER_FIXTURES.get(data_region, TRADE_PARTNER_FIXTURES["US"])
+        total = sum((exports + imports) for _, _, _, exports, imports, _ in raw_rows)
+        partners: list[MacroTradePartnerRow] = []
+        for partner_code, partner_name, rank, exports, imports, provider in raw_rows:
+            total_trade = exports + imports
+            balance = exports - imports
+            share = (total_trade / total) if total else None
+            partners.append(
+                MacroTradePartnerRow(
+                    partner_code=partner_code,
+                    partner_name=partner_name,
+                    rank=rank,
+                    export_value=exports,
+                    import_value=imports,
+                    total_trade_value=total_trade,
+                    trade_balance=balance,
+                    share_of_total=share,
+                    export_value_display=_format_usd_billions(exports),
+                    import_value_display=_format_usd_billions(imports),
+                    total_trade_value_display=_format_usd_billions(total_trade),
+                    trade_balance_display=_format_usd_billions(balance),
+                    share_of_total_display=_format_percent(share),
+                    interpretation=_trade_partner_interpretation(partner_name, balance, share),
+                    source_provider=provider,
+                    retrieved_at=None,
+                    origin=f"macro_service.trade_partners.{data_region.lower()}",
+                    transformation_note=(
+                        "Curated first-pass trade partner context based on official-provider categories identified for Macro V2. "
+                        "Values are normalized placeholders until live BEA/Census/Eurostat trade adapters replace this fixture."
+                    ),
+                )
+            )
+        provider_label = "BEA/Census" if data_region == "US" else "Eurostat"
+        caveats = [
+            f"{provider_label} live trade adapters are not wired yet; this first pass preserves the target schema and provenance boundary.",
+            "Trade values are annualized USD-bn placeholders for workflow design, not a live statistical release.",
+        ]
+        if region == "Global":
+            caveats.append("Global trade partner mode stays light and reuses the US partner stack until country-level global adapters are added.")
+        return MacroTradePartnerSummary(
+            region=region,
+            headline=f"{region} trade partner exposure",
+            summary=f"{region} trade partner context ranks the main bilateral demand and supply links that can explain macro sensitivity.",
+            partners=partners,
+            caveats=caveats,
+            research_focus="Compare partner concentration against FX, commodity, inflation, and policy shocks before treating a macro move as purely domestic.",
+            source_provider="gamma",
+            retrieved_at=None,
+            origin=f"macro_service.trade_partners.{data_region.lower()}",
+            transformation_note=(
+                "Trade partner summary is a normalized Macro V2 scaffold. It is read-only and designed for official BEA/Census, Eurostat, UN Comtrade, and WTO adapter replacement."
+            ),
+        )
+
+    def _build_country_compare(self, *, region: str, comparison_region: str | None) -> MacroCountryCompareSummary:
+        base_region = self._data_region(region)
+        target_region = comparison_region or ("EU" if base_region == "US" else "US")
+        base_values = COUNTRY_COMPARE_FIXTURES.get(base_region, COUNTRY_COMPARE_FIXTURES["US"])
+        comparison_values = COUNTRY_COMPARE_FIXTURES.get(target_region, COUNTRY_COMPARE_FIXTURES["US"])
+        rows: list[MacroCountryCompareRow] = []
+        for metric_id, label, unit, provider in COUNTRY_COMPARE_METRICS:
+            base_value = base_values.get(metric_id)
+            comparison_value = comparison_values.get(metric_id)
+            gap_value = base_value - comparison_value if base_value is not None and comparison_value is not None else None
+            rows.append(
+                MacroCountryCompareRow(
+                    metric_id=metric_id,
+                    label=label,
+                    base_region=base_region,
+                    comparison_region=target_region,
+                    base_value=base_value,
+                    comparison_value=comparison_value,
+                    gap_value=gap_value,
+                    unit=unit,
+                    base_value_display=_format_metric(base_value, unit),
+                    comparison_value_display=_format_metric(comparison_value, unit),
+                    gap_display=_format_delta(gap_value, unit),
+                    interpretation=_country_compare_interpretation(label, base_region, target_region, gap_value, unit),
+                    source_provider=provider,
+                    retrieved_at=None,
+                    origin=f"macro_service.country_compare.{base_region.lower()}_vs_{target_region.lower()}",
+                    transformation_note=(
+                        "Curated first-pass country comparison row based on official-provider categories identified for Macro V2. "
+                        "Values are normalized placeholders until live IMF/OECD/Eurostat/ECB/BEA/BLS adapters replace this fixture."
+                    ),
+                )
+            )
+        return MacroCountryCompareSummary(
+            base_region=base_region,
+            comparison_region=target_region,
+            headline=f"{base_region} versus {target_region} macro comparison",
+            summary=(
+                f"{base_region} is compared with {target_region} across growth, inflation, labor, policy, and external-balance proxies. "
+                "Global remains a lighter lens; US/EU are the primary normalized pair."
+            ),
+            rows=rows,
+            caveats=[
+                "Country comparison uses curated normalized placeholders in this pass; live official-provider adapters should replace rows source-by-source.",
+                "Do not compare gaps as a statistical model; use them as research prompts for the existing Macro modes.",
+            ],
+            research_focus="Start with gaps that disagree with market pricing, then drill back into Cross-Asset, Rates & Policy, or Events / Regimes.",
+            source_provider="gamma",
+            retrieved_at=None,
+            origin=f"macro_service.country_compare.{base_region.lower()}_vs_{target_region.lower()}",
+            transformation_note="Country comparison is a read-only Macro V2 scaffold for IMF, OECD, Eurostat, ECB, BEA, and BLS provider integration.",
         )
 
     def get_series_history(self, series_id: str, *, region: str = "US", timeframe: str = "1Y", force_refresh: bool = False) -> MacroSeriesHistory | None:
@@ -2913,6 +3079,38 @@ def _format_metric(value: float | None, unit: str | None) -> str:
     if unit == "score":
         return f"{value:.2f}"
     return f"{value:.2f}"
+
+
+def _format_percent(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value * 100.0:.1f}%"
+
+
+def _format_usd_billions(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    sign = "-" if value < 0 else ""
+    return f"{sign}${abs(value):.0f}bn"
+
+
+def _trade_partner_interpretation(partner_name: str, balance: float | None, share: float | None) -> str:
+    balance_label = "balanced"
+    if balance is not None and balance > 25:
+        balance_label = "export-skewed"
+    elif balance is not None and balance < -25:
+        balance_label = "import-skewed"
+    share_text = _format_percent(share)
+    return f"{partner_name} is a {balance_label} partner at roughly {share_text} of this curated trade set."
+
+
+def _country_compare_interpretation(label: str, base_region: str, comparison_region: str, gap: float | None, unit: str | None) -> str:
+    if gap is None:
+        return f"{label} is unavailable for a clean {base_region} versus {comparison_region} comparison in this first pass."
+    if abs(gap) < 0.05:
+        return f"{label} is broadly similar between {base_region} and {comparison_region}."
+    direction = "above" if gap > 0 else "below"
+    return f"{base_region} {label.lower()} sits {direction} {comparison_region} by {_format_delta(gap, unit)}."
 
 
 def _format_probability(value: float | None) -> str:

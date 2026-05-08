@@ -51,6 +51,8 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
     { id: "cross_asset", label: "Cross-Asset", defaultIndex: 1 },
     { id: "rates_policy", label: "Rates & Policy", defaultIndex: 2 },
     { id: "events_regimes", label: "Events / Regimes", defaultIndex: 3 },
+    { id: "trade_partners", label: "Trade Partners", defaultIndex: 4 },
+    { id: "country_compare", label: "Country Compare", defaultIndex: 5 },
   ]),
   crypto: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },

@@ -52,7 +52,7 @@ export interface ActionKeybindingDefinition {
   combos: ShortcutCombo[];
 }
 
-export type MacroMode = "snapshot" | "cross_asset" | "rates_policy" | "events_regimes";
+export type MacroMode = "snapshot" | "cross_asset" | "rates_policy" | "events_regimes" | "trade_partners" | "country_compare";
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
 export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";
@@ -1921,6 +1921,73 @@ export interface MacroRatesPolicySummary {
   comparison_summary: string | null;
 }
 
+export interface MacroTradePartnerRow {
+  partner_code: string;
+  partner_name: string;
+  rank: number;
+  export_value: number | null;
+  import_value: number | null;
+  total_trade_value: number | null;
+  trade_balance: number | null;
+  share_of_total: number | null;
+  export_value_display: string | null;
+  import_value_display: string | null;
+  total_trade_value_display: string | null;
+  trade_balance_display: string | null;
+  share_of_total_display: string | null;
+  interpretation: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroTradePartnerSummary {
+  region: string;
+  headline: string;
+  summary: string;
+  partners: MacroTradePartnerRow[];
+  caveats: string[];
+  research_focus: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroCountryCompareRow {
+  metric_id: string;
+  label: string;
+  base_region: string;
+  comparison_region: string;
+  base_value: number | null;
+  comparison_value: number | null;
+  gap_value: number | null;
+  unit: string | null;
+  base_value_display: string | null;
+  comparison_value_display: string | null;
+  gap_display: string | null;
+  interpretation: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface MacroCountryCompareSummary {
+  base_region: string;
+  comparison_region: string;
+  headline: string;
+  summary: string;
+  rows: MacroCountryCompareRow[];
+  caveats: string[];
+  research_focus: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface MacroEventStudy {
   study_id: string;
   theme: string;
@@ -1971,6 +2038,8 @@ export interface MacroSnapshot {
   snapshot_cards: MacroSnapshotCard[];
   rates_policy: MacroRatesPolicySummary | null;
   cross_asset: MacroThemeComparison[];
+  trade_partners?: MacroTradePartnerSummary | null;
+  country_compare?: MacroCountryCompareSummary | null;
   top_divergences: MacroDivergence[];
   event_studies: MacroEventStudy[];
   upcoming_events: MacroEvent[];

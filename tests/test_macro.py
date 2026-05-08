@@ -773,6 +773,57 @@ def test_macro_service_supports_eu_region_and_us_comparison(monkeypatch):
     assert snapshot.cross_asset[0].linked_markets is not None
 
 
+def test_macro_service_snapshot_includes_trade_partner_context_for_us_and_eu(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+
+    us_snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
+    eu_snapshot = service.get_snapshot(MacroSnapshotRequest(region="EU", timeframe="3M", theme="all"))
+
+    assert us_snapshot.trade_partners is not None
+    assert us_snapshot.trade_partners.region == "US"
+    assert us_snapshot.trade_partners.summary.startswith("US trade partner context")
+    assert [row.partner_code for row in us_snapshot.trade_partners.partners[:3]] == ["EU", "CN", "MX"]
+    assert all(row.share_of_total_display for row in us_snapshot.trade_partners.partners)
+    assert all(row.source_provider in {"bea", "census", "gamma"} for row in us_snapshot.trade_partners.partners)
+    assert us_snapshot.trade_partners.research_focus is not None
+    assert us_snapshot.trade_partners.transformation_note is not None
+
+    assert eu_snapshot.trade_partners is not None
+    assert eu_snapshot.trade_partners.region == "EU"
+    assert [row.partner_code for row in eu_snapshot.trade_partners.partners[:3]] == ["US", "CN", "UK"]
+    assert any("Eurostat" in caveat for caveat in eu_snapshot.trade_partners.caveats)
+
+
+def test_macro_service_snapshot_includes_country_compare_context(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    service = _build_macro_service()
+
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="EU", timeframe="1Y", theme="growth", comparison_region="US"))
+
+    assert snapshot.country_compare is not None
+    assert snapshot.country_compare.base_region == "EU"
+    assert snapshot.country_compare.comparison_region == "US"
+    assert snapshot.country_compare.rows
+    assert {row.metric_id for row in snapshot.country_compare.rows} >= {
+        "real_gdp_growth",
+        "inflation",
+        "unemployment",
+        "policy_rate",
+        "trade_balance",
+    }
+    gdp_row = next(row for row in snapshot.country_compare.rows if row.metric_id == "real_gdp_growth")
+    assert gdp_row.base_value_display.endswith("%")
+    assert gdp_row.comparison_value_display.endswith("%")
+    assert gdp_row.gap_display is not None
+    assert gdp_row.interpretation is not None
+    assert gdp_row.source_provider in {"imf", "oecd", "fred", "ecb", "gamma"}
+    assert snapshot.country_compare.research_focus is not None
+    assert snapshot.country_compare.transformation_note is not None
+
+
 def test_macro_api_routes_expose_snapshot_history_divergences_and_events(tmp_path, monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
 

@@ -329,6 +329,77 @@ class MacroRatesPolicySummary:
 
 
 @dataclass(frozen=True)
+class MacroTradePartnerRow:
+    partner_code: str
+    partner_name: str
+    rank: int
+    export_value: float | None
+    import_value: float | None
+    total_trade_value: float | None
+    trade_balance: float | None
+    share_of_total: float | None
+    export_value_display: str | None = None
+    import_value_display: str | None = None
+    total_trade_value_display: str | None = None
+    trade_balance_display: str | None = None
+    share_of_total_display: str | None = None
+    interpretation: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroTradePartnerSummary:
+    region: str
+    headline: str
+    summary: str
+    partners: list[MacroTradePartnerRow] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroCountryCompareRow:
+    metric_id: str
+    label: str
+    base_region: str
+    comparison_region: str
+    base_value: float | None
+    comparison_value: float | None
+    gap_value: float | None
+    unit: str | None = None
+    base_value_display: str | None = None
+    comparison_value_display: str | None = None
+    gap_display: str | None = None
+    interpretation: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
+class MacroCountryCompareSummary:
+    base_region: str
+    comparison_region: str
+    headline: str
+    summary: str
+    rows: list[MacroCountryCompareRow] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class MacroSnapshotPayload:
     region: str
     timeframe: str
@@ -341,6 +412,8 @@ class MacroSnapshotPayload:
     snapshot_cards: list[MacroSnapshotCard] = field(default_factory=list)
     rates_policy: MacroRatesPolicySummary | None = None
     cross_asset: list[MacroThemeComparison] = field(default_factory=list)
+    trade_partners: MacroTradePartnerSummary | None = None
+    country_compare: MacroCountryCompareSummary | None = None
     top_divergences: list[MacroDivergenceRecord] = field(default_factory=list)
     event_studies: list[MacroEventStudy] = field(default_factory=list)
     upcoming_events: list[MacroEventRecord] = field(default_factory=list)

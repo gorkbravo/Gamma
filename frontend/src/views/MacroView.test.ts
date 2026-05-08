@@ -669,6 +669,129 @@ describe("MacroView", () => {
     expect(body).toContain("1 oppose");
     expect(body).toContain("Scheduled catalysts");
   });
+
+  it("renders trade partner context in the trade partners mode", () => {
+    macroContext.set({
+      mode: "trade_partners" as any,
+      region: "US",
+      timeframe: "3M",
+      theme: "all",
+      comparisonRegion: null
+    });
+
+    const { body } = render(MacroView, {
+      props: {
+        snapshot: makeSnapshot({
+          trade_partners: {
+            region: "US",
+            headline: "US trade partner exposure",
+            summary: "US trade partner context ranks the main bilateral demand and supply links.",
+            partners: [
+              {
+                partner_code: "EU",
+                partner_name: "European Union",
+                rank: 1,
+                export_value: 420,
+                import_value: 610,
+                total_trade_value: 1030,
+                trade_balance: -190,
+                share_of_total: 0.28,
+                export_value_display: "$420bn",
+                import_value_display: "$610bn",
+                total_trade_value_display: "$1030bn",
+                trade_balance_display: "-$190bn",
+                share_of_total_display: "28.0%",
+                interpretation: "European Union is an import-skewed partner at roughly 28.0% of this curated trade set.",
+                source_provider: "bea",
+                retrieved_at: null,
+                origin: "macro_service.trade_partners.us",
+                transformation_note: "Curated first-pass trade partner context."
+              }
+            ],
+            caveats: ["BEA/Census live trade adapters are not wired yet."],
+            research_focus: "Compare partner concentration against FX and inflation shocks.",
+            source_provider: "gamma",
+            retrieved_at: null,
+            origin: "macro_service.trade_partners.us",
+            transformation_note: "Trade partner summary scaffold."
+          }
+        } as any),
+        divergences: makeDivergences(),
+        events: makeEvents(),
+        histories: {},
+        loading: false,
+        onLoadWorkspace: vi.fn(),
+        onLoadSeries: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Trade Partners");
+    expect(body).toContain("European Union");
+    expect(body).toContain("Trade Balance");
+    expect(body).toContain("Compare partner concentration against FX and inflation shocks.");
+  });
+
+  it("renders country comparison context in the country compare mode", () => {
+    macroContext.set({
+      mode: "country_compare" as any,
+      region: "EU",
+      timeframe: "1Y",
+      theme: "growth",
+      comparisonRegion: "US"
+    });
+
+    const { body } = render(MacroView, {
+      props: {
+        snapshot: makeSnapshot({
+          region: "EU",
+          comparison_region: "US",
+          country_compare: {
+            base_region: "EU",
+            comparison_region: "US",
+            headline: "EU versus US macro comparison",
+            summary: "EU is compared with US across growth, inflation, labor, policy, and external-balance proxies.",
+            rows: [
+              {
+                metric_id: "real_gdp_growth",
+                label: "Real GDP growth",
+                base_region: "EU",
+                comparison_region: "US",
+                base_value: 1.1,
+                comparison_value: 2.4,
+                gap_value: -1.3,
+                unit: "pct",
+                base_value_display: "1.10%",
+                comparison_value_display: "2.40%",
+                gap_display: "-1.30 pp",
+                interpretation: "EU real gdp growth sits below US by -1.30 pp.",
+                source_provider: "imf",
+                retrieved_at: null,
+                origin: "macro_service.country_compare.eu_vs_us",
+                transformation_note: "Curated first-pass country comparison row."
+              }
+            ],
+            caveats: ["Country comparison uses curated normalized placeholders in this pass."],
+            research_focus: "Start with gaps that disagree with market pricing.",
+            source_provider: "gamma",
+            retrieved_at: null,
+            origin: "macro_service.country_compare.eu_vs_us",
+            transformation_note: "Country comparison scaffold."
+          }
+        } as any),
+        divergences: makeDivergences(),
+        events: makeEvents(),
+        histories: {},
+        loading: false,
+        onLoadWorkspace: vi.fn(),
+        onLoadSeries: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Country Compare");
+    expect(body).toContain("EU versus US macro comparison");
+    expect(body).toContain("Real GDP growth");
+    expect(body).toContain("Start with gaps that disagree with market pricing.");
+  });
 });
 
 function makeSnapshot(overrides: Partial<MacroSnapshot> = {}): MacroSnapshot {

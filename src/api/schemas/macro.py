@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 from src.application.macro_service import MacroSnapshotRequest
 from src.models.macro import (
     MacroCoherenceProfile,
+    MacroCountryCompareRow,
+    MacroCountryCompareSummary,
     MacroCurveNode,
     MacroDivergenceRecord,
     MacroDivergenceSignal,
@@ -25,6 +27,8 @@ from src.models.macro import (
     MacroSnapshotFocusItem,
     MacroSnapshotPayload,
     MacroThemeComparison,
+    MacroTradePartnerRow,
+    MacroTradePartnerSummary,
 )
 
 
@@ -429,6 +433,93 @@ class MacroPolicyMeetingPathSummaryModel(BaseModel):
         return cls(**payload)
 
 
+class MacroTradePartnerRowModel(BaseModel):
+    partner_code: str
+    partner_name: str
+    rank: int
+    export_value: float | None = None
+    import_value: float | None = None
+    total_trade_value: float | None = None
+    trade_balance: float | None = None
+    share_of_total: float | None = None
+    export_value_display: str | None = None
+    import_value_display: str | None = None
+    total_trade_value_display: str | None = None
+    trade_balance_display: str | None = None
+    share_of_total_display: str | None = None
+    interpretation: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroTradePartnerRow) -> "MacroTradePartnerRowModel":
+        return cls(**row.__dict__)
+
+
+class MacroTradePartnerSummaryModel(BaseModel):
+    region: str
+    headline: str
+    summary: str
+    partners: list[MacroTradePartnerRowModel] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroTradePartnerSummary) -> "MacroTradePartnerSummaryModel":
+        payload = dict(row.__dict__)
+        payload["partners"] = [MacroTradePartnerRowModel.from_domain(partner) for partner in row.partners]
+        return cls(**payload)
+
+
+class MacroCountryCompareRowModel(BaseModel):
+    metric_id: str
+    label: str
+    base_region: str
+    comparison_region: str
+    base_value: float | None = None
+    comparison_value: float | None = None
+    gap_value: float | None = None
+    unit: str | None = None
+    base_value_display: str | None = None
+    comparison_value_display: str | None = None
+    gap_display: str | None = None
+    interpretation: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroCountryCompareRow) -> "MacroCountryCompareRowModel":
+        return cls(**row.__dict__)
+
+
+class MacroCountryCompareSummaryModel(BaseModel):
+    base_region: str
+    comparison_region: str
+    headline: str
+    summary: str
+    rows: list[MacroCountryCompareRowModel] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    research_focus: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: MacroCountryCompareSummary) -> "MacroCountryCompareSummaryModel":
+        payload = dict(row.__dict__)
+        payload["rows"] = [MacroCountryCompareRowModel.from_domain(item) for item in row.rows]
+        return cls(**payload)
+
+
 class MacroEventStudyModel(BaseModel):
     study_id: str
     theme: str
@@ -498,6 +589,8 @@ class MacroSnapshotResponseModel(BaseModel):
     snapshot_cards: list[MacroSnapshotCardModel] = Field(default_factory=list)
     rates_policy: MacroRatesPolicySummaryModel | None = None
     cross_asset: list[MacroThemeComparisonModel] = Field(default_factory=list)
+    trade_partners: MacroTradePartnerSummaryModel | None = None
+    country_compare: MacroCountryCompareSummaryModel | None = None
     top_divergences: list[MacroDivergenceModel] = Field(default_factory=list)
     event_studies: list[MacroEventStudyModel] = Field(default_factory=list)
     upcoming_events: list[MacroEventModel] = Field(default_factory=list)
@@ -516,6 +609,12 @@ class MacroSnapshotResponseModel(BaseModel):
             MacroRatesPolicySummaryModel.from_domain(row.rates_policy) if row.rates_policy is not None else None
         )
         payload["cross_asset"] = [MacroThemeComparisonModel.from_domain(item) for item in row.cross_asset]
+        payload["trade_partners"] = (
+            MacroTradePartnerSummaryModel.from_domain(row.trade_partners) if row.trade_partners is not None else None
+        )
+        payload["country_compare"] = (
+            MacroCountryCompareSummaryModel.from_domain(row.country_compare) if row.country_compare is not None else None
+        )
         payload["top_divergences"] = [MacroDivergenceModel.from_domain(item) for item in row.top_divergences]
         payload["event_studies"] = [MacroEventStudyModel.from_domain(item) for item in row.event_studies]
         payload["upcoming_events"] = [MacroEventModel.from_domain(item) for item in row.upcoming_events]

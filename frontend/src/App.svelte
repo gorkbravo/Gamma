@@ -359,6 +359,8 @@
     cross_asset: "Cross-Asset",
     rates_policy: "Rates & Policy",
     events_regimes: "Events / Regimes",
+    trade_partners: "Trade Partners",
+    country_compare: "Country Compare",
   };
 
   function describeMacroCopilotContext(context: MacroContextState) {

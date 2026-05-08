@@ -108,6 +108,8 @@ describe("navigation tab ordering", () => {
       "cross_asset",
       "rates_policy",
       "events_regimes",
+      "trade_partners",
+      "country_compare",
     ]);
     expect(getModeByShortcutIndex("macro", 2)?.id).toBe("cross_asset");
     expect(getModeShortcutHint("crypto", "flows_liquidity")).toBe("Shift+3");
@@ -139,6 +141,8 @@ describe("navigation tab ordering", () => {
     expect(resolveNavigationPath("research", orderState, "/Research/Scope")?.mode?.id).toBe("scope_analysis");
     expect(resolveNavigationPath("research", orderState, "/Rearch/Scope")?.mode?.id).toBe("scope_analysis");
     expect(resolveNavigationPath("research", orderState, "/macro/rates")?.mode?.id).toBe("rates_policy");
+    expect(resolveNavigationPath("research", orderState, "/macro/trade")?.mode?.id).toBe("trade_partners");
+    expect(resolveNavigationPath("research", orderState, "/macro/country")?.mode?.id).toBe("country_compare");
     expect(resolveNavigationPath("research", orderState, "/Prediction")?.tab.id).toBe("prediction_markets");
     expect(resolveNavigationPath("research", orderState, "/Research/Unknown")).toBeNull();
     expect(resolveNavigationPath("portfolio", orderState, "/Research/Scope")).toBeNull();
