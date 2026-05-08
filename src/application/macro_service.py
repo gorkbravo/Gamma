@@ -33,6 +33,7 @@ from src.models.macro import (
 from src.application.prediction_market_service import PredictionMarketScreenerRequest, PredictionMarketService
 from src.models.prediction_markets import PredictionMarketRecord
 from src.services.macro_adapters import (
+    CensusTradePartnerAdapter,
     DBnomicsMacroAdapter,
     IBKRMacroFXAdapter,
     FredMacroAdapter,
@@ -812,6 +813,7 @@ class MacroService:
         events_adapter: USMacroEventsAdapter,
         fx_adapter: IBKRMacroFXAdapter | None = None,
         dbnomics_adapter: DBnomicsMacroAdapter | None = None,
+        census_trade_adapter: CensusTradePartnerAdapter | None = None,
         prediction_market_service: PredictionMarketService | None = None,
     ) -> None:
         self.fred_adapter = fred_adapter
@@ -819,6 +821,7 @@ class MacroService:
         self.events_adapter = events_adapter
         self.fx_adapter = fx_adapter
         self.dbnomics_adapter = dbnomics_adapter
+        self.census_trade_adapter = census_trade_adapter
         self.prediction_market_service = prediction_market_service
 
     def get_snapshot(self, request: MacroSnapshotRequest) -> MacroSnapshotPayload:
@@ -870,7 +873,7 @@ class MacroService:
             timeframe=timeframe,
             force_refresh=request.force_refresh,
         )
-        trade_partners = self._build_trade_partners(region=region, timeframe=timeframe)
+        trade_partners = self._build_trade_partners(region=region, timeframe=timeframe, force_refresh=request.force_refresh)
         country_compare = self._build_country_compare(region=region, comparison_region=comparison_region)
         retrieved_at = _max_timestamp(
             [row.retrieved_at for row in histories.values()]
@@ -929,8 +932,67 @@ class MacroService:
             transformation_note="Snapshot combines normalized FRED series histories, Treasury curve snapshots where available, comparison-aware metric overlays, event-window studies, and official calendar events into a mode-oriented macro workspace.",
         )
 
-    def _build_trade_partners(self, *, region: str, timeframe: str) -> MacroTradePartnerSummary:
+    def _build_trade_partners(self, *, region: str, timeframe: str, force_refresh: bool = False) -> MacroTradePartnerSummary:
         data_region = self._data_region(region)
+        if data_region == "US" and self.census_trade_adapter is not None:
+            try:
+                live_rows, live_retrieved_at = self.census_trade_adapter.get_us_trade_partners(
+                    ttl=timedelta(hours=24),
+                    force_refresh=force_refresh,
+                )
+            except Exception:
+                live_rows = []
+                live_retrieved_at = None
+            if live_rows:
+                total = sum(row.total_trade_value for row in live_rows)
+                partners = []
+                for rank, row in enumerate(live_rows, start=1):
+                    total_trade = row.total_trade_value
+                    balance = row.trade_balance
+                    share = (total_trade / total) if total else None
+                    partners.append(
+                        MacroTradePartnerRow(
+                            partner_code=row.partner_code,
+                            partner_name=row.partner_name,
+                            rank=rank,
+                            export_value=row.export_value,
+                            import_value=row.import_value,
+                            total_trade_value=total_trade,
+                            trade_balance=balance,
+                            share_of_total=share,
+                            export_value_display=_format_usd_billions(row.export_value),
+                            import_value_display=_format_usd_billions(row.import_value),
+                            total_trade_value_display=_format_usd_billions(total_trade),
+                            trade_balance_display=_format_usd_billions(balance),
+                            share_of_total_display=_format_percent(share),
+                            interpretation=_trade_partner_interpretation(row.partner_name, balance, share),
+                            source_provider=row.source_provider,
+                            retrieved_at=row.retrieved_at,
+                            origin=row.origin,
+                            transformation_note=row.transformation_note,
+                        )
+                    )
+                return MacroTradePartnerSummary(
+                    region=region,
+                    headline=f"{region} trade partner exposure",
+                    summary=(
+                        "US trade partner context is sourced from Census International Trade country rows and ranks "
+                        "partners by combined year-to-date exports plus general imports."
+                    ),
+                    partners=partners,
+                    caveats=[
+                        "Census values are official year-to-date goods trade rows converted to USD billions; services trade and revisions are outside this first live slice.",
+                        "Country groups are excluded from the live ranking so the rows behave as country-compare inputs.",
+                    ],
+                    research_focus="Compare partner concentration against FX, commodity, inflation, and policy shocks before treating a macro move as purely domestic.",
+                    source_provider="census",
+                    retrieved_at=live_retrieved_at,
+                    origin="macro_service.trade_partners.us.census",
+                    transformation_note=(
+                        "Trade partner summary uses the live Census International Trade NAICS adapter when available, "
+                        "with curated Gamma rows retained as offline fallback."
+                    ),
+                )
         raw_rows = TRADE_PARTNER_FIXTURES.get(data_region, TRADE_PARTNER_FIXTURES["US"])
         total = sum((exports + imports) for _, _, _, exports, imports, _ in raw_rows)
         partners: list[MacroTradePartnerRow] = []

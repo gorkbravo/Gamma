@@ -49,6 +49,7 @@ from src.services.fundamentals_adapters import IbkrValuationAdapter, SecFundamen
 from src.services.fundamentals_store import FundamentalsResearchStore
 from src.services.fred import FredClient
 from src.services.macro_adapters import (
+    CensusTradePartnerAdapter,
     DBnomicsMacroAdapter,
     IBKRMacroFXAdapter,
     FredMacroAdapter,
@@ -299,6 +300,7 @@ def build_runtime(
         events_adapter=USMacroEventsAdapter(cache),
         fx_adapter=IBKRMacroFXAdapter(market_data),
         dbnomics_adapter=DBnomicsMacroAdapter(cache),
+        census_trade_adapter=CensusTradePartnerAdapter(cache, api_key=os.getenv("CENSUS_API_KEY", "")),
         prediction_market_service=prediction_market_service,
     )
     commodities_service = CommoditiesService(

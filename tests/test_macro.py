@@ -14,7 +14,14 @@ from src.models.macro import MacroEventRecord, MacroLinkedPredictionMarket, Macr
 from src.models.prediction_markets import PredictionMarketRecord, PredictionMarketScreenerResult
 from src.services.cache import CacheService
 from src.services.fred import FredObservation
-from src.services.macro_adapters import DBnomicsMacroAdapter, FredMacroAdapter, TreasuryCurveAdapter, USMacroEventsAdapter
+from src.services.macro_adapters import (
+    CensusTradePartnerAdapter,
+    CensusTradePartnerResult,
+    DBnomicsMacroAdapter,
+    FredMacroAdapter,
+    TreasuryCurveAdapter,
+    USMacroEventsAdapter,
+)
 
 
 NOW = datetime(2026, 3, 20, 12, 0, 0)
@@ -104,6 +111,114 @@ def test_dbnomics_macro_adapter_normalizes_observations_and_uses_cache(tmp_path,
     assert all(point.source_provider == "dbnomics" for point in first.points)
     assert all(point.origin == "dbnomics.series.observations:BLS/ln/LNS14000000" for point in first.points)
     assert all(point.transformation_note for point in first.points)
+
+
+def test_census_trade_partner_adapter_combines_export_and_import_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: FRED_RETRIEVED_AT)
+    calls: list[str] = []
+    export_payload = [
+        ["CTY_CODE", "CTY_NAME", "SUMMARY_LVL", "ALL_VAL_YR", "YEAR", "MONTH", "time"],
+        ["-", "TOTAL FOR ALL COUNTRIES", "DET", "1000000000000", "2025", "12", "2025-12"],
+        ["0003", "EUROPEAN UNION", "CGP", "250000000000", "2025", "12", "2025-12"],
+        ["1220", "CANADA", "DET", "360000000000", "2025", "12", "2025-12"],
+        ["2010", "MEXICO", "DET", "410000000000", "2025", "12", "2025-12"],
+    ]
+    import_payload = [
+        ["CTY_CODE", "CTY_NAME", "SUMMARY_LVL", "GEN_VAL_YR", "YEAR", "MONTH", "time"],
+        ["-", "TOTAL FOR ALL COUNTRIES", "DET", "1400000000000", "2025", "12", "2025-12"],
+        ["1220", "CANADA", "DET", "430000000000", "2025", "12", "2025-12"],
+        ["2010", "MEXICO", "DET", "520000000000", "2025", "12", "2025-12"],
+        ["5700", "CHINA", "DET", "450000000000", "2025", "12", "2025-12"],
+    ]
+
+    def fake_fetch_json(url: str):
+        calls.append(url)
+        return export_payload if "/exports/" in url else import_payload
+
+    adapter = CensusTradePartnerAdapter(
+        cache=CacheService(base_dir=tmp_path / "cache"),
+        api_key="test-key",
+        fetch_json=fake_fetch_json,
+    )
+
+    rows, retrieved_at = adapter.get_us_trade_partners(year_month="2025-12")
+
+    assert len(calls) == 2
+    assert all("key=test-key" in call for call in calls)
+    assert retrieved_at == FRED_RETRIEVED_AT
+    assert [row.partner_code for row in rows] == ["MX", "CA", "CN"]
+    assert rows[0].partner_name == "Mexico"
+    assert rows[0].export_value == 410.0
+    assert rows[0].import_value == 520.0
+    assert rows[0].total_trade_value == 930.0
+    assert rows[0].trade_balance == -110.0
+    assert rows[0].source_provider == "census"
+    assert rows[0].retrieved_at == FRED_RETRIEVED_AT
+    assert rows[0].origin == "census.intltrade.naics:2025-12"
+    assert rows[0].transformation_note is not None
+
+
+def test_census_trade_partner_adapter_skips_unavailable_recent_months(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: FRED_RETRIEVED_AT)
+    calls: list[str] = []
+    export_payload = [
+        ["CTY_CODE", "CTY_NAME", "SUMMARY_LVL", "ALL_VAL_YR", "YEAR", "MONTH", "time"],
+        ["1220", "CANADA", "DET", "360000000000", "2026", "03", "2026-03"],
+    ]
+    import_payload = [
+        ["CTY_CODE", "CTY_NAME", "SUMMARY_LVL", "GEN_VAL_YR", "YEAR", "MONTH", "time"],
+        ["1220", "CANADA", "DET", "430000000000", "2026", "03", "2026-03"],
+    ]
+
+    def fake_fetch_json(url: str):
+        calls.append(url)
+        if "2026-04" in url:
+            raise ValueError("empty Census response")
+        return export_payload if "/exports/" in url else import_payload
+
+    adapter = CensusTradePartnerAdapter(
+        cache=CacheService(base_dir=tmp_path / "cache"),
+        api_key="test-key",
+        fetch_json=fake_fetch_json,
+    )
+    monkeypatch.setattr(adapter, "_candidate_months", lambda: ["2026-04", "2026-03"])
+
+    rows, _ = adapter.get_us_trade_partners()
+
+    assert [row.partner_code for row in rows] == ["CA"]
+    assert any("2026-04" in call for call in calls)
+    assert any("2026-03" in call for call in calls)
+
+
+def test_macro_service_prefers_live_census_trade_partner_rows_for_us(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+
+    class FakeCensusTradeAdapter:
+        def get_us_trade_partners(self, **kwargs):
+            assert kwargs["force_refresh"] is False
+            return [
+                CensusTradePartnerResult(
+                    partner_code="MX",
+                    partner_name="Mexico",
+                    export_value=410.0,
+                    import_value=520.0,
+                    source_provider="census",
+                    retrieved_at=FRED_RETRIEVED_AT,
+                    origin="census.intltrade.naics:2025-12",
+                    transformation_note="Official Census trade rows normalized from YTD values.",
+                )
+            ], FRED_RETRIEVED_AT
+
+    service = _build_macro_service(census_trade_adapter=FakeCensusTradeAdapter())
+
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
+
+    assert snapshot.trade_partners is not None
+    assert snapshot.trade_partners.source_provider == "census"
+    assert snapshot.trade_partners.retrieved_at == FRED_RETRIEVED_AT
+    assert snapshot.trade_partners.partners[0].partner_code == "MX"
+    assert snapshot.trade_partners.partners[0].share_of_total_display == "100.0%"
+    assert "Census" in snapshot.trade_partners.caveats[0]
 
 
 def test_macro_service_exposes_on_demand_dbnomics_history(monkeypatch):
@@ -1087,13 +1202,14 @@ class _FakePredictionMarketService:
         return PredictionMarketScreenerResult(markets=[market], venues=[], warnings=[])
 
 
-def _build_macro_service(dbnomics_adapter=None) -> MacroService:
+def _build_macro_service(dbnomics_adapter=None, census_trade_adapter=None) -> MacroService:
     return MacroService(
         fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
         treasury_adapter=_FakeTreasuryCurveAdapter(),
         events_adapter=_FakeEventsAdapter(),
         fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
         dbnomics_adapter=dbnomics_adapter,
+        census_trade_adapter=census_trade_adapter,
         prediction_market_service=_FakePredictionMarketService(),
     )
 

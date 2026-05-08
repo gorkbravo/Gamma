@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
@@ -20,7 +20,7 @@ from src.utils.time import now_utc
 
 
 TextFetcher = Callable[[str], str]
-JsonFetcher = Callable[[str], dict[str, Any]]
+JsonFetcher = Callable[[str], Any]
 _US_EASTERN = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,26 @@ class DBnomicsSeriesResult:
     points: list[MacroSeriesPoint]
     retrieved_at: datetime
     metadata: DBnomicsSeriesMetadata
+
+
+@dataclass(frozen=True)
+class CensusTradePartnerResult:
+    partner_code: str
+    partner_name: str
+    export_value: float
+    import_value: float
+    source_provider: str
+    retrieved_at: datetime
+    origin: str
+    transformation_note: str
+
+    @property
+    def total_trade_value(self) -> float:
+        return self.export_value + self.import_value
+
+    @property
+    def trade_balance(self) -> float:
+        return self.export_value - self.import_value
 
 
 class FredMacroAdapter:
@@ -262,6 +282,177 @@ class DBnomicsMacroAdapter:
                 )
             )
         return DBnomicsSeriesResult(points=points, retrieved_at=retrieved_at, metadata=metadata)
+
+
+class CensusTradePartnerAdapter:
+    provider = "census"
+    BASE_URL = "https://api.census.gov/data/timeseries/intltrade"
+
+    def __init__(
+        self,
+        cache: CacheService,
+        *,
+        api_key: str | None = None,
+        fetch_json: JsonFetcher | None = None,
+    ) -> None:
+        self.cache = cache
+        self.api_key = str(api_key or "").strip()
+        self.fetch_json = fetch_json or default_json_fetcher
+
+    def get_us_trade_partners(
+        self,
+        *,
+        year_month: str | None = None,
+        ttl: timedelta = timedelta(hours=24),
+        force_refresh: bool = False,
+        limit: int = 8,
+    ) -> tuple[list[CensusTradePartnerResult], datetime]:
+        candidates = [year_month] if year_month else self._candidate_months()
+        last_retrieved_at = now_utc()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                rows, retrieved_at = self._get_month(candidate, ttl=ttl, force_refresh=force_refresh, limit=limit)
+            except Exception as exc:
+                logger.debug("Census trade partner month %s unavailable: %s", candidate, exc)
+                continue
+            last_retrieved_at = retrieved_at
+            if rows:
+                return rows, retrieved_at
+        return [], last_retrieved_at
+
+    def _get_month(
+        self,
+        year_month: str,
+        *,
+        ttl: timedelta,
+        force_refresh: bool,
+        limit: int,
+    ) -> tuple[list[CensusTradePartnerResult], datetime]:
+        cache_key = self.cache.make_key("macro", "census", "trade_partners", year_month)
+        cached: Any = None
+        if not force_refresh:
+            cached = self.cache.get_json(cache_key, max_age=ttl)
+        if isinstance(cached, dict) and "exports" in cached and "imports" in cached and "retrieved_at" in cached:
+            exports_payload = cached["exports"]
+            imports_payload = cached["imports"]
+            retrieved_at = _parse_datetime(cached["retrieved_at"]) or now_utc()
+        else:
+            exports_payload = self.fetch_json(self._build_url("exports", year_month))
+            imports_payload = self.fetch_json(self._build_url("imports", year_month))
+            retrieved_at = now_utc()
+            self.cache.set_json(
+                cache_key,
+                {
+                    "retrieved_at": retrieved_at.isoformat(),
+                    "exports": exports_payload,
+                    "imports": imports_payload,
+                },
+            )
+        return self._parse_partner_payloads(
+            exports_payload,
+            imports_payload,
+            year_month=year_month,
+            retrieved_at=retrieved_at,
+            limit=limit,
+        ), retrieved_at
+
+    def _build_url(self, flow: str, year_month: str) -> str:
+        if flow == "exports":
+            path = "exports/naics"
+            value_field = "ALL_VAL_YR"
+        elif flow == "imports":
+            path = "imports/naics"
+            value_field = "GEN_VAL_YR"
+        else:
+            raise ValueError(f"Unsupported Census trade flow: {flow}")
+        params = {
+            "get": f"CTY_CODE,CTY_NAME,SUMMARY_LVL,{value_field},YEAR,MONTH",
+            "time": year_month,
+        }
+        if self.api_key:
+            params["key"] = self.api_key
+        return f"{self.BASE_URL}/{path}?{urlencode(params)}"
+
+    def _parse_partner_payloads(
+        self,
+        exports_payload: Any,
+        imports_payload: Any,
+        *,
+        year_month: str,
+        retrieved_at: datetime,
+        limit: int,
+    ) -> list[CensusTradePartnerResult]:
+        exports = self._parse_flow_rows(exports_payload, "ALL_VAL_YR")
+        imports = self._parse_flow_rows(imports_payload, "GEN_VAL_YR")
+        partner_keys = set(exports) | set(imports)
+        rows: list[CensusTradePartnerResult] = []
+        origin = f"census.intltrade.naics:{year_month}"
+        note = (
+            "Official Census International Trade NAICS country rows normalized from year-to-date export and general-import values; "
+            "Gamma converts dollars to USD billions and ranks by combined trade."
+        )
+        for key in partner_keys:
+            export_row = exports.get(key)
+            import_row = imports.get(key)
+            partner_name = (export_row or import_row or {}).get("partner_name") or key
+            export_value = float((export_row or {}).get("value") or 0.0) / 1_000_000_000.0
+            import_value = float((import_row or {}).get("value") or 0.0) / 1_000_000_000.0
+            if export_value <= 0 and import_value <= 0:
+                continue
+            rows.append(
+                CensusTradePartnerResult(
+                    partner_code=_census_partner_code(key, partner_name),
+                    partner_name=_title_country_name(partner_name),
+                    export_value=export_value,
+                    import_value=import_value,
+                    source_provider=self.provider,
+                    retrieved_at=retrieved_at,
+                    origin=origin,
+                    transformation_note=note,
+                )
+            )
+        rows.sort(key=lambda row: row.export_value + row.import_value, reverse=True)
+        return rows[: max(limit, 1)]
+
+    def _parse_flow_rows(self, payload: Any, value_field: str) -> dict[str, dict[str, Any]]:
+        if not isinstance(payload, list) or len(payload) < 2 or not isinstance(payload[0], list):
+            return {}
+        header = [str(value) for value in payload[0]]
+        index = {name: position for position, name in enumerate(header)}
+        required = {"CTY_CODE", "CTY_NAME", "SUMMARY_LVL", value_field}
+        if not required.issubset(index):
+            return {}
+        rows: dict[str, dict[str, Any]] = {}
+        for raw_row in payload[1:]:
+            if not isinstance(raw_row, list):
+                continue
+            summary_level = str(_list_get(raw_row, index["SUMMARY_LVL"]) or "").strip().upper()
+            country_code = str(_list_get(raw_row, index["CTY_CODE"]) or "").strip()
+            if summary_level != "DET" or country_code in {"", "-"}:
+                continue
+            value = _parse_float(_list_get(raw_row, index[value_field]))
+            if value is None or value <= 0:
+                continue
+            rows[country_code] = {
+                "partner_name": str(_list_get(raw_row, index["CTY_NAME"]) or "").strip() or country_code,
+                "value": value,
+            }
+        return rows
+
+    def _candidate_months(self) -> list[str]:
+        current = now_utc()
+        year = current.year
+        month = current.month - 1
+        candidates: list[str] = []
+        for _ in range(18):
+            if month <= 0:
+                year -= 1
+                month += 12
+            candidates.append(f"{year:04d}-{month:02d}")
+            month -= 1
+        return candidates
 
 
 class TreasuryCurveAdapter:
@@ -579,6 +770,53 @@ class USMacroEventsAdapter:
 
 def _clean_html(value: str) -> str:
     return re.sub(r"<[^>]+>", " ", unescape(str(value or ""))).replace("\xa0", " ").strip()
+
+
+def _list_get(values: list[Any], index: int) -> Any:
+    return values[index] if 0 <= index < len(values) else None
+
+
+_CENSUS_COUNTRY_CODE_MAP = {
+    "1220": "CA",
+    "2010": "MX",
+    "5700": "CN",
+    "4280": "DE",
+    "5880": "JP",
+    "4120": "GB",
+    "4279": "FR",
+    "4759": "IT",
+    "4210": "NL",
+    "5800": "KR",
+    "5330": "IN",
+    "5830": "TW",
+    "3510": "BR",
+    "6021": "AU",
+    "4010": "ES",
+}
+
+
+def _census_partner_code(country_code: str, partner_name: str) -> str:
+    mapped = _CENSUS_COUNTRY_CODE_MAP.get(str(country_code or "").strip())
+    if mapped:
+        return mapped
+    words = re.findall(r"[A-Z0-9]+", str(partner_name or "").upper())
+    if not words:
+        return str(country_code or "").strip() or "NA"
+    if len(words) == 1:
+        return words[0][:3]
+    return "".join(word[0] for word in words[:3])
+
+
+def _title_country_name(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    acronyms = {"USA", "US", "UAE", "UK", "EU", "OECD", "USMCA", "NAFTA"}
+    titled_words = []
+    for word in text.split():
+        cleaned = word.strip()
+        titled_words.append(cleaned if cleaned.upper() in acronyms else cleaned.capitalize())
+    return " ".join(titled_words)
 
 
 def _strip_namespace(value: str) -> str:

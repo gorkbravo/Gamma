@@ -688,21 +688,81 @@ describe("MacroView", () => {
             summary: "US trade partner context ranks the main bilateral demand and supply links.",
             partners: [
               {
+                partner_code: "MX",
+                partner_name: "Mexico",
+                rank: 1,
+                export_value: 410,
+                import_value: 520,
+                total_trade_value: 930,
+                trade_balance: -110,
+                share_of_total: 0.28,
+                export_value_display: "$410bn",
+                import_value_display: "$520bn",
+                total_trade_value_display: "$930bn",
+                trade_balance_display: "-$110bn",
+                share_of_total_display: "28.0%",
+                interpretation: "Mexico is an import-skewed partner at roughly 28.0% of this curated trade set.",
+                source_provider: "census",
+                retrieved_at: null,
+                origin: "macro_service.trade_partners.us",
+                transformation_note: "Curated first-pass trade partner context."
+              },
+              {
+                partner_code: "CA",
+                partner_name: "Canada",
+                rank: 2,
+                export_value: 360,
+                import_value: 430,
+                total_trade_value: 790,
+                trade_balance: -70,
+                share_of_total: 0.24,
+                export_value_display: "$360bn",
+                import_value_display: "$430bn",
+                total_trade_value_display: "$790bn",
+                trade_balance_display: "-$70bn",
+                share_of_total_display: "24.0%",
+                interpretation: "Canada is an import-skewed partner at roughly 24.0% of this curated trade set.",
+                source_provider: "census",
+                retrieved_at: null,
+                origin: "macro_service.trade_partners.us",
+                transformation_note: "Curated first-pass trade partner context."
+              },
+              {
+                partner_code: "CN",
+                partner_name: "China",
+                rank: 3,
+                export_value: 150,
+                import_value: 540,
+                total_trade_value: 690,
+                trade_balance: -390,
+                share_of_total: 0.21,
+                export_value_display: "$150bn",
+                import_value_display: "$540bn",
+                total_trade_value_display: "$690bn",
+                trade_balance_display: "-$390bn",
+                share_of_total_display: "21.0%",
+                interpretation: "China is an import-skewed partner at roughly 21.0% of this curated trade set.",
+                source_provider: "census",
+                retrieved_at: null,
+                origin: "macro_service.trade_partners.us",
+                transformation_note: "Curated first-pass trade partner context."
+              },
+              {
                 partner_code: "EU",
                 partner_name: "European Union",
-                rank: 1,
+                rank: 4,
                 export_value: 420,
                 import_value: 610,
                 total_trade_value: 1030,
                 trade_balance: -190,
-                share_of_total: 0.28,
+                share_of_total: 0.27,
                 export_value_display: "$420bn",
                 import_value_display: "$610bn",
                 total_trade_value_display: "$1030bn",
                 trade_balance_display: "-$190bn",
-                share_of_total_display: "28.0%",
-                interpretation: "European Union is an import-skewed partner at roughly 28.0% of this curated trade set.",
-                source_provider: "bea",
+                share_of_total_display: "27.0%",
+                interpretation: "European Union is an import-skewed partner at roughly 27.0% of this curated trade set.",
+                source_provider: "gamma",
                 retrieved_at: null,
                 origin: "macro_service.trade_partners.us",
                 transformation_note: "Curated first-pass trade partner context."
@@ -726,6 +786,14 @@ describe("MacroView", () => {
     });
 
     expect(body).toContain("Trade Partners");
+    expect(body).toContain("Trade Viz");
+    expect(body).toContain("🇲🇽");
+    expect(body).toContain("🇨🇦");
+    expect(body).toContain("🇨🇳");
+    expect(body).toContain("🇪🇺");
+    expect(body).toContain("Exports");
+    expect(body).toContain("Imports");
+    expect(body).toContain("Mexico");
     expect(body).toContain("European Union");
     expect(body).toContain("Trade Balance");
     expect(body).toContain("Compare partner concentration against FX and inflation shocks.");

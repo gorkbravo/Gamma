@@ -107,6 +107,7 @@ Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 - `IBKR`: portfolio snapshots, security history when explicitly configured or needed as fallback, FX spot/history, IV surfaces, fundamentals market-price context, and commodity futures curves where the user has entitlements
 - `Yahoo Finance / yfinance`: default public live-ish listed-market history for Research Overview and SITREP boards; unofficial and not institutional quote truth
 - `FRED`: macro time series
+- `US Census`: optional live US trade-partner rows for Macro when `CENSUS_API_KEY` is configured
 - `EIA`: optional selected official US energy fundamentals for the Commodities tab when `EIA_API_KEY` is configured
 - `US Treasury`: Treasury curve snapshots for the US rates view
 - official macro event adapters: policy and macro calendar coverage used in `Events / Regimes`
@@ -373,7 +374,7 @@ Important caveats:
 - comparison overlays only exist where Gamma has curated counterpart mappings
 - `Global` is a lighter comparative lens, not a fully independent region stack
 - EU coverage is now a first-class target for trade and country-compare context, while some underlying live adapters remain planned
-- trade-partner and country-compare rows are read-only research scaffolds until official BEA/Census, Eurostat, IMF/OECD, UN Comtrade, and WTO adapter paths replace the curated placeholders
+- US trade-partner rows use live Census country goods-trade data when `CENSUS_API_KEY` is configured and fall back to curated rows; EU/global trade-partner and country-compare rows remain read-only scaffolds until Eurostat, IMF/OECD, UN Comtrade, WTO, BEA, and BLS adapter paths replace the placeholders
 
 #### Commodities tab
 
