@@ -15,6 +15,7 @@
   export let emptyLabel = "No matches";
   export let results: SearchDropdownItem[] = [];
   export let enterBehavior: "select-first" | "submit" = "submit";
+  export let clearOnEscape = false;
 
   const dispatch = createEventDispatcher<{
     select: SearchDropdownItem;
@@ -22,6 +23,7 @@
   }>();
 
   let focused = false;
+  let inputElement: HTMLInputElement | null = null;
 
   $: normalizedValue = value.trim().toLowerCase();
   $: showResults = focused && normalizedValue.length > 0;
@@ -29,11 +31,17 @@
   function selectResult(item: SearchDropdownItem) {
     dispatch("select", item);
     focused = false;
+    inputElement?.blur();
   }
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
+      if (clearOnEscape) {
+        event.preventDefault();
+        value = "";
+      }
       focused = false;
+      inputElement?.blur();
       return;
     }
 
@@ -60,6 +68,7 @@
       </svg>
     </span>
     <input
+      bind:this={inputElement}
       bind:value
       type="search"
       {placeholder}

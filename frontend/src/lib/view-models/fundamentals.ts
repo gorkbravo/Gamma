@@ -33,6 +33,41 @@ export interface FundamentalsDcfDraft {
   scenarios: Record<string, FundamentalsDcfDraftScenario>;
 }
 
+export interface FundamentalsDcfDecisionGate {
+  blocked: boolean;
+  reasons: string[];
+}
+
+const DCF_BLOCKING_WARNING_PATTERNS = [
+  "no normalized annual statement periods",
+  "mapped annual revenue line",
+  "annual income line `revenue` has no mapped",
+  "mapped capital expenditures line",
+  "annual cashflow line `capex` has no mapped",
+  "mapped annual operating cash flow",
+  "annual cashflow line `operating cash flow` has no mapped",
+  "shares outstanding are unavailable",
+  "mapped share-count line"
+];
+
+export function dcfDecisionGateFromWarnings(warnings: string[]): FundamentalsDcfDecisionGate {
+  const reasons = warnings.reduce<string[]>((rows, warning) => {
+    const text = warning.trim();
+    const normalized = text.toLowerCase();
+    if (!text || rows.includes(text)) {
+      return rows;
+    }
+    if (DCF_BLOCKING_WARNING_PATTERNS.some((pattern) => normalized.includes(pattern))) {
+      return [...rows, text];
+    }
+    return rows;
+  }, []);
+  return {
+    blocked: reasons.length > 0,
+    reasons
+  };
+}
+
 export function statementViewForSelection(
   financials: FundamentalsFinancials | null,
   basis: FundamentalsStatementBasis,

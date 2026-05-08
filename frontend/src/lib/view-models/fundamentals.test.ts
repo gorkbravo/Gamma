@@ -9,6 +9,7 @@ import type {
 import {
   buildDcfSavePayload,
   createDcfDraft,
+  dcfDecisionGateFromWarnings,
   driverTone,
   findDcfScenario,
   fundamentalsModes,
@@ -74,6 +75,21 @@ describe("fundamentals view-model helpers", () => {
       "dcf",
       "reverse_valuation",
       "reference"
+    ]);
+  });
+
+  it("gates DCF decision outputs when required filings lines are missing", () => {
+    const gate = dcfDecisionGateFromWarnings([
+      "Quarterly SEC company-facts statements are unavailable or not mapped for this ticker; quarterly views may be empty while annual statements remain usable.",
+      "SEC company facts did not provide a mapped annual revenue line in the retained periods.",
+      "SEC company facts did not provide a mapped capital expenditures line; free-cash-flow and DCF values that depend on capex may be incomplete.",
+      "SEC company facts did not provide a mapped annual revenue line in the retained periods."
+    ]);
+
+    expect(gate.blocked).toBe(true);
+    expect(gate.reasons).toEqual([
+      "SEC company facts did not provide a mapped annual revenue line in the retained periods.",
+      "SEC company facts did not provide a mapped capital expenditures line; free-cash-flow and DCF values that depend on capex may be incomplete."
     ]);
   });
 

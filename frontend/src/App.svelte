@@ -201,6 +201,7 @@
   let pollHandle: ReturnType<typeof setInterval> | undefined;
   let ivPollHandle: ReturnType<typeof setInterval> | undefined;
   let workspaceMode: WorkspaceMode | null = null;
+  let navigationSearchResetToken = 0;
   let ivRequestedSymbol = "SPY";
   let ivPollingActive = false;
   let researchMode: ResearchMode = "overview";
@@ -1210,9 +1211,14 @@
     if (!workspaceMode) {
       return;
     }
-    const primaryTab = getWorkspaceHomeTab(workspaceMode);
-    const nextTab = isWorkspaceTab(workspaceMode, tab) ? tab : primaryTab;
+    if (!isWorkspaceTab(workspaceMode, tab)) {
+      resetNavigationSearch();
+      return;
+    }
+    const nextTab = tab;
 
+    resetNavigationSearch();
+    dismissSurfaces();
     activeTab.set(nextTab);
     if (nextTab !== "copilot") {
       copilotContextTab = nextTab;
@@ -1501,6 +1507,10 @@
     settingsOpen = false;
   }
 
+  function resetNavigationSearch() {
+    navigationSearchResetToken += 1;
+  }
+
   async function handleGenerateCopilot(prompt = "") {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
@@ -1694,6 +1704,10 @@
   }
 
   async function selectNavigationRoute(route: NavigationRouteMatch) {
+    if (!workspaceMode || !isWorkspaceTab(workspaceMode, route.tab.id)) {
+      resetNavigationSearch();
+      return;
+    }
     await selectTab(route.tab.id);
     if (route.mode) {
       await selectModeById(route.tab.id, route.mode.id);
@@ -1835,6 +1849,7 @@
     activeTab={$activeTab}
     workspaceMode={workspaceMode}
     workspaceTabOrders={$workspaceTabOrders}
+    searchResetToken={navigationSearchResetToken}
     tabs={tabBarTabs}
     selectedEquity={$sharedEquitySelection}
     selectedPortfolio={$researchResult?.scope_type === "synthetic_portfolio"

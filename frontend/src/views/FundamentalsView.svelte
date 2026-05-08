@@ -23,6 +23,7 @@
   import {
     buildDcfSavePayload,
     createDcfDraft,
+    dcfDecisionGateFromWarnings,
     driverTone,
     findDcfScenario,
     fundamentalsModes,
@@ -490,6 +491,7 @@
     }
     return [...rows, text];
   }, []);
+  $: dcfDecisionGate = dcfDecisionGateFromWarnings([...dcfWarnings, ...referenceWarnings]);
   $: currentStatement = statementViewForSelection(financials, statementBasis, statementKind);
   $: currentRatioView = statementViewForSelection(financials, statementBasis, "ratios");
   $: currentSourceTraces = sourceTracesForStatement(reference, statementBasis, statementKind).slice(0, 24);
@@ -1269,11 +1271,27 @@
           {#each dcfModel?.scenarios ?? [] as scenario}
             <button type="button" class:scenario-card={true} class:selected-scenario={scenario.scenario_id === dcfDraft.activeScenarioId} on:click={() => selectScenario(scenario.scenario_id)}>
               <span>{scenario.label}</span>
-              <strong>{currency(scenario.summary?.implied_value_per_share, 2)}</strong>
-              <small class={toneClass(scenario.summary?.upside_downside_pct)}>{pct(scenario.summary?.upside_downside_pct)}</small>
+              <strong>{dcfDecisionGate.blocked ? "Gated" : currency(scenario.summary?.implied_value_per_share, 2)}</strong>
+              <small class={dcfDecisionGate.blocked ? "" : toneClass(scenario.summary?.upside_downside_pct)}>
+                {dcfDecisionGate.blocked ? "Input coverage" : pct(scenario.summary?.upside_downside_pct)}
+              </small>
             </button>
           {/each}
         </div>
+
+        {#if dcfDecisionGate.blocked}
+          <div class="decision-gate">
+            <div>
+              <strong>DCF valuation gated</strong>
+              <p>Gamma found missing required fundamentals, so precise enterprise value, equity value, per-share value, and sensitivity outputs are suppressed.</p>
+            </div>
+            <ul>
+              {#each dcfDecisionGate.reasons.slice(0, 4) as reason}
+                <li>{reason}</li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
 
         <div class="kpi-grid scenario-kpi-grid">
           <article class="metric">
@@ -1282,19 +1300,19 @@
           </article>
           <article class="metric">
             <span>Enterprise Value</span>
-            <strong>{compactCurrency(activeScenarioSummary?.enterprise_value)}</strong>
+            <strong>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.enterprise_value)}</strong>
           </article>
           <article class="metric">
             <span>Equity Value</span>
-            <strong>{compactCurrency(activeScenarioSummary?.equity_value)}</strong>
+            <strong>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(activeScenarioSummary?.equity_value)}</strong>
           </article>
           <article class="metric">
             <span>Implied / Share</span>
-            <strong>{currency(activeScenarioSummary?.implied_value_per_share, 2)}</strong>
+            <strong>{dcfDecisionGate.blocked ? "N/A" : currency(activeScenarioSummary?.implied_value_per_share, 2)}</strong>
           </article>
           <article class="metric">
             <span>Upside / Downside</span>
-            <strong class={toneClass(activeScenarioSummary?.upside_downside_pct)}>{pct(activeScenarioSummary?.upside_downside_pct)}</strong>
+            <strong class={dcfDecisionGate.blocked ? "" : toneClass(activeScenarioSummary?.upside_downside_pct)}>{dcfDecisionGate.blocked ? "N/A" : pct(activeScenarioSummary?.upside_downside_pct)}</strong>
           </article>
         </div>
       </article>
@@ -1555,7 +1573,7 @@
                   <tr>
                     <td class="sheet-label">{pct(dcfModel.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
                     {#each row as cell}
-                      <td class={`sheet-cell sens-cell ${sensitivityHeatClass(cell.implied_value_per_share, sensitivityRange)}`}>{currency(cell.implied_value_per_share, 2)}</td>
+                      <td class={`sheet-cell sens-cell ${dcfDecisionGate.blocked ? "" : sensitivityHeatClass(cell.implied_value_per_share, sensitivityRange)}`}>{dcfDecisionGate.blocked ? "N/A" : currency(cell.implied_value_per_share, 2)}</td>
                     {/each}
                   </tr>
                 {/each}
@@ -1593,13 +1611,26 @@
           </article>
           <article class="metric">
             <span>Base Value / Share</span>
-            <strong>{currency(reverseValuation?.base_case_summary?.implied_value_per_share, 2)}</strong>
+            <strong>{dcfDecisionGate.blocked ? "N/A" : currency(reverseValuation?.base_case_summary?.implied_value_per_share, 2)}</strong>
           </article>
           <article class="metric">
             <span>Base Gap</span>
-            <strong class={toneClass(reverseValuation?.base_case_summary?.upside_downside_pct)}>{pct(reverseValuation?.base_case_summary?.upside_downside_pct)}</strong>
+            <strong class={dcfDecisionGate.blocked ? "" : toneClass(reverseValuation?.base_case_summary?.upside_downside_pct)}>{dcfDecisionGate.blocked ? "N/A" : pct(reverseValuation?.base_case_summary?.upside_downside_pct)}</strong>
           </article>
         </div>
+        {#if dcfDecisionGate.blocked}
+          <div class="decision-gate">
+            <div>
+              <strong>Reverse valuation gated</strong>
+              <p>Market-implied solves depend on the same DCF mechanics, so Gamma suppresses solved-path outputs until required financial lines are mapped or manually overridden.</p>
+            </div>
+            <ul>
+              {#each dcfDecisionGate.reasons.slice(0, 4) as reason}
+                <li>{reason}</li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
       </article>
 
       <article class="panel">
@@ -1621,11 +1652,11 @@
                 {#each reverseDrivers as driver}
                   <tr>
                     <td><strong>{driver.label}</strong><small>{driver.driver_id}</small></td>
-                    <td class={driverTone(driver)}>{driver.display_value ?? "N/A"}</td>
+                    <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.display_value ?? "N/A"}</td>
                     <td>{driver.base_display_value ?? "N/A"}</td>
-                    <td class={driverTone(driver)}>{driver.gap_display_value ?? "N/A"}</td>
-                    <td>{compactCurrency(driver.solved_enterprise_value)}</td>
-                    <td>{driver.success ? "Solved" : "Bounded"}</td>
+                    <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.gap_display_value ?? "N/A"}</td>
+                    <td>{dcfDecisionGate.blocked ? "N/A" : compactCurrency(driver.solved_enterprise_value)}</td>
+                    <td>{dcfDecisionGate.blocked ? "Gated" : driver.success ? "Solved" : "Bounded"}</td>
                     <td>{driver.warnings.join(" | ") || driver.transformation_note || "N/A"}</td>
                   </tr>
                 {/each}
@@ -1650,7 +1681,7 @@
             {#each reverseGapMetrics as metric}
               <article class="metric">
                 <span>{metric.label}</span>
-                <strong class={metricTone(metric.metric_id, metric.value)}>{metric.display_value ?? "N/A"}</strong>
+                <strong class={dcfDecisionGate.blocked ? "" : metricTone(metric.metric_id, metric.value)}>{dcfDecisionGate.blocked ? "N/A" : metric.display_value ?? "N/A"}</strong>
               </article>
             {:else}
               <div class="empty-panel">Scenario gap metrics appear with the reverse valuation payload.</div>
@@ -1682,9 +1713,9 @@
                     <tr>
                       <td class="sheet-label">{pct(reverseValuation.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
                       {#each row as cell}
-                        <td class={`sheet-cell sens-cell ${reverseSensitivityHeatClass(cell.implied_revenue_growth_pct)}`}>
-                          <strong>{pct(cell.implied_revenue_growth_pct)}</strong>
-                          <small>EBIT {pct(cell.implied_ebit_margin_pct)} | FCF {pct(cell.implied_fcf_cagr_pct)}</small>
+                        <td class={`sheet-cell sens-cell ${dcfDecisionGate.blocked ? "" : reverseSensitivityHeatClass(cell.implied_revenue_growth_pct)}`}>
+                          <strong>{dcfDecisionGate.blocked ? "N/A" : pct(cell.implied_revenue_growth_pct)}</strong>
+                          <small>{dcfDecisionGate.blocked ? "Input coverage gated" : `EBIT ${pct(cell.implied_ebit_margin_pct)} | FCF ${pct(cell.implied_fcf_cagr_pct)}`}</small>
                         </td>
                       {/each}
                     </tr>
@@ -2498,6 +2529,34 @@
     place-items: center;
     text-align: center;
     padding: 0.6rem;
+  }
+
+  .decision-gate {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 0.75rem;
+    margin-top: 0.65rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--panel-border));
+    background: color-mix(in srgb, var(--warning) 7%, var(--surface-0));
+  }
+
+  .decision-gate strong {
+    color: var(--warning);
+    font-size: 0.78rem;
+  }
+
+  .decision-gate p,
+  .decision-gate li {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 0.72rem;
+    line-height: 1.4;
+  }
+
+  .decision-gate ul {
+    margin: 0;
+    padding-left: 1rem;
   }
 
   .kpi-grid {

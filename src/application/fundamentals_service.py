@@ -1537,6 +1537,27 @@ class FundamentalsService:
             warnings.append("Latest shares outstanding are unavailable, so reverse valuation cannot bridge price to equity value.")
         if market_context.get("net_debt") is None:
             warnings.append("Net debt bridge is unavailable, so reverse valuation cannot bridge market equity value to enterprise value.")
+        if _has_dcf_decision_blocker(warnings):
+            warnings.append(
+                "Reverse valuation is gated because required normalized annual DCF inputs are missing; map the required lines or add explicit scenario overrides before using market-implied solves."
+            )
+            return FundamentalsReverseValuationResult(
+                company=sec_data.company,
+                current_price=market_context.get("current_price"),
+                shares_outstanding=market_context.get("shares"),
+                net_debt=market_context.get("net_debt"),
+                target_equity_value=target_equity_value,
+                target_enterprise_value=target_enterprise_value,
+                base_case_summary=base_summary,
+                scenario_gap_metrics=self._reverse_gap_metrics(base_summary, market_context),
+                drivers=[],
+                sensitivity_matrix=None,
+                warnings=_dedupe_warnings(warnings),
+                source_provider="gamma",
+                retrieved_at=datetime.now(timezone.utc),
+                origin="fundamentals.reverse_valuation",
+                transformation_note="Gamma gated reverse valuation because required normalized annual inputs for the underlying DCF mechanics are missing.",
+            )
         if target_enterprise_value is None:
             return FundamentalsReverseValuationResult(
                 company=sec_data.company,
@@ -3251,6 +3272,26 @@ def _dedupe_warnings(*groups: list[str] | None) -> list[str]:
     return ordered
 
 
+_DCF_DECISION_BLOCKER_PATTERNS = (
+    "no normalized annual statement periods",
+    "mapped annual revenue line",
+    "annual income line `revenue` has no mapped",
+    "mapped capital expenditures line",
+    "annual cashflow line `capex` has no mapped",
+    "mapped annual operating cash flow",
+    "annual cashflow line `operating cash flow` has no mapped",
+    "shares outstanding are unavailable",
+    "mapped share-count line",
+)
+
+
+def _has_dcf_decision_blocker(warnings: list[str]) -> bool:
+    return any(
+        any(pattern in str(warning or "").strip().lower() for pattern in _DCF_DECISION_BLOCKER_PATTERNS)
+        for warning in warnings
+    )
+
+
 def _coerce_float(value: Any, default: float) -> float:
     try:
         return float(value)
@@ -3310,7 +3351,7 @@ def _compute_dcf_projection(
     overrides: dict[str, list[float | None]],
     market_context: dict[str, Any],
 ) -> dict[str, Any]:
-    last_revenue = _last_non_null(actuals["revenue"]) or 0.0
+    last_revenue = _last_non_null(actuals["revenue"])
     last_shares = _first_non_null(_last_non_null(actuals["shares"]), market_context.get("shares")) or 0.0
     revenue_growth = _ensure_list_length(assumptions.get("revenue_growth_pct"), len(projection_years), 0.05)
     ebit_margin = _ensure_list_length(assumptions.get("ebit_margin_pct"), len(projection_years), 0.20)
@@ -3326,18 +3367,22 @@ def _compute_dcf_projection(
     previous_revenue = last_revenue
     previous_shares = last_shares
     for index, _year in enumerate(projection_years):
-        computed_revenue = previous_revenue * (1.0 + revenue_growth[index])
+        computed_revenue = (
+            None
+            if previous_revenue is None
+            else previous_revenue * (1.0 + revenue_growth[index])
+        )
         revenue = _override_or_value(overrides, "revenue", index, computed_revenue, override_flags)
-        computed_ebit = (revenue or 0.0) * ebit_margin[index]
+        computed_ebit = None if revenue is None else revenue * ebit_margin[index]
         ebit = _override_or_value(overrides, "ebit", index, computed_ebit, override_flags)
-        computed_taxes = max(ebit or 0.0, 0.0) * tax_rate[index]
+        computed_taxes = None if ebit is None else max(ebit, 0.0) * tax_rate[index]
         taxes = _override_or_value(overrides, "taxes", index, computed_taxes, override_flags)
-        computed_da = (revenue or 0.0) * da_pct[index]
+        computed_da = None if revenue is None else revenue * da_pct[index]
         da = _override_or_value(overrides, "depreciation_and_amortization", index, computed_da, override_flags)
-        computed_capex = (revenue or 0.0) * capex_pct[index]
+        computed_capex = None if revenue is None else revenue * capex_pct[index]
         capex = _override_or_value(overrides, "capital_expenditures", index, computed_capex, override_flags)
-        incremental_revenue = (revenue or 0.0) - previous_revenue
-        computed_nwc = incremental_revenue * nwc_pct[index]
+        incremental_revenue = None if revenue is None or previous_revenue is None else revenue - previous_revenue
+        computed_nwc = None if incremental_revenue is None else incremental_revenue * nwc_pct[index]
         nwc = _override_or_value(overrides, "change_in_nwc", index, computed_nwc, override_flags)
         computed_fcf = None if None in {ebit, taxes, da, capex, nwc} else (ebit - taxes + da - capex - nwc)
         fcf = _override_or_value(overrides, "free_cash_flow", index, computed_fcf, override_flags)

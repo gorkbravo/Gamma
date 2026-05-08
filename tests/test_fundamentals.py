@@ -534,6 +534,39 @@ def test_fundamentals_dcf_and_reverse_do_not_assume_missing_shares(tmp_path):
     assert any("shares outstanding are unavailable" in warning.lower() for warning in reverse.warnings)
 
 
+def test_fundamentals_dcf_and_reverse_gate_missing_revenue_base(tmp_path):
+    service = _build_service(tmp_path)
+    sec_data = service.sec_adapter.company_data["AAPL"]
+    service.sec_adapter.company_data["AAPL"] = replace(
+        sec_data,
+        annual_income_statement=_without_statement_lines(sec_data.annual_income_statement, {"revenue"}),
+        quarterly_income_statement=_without_statement_lines(sec_data.quarterly_income_statement, {"revenue"}),
+    )
+
+    dcf = service.get_dcf_model("AAPL")
+    reverse = service.get_reverse_valuation("AAPL")
+
+    assert dcf is not None
+    assert any("mapped annual revenue line" in warning for warning in dcf.warnings)
+    assert all(
+        scenario.summary is not None
+        and scenario.summary.enterprise_value is None
+        and scenario.summary.implied_value_per_share is None
+        for scenario in dcf.scenarios
+    )
+    assert dcf.sensitivity_matrix is not None
+    assert all(
+        cell.implied_value_per_share is None
+        for row in dcf.sensitivity_matrix.rows
+        for cell in row
+    )
+    assert reverse is not None
+    assert reverse.target_enterprise_value is not None
+    assert reverse.drivers == []
+    assert reverse.sensitivity_matrix is None
+    assert any("Reverse valuation is gated" in warning for warning in reverse.warnings)
+
+
 def test_fundamentals_peers_degrade_when_peer_price_context_fails(tmp_path):
     service = _build_service(tmp_path)
     service.valuation_adapter = FailingPeerValuationAdapter(

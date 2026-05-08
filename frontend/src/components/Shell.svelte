@@ -19,6 +19,7 @@
   export let activeTab: TabId = "portfolio";
   export let workspaceMode: WorkspaceMode = "portfolio";
   export let workspaceTabOrders: WorkspaceTabOrderState = DEFAULT_WORKSPACE_TAB_ORDER;
+  export let searchResetToken = 0;
   export let tabs: TabBarItem[] = [];
   export let selectedEquity: SharedEquitySelection | null = null;
   export let selectedPortfolio: SelectedPortfolio | null = null;
@@ -32,6 +33,8 @@
 
   let searchValue = "";
   let previousActiveTab: TabId = activeTab;
+  let previousWorkspaceMode: WorkspaceMode = workspaceMode;
+  let previousSearchResetToken = searchResetToken;
 
   function normalizeSearchTerm(value: string) {
     return value.trim().toLowerCase().replace(/[_\s]+/g, " ");
@@ -75,10 +78,22 @@
     previousActiveTab = activeTab;
     searchValue = "";
   }
+  $: if (workspaceMode !== previousWorkspaceMode) {
+    previousWorkspaceMode = workspaceMode;
+    searchValue = "";
+  }
+  $: if (searchResetToken !== previousSearchResetToken) {
+    previousSearchResetToken = searchResetToken;
+    searchValue = "";
+  }
 
   function handleSearchSelect(tabId: TabId) {
-    onSelectTab(tabId);
+    if (!tabs.some((tab) => tab.id === tabId)) {
+      searchValue = "";
+      return;
+    }
     searchValue = "";
+    onSelectTab(tabId);
   }
 
   function routeResultId(route: NavigationRouteMatch) {
@@ -86,9 +101,19 @@
   }
 
   function handleSearchResultSelect(id: string) {
-    if (id.startsWith("route:") && pathMatch && id === routeResultId(pathMatch)) {
-      onSelectRoute(pathMatch);
+    const selectedResult = searchResults.find((result) => result.id === id);
+    if (!selectedResult) {
       searchValue = "";
+      return;
+    }
+
+    if (id.startsWith("route:")) {
+      if (pathMatch && id === routeResultId(pathMatch)) {
+        searchValue = "";
+        onSelectRoute(pathMatch);
+      } else {
+        searchValue = "";
+      }
       return;
     }
 
@@ -113,6 +138,7 @@
           ariaLabel="Search tabs"
           emptyLabel="No matching tabs"
           enterBehavior="select-first"
+          clearOnEscape
           results={searchResults}
           on:select={(event) => handleSearchResultSelect(event.detail.id)}
         />
