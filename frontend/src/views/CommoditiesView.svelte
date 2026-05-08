@@ -31,7 +31,7 @@
   ];
 
   let selectedInstrumentId = "wti";
-  const scatterBounds = { left: 12, right: 190, top: 10, bottom: 108 };
+  const scatterBounds = { left: 22, right: 342, top: 9, bottom: 92 };
   const scatterGridFractions = [0.25, 0.5, 0.75];
   const macroDriverSeries = ["us-dollar-broad", "us-real-10y-yield"];
   const requestedMacroDrivers = new Set<string>();
@@ -1086,6 +1086,7 @@
     const normalized = (value ?? "").toLowerCase();
     if (normalized.includes("backward")) return "positive";
     if (normalized.includes("contango")) return "negative";
+    if (normalized.includes("unavailable") || normalized.includes("n/a") || !normalized) return "neutral";
     return "warning";
   }
 
@@ -1148,7 +1149,8 @@
 
     {#if mode === "overview"}
       <section class="overview-grid">
-        <article class="panel table-panel matrix-panel span-4">
+        <div class="overview-top">
+        <article class="panel table-panel matrix-panel matrix-cell">
           <header class="panel-title">
             <span>Commodity Matrix</span>
             <span class="header-meta">{overviewRows.length} markets · click row to drill</span>
@@ -1203,7 +1205,8 @@
           </div>
         </article>
 
-        <article class="panel chart-panel span-2">
+        <div class="left-stack">
+        <article class="panel chart-panel term-cell">
           <header class="panel-title">
             <span>Term Structure Stack</span>
             <span class="header-meta">
@@ -1228,10 +1231,10 @@
               <strong class={valueClass(selectedCurve?.roll_yield_proxy_pct)}>{formatPct(selectedCurve?.roll_yield_proxy_pct, false)}</strong>
             </div>
           </div>
-          <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
+          <TimeSeriesChart series={curveSeries} height={220} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
-        <article class="panel scatter-panel span-2">
+        <article class="panel scatter-panel scatter-cell">
           <header class="panel-title">
             <span>Momentum / Roll Scatter</span>
           </header>
@@ -1240,19 +1243,19 @@
                  role="presentation"
                  on:mousemove={handleScatterMouseMove}
                  on:mouseleave={() => tooltipPoint = null}>
-              <svg viewBox="0 0 200 130" role="img" aria-label="Commodity momentum versus roll yield scatter plot">
+              <svg viewBox="0 0 360 110" preserveAspectRatio="none" role="img" aria-label="Commodity momentum versus roll yield scatter plot">
                 {#each scatterGridFractions as fraction}
                   <line class="grid-line" x1={scatterGridX(fraction)} x2={scatterGridX(fraction)} y1={scatterBounds.top} y2={scatterBounds.bottom} />
                   <line class="grid-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterGridY(fraction)} y2={scatterGridY(fraction)} />
                 {/each}
                 <line class="axis-line" x1={scatterBounds.left} x2={scatterBounds.right} y1={scatterState.zeroY} y2={scatterState.zeroY} />
                 <line class="axis-line" x1={scatterState.zeroX} x2={scatterState.zeroX} y1={scatterBounds.top} y2={scatterBounds.bottom} />
-                <text class="quadrant-label" x="11" y="17">Carry / weak momentum</text>
-                <text class="quadrant-label" x="189" y="17" text-anchor="end">Backwardation + momentum</text>
-                <text class="quadrant-label" x="11" y="105">Contango / weak</text>
-                <text class="quadrant-label" x="189" y="105" text-anchor="end">Momentum / carry drag</text>
-                <text class="axis-label" x="100" y="127">{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"}</text>
-                <text class="axis-label vertical" x="-59" y="5">{overview?.scatter?.y_methodology_label ?? "Roll proxy"}</text>
+                <text class="quadrant-label" x="20" y="14">Carry / weak momentum</text>
+                <text class="quadrant-label" x="340" y="14" text-anchor="end">Backwardation + momentum</text>
+                <text class="quadrant-label" x="20" y="89">Contango / weak</text>
+                <text class="quadrant-label" x="340" y="89" text-anchor="end">Momentum / carry drag</text>
+                <text class="axis-label" x="180" y="107">{overview?.scatter?.x_methodology_label ?? "Loaded-history momentum"}</text>
+                <text class="axis-label vertical" x="-55" y="6">{overview?.scatter?.y_methodology_label ?? "Roll proxy"}</text>
                 {#each scatterState.points as point}
                   {@const hovered = tooltipPoint?.id === point.id}
                   <g class="scatter-point {point.family}"
@@ -1262,8 +1265,8 @@
                      transform={`translate(${point.cx}, ${point.cy})`}
                      on:mouseenter={() => tooltipPoint = point}
                      on:mouseleave={() => tooltipPoint = null}>
-                    <circle r={hovered ? 4.6 : 3.2} />
-                    <text x="4.5" y="-4">{point.symbol}</text>
+                    <circle r={hovered ? 4.5 : 3} />
+                    <text x="6" y="-5">{point.symbol}</text>
                   </g>
                 {/each}
               </svg>
@@ -1280,6 +1283,8 @@
             <p class="empty-hint">No overlapping price-history and curve-roll data for a scatter view.</p>
           {/if}
         </article>
+        </div>
+        </div>
 
         <article class="panel table-panel rankers-panel span-4">
           <header class="panel-title">
@@ -2341,6 +2346,57 @@
   .span-2 { grid-column: span 2; }
   .span-4 { grid-column: span 4; }
 
+  /* Overview top block: term structure + scatter stacked left, matrix right */
+  .overview-top {
+    grid-column: 1 / span 4;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.5rem;
+    min-height: 0;
+  }
+  .overview-top .left-stack {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 0;
+  }
+  .overview-top .left-stack > .term-cell,
+  .overview-top .left-stack > .scatter-cell {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .overview-top .matrix-cell {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .overview-top .matrix-cell .table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+  }
+  .overview-top .term-cell :global(.chart-shell) {
+    flex: 1 1 auto;
+    height: auto !important;
+    min-height: 0;
+  }
+  .overview-top .scatter-cell .scatter-shell {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+  }
+  .overview-top .scatter-cell .scatter-shell svg {
+    width: 100%;
+    height: 100%;
+  }
+
   .split {
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(20rem, 0.6fr);
@@ -2492,6 +2548,7 @@
   .tag.positive { border-color: color-mix(in srgb, var(--positive) 55%, var(--divider)); color: var(--positive); }
   .tag.negative { border-color: color-mix(in srgb, var(--negative) 55%, var(--divider)); color: var(--negative); }
   .tag.warning { border-color: color-mix(in srgb, var(--warning) 55%, var(--divider)); color: var(--warning); }
+  .tag.neutral { border-color: var(--divider); color: var(--text-2); background: rgba(122, 166, 200, 0.05); }
 
   .scatter-shell {
     position: relative;
@@ -2519,7 +2576,7 @@
   .axis-label,
   .quadrant-label {
     fill: var(--text-2);
-    font-size: 4.5px;
+    font-size: 5.5px;
     letter-spacing: 0;
   }
 
@@ -2551,7 +2608,7 @@
 
   .scatter-point text {
     fill: var(--text-1);
-    font-size: 4.6px;
+    font-size: 5.5px;
     letter-spacing: 0;
     pointer-events: none;
   }
