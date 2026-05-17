@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHeroPriceChartSeries,
   computeSimpleMovingAverage,
+  defaultHeroPriceChartSettings,
   heroPriceChartAvailability,
   normalizeHeroPriceChartSettings,
   normalizeHeroPricePoints
@@ -71,6 +72,14 @@ describe("normalizeHeroPricePoints", () => {
 });
 
 describe("normalizeHeroPriceChartSettings", () => {
+  it("returns fresh default moving average arrays", () => {
+    const normalized = normalizeHeroPriceChartSettings(null);
+    normalized.movingAverages.push(20);
+
+    expect(defaultHeroPriceChartSettings.movingAverages).toEqual([]);
+    expect(normalizeHeroPriceChartSettings(null).movingAverages).toEqual([]);
+  });
+
   it("normalizes invalid persisted settings while preserving valid moving averages and volume", () => {
     expect(
       normalizeHeroPriceChartSettings({

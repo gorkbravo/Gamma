@@ -57,7 +57,7 @@ const movingAverageWindowSet = new Set<number>(movingAverageWindows);
 
 export function normalizeHeroPriceChartSettings(value: unknown): HeroPriceChartSettings {
   if (!isRecord(value)) {
-    return { ...defaultHeroPriceChartSettings };
+    return { ...defaultHeroPriceChartSettings, movingAverages: [...defaultHeroPriceChartSettings.movingAverages] };
   }
 
   const movingAverages = Array.isArray(value.movingAverages)
