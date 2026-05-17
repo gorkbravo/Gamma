@@ -1,9 +1,10 @@
 <script lang="ts">
-  import type { SystemStatus, WorkspaceMode } from "../lib/api/types";
+  import type { ProviderUsageResponse, ProviderUsageSummary, SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
   import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
 
   export let status: SystemStatus | null = null;
+  export let providerUsage: ProviderUsageResponse | null = null;
   export let workspaceMode: WorkspaceMode = "portfolio";
   export let busy = false;
   export let settingsOpen = false;
@@ -19,6 +20,7 @@
   let selectedBaseCurrency = status?.base_currency ?? "USD";
   let selectedMarketDataMode = status?.market_data_mode ?? "delayed";
   let workspaceLabel = getWorkspaceLabel("portfolio");
+  let topProviderRows: ProviderUsageSummary[] = [];
 
   $: if (status?.base_currency) {
     selectedBaseCurrency = status.base_currency;
@@ -32,6 +34,27 @@
 
   let selectedChartTheme: string = "blue";
   let selectedFontFamily: string = "Consolas";
+
+  $: topProviderRows = providerUsage?.providers.slice(0, 4) ?? [];
+
+  function providerCallLabel(row: ProviderUsageSummary) {
+    return row.call_count === 1 ? "1 call" : `${row.call_count} calls`;
+  }
+
+  function providerStatusLabel(row: ProviderUsageSummary) {
+    const parts = [`${row.success_count} ok`];
+    if (row.unavailable_count) {
+      parts.push(`${row.unavailable_count} unavailable`);
+    }
+    if (row.error_count) {
+      parts.push(`${row.error_count} error`);
+    }
+    return parts.join(" / ");
+  }
+
+  function providerLatencyLabel(row: ProviderUsageSummary) {
+    return `${row.average_duration_ms.toFixed(row.average_duration_ms >= 10 ? 0 : 1)} ms avg`;
+  }
 </script>
 
 <section class="rail">
@@ -99,6 +122,26 @@
             <option value="live">Live</option>
             <option value="auto">Auto</option>
           </select>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-head">
+            <span class="label">Provider Usage</span>
+            <strong>{providerUsage?.total_calls ?? 0} calls</strong>
+          </div>
+          {#if topProviderRows.length}
+            <div class="usage-list">
+              {#each topProviderRows as row}
+                <div class="usage-row" title={row.endpoints.join(", ")}>
+                  <strong>{row.provider_id}</strong>
+                  <span>{providerCallLabel(row)}</span>
+                  <small>{providerStatusLabel(row)} | {providerLatencyLabel(row)}</small>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <small>No provider calls recorded since backend startup.</small>
+          {/if}
         </div>
 
         <div class="settings-section field">
@@ -273,6 +316,41 @@
 
   .wide {
     width: 100%;
+  }
+
+  .usage-list {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .usage-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.2rem 0.55rem;
+    align-items: baseline;
+    padding: 0.42rem 0;
+    border-top: 1px solid rgba(46, 60, 74, 0.36);
+  }
+
+  .usage-row:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .usage-row strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .usage-row span {
+    color: var(--text-1);
+    font-size: 0.72rem;
+  }
+
+  .usage-row small {
+    grid-column: 1 / -1;
+    margin-top: 0;
   }
 
   @media (max-width: 960px) {

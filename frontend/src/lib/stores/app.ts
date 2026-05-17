@@ -50,6 +50,7 @@ import type {
   PortfolioHistoryResponse,
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
+  ProviderUsageResponse,
   RelatedPredictionMarketListResponse,
   ResearchCompareResult,
   ResearchOverviewResponse,
@@ -275,6 +276,7 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
 export const activeTab = writable<TabId>("portfolio");
 export const systemStatus = writable<SystemStatus | null>(null);
 export const diagnostics = writable<DiagnosticsResponse | null>(null);
+export const providerUsage = writable<ProviderUsageResponse | null>(null);
 export const diagnosticsLog = writable<string[]>([]);
 export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
 export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
@@ -395,6 +397,7 @@ export function setFontFamily(family: FontFamily) {
 export const loading = writable<Record<string, boolean>>({
   status: false,
   diagnostics: false,
+  providerUsage: false,
   diagnosticsAction: false,
   portfolio: false,
   portfolioAction: false,
@@ -823,6 +826,18 @@ export async function loadDiagnostics() {
     setError(error);
   } finally {
     setLoading("diagnostics", false);
+  }
+}
+
+export async function loadProviderUsage() {
+  setLoading("providerUsage", true);
+  try {
+    providerUsage.set(await getJson<ProviderUsageResponse>("/system/provider-usage"));
+    lastError.set("");
+  } catch (error) {
+    setError(error);
+  } finally {
+    setLoading("providerUsage", false);
   }
 }
 

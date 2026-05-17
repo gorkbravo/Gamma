@@ -13,6 +13,7 @@ from src.api.schemas.system import (
     MarketDataModeRequestModel,
     ProviderCapabilityListResponseModel,
     ProviderCapabilityModel,
+    ProviderUsageResponseModel,
     ReadOnlyBoundaryModel,
     SystemStatusResponseModel,
 )
@@ -63,6 +64,15 @@ def provider_capability(provider_id: str, request: Request) -> ProviderCapabilit
     if provider is None:
         raise HTTPException(status_code=404, detail=f"Provider capability not found: {provider_id}")
     return ProviderCapabilityModel.from_domain(provider)
+
+
+@router.get("/system/provider-usage", response_model=ProviderUsageResponseModel)
+def provider_usage(
+    request: Request,
+    limit: int = Query(default=50, ge=0, le=200),
+) -> ProviderUsageResponseModel:
+    runtime = request.app.state.runtime
+    return ProviderUsageResponseModel.from_domain(runtime.provider_usage.snapshot(limit=limit))
 
 
 @router.get("/system/read-only-boundary", response_model=ReadOnlyBoundaryModel)

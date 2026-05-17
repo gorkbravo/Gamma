@@ -65,6 +65,7 @@
     ivSession,
     lastError,
     loadDiagnostics,
+    loadProviderUsage,
     loadIvSession,
     loadIvSurface,
     loadFundamentalsSearch,
@@ -95,6 +96,7 @@
     portfolioHistory,
     portfolioPerformance,
     portfolioSnapshot,
+    providerUsage,
     predictionMarketCalibration,
     predictionMarketDetail,
     predictionMarketHistory,
@@ -989,6 +991,7 @@
     window.addEventListener("keydown", handleGlobalKeydown);
     pollHandle = setInterval(() => {
       void refreshSystemStatus();
+      void loadProviderUsage();
     }, 5000);
     return () => {
       uninstallExternalLinkHandler();
@@ -1014,7 +1017,7 @@
   }
 
   async function bootstrapApp() {
-    const [status] = await Promise.all([refreshSystemStatus(), loadDiagnostics()]);
+    const [status] = await Promise.all([refreshSystemStatus(), loadDiagnostics(), loadProviderUsage()]);
     if (status?.mock_mode || status?.connection.connected) {
       await loadPortfolioSnapshot();
     }
@@ -1106,7 +1109,7 @@
     copilotOpen = false;
     settingsOpen = false;
     activeTab.set(getWorkspaceHomeTab(mode));
-    const tasks: Array<Promise<unknown>> = [loadDiagnostics()];
+    const tasks: Array<Promise<unknown>> = [loadDiagnostics(), loadProviderUsage()];
     if (mode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
       tasks.push(loadPortfolioSnapshot());
     }
@@ -1351,7 +1354,7 @@
   }
 
   async function handleRefreshWorkspace() {
-    await Promise.allSettled([refreshSystemStatus(), loadDiagnostics()]);
+    await Promise.allSettled([refreshSystemStatus(), loadDiagnostics(), loadProviderUsage()]);
 
     if (workspaceMode === "portfolio" && ($activeTab === "portfolio" || $activeTab === "risk")) {
       await loadPortfolioSnapshot();
@@ -1469,6 +1472,7 @@
     if (nextOpen) {
       sidebarOpen = false;
       copilotOpen = false;
+      void loadProviderUsage();
     }
   }
 
@@ -1901,6 +1905,7 @@
     <svelte:fragment slot="status">
       <StatusRail
         status={$systemStatus}
+        providerUsage={$providerUsage}
         workspaceMode={workspaceMode}
         busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.researchOverview || $loading.macro || $loading.commodities || $loading.prediction || $loading.ivSession}
         settingsOpen={settingsOpen}

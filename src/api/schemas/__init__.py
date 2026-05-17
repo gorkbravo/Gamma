@@ -66,6 +66,9 @@ from src.api.schemas.system import (
     HealthResponseModel,
     ProviderCapabilityListResponseModel,
     ProviderCapabilityModel,
+    ProviderUsageCallModel,
+    ProviderUsageResponseModel,
+    ProviderUsageSummaryModel,
     SystemStatusResponseModel,
 )
 from src.api.schemas.commodities import (
@@ -108,6 +111,9 @@ __all__ = [
     "PortfolioHistoryResponseModel",
     "ProviderCapabilityListResponseModel",
     "ProviderCapabilityModel",
+    "ProviderUsageCallModel",
+    "ProviderUsageResponseModel",
+    "ProviderUsageSummaryModel",
     "PredictionMarketListResponseModel",
     "PredictionMarketModel",
     "PredictionMarketScreenerRequestModel",

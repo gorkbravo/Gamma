@@ -78,6 +78,7 @@ from src.services.research_market_data import (
     YFinanceListedMarketHistoryProvider,
 )
 from src.services.portfolio_history_store import PortfolioHistoryStore
+from src.services.provider_usage import ProviderUsageLedger, trace_provider
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
 from src.services.risk_free_rate import RiskFreeRateService
@@ -106,6 +107,7 @@ class ApplicationRuntime:
     client: IBKRClient
     cache: CacheService
     provider_capabilities: ProviderCapabilityRegistry
+    provider_usage: ProviderUsageLedger
     market_data: MarketDataService
     fx_service: FXService
     portfolio_history: PortfolioHistoryStore
@@ -217,6 +219,7 @@ def build_runtime(
     client.set_market_data_mode(market_data_mode)
     cache = CacheService(base_dir=resolved_cache_dir, ttl_hours=24)
     provider_capabilities = build_default_provider_capability_registry()
+    provider_usage = ProviderUsageLedger()
     market_data = MarketDataService(
         client.ib,
         cache,
@@ -242,6 +245,7 @@ def build_runtime(
             client,
             market_data,
             mock_service,
+            provider_usage,
             env_var="PORTFOLIO_RISK_HISTORY_PROVIDERS",
             live_default="ibkr,yfinance",
         ),
@@ -255,12 +259,13 @@ def build_runtime(
         history_cache=research_cache,
         instrument_defaults=research_defaults,
         benchmark_defaults=benchmark_defaults,
-        history_providers=_build_research_history_providers(client, market_data, mock_service),
+        history_providers=_build_research_history_providers(client, market_data, mock_service, provider_usage),
         history_provider_sets={
             "research_overview": _build_research_history_providers(
                 client,
                 market_data,
                 mock_service,
+                provider_usage,
                 env_var="RESEARCH_MARKET_DATA_PROVIDERS",
                 live_default="yfinance,ibkr",
             ),
@@ -268,6 +273,7 @@ def build_runtime(
                 client,
                 market_data,
                 mock_service,
+                provider_usage,
                 env_var="SITREP_MARKET_DATA_PROVIDERS",
                 live_default="yfinance",
             ),
@@ -290,43 +296,70 @@ def build_runtime(
     research_service = ResearchService(research_provider, saved_store=saved_research_store)
     prediction_market_service = PredictionMarketService(
         adapters={
-            "polymarket": PolymarketAdapter(cache),
-            "kalshi": KalshiAdapter(cache),
+            "polymarket": trace_provider(PolymarketAdapter(cache), provider_usage, endpoint_prefix="prediction_markets"),
+            "kalshi": trace_provider(KalshiAdapter(cache), provider_usage, endpoint_prefix="prediction_markets"),
         }
     )
     macro_service = MacroService(
-        fred_adapter=FredMacroAdapter(cache),
-        treasury_adapter=TreasuryCurveAdapter(cache),
-        events_adapter=USMacroEventsAdapter(cache),
-        fx_adapter=IBKRMacroFXAdapter(market_data),
-        dbnomics_adapter=DBnomicsMacroAdapter(cache),
-        census_trade_adapter=CensusTradePartnerAdapter(cache, api_key=os.getenv("CENSUS_API_KEY", "")),
+        fred_adapter=trace_provider(FredMacroAdapter(cache), provider_usage, endpoint_prefix="macro"),
+        treasury_adapter=trace_provider(TreasuryCurveAdapter(cache), provider_usage, endpoint_prefix="macro"),
+        events_adapter=trace_provider(USMacroEventsAdapter(cache), provider_usage, endpoint_prefix="macro"),
+        fx_adapter=trace_provider(IBKRMacroFXAdapter(market_data), provider_usage, endpoint_prefix="macro"),
+        dbnomics_adapter=trace_provider(DBnomicsMacroAdapter(cache), provider_usage, endpoint_prefix="macro"),
+        census_trade_adapter=trace_provider(
+            CensusTradePartnerAdapter(cache, api_key=os.getenv("CENSUS_API_KEY", "")),
+            provider_usage,
+            endpoint_prefix="macro",
+        ),
         prediction_market_service=prediction_market_service,
     )
     commodities_service = CommoditiesService(
-        provider=_build_commodities_provider(cache, client, market_data, live_mode=not bool(mock_mode))
+        provider=trace_provider(
+            _build_commodities_provider(cache, client, market_data, live_mode=not bool(mock_mode)),
+            provider_usage,
+            endpoint_prefix="commodities",
+        )
     )
-    maritime_service = MaritimeService(provider=_build_maritime_provider(live_mode=not bool(mock_mode)))
+    maritime_service = MaritimeService(
+        provider=trace_provider(
+            _build_maritime_provider(live_mode=not bool(mock_mode)),
+            provider_usage,
+            endpoint_prefix="maritime",
+        )
+    )
     crypto_service = CryptoService(
-        market_adapter=CoinGeckoAdapter(cache),
-        dex_adapter=GeckoTerminalAdapter(cache),
+        market_adapter=trace_provider(CoinGeckoAdapter(cache), provider_usage, endpoint_prefix="crypto"),
+        dex_adapter=trace_provider(GeckoTerminalAdapter(cache), provider_usage, endpoint_prefix="crypto"),
     )
     fundamentals_service = FundamentalsService(
-        sec_adapter=SecFundamentalsAdapter(cache),
-        valuation_adapter=IbkrValuationAdapter(
-            research_provider=research_provider,
-            market_data=market_data,
+        sec_adapter=trace_provider(SecFundamentalsAdapter(cache), provider_usage, endpoint_prefix="fundamentals"),
+        valuation_adapter=trace_provider(
+            IbkrValuationAdapter(
+                research_provider=research_provider,
+                market_data=market_data,
+            ),
+            provider_usage,
+            endpoint_prefix="fundamentals",
         ),
         store=FundamentalsResearchStore(base_dir=resolved_history_dir / "fundamentals"),
         treasury_adapter=macro_service.treasury_adapter,
     )
-    news_service = NewsService(_build_news_providers(live_mode=not bool(mock_mode)))
+    news_service = NewsService(
+        [
+            trace_provider(provider, provider_usage, endpoint_prefix="news")
+            for provider in _build_news_providers(live_mode=not bool(mock_mode))
+        ]
+    )
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
-        provider=_build_copilot_provider(allow_mock=bool(mock_mode)),
+        provider=trace_provider(
+            _build_copilot_provider(allow_mock=bool(mock_mode)),
+            provider_usage,
+            endpoint_prefix="copilot",
+        ),
         store=copilot_store,
     )
     risk_service = RiskService(
@@ -351,6 +384,7 @@ def build_runtime(
         client=client,
         cache=cache,
         provider_capabilities=provider_capabilities,
+        provider_usage=provider_usage,
         market_data=market_data,
         fx_service=fx_service,
         portfolio_history=portfolio_history,
@@ -453,6 +487,7 @@ def _build_research_history_providers(
     client: IBKRClient,
     market_data: MarketDataService,
     mock_service: MockDataService,
+    provider_usage: ProviderUsageLedger,
     *,
     env_var: str = "RESEARCH_MARKET_DATA_PROVIDERS",
     live_default: str = "yfinance,ibkr",
@@ -469,45 +504,74 @@ def _build_research_history_providers(
     for provider_id in provider_ids:
         if provider_id in {"mock", "sample", "offline", "demo"}:
             if client.mock:
-                providers.append(MockListedMarketHistoryProvider(mock_service))
+                providers.append(
+                    trace_provider(
+                        MockListedMarketHistoryProvider(mock_service),
+                        provider_usage,
+                        endpoint_prefix="research_history",
+                    )
+                )
             else:
                 providers.append(
-                    UnavailableListedMarketHistoryProvider(
-                        provider_id=provider_id,
-                        source_label=f"{provider_id} listed-market history",
-                        warning=(
-                            f"Configured listed-market provider '{provider_id}' is disabled while Gamma is running "
-                            "in live mode."
+                    trace_provider(
+                        UnavailableListedMarketHistoryProvider(
+                            provider_id=provider_id,
+                            source_label=f"{provider_id} listed-market history",
+                            warning=(
+                                f"Configured listed-market provider '{provider_id}' is disabled while Gamma is running "
+                                "in live mode."
+                            ),
                         ),
+                        provider_usage,
+                        endpoint_prefix="research_history",
                     )
                 )
         elif provider_id in {"ibkr", "tws"}:
-            providers.append(IbkrListedMarketHistoryProvider(market_data))
+            providers.append(
+                trace_provider(
+                    IbkrListedMarketHistoryProvider(market_data),
+                    provider_usage,
+                    endpoint_prefix="research_history",
+                )
+            )
         elif provider_id in {"yfinance", "yahoo", "yahoo_finance"}:
             providers.append(
-                YFinanceListedMarketHistoryProvider(
-                    timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0)
+                trace_provider(
+                    YFinanceListedMarketHistoryProvider(
+                        timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0)
+                    ),
+                    provider_usage,
+                    endpoint_prefix="research_history",
                 )
             )
         elif provider_id in {"akshare", "ak_share"}:
             providers.append(
-                UnavailableListedMarketHistoryProvider(
-                    provider_id="akshare",
-                    source_label="AKShare listed-market history (planned optional adapter)",
-                    warning=(
-                        "AKShare is recognized as a planned China/Asia coverage hook, but no Gamma adapter is active yet"
+                trace_provider(
+                    UnavailableListedMarketHistoryProvider(
+                        provider_id="akshare",
+                        source_label="AKShare listed-market history (planned optional adapter)",
+                        warning=(
+                            "AKShare is recognized as a planned China/Asia coverage hook, but no Gamma adapter is active yet"
+                        ),
                     ),
+                    provider_usage,
+                    endpoint_prefix="research_history",
                 )
             )
         else:
             providers.append(
-                UnavailableListedMarketHistoryProvider(
-                    provider_id=provider_id,
-                    source_label=f"{provider_id} listed-market history",
-                    warning=f"Configured listed-market provider '{provider_id}' is not supported by this Gamma build",
+                trace_provider(
+                    UnavailableListedMarketHistoryProvider(
+                        provider_id=provider_id,
+                        source_label=f"{provider_id} listed-market history",
+                        warning=f"Configured listed-market provider '{provider_id}' is not supported by this Gamma build",
+                    ),
+                    provider_usage,
+                    endpoint_prefix="research_history",
                 )
             )
-    return providers or [MockListedMarketHistoryProvider(mock_service) if client.mock else IbkrListedMarketHistoryProvider(market_data)]
+    fallback = MockListedMarketHistoryProvider(mock_service) if client.mock else IbkrListedMarketHistoryProvider(market_data)
+    return providers or [trace_provider(fallback, provider_usage, endpoint_prefix="research_history")]
 
 
 def _build_commodities_provider(

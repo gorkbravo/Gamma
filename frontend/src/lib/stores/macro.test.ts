@@ -36,6 +36,7 @@ describe("macro store orchestration", () => {
     loading.set({
       status: false,
       diagnostics: false,
+      providerUsage: false,
       diagnosticsAction: false,
       portfolio: false,
       portfolioAction: false,

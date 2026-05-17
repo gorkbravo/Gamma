@@ -65,10 +65,10 @@ The implemented app state is materially ahead of the original V2 starting point:
 - `Commodities` is a first-pass V2 domain tab with six modes, sample/EIA/FRED/IBKR provider paths, curve/spread/inventory/event/cross-domain models, Energy and Metals analytics, and Copilot grounding.
 - `Sealanes` is a paused maritime prototype with normalized maritime models, sample/static context, AISstream server-side websocket proxying, viewport live subscriptions, map overlays, route/chokepoint/port/vessel/event concepts, and clear data-provider limits.
 - `Copilot` now exists both as the shell shelf and as a dedicated no-mode-bar workspace. It supports grounded research cards, read-only domain tools, OpenAI/mock/disabled provider boundaries, local sessions/turns/context snapshots/memos, memo creation, synthesis/active-tab focus, and an NDJSON streaming endpoint wrapper around the current synchronous provider boundary.
-- `System` now exposes health, status, provider capabilities, read-only boundary metadata, diagnostics, connection toggles, market-data mode, base-currency mutation, and account-subscribe helpers.
+- `System` now exposes health, status, provider capabilities, provider usage diagnostics, read-only boundary metadata, diagnostics, connection toggles, market-data mode, base-currency mutation, and account-subscribe helpers.
 - `News` has a first-pass sample/RSS provider boundary and `/news/latest` feed route for lightweight event context.
 
-The main remaining V2 gaps are no longer "make the tabs exist." They are provider depth, provenance adoption consistency, real cross-tab handoff actions, saved workflow depth, live-provider smoke coverage, installer/first-run readiness, tutorial flows, and richer beta-facing diagnostics/error states.
+The main remaining V2 gaps are no longer "make the tabs exist." They are provider depth, provenance adoption consistency, real cross-tab handoff actions, saved workflow depth, live-provider smoke coverage, installer/first-run readiness, tutorial flows, and richer beta-facing diagnostics/error states built on the new provider usage visibility.
 
 ### Current Tab Progress Snapshot
 
@@ -226,10 +226,10 @@ Installer, tutorial, setup flow, mock mode, diagnostics, and clear error states 
 
 ## Workstream 1 - Cross-Cutting Platform Foundation
 
-_Status: In progress (~72%)_
+_Status: In progress (~74%)_
 _Dependency marker: Foundation_
 _Parallelization note: Some pieces are independent, but this workstream should start early because it shapes most V2 tabs._
-_Recent progress: Workstream 1 now has shared provenance/freshness primitives, provider-agnostic cache freshness policies, a generic cross-tab handoff envelope, a compact Copilot context contract, explicit read-only boundary metadata at `/system/read-only-boundary`, hardened provider capability metadata for active/optional/sample/planned providers, a reusable frontend mode-registry helper, local saved-research / fundamentals / Copilot persistence stores, first-pass diagnostics routes, a news provider boundary, and broad mode registration across Research, Macro, Crypto, Fundamentals, Commodities, Sealanes, and Options._
+_Recent progress: Workstream 1 now has shared provenance/freshness primitives, provider-agnostic cache freshness policies, a generic cross-tab handoff envelope, a compact Copilot context contract, explicit read-only boundary metadata at `/system/read-only-boundary`, hardened provider capability metadata for active/optional/sample/planned providers, an in-memory provider usage ledger exposed through `/system/provider-usage`, a compact provider-usage diagnostics surface in Settings, a reusable frontend mode-registry helper, local saved-research / fundamentals / Copilot persistence stores, first-pass diagnostics routes, a news provider boundary, and broad mode registration across Research, Macro, Crypto, Fundamentals, Commodities, Sealanes, and Options._
 
 ### Why this workstream matters
 
@@ -476,7 +476,7 @@ This workstream should start with the smallest foundation that unblocks V2:
 It does not need to build every provider before tab work starts. It only needs enough structure that tabs do not hard-code around a single source.
 
 Current standalone ceiling note:
-- Workstream 1 is now close to its practical standalone ceiling before more provider and beta work begins. The remaining foundation work is mostly adoption work: wiring `CrossTabHandoffEnvelope` into actual UI actions, applying provenance/freshness consistently across all legacy and V2 payloads, making provider selection user-facing where needed, expanding domain-specific saved workflow models, and turning diagnostics/setup metadata into a beta-ready first-run experience.
+- Workstream 1 is now close to its practical standalone ceiling before more provider and beta work begins. The remaining foundation work is mostly adoption work: wiring `CrossTabHandoffEnvelope` into actual UI actions, applying provenance/freshness consistently across all legacy and V2 payloads, making provider selection user-facing where needed, expanding domain-specific saved workflow models, adding deeper provider usage interpretation where it affects user decisions, and turning diagnostics/setup metadata into a beta-ready first-run experience.
 
 ### Deliverable
 
@@ -2112,7 +2112,7 @@ Prediction Markets V2 should remain a targeted enhancement layer, not a major st
 _Status: In progress (~22%)_
 _Dependency marker: Parallelizable, but final release polish depends on product stability_
 _Parallelization note: Installer and tutorial planning can begin early; final beta packaging should wait until core workflows are stable._
-_Recent progress: Gamma has mock/demo defaults, system health/status routes, `/diagnostics` and `/diagnostics/run`, provider capability metadata, read-only boundary metadata, market-data mode and base-currency controls, account-subscribe diagnostics helpers, local persistence stores for portfolio history/research/fundamentals/Copilot, and clearer provider warnings across several V2 tabs. It is still not packaged as an installer and does not yet have a real first-run setup or guided tutorial._
+_Recent progress: Gamma has mock/demo defaults, system health/status routes, `/diagnostics` and `/diagnostics/run`, `/system/provider-usage`, provider capability metadata, provider usage summaries in Settings, read-only boundary metadata, market-data mode and base-currency controls, account-subscribe diagnostics helpers, local persistence stores for portfolio history/research/fundamentals/Copilot, and clearer provider warnings across several V2 tabs. It is still not packaged as an installer and does not yet have a real first-run setup or guided tutorial._
 
 ### Why this workstream matters
 

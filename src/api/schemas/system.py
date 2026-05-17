@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from src.models.platform_boundary import ReadOnlyBoundary
 from src.models.provider_capabilities import ProviderCapability
+from src.models.provider_usage import ProviderUsageCall, ProviderUsageSnapshot, ProviderUsageSummary
 
 
 class ConnectionStateModel(BaseModel):
@@ -110,6 +111,62 @@ class ProviderCapabilityListResponseModel(BaseModel):
     retrieved_at: datetime | None = None
     origin: str = "provider_capability_registry.list_capabilities"
     transformation_note: str | None = None
+
+
+class ProviderUsageCallModel(BaseModel):
+    provider_id: str
+    endpoint: str
+    status: str
+    cache_status: str | None = None
+    duration_ms: float
+    recorded_at: datetime
+    message: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: ProviderUsageCall) -> "ProviderUsageCallModel":
+        return cls(**row.__dict__)
+
+
+class ProviderUsageSummaryModel(BaseModel):
+    provider_id: str
+    call_count: int
+    success_count: int
+    unavailable_count: int
+    error_count: int
+    cache_hit_count: int
+    cache_miss_count: int
+    average_duration_ms: float
+    last_status: str | None = None
+    last_message: str | None = None
+    last_error: str | None = None
+    last_called_at: datetime | None = None
+    endpoints: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: ProviderUsageSummary) -> "ProviderUsageSummaryModel":
+        return cls(**row.__dict__)
+
+
+class ProviderUsageResponseModel(BaseModel):
+    generated_at: datetime
+    providers: list[ProviderUsageSummaryModel] = Field(default_factory=list)
+    recent_calls: list[ProviderUsageCallModel] = Field(default_factory=list)
+    total_calls: int = 0
+    source_provider: str = "gamma"
+    origin: str = "provider_usage_ledger.snapshot"
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: ProviderUsageSnapshot) -> "ProviderUsageResponseModel":
+        return cls(
+            generated_at=row.generated_at,
+            providers=[ProviderUsageSummaryModel.from_domain(provider) for provider in row.providers],
+            recent_calls=[ProviderUsageCallModel.from_domain(call) for call in row.recent_calls],
+            total_calls=row.total_calls,
+            source_provider=row.source_provider,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
 
 
 class ReadOnlyBoundaryModel(BaseModel):

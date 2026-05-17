@@ -70,6 +70,7 @@ import {
   portfolioHistory,
   portfolioPerformance,
   portfolioSnapshot,
+  providerUsage,
   predictionMarketCalibration,
   predictionMarketDetail,
   predictionMarketHistory,
@@ -103,6 +104,7 @@ describe("app store orchestration", () => {
     vi.unstubAllGlobals();
     systemStatus.set(null);
     diagnostics.set(null);
+    providerUsage.set(null);
     portfolioSnapshot.set(null);
     portfolioHistory.set(null);
     portfolioPerformance.set(null);
@@ -147,6 +149,7 @@ describe("app store orchestration", () => {
     loading.set({
       status: false,
       diagnostics: false,
+      providerUsage: false,
       diagnosticsAction: false,
       portfolio: false,
       portfolioAction: false,

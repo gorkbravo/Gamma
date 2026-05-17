@@ -115,6 +115,42 @@ export interface DiagnosticsResponse {
   iv_active_symbol: string | null;
 }
 
+export interface ProviderUsageCall {
+  provider_id: string;
+  endpoint: string;
+  status: string;
+  cache_status: string | null;
+  duration_ms: number;
+  recorded_at: string;
+  message: string | null;
+}
+
+export interface ProviderUsageSummary {
+  provider_id: string;
+  call_count: number;
+  success_count: number;
+  unavailable_count: number;
+  error_count: number;
+  cache_hit_count: number;
+  cache_miss_count: number;
+  average_duration_ms: number;
+  last_status: string | null;
+  last_message: string | null;
+  last_error: string | null;
+  last_called_at: string | null;
+  endpoints: string[];
+}
+
+export interface ProviderUsageResponse {
+  generated_at: string;
+  providers: ProviderUsageSummary[];
+  recent_calls: ProviderUsageCall[];
+  total_calls: number;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface NewsEventEntity {
   label: string;
   entity_type: string;
