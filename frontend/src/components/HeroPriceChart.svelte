@@ -1,17 +1,102 @@
-<script lang="ts">
-  import { onMount } from "svelte";
-  import TimeSeriesChart from "./TimeSeriesChart.svelte";
+<script module lang="ts">
   import {
     buildHeroPriceChartSeries,
     defaultHeroPriceChartSettings,
     heroPriceChartAvailability,
     heroPriceSettingsStorageKey,
     movingAverageWindows,
+    normalizeHeroPricePoints,
     normalizeHeroPriceChartSettings,
     type HeroPriceChartSettings,
     type HeroPricePoint,
     type MovingAverageWindow
   } from "../lib/view-models/hero-price-chart";
+
+  export interface HeroPriceSettingsStorage {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  }
+
+  export interface HeroPriceSettingsStorageState {
+    loadedStorageKey: string | null;
+    settings: HeroPriceChartSettings;
+  }
+
+  export function readHeroPriceChartSettings(
+    storage: HeroPriceSettingsStorage | null,
+    key: string
+  ): HeroPriceChartSettings {
+    if (!storage) {
+      return normalizeHeroPriceChartSettings(null);
+    }
+    try {
+      return normalizeHeroPriceChartSettings(JSON.parse(storage.getItem(key) ?? "null"));
+    } catch {
+      return normalizeHeroPriceChartSettings(null);
+    }
+  }
+
+  export function writeHeroPriceChartSettings(
+    storage: HeroPriceSettingsStorage | null,
+    key: string,
+    value: HeroPriceChartSettings
+  ) {
+    if (!storage) {
+      return;
+    }
+    try {
+      storage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Storage may be blocked or full. Chart settings should degrade without interrupting research.
+    }
+  }
+
+  export function syncHeroPriceSettingsStorage({
+    storageKey,
+    loadedStorageKey,
+    settings,
+    readSettings,
+    writeSettings
+  }: {
+    storageKey: string;
+    loadedStorageKey: string | null;
+    settings: HeroPriceChartSettings;
+    readSettings: (key: string) => HeroPriceChartSettings;
+    writeSettings: (key: string, value: HeroPriceChartSettings) => void;
+  }): HeroPriceSettingsStorageState {
+    if (loadedStorageKey !== storageKey) {
+      return {
+        loadedStorageKey: storageKey,
+        settings: readSettings(storageKey)
+      };
+    }
+
+    writeSettings(storageKey, settings);
+    return { loadedStorageKey, settings };
+  }
+
+  export function canRenderHeroCandlesticks(points: Array<Partial<HeroPricePoint>> | null | undefined) {
+    const normalized = normalizeHeroPricePoints(points);
+    return normalized.length > 0 && normalized.every(hasCompleteOhlc);
+  }
+
+  function hasCompleteOhlc(point: Partial<HeroPricePoint>) {
+    return (
+      typeof point.open === "number" &&
+      Number.isFinite(point.open) &&
+      typeof point.high === "number" &&
+      Number.isFinite(point.high) &&
+      typeof point.low === "number" &&
+      Number.isFinite(point.low) &&
+      typeof point.close === "number" &&
+      Number.isFinite(point.close)
+    );
+  }
+</script>
+
+<script lang="ts">
+  import { onMount } from "svelte";
+  import TimeSeriesChart from "./TimeSeriesChart.svelte";
 
   export let chartKey: string;
   export let points: HeroPricePoint[] = [];
@@ -21,12 +106,14 @@
 
   let settings: HeroPriceChartSettings = normalizeHeroPriceChartSettings(defaultHeroPriceChartSettings);
   let mounted = false;
+  let loadedStorageKey: string | null = null;
 
   $: storageKey = heroPriceSettingsStorageKey(chartKey);
   $: availability = heroPriceChartAvailability(points);
+  $: candlesAvailable = canRenderHeroCandlesticks(points);
   $: effectiveSettings = normalizeHeroPriceChartSettings({
     ...settings,
-    priceStyle: settings.priceStyle === "candlestick" && !availability.hasOhlc ? "line" : settings.priceStyle,
+    priceStyle: settings.priceStyle === "candlestick" && !candlesAvailable ? "line" : settings.priceStyle,
     volumeOverlay: settings.volumeOverlay && availability.hasVolume,
     movingAverages: availability.hasClose ? settings.movingAverages : []
   });
@@ -34,32 +121,33 @@
 
   onMount(() => {
     mounted = true;
-    const stored = readStoredSettings(storageKey);
-    if (stored) {
-      settings = stored;
-    }
   });
 
   $: if (mounted) {
-    writeStoredSettings(storageKey, settings);
+    const synced = syncHeroPriceSettingsStorage({
+      storageKey,
+      loadedStorageKey,
+      settings,
+      readSettings: (key) => readHeroPriceChartSettings(getLocalStorage(), key),
+      writeSettings: (key, value) => writeHeroPriceChartSettings(getLocalStorage(), key, value)
+    });
+    if (loadedStorageKey !== synced.loadedStorageKey) {
+      loadedStorageKey = synced.loadedStorageKey;
+    }
+    if (settings !== synced.settings) {
+      settings = synced.settings;
+    }
   }
 
-  function readStoredSettings(key: string): HeroPriceChartSettings | null {
-    if (typeof window === "undefined" || !window.localStorage) {
+  function getLocalStorage(): HeroPriceSettingsStorage | null {
+    if (typeof window === "undefined") {
       return null;
     }
     try {
-      return normalizeHeroPriceChartSettings(JSON.parse(window.localStorage.getItem(key) ?? "null"));
+      return window.localStorage;
     } catch {
-      return normalizeHeroPriceChartSettings(null);
+      return null;
     }
-  }
-
-  function writeStoredSettings(key: string, value: HeroPriceChartSettings) {
-    if (typeof window === "undefined" || !window.localStorage) {
-      return;
-    }
-    window.localStorage.setItem(key, JSON.stringify(value));
   }
 
   function setPriceStyle(priceStyle: HeroPriceChartSettings["priceStyle"]) {
@@ -89,10 +177,10 @@
         <button
           class:active={settings.priceStyle === "candlestick"}
           type="button"
-          disabled={!availability.hasOhlc}
+          disabled={!candlesAvailable}
           on:click={() => setPriceStyle("candlestick")}
         >
-          {availability.hasOhlc ? "Candles" : "Candles unavailable"}
+          {candlesAvailable ? "Candles" : "Candles unavailable"}
         </button>
       </div>
 
