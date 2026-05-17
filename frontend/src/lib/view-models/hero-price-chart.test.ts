@@ -3,7 +3,8 @@ import {
   buildHeroPriceChartSeries,
   computeSimpleMovingAverage,
   heroPriceChartAvailability,
-  normalizeHeroPriceChartSettings
+  normalizeHeroPriceChartSettings,
+  normalizeHeroPricePoints
 } from "./hero-price-chart";
 
 describe("heroPriceChartAvailability", () => {
@@ -46,6 +47,25 @@ describe("computeSimpleMovingAverage", () => {
     ).toEqual([
       { time: 2, value: 10.5 },
       { time: 3, value: 11.5 }
+    ]);
+  });
+});
+
+describe("normalizeHeroPricePoints", () => {
+  it("filters invalid rows, sorts by time, and keeps the latest duplicate time", () => {
+    expect(
+      normalizeHeroPricePoints([
+        { time: 3, close: 12 },
+        { time: Number.NaN, close: 99 },
+        { time: 4, close: Number.NaN },
+        { time: 2, close: 10 },
+        { time: 2, close: 11 },
+        { time: 1, close: 9 }
+      ])
+    ).toEqual([
+      { time: 1, close: 9 },
+      { time: 2, close: 11 },
+      { time: 3, close: 12 }
     ]);
   });
 });
