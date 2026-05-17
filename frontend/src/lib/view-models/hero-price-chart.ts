@@ -42,6 +42,7 @@ export interface ChartSeries {
   type: "line" | "area" | "candlestick" | "histogram";
   data: Array<HeroChartPoint | HeroCandlestickPoint>;
   lineStyle?: "solid" | "dashed";
+  priceScaleId?: string;
 }
 
 export const movingAverageWindows: MovingAverageWindow[] = [20, 50, 200];
@@ -128,6 +129,7 @@ export function buildHeroPriceChartSeries(
 ): ChartSeries[] {
   const normalized = normalizeHeroPricePoints(points);
   const hasCompleteOhlc = normalized.length > 0 && normalized.every(hasValidOhlc);
+  const movingAverages = Array.from(new Set(settings.movingAverages.filter((window) => movingAverageWindowSet.has(window))));
   const series: ChartSeries[] = [
     settings.priceStyle === "candlestick" && hasCompleteOhlc
       ? {
@@ -152,7 +154,7 @@ export function buildHeroPriceChartSeries(
         }
   ];
 
-  for (const window of settings.movingAverages) {
+  for (const window of movingAverages) {
     series.push({
       id: `ma-${window}`,
       label: `MA ${window}`,
@@ -169,6 +171,7 @@ export function buildHeroPriceChartSeries(
       label: "Volume",
       color: "var(--text-2)",
       type: "histogram",
+      priceScaleId: "volume",
       data: normalized
         .filter((point) => isFiniteNumber(point.volume))
         .map((point) => ({ time: point.time, value: point.volume! }))

@@ -94,4 +94,26 @@ describe("buildHeroPriceChartSeries", () => {
       ["volume", "histogram"]
     ]);
   });
+
+  it("puts volume histograms on the volume price scale", () => {
+    const series = buildHeroPriceChartSeries(
+      [{ time: 1, open: 9, high: 11, low: 8, close: 10, volume: 100 }],
+      { priceStyle: "candlestick", volumeOverlay: true, movingAverages: [] }
+    );
+
+    expect(series.find((item) => item.id === "volume")?.priceScaleId).toBe("volume");
+  });
+
+  it("deduplicates moving average windows before building overlay series", () => {
+    const series = buildHeroPriceChartSeries(
+      [
+        { time: 1, close: 10 },
+        { time: 2, close: 11 },
+        { time: 3, close: 12 }
+      ],
+      { priceStyle: "line", volumeOverlay: false, movingAverages: [20, 20] }
+    );
+
+    expect(series.filter((item) => item.id === "ma-20")).toHaveLength(1);
+  });
 });
