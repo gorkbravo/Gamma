@@ -33,9 +33,26 @@ class ProviderUsageSummary:
 
 
 @dataclass(frozen=True)
+class ProviderUsageHealth:
+    provider_id: str
+    display_name: str
+    health_status: str
+    health_label: str
+    expected_when: str
+    reason: str
+    action_label: str | None = None
+    call_count: int = 0
+    success_count: int = 0
+    unavailable_count: int = 0
+    error_count: int = 0
+    last_called_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class ProviderUsageSnapshot:
     generated_at: datetime
     providers: list[ProviderUsageSummary] = field(default_factory=list)
+    health: list[ProviderUsageHealth] = field(default_factory=list)
     recent_calls: list[ProviderUsageCall] = field(default_factory=list)
     total_calls: int = 0
     source_provider: str = "gamma"

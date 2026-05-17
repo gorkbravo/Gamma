@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProviderUsageResponse, ProviderUsageSummary, SystemStatus, WorkspaceMode } from "../lib/api/types";
+  import type { ProviderUsageHealth, ProviderUsageResponse, ProviderUsageSummary, SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
   import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
 
@@ -21,6 +21,7 @@
   let selectedMarketDataMode = status?.market_data_mode ?? "delayed";
   let workspaceLabel = getWorkspaceLabel("portfolio");
   let topProviderRows: ProviderUsageSummary[] = [];
+  let providerHealthRows: ProviderUsageHealth[] = [];
 
   $: if (status?.base_currency) {
     selectedBaseCurrency = status.base_currency;
@@ -36,6 +37,7 @@
   let selectedFontFamily: string = "Consolas";
 
   $: topProviderRows = providerUsage?.providers.slice(0, 4) ?? [];
+  $: providerHealthRows = providerUsage?.health.slice(0, 4) ?? [];
 
   function providerCallLabel(row: ProviderUsageSummary) {
     return row.call_count === 1 ? "1 call" : `${row.call_count} calls`;
@@ -54,6 +56,12 @@
 
   function providerLatencyLabel(row: ProviderUsageSummary) {
     return `${row.average_duration_ms.toFixed(row.average_duration_ms >= 10 ? 0 : 1)} ms avg`;
+  }
+
+  function providerHealthTone(status: string) {
+    if (status === "healthy") return "positive";
+    if (status === "degraded" || status === "unavailable" || status === "needs_config") return "warning";
+    return "neutral";
   }
 </script>
 
@@ -141,6 +149,17 @@
             </div>
           {:else}
             <small>No provider calls recorded since backend startup.</small>
+          {/if}
+          {#if providerHealthRows.length}
+            <div class="health-list">
+              {#each providerHealthRows as row}
+                <div class="health-row" title={row.expected_when}>
+                  <strong>{row.display_name}</strong>
+                  <span class={providerHealthTone(row.health_status)}>{row.health_label}</span>
+                  <small>{row.action_label ?? row.reason}</small>
+                </div>
+              {/each}
+            </div>
           {/if}
         </div>
 
@@ -351,6 +370,49 @@
   .usage-row small {
     grid-column: 1 / -1;
     margin-top: 0;
+  }
+
+  .health-list {
+    display: grid;
+    gap: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px dashed rgba(46, 60, 74, 0.42);
+  }
+
+  .health-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.2rem 0.55rem;
+    align-items: baseline;
+  }
+
+  .health-row strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .health-row span {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .health-row small {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
+  .health-row .positive {
+    color: var(--positive);
+  }
+
+  .health-row .warning {
+    color: var(--warning);
+  }
+
+  .health-row .neutral {
+    color: var(--text-2);
   }
 
   @media (max-width: 960px) {

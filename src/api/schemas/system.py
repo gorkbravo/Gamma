@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from src.models.platform_boundary import ReadOnlyBoundary
 from src.models.provider_capabilities import ProviderCapability
-from src.models.provider_usage import ProviderUsageCall, ProviderUsageSnapshot, ProviderUsageSummary
+from src.models.provider_usage import ProviderUsageCall, ProviderUsageHealth, ProviderUsageSnapshot, ProviderUsageSummary
 
 
 class ConnectionStateModel(BaseModel):
@@ -147,9 +147,29 @@ class ProviderUsageSummaryModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class ProviderUsageHealthModel(BaseModel):
+    provider_id: str
+    display_name: str
+    health_status: str
+    health_label: str
+    expected_when: str
+    reason: str
+    action_label: str | None = None
+    call_count: int = 0
+    success_count: int = 0
+    unavailable_count: int = 0
+    error_count: int = 0
+    last_called_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, row: ProviderUsageHealth) -> "ProviderUsageHealthModel":
+        return cls(**row.__dict__)
+
+
 class ProviderUsageResponseModel(BaseModel):
     generated_at: datetime
     providers: list[ProviderUsageSummaryModel] = Field(default_factory=list)
+    health: list[ProviderUsageHealthModel] = Field(default_factory=list)
     recent_calls: list[ProviderUsageCallModel] = Field(default_factory=list)
     total_calls: int = 0
     source_provider: str = "gamma"
@@ -161,6 +181,7 @@ class ProviderUsageResponseModel(BaseModel):
         return cls(
             generated_at=row.generated_at,
             providers=[ProviderUsageSummaryModel.from_domain(provider) for provider in row.providers],
+            health=[ProviderUsageHealthModel.from_domain(health) for health in row.health],
             recent_calls=[ProviderUsageCallModel.from_domain(call) for call in row.recent_calls],
             total_calls=row.total_calls,
             source_provider=row.source_provider,

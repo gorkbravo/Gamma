@@ -41,6 +41,22 @@ describe("StatusRail", () => {
               endpoints: ["research_history.load_history"]
             }
           ],
+          health: [
+            {
+              provider_id: "aisstream",
+              display_name: "AISstream live AIS",
+              health_status: "idle_by_design",
+              health_label: "Idle by design",
+              expected_when: "Sealanes live map has a viewport subscription at zoom >= 4.",
+              reason: "AISstream calls are geofenced and zoom-gated.",
+              action_label: "Open Sealanes and zoom past level 4 to subscribe.",
+              call_count: 0,
+              success_count: 0,
+              unavailable_count: 0,
+              error_count: 0,
+              last_called_at: null
+            }
+          ],
           recent_calls: [],
           total_calls: 4,
           source_provider: "gamma",
@@ -62,5 +78,8 @@ describe("StatusRail", () => {
     expect(body).toContain("4 calls");
     expect(body).toContain("3 ok");
     expect(body).toContain("1 unavailable");
+    expect(body).toContain("AISstream live AIS");
+    expect(body).toContain("Idle by design");
+    expect(body).toContain("zoom past level 4");
   });
 });

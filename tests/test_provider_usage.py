@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from src.api.main import create_app
 from src.application.runtime import build_runtime
-from src.services.provider_usage import ProviderUsageLedger, trace_provider
+from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
 
 
 class FakeProvider:
@@ -76,6 +76,60 @@ def test_trace_provider_records_success_and_failure_without_swallowing_errors():
     assert snapshot.providers[0].last_error == "provider broke"
 
 
+def test_provider_usage_health_distinguishes_idle_by_design_from_failure():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    ledger.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="aisstream",
+            display_name="AISstream live AIS",
+            expected_when="Sealanes live map has a viewport subscription at zoom >= 4.",
+            configured=True,
+            active=False,
+            idle_status="idle_by_design",
+            idle_reason="AISstream calls are geofenced and zoom-gated to avoid unnecessary provider traffic.",
+            action_label="Open Sealanes and zoom past level 4 to subscribe.",
+        )
+    )
+
+    snapshot = ledger.snapshot()
+
+    assert snapshot.health[0].provider_id == "aisstream"
+    assert snapshot.health[0].health_status == "idle_by_design"
+    assert snapshot.health[0].health_label == "Idle by design"
+    assert "zoom >= 4" in snapshot.health[0].expected_when
+    assert "geofenced" in snapshot.health[0].reason
+
+
+def test_provider_usage_health_marks_recent_errors_as_degraded():
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    ledger.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="openai_copilot",
+            display_name="OpenAI Copilot",
+            expected_when="Copilot research card or synthesis request is submitted.",
+            configured=True,
+            active=False,
+            idle_status="not_requested",
+            idle_reason="No Copilot request has been made in this backend session.",
+            action_label="Ask Copilot for a grounded research card.",
+        )
+    )
+    ledger.record(
+        provider_id="openai_copilot",
+        endpoint="copilot.generate",
+        status="error",
+        duration_ms=250.0,
+        message="rate limited",
+    )
+
+    snapshot = ledger.snapshot()
+
+    assert snapshot.health[0].provider_id == "openai_copilot"
+    assert snapshot.health[0].health_status == "degraded"
+    assert snapshot.health[0].error_count == 1
+    assert snapshot.health[0].reason == "rate limited"
+
+
 def test_provider_usage_system_api_returns_runtime_ledger(tmp_path):
     runtime = build_runtime(
         mock_mode=True,
@@ -102,5 +156,27 @@ def test_provider_usage_system_api_returns_runtime_ledger(tmp_path):
         assert payload["providers"][0]["provider_id"] == "mock"
         assert payload["providers"][0]["success_count"] == 1
         assert payload["recent_calls"][0]["endpoint"] == "research_history.load_history"
+    finally:
+        runtime.shutdown()
+
+
+def test_provider_usage_system_api_reports_aisstream_idle_by_design(tmp_path, monkeypatch):
+    monkeypatch.setenv("MARITIME_PROVIDER", "aisstream")
+    monkeypatch.setenv("AISSTREAM_API_KEY", "test-key")
+    runtime = build_runtime(
+        mock_mode=False,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.get("/system/provider-usage")
+
+        assert response.status_code == 200
+        health = {row["provider_id"]: row for row in response.json()["health"]}
+        assert health["aisstream"]["health_status"] == "idle_by_design"
+        assert "zoom >= 4" in health["aisstream"]["expected_when"]
+        assert "Sealanes" in health["aisstream"]["action_label"]
     finally:
         runtime.shutdown()

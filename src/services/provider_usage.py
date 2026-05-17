@@ -3,12 +3,25 @@ from __future__ import annotations
 import time
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
 from typing import Any
 
-from src.models.provider_usage import ProviderUsageCall, ProviderUsageSnapshot, ProviderUsageSummary
+from src.models.provider_usage import ProviderUsageCall, ProviderUsageHealth, ProviderUsageSnapshot, ProviderUsageSummary
 from src.utils.time import now_utc
+
+
+@dataclass(frozen=True)
+class ProviderActivationCondition:
+    provider_id: str
+    display_name: str
+    expected_when: str
+    configured: bool
+    active: bool = False
+    idle_status: str = "not_requested"
+    idle_reason: str = "Provider has not been requested in this backend session."
+    action_label: str | None = None
 
 
 class ProviderUsageLedger:
@@ -16,7 +29,12 @@ class ProviderUsageLedger:
         self.max_calls = max(1, int(max_calls))
         self._clock = clock
         self._calls: deque[ProviderUsageCall] = deque(maxlen=self.max_calls)
+        self._activation_conditions: dict[str, ProviderActivationCondition] = {}
         self._lock = RLock()
+
+    def register_activation_condition(self, condition: ProviderActivationCondition) -> None:
+        with self._lock:
+            self._activation_conditions[_clean(condition.provider_id, "unknown")] = condition
 
     def record(
         self,
@@ -43,11 +61,13 @@ class ProviderUsageLedger:
     def snapshot(self, *, limit: int = 50) -> ProviderUsageSnapshot:
         with self._lock:
             calls = list(self._calls)
+            conditions = list(self._activation_conditions.values())
         summaries = _summarize(calls)
         recent_limit = max(0, int(limit))
         return ProviderUsageSnapshot(
             generated_at=self._clock(),
             providers=summaries,
+            health=_health_rows(summaries, conditions),
             recent_calls=list(reversed(calls[-recent_limit:])) if recent_limit else [],
             total_calls=len(calls),
         )
@@ -137,6 +157,99 @@ def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
             )
         )
     return sorted(summaries, key=lambda row: (row.last_called_at is None, row.last_called_at), reverse=True)
+
+
+def _health_rows(
+    summaries: list[ProviderUsageSummary],
+    conditions: list[ProviderActivationCondition],
+) -> list[ProviderUsageHealth]:
+    by_provider = {row.provider_id: row for row in summaries}
+    condition_ids = {condition.provider_id for condition in conditions}
+    rows = [_health_for_condition(condition, by_provider.get(condition.provider_id)) for condition in conditions]
+    for summary in summaries:
+        if summary.provider_id not in condition_ids:
+            rows.append(_health_for_summary(summary, summary.provider_id, summary.provider_id, "Provider was requested."))
+    return sorted(rows, key=lambda row: (_health_sort_rank(row.health_status), row.provider_id))
+
+
+def _health_for_condition(
+    condition: ProviderActivationCondition,
+    summary: ProviderUsageSummary | None,
+) -> ProviderUsageHealth:
+    if summary is not None:
+        return _health_for_summary(summary, condition.provider_id, condition.display_name, condition.expected_when)
+    if not condition.configured:
+        return ProviderUsageHealth(
+            provider_id=condition.provider_id,
+            display_name=condition.display_name,
+            health_status="needs_config",
+            health_label="Needs config",
+            expected_when=condition.expected_when,
+            reason="Provider is not configured for the current runtime.",
+            action_label=condition.action_label,
+        )
+    status = condition.idle_status if not condition.active else "not_requested"
+    return ProviderUsageHealth(
+        provider_id=condition.provider_id,
+        display_name=condition.display_name,
+        health_status=status,
+        health_label=_health_label(status),
+        expected_when=condition.expected_when,
+        reason=condition.idle_reason,
+        action_label=condition.action_label,
+    )
+
+
+def _health_for_summary(
+    summary: ProviderUsageSummary,
+    provider_id: str,
+    display_name: str,
+    expected_when: str,
+) -> ProviderUsageHealth:
+    if summary.error_count:
+        status = "degraded"
+        reason = summary.last_error or summary.last_message or "Recent provider request failed."
+    elif summary.unavailable_count and not summary.success_count:
+        status = "unavailable"
+        reason = summary.last_message or "Provider was requested but returned unavailable data."
+    else:
+        status = "healthy"
+        reason = summary.last_message or "Recent provider requests succeeded."
+    return ProviderUsageHealth(
+        provider_id=provider_id,
+        display_name=display_name,
+        health_status=status,
+        health_label=_health_label(status),
+        expected_when=expected_when,
+        reason=reason,
+        call_count=summary.call_count,
+        success_count=summary.success_count,
+        unavailable_count=summary.unavailable_count,
+        error_count=summary.error_count,
+        last_called_at=summary.last_called_at,
+    )
+
+
+def _health_label(status: str) -> str:
+    return {
+        "healthy": "Healthy",
+        "degraded": "Degraded",
+        "unavailable": "Unavailable",
+        "needs_config": "Needs config",
+        "idle_by_design": "Idle by design",
+        "not_requested": "Not requested",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _health_sort_rank(status: str) -> int:
+    return {
+        "degraded": 0,
+        "unavailable": 1,
+        "needs_config": 2,
+        "healthy": 3,
+        "idle_by_design": 4,
+        "not_requested": 5,
+    }.get(status, 9)
 
 
 def _provider_id(provider: Any) -> str:

@@ -78,7 +78,7 @@ from src.services.research_market_data import (
     YFinanceListedMarketHistoryProvider,
 )
 from src.services.portfolio_history_store import PortfolioHistoryStore
-from src.services.provider_usage import ProviderUsageLedger, trace_provider
+from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
 from src.services.risk_free_rate import RiskFreeRateService
@@ -220,6 +220,7 @@ def build_runtime(
     cache = CacheService(base_dir=resolved_cache_dir, ttl_hours=24)
     provider_capabilities = build_default_provider_capability_registry()
     provider_usage = ProviderUsageLedger()
+    _register_provider_activation_conditions(provider_usage, mock_mode=bool(mock_mode))
     market_data = MarketDataService(
         client.ib,
         cache,
@@ -480,6 +481,82 @@ def _build_copilot_provider(*, allow_mock: bool = True):
             or "https://api.openai.com/v1/responses"
         ).strip(),
         store_responses=store_flag,
+    )
+
+
+def _register_provider_activation_conditions(
+    provider_usage: ProviderUsageLedger,
+    *,
+    mock_mode: bool,
+) -> None:
+    maritime_provider = (os.getenv("MARITIME_PROVIDER", "sample") or "sample").strip().lower()
+    provider_usage.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="aisstream",
+            display_name="AISstream live AIS",
+            expected_when="Sealanes live map has a viewport subscription at zoom >= 4.",
+            configured=maritime_provider in {"aisstream", "aisstream_live", "live"}
+            and bool((os.getenv("AISSTREAM_API_KEY", "") or "").strip()),
+            active=False,
+            idle_status="idle_by_design",
+            idle_reason="AISstream calls are geofenced and zoom-gated to avoid unnecessary provider traffic.",
+            action_label="Open Sealanes and zoom past level 4 to subscribe.",
+        )
+    )
+    copilot_provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
+    provider_usage.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="openai_copilot",
+            display_name="OpenAI Copilot",
+            expected_when="Copilot research card, follow-up, or synthesis request is submitted.",
+            configured=copilot_provider in {"mock", "demo", "offline"}
+            or (
+                copilot_provider == "openai"
+                and bool((os.getenv("OPENAI_API_KEY", "") or "").strip())
+            ),
+            active=False,
+            idle_status="not_requested",
+            idle_reason="No Copilot request has been made in this backend session.",
+            action_label="Ask Copilot for a grounded research card.",
+        )
+    )
+    provider_usage.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="yfinance",
+            display_name="Yahoo Finance / yfinance",
+            expected_when="SITREP or Research Overview listed-market boards are loaded with yfinance policy.",
+            configured=not mock_mode,
+            active=False,
+            idle_status="not_requested",
+            idle_reason="Research/SITREP listed-market boards have not requested yfinance in this backend session.",
+            action_label="Open SITREP or Research Overview.",
+        )
+    )
+    provider_usage.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="ibkr",
+            display_name="IBKR / TWS market data",
+            expected_when="Portfolio, IV, Risk, FX, Fundamentals valuation, or IBKR-backed commodities request broker data.",
+            configured=not mock_mode,
+            active=False,
+            idle_status="not_requested",
+            idle_reason="No broker-backed provider request has been made in this backend session.",
+            action_label="Connect TWS and open a broker-backed workspace.",
+        )
+    )
+    commodities_provider = (os.getenv("COMMODITIES_PROVIDER", "sample") or "sample").strip().lower()
+    provider_usage.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="eia",
+            display_name="EIA commodities",
+            expected_when="Commodities workspace is loaded with EIA/FRED official-provider configuration.",
+            configured=commodities_provider in {"eia", "official", "eia_fred", "fred", "ibkr_eia"}
+            and bool((os.getenv("EIA_API_KEY", "") or "").strip()),
+            active=False,
+            idle_status="not_requested",
+            idle_reason="No EIA-backed commodities request has been made in this backend session.",
+            action_label="Configure EIA_API_KEY and open Commodities.",
+        )
     )
 
 

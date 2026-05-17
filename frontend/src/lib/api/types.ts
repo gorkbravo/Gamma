@@ -141,9 +141,25 @@ export interface ProviderUsageSummary {
   endpoints: string[];
 }
 
+export interface ProviderUsageHealth {
+  provider_id: string;
+  display_name: string;
+  health_status: string;
+  health_label: string;
+  expected_when: string;
+  reason: string;
+  action_label: string | null;
+  call_count: number;
+  success_count: number;
+  unavailable_count: number;
+  error_count: number;
+  last_called_at: string | null;
+}
+
 export interface ProviderUsageResponse {
   generated_at: string;
   providers: ProviderUsageSummary[];
+  health: ProviderUsageHealth[];
   recent_calls: ProviderUsageCall[];
   total_calls: number;
   source_provider: string;
