@@ -28,4 +28,5 @@ frontend/.playwright-cli/
 /.playwright-cli/
 output/playwright/
 .superpowers/
+.worktrees/
 /package-lock.json
