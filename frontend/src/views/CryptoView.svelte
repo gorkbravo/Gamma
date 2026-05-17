@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import CryptoTreemapBoard from "../components/CryptoTreemapBoard.svelte";
+  import HeroPriceChart from "../components/HeroPriceChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
@@ -32,6 +33,7 @@
     type HeadlineMetric,
     type HeroCanvas
   } from "../lib/view-models/crypto";
+  import type { HeroPricePoint } from "../lib/view-models/hero-price-chart";
   import { normalizeSyntheticText, parseSyntheticText } from "../lib/view-models/research";
 
   export let workspace: CryptoWorkspaceResponse | null = null;
@@ -263,6 +265,13 @@
   ] satisfies FocusRow[];
   $: narrativeOptions = Array.from(new Set([...defaultNarrativeOptions, ...(workspace?.narratives ?? []).map((basket) => basket.label)]));
   $: tokenChartSeries = history?.points?.length ? [{ id: "price", label: detail ? `${detail.symbol.toUpperCase()} price` : "Price", color: "var(--chart-primary)", type: "area", data: history.points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.price })).filter((point): point is { time: number; value: number } => point.time != null) }] : [];
+  $: tokenHeroPricePoints = (history?.points ?? [])
+    .map((point) => ({
+      time: parseApiTimestampToUtcSeconds(point.timestamp),
+      close: point.price,
+      volume: point.total_volume ?? undefined
+    }))
+    .filter((point): point is HeroPricePoint => point.time != null && Number.isFinite(point.close));
   $: syntheticChartSeries = syntheticPortfolio ? [
     { id: "basket", label: "Synthetic basket", color: "var(--chart-primary)", type: "area", data: syntheticPortfolio.portfolio_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) },
     { id: "benchmark", label: syntheticPortfolio.benchmark_label, color: "var(--chart-secondary)", type: "line", lineStyle: "dashed", data: syntheticPortfolio.benchmark_points.map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.value })).filter((point): point is { time: number; value: number } => point.time != null) }
@@ -596,11 +605,20 @@
             {/if}
           </div>
 
-          <TimeSeriesChart
-            series={activeHeroSeries}
-            height={360}
-            emptyMessage={heroCanvas === "basket" ? "Build a synthetic basket to promote it into the hero canvas." : "Select a token to load price history."}
-          />
+          {#if heroCanvas === "basket"}
+            <TimeSeriesChart
+              series={activeHeroSeries}
+              height={360}
+              emptyMessage="Build a synthetic basket to promote it into the hero canvas."
+            />
+          {:else}
+            <HeroPriceChart
+              chartKey="crypto:token"
+              points={tokenHeroPricePoints}
+              height={360}
+              emptyMessage="Select a token to load price history."
+            />
+          {/if}
 
           <div class="chart-foot">
             <span>{heroCanvas === "basket" && syntheticPortfolio ? syntheticPortfolio.transformation_note ?? "" : detail?.transformation_note ?? ""}</span>

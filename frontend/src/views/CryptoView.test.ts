@@ -46,6 +46,36 @@ describe("CryptoView", () => {
     expect(body).toContain("Flow Proxy Leaders");
     expect(body).toContain("Quick Take");
   });
+
+  it("renders token hero chart settings in deep dive", () => {
+    const { body } = render(CryptoView, {
+      props: {
+        workspace: makeWorkspace(),
+        detail: makeToken({
+          token_id: "solana",
+          symbol: "sol",
+          name: "Solana",
+          layer_bucket: "Layer 1",
+          narrative_labels: ["Layer 1"],
+        }),
+        history: makeHistory(),
+        liquidity: makeLiquidity(),
+        flow: makeFlow(),
+        comparison: makeComparison(),
+        syntheticPortfolio: null,
+        loading: false,
+        portfolioLoading: false,
+        mode: "deep_dive",
+        onLoadWorkspace: vi.fn(),
+        onSelectToken: vi.fn(),
+        onRunSyntheticPortfolio: vi.fn(),
+        onClearSyntheticPortfolio: vi.fn(),
+      }
+    });
+
+    expect(body).toContain("Chart Settings");
+    expect(body).toContain("Volume overlay");
+  });
 });
 
 function makeWorkspace(): CryptoWorkspaceResponse {
