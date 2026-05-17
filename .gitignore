@@ -27,4 +27,5 @@ frontend/src-tauri/target-check/
 frontend/.playwright-cli/
 /.playwright-cli/
 output/playwright/
+.superpowers/
 /package-lock.json
