@@ -512,15 +512,25 @@ class ResearchService:
             raise ResearchValidationError(["Strategy Lab composition requires at least one weighted return leg."])
         leg_series: dict[str, pd.Series] = {}
         leg_weight_map: dict[str, float] = {}
-        for leg, normalized_weight in zip(weighted_legs, normalized_weights, strict=True):
+        leg_display_labels: dict[str, str] = {}
+        display_label_counts: dict[str, int] = {}
+        for index, (leg, normalized_weight) in enumerate(zip(weighted_legs, normalized_weights, strict=True), start=1):
             if "return_leg" not in leg.object.resolver_capabilities:
                 raise ResearchValidationError([f"{leg.object.display_name} cannot be used as a weighted return leg."])
-            label = str(leg.object.display_name or leg.object.object_id or "Research Object")
-            returns = self._returns_from_research_object(leg.object, label=label, warnings=warnings)
+            display_label = str(leg.object.display_name or leg.object.object_id or "Research Object")
+            display_label_counts[display_label] = display_label_counts.get(display_label, 0) + 1
+            contribution_label = (
+                display_label
+                if display_label_counts[display_label] == 1
+                else f"{display_label} ({display_label_counts[display_label]})"
+            )
+            internal_key = f"{index}:{leg.object.object_id or display_label}"
+            returns = self._returns_from_research_object(leg.object, label=display_label, warnings=warnings)
             if returns.empty:
-                raise ResearchValidationError([f"{label} return stream is empty after cleaning."])
-            leg_series[label] = returns
-            leg_weight_map[label] = normalized_weight
+                raise ResearchValidationError([f"{display_label} return stream is empty after cleaning."])
+            leg_series[internal_key] = returns
+            leg_weight_map[internal_key] = normalized_weight
+            leg_display_labels[internal_key] = contribution_label
 
         aligned = pd.DataFrame(leg_series).dropna(how="any")
         if len(aligned) < min_observations:
@@ -530,8 +540,8 @@ class ResearchService:
         weighted_columns = aligned.mul(pd.Series(leg_weight_map), axis="columns")
         composition_returns = weighted_columns.sum(axis="columns").astype(float)
         leg_contributions = {
-            label: total_return_from_returns(weighted_columns[label].dropna()) or 0.0
-            for label in weighted_columns.columns
+            leg_display_labels[key]: total_return_from_returns(weighted_columns[key].dropna()) or 0.0
+            for key in weighted_columns.columns
         }
 
         benchmark_returns = pd.Series(dtype=float)

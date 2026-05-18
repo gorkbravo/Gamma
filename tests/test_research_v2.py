@@ -555,6 +555,60 @@ def test_strategy_lab_drops_non_finite_return_point_values(tmp_path):
     )
 
 
+def test_strategy_lab_composes_duplicate_display_name_legs_without_overwrite(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Duplicate Display Names",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:same-name-a",
+                        object_type="strategy_return_stream",
+                        display_name="Same Name",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                        ],
+                    ),
+                    weight=0.5,
+                ),
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:same-name-b",
+                        object_type="strategy_return_stream",
+                        display_name="Same Name",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.03),
+                        ],
+                    ),
+                    weight=0.5,
+                ),
+            ],
+            lenses=[],
+            overlays=[],
+            benchmark_object=None,
+            min_observations=5,
+        )
+    )
+
+    assert result.returns.tolist() == pytest.approx([0.02, 0.02, 0.02, 0.02, 0.02])
+    assert list(result.leg_contributions.keys()) == ["Same Name", "Same Name (2)"]
+    assert len(result.leg_contributions) == 2
+
+
 def test_research_object_schema_serializes_nested_return_points():
     research_object = GammaResearchObject(
         object_id="strategy:api",
