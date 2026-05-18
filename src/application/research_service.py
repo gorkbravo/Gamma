@@ -513,17 +513,12 @@ class ResearchService:
         leg_series: dict[str, pd.Series] = {}
         leg_weight_map: dict[str, float] = {}
         leg_display_labels: dict[str, str] = {}
-        display_label_counts: dict[str, int] = {}
+        emitted_labels: set[str] = set()
         for index, (leg, normalized_weight) in enumerate(zip(weighted_legs, normalized_weights, strict=True), start=1):
             if "return_leg" not in leg.object.resolver_capabilities:
                 raise ResearchValidationError([f"{leg.object.display_name} cannot be used as a weighted return leg."])
-            display_label = str(leg.object.display_name or leg.object.object_id or "Research Object")
-            display_label_counts[display_label] = display_label_counts.get(display_label, 0) + 1
-            contribution_label = (
-                display_label
-                if display_label_counts[display_label] == 1
-                else f"{display_label} ({display_label_counts[display_label]})"
-            )
+            display_label = str(leg.object.display_name or leg.object.object_id or f"Leg {index}")
+            contribution_label = self._unique_composition_label(display_label, emitted_labels)
             internal_key = f"{index}:{leg.object.object_id or display_label}"
             returns = self._returns_from_research_object(leg.object, label=display_label, warnings=warnings)
             if returns.empty:
@@ -539,10 +534,7 @@ class ResearchService:
             )
         weighted_columns = aligned.mul(pd.Series(leg_weight_map), axis="columns")
         composition_returns = weighted_columns.sum(axis="columns").astype(float)
-        leg_contributions = {
-            leg_display_labels[key]: total_return_from_returns(weighted_columns[key].dropna()) or 0.0
-            for key in weighted_columns.columns
-        }
+        contribution_columns = weighted_columns
 
         benchmark_returns = pd.Series(dtype=float)
         benchmark_object = request.benchmark_object
@@ -562,8 +554,14 @@ class ResearchService:
                 if len(benchmark_aligned) >= min_observations:
                     composition_returns = benchmark_aligned["strategy"]
                     benchmark_returns = benchmark_aligned["benchmark"]
+                    contribution_columns = weighted_columns.reindex(benchmark_aligned.index)
                 else:
                     warnings.append("Benchmark overlap is too thin; benchmark-relative metrics are unavailable.")
+
+        leg_contributions = {
+            leg_display_labels[key]: total_return_from_returns(contribution_columns[key].dropna()) or 0.0
+            for key in contribution_columns.columns
+        }
 
         try:
             analysis = analyze_return_stream(
@@ -620,6 +618,17 @@ class ResearchService:
         if weight_sum <= 0:
             return [], []
         return weighted_legs, [weight / weight_sum for weight in raw_weights]
+
+    @staticmethod
+    def _unique_composition_label(base_label: str, emitted_labels: set[str]) -> str:
+        base = str(base_label or "").strip() or "Research Object"
+        candidate = base
+        suffix = 2
+        while candidate in emitted_labels:
+            candidate = f"{base} ({suffix})"
+            suffix += 1
+        emitted_labels.add(candidate)
+        return candidate
 
     def compare_research(self, request: ResearchComparisonRequest) -> ResearchComparisonResult:
         warnings: list[str] = [

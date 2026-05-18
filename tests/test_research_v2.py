@@ -609,6 +609,150 @@ def test_strategy_lab_composes_duplicate_display_name_legs_without_overwrite(tmp
     assert len(result.leg_contributions) == 2
 
 
+def test_strategy_lab_disambiguates_explicit_duplicate_contribution_suffixes(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Duplicate Explicit Suffixes",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:same-name-a",
+                        object_type="strategy_return_stream",
+                        display_name="Same Name",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                        ],
+                    ),
+                    weight=1.0,
+                ),
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:same-name-b",
+                        object_type="strategy_return_stream",
+                        display_name="Same Name (2)",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.02),
+                        ],
+                    ),
+                    weight=1.0,
+                ),
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:same-name-c",
+                        object_type="strategy_return_stream",
+                        display_name="Same Name",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.03),
+                        ],
+                    ),
+                    weight=1.0,
+                ),
+            ],
+            lenses=[],
+            overlays=[],
+            benchmark_object=None,
+            min_observations=5,
+        )
+    )
+
+    assert list(result.leg_contributions.keys()) == ["Same Name", "Same Name (2)", "Same Name (3)"]
+    assert len(result.leg_contributions) == 3
+
+
+def test_strategy_lab_contributions_use_benchmark_trimmed_window(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Benchmark Trimmed Contributions",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:trimmed-a",
+                        object_type="strategy_return_stream",
+                        display_name="Trimmed A",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-01", value=0.50),
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.012),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.008),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.014),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                        ],
+                    ),
+                    weight=0.5,
+                ),
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:trimmed-b",
+                        object_type="strategy_return_stream",
+                        display_name="Trimmed B",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-01", value=0.10),
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.032),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.026),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.034),
+                        ],
+                    ),
+                    weight=0.5,
+                ),
+            ],
+            lenses=[],
+            overlays=[],
+            benchmark_object=GammaResearchObject(
+                object_id="benchmark:trimmed",
+                object_type="benchmark_return_stream",
+                display_name="Trimmed Benchmark",
+                source_tab="equity_research",
+                resolver_capabilities=["benchmark"],
+                return_points=[
+                    ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.004),
+                    ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.005),
+                    ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.003),
+                    ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.006),
+                    ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.002),
+                ],
+            ),
+            min_observations=5,
+        )
+    )
+
+    assert result.metrics.observation_count == 5
+    assert result.returns.tolist() == pytest.approx([0.02, 0.021, 0.02, 0.02, 0.022])
+    assert result.leg_contributions["Trimmed A"] == pytest.approx(
+        float((1.0 + pd.Series([0.005, 0.006, 0.004, 0.007, 0.005])).prod() - 1.0)
+    )
+    assert result.leg_contributions["Trimmed B"] == pytest.approx(
+        float((1.0 + pd.Series([0.015, 0.015, 0.016, 0.013, 0.017])).prod() - 1.0)
+    )
+
+
 def test_research_object_schema_serializes_nested_return_points():
     research_object = GammaResearchObject(
         object_id="strategy:api",
