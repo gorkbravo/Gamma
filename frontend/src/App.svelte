@@ -236,6 +236,7 @@
 
   function mapSplitResearchMode(tab: TabId, modeId: string): ResearchMode {
     if (tab === "strategy_lab") {
+      if (modeId === "composer") return "strategy_lab";
       if (modeId === "imports") return "strategy_lab";
       if (modeId === "backtest_analyze") return "compare_scenario";
       if (modeId === "saved_runs") return "saved_research";
