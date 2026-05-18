@@ -201,6 +201,23 @@ describe("research view model helpers", () => {
     expect(buildResearchObjectFromScopeResult(makeResearchResult("single_ticker", [{ symbol: "AAPL", weight: 1 }]))).toBeNull();
   });
 
+  it("includes normalized weights in synthetic scope research object ids", () => {
+    const first = makeResearchResult("synthetic_portfolio", [
+      { symbol: "XLV", weight: 0.6 },
+      { symbol: "XLP", weight: 0.4 }
+    ]);
+    const second = makeResearchResult("synthetic_portfolio", [
+      { symbol: "XLV", weight: 0.4 },
+      { symbol: "XLP", weight: 0.6 }
+    ]);
+    first.performance_points = [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }];
+    second.performance_points = [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }];
+
+    expect(buildResearchObjectFromScopeResult(first)?.object_id).not.toBe(
+      buildResearchObjectFromScopeResult(second)?.object_id
+    );
+  });
+
   it("builds a strategy lab research object from strategy returns", () => {
     const result = makeStrategyLabResult();
 
@@ -221,6 +238,18 @@ describe("research view model helpers", () => {
     });
     expect(object?.return_points).toEqual(result.returns_points);
     expect(buildResearchObjectFromStrategyResult({ ...result, returns_points: [] })).toBeNull();
+  });
+
+  it("includes return stream values in strategy research object ids", () => {
+    const first = makeStrategyLabResult();
+    const second = {
+      ...makeStrategyLabResult(),
+      returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.02 }]
+    };
+
+    expect(buildResearchObjectFromStrategyResult(first)?.object_id).not.toBe(
+      buildResearchObjectFromStrategyResult(second)?.object_id
+    );
   });
 
   it("hydrates safe saved scope and strategy objects for reload", () => {

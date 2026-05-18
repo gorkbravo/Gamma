@@ -612,6 +612,8 @@ function buildCopilotContextFingerprint(
 
   if (domain === "research") {
     const result = get(researchResult);
+    const strategyResult = get(strategyLabResult);
+    const composition = get(strategyLabComposition);
     return JSON.stringify({
       domain,
       workspaceMode,
@@ -622,7 +624,23 @@ function buildCopilotContextFingerprint(
       weights: (result?.weights ?? []).map((weight) => ({
         symbol: weight.symbol,
         weight: weight.weight
-      }))
+      })),
+      strategyResult: strategyResult
+        ? {
+            name: strategyResult.name,
+            valueKind: strategyResult.value_kind,
+            returnPoints: strategyResult.returns_points
+          }
+        : null,
+      strategyLabComposition: composition
+        ? {
+            name: composition.name,
+            returnPoints: composition.returns_points,
+            legContributions: composition.leg_contributions,
+            lenses: composition.lenses,
+            overlays: composition.overlays
+          }
+        : null
     });
   }
 
@@ -1103,6 +1121,7 @@ export async function runResearch(options: ResearchRunOptions) {
     };
     const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload);
     researchResult.set(nextResearchResult);
+    strategyLabComposition.set(null);
     researchCompareResult.set(null);
     // Downstream analysis must be recomputed from the latest executed research scope.
     riskResult.set(null);
@@ -2097,7 +2116,9 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         current_tab: "research",
         workspace_mode: workspaceMode,
         research_state: {
-          result: get(researchResult)
+          result: get(researchResult),
+          strategy_result: get(strategyLabResult),
+          strategy_composition: get(strategyLabComposition)
         }
       };
     case "macro":

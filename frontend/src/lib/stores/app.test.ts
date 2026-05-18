@@ -61,6 +61,7 @@ import {
   loadPredictionMarketScreener,
   loadResearchOverview,
   loadSavedResearch,
+  previewCopilotThreadFingerprint,
   loading,
   macroContext,
   macroDivergences,
@@ -656,6 +657,29 @@ describe("app store orchestration", () => {
     expect(body.value_kind).toBe("return");
     expect(get(strategyLabResult)?.name).toBe("CSV Strategy");
     expect(get(researchCompareResult)).toBeNull();
+  });
+
+  it("clears stale Strategy Lab composition after a new research run", async () => {
+    const snapshot = makeSnapshot();
+    const result = makeResearchResult("single_ticker", snapshot);
+    strategyLabComposition.set({
+      ...makeStrategyLabResult(),
+      name: "Stale Composition",
+      leg_contributions: { "scope-1": 1 },
+      lenses: [],
+      overlays: []
+    } as any);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(ok(result)));
+
+    await runResearch({
+      scopeType: "single_ticker",
+      primarySymbol: "AAPL",
+      benchmarkSymbol: "SPY",
+      lookbackDays: 252
+    });
+
+    expect(get(researchResult)?.scope_type).toBe("single_ticker");
+    expect(get(strategyLabComposition)).toBeNull();
   });
 
   it("composes Strategy Lab research objects and stores the composition result", async () => {
@@ -1428,6 +1452,35 @@ describe("app store orchestration", () => {
     expect(secondBody.previous_response_id).toBeUndefined();
     expect(get(copilotThreads).macro.entries).toHaveLength(1);
     expect(get(copilotThreads).macro.entries[0]?.result.response_id).toBe("resp_macro_2");
+  });
+
+  it("includes Strategy Lab state in the legacy research copilot context and fingerprint", async () => {
+    const snapshot = makeSnapshot();
+    researchResult.set(makeResearchResult("single_ticker", snapshot));
+    const baseFingerprint = previewCopilotThreadFingerprint("research", { workspaceMode: "research" });
+    const composition = {
+      ...makeStrategyLabResult(),
+      name: "Composite Strategy",
+      leg_contributions: { "scope-1": 0.6, "strategy-1": 0.4 },
+      lenses: [],
+      overlays: []
+    };
+    strategyLabResult.set(makeStrategyLabResult());
+    strategyLabComposition.set(composition as any);
+    const enrichedFingerprint = previewCopilotThreadFingerprint("research", { workspaceMode: "research" });
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(makeCopilotResult("research", "resp_research_1", "Research Card")));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCopilotResearchCard("research", "Assess the current Strategy Lab setup.", {
+      workspaceMode: "research"
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(enrichedFingerprint).not.toBe(baseFingerprint);
+    expect(body.context_fingerprint).toBe(enrichedFingerprint);
+    expect(body.context.research_state.result?.scope_type).toBe("single_ticker");
+    expect(body.context.research_state.strategy_result?.name).toBe("CSV Strategy");
+    expect(body.context.research_state.strategy_composition?.name).toBe("Composite Strategy");
   });
 
   it("adds a visible copilot error turn when generation fails before a response", async () => {

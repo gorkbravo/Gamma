@@ -240,9 +240,13 @@ export function buildResearchObjectFromScopeResult(result: ResearchResult | null
     result.scope_type === "single_ticker"
       ? result.primary_symbol ?? symbols[0] ?? "Equity Scope"
       : "Synthetic Basket";
+  const signature = buildDeterministicSignature({
+    weights: normalizeWeightSignature(result.weights),
+    return_points: normalizeReturnPointSignature(returnPoints)
+  });
 
   return {
-    object_id: ["equity_scope", result.scope_type, symbols.join(","), start, end].filter(Boolean).join(":"),
+    object_id: ["equity_scope", result.scope_type, symbols.join(","), start, end, signature].filter(Boolean).join(":"),
     object_type: "equity_scope",
     display_name: displayName,
     source_tab: "equity_research",
@@ -271,8 +275,11 @@ export function buildResearchObjectFromStrategyResult(result: StrategyLabResult 
 
   const start = returnPoints[0]?.timestamp ?? null;
   const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  const signature = buildDeterministicSignature({
+    return_points: normalizeReturnPointSignature(returnPoints)
+  });
   return {
-    object_id: ["strategy_return_stream", result.name, start, end].filter(Boolean).join(":"),
+    object_id: ["strategy_return_stream", result.name, start, end, signature].filter(Boolean).join(":"),
     object_type: "strategy_return_stream",
     display_name: result.name || "Strategy Return Stream",
     source_tab: "strategy_lab",
@@ -391,6 +398,59 @@ function normalizeResearchObjectReturnPoints(
     timestamp: point.timestamp,
     value: point.value
   }));
+}
+
+function normalizeWeightSignature(weights: ResearchWeightPoint[] | null | undefined) {
+  const normalizedWeights = (weights ?? [])
+    .map((weight) => ({
+      symbol: weight.symbol.trim().toUpperCase(),
+      weight: normalizeSignatureNumber(weight.weight)
+    }))
+    .filter((weight) => weight.symbol && weight.weight !== null);
+  const total = normalizedWeights.reduce((sum, weight) => sum + (weight.weight ?? 0), 0);
+  return normalizedWeights
+    .map((weight) => ({
+      symbol: weight.symbol,
+      weight: total > 0 && weight.weight !== null ? normalizeSignatureNumber(weight.weight / total) : weight.weight
+    }))
+    .sort((left, right) => left.symbol.localeCompare(right.symbol));
+}
+
+function normalizeReturnPointSignature(points: ResearchObjectReturnPoint[] | null | undefined) {
+  return (points ?? []).map((point) => ({
+    timestamp: point.timestamp,
+    value: normalizeSignatureNumber(point.value)
+  }));
+}
+
+function normalizeSignatureNumber(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = Number(value.toPrecision(12));
+  return Object.is(normalized, -0) ? 0 : normalized;
+}
+
+function buildDeterministicSignature(value: unknown) {
+  let hash = 2166136261;
+  for (const char of stableCompactJson(value)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function stableCompactJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableCompactJson).join(",")}]`;
+  }
+  if (isPlainRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableCompactJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function firstWeightSymbol(payload: Record<string, unknown>) {
