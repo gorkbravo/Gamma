@@ -253,6 +253,57 @@ def test_strategy_lab_composes_weighted_return_objects(tmp_path):
     assert any("Strategy A: dropped 1 return points with invalid timestamps" in warning for warning in result.warnings)
 
 
+def test_strategy_lab_ignores_thin_optional_benchmark_overlap(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Thin Benchmark Composition",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:thin-benchmark",
+                        object_type="strategy_return_stream",
+                        display_name="Strategy With Thin Benchmark",
+                        source_tab="strategy_lab",
+                        source_mode="imports",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                        ],
+                    ),
+                    weight=1.0,
+                )
+            ],
+            lenses=[],
+            overlays=[],
+            benchmark_object=GammaResearchObject(
+                object_id="benchmark:thin",
+                object_type="benchmark_return_stream",
+                display_name="Thin Benchmark",
+                source_tab="equity_research",
+                resolver_capabilities=["benchmark"],
+                return_points=[
+                    ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.004),
+                    ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.003),
+                ],
+            ),
+            min_observations=5,
+        )
+    )
+
+    assert result.metrics.observation_count == 5
+    assert len(result.returns) == 5
+    assert result.benchmark_returns.empty
+    assert result.metrics.benchmark_beta is None
+    assert result.metrics.benchmark_correlation is None
+    assert any("Benchmark overlap is too thin" in warning for warning in result.warnings)
+
+
 def test_strategy_lab_rejects_lens_as_weighted_leg(tmp_path):
     service = _service(tmp_path)
     with pytest.raises(ResearchValidationError) as exc_info:

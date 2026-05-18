@@ -553,11 +553,11 @@ class ResearchService:
                     candidate.to_frame("benchmark"),
                     how="inner",
                 ).dropna()
-                if len(benchmark_aligned) >= 2:
+                if len(benchmark_aligned) >= min_observations:
                     composition_returns = benchmark_aligned["strategy"]
                     benchmark_returns = benchmark_aligned["benchmark"]
                 else:
-                    warnings.append(f"{benchmark_object.display_name} benchmark overlap is too thin; benchmark ignored.")
+                    warnings.append("Benchmark overlap is too thin; benchmark-relative metrics are unavailable.")
 
         try:
             analysis = analyze_return_stream(
