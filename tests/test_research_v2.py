@@ -5,14 +5,22 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from fastapi.testclient import TestClient
 
+from src.api.main import create_app
 from src.application.research_service import ResearchService
+from src.application.runtime import build_runtime
 from src.application.research_validation import ResearchValidationError
+from src.api.schemas.research import GammaResearchObjectModel
 from src.models.research_lab import (
+    GammaResearchObject,
     ImportedReturnStreamRequest,
     ResearchComparisonLeg,
     ResearchComparisonRequest,
+    ResearchObjectReturnPoint,
     SavedResearchCreateRequest,
+    StrategyLabCompositionLeg,
+    StrategyLabCompositionRequest,
 )
 from src.services.saved_research_store import SavedResearchStore
 
@@ -143,6 +151,214 @@ def test_strategy_lab_rejects_too_few_observations(tmp_path):
         )
 
     assert "needs at least 5 return observations" in exc_info.value.errors[0]
+
+
+def test_strategy_lab_composes_weighted_return_objects(tmp_path):
+    service = _service(tmp_path)
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Live Gamma Composition",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:a",
+                        object_type="strategy_return_stream",
+                        display_name="Strategy A",
+                        source_tab="strategy_lab",
+                        source_mode="imports",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="bad-date", value=0.99),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                        ],
+                    ),
+                    weight=6.0,
+                ),
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:b",
+                        object_type="strategy_return_stream",
+                        display_name="Strategy B",
+                        source_tab="strategy_lab",
+                        source_mode="imports",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.00),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.00),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.02),
+                        ],
+                    ),
+                    weight=4.0,
+                ),
+            ],
+            lenses=[
+                GammaResearchObject(
+                    object_id="macro:lens",
+                    object_type="macro_regime",
+                    display_name="Macro Lens",
+                    source_tab="macro",
+                    resolver_capabilities=["lens"],
+                )
+            ],
+            overlays=[
+                GammaResearchObject(
+                    object_id="crypto:overlay",
+                    object_type="crypto_flow",
+                    display_name="Flow Overlay",
+                    source_tab="crypto",
+                    resolver_capabilities=["overlay"],
+                )
+            ],
+            benchmark_object=GammaResearchObject(
+                object_id="benchmark:spy",
+                object_type="benchmark_return_stream",
+                display_name="SPY Benchmark",
+                source_tab="equity_research",
+                resolver_capabilities=["benchmark"],
+                return_points=[
+                    ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.004),
+                    ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.003),
+                    ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.002),
+                    ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.005),
+                    ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.001),
+                ],
+            ),
+            min_observations=5,
+        )
+    )
+
+    expected_returns = pd.Series([0.006, 0.016, -0.002, 0.018, 0.014], index=pd.date_range("2026-01-02", periods=5))
+    expected_strategy_a_contribution = pd.Series([0.006, 0.012, -0.006, 0.018, 0.006])
+    assert result.name == "Live Gamma Composition"
+    assert list(result.leg_contributions.keys()) == ["Strategy A", "Strategy B"]
+    assert result.leg_contributions["Strategy A"] == pytest.approx(
+        float((1.0 + expected_strategy_a_contribution).prod() - 1.0)
+    )
+    assert result.returns.tolist() == pytest.approx(expected_returns.tolist())
+    assert len(result.returns) == 5
+    assert result.metrics.observation_count == 5
+    assert result.benchmark_returns.size == 5
+    assert result.source_provider == "gamma_strategy_lab"
+    assert result.origin == "research_service.strategy_lab.compose"
+    assert result.freshness_label == "derived"
+    assert result.lenses[0].display_name == "Macro Lens"
+    assert result.overlays[0].display_name == "Flow Overlay"
+    assert result.warnings[0].startswith("Strategy Lab compositions are read-only research")
+    assert any("Strategy A: dropped 1 return points with invalid timestamps" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_rejects_lens_as_weighted_leg(tmp_path):
+    service = _service(tmp_path)
+    with pytest.raises(ResearchValidationError) as exc_info:
+        service.compose_strategy_lab(
+            StrategyLabCompositionRequest(
+                name="Bad Composition",
+                legs=[
+                    StrategyLabCompositionLeg(
+                        object=GammaResearchObject(
+                            object_id="macro:inflation-shock",
+                            object_type="macro_regime",
+                            display_name="Inflation Shock",
+                            source_tab="macro",
+                            source_mode="events_regimes",
+                            resolver_capabilities=["lens"],
+                        ),
+                        weight=1.0,
+                    )
+                ],
+                lenses=[],
+                overlays=[],
+                benchmark_object=None,
+                min_observations=5,
+            )
+        )
+
+    assert "Inflation Shock cannot be used as a weighted return leg." in exc_info.value.errors[0]
+
+
+def test_research_object_schema_serializes_nested_return_points():
+    research_object = GammaResearchObject(
+        object_id="strategy:api",
+        object_type="strategy_return_stream",
+        display_name="API Strategy",
+        source_tab="strategy_lab",
+        source_mode="imports",
+        resolver_capabilities=["return_leg"],
+        return_points=[
+            ResearchObjectReturnPoint(timestamp="2026-01-02T00:00:00", value=0.01),
+            ResearchObjectReturnPoint(timestamp="2026-01-03T00:00:00", value=-0.02),
+        ],
+    )
+
+    model = GammaResearchObjectModel.from_domain(research_object)
+    round_trip = model.to_domain()
+
+    assert model.return_points[0].timestamp.year == 2026
+    assert round_trip.return_points[0] == ResearchObjectReturnPoint(timestamp="2026-01-02T00:00:00", value=0.01)
+
+
+def test_strategy_lab_compose_route_serializes_nested_return_points(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/research/strategy-lab/compose",
+            json={
+                "name": "API Composition",
+                "legs": [
+                    {
+                        "object": {
+                            "object_id": "strategy:api-a",
+                            "object_type": "strategy_return_stream",
+                            "display_name": "API Strategy A",
+                            "source_tab": "strategy_lab",
+                            "resolver_capabilities": ["return_leg"],
+                            "return_points": [
+                                {"timestamp": "2026-01-02T00:00:00", "value": 0.01},
+                                {"timestamp": "2026-01-03T00:00:00", "value": 0.02},
+                                {"timestamp": "2026-01-04T00:00:00", "value": -0.01},
+                                {"timestamp": "2026-01-05T00:00:00", "value": 0.03},
+                                {"timestamp": "2026-01-06T00:00:00", "value": 0.01},
+                            ],
+                        },
+                        "weight": 1.0,
+                    }
+                ],
+                "lenses": [
+                    {
+                        "object_id": "macro:lens",
+                        "object_type": "macro_regime",
+                        "display_name": "Macro Lens",
+                        "source_tab": "macro",
+                        "resolver_capabilities": ["lens"],
+                        "return_points": [],
+                    }
+                ],
+                "overlays": [],
+                "benchmark_object": None,
+                "min_observations": 5,
+            },
+        )
+
+        payload = response.json()
+        assert response.status_code == 200
+        assert payload["name"] == "API Composition"
+        assert payload["metrics"]["observation_count"] == 5
+        assert payload["lenses"][0]["return_points"] == []
+        assert payload["returns_points"][0]["timestamp"].startswith("2026-01-02")
+    finally:
+        runtime.shutdown()
 
 
 def test_compare_scenario_aligns_direct_and_saved_return_streams(tmp_path):

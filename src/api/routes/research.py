@@ -14,6 +14,8 @@ from src.api.schemas.research import (
     SavedResearchListResponseModel,
     StrategyLabAnalyzeRequestModel,
     StrategyLabAnalyzeResponseModel,
+    StrategyLabCompositionRequestModel,
+    StrategyLabCompositionResponseModel,
 )
 from src.application.research_service import ResearchAnalysisRequest
 from src.application.research_validation import ResearchValidationError
@@ -77,6 +79,19 @@ def analyze_strategy_lab(
     except ResearchValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
     return StrategyLabAnalyzeResponseModel.from_domain(result)
+
+
+@router.post("/research/strategy-lab/compose", response_model=StrategyLabCompositionResponseModel)
+def compose_strategy_lab(
+    payload: StrategyLabCompositionRequestModel,
+    request: Request,
+) -> StrategyLabCompositionResponseModel:
+    runtime = request.app.state.runtime
+    try:
+        result = runtime.research_service.compose_strategy_lab(payload.to_domain())
+    except ResearchValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
+    return StrategyLabCompositionResponseModel.from_domain(result)
 
 
 @router.post("/research/compare-scenario/analyze", response_model=ResearchCompareResponseModel)

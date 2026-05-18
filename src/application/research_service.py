@@ -28,6 +28,7 @@ from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot
 from src.models.provenance import FreshnessLabel
 from src.models.research_lab import (
+    GammaResearchObject,
     ImportedReturnStreamRequest,
     ResearchComparisonLeg,
     ResearchComparisonRequest,
@@ -35,6 +36,8 @@ from src.models.research_lab import (
     SavedResearchCreateRequest,
     SavedResearchItem,
     StrategyLabAnalysisResult,
+    StrategyLabCompositionRequest,
+    StrategyLabCompositionResult,
 )
 from src.models.research_overview import (
     RESEARCH_OVERVIEW_METRIC_OPTIONS,
@@ -490,6 +493,109 @@ class ResearchService:
             freshness_label=FreshnessLabel.DERIVED.value,
         )
 
+    def compose_strategy_lab(self, request: StrategyLabCompositionRequest) -> StrategyLabCompositionResult:
+        warnings: list[str] = [
+            "Strategy Lab compositions are read-only research runs; Gamma does not rebalance or modify broker portfolios."
+        ]
+        retrieved_at = now_utc()
+        min_observations = max(int(request.min_observations), 2)
+        weighted_legs = [leg for leg in request.legs if float(leg.weight) != 0.0]
+        if not weighted_legs:
+            raise ResearchValidationError(["Strategy Lab composition requires at least one weighted return leg."])
+
+        raw_weights: list[float] = []
+        for leg in weighted_legs:
+            weight = float(leg.weight)
+            if weight < 0:
+                raise ResearchValidationError(["Strategy Lab composition weights must be non-negative."])
+            if "return_leg" not in leg.object.resolver_capabilities:
+                raise ResearchValidationError([f"{leg.object.display_name} cannot be used as a weighted return leg."])
+            raw_weights.append(weight)
+        weight_sum = sum(raw_weights)
+        if weight_sum <= 0:
+            raise ResearchValidationError(["Strategy Lab composition weights must sum to a positive value."])
+
+        normalized_weights = [weight / weight_sum for weight in raw_weights]
+        leg_series: dict[str, pd.Series] = {}
+        leg_weight_map: dict[str, float] = {}
+        for leg, normalized_weight in zip(weighted_legs, normalized_weights, strict=True):
+            label = str(leg.object.display_name or leg.object.object_id or "Research Object")
+            returns = self._returns_from_research_object(leg.object, label=label, warnings=warnings)
+            if returns.empty:
+                raise ResearchValidationError([f"{label} return stream is empty after cleaning."])
+            leg_series[label] = returns
+            leg_weight_map[label] = normalized_weight
+
+        aligned = pd.DataFrame(leg_series).dropna(how="any")
+        if len(aligned) < min_observations:
+            raise ResearchValidationError(
+                [f"Strategy Lab composition needs at least {min_observations} shared return observations."]
+            )
+        weighted_columns = aligned.mul(pd.Series(leg_weight_map), axis="columns")
+        composition_returns = weighted_columns.sum(axis="columns").astype(float)
+        leg_contributions = {
+            label: total_return_from_returns(weighted_columns[label].dropna()) or 0.0
+            for label in weighted_columns.columns
+        }
+
+        benchmark_returns = pd.Series(dtype=float)
+        benchmark_object = request.benchmark_object
+        if benchmark_object is not None:
+            if {"benchmark", "return_leg"}.isdisjoint(set(benchmark_object.resolver_capabilities)):
+                warnings.append(f"{benchmark_object.display_name} is not return-resolvable as a benchmark.")
+            else:
+                candidate = self._returns_from_research_object(
+                    benchmark_object,
+                    label=benchmark_object.display_name or "Benchmark",
+                    warnings=warnings,
+                )
+                benchmark_aligned = composition_returns.to_frame("strategy").join(
+                    candidate.to_frame("benchmark"),
+                    how="inner",
+                ).dropna()
+                if len(benchmark_aligned) >= 2:
+                    composition_returns = benchmark_aligned["strategy"]
+                    benchmark_returns = benchmark_aligned["benchmark"]
+                else:
+                    warnings.append(f"{benchmark_object.display_name} benchmark overlap is too thin; benchmark ignored.")
+
+        try:
+            analysis = analyze_return_stream(
+                composition_returns,
+                benchmark_returns=benchmark_returns if not benchmark_returns.empty else None,
+                min_observations=min_observations,
+            )
+        except ValueError as exc:
+            raise ResearchValidationError([str(exc)]) from exc
+
+        return StrategyLabCompositionResult(
+            name=str(request.name or "").strip() or "Gamma Research Composition",
+            value_kind="return",
+            benchmark_column=benchmark_object.display_name if benchmark_object is not None else None,
+            benchmark_value_kind="return",
+            returns=analysis.returns,
+            equity_curve=analysis.equity_curve,
+            drawdowns=analysis.drawdowns,
+            benchmark_returns=benchmark_returns,
+            benchmark_equity_curve=equity_curve_from_returns(benchmark_returns),
+            metrics=analysis.metrics,
+            rolling_points=analysis.rolling_points,
+            monthly_returns=analysis.monthly_returns,
+            annual_returns=analysis.annual_returns,
+            warnings=list(dict.fromkeys(warnings)),
+            source_provider="gamma_strategy_lab",
+            retrieved_at=retrieved_at,
+            origin="research_service.strategy_lab.compose",
+            transformation_note=(
+                "Weighted Gamma research objects are resolved to return streams, normalized by non-negative weights, "
+                "aligned on shared timestamps, and summed as a read-only research composition."
+            ),
+            freshness_label=FreshnessLabel.DERIVED.value,
+            leg_contributions=leg_contributions,
+            lenses=list(request.lenses),
+            overlays=list(request.overlays),
+        )
+
     def compare_research(self, request: ResearchComparisonRequest) -> ResearchComparisonResult:
         warnings: list[str] = [
             "Compare / Scenario is historical analytics only; it does not rebalance or modify broker portfolios."
@@ -698,6 +804,40 @@ class ResearchService:
         if not values:
             return pd.Series(dtype=float)
         return pd.Series(values).sort_index().astype(float)
+
+    @staticmethod
+    def _returns_from_research_object(
+        research_object: GammaResearchObject,
+        *,
+        label: str,
+        warnings: list[str],
+    ) -> pd.Series:
+        records: list[tuple[pd.Timestamp, float]] = []
+        invalid_timestamps = 0
+        invalid_values = 0
+        for point in research_object.return_points:
+            timestamp = pd.to_datetime(point.timestamp, errors="coerce")
+            value = ResearchService._parse_imported_number(point.value)
+            if pd.isna(timestamp):
+                invalid_timestamps += 1
+                continue
+            if value is None:
+                invalid_values += 1
+                continue
+            records.append((pd.Timestamp(timestamp).normalize(), value))
+        if invalid_timestamps:
+            warnings.append(f"{label}: dropped {invalid_timestamps} return points with invalid timestamps.")
+        if invalid_values:
+            warnings.append(f"{label}: dropped {invalid_values} return points with missing or invalid values.")
+        if not records:
+            return pd.Series(dtype=float)
+        frame = pd.DataFrame(records, columns=["date", "value"]).sort_values("date")
+        duplicate_count = int(frame.duplicated("date", keep=False).sum())
+        if duplicate_count:
+            warnings.append(f"{label}: duplicate return timestamps detected; keeping the last point per date.")
+            frame = frame.drop_duplicates("date", keep="last")
+        values = pd.Series(frame["value"].to_numpy(dtype=float), index=pd.to_datetime(frame["date"]))
+        return clean_return_series(values)
 
     @staticmethod
     def _returns_from_imported_rows(
