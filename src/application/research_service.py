@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 import pandas as pd
@@ -36,6 +37,7 @@ from src.models.research_lab import (
     SavedResearchCreateRequest,
     SavedResearchItem,
     StrategyLabAnalysisResult,
+    StrategyLabCompositionLeg,
     StrategyLabCompositionRequest,
     StrategyLabCompositionResult,
 )
@@ -505,26 +507,14 @@ class ResearchService:
         for overlay in request.overlays:
             if "overlay" not in overlay.resolver_capabilities:
                 raise ResearchValidationError([f"{overlay.display_name} cannot be used as a Strategy Lab overlay."])
-        weighted_legs = [leg for leg in request.legs if float(leg.weight) != 0.0]
+        weighted_legs, normalized_weights = self._normalize_composition_weights(request.legs)
         if not weighted_legs:
             raise ResearchValidationError(["Strategy Lab composition requires at least one weighted return leg."])
-
-        raw_weights: list[float] = []
-        for leg in weighted_legs:
-            weight = float(leg.weight)
-            if weight < 0:
-                raise ResearchValidationError(["Strategy Lab composition weights must be non-negative."])
-            if "return_leg" not in leg.object.resolver_capabilities:
-                raise ResearchValidationError([f"{leg.object.display_name} cannot be used as a weighted return leg."])
-            raw_weights.append(weight)
-        weight_sum = sum(raw_weights)
-        if weight_sum <= 0:
-            raise ResearchValidationError(["Strategy Lab composition weights must sum to a positive value."])
-
-        normalized_weights = [weight / weight_sum for weight in raw_weights]
         leg_series: dict[str, pd.Series] = {}
         leg_weight_map: dict[str, float] = {}
         for leg, normalized_weight in zip(weighted_legs, normalized_weights, strict=True):
+            if "return_leg" not in leg.object.resolver_capabilities:
+                raise ResearchValidationError([f"{leg.object.display_name} cannot be used as a weighted return leg."])
             label = str(leg.object.display_name or leg.object.object_id or "Research Object")
             returns = self._returns_from_research_object(leg.object, label=label, warnings=warnings)
             if returns.empty:
@@ -601,6 +591,25 @@ class ResearchService:
             lenses=list(request.lenses),
             overlays=list(request.overlays),
         )
+
+    @staticmethod
+    def _normalize_composition_weights(
+        legs: list[StrategyLabCompositionLeg],
+    ) -> tuple[list[StrategyLabCompositionLeg], list[float]]:
+        weighted_legs: list[StrategyLabCompositionLeg] = []
+        raw_weights: list[float] = []
+        for leg in legs:
+            weight = float(leg.weight)
+            if not math.isfinite(weight) or weight < 0:
+                raise ResearchValidationError(["Composition leg weights must be finite non-negative values."])
+            if weight == 0:
+                continue
+            weighted_legs.append(leg)
+            raw_weights.append(weight)
+        weight_sum = sum(raw_weights)
+        if weight_sum <= 0:
+            return [], []
+        return weighted_legs, [weight / weight_sum for weight in raw_weights]
 
     def compare_research(self, request: ResearchComparisonRequest) -> ResearchComparisonResult:
         warnings: list[str] = [
@@ -821,6 +830,7 @@ class ResearchService:
         records: list[tuple[pd.Timestamp, float]] = []
         invalid_timestamps = 0
         invalid_values = 0
+        non_finite_values = 0
         for point in research_object.return_points:
             timestamp = pd.to_datetime(point.timestamp, errors="coerce")
             value = ResearchService._parse_imported_number(point.value)
@@ -830,11 +840,19 @@ class ResearchService:
             if value is None:
                 invalid_values += 1
                 continue
+            if not math.isfinite(value):
+                non_finite_values += 1
+                continue
             records.append((pd.Timestamp(timestamp).normalize(), value))
         if invalid_timestamps:
             warnings.append(f"{label}: dropped {invalid_timestamps} return points with invalid timestamps.")
         if invalid_values:
             warnings.append(f"{label}: dropped {invalid_values} return points with missing or invalid values.")
+        if non_finite_values:
+            if non_finite_values == 1:
+                warnings.append(f"{label}: dropped return point with non-finite value.")
+            else:
+                warnings.append(f"{label}: dropped {non_finite_values} return points with non-finite values.")
         if not records:
             return pd.Series(dtype=float)
         frame = pd.DataFrame(records, columns=["date", "value"]).sort_values("date")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from types import SimpleNamespace
 
 import pandas as pd
@@ -473,6 +474,85 @@ def test_strategy_lab_rejects_lens_as_weighted_leg(tmp_path):
         )
 
     assert "Inflation Shock cannot be used as a weighted return leg." in exc_info.value.errors[0]
+
+
+def test_strategy_lab_rejects_non_finite_leg_weight(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ResearchValidationError) as exc_info:
+        service.compose_strategy_lab(
+            StrategyLabCompositionRequest(
+                name="Bad Weight Composition",
+                legs=[
+                    StrategyLabCompositionLeg(
+                        object=GammaResearchObject(
+                            object_id="strategy:bad-weight",
+                            object_type="strategy_return_stream",
+                            display_name="Bad Weight Strategy",
+                            source_tab="strategy_lab",
+                            resolver_capabilities=["return_leg"],
+                            return_points=[
+                                ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                                ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                                ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                            ],
+                        ),
+                        weight=float("nan"),
+                    )
+                ],
+                lenses=[],
+                overlays=[],
+                benchmark_object=None,
+                min_observations=5,
+            )
+        )
+
+    assert exc_info.value.errors == ["Composition leg weights must be finite non-negative values."]
+
+
+def test_strategy_lab_drops_non_finite_return_point_values(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Finite Return Composition",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:non-finite-return",
+                        object_type="strategy_return_stream",
+                        display_name="Non-Finite Return Strategy",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=float("inf")),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-07", value=0.02),
+                        ],
+                    ),
+                    weight=1.0,
+                )
+            ],
+            lenses=[],
+            overlays=[],
+            benchmark_object=None,
+            min_observations=5,
+        )
+    )
+
+    assert result.metrics.observation_count == 5
+    assert result.metrics.total_return is not None
+    assert math.isfinite(result.metrics.total_return)
+    assert all(math.isfinite(float(value)) for value in result.returns)
+    assert any(
+        "Non-Finite Return Strategy: dropped return point with non-finite value." in warning
+        for warning in result.warnings
+    )
 
 
 def test_research_object_schema_serializes_nested_return_points():
