@@ -149,6 +149,8 @@ describe("navigation tab ordering", () => {
 
     expect(resolveNavigationPath("research", orderState, "/Research")?.tab.id).toBe("equity_research");
     expect(resolveNavigationPath("research", orderState, "/Research/Scope")?.mode?.id).toBe("scope_analysis");
+    expect(resolveNavigationPath("research", orderState, "/Research/Comparables")?.tab.id).toBe("equity_research");
+    expect(resolveNavigationPath("research", orderState, "/Research/Comparables")?.mode?.id).toBe("comparables");
     expect(resolveNavigationPath("research", orderState, "/Research/Strategy")?.tab.id).toBe("strategy_lab");
     expect(resolveNavigationPath("research", orderState, "/Strategy Lab/Imports")?.mode?.id).toBe("imports");
     expect(resolveNavigationPath("research", orderState, "/Rearch/Scope")?.mode?.id).toBe("scope_analysis");
@@ -156,8 +158,7 @@ describe("navigation tab ordering", () => {
     expect(resolveNavigationPath("research", orderState, "/macro/trade")?.mode?.id).toBe("trade_partners");
     expect(resolveNavigationPath("research", orderState, "/macro/country")?.mode?.id).toBe("country_compare");
     expect(resolveNavigationPath("research", orderState, "/Prediction")?.tab.id).toBe("prediction_markets");
-    expect(resolveNavigationPath("research", orderState, "/Research/Unknown")?.tab.id).toBe("equity_research");
-    expect(resolveNavigationPath("research", orderState, "/Research/Unknown")?.mode).toBeNull();
+    expect(resolveNavigationPath("research", orderState, "/Research/Unknown")).toBeNull();
     expect(resolveNavigationPath("portfolio", orderState, "/Research/Scope")).toBeNull();
   });
 

@@ -230,6 +230,23 @@
   let synthesisCopilotSurface: CopilotSurfaceState;
   let copilotSurface: CopilotSurfaceState;
 
+  function isResearchCompatibilityTab(tab: TabId) {
+    return tab === "equity_research" || tab === "strategy_lab";
+  }
+
+  function mapSplitResearchMode(tab: TabId, modeId: string): ResearchMode {
+    if (tab === "strategy_lab") {
+      if (modeId === "imports") return "strategy_lab";
+      if (modeId === "backtest_analyze") return "compare_scenario";
+      if (modeId === "saved_runs") return "saved_research";
+      return "compare_scenario";
+    }
+
+    if (modeId === "saved_equity_research") return "saved_research";
+    if (modeId === "comparables" || modeId === "scenario_context") return "compare_scenario";
+    return modeId as ResearchMode;
+  }
+
   $: orderedTabs =
     workspaceMode == null
       ? []
@@ -740,7 +757,7 @@
       };
     }
 
-    if (tab === "research") {
+    if (isResearchCompatibilityTab(tab)) {
       return {
         supported: research != null,
         domain: "research",
@@ -1067,7 +1084,7 @@
       push("Commodities", $commoditiesWorkspace?.warnings, "warning");
       push("Coverage", $commoditiesWorkspace?.coverage.caveats, "warning");
       push("Prediction", $predictionMarketScreener?.warnings, "warning");
-    } else if ($activeTab === "research") {
+    } else if (isResearchCompatibilityTab($activeTab)) {
       push("Research", $researchResult?.warnings, "warning");
     } else if ($activeTab === "macro") {
       push("Macro", $macroSnapshot?.warnings, "warning");
@@ -1177,7 +1194,7 @@
       return false;
     }
 
-    if (tab === "research") {
+    if (isResearchCompatibilityTab(tab)) {
       researchMode = "scope_analysis";
       await ensureSingleEquityResearch(symbol);
       return true;
@@ -1234,7 +1251,7 @@
       await loadSitrepContext();
     } else if (nextTab === "copilot") {
       await handleLoadCopilotWorkspaceState();
-    } else if (nextTab === "research") {
+    } else if (isResearchCompatibilityTab(nextTab)) {
       if (await applySharedEquityToTab(nextTab)) {
         return;
       }
@@ -1288,7 +1305,7 @@
 
   async function runResearchFromView(options: Parameters<typeof runResearch>[0]) {
     if (options.scopeType === "single_ticker" && options.primarySymbol) {
-      selectSharedEquity(options.primarySymbol, null, "research");
+      selectSharedEquity(options.primarySymbol, null, "equity_research");
     }
     await runResearch(options);
   }
@@ -1360,7 +1377,7 @@
       await loadPortfolioSnapshot();
     }
 
-    if ($activeTab === "research" && researchMode === "overview") {
+    if (isResearchCompatibilityTab($activeTab) && researchMode === "overview") {
       await loadResearchOverview({ forceRefresh: true });
     }
 
@@ -1622,8 +1639,8 @@
       return false;
     }
 
-    if (tabId === "research") {
-      researchMode = modeId as ResearchMode;
+    if (isResearchCompatibilityTab(tabId)) {
+      researchMode = mapSplitResearchMode(tabId, modeId);
       if (researchMode === "overview" && !$researchOverview) {
         await loadResearchOverview();
       }
@@ -1674,7 +1691,7 @@
   }
 
   function getCurrentModeId(tabId: TabId) {
-    if (tabId === "research") return researchMode;
+    if (isResearchCompatibilityTab(tabId)) return researchMode;
     if (tabId === "macro") return $macroContext.mode;
     if (tabId === "crypto") return cryptoMode;
     if (tabId === "fundamentals") return fundamentalsMode;
@@ -1970,7 +1987,7 @@
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
             onOpenHandoff={openSitrepHandoff}
           />
-        {:else if $activeTab === "research"}
+        {:else if isResearchCompatibilityTab($activeTab)}
           <ResearchView
             bind:mode={researchMode}
             overview={$researchOverview}
@@ -1986,7 +2003,7 @@
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onLoadOverview={loadResearchOverview}
             onRun={runResearchFromView}
-            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "research")}
+            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, $activeTab)}
             onAnalyzeStrategy={analyzeStrategyLab}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}

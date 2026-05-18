@@ -192,7 +192,9 @@ const LEGACY_TAB_ALIASES: Partial<Record<WorkspaceMode, Record<string, TabId>>> 
   },
 };
 
-const LEGACY_RESEARCH_MODE_ALIASES: Record<string, { tabId: TabId; modeId: string }> = {
+type ResearchSplitTabId = "equity_research" | "strategy_lab";
+
+const LEGACY_RESEARCH_MODE_ALIASES: Record<string, { tabId: ResearchSplitTabId; modeId: string }> = {
   overview: { tabId: "equity_research", modeId: "overview" },
   scope: { tabId: "equity_research", modeId: "scope_analysis" },
   scope_analysis: { tabId: "equity_research", modeId: "scope_analysis" },
@@ -406,15 +408,24 @@ export function resolveNavigationPath(
   }
 
   if (mode === "research" && matchesNavigationSegment({ id: "research", label: "Research" }, tabSegment)) {
+    const tab = WORKSPACE_TAB_LOOKUP.research.get("equity_research");
+    if (!tab) {
+      return null;
+    }
+    if (!modeSegment) {
+      return { tab, mode: null };
+    }
+
     const legacyModeKey = normalizeNavigationSearchTerm(modeSegment ?? "").replace(/\s+/g, "_");
     const mapped = LEGACY_RESEARCH_MODE_ALIASES[legacyModeKey];
     if (mapped) {
-      const tab = WORKSPACE_TAB_LOOKUP.research.get(mapped.tabId);
+      const mappedTab = WORKSPACE_TAB_LOOKUP.research.get(mapped.tabId);
       const routeMode = getTabModes(mapped.tabId).find((candidate) => candidate.id === mapped.modeId) ?? null;
-      return tab ? { tab, mode: routeMode } : null;
+      return mappedTab ? { tab: mappedTab, mode: routeMode } : null;
     }
-    const tab = WORKSPACE_TAB_LOOKUP.research.get("equity_research");
-    return tab ? { tab, mode: null } : null;
+
+    const equityMode = getTabModes("equity_research").find((candidate) => matchesNavigationSegment(candidate, modeSegment));
+    return equityMode ? { tab, mode: equityMode } : null;
   }
 
   const tab = getOrderedWorkspaceTabs(mode, orders).find((candidate) => matchesNavigationSegment(candidate, tabSegment));
