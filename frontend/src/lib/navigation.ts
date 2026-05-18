@@ -181,10 +181,10 @@ export const ACTION_KEYBINDINGS: readonly ActionKeybindingDefinition[] = [
   },
 ] as const;
 
-const WORKSPACE_TAB_LOOKUP = {
+const WORKSPACE_TAB_LOOKUP: Record<WorkspaceMode, Map<TabId, WorkspaceTabDefinition>> = {
   portfolio: new Map(WORKSPACE_TAB_DEFINITIONS.portfolio.map((tab) => [tab.id, tab])),
   research: new Map(WORKSPACE_TAB_DEFINITIONS.research.map((tab) => [tab.id, tab])),
-} satisfies Record<WorkspaceMode, Map<TabId, WorkspaceTabDefinition>>;
+};
 
 const LEGACY_TAB_ALIASES: Partial<Record<WorkspaceMode, Record<string, TabId>>> = {
   research: {

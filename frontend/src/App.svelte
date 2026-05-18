@@ -1252,10 +1252,10 @@
     } else if (nextTab === "copilot") {
       await handleLoadCopilotWorkspaceState();
     } else if (isResearchCompatibilityTab(nextTab)) {
-      if (await applySharedEquityToTab(nextTab)) {
+      if (nextTab === "equity_research" && (await applySharedEquityToTab(nextTab))) {
         return;
       }
-      researchMode = "overview";
+      researchMode = nextTab === "strategy_lab" ? "strategy_lab" : "overview";
       if (!$researchOverview) {
         await loadResearchOverview();
       }

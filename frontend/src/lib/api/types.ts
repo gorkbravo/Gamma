@@ -2709,7 +2709,16 @@ export interface MaritimeTrackResponse {
   track: MaritimeTrackSnippet | null;
 }
 
-export type CopilotBaseDomain = Exclude<TabId, "sitrep" | "maritime" | "copilot"> | "research";
+export type CopilotBaseDomain =
+  | "portfolio"
+  | "research"
+  | "macro"
+  | "commodities"
+  | "prediction_markets"
+  | "crypto"
+  | "fundamentals"
+  | "risk"
+  | "iv";
 export type CopilotDomain = CopilotBaseDomain | "synthesis";
 
 export interface CopilotSourceRef {

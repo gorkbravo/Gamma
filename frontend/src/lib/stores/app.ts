@@ -132,7 +132,7 @@ export interface ResearchDraftState {
 export interface SharedEquitySelection {
   symbol: string;
   label: string | null;
-  sourceTab: TabId | null;
+  sourceTab: TabId | "research" | null;
   updatedAt: string;
 }
 
@@ -466,7 +466,7 @@ export function setResearchDraft(nextDraft: ResearchDraftState) {
 
 export function setSharedEquitySelection(
   symbol: string,
-  options: { label?: string | null; sourceTab?: TabId | null } = {}
+  options: { label?: string | null; sourceTab?: TabId | "research" | null } = {}
 ) {
   const normalizedSymbol = symbol.trim().toUpperCase();
   if (!normalizedSymbol) {
@@ -566,8 +566,8 @@ const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
 function buildCopilotContextFingerprint(
   domain: CopilotDomain,
   workspaceMode: WorkspaceMode | null | undefined,
-  options: { synthesisDomains?: CopilotBaseDomain[]; activeTabId?: TabId } = {}
-) {
+  options: { synthesisDomains?: CopilotBaseDomain[]; activeTabId?: TabId | "research" } = {}
+): string {
   if (domain === "synthesis") {
     const includedDomains = normalizeSynthesisDomains(options.synthesisDomains);
     return JSON.stringify({
@@ -2025,7 +2025,7 @@ function setCopilotSessionId(sessionId: string) {
 type CopilotLoadOptions = {
   workspaceMode?: WorkspaceMode | null;
   synthesisDomains?: CopilotBaseDomain[];
-  activeTabId?: TabId;
+  activeTabId?: TabId | "research";
 };
 
 function normalizeSynthesisDomains(domains: CopilotBaseDomain[] | undefined) {
@@ -2152,7 +2152,7 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
 function buildCopilotSynthesisPayload(
   domains: CopilotBaseDomain[] | undefined,
   workspaceMode: WorkspaceMode | null | undefined,
-  activeTabId: TabId | undefined
+  activeTabId: TabId | "research" | undefined
 ) {
   const includedScopes = normalizeSynthesisDomains(domains)
     .map((domain) => {
