@@ -336,6 +336,9 @@ export interface ResearchResult {
   coverage: ResearchCoverage;
   constituents: ResearchConstituent[];
   warnings: string[];
+  source_provider?: string;
+  history_source_label?: string | null;
+  freshness_label?: string;
 }
 
 export type ResearchOverviewMetricId = "return" | "volatility" | "beta" | "drawdown" | "relative_return";
@@ -538,6 +541,42 @@ export interface StrategyLabResult {
   origin: string;
   transformation_note: string | null;
   freshness_label: string;
+}
+
+export type ResearchObjectResolverCapability = "return_leg" | "benchmark" | "lens" | "overlay" | "reference_only";
+
+export interface ResearchObjectReturnPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface GammaResearchObject {
+  object_id: string;
+  object_type: string;
+  display_name: string;
+  source_tab: string;
+  source_mode: string | null;
+  resolver_capabilities: ResearchObjectResolverCapability[];
+  symbols: string[];
+  constituents: Record<string, unknown>[];
+  weights: Record<string, unknown>[];
+  available_start: string | null;
+  available_end: string | null;
+  provider_summary: string | null;
+  provenance: Record<string, unknown>;
+  warnings: string[];
+  return_points: ResearchObjectReturnPoint[];
+}
+
+export interface StrategyLabCompositionLegInput {
+  object: GammaResearchObject;
+  weight: number;
+}
+
+export interface StrategyLabCompositionResult extends StrategyLabResult {
+  leg_contributions: Record<string, number>;
+  lenses: GammaResearchObject[];
+  overlays: GammaResearchObject[];
 }
 
 export interface ResearchComparisonLegResult {

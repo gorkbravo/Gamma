@@ -52,6 +52,7 @@ import type {
   PortfolioSnapshot,
   ProviderUsageResponse,
   RelatedPredictionMarketListResponse,
+  GammaResearchObject,
   ResearchCompareResult,
   ResearchOverviewResponse,
   ResearchResult,
@@ -59,6 +60,8 @@ import type {
   SavedResearchDeleteResponse,
   SavedResearchItem,
   SavedResearchListResponse,
+  StrategyLabCompositionLegInput,
+  StrategyLabCompositionResult,
   StrategyLabResult,
   SystemStatus,
   TabId,
@@ -94,6 +97,15 @@ export interface StrategyLabAnalyzeOptions {
   valueKind: "return" | "level";
   benchmarkColumn?: string | null;
   benchmarkValueKind?: "return" | "level";
+  minObservations?: number;
+}
+
+export interface StrategyLabComposeOptions {
+  name: string;
+  legs: StrategyLabCompositionLegInput[];
+  lenses: GammaResearchObject[];
+  overlays: GammaResearchObject[];
+  benchmarkObject?: StrategyLabCompositionLegInput["object"] | null;
   minObservations?: number;
 }
 
@@ -285,6 +297,7 @@ export const researchOverview = writable<ResearchOverviewResponse | null>(null);
 export const sitrepIndicesOverview = writable<ResearchOverviewResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
 export const strategyLabResult = writable<StrategyLabResult | null>(null);
+export const strategyLabComposition = writable<StrategyLabCompositionResult | null>(null);
 export const researchCompareResult = writable<ResearchCompareResult | null>(null);
 export const savedResearchItems = writable<SavedResearchItem[]>([]);
 export const macroContext = writable<MacroContextState>({
@@ -1119,6 +1132,31 @@ export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
       min_observations: options.minObservations ?? 5
     });
     strategyLabResult.set(result);
+    strategyLabComposition.set(null);
+    researchCompareResult.set(null);
+    resetCopilotCard("research");
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("strategyLab", false);
+  }
+}
+
+export async function composeStrategyLab(options: StrategyLabComposeOptions) {
+  setLoading("strategyLab", true);
+  try {
+    const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/compose", {
+      name: options.name,
+      legs: options.legs,
+      lenses: options.lenses,
+      overlays: options.overlays,
+      benchmark_object: options.benchmarkObject ?? null,
+      min_observations: options.minObservations ?? 5
+    });
+    strategyLabComposition.set(result);
     researchCompareResult.set(null);
     resetCopilotCard("research");
     lastError.set("");
@@ -1133,6 +1171,7 @@ export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
 
 export function restoreStrategyLabResult(result: StrategyLabResult) {
   strategyLabResult.set(result);
+  strategyLabComposition.set(null);
   researchCompareResult.set(null);
   resetCopilotCard("research");
   lastError.set("");

@@ -1,6 +1,8 @@
 import type {
+  GammaResearchObject,
   ResearchConstituent,
   ResearchCoverage,
+  ResearchObjectReturnPoint,
   ResearchOverviewMetricId,
   ResearchOverviewNode,
   ResearchOverviewResponse,
@@ -11,6 +13,8 @@ import type {
   ResearchStructure,
   ResearchWeightPoint
 } from "../api/types";
+
+export type { EquityResearchMode, StrategyLabMode } from "../api/types";
 
 export type ResearchMode = "overview" | "scope_analysis" | "strategy_lab" | "compare_scenario" | "saved_research";
 
@@ -210,6 +214,87 @@ export function savedResearchHasReturnStream(item: SavedResearchItem) {
   );
 }
 
+export function classifySavedResearchSurface(item: SavedResearchItem): "equity" | "strategy" | "unknown" {
+  if (["scope_analysis", "equity_scope", "equity_screen"].includes(item.object_type)) {
+    return "equity";
+  }
+  if (
+    ["strategy_lab", "strategy_return_stream", "strategy_composition"].includes(item.object_type) ||
+    savedResearchHasReturnStream(item)
+  ) {
+    return "strategy";
+  }
+  return "unknown";
+}
+
+export function buildResearchObjectFromScopeResult(result: ResearchResult | null): GammaResearchObject | null {
+  const returnPoints = normalizeResearchObjectReturnPoints(result?.performance_points);
+  if (!result || !returnPoints.length) {
+    return null;
+  }
+
+  const symbols = (result.weights ?? []).map((weight) => weight.symbol).filter(Boolean);
+  const start = returnPoints[0]?.timestamp ?? null;
+  const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  const displayName =
+    result.scope_type === "single_ticker"
+      ? result.primary_symbol ?? symbols[0] ?? "Equity Scope"
+      : "Synthetic Basket";
+
+  return {
+    object_id: ["equity_scope", result.scope_type, symbols.join(","), start, end].filter(Boolean).join(":"),
+    object_type: "equity_scope",
+    display_name: displayName,
+    source_tab: "equity_research",
+    source_mode: "scope_analysis",
+    resolver_capabilities: ["return_leg", "benchmark"],
+    symbols,
+    constituents: copyRecords(result.constituents),
+    weights: copyRecords(result.weights),
+    available_start: start,
+    available_end: end,
+    provider_summary: result.history_source_label ?? result.source_provider ?? null,
+    provenance: {
+      source_provider: result.source_provider ?? null,
+      freshness_label: result.freshness_label ?? null
+    },
+    warnings: result.warnings ?? [],
+    return_points: returnPoints
+  };
+}
+
+export function buildResearchObjectFromStrategyResult(result: StrategyLabResult | null): GammaResearchObject | null {
+  const returnPoints = normalizeResearchObjectReturnPoints(result?.returns_points);
+  if (!result || !returnPoints.length) {
+    return null;
+  }
+
+  const start = returnPoints[0]?.timestamp ?? null;
+  const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  return {
+    object_id: ["strategy_return_stream", result.name, start, end].filter(Boolean).join(":"),
+    object_type: "strategy_return_stream",
+    display_name: result.name || "Strategy Return Stream",
+    source_tab: "strategy_lab",
+    source_mode: "imports",
+    resolver_capabilities: ["return_leg", "benchmark"],
+    symbols: [],
+    constituents: [],
+    weights: [],
+    available_start: start,
+    available_end: end,
+    provider_summary: result.source_provider ?? null,
+    provenance: {
+      source_provider: result.source_provider,
+      retrieved_at: result.retrieved_at,
+      origin: result.origin,
+      freshness_label: result.freshness_label
+    },
+    warnings: result.warnings ?? [],
+    return_points: returnPoints
+  };
+}
+
 export function savedResearchScopeDraft(item: SavedResearchItem): SavedScopeDraft | null {
   if (item.object_type !== "scope_analysis") {
     return null;
@@ -293,6 +378,19 @@ export function savedResearchCanReloadStrategy(item: SavedResearchItem) {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function copyRecords<T extends object>(items: T[] | null | undefined): Record<string, unknown>[] {
+  return (items ?? []).map((item) => ({ ...item }));
+}
+
+function normalizeResearchObjectReturnPoints(
+  points: ResearchObjectReturnPoint[] | null | undefined
+): ResearchObjectReturnPoint[] {
+  return (points ?? []).map((point) => ({
+    timestamp: point.timestamp,
+    value: point.value
+  }));
 }
 
 function firstWeightSymbol(payload: Record<string, unknown>) {
