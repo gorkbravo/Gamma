@@ -93,12 +93,10 @@
   $: termSpreadHeatmapRows = buildTermSpreadHeatmap(selectedCurve);
   $: crackMatrixRows = buildCrackMatrix(workspace?.spreads ?? []);
   $: inventoryCloudRows = buildInventoryCloudRows(visibleInventories);
-  $: flowProxyRows = buildFlowProxyRows(workspace, selectedInstrumentId);
-  $: fundamentalStackSeries = buildFundamentalStackSeries(visibleInventories);
+  $: fundamentalGroups = buildFundamentalGroups(visibleInventories);
   $: fundamentalTapeRows = buildFundamentalTapeRows(visibleInventories);
   $: metalsCorrelationRows = buildMetalsCorrelationRows(workspace, macroHistories);
   $: metalRatioGaugeRows = buildMetalRatioGaugeRows(workspace?.spreads ?? []);
-  $: warehouseStockRows = buildWarehouseStockRows(mode === "metals" ? workspace?.inventories ?? [] : visibleInventories);
   $: substitutionSpreadRows = buildSubstitutionSpreadRows(workspace?.spreads ?? []);
   $: if (mode === "metals") {
     void ensureMacroDrivers();
@@ -294,10 +292,30 @@
       const bandValues = values.length >= 3 ? values : allValues;
       const min = bandValues.length ? Math.min(...bandValues) : null;
       const max = bandValues.length ? Math.max(...bandValues) : null;
+      const median = bandValues.length ? medianOf(bandValues) : null;
+      const q1 = bandValues.length ? quantileOf(bandValues, 0.25) : null;
+      const q3 = bandValues.length ? quantileOf(bandValues, 0.75) : null;
       const latestValue = series.latest_value ?? latest?.value ?? null;
       const position = min != null && max != null && latestValue != null && max !== min
         ? ((latestValue - min) / (max - min)) * 100
         : null;
+      const q1Pos = min != null && max != null && q1 != null && max !== min
+        ? ((q1 - min) / (max - min)) * 100
+        : null;
+      const q3Pos = min != null && max != null && q3 != null && max !== min
+        ? ((q3 - min) / (max - min)) * 100
+        : null;
+      const medianPos = min != null && max != null && median != null && max !== min
+        ? ((median - min) / (max - min)) * 100
+        : null;
+      const pct = series.seasonal_percentile;
+      const tone = pct == null
+        ? "neutral"
+        : pct >= 0.8
+          ? "negative"
+          : pct <= 0.2
+            ? "positive"
+            : "neutral";
       return {
         id: series.metadata.series_id,
         label: series.metadata.label,
@@ -306,73 +324,76 @@
         change: series.latest_change,
         min,
         max,
+        median,
+        q1Pos: q1Pos == null ? null : Math.max(0, Math.min(100, q1Pos)),
+        q3Pos: q3Pos == null ? null : Math.max(0, Math.min(100, q3Pos)),
+        medianPos: medianPos == null ? null : Math.max(0, Math.min(100, medianPos)),
         position: position == null ? null : Math.max(0, Math.min(100, position)),
-        percentile: series.seasonal_percentile,
+        percentile: pct,
+        tone,
         methodology: series.points.length >= 240 ? "5Y seasonal band" : "Loaded seasonal band",
         interpretation: series.interpretation ?? "N/A"
       };
     });
   }
 
-  function buildFlowProxyRows(data: CommodityWorkspaceResponse | null, instrumentId: string) {
-    const selectedLinks = (data?.cross_domain_links ?? []).filter((link) => link.linked_instrument_ids.includes(instrumentId));
-    const maritimeLink = selectedLinks.find((link) => link.target_domain === "maritime");
-    const inventory = findSelectedInventory(data, instrumentId);
-    const isEnergy = findSelectedInstrument(data, instrumentId)?.family === "energy";
-    return [
-      {
-        hub: "Cushing",
-        metric: inventory ? inventoryValue(inventory) : "Storage N/A",
-        signal: inventory?.interpretation ?? "No linked storage series",
-        source: inventory?.source_provider ?? "inventory payload"
-      },
-      {
-        hub: "US Gulf",
-        metric: isEnergy ? "Maritime handoff" : "N/A",
-        signal: maritimeLink?.summary ?? "No vessel-count feed in commodities payload",
-        source: maritimeLink?.source_provider ?? "handoff proxy"
-      },
-      {
-        hub: "Rotterdam",
-        metric: maritimeLink ? `confidence ${formatNumber(maritimeLink.confidence, 2)}` : "Proxy only",
-        signal: maritimeLink ? humanize(maritimeLink.relationship) : "Requires Maritime flow coverage",
-        source: maritimeLink?.origin ?? "provider unavailable"
-      }
-    ];
+  function medianOf(values: number[]) {
+    return quantileOf(values, 0.5);
   }
 
-  function buildFundamentalStackSeries(seriesRows: CommodityInventorySeries[]): ChartSeries[] {
-    const colors = [
-      "var(--chart-primary)",
-      "var(--chart-secondary)",
-      "var(--positive)",
-      "var(--warning)",
-      "var(--negative)"
+  function quantileOf(values: number[], q: number) {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const pos = (sorted.length - 1) * q;
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    if (lo === hi) return sorted[lo];
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  }
+
+  function buildFundamentalGroups(seriesRows: CommodityInventorySeries[]) {
+    const buckets: Array<{ id: string; title: string; categories: string[]; color: string }> = [
+      { id: "stocks", title: "Stocks", categories: ["inventories", "storage", "warehouse"], color: "var(--chart-primary)" },
+      { id: "supply", title: "Supply", categories: ["production", "imports", "refinery"], color: "var(--positive)" },
+      { id: "demand", title: "Demand", categories: ["demand", "exports"], color: "var(--warning)" }
     ];
-    return [...seriesRows]
-      .filter((series) => series.points.length >= 2)
-      .sort((left, right) => categoryRank(left.metadata.category) - categoryRank(right.metadata.category))
-      .slice(0, 5)
-      .map((series, index) => {
-        const first = series.points.find((point) => Number.isFinite(point.value) && point.value !== 0)?.value;
-        const data = first
-          ? series.points
-              .slice(-260)
-              .map((point) => ({
-                time: Math.floor(new Date(point.timestamp).getTime() / 1000),
-                value: (point.value / first) * 100
-              }))
-              .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
-          : [];
+    const colorPalette = ["var(--chart-primary)", "var(--chart-secondary)", "var(--positive)", "var(--warning)", "var(--negative)"];
+    return buckets
+      .map((bucket) => {
+        const inBucket = seriesRows.filter((series) =>
+          bucket.categories.includes(series.metadata.category ?? "")
+        );
+        const series: ChartSeries[] = inBucket
+          .filter((s) => s.points.length >= 2)
+          .slice(0, 4)
+          .map((s, index) => {
+            const first = s.points.find((point) => Number.isFinite(point.value) && point.value !== 0)?.value;
+            const data = first
+              ? s.points
+                  .slice(-260)
+                  .map((point) => ({
+                    time: Math.floor(new Date(point.timestamp).getTime() / 1000),
+                    value: (point.value / first) * 100
+                  }))
+                  .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
+              : [];
+            return {
+              id: `${s.metadata.series_id}-indexed`,
+              label: s.metadata.label,
+              color: colorPalette[index % colorPalette.length],
+              type: "line" as const,
+              data
+            };
+          })
+          .filter((s) => s.data.length >= 2);
         return {
-          id: `${series.metadata.series_id}-indexed`,
-          label: `${humanize(series.metadata.category)} | ${series.metadata.label}`,
-          color: colors[index % colors.length],
-          type: "line" as const,
-          data
+          id: bucket.id,
+          title: bucket.title,
+          count: series.length,
+          series
         };
       })
-      .filter((series) => series.data.length >= 2);
+      .filter((group) => group.series.length > 0);
   }
 
   function buildFundamentalTapeRows(seriesRows: CommodityInventorySeries[]) {
@@ -426,35 +447,51 @@
       .map((spread) => {
         const values = spread.history.map((point) => point.value).filter((value) => Number.isFinite(value));
         const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+        const min = values.length ? Math.min(...values) : null;
+        const max = values.length ? Math.max(...values) : null;
+        const median = values.length ? medianOf(values) : null;
+        const q1 = values.length ? quantileOf(values, 0.25) : null;
+        const q3 = values.length ? quantileOf(values, 0.75) : null;
         const current = spread.value;
         const distance = current != null && mean ? ((current - mean) / mean) * 100 : null;
+        const positionFromRange = min != null && max != null && current != null && max !== min
+          ? ((current - min) / (max - min)) * 100
+          : null;
+        const q1Pos = min != null && max != null && q1 != null && max !== min
+          ? ((q1 - min) / (max - min)) * 100
+          : null;
+        const q3Pos = min != null && max != null && q3 != null && max !== min
+          ? ((q3 - min) / (max - min)) * 100
+          : null;
+        const medianPos = min != null && max != null && median != null && max !== min
+          ? ((median - min) / (max - min)) * 100
+          : null;
+        const pct = spread.percentile;
+        const tone = pct == null
+          ? "neutral"
+          : pct >= 0.8 || pct <= 0.2
+            ? "warning"
+            : "neutral";
         return {
           id: spread.definition.spread_id,
           label: spread.definition.label,
           current,
           mean,
           distance,
-          percentile: spread.percentile,
-          position: spread.percentile ?? (distance == null ? null : Math.max(0, Math.min(100, 50 + distance))),
+          min,
+          max,
+          median,
+          percentile: pct,
+          position: positionFromRange == null
+            ? null
+            : Math.max(0, Math.min(100, positionFromRange)),
+          q1Pos: q1Pos == null ? null : Math.max(0, Math.min(100, q1Pos)),
+          q3Pos: q3Pos == null ? null : Math.max(0, Math.min(100, q3Pos)),
+          medianPos: medianPos == null ? null : Math.max(0, Math.min(100, medianPos)),
+          tone,
           methodology: values.length >= 2400 ? "10Y mean" : "Loaded-history mean"
         };
       });
-  }
-
-  function buildWarehouseStockRows(seriesRows: CommodityInventorySeries[]) {
-    return seriesRows
-      .filter((series) => series.metadata.category === "warehouse")
-      .map((series) => ({
-        id: series.metadata.series_id,
-        label: series.metadata.label,
-        market: findSelectedInstrument(workspace, series.metadata.instrument_id ?? "")?.symbol ?? displayStatus(series.metadata.instrument_id),
-        latest: series.latest_value,
-        change: series.latest_change,
-        percentile: series.seasonal_percentile,
-        unit: series.metadata.unit,
-        signal: series.interpretation ?? "N/A",
-        source: series.metadata.source_provider
-      }));
   }
 
   function buildSubstitutionSpreadRows(spreads: CommoditySpreadSnapshot[]) {
@@ -631,10 +668,6 @@
 
   function spreadUnit(spread: CommoditySpreadSnapshot) {
     return spread.definition.unit === "ratio" ? "x" : spread.definition.unit;
-  }
-
-  function inventoryValue(series: CommodityInventorySeries) {
-    return `${formatNumber(series.latest_value, 2)} ${series.metadata.unit}`;
   }
 
   function coverageTone(status: string | null | undefined) {
@@ -1510,12 +1543,12 @@
           <TimeSeriesChart series={priceSeries} height={260} emptyMessage="CHART UNAVAILABLE" />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel table-panel snapshot-panel">
           <header class="panel-title">
             <span>{mode === "metals" ? "Metals Snapshot" : "Energy Snapshot"}</span>
             <span class="header-meta">{visibleSummaries.length} markets</span>
           </header>
-          <div class="table-wrap">
+          <div class="table-wrap snapshot-wrap">
             <table class="compact-table market-table">
               <thead>
                 <tr>
@@ -1558,269 +1591,7 @@
       </section>
     {/if}
 
-    {#if mode === "energy"}
-      <section class="deep-grid">
-        <article class="panel table-panel">
-          <header class="panel-title"><span>Crack Spread Matrix</span></header>
-          <div class="table-wrap">
-            <table class="compact-table">
-              <thead>
-                <tr>
-                  <th>Spread</th>
-                  <th>Value</th>
-                  <th>Chg</th>
-                  <th>Pctl</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#if crackMatrixRows.length}
-                  {#each crackMatrixRows as row}
-                    <tr>
-                      <td><strong>{row.label}</strong><span class="meta">{row.formula}</span></td>
-                      <td class="num">{formatNumber(row.value, 2)}</td>
-                      <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
-                      <td class="num">{formatPercentile(row.percentile)}</td>
-                    </tr>
-                  {/each}
-                {:else}
-                  <tr class="empty-row"><td colspan="4">No crack-spread rows.</td></tr>
-                {/if}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="panel rows-panel">
-          <header class="panel-title"><span>Term Structure Heatmap</span></header>
-          {#if termSpreadHeatmapRows.length}
-            <div class="heatmap-list">
-              {#each termSpreadHeatmapRows as row}
-                <div class="heatmap-row">
-                  <span class="row-label">{row.label}</span>
-                  <div class="heatmap-track">
-                    <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
-                  </div>
-                  <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div class="empty-state-inline">No adjacent curve nodes.</div>
-          {/if}
-        </article>
-
-        <article class="panel rows-panel">
-          <header class="panel-title"><span>Inventory vs Seasonality</span></header>
-          <div class="seasonality-list">
-            {#if inventoryCloudRows.length}
-              {#each inventoryCloudRows as row}
-                <div class="seasonality-row">
-                  <span class="row-label" title={row.label}>{row.label}</span>
-                  <div class="seasonality-band">
-                    {#if row.position != null}
-                      <span class="seasonality-dot" style={`left:${row.position}%`}></span>
-                    {/if}
-                  </div>
-                  <strong class="num">{formatNumber(row.latest, 1)}</strong>
-                  <span class="num meta">{formatNumber(row.min, 1)}/{formatNumber(row.max, 1)}</span>
-                </div>
-              {/each}
-            {:else}
-              <div class="empty-state-inline">No inventory series.</div>
-            {/if}
-          </div>
-        </article>
-
-        <article class="panel table-panel">
-          <header class="panel-title"><span>Vessel / Flow Proxy</span></header>
-          <div class="table-wrap">
-            <table class="compact-table">
-              <thead>
-                <tr>
-                  <th>Hub</th>
-                  <th>Metric</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each flowProxyRows as row}
-                  <tr>
-                    <td><strong>{row.hub}</strong></td>
-                    <td>{row.metric}</td>
-                    <td class="meta">{row.source}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-    {/if}
-
-    {#if mode === "metals"}
-      <section class="deep-grid">
-        <article class="panel table-panel">
-          <header class="panel-title"><span>Macro Driver Correlation</span></header>
-          <div class="table-wrap">
-            <table class="compact-table">
-              <thead>
-                <tr>
-                  <th>Metal</th>
-                  <th>Driver</th>
-                  <th class="num">30D Corr</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#if metalsCorrelationRows.length}
-                  {#each metalsCorrelationRows as row}
-                    <tr>
-                      <td><strong>{row.metal}</strong></td>
-                      <td>{row.driver}</td>
-                      <td class="num"><span class="tag {row.tone}">{formatNumber(row.value, 2)}</span></td>
-                    </tr>
-                  {/each}
-                {:else}
-                  <tr class="empty-row"><td colspan="3">No gold/copper macro histories.</td></tr>
-                {/if}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="panel rows-panel">
-          <header class="panel-title"><span>Precious Ratio Gauges</span></header>
-          <div class="ratio-gauge-list">
-            {#if metalRatioGaugeRows.length}
-              {#each metalRatioGaugeRows as row}
-                <div class="seasonality-row">
-                  <span class="row-label" title={row.label}>{row.label}</span>
-                  <div class="gauge-track">
-                    {#if row.position != null}
-                      <span class="gauge-marker" style={`left:${row.position}%`}></span>
-                    {/if}
-                  </div>
-                  <strong class="num">{formatNumber(row.current, 2)}x</strong>
-                  <span class="num meta">{formatPercentile(row.percentile)}</span>
-                </div>
-              {/each}
-            {:else}
-              <div class="empty-state-inline">No precious-metal ratios.</div>
-            {/if}
-          </div>
-        </article>
-
-        <article class="panel table-panel">
-          <header class="panel-title"><span>LME / COMEX Warehouse Stocks</span></header>
-          <div class="table-wrap">
-            <table class="compact-table">
-              <thead>
-                <tr>
-                  <th>Series</th>
-                  <th>Market</th>
-                  <th class="num">Latest</th>
-                  <th class="num">Chg</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#if warehouseStockRows.length}
-                  {#each warehouseStockRows as row}
-                    <tr>
-                      <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
-                      <td>{row.market}</td>
-                      <td class="num">{formatNumber(row.latest, 1)} {row.unit}</td>
-                      <td class="num {valueClass(row.change)}">{formatNumber(row.change, 1)}</td>
-                    </tr>
-                  {/each}
-                {:else}
-                  <tr class="empty-row"><td colspan="4">No exchange warehouse rows.</td></tr>
-                {/if}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="panel table-panel">
-          <header class="panel-title"><span>Substitution Spreads</span></header>
-          <div class="table-wrap">
-            <table class="compact-table">
-              <thead>
-                <tr>
-                  <th>Spread</th>
-                  <th class="num">Value</th>
-                  <th class="num">Chg</th>
-                  <th class="num">Z</th>
-                  <th class="num">Pctl</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#if substitutionSpreadRows.length}
-                  {#each substitutionSpreadRows as row}
-                    <tr>
-                      <td><strong>{row.label}</strong></td>
-                      <td class="num">{formatNumber(row.value, 1)}</td>
-                      <td class="num {valueClass(row.change)}">{formatNumber(row.change, 1)}</td>
-                      <td class="num {valueClass(row.zScore)}">{formatNumber(row.zScore, 2)}</td>
-                      <td class="num">{formatPercentile(row.percentile)}</td>
-                    </tr>
-                  {/each}
-                {:else}
-                  <tr class="empty-row"><td colspan="5">No copper/aluminum spread row.</td></tr>
-                {/if}
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-    {/if}
-
-    {#if (mode === "energy" || mode === "inventories_fundamentals") && fundamentalTapeRows.length}
-      <section class="split">
-        <article class="panel chart-panel">
-          <header class="panel-title">
-            <span>EIA Fundamental Stack</span>
-            <span class="header-meta">indexed to 100</span>
-          </header>
-          <TimeSeriesChart series={fundamentalStackSeries} height={240} emptyMessage="NO FUNDAMENTAL HISTORY" showLegend={true} />
-        </article>
-
-        <article class="panel table-panel">
-          <header class="panel-title"><span>Fundamental Tape</span></header>
-          <div class="table-wrap">
-            <table class="compact-table fundamental-table">
-              <thead>
-                <tr>
-                  <th>Series</th>
-                  <th>Type</th>
-                  <th class="num">Latest</th>
-                  <th class="num">Chg</th>
-                  <th class="num">Path</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each fundamentalTapeRows as row}
-                  <tr>
-                    <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
-                    <td>{row.category}</td>
-                    <td class="num">{formatNumber(row.latest, 2)} {row.unit}</td>
-                    <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
-                    <td class="sparkline-cell">
-                      {#if row.path}
-                        <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${row.label} recent path`}>
-                          <path d={row.path}></path>
-                        </svg>
-                      {:else}
-                        <span class="sparkline-empty">N/A</span>
-                      {/if}
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-    {/if}
-
+    <!-- 1. Forward curve + curve nodes (top of curve-bearing modes) -->
     {#if mode === "energy" || mode === "metals" || mode === "curves_spreads"}
       <section class="split">
         <article class="panel chart-panel">
@@ -1845,12 +1616,12 @@
           <TimeSeriesChart series={curveSeries} height={260} emptyMessage="NO CURVE NODES" showLegend={true} />
         </article>
 
-        <article class="panel table-panel">
+        <article class="panel table-panel curve-nodes-panel">
           <header class="panel-title">
             <span>Curve Nodes</span>
             <span class="header-meta">{selectedCurve?.nodes.length ?? 0} contracts</span>
           </header>
-          <div class="table-wrap">
+          <div class="table-wrap curve-nodes-wrap">
             <table class="compact-table">
               <thead>
                 <tr>
@@ -1880,10 +1651,49 @@
           </div>
         </article>
       </section>
+    {/if}
 
-      {#if mode === "curves_spreads"}
-        <section class="panel rows-panel">
-          <header class="panel-title"><span>Term Structure Heatmap</span></header>
+    <!-- 2. Energy curve-support: Crack Spread Matrix + Term Structure Heatmap -->
+    {#if mode === "energy"}
+      <section class="curve-support-grid">
+        <article class="panel table-panel">
+          <header class="panel-title">
+            <span>Crack Spread Matrix</span>
+            <span class="header-meta">{crackMatrixRows.length} rows</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Spread</th>
+                  <th class="num">Value</th>
+                  <th class="num">Chg</th>
+                  <th class="num">Pctl</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if crackMatrixRows.length}
+                  {#each crackMatrixRows as row}
+                    <tr>
+                      <td><strong>{row.label}</strong><span class="meta">{row.formula}</span></td>
+                      <td class="num">{formatNumber(row.value, 2)}</td>
+                      <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
+                      <td class="num">{formatPercentile(row.percentile)}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="4">No crack-spread rows.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel rows-panel">
+          <header class="panel-title">
+            <span>Term Structure Heatmap</span>
+            <span class="header-meta">{termSpreadHeatmapRows.length} legs</span>
+          </header>
           {#if termSpreadHeatmapRows.length}
             <div class="heatmap-list">
               {#each termSpreadHeatmapRows as row}
@@ -1899,10 +1709,95 @@
           {:else}
             <div class="empty-state-inline">No adjacent curve nodes.</div>
           {/if}
-        </section>
-      {/if}
+        </article>
+      </section>
     {/if}
 
+    <!-- 2b. Metals curve-support: Substitution Spreads + Term Structure Heatmap -->
+    {#if mode === "metals"}
+      <section class="curve-support-grid">
+        <article class="panel table-panel">
+          <header class="panel-title">
+            <span>Substitution Spreads</span>
+            <span class="header-meta">{substitutionSpreadRows.length} rows</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Spread</th>
+                  <th class="num">Value</th>
+                  <th class="num">Chg</th>
+                  <th class="num">Z</th>
+                  <th class="num">Pctl</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if substitutionSpreadRows.length}
+                  {#each substitutionSpreadRows as row}
+                    <tr>
+                      <td><strong>{row.label}</strong></td>
+                      <td class="num">{formatNumber(row.value, 1)}</td>
+                      <td class="num {valueClass(row.change)}">{formatNumber(row.change, 1)}</td>
+                      <td class="num {valueClass(row.zScore)}">{formatNumber(row.zScore, 2)}</td>
+                      <td class="num">{formatPercentile(row.percentile)}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="5">No substitution spreads.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel rows-panel">
+          <header class="panel-title">
+            <span>Term Structure Heatmap</span>
+            <span class="header-meta">{termSpreadHeatmapRows.length} legs</span>
+          </header>
+          {#if termSpreadHeatmapRows.length}
+            <div class="heatmap-list">
+              {#each termSpreadHeatmapRows as row}
+                <div class="heatmap-row">
+                  <span class="row-label">{row.label}</span>
+                  <div class="heatmap-track">
+                    <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
+                  </div>
+                  <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="empty-state-inline">No adjacent curve nodes.</div>
+          {/if}
+        </article>
+      </section>
+    {/if}
+
+    <!-- Standalone curves-spreads term structure heatmap (kept for curves_spreads mode) -->
+    {#if mode === "curves_spreads"}
+      <section class="panel rows-panel">
+        <header class="panel-title"><span>Term Structure Heatmap</span></header>
+        {#if termSpreadHeatmapRows.length}
+          <div class="heatmap-list">
+            {#each termSpreadHeatmapRows as row}
+              <div class="heatmap-row">
+                <span class="row-label">{row.label}</span>
+                <div class="heatmap-track">
+                  <span class="heatmap-bar {row.tone}" style={`width:${row.width}%`}></span>
+                </div>
+                <strong class="num {row.tone}">{formatNumber(row.value, 3)}</strong>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="empty-state-inline">No adjacent curve nodes.</div>
+        {/if}
+      </section>
+    {/if}
+
+    <!-- 3. Spreads table -->
     {#if mode === "curves_spreads" || mode === "metals" || mode === "energy"}
       <section class="panel table-panel">
         <header class="panel-title">
@@ -1936,6 +1831,168 @@
               {/if}
             </tbody>
           </table>
+        </div>
+      </section>
+    {/if}
+
+    <!-- 4. Metals macro context (parallel to where Energy's fundamentals charts go) -->
+    {#if mode === "metals"}
+      <section class="curve-support-grid">
+        <article class="panel table-panel">
+          <header class="panel-title">
+            <span>Macro Driver Correlation</span>
+            <span class="header-meta">{metalsCorrelationRows.length} pairs</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Metal</th>
+                  <th>Driver</th>
+                  <th class="num">30D Corr</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if metalsCorrelationRows.length}
+                  {#each metalsCorrelationRows as row}
+                    <tr>
+                      <td><strong>{row.metal}</strong></td>
+                      <td>{row.driver}</td>
+                      <td class="num"><span class="tag {row.tone}">{formatNumber(row.value, 2)}</span></td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="3">No gold/copper macro histories.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel rows-panel">
+          <header class="panel-title">
+            <span>Precious Ratio Gauges</span>
+            <span class="header-meta">{metalRatioGaugeRows.length} · loaded-history band</span>
+          </header>
+          <div class="seasonality-list">
+            {#if metalRatioGaugeRows.length}
+              {#each metalRatioGaugeRows as row}
+                <div class="seasonality-row">
+                  <span class="row-label" title={row.label}>{row.label}</span>
+                  <span class="num meta range-min">{formatNumber(row.min, 2)}</span>
+                  <div class="seasonality-band">
+                    <span class="band-whisker"></span>
+                    {#if row.q1Pos != null && row.q3Pos != null}
+                      <span class="band-box" style={`left:${row.q1Pos}%;width:${Math.max(0.5, row.q3Pos - row.q1Pos)}%`}></span>
+                    {/if}
+                    {#if row.medianPos != null}
+                      <span class="band-median" style={`left:${row.medianPos}%`}></span>
+                    {/if}
+                    {#if row.position != null}
+                      <span class="band-marker {row.tone}" style={`left:${row.position}%`}></span>
+                    {/if}
+                  </div>
+                  <span class="num meta range-max">{formatNumber(row.max, 2)}</span>
+                  <strong class="num {row.tone}">{formatNumber(row.current, 2)}x</strong>
+                  <span class="num meta pctl-cell">{formatPercentile(row.percentile)}</span>
+                </div>
+              {/each}
+            {:else}
+              <div class="empty-state-inline">No precious-metal ratios.</div>
+            {/if}
+          </div>
+        </article>
+      </section>
+    {/if}
+
+    <!-- 5. Fundamentals charts (split by category group) -->
+    {#if (mode === "energy" || mode === "metals" || mode === "inventories_fundamentals") && fundamentalGroups.length}
+      <section class="fundamental-grid">
+        {#each fundamentalGroups as group}
+          <article class="panel chart-panel">
+            <header class="panel-title">
+              <span>{group.title}</span>
+              <span class="header-meta">{group.count} · idx 100</span>
+            </header>
+            <TimeSeriesChart series={group.series} height={180} emptyMessage="NO HISTORY" showLegend={true} />
+          </article>
+        {/each}
+      </section>
+    {/if}
+
+    <!-- 6. Fundamental Tape (full width, room to breathe) -->
+    {#if (mode === "energy" || mode === "metals" || mode === "inventories_fundamentals") && fundamentalTapeRows.length}
+      <section class="panel table-panel">
+        <header class="panel-title">
+          <span>Fundamental Tape</span>
+          <span class="header-meta">{fundamentalTapeRows.length} series</span>
+        </header>
+        <div class="table-wrap">
+          <table class="compact-table fundamental-table wide">
+            <thead>
+              <tr>
+                <th>Series</th>
+                <th>Type</th>
+                <th class="num">Latest</th>
+                <th class="num">Chg</th>
+                <th class="num">Pctl</th>
+                <th class="num">Path</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each fundamentalTapeRows as row}
+                <tr>
+                  <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
+                  <td>{row.category}</td>
+                  <td class="num">{formatNumber(row.latest, 2)} {row.unit}</td>
+                  <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
+                  <td class="num">{formatPercentile(row.percentile)}</td>
+                  <td class="sparkline-cell">
+                    {#if row.path}
+                      <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${row.label} recent path`}>
+                        <path d={row.path}></path>
+                      </svg>
+                    {:else}
+                      <span class="sparkline-empty">N/A</span>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
+
+    <!-- 7. Inventory vs Seasonality (energy only, box-plot redesign) -->
+    {#if (mode === "energy" || mode === "metals") && inventoryCloudRows.length}
+      <section class="panel rows-panel">
+        <header class="panel-title">
+          <span>Inventory vs Seasonality</span>
+          <span class="header-meta">5Y · same week-of-year band</span>
+        </header>
+        <div class="seasonality-list">
+          {#each inventoryCloudRows as row}
+            <div class="seasonality-row">
+              <span class="row-label" title={row.label}>{row.label}</span>
+              <span class="num meta range-min">{formatNumber(row.min, 1)}</span>
+              <div class="seasonality-band">
+                <span class="band-whisker"></span>
+                {#if row.q1Pos != null && row.q3Pos != null}
+                  <span class="band-box" style={`left:${row.q1Pos}%;width:${Math.max(0.5, row.q3Pos - row.q1Pos)}%`}></span>
+                {/if}
+                {#if row.medianPos != null}
+                  <span class="band-median" style={`left:${row.medianPos}%`}></span>
+                {/if}
+                {#if row.position != null}
+                  <span class="band-marker {row.tone}" style={`left:${row.position}%`}></span>
+                {/if}
+              </div>
+              <span class="num meta range-max">{formatNumber(row.max, 1)}</span>
+              <strong class="num {row.tone}">{formatNumber(row.latest, 1)}</strong>
+              <span class="num meta pctl-cell">{formatPercentile(row.percentile)}</span>
+            </div>
+          {/each}
         </div>
       </section>
     {/if}
@@ -2409,6 +2466,20 @@
     gap: 0.5rem;
   }
 
+  /* Energy curve-support grid: Crack Spread Matrix + Term Structure Heatmap */
+  .curve-support-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  /* Fundamentals charts grid: one chart per category bucket (stocks / supply / demand) */
+  .fundamental-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
   /* ── Inline stats strip (under chart panel headers) ── */
   .inline-stats {
     display: grid;
@@ -2445,6 +2516,24 @@
   /* ── Tables ── */
   .table-panel { overflow: hidden; }
   .table-wrap { overflow: auto; max-width: 100%; }
+
+  /* Curve Nodes scrolls so the paired Forward Curve chart sets the row height */
+  .curve-nodes-panel { display: flex; flex-direction: column; min-height: 0; }
+  .curve-nodes-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 18.25rem;
+    overflow-y: auto;
+  }
+
+  /* Snapshot table scrolls so the paired Price History chart sets the row height */
+  .snapshot-panel { display: flex; flex-direction: column; min-height: 0; }
+  .snapshot-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 16.25rem;
+    overflow-y: auto;
+  }
 
   table {
     width: 100%;
@@ -2795,6 +2884,12 @@
     border-bottom: 1px solid var(--divider);
   }
 
+  /* Inventory vs Seasonality: label | min | track | max | latest | pctl */
+  .seasonality-list .seasonality-row {
+    grid-template-columns: minmax(8rem, 11rem) 3.5rem minmax(0, 1fr) 3.5rem 4rem 3.2rem;
+    padding: 0.42rem 0.75rem;
+  }
+
   .heatmap-row { grid-template-columns: 4.5rem minmax(0, 1fr) 5.5rem; }
 
   .heatmap-row:last-child,
@@ -2817,9 +2912,11 @@
   }
 
   .seasonality-row .meta { color: var(--text-2); font-size: 10px; text-align: right; }
+  .seasonality-row .range-min { text-align: right; }
+  .seasonality-row .range-max { text-align: left; }
+  .seasonality-row .pctl-cell { text-align: right; color: var(--text-2); font-size: 10.5px; }
 
   .heatmap-track,
-  .seasonality-band,
   .gauge-track {
     position: relative;
     height: 0.6rem;
@@ -2849,7 +2946,6 @@
   .heatmap-bar.negative { background: var(--negative); }
   .heatmap-bar.neutral { background: var(--text-2); }
 
-  .seasonality-dot,
   .gauge-marker {
     position: absolute;
     top: -0.15rem;
@@ -2858,7 +2954,6 @@
     background: var(--accent);
   }
 
-  .seasonality-dot::after,
   .gauge-marker::after {
     content: "";
     position: absolute;
@@ -2869,6 +2964,72 @@
     border: 1px solid var(--accent);
     background: var(--bg-0);
   }
+
+  /* ── Seasonality box-plot ── */
+  .seasonality-band {
+    position: relative;
+    height: 1.3rem;
+    background: rgba(39, 53, 68, 0.35);
+    border-left: 1px solid var(--divider);
+    border-right: 1px solid var(--divider);
+  }
+
+  .band-whisker {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--text-2);
+    opacity: 0.45;
+  }
+
+  .band-box {
+    position: absolute;
+    top: 22%;
+    bottom: 22%;
+    background: rgba(122, 166, 200, 0.18);
+    border: 1px solid color-mix(in srgb, var(--chart-primary) 45%, var(--divider));
+  }
+
+  .band-median {
+    position: absolute;
+    top: 22%;
+    bottom: 22%;
+    width: 1px;
+    background: var(--text-1);
+    opacity: 0.85;
+  }
+
+  .band-marker {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 0 1px var(--bg-0);
+    transform: translateX(-1px);
+  }
+
+  .band-marker::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0.55rem;
+    height: 0.55rem;
+    transform: translate(-50%, -50%);
+    border: 1.5px solid var(--accent);
+    background: var(--bg-0);
+    border-radius: 50%;
+  }
+
+  .band-marker.positive { background: var(--positive); }
+  .band-marker.positive::after { border-color: var(--positive); }
+  .band-marker.negative { background: var(--negative); }
+  .band-marker.negative::after { border-color: var(--negative); }
+  .band-marker.warning { background: var(--warning); }
+  .band-marker.warning::after { border-color: var(--warning); }
 
   /* ── Empty state ── */
   .empty-state-inline,
@@ -2921,6 +3082,10 @@
   .provenance .meta { color: var(--text-2); }
 
   /* ── Responsive ── */
+  @media (max-width: 1280px) {
+    .fundamental-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
   @media (max-width: 1200px) {
     .overview-grid,
     .rank-grid,
@@ -2935,6 +3100,17 @@
   @media (max-width: 1100px) {
     .split {
       grid-template-columns: minmax(0, 1fr);
+    }
+    .curve-support-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 900px) {
+    .fundamental-grid { grid-template-columns: minmax(0, 1fr); }
+    .seasonality-list .seasonality-row {
+      grid-template-columns: 1fr;
+      gap: 0.3rem;
     }
   }
 
