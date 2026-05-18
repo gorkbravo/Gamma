@@ -14,16 +14,17 @@ export const WORKSPACE_TAB_DEFINITIONS = {
   ],
   research: [
     { id: "sitrep", label: "SITREP", pinned: true, defaultIndex: 0 },
-    { id: "research", label: "RESEARCH", pinned: false, defaultIndex: 1 },
-    { id: "macro", label: "MACRO", pinned: false, defaultIndex: 2 },
-    { id: "prediction_markets", label: "PREDICTION MARKETS", pinned: false, defaultIndex: 3 },
-    { id: "crypto", label: "CRYPTO", pinned: false, defaultIndex: 4 },
-    { id: "fundamentals", label: "FUNDAMENTALS", pinned: false, defaultIndex: 5 },
-    { id: "commodities", label: "COMMODITIES", pinned: false, defaultIndex: 6 },
-    { id: "maritime", label: "SEALANES", pinned: false, defaultIndex: 7 },
-    { id: "copilot", label: "COPILOT", pinned: false, defaultIndex: 8 },
-    { id: "risk", label: "RISK", pinned: false, defaultIndex: 9 },
-    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 10 },
+    { id: "equity_research", label: "EQUITY RESEARCH", pinned: false, defaultIndex: 1 },
+    { id: "strategy_lab", label: "STRATEGY LAB", pinned: false, defaultIndex: 2 },
+    { id: "macro", label: "MACRO", pinned: false, defaultIndex: 3 },
+    { id: "prediction_markets", label: "PREDICTION MARKETS", pinned: false, defaultIndex: 4 },
+    { id: "crypto", label: "CRYPTO", pinned: false, defaultIndex: 5 },
+    { id: "fundamentals", label: "FUNDAMENTALS", pinned: false, defaultIndex: 6 },
+    { id: "commodities", label: "COMMODITIES", pinned: false, defaultIndex: 7 },
+    { id: "maritime", label: "SEALANES", pinned: false, defaultIndex: 8 },
+    { id: "copilot", label: "COPILOT", pinned: false, defaultIndex: 9 },
+    { id: "risk", label: "RISK", pinned: false, defaultIndex: 10 },
+    { id: "iv", label: "OPTIONS", pinned: false, defaultIndex: 11 },
   ],
 } satisfies Record<WorkspaceMode, readonly WorkspaceTabDefinition[]>;
 
@@ -39,12 +40,19 @@ export interface NavigationRouteMatch {
 }
 
 export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinition[]>> = {
-  research: defineTabModes([
+  equity_research: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
     { id: "scope_analysis", label: "Scope Analysis", defaultIndex: 1 },
-    { id: "strategy_lab", label: "Strategy Lab", defaultIndex: 2 },
-    { id: "compare_scenario", label: "Compare / Scenario", defaultIndex: 3 },
-    { id: "saved_research", label: "Saved Research", defaultIndex: 4 },
+    { id: "comparables", label: "Comparables", defaultIndex: 2 },
+    { id: "scenario_context", label: "Scenario / Context", defaultIndex: 3 },
+    { id: "saved_equity_research", label: "Saved Equity Research", defaultIndex: 4 },
+  ]),
+  strategy_lab: defineTabModes([
+    { id: "composer", label: "Composer", defaultIndex: 0 },
+    { id: "backtest_analyze", label: "Backtest / Analyze", defaultIndex: 1 },
+    { id: "regime_stress", label: "Regime / Stress", defaultIndex: 2 },
+    { id: "imports", label: "Imports", defaultIndex: 3 },
+    { id: "saved_runs", label: "Saved Runs", defaultIndex: 4 },
   ]),
   macro: defineTabModes([
     { id: "snapshot", label: "Snapshot", defaultIndex: 0 },
@@ -178,6 +186,29 @@ const WORKSPACE_TAB_LOOKUP = {
   research: new Map(WORKSPACE_TAB_DEFINITIONS.research.map((tab) => [tab.id, tab])),
 } satisfies Record<WorkspaceMode, Map<TabId, WorkspaceTabDefinition>>;
 
+const LEGACY_TAB_ALIASES: Partial<Record<WorkspaceMode, Record<string, TabId>>> = {
+  research: {
+    research: "equity_research",
+  },
+};
+
+const LEGACY_RESEARCH_MODE_ALIASES: Record<string, { tabId: TabId; modeId: string }> = {
+  overview: { tabId: "equity_research", modeId: "overview" },
+  scope: { tabId: "equity_research", modeId: "scope_analysis" },
+  scope_analysis: { tabId: "equity_research", modeId: "scope_analysis" },
+  strategy: { tabId: "strategy_lab", modeId: "imports" },
+  strategy_lab: { tabId: "strategy_lab", modeId: "imports" },
+  compare: { tabId: "strategy_lab", modeId: "backtest_analyze" },
+  compare_scenario: { tabId: "strategy_lab", modeId: "backtest_analyze" },
+  saved: { tabId: "strategy_lab", modeId: "saved_runs" },
+  saved_research: { tabId: "strategy_lab", modeId: "saved_runs" },
+};
+
+function normalizeLegacyTabId(mode: WorkspaceMode, tabId: unknown): unknown {
+  if (typeof tabId !== "string") return tabId;
+  return LEGACY_TAB_ALIASES[mode]?.[tabId] ?? tabId;
+}
+
 export function getWorkspaceHomeTab(mode: WorkspaceMode): TabId {
   return DEFAULT_WORKSPACE_TAB_ORDER[mode][0];
 }
@@ -209,7 +240,8 @@ export function normalizeWorkspaceTabOrder(mode: WorkspaceMode, candidate: reado
   const nextOrder: TabId[] = [defaultOrder[0]];
   const seen = new Set<TabId>(nextOrder);
 
-  for (const tabId of candidate ?? []) {
+  for (const rawTabId of candidate ?? []) {
+    const tabId = normalizeLegacyTabId(mode, rawTabId);
     if (!isWorkspaceTab(mode, tabId) || seen.has(tabId)) {
       continue;
     }
@@ -371,6 +403,18 @@ export function resolveNavigationPath(
 
   if (!tabSegment) {
     return null;
+  }
+
+  if (mode === "research" && matchesNavigationSegment({ id: "research", label: "Research" }, tabSegment)) {
+    const legacyModeKey = normalizeNavigationSearchTerm(modeSegment ?? "").replace(/\s+/g, "_");
+    const mapped = LEGACY_RESEARCH_MODE_ALIASES[legacyModeKey];
+    if (mapped) {
+      const tab = WORKSPACE_TAB_LOOKUP.research.get(mapped.tabId);
+      const routeMode = getTabModes(mapped.tabId).find((candidate) => candidate.id === mapped.modeId) ?? null;
+      return tab ? { tab, mode: routeMode } : null;
+    }
+    const tab = WORKSPACE_TAB_LOOKUP.research.get("equity_research");
+    return tab ? { tab, mode: null } : null;
   }
 
   const tab = getOrderedWorkspaceTabs(mode, orders).find((candidate) => matchesNavigationSegment(candidate, tabSegment));

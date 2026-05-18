@@ -3,7 +3,8 @@ export type WorkspaceMode = "portfolio" | "research";
 export type TabId =
   | "portfolio"
   | "sitrep"
-  | "research"
+  | "equity_research"
+  | "strategy_lab"
   | "macro"
   | "commodities"
   | "prediction_markets"
@@ -53,6 +54,13 @@ export interface ActionKeybindingDefinition {
 }
 
 export type MacroMode = "snapshot" | "cross_asset" | "rates_policy" | "events_regimes" | "trade_partners" | "country_compare";
+export type EquityResearchMode =
+  | "overview"
+  | "scope_analysis"
+  | "comparables"
+  | "scenario_context"
+  | "saved_equity_research";
+export type StrategyLabMode = "composer" | "backtest_analyze" | "regime_stress" | "imports" | "saved_runs";
 export type MacroRegion = "US" | "EU" | "Global";
 export type MacroTimeframe = "1M" | "3M" | "6M" | "1Y";
 export type MacroTheme = "all" | "growth" | "inflation" | "policy" | "recession_risk";
