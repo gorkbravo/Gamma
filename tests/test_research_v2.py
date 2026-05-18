@@ -304,6 +304,148 @@ def test_strategy_lab_ignores_thin_optional_benchmark_overlap(tmp_path):
     assert any("Benchmark overlap is too thin" in warning for warning in result.warnings)
 
 
+def test_strategy_lab_preserves_valid_lenses_and_overlays_without_return_contributions(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Lens Overlay Composition",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:base",
+                        object_type="strategy_return_stream",
+                        display_name="Base Strategy",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                        ],
+                    ),
+                    weight=1.0,
+                )
+            ],
+            lenses=[
+                GammaResearchObject(
+                    object_id="macro:valid-lens",
+                    object_type="macro_regime",
+                    display_name="Valid Macro Lens",
+                    source_tab="macro",
+                    resolver_capabilities=["lens"],
+                )
+            ],
+            overlays=[
+                GammaResearchObject(
+                    object_id="crypto:valid-overlay",
+                    object_type="crypto_flow",
+                    display_name="Valid Flow Overlay",
+                    source_tab="crypto",
+                    resolver_capabilities=["overlay"],
+                )
+            ],
+            benchmark_object=None,
+            min_observations=5,
+        )
+    )
+
+    assert [item.display_name for item in result.lenses] == ["Valid Macro Lens"]
+    assert [item.display_name for item in result.overlays] == ["Valid Flow Overlay"]
+    assert list(result.leg_contributions.keys()) == ["Base Strategy"]
+    assert result.metrics.observation_count == 5
+
+
+def test_strategy_lab_rejects_invalid_lens_object(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ResearchValidationError) as exc_info:
+        service.compose_strategy_lab(
+            StrategyLabCompositionRequest(
+                name="Invalid Lens Composition",
+                legs=[
+                    StrategyLabCompositionLeg(
+                        object=GammaResearchObject(
+                            object_id="strategy:base",
+                            object_type="strategy_return_stream",
+                            display_name="Base Strategy",
+                            source_tab="strategy_lab",
+                            resolver_capabilities=["return_leg"],
+                            return_points=[
+                                ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                                ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                                ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                            ],
+                        ),
+                        weight=1.0,
+                    )
+                ],
+                lenses=[
+                    GammaResearchObject(
+                        object_id="macro:not-lens",
+                        object_type="macro_regime",
+                        display_name="Invalid Lens",
+                        source_tab="macro",
+                        resolver_capabilities=["reference_only"],
+                    )
+                ],
+                overlays=[],
+                benchmark_object=None,
+                min_observations=5,
+            )
+        )
+
+    assert exc_info.value.errors == ["Invalid Lens cannot be used as a Strategy Lab lens."]
+
+
+def test_strategy_lab_rejects_invalid_overlay_object(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ResearchValidationError) as exc_info:
+        service.compose_strategy_lab(
+            StrategyLabCompositionRequest(
+                name="Invalid Overlay Composition",
+                legs=[
+                    StrategyLabCompositionLeg(
+                        object=GammaResearchObject(
+                            object_id="strategy:base",
+                            object_type="strategy_return_stream",
+                            display_name="Base Strategy",
+                            source_tab="strategy_lab",
+                            resolver_capabilities=["return_leg"],
+                            return_points=[
+                                ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                                ResearchObjectReturnPoint(timestamp="2026-01-04", value=-0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.03),
+                                ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                            ],
+                        ),
+                        weight=1.0,
+                    )
+                ],
+                lenses=[],
+                overlays=[
+                    GammaResearchObject(
+                        object_id="crypto:not-overlay",
+                        object_type="crypto_flow",
+                        display_name="Invalid Overlay",
+                        source_tab="crypto",
+                        resolver_capabilities=["reference_only"],
+                    )
+                ],
+                benchmark_object=None,
+                min_observations=5,
+            )
+        )
+
+    assert exc_info.value.errors == ["Invalid Overlay cannot be used as a Strategy Lab overlay."]
+
+
 def test_strategy_lab_rejects_lens_as_weighted_leg(tmp_path):
     service = _service(tmp_path)
     with pytest.raises(ResearchValidationError) as exc_info:

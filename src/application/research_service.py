@@ -499,6 +499,12 @@ class ResearchService:
         ]
         retrieved_at = now_utc()
         min_observations = max(int(request.min_observations), 2)
+        for lens in request.lenses:
+            if "lens" not in lens.resolver_capabilities:
+                raise ResearchValidationError([f"{lens.display_name} cannot be used as a Strategy Lab lens."])
+        for overlay in request.overlays:
+            if "overlay" not in overlay.resolver_capabilities:
+                raise ResearchValidationError([f"{overlay.display_name} cannot be used as a Strategy Lab overlay."])
         weighted_legs = [leg for leg in request.legs if float(leg.weight) != 0.0]
         if not weighted_legs:
             raise ResearchValidationError(["Strategy Lab composition requires at least one weighted return leg."])
