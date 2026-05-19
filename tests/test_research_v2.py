@@ -899,6 +899,18 @@ def test_saved_research_create_list_load_and_delete(tmp_path):
     assert service.load_saved_research(saved.id) is None
 
 
+def test_saved_research_keeps_legacy_scope_and_strategy_objects(tmp_path):
+    store = SavedResearchStore(tmp_path / "research")
+    scope = store.create_item(SavedResearchCreateRequest(object_type="scope_analysis", title="AAPL Scope"))
+    strategy = store.create_item(SavedResearchCreateRequest(object_type="strategy_lab", title="CSV Strategy"))
+
+    loaded = store.list_items()
+
+    assert {item.id for item in loaded} == {scope.id, strategy.id}
+    assert store.load_item(scope.id).object_type == "scope_analysis"
+    assert store.load_item(strategy.id).object_type == "strategy_lab"
+
+
 def test_saved_research_loads_future_schema_best_effort(tmp_path):
     store = SavedResearchStore(tmp_path / "research")
     item_path = store.items_dir / "future-schema.json"

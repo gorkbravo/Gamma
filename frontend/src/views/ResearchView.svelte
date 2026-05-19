@@ -32,6 +32,7 @@
     buildResearchCompareOptions,
     buildResearchTreemapSections,
     buildPreviewRows,
+    classifySavedResearchSurface,
     deriveConstituentsFromResearchResult,
     deriveCoverageFromResearchResult,
     deriveStructureFromWeights,
@@ -981,6 +982,13 @@
   $: savedResearchList = Array.isArray(savedItems) ? savedItems : [];
   $: activeStrategyResult = strategyComposition ?? strategyResult;
   $: compareOptions = buildResearchCompareOptions(result, activeStrategyResult, savedResearchList);
+  $: visibleSavedItems = savedResearchList.filter((item) => {
+    if (surface === "legacy") {
+      return true;
+    }
+    const classification = classifySavedResearchSurface(item);
+    return surface === "equity" ? classification === "equity" : classification === "strategy";
+  });
   $: visibleResearchModes =
     surface === "equity" ? equityResearchModes : surface === "strategy" ? strategyResearchModes : legacyResearchModes;
   $: surfaceTitle =
@@ -2079,8 +2087,8 @@
             <table>
               <thead><tr><th>Title</th><th>Type</th><th>Updated</th><th>Warnings</th><th>Actions</th></tr></thead>
               <tbody>
-                {#if savedResearchList.length}
-                  {#each savedResearchList as item}
+                {#if visibleSavedItems.length}
+                  {#each visibleSavedItems as item}
                     <tr>
                       <td>{item.title}</td>
                       <td>{item.object_type}</td>
@@ -2122,8 +2130,8 @@
         <article class="panel rail-panel">
           <div class="rail-header"><div><p class="eyebrow">Storage</p><h3>Local JSON Layer</h3></div></div>
           <div class="stack">
-            <div class="row"><span>Items</span><strong>{savedResearchList.length}</strong></div>
-            <div class="row"><span>Reusable Streams</span><strong>{savedResearchList.filter(savedResearchHasReturnStream).length}</strong></div>
+            <div class="row"><span>Items</span><strong>{visibleSavedItems.length}</strong></div>
+            <div class="row"><span>Reusable Streams</span><strong>{visibleSavedItems.filter(savedResearchHasReturnStream).length}</strong></div>
           </div>
           <p class="muted">Saved Research is a first-pass structured layer, not a notebook. It preserves normalized outputs, warnings, timestamps, and provenance fields for reuse.</p>
         </article>
