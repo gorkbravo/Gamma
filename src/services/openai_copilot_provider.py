@@ -223,6 +223,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         default_prompt = {
             "portfolio": "Generate a concise research card for the active Gamma portfolio workspace.",
             "research": "Generate a concise research card for the active Gamma research scope.",
+            "equity_research": "Generate a concise research card for the active Gamma equity research workspace.",
+            "strategy_lab": "Generate a concise research card for the active Gamma strategy lab workspace.",
             "macro": "Generate a concise research card for the current Gamma macro workspace.",
             "prediction_markets": "Generate a concise research card for the selected Gamma prediction market.",
             "risk": "Generate a concise research card for the active Gamma risk workspace.",

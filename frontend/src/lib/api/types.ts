@@ -2751,6 +2751,8 @@ export interface MaritimeTrackResponse {
 export type CopilotBaseDomain =
   | "portfolio"
   | "research"
+  | "equity_research"
+  | "strategy_lab"
   | "macro"
   | "commodities"
   | "prediction_markets"

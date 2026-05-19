@@ -274,6 +274,8 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
   return {
     portfolio: createEmptyCopilotThread("portfolio"),
     research: createEmptyCopilotThread("research"),
+    equity_research: createEmptyCopilotThread("equity_research"),
+    strategy_lab: createEmptyCopilotThread("strategy_lab"),
     macro: createEmptyCopilotThread("macro"),
     commodities: createEmptyCopilotThread("commodities"),
     prediction_markets: createEmptyCopilotThread("prediction_markets"),
@@ -341,6 +343,8 @@ export const fundamentalsDcfSnapshots = writable<FundamentalsDcfSnapshotList | n
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
   portfolio: null,
   research: null,
+  equity_research: null,
+  strategy_lab: null,
   macro: null,
   commodities: null,
   prediction_markets: null,
@@ -469,8 +473,22 @@ function setLoading(key: string, value: boolean) {
 }
 
 function resetCopilotCard(domain: CopilotDomain) {
-  copilotCards.update((current) => ({ ...current, [domain]: null }));
-  copilotThreads.update((current) => ({ ...current, [domain]: createEmptyCopilotThread(domain) }));
+  const domainsToReset: CopilotDomain[] =
+    domain === "research" ? ["research", "equity_research", "strategy_lab"] : [domain];
+  copilotCards.update((current) => {
+    const next = { ...current };
+    for (const resetDomain of domainsToReset) {
+      next[resetDomain] = null;
+    }
+    return next;
+  });
+  copilotThreads.update((current) => {
+    const next = { ...current };
+    for (const resetDomain of domainsToReset) {
+      next[resetDomain] = createEmptyCopilotThread(resetDomain);
+    }
+    return next;
+  });
 }
 
 export function setResearchDraft(nextDraft: ResearchDraftState) {
@@ -567,6 +585,8 @@ function serializePositionSignature(snapshot: PortfolioSnapshot | null | undefin
 const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   portfolio: "Portfolio",
   research: "Research",
+  equity_research: "Equity Research",
+  strategy_lab: "Strategy Lab",
   macro: "Macro",
   commodities: "Commodities",
   prediction_markets: "Prediction Markets",
@@ -639,6 +659,60 @@ function buildCopilotContextFingerprint(
             legContributions: composition.leg_contributions,
             lenses: composition.lenses,
             overlays: composition.overlays
+          }
+        : null
+    });
+  }
+
+  if (domain === "equity_research") {
+    const overview = get(researchOverview);
+    const result = get(researchResult);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      overviewUniverse: overview?.universe_id ?? null,
+      overviewRetrievedAt: overview?.retrieved_at ?? null,
+      overviewWarnings: overview?.warnings.length ?? 0,
+      scopeType: result?.scope_type ?? null,
+      primarySymbol: result?.primary_symbol ?? null,
+      benchmarkSymbol: result?.benchmark_symbol ?? null,
+      snapshotTimestamp: result?.snapshot?.timestamp ?? null,
+      weights: (result?.weights ?? []).map((weight) => ({
+        symbol: weight.symbol,
+        weight: weight.weight
+      }))
+    });
+  }
+
+  if (domain === "strategy_lab") {
+    const strategyResult = get(strategyLabResult);
+    const composition = get(strategyLabComposition);
+    const compareResult = get(researchCompareResult);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      importedStrategy: strategyResult
+        ? {
+            name: strategyResult.name,
+            valueKind: strategyResult.value_kind,
+            returnPoints: strategyResult.returns_points.length,
+            retrievedAt: strategyResult.retrieved_at
+          }
+        : null,
+      composition: composition
+        ? {
+            name: composition.name,
+            returnPoints: composition.returns_points.length,
+            legContributions: composition.leg_contributions,
+            lenses: composition.lenses.map((lens) => lens.object_id),
+            overlays: composition.overlays.map((overlay) => overlay.object_id)
+          }
+        : null,
+      compareResult: compareResult
+        ? {
+            left: compareResult.left.label,
+            right: compareResult.right.label,
+            alignedObservationCount: compareResult.aligned_observation_count
           }
         : null
     });
@@ -2121,6 +2195,25 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
           strategy_composition: get(strategyLabComposition)
         }
       };
+    case "equity_research":
+      return {
+        current_tab: "equity_research",
+        workspace_mode: workspaceMode,
+        research_state: {
+          overview: get(researchOverview),
+          result: get(researchResult)
+        }
+      };
+    case "strategy_lab":
+      return {
+        current_tab: "strategy_lab",
+        workspace_mode: workspaceMode,
+        strategy_lab_state: {
+          imported_result: get(strategyLabResult),
+          composition: get(strategyLabComposition),
+          compare_result: get(researchCompareResult)
+        }
+      };
     case "macro":
       return {
         current_tab: "macro",
@@ -2249,6 +2342,12 @@ function validateSynthesisScopeDomain(
   if (domain === "research" && !get(researchResult)) {
     return "Run a Research analysis before including it in a synthesis card.";
   }
+  if (domain === "equity_research" && !get(researchOverview) && !get(researchResult)) {
+    return "Load Equity Research overview or run Scope Analysis before including it in a synthesis card.";
+  }
+  if (domain === "strategy_lab" && !get(strategyLabResult) && !get(strategyLabComposition) && !get(researchCompareResult)) {
+    return "Run a Strategy Lab import, composition, or comparison before including it in a synthesis card.";
+  }
   if (domain === "macro" && !get(macroSnapshot)) {
     return "Load the Macro workspace before including it in a synthesis card.";
   }
@@ -2297,6 +2396,12 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "research" && !get(researchResult)) {
     return "Run a research analysis before generating a research card.";
   }
+  if (domain === "equity_research" && !get(researchOverview) && !get(researchResult)) {
+    return "Load Equity Research overview or run Scope Analysis before generating a research card.";
+  }
+  if (domain === "strategy_lab" && !get(strategyLabResult) && !get(strategyLabComposition) && !get(researchCompareResult)) {
+    return "Run a Strategy Lab import, composition, or comparison before generating a research card.";
+  }
   if (domain === "commodities" && !get(commoditiesWorkspace)) {
     return "Load the Commodities workspace before generating a research card.";
   }
@@ -2321,6 +2426,8 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (
     domain === "portfolio" ||
     domain === "research" ||
+    domain === "equity_research" ||
+    domain === "strategy_lab" ||
     domain === "commodities" ||
     domain === "crypto" ||
     domain === "fundamentals" ||

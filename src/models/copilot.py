@@ -30,6 +30,7 @@ class CopilotRequestContext:
     commodities_state: dict[str, Any] | None = None
     portfolio_state: dict[str, Any] | None = None
     research_state: dict[str, Any] | None = None
+    strategy_lab_state: dict[str, Any] | None = None
     risk_state: dict[str, Any] | None = None
     iv_state: dict[str, Any] | None = None
 

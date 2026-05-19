@@ -53,7 +53,10 @@ class CopilotPortfolioStateModel(BaseModel):
 
 
 class CopilotResearchStateModel(BaseModel):
+    overview: dict[str, object] | None = None
     result: ResearchAnalyzeResponseModel | None = None
+    strategy_result: dict[str, object] | None = None
+    strategy_composition: dict[str, object] | None = None
 
 
 class CopilotRiskStateModel(BaseModel):
@@ -77,6 +80,7 @@ class CopilotRequestContextModel(BaseModel):
     commodities_state: dict[str, object] | None = None
     portfolio_state: CopilotPortfolioStateModel | None = None
     research_state: CopilotResearchStateModel | None = None
+    strategy_lab_state: dict[str, object] | None = None
     risk_state: CopilotRiskStateModel | None = None
     iv_state: CopilotIvStateModel | None = None
 
@@ -92,6 +96,7 @@ class CopilotRequestContextModel(BaseModel):
             commodities_state=self.commodities_state,
             portfolio_state=self.portfolio_state.model_dump(mode="python") if self.portfolio_state is not None else None,
             research_state=self.research_state.model_dump(mode="python") if self.research_state is not None else None,
+            strategy_lab_state=self.strategy_lab_state,
             risk_state=self.risk_state.model_dump(mode="python") if self.risk_state is not None else None,
             iv_state=self.iv_state.model_dump(mode="python") if self.iv_state is not None else None,
         )

@@ -1483,6 +1483,35 @@ describe("app store orchestration", () => {
     expect(body.context.research_state.strategy_composition?.name).toBe("Composite Strategy");
   });
 
+  it("builds distinct copilot contexts for equity research and strategy lab", async () => {
+    const snapshot = makeSnapshot();
+    researchResult.set(makeResearchResult("single_ticker", snapshot));
+    strategyLabResult.set(makeStrategyLabResult());
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(makeCopilotResult("equity_research", "resp_equity_1", "Equity Card")))
+      .mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_1", "Strategy Card")));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCopilotResearchCard("equity_research", "Assess the active equity scope.", {
+      workspaceMode: "research"
+    });
+    await loadCopilotResearchCard("strategy_lab", "Assess the active strategy setup.", {
+      workspaceMode: "research"
+    });
+
+    const equityBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    const strategyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}"));
+    expect(equityBody.domain).toBe("equity_research");
+    expect(equityBody.context.current_tab).toBe("equity_research");
+    expect(equityBody.context.research_state.result?.scope_type).toBe("single_ticker");
+    expect(strategyBody.domain).toBe("strategy_lab");
+    expect(strategyBody.context.current_tab).toBe("strategy_lab");
+    expect(strategyBody.context.strategy_lab_state.imported_result?.name).toBe("CSV Strategy");
+    expect(get(copilotCards).equity_research?.response_id).toBe("resp_equity_1");
+    expect(get(copilotCards).strategy_lab?.response_id).toBe("resp_strategy_1");
+  });
+
   it("adds a visible copilot error turn when generation fails before a response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("Failed to fetch")));
 
@@ -1605,9 +1634,13 @@ function emptyCopilotCards() {
   return {
     portfolio: null,
     research: null,
+    equity_research: null,
+    strategy_lab: null,
     macro: null,
+    commodities: null,
     prediction_markets: null,
     crypto: null,
+    fundamentals: null,
     risk: null,
     iv: null,
     synthesis: null
@@ -1618,9 +1651,13 @@ function emptyCopilotThreads() {
   return {
     portfolio: { domain: "portfolio" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     research: { domain: "research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    equity_research: { domain: "equity_research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    strategy_lab: { domain: "strategy_lab" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     macro: { domain: "macro" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    commodities: { domain: "commodities" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     prediction_markets: { domain: "prediction_markets" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     crypto: { domain: "crypto" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    fundamentals: { domain: "fundamentals" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     risk: { domain: "risk" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     iv: { domain: "iv" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     synthesis: { domain: "synthesis" as const, contextFingerprint: null, latestResponseId: null, entries: [] }
@@ -2061,9 +2098,13 @@ function makeCopilotResult(
   domain:
     | "portfolio"
     | "research"
+    | "equity_research"
+    | "strategy_lab"
     | "macro"
+    | "commodities"
     | "prediction_markets"
     | "crypto"
+    | "fundamentals"
     | "risk"
     | "iv"
     | "synthesis",
