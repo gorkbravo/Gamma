@@ -35,7 +35,8 @@ describe("navigation tab ordering", () => {
     expect(getDefaultTabOrder("portfolio")).toEqual(["portfolio", "risk", "iv"]);
     expect(getDefaultTabOrder("research")).toEqual([
       "sitrep",
-      "research",
+      "equity_research",
+      "strategy_lab",
       "macro",
       "prediction_markets",
       "crypto",
@@ -52,10 +53,11 @@ describe("navigation tab ordering", () => {
     expect(normalizeWorkspaceTabOrder("research", ["risk", "research", "iv", "macro", "prediction_markets"])).toEqual([
       "sitrep",
       "risk",
-      "research",
+      "equity_research",
       "iv",
       "macro",
       "prediction_markets",
+      "strategy_lab",
       "crypto",
       "fundamentals",
       "commodities",
@@ -67,9 +69,10 @@ describe("navigation tab ordering", () => {
   it("appends newly introduced tabs at the end when restoring older saved order", () => {
     expect(normalizeWorkspaceTabOrder("research", ["research", "risk", "macro"])).toEqual([
       "sitrep",
-      "research",
+      "equity_research",
       "risk",
       "macro",
+      "strategy_lab",
       "prediction_markets",
       "crypto",
       "fundamentals",
@@ -93,16 +96,23 @@ describe("navigation tab ordering", () => {
 
   it("maps Shift+N to registered mode order for mode-bearing tabs", () => {
     expect(getModeShortcutHintForIndex(0)).toBe("Shift+1");
-    expect(getTabModes("research").map((mode) => mode.id)).toEqual([
+    expect(getTabModes("equity_research").map((mode) => mode.id)).toEqual([
       "overview",
       "scope_analysis",
-      "strategy_lab",
-      "compare_scenario",
-      "saved_research",
+      "comparables",
+      "scenario_context",
+      "saved_equity_research",
     ]);
-    expect(getModeByShortcutIndex("research", 1)?.id).toBe("overview");
-    expect(getModeShortcutHint("research", "scope_analysis")).toBe("Shift+2");
-    expect(getModeShortcutHint("research", "saved_research")).toBe("Shift+5");
+    expect(getModeByShortcutIndex("equity_research", 1)?.id).toBe("overview");
+    expect(getModeShortcutHint("equity_research", "scope_analysis")).toBe("Shift+2");
+    expect(getModeShortcutHint("equity_research", "saved_equity_research")).toBe("Shift+5");
+    expect(getTabModes("strategy_lab").map((mode) => mode.id)).toEqual([
+      "composer",
+      "backtest_analyze",
+      "regime_stress",
+      "imports",
+      "saved_runs",
+    ]);
     expect(getTabModes("macro").map((mode) => mode.id)).toEqual([
       "snapshot",
       "cross_asset",
@@ -137,8 +147,12 @@ describe("navigation tab ordering", () => {
   it("resolves slash navigation paths to tabs and modes", () => {
     const orderState = normalizeWorkspaceTabOrderState(null);
 
-    expect(resolveNavigationPath("research", orderState, "/Research")?.tab.id).toBe("research");
+    expect(resolveNavigationPath("research", orderState, "/Research")?.tab.id).toBe("equity_research");
     expect(resolveNavigationPath("research", orderState, "/Research/Scope")?.mode?.id).toBe("scope_analysis");
+    expect(resolveNavigationPath("research", orderState, "/Research/Comparables")?.tab.id).toBe("equity_research");
+    expect(resolveNavigationPath("research", orderState, "/Research/Comparables")?.mode?.id).toBe("comparables");
+    expect(resolveNavigationPath("research", orderState, "/Research/Strategy")?.tab.id).toBe("strategy_lab");
+    expect(resolveNavigationPath("research", orderState, "/Strategy Lab/Imports")?.mode?.id).toBe("imports");
     expect(resolveNavigationPath("research", orderState, "/Rearch/Scope")?.mode?.id).toBe("scope_analysis");
     expect(resolveNavigationPath("research", orderState, "/macro/rates")?.mode?.id).toBe("rates_policy");
     expect(resolveNavigationPath("research", orderState, "/macro/trade")?.mode?.id).toBe("trade_partners");
@@ -152,17 +166,19 @@ describe("navigation tab ordering", () => {
     const snapshot = getModeRegistrySnapshot();
 
     expect(hasRegisteredModes("macro")).toBe(true);
-    expect(hasRegisteredModes("research")).toBe(true);
+    expect(hasRegisteredModes("equity_research")).toBe(true);
+    expect(hasRegisteredModes("strategy_lab")).toBe(true);
     expect(hasRegisteredModes("copilot")).toBe(false);
     expect(Object.keys(snapshot).sort()).toEqual([
       "commodities",
       "crypto",
+      "equity_research",
       "fundamentals",
       "iv",
       "macro",
       "maritime",
-      "research",
       "risk",
+      "strategy_lab",
     ]);
     expect(snapshot.commodities?.map((mode) => mode.id)).toEqual([
       "overview",
@@ -180,12 +196,19 @@ describe("navigation tab ordering", () => {
       "reverse_valuation",
       "reference",
     ]);
-    expect(snapshot.research?.map((mode) => mode.id)).toEqual([
+    expect(snapshot.equity_research?.map((mode) => mode.id)).toEqual([
       "overview",
       "scope_analysis",
-      "strategy_lab",
-      "compare_scenario",
-      "saved_research",
+      "comparables",
+      "scenario_context",
+      "saved_equity_research",
+    ]);
+    expect(snapshot.strategy_lab?.map((mode) => mode.id)).toEqual([
+      "composer",
+      "backtest_analyze",
+      "regime_stress",
+      "imports",
+      "saved_runs",
     ]);
     expect(snapshot.maritime?.map((mode) => mode.id)).toEqual([
       "live_map",
@@ -231,7 +254,8 @@ describe("workspace tab-order persistence", () => {
     expect(get(store).research).toEqual([
       "sitrep",
       "risk",
-      "research",
+      "equity_research",
+      "strategy_lab",
       "macro",
       "prediction_markets",
       "crypto",
@@ -247,7 +271,8 @@ describe("workspace tab-order persistence", () => {
     expect(get(reloadedStore).research).toEqual([
       "sitrep",
       "risk",
-      "research",
+      "equity_research",
+      "strategy_lab",
       "macro",
       "prediction_markets",
       "crypto",

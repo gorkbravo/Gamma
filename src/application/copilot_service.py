@@ -79,6 +79,8 @@ class CopilotService:
         self._context_builders = {
             "portfolio": self._build_portfolio_context,
             "research": self._build_research_context,
+            "equity_research": self._build_equity_research_context,
+            "strategy_lab": self._build_strategy_lab_context,
             "macro": self._build_macro_context,
             "commodities": self._build_commodities_context,
             "prediction_markets": self._build_prediction_market_context,
@@ -118,7 +120,7 @@ class CopilotService:
                 _CopilotToolDefinition(
                     name="get_research_scope_summary",
                     description="Return a read-only summary of the active Gamma research scope, weights, and benchmark context.",
-                    domains=("research",),
+                    domains=("research", "equity_research"),
                     parameters_schema={
                         "type": "object",
                         "properties": {},
@@ -130,7 +132,7 @@ class CopilotService:
                 _CopilotToolDefinition(
                     name="get_research_coverage_context",
                     description="Return a read-only research coverage and constituent summary for the active Gamma research result.",
-                    domains=("research",),
+                    domains=("research", "equity_research"),
                     parameters_schema={
                         "type": "object",
                         "properties": {},
@@ -797,6 +799,102 @@ class CopilotService:
             current_tab=request.context.current_tab or "research",
             summary_data=summary_data,
             tool_state={"result": result},
+            sources=sources,
+            warnings=warnings,
+        )
+
+    def _build_equity_research_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        state = request.context.research_state or {}
+        result = state.get("result")
+        overview = state.get("overview")
+        if not isinstance(result, dict) and not isinstance(overview, dict):
+            raise ValueError("Equity Research copilot requires an active overview or research result.")
+        summary_data: dict[str, Any] = {
+            "workspace_mode": request.context.workspace_mode or "research",
+        }
+        warnings: list[str] = []
+        sources: list[CopilotSourceRef] = []
+        tool_state: dict[str, Any] = {}
+        if isinstance(result, dict):
+            summary_data["research"] = summarize_research_result(result)
+            warnings.extend(dedupe_warnings(result.get("warnings", [])))
+            performance_points = result.get("performance_points", [])
+            sources.append(
+                CopilotSourceRef(
+                    source_id="research.result",
+                    label="Equity research analysis result",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.research.analyze",
+                    description="Active Equity Research analysis result returned by Gamma.",
+                    retrieved_at=performance_points[-1].get("timestamp") if performance_points else None,
+                )
+            )
+            tool_state["result"] = result
+        if isinstance(overview, dict):
+            summary_data["overview"] = {
+                "universe": overview.get("universe_label") or overview.get("universe_id"),
+                "benchmark": overview.get("benchmark_symbol"),
+                "nodes": len(overview.get("nodes", [])) if isinstance(overview.get("nodes"), list) else 0,
+                "warnings": overview.get("warnings", []),
+            }
+            warnings.extend(dedupe_warnings(overview.get("warnings", [])))
+            sources.append(
+                CopilotSourceRef(
+                    source_id="equity_research.overview",
+                    label="Equity Research overview",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.research.overview",
+                    description="Active Equity Research market-map overview.",
+                    retrieved_at=overview.get("retrieved_at"),
+                )
+            )
+        return CopilotContextBundle(
+            domain="equity_research",
+            current_tab=request.context.current_tab or "equity_research",
+            summary_data=summary_data,
+            tool_state=tool_state,
+            sources=sources,
+            warnings=dedupe_warnings(warnings),
+        )
+
+    def _build_strategy_lab_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        state = request.context.strategy_lab_state or {}
+        imported_result = state.get("imported_result")
+        composition = state.get("composition")
+        compare_result = state.get("compare_result")
+        if not any(isinstance(item, dict) for item in (imported_result, composition, compare_result)):
+            raise ValueError("Strategy Lab copilot requires an active import, composition, or comparison.")
+        summary_data = {
+            "workspace_mode": request.context.workspace_mode or "research",
+            "imported_result": imported_result if isinstance(imported_result, dict) else None,
+            "composition": composition if isinstance(composition, dict) else None,
+            "compare_result": compare_result if isinstance(compare_result, dict) else None,
+        }
+        warnings = dedupe_warnings(
+            (imported_result or {}).get("warnings", []) if isinstance(imported_result, dict) else [],
+            (composition or {}).get("warnings", []) if isinstance(composition, dict) else [],
+            (compare_result or {}).get("warnings", []) if isinstance(compare_result, dict) else [],
+        )
+        sources = [
+            CopilotSourceRef(
+                source_id="strategy_lab.context",
+                label="Strategy Lab context",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.strategy_lab",
+                description="Active Strategy Lab import, composition, or comparison context.",
+                retrieved_at=(composition or imported_result or {}).get("retrieved_at")
+                if isinstance(composition or imported_result, dict)
+                else None,
+            )
+        ]
+        return CopilotContextBundle(
+            domain="strategy_lab",
+            current_tab=request.context.current_tab or "strategy_lab",
+            summary_data=summary_data,
+            tool_state=summary_data,
             sources=sources,
             warnings=warnings,
         )
@@ -2582,6 +2680,11 @@ class CopilotService:
                 "get_research_scope_summary",
                 "get_research_coverage_context",
             ),
+            "equity_research": (
+                "get_research_scope_summary",
+                "get_research_coverage_context",
+            ),
+            "strategy_lab": (),
             "macro": ("get_macro_workspace_drilldown",),
             "commodities": ("get_commodities_workspace_summary",),
             "prediction_markets": (

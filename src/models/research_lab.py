@@ -15,6 +15,32 @@ from src.analytics.research_returns import (
 
 
 ReturnValueKind = Literal["return", "level"]
+ResolverCapability = Literal["return_leg", "benchmark", "lens", "overlay", "reference_only"]
+
+
+@dataclass(frozen=True)
+class ResearchObjectReturnPoint:
+    timestamp: str
+    value: float
+
+
+@dataclass(frozen=True)
+class GammaResearchObject:
+    object_id: str
+    object_type: str
+    display_name: str
+    source_tab: str
+    source_mode: str | None = None
+    resolver_capabilities: list[ResolverCapability] = field(default_factory=list)
+    symbols: list[str] = field(default_factory=list)
+    constituents: list[dict[str, Any]] = field(default_factory=list)
+    weights: list[dict[str, Any]] = field(default_factory=list)
+    available_start: str | None = None
+    available_end: str | None = None
+    provider_summary: str | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    return_points: list[ResearchObjectReturnPoint] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -50,6 +76,29 @@ class StrategyLabAnalysisResult:
     origin: str
     transformation_note: str | None = None
     freshness_label: str = "derived"
+
+
+@dataclass(frozen=True)
+class StrategyLabCompositionLeg:
+    object: GammaResearchObject
+    weight: float
+
+
+@dataclass(frozen=True)
+class StrategyLabCompositionRequest:
+    name: str
+    legs: list[StrategyLabCompositionLeg] = field(default_factory=list)
+    lenses: list[GammaResearchObject] = field(default_factory=list)
+    overlays: list[GammaResearchObject] = field(default_factory=list)
+    benchmark_object: GammaResearchObject | None = None
+    min_observations: int = 5
+
+
+@dataclass(frozen=True)
+class StrategyLabCompositionResult(StrategyLabAnalysisResult):
+    leg_contributions: dict[str, float] = field(default_factory=dict)
+    lenses: list[GammaResearchObject] = field(default_factory=list)
+    overlays: list[GammaResearchObject] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

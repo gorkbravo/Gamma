@@ -46,7 +46,7 @@ export function resolveSitrepMarketHandoff(
     const symbol = (row.symbol ?? row.label).trim();
     return symbol
       ? {
-          targetTab: "research",
+          targetTab: "equity_research",
           targetMode: "scope_analysis",
           symbol,
           label: row.selectionLabel ?? row.label,
@@ -55,7 +55,7 @@ export function resolveSitrepMarketHandoff(
   }
 
   if (profile === "indices") {
-    return { targetTab: "research", targetMode: "overview" };
+    return { targetTab: "equity_research", targetMode: "overview" };
   }
 
   if (profile === "fx") {

@@ -766,7 +766,7 @@
         detail: item.group ?? "Market overview",
         meta: overviewData?.freshness_label ?? "research overview",
         handoff: {
-          targetTab: "research",
+          targetTab: "equity_research",
           targetMode: "overview"
         }
       }));

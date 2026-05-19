@@ -12,13 +12,18 @@ from src.application.instrument_identity import find_identity_by_symbol, snapsho
 from src.application.research_service import ResearchAnalysisResult
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.research_lab import (
+    GammaResearchObject,
     ImportedReturnStreamRequest,
     ResearchComparisonLeg,
     ResearchComparisonRequest,
     ResearchComparisonResult,
+    ResearchObjectReturnPoint,
     SavedResearchCreateRequest,
     SavedResearchItem,
     StrategyLabAnalysisResult,
+    StrategyLabCompositionLeg,
+    StrategyLabCompositionRequest,
+    StrategyLabCompositionResult,
 )
 from src.models.research_overview import (
     ResearchOverviewCoverage,
@@ -89,6 +94,104 @@ class StrategyLabAnalyzeRequestModel(BaseModel):
             name=self.name,
             benchmark_column=self.benchmark_column,
             benchmark_value_kind=self.benchmark_value_kind,
+            min_observations=max(int(self.min_observations), 2),
+        )
+
+
+class ResearchObjectReturnPointModel(BaseModel):
+    timestamp: datetime
+    value: float
+
+    def to_domain(self) -> ResearchObjectReturnPoint:
+        return ResearchObjectReturnPoint(timestamp=self.timestamp.isoformat(), value=float(self.value))
+
+    @classmethod
+    def from_domain(cls, row: ResearchObjectReturnPoint) -> "ResearchObjectReturnPointModel":
+        return cls(timestamp=row.timestamp, value=float(row.value))
+
+
+class GammaResearchObjectModel(BaseModel):
+    object_id: str
+    object_type: str
+    display_name: str
+    source_tab: str
+    source_mode: str | None = None
+    resolver_capabilities: list[Literal["return_leg", "benchmark", "lens", "overlay", "reference_only"]] = Field(
+        default_factory=list
+    )
+    symbols: list[str] = Field(default_factory=list)
+    constituents: list[dict[str, Any]] = Field(default_factory=list)
+    weights: list[dict[str, Any]] = Field(default_factory=list)
+    available_start: str | None = None
+    available_end: str | None = None
+    provider_summary: str | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    return_points: list[ResearchObjectReturnPointModel] = Field(default_factory=list)
+
+    def to_domain(self) -> GammaResearchObject:
+        return GammaResearchObject(
+            object_id=self.object_id,
+            object_type=self.object_type,
+            display_name=self.display_name,
+            source_tab=self.source_tab,
+            source_mode=self.source_mode,
+            resolver_capabilities=list(self.resolver_capabilities),
+            symbols=list(self.symbols),
+            constituents=[dict(row) for row in self.constituents],
+            weights=[dict(row) for row in self.weights],
+            available_start=self.available_start,
+            available_end=self.available_end,
+            provider_summary=self.provider_summary,
+            provenance=dict(self.provenance),
+            warnings=list(self.warnings),
+            return_points=[point.to_domain() for point in self.return_points],
+        )
+
+    @classmethod
+    def from_domain(cls, row: GammaResearchObject) -> "GammaResearchObjectModel":
+        return cls(
+            object_id=row.object_id,
+            object_type=row.object_type,
+            display_name=row.display_name,
+            source_tab=row.source_tab,
+            source_mode=row.source_mode,
+            resolver_capabilities=list(row.resolver_capabilities),
+            symbols=list(row.symbols),
+            constituents=[dict(item) for item in row.constituents],
+            weights=[dict(item) for item in row.weights],
+            available_start=row.available_start,
+            available_end=row.available_end,
+            provider_summary=row.provider_summary,
+            provenance=dict(row.provenance),
+            warnings=list(row.warnings),
+            return_points=[ResearchObjectReturnPointModel.from_domain(point) for point in row.return_points],
+        )
+
+
+class StrategyLabCompositionLegModel(BaseModel):
+    object: GammaResearchObjectModel
+    weight: float
+
+    def to_domain(self) -> StrategyLabCompositionLeg:
+        return StrategyLabCompositionLeg(object=self.object.to_domain(), weight=float(self.weight))
+
+
+class StrategyLabCompositionRequestModel(BaseModel):
+    name: str = "Gamma Research Composition"
+    legs: list[StrategyLabCompositionLegModel] = Field(default_factory=list)
+    lenses: list[GammaResearchObjectModel] = Field(default_factory=list)
+    overlays: list[GammaResearchObjectModel] = Field(default_factory=list)
+    benchmark_object: GammaResearchObjectModel | None = None
+    min_observations: int = 5
+
+    def to_domain(self) -> StrategyLabCompositionRequest:
+        return StrategyLabCompositionRequest(
+            name=self.name,
+            legs=[leg.to_domain() for leg in self.legs],
+            lenses=[item.to_domain() for item in self.lenses],
+            overlays=[item.to_domain() for item in self.overlays],
+            benchmark_object=self.benchmark_object.to_domain() if self.benchmark_object is not None else None,
             min_observations=max(int(self.min_observations), 2),
         )
 
@@ -180,6 +283,22 @@ class StrategyLabAnalyzeResponseModel(BaseModel):
             origin=row.origin,
             transformation_note=row.transformation_note,
             freshness_label=row.freshness_label,
+        )
+
+
+class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
+    leg_contributions: dict[str, float] = Field(default_factory=dict)
+    lenses: list[GammaResearchObjectModel] = Field(default_factory=list)
+    overlays: list[GammaResearchObjectModel] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: StrategyLabCompositionResult) -> "StrategyLabCompositionResponseModel":
+        base = StrategyLabAnalyzeResponseModel.from_domain(row)
+        return cls(
+            **base.model_dump(),
+            leg_contributions=dict(row.leg_contributions),
+            lenses=[GammaResearchObjectModel.from_domain(item) for item in row.lenses],
+            overlays=[GammaResearchObjectModel.from_domain(item) for item in row.overlays],
         )
 
 

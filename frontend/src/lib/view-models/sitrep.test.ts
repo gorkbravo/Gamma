@@ -2,17 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   resolveSitrepMarketHandoff,
   resolveSitrepTapeHandoff,
+  type SitrepHandoffRequest,
   type SitrepMarketHandoffProfile,
   type SitrepMarketHandoffRow,
   type SitrepTapeHandoffRow,
 } from "./sitrep";
 
 describe("sitrep handoff view model", () => {
-  it.each<[SitrepMarketHandoffProfile, SitrepMarketHandoffRow, unknown]>([
+  it.each<[SitrepMarketHandoffProfile, SitrepMarketHandoffRow, Partial<SitrepHandoffRequest>]>([
     [
       "indices",
       { id: "idx-spx", label: "S&P 500", group: "US", last: "5000", change: "+1", secondary: "SPX" },
-      { targetTab: "research", targetMode: "overview" },
+      { targetTab: "equity_research", targetMode: "overview" },
     ],
     [
       "fx",
@@ -51,7 +52,7 @@ describe("sitrep handoff view model", () => {
         secondary: "24.0%",
       })
     ).toMatchObject({
-      targetTab: "research",
+      targetTab: "equity_research",
       targetMode: "scope_analysis",
       symbol: "AAPL",
       label: "Apple Inc.",

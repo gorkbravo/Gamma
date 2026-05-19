@@ -49,7 +49,7 @@ _Updated: 2026-05-08_
 Gamma is now a broad read-only research application with two primary workspaces:
 
 - `Portfolio`: Portfolio, Risk, and Options.
-- `Research`: SITREP, Research, Macro, Prediction Markets, Crypto, Fundamentals, Commodities, Sealanes, Copilot, plus cross-listed Risk and Options.
+- `Research`: SITREP, Equity Research, Strategy Lab, Macro, Prediction Markets, Crypto, Fundamentals, Commodities, Sealanes, Copilot, plus cross-listed Risk and Options.
 
 The implemented app state is materially ahead of the original V2 starting point:
 
@@ -57,7 +57,7 @@ The implemented app state is materially ahead of the original V2 starting point:
 - `Risk` is a real read-only analytics surface for Portfolio and Research contexts, including contribution, concentration, drawdown/cumulative/rolling analytics, beta/correlation style views, Monte Carlo-style terminal return modeling, and coverage warnings.
 - `Options` now has a registered multi-mode IV workspace with Surface, Skew & Term, Realized vs Implied, Implied Distribution, and Source views. It has live/mock IV surface collection, session start/stop/status routes, market-data mode controls, option-chain quality metadata, derived skew/term/realized/distribution analytics, and Copilot tools.
 - `SITREP` is the locked Research home and cross-domain triage surface. It reuses Research, Macro, Commodities, Prediction Markets, and News payloads, plus media/provider/status context, rather than acting as a standalone provider.
-- `Research` is a full multi-mode hub with Overview, Scope Analysis, Strategy Lab, Compare / Scenario, and Saved Research. It supports provider-neutral overview payloads, imported return-stream analytics, saved normalized research objects, and historical comparison without arbitrary code execution.
+- `Equity Research` owns equity market overview, scope analysis, comparables, scenario context, and saved equity research. `Strategy Lab` owns imported return streams, weighted Gamma object compositions, backtest/analyze views, regime/stress lenses, and saved runs.
 - `Macro` is now a six-mode workspace with Snapshot, Cross-Asset, Rates & Policy, Events / Regimes, Trade Partners, and Country Compare. It has FRED, Treasury, DB.nomics, Census trade-partner, IBKR FX proxy, US event, prediction-market linkage, coherence/lead-lag, policy path, event-study, bilateral trade-context, and country-comparison logic.
 - `Prediction Markets` remains first-pass complete with Polymarket/Kalshi adapters, screener/detail/history/wallet/related/calibration routes, venue status, filtering, canonicalization, freshness, and research ranking.
 - `Crypto` is a substantial first-pass workspace with CoinGecko and GeckoTerminal adapters, token overview/deep-dive/flows-liquidity modes, narratives, synthetic portfolios, DEX liquidity, flow proxies, comparison analytics, and Copilot grounding.
@@ -80,7 +80,8 @@ This table tracks the visible app tabs as of 2026-05-08. Percentages are pragmat
 | Portfolio / Research | `Risk` | ~76% | Improve cross-tab handoffs from Research/Portfolio, validate optimization/scenario assumptions more deeply, add richer stress/regime slices, and expand interactive test coverage. |
 | Portfolio / Research | `Options` | ~58% | Add historical IV/skew persistence, better expiry/strike filtering, more durable underlying history, richer source/Greeks inspection, and deeper Research/Fundamentals/Copilot handoffs. |
 | Research | `SITREP` | ~62% | Harden the aggregator into a backend-owned SITREP contract over time, improve media/provider resilience, deepen saved triage/follow-up behavior, and expand handoffs beyond the current first-pass row targets. |
-| Research | `Research` | ~76% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, regime slicing, and explicit provider selection. |
+| Research | `Equity Research` | ~78% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, comparables depth, scenario context, and explicit provider selection. |
+| Research | `Strategy Lab` | ~70% | Deepen Gamma object composition, backtest/analyze views, regime/stress lenses, saved-run workflows, and read-only sandbox architecture decisions without arbitrary in-app execution. |
 | Research | `Macro` | ~86% | Deepen Trade Partners and Country Compare beyond first-pass US/curated coverage, expand EU/global official data, improve source citations, and wire real handoffs to Commodities, Sealanes, Prediction Markets, and Copilot memos. |
 | Research | `Prediction Markets` | First-pass complete / targeted V2 | Keep enhancements opportunistic: better event taxonomy, commodity/maritime links, saved market clusters, calibration depth, and Copilot summaries where other tabs need them. |
 | Research | `Crypto` | ~74% | Add real wallet/transfer adapters, persistent narrative baskets, deeper pool monitoring, transaction-level DEX context, derivatives overlays, and saved crypto research sessions. |

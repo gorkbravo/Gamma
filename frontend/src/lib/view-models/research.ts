@@ -1,6 +1,8 @@
 import type {
+  GammaResearchObject,
   ResearchConstituent,
   ResearchCoverage,
+  ResearchObjectReturnPoint,
   ResearchOverviewMetricId,
   ResearchOverviewNode,
   ResearchOverviewResponse,
@@ -11,6 +13,8 @@ import type {
   ResearchStructure,
   ResearchWeightPoint
 } from "../api/types";
+
+export type { EquityResearchMode, StrategyLabMode } from "../api/types";
 
 export type ResearchMode = "overview" | "scope_analysis" | "strategy_lab" | "compare_scenario" | "saved_research";
 
@@ -30,6 +34,13 @@ export interface ResearchCompareOption {
   label: string;
   objectType: string;
   source: "scope" | "strategy" | "saved";
+}
+
+export interface StrategyComposerObjectOption {
+  id: string;
+  label: string;
+  object: GammaResearchObject;
+  defaultWeight: number;
 }
 
 export interface SavedScopeDraft {
@@ -210,6 +221,123 @@ export function savedResearchHasReturnStream(item: SavedResearchItem) {
   );
 }
 
+export function buildStrategyComposerObjects(
+  scopeResult: ResearchResult | null,
+  strategyResult: StrategyLabResult | null,
+  savedItems: SavedResearchItem[]
+): StrategyComposerObjectOption[] {
+  const options: StrategyComposerObjectOption[] = [];
+  const scopeObject = buildResearchObjectFromScopeResult(scopeResult);
+  if (scopeObject) {
+    options.push({ id: "latest_scope", label: scopeObject.display_name, object: scopeObject, defaultWeight: 0.5 });
+  }
+  const strategyObject = buildResearchObjectFromStrategyResult(strategyResult);
+  if (strategyObject) {
+    options.push({ id: "latest_strategy", label: strategyObject.display_name, object: strategyObject, defaultWeight: 0.5 });
+  }
+  for (const item of savedItems) {
+    const restored = hydrateStrategyLabResultFromSaved(item);
+    const object = buildResearchObjectFromStrategyResult(restored);
+    if (object) {
+      options.push({
+        id: `saved:${item.id}`,
+        label: `Saved: ${item.title}`,
+        object: { ...object, object_id: `saved:${item.id}` },
+        defaultWeight: 0.25
+      });
+    }
+  }
+  return options;
+}
+
+export function classifySavedResearchSurface(item: SavedResearchItem): "equity" | "strategy" | "unknown" {
+  if (["scope_analysis", "equity_scope", "equity_screen"].includes(item.object_type)) {
+    return "equity";
+  }
+  if (
+    ["strategy_lab", "strategy_return_stream", "strategy_composition"].includes(item.object_type) ||
+    savedResearchHasReturnStream(item)
+  ) {
+    return "strategy";
+  }
+  return "unknown";
+}
+
+export function buildResearchObjectFromScopeResult(result: ResearchResult | null): GammaResearchObject | null {
+  const returnPoints = normalizeResearchObjectReturnPoints(result?.performance_points);
+  if (!result || !returnPoints.length) {
+    return null;
+  }
+
+  const symbols = (result.weights ?? []).map((weight) => weight.symbol).filter(Boolean);
+  const start = returnPoints[0]?.timestamp ?? null;
+  const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  const displayName =
+    result.scope_type === "single_ticker"
+      ? result.primary_symbol ?? symbols[0] ?? "Equity Scope"
+      : "Synthetic Basket";
+  const signature = buildDeterministicSignature({
+    weights: normalizeWeightSignature(result.weights),
+    return_points: normalizeReturnPointSignature(returnPoints)
+  });
+
+  return {
+    object_id: ["equity_scope", result.scope_type, symbols.join(","), start, end, signature].filter(Boolean).join(":"),
+    object_type: "equity_scope",
+    display_name: displayName,
+    source_tab: "equity_research",
+    source_mode: "scope_analysis",
+    resolver_capabilities: ["return_leg", "benchmark"],
+    symbols,
+    constituents: copyRecords(result.constituents),
+    weights: copyRecords(result.weights),
+    available_start: start,
+    available_end: end,
+    provider_summary: result.history_source_label ?? result.source_provider ?? null,
+    provenance: {
+      source_provider: result.source_provider ?? null,
+      freshness_label: result.freshness_label ?? null
+    },
+    warnings: result.warnings ?? [],
+    return_points: returnPoints
+  };
+}
+
+export function buildResearchObjectFromStrategyResult(result: StrategyLabResult | null): GammaResearchObject | null {
+  const returnPoints = normalizeResearchObjectReturnPoints(result?.returns_points);
+  if (!result || !returnPoints.length) {
+    return null;
+  }
+
+  const start = returnPoints[0]?.timestamp ?? null;
+  const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  const signature = buildDeterministicSignature({
+    return_points: normalizeReturnPointSignature(returnPoints)
+  });
+  return {
+    object_id: ["strategy_return_stream", result.name, start, end, signature].filter(Boolean).join(":"),
+    object_type: "strategy_return_stream",
+    display_name: result.name || "Strategy Return Stream",
+    source_tab: "strategy_lab",
+    source_mode: "imports",
+    resolver_capabilities: ["return_leg", "benchmark"],
+    symbols: [],
+    constituents: [],
+    weights: [],
+    available_start: start,
+    available_end: end,
+    provider_summary: result.source_provider ?? null,
+    provenance: {
+      source_provider: result.source_provider,
+      retrieved_at: result.retrieved_at,
+      origin: result.origin,
+      freshness_label: result.freshness_label
+    },
+    warnings: result.warnings ?? [],
+    return_points: returnPoints
+  };
+}
+
 export function savedResearchScopeDraft(item: SavedResearchItem): SavedScopeDraft | null {
   if (item.object_type !== "scope_analysis") {
     return null;
@@ -293,6 +421,72 @@ export function savedResearchCanReloadStrategy(item: SavedResearchItem) {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function copyRecords<T extends object>(items: T[] | null | undefined): Record<string, unknown>[] {
+  return (items ?? []).map((item) => ({ ...item }));
+}
+
+function normalizeResearchObjectReturnPoints(
+  points: ResearchObjectReturnPoint[] | null | undefined
+): ResearchObjectReturnPoint[] {
+  return (points ?? []).map((point) => ({
+    timestamp: point.timestamp,
+    value: point.value
+  }));
+}
+
+function normalizeWeightSignature(weights: ResearchWeightPoint[] | null | undefined) {
+  const normalizedWeights = (weights ?? [])
+    .map((weight) => ({
+      symbol: weight.symbol.trim().toUpperCase(),
+      weight: normalizeSignatureNumber(weight.weight)
+    }))
+    .filter((weight) => weight.symbol && weight.weight !== null);
+  const total = normalizedWeights.reduce((sum, weight) => sum + (weight.weight ?? 0), 0);
+  return normalizedWeights
+    .map((weight) => ({
+      symbol: weight.symbol,
+      weight: total > 0 && weight.weight !== null ? normalizeSignatureNumber(weight.weight / total) : weight.weight
+    }))
+    .sort((left, right) => left.symbol.localeCompare(right.symbol));
+}
+
+function normalizeReturnPointSignature(points: ResearchObjectReturnPoint[] | null | undefined) {
+  return (points ?? []).map((point) => ({
+    timestamp: point.timestamp,
+    value: normalizeSignatureNumber(point.value)
+  }));
+}
+
+function normalizeSignatureNumber(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = Number(value.toPrecision(12));
+  return Object.is(normalized, -0) ? 0 : normalized;
+}
+
+function buildDeterministicSignature(value: unknown) {
+  let hash = 2166136261;
+  for (const char of stableCompactJson(value)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function stableCompactJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableCompactJson).join(",")}]`;
+  }
+  if (isPlainRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableCompactJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function firstWeightSymbol(payload: Record<string, unknown>) {

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ResearchResult } from "../api/types";
 import {
+  buildResearchObjectFromScopeResult,
+  buildResearchObjectFromStrategyResult,
+  buildStrategyComposerObjects,
   buildResearchCompareOptions,
   buildResearchTreemapLayout,
   buildResearchTreemapSections,
   buildPreviewRows,
+  classifySavedResearchSurface,
   deriveConstituentsFromResearchResult,
   deriveCoverageFromResearchResult,
   deriveStructureFromWeights,
@@ -149,6 +153,123 @@ describe("research view model helpers", () => {
       "strategy:latest",
       "saved:saved-1"
     ]);
+  });
+
+  it("classifies saved research surfaces by object type and return streams", () => {
+    expect(classifySavedResearchSurface({ object_type: "scope_analysis", payload: {} } as any)).toBe("equity");
+    expect(classifySavedResearchSurface({ object_type: "equity_scope", payload: {} } as any)).toBe("equity");
+    expect(classifySavedResearchSurface({ object_type: "equity_screen", payload: {} } as any)).toBe("equity");
+    expect(classifySavedResearchSurface({ object_type: "strategy_composition", payload: {} } as any)).toBe("strategy");
+    expect(
+      classifySavedResearchSurface({
+        object_type: "custom_upload",
+        payload: { returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }] }
+      } as any)
+    ).toBe("strategy");
+    expect(classifySavedResearchSurface({ object_type: "memo", payload: {} } as any)).toBe("unknown");
+  });
+
+  it("builds a strategy lab research object from scope performance", () => {
+    const result = makeResearchResult("synthetic_portfolio", [
+      { symbol: "XLV", weight: 0.35 },
+      { symbol: "XLP", weight: 0.35 },
+      { symbol: "XLU", weight: 0.3 }
+    ]);
+    result.performance_points = [
+      { timestamp: "2026-03-01T00:00:00Z", value: 0.01 },
+      { timestamp: "2026-03-02T00:00:00Z", value: 0.02 }
+    ];
+    result.source_provider = "gamma_research";
+    result.history_source_label = "Local daily history";
+    result.freshness_label = "cached";
+
+    const object = buildResearchObjectFromScopeResult(result);
+
+    expect(object?.object_type).toBe("equity_scope");
+    expect(object?.display_name).toBe("Synthetic Basket");
+    expect(object?.source_tab).toBe("equity_research");
+    expect(object?.source_mode).toBe("scope_analysis");
+    expect(object?.resolver_capabilities).toEqual(["return_leg", "benchmark"]);
+    expect(object?.symbols).toEqual(["XLV", "XLP", "XLU"]);
+    expect(object?.constituents).toEqual(result.constituents);
+    expect(object?.weights).toEqual(result.weights);
+    expect(object?.available_start).toBe("2026-03-01T00:00:00Z");
+    expect(object?.available_end).toBe("2026-03-02T00:00:00Z");
+    expect(object?.provider_summary).toBe("Local daily history");
+    expect(object?.provenance).toMatchObject({ source_provider: "gamma_research", freshness_label: "cached" });
+    expect(object?.return_points).toEqual(result.performance_points);
+    expect(buildResearchObjectFromScopeResult(null)).toBeNull();
+    expect(buildResearchObjectFromScopeResult(makeResearchResult("single_ticker", [{ symbol: "AAPL", weight: 1 }]))).toBeNull();
+  });
+
+  it("builds strategy composer objects from latest scope, imported strategy, and saved return streams", () => {
+    const scope = makeResearchResult("single_ticker", [{ symbol: "AAPL", weight: 1 }]);
+    scope.performance_points = [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }];
+    const strategy = makeStrategyLabResult();
+    const options = buildStrategyComposerObjects(scope, strategy as any, [
+      {
+        id: "saved-1",
+        object_type: "strategy_lab",
+        title: "Saved Strategy",
+        payload: strategy as unknown as Record<string, unknown>,
+        warnings: []
+      } as any
+    ]);
+
+    expect(options.map((option) => option.object.object_type)).toContain("equity_scope");
+    expect(options.map((option) => option.object.object_type)).toContain("strategy_return_stream");
+    expect(options.map((option) => option.id)).toContain("saved:saved-1");
+  });
+
+  it("includes normalized weights in synthetic scope research object ids", () => {
+    const first = makeResearchResult("synthetic_portfolio", [
+      { symbol: "XLV", weight: 0.6 },
+      { symbol: "XLP", weight: 0.4 }
+    ]);
+    const second = makeResearchResult("synthetic_portfolio", [
+      { symbol: "XLV", weight: 0.4 },
+      { symbol: "XLP", weight: 0.6 }
+    ]);
+    first.performance_points = [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }];
+    second.performance_points = [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }];
+
+    expect(buildResearchObjectFromScopeResult(first)?.object_id).not.toBe(
+      buildResearchObjectFromScopeResult(second)?.object_id
+    );
+  });
+
+  it("builds a strategy lab research object from strategy returns", () => {
+    const result = makeStrategyLabResult();
+
+    const object = buildResearchObjectFromStrategyResult(result);
+
+    expect(object?.object_type).toBe("strategy_return_stream");
+    expect(object?.display_name).toBe("CSV Strategy");
+    expect(object?.source_tab).toBe("strategy_lab");
+    expect(object?.source_mode).toBe("imports");
+    expect(object?.resolver_capabilities).toEqual(["return_leg", "benchmark"]);
+    expect(object?.available_start).toBe("2026-03-01T00:00:00Z");
+    expect(object?.available_end).toBe("2026-03-01T00:00:00Z");
+    expect(object?.provenance).toMatchObject({
+      source_provider: "uploaded_csv",
+      retrieved_at: "2026-03-01T00:00:00Z",
+      origin: "research_service.strategy_lab.analyze",
+      freshness_label: "derived"
+    });
+    expect(object?.return_points).toEqual(result.returns_points);
+    expect(buildResearchObjectFromStrategyResult({ ...result, returns_points: [] })).toBeNull();
+  });
+
+  it("includes return stream values in strategy research object ids", () => {
+    const first = makeStrategyLabResult();
+    const second = {
+      ...makeStrategyLabResult(),
+      returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.02 }]
+    };
+
+    expect(buildResearchObjectFromStrategyResult(first)?.object_id).not.toBe(
+      buildResearchObjectFromStrategyResult(second)?.object_id
+    );
   });
 
   it("hydrates safe saved scope and strategy objects for reload", () => {
@@ -337,5 +458,46 @@ function makeOverviewNode(
     transformation_note: null,
     freshness_label: "mocked",
     warnings: []
+  };
+}
+
+function makeStrategyLabResult() {
+  return {
+    name: "CSV Strategy",
+    value_kind: "return",
+    benchmark_column: null,
+    benchmark_value_kind: "return",
+    metrics: {
+      total_return: 0.01,
+      annual_return: 0.1,
+      annual_volatility: 0.2,
+      sharpe_ratio: 0.5,
+      sortino_ratio: 0.6,
+      max_drawdown: -0.02,
+      max_drawdown_duration: 2,
+      observation_count: 12,
+      frequency: "daily",
+      periods_per_year: 252,
+      start_date: "2026-03-01T00:00:00Z",
+      end_date: "2026-03-12T00:00:00Z",
+      benchmark_beta: 1,
+      benchmark_correlation: 0.8,
+      upside_capture: 1.1,
+      downside_capture: 0.9
+    },
+    returns_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }],
+    equity_curve_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 1.01 }],
+    drawdown_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0 }],
+    benchmark_points: [],
+    benchmark_equity_curve_points: [],
+    rolling_points: [],
+    monthly_returns: [{ period: "2026-03", value: 0.01 }],
+    annual_returns: [{ period: "2026", value: 0.01 }],
+    warnings: [],
+    source_provider: "uploaded_csv",
+    retrieved_at: "2026-03-01T00:00:00Z",
+    origin: "research_service.strategy_lab.analyze",
+    transformation_note: "CSV rows parsed as returns.",
+    freshness_label: "derived"
   };
 }

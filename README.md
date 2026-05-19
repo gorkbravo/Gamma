@@ -55,7 +55,7 @@ Gamma opens on a landing screen that shows connection state and lets the user en
 Within each workspace, tabs can be reordered in the sidebar. The default layout is:
 
 - `Portfolio View`: `PORTFOLIO`, `RISK`, `OPTIONS`
-- `Research View`: `SITREP`, `RESEARCH`, `MACRO`, `PREDICTION MARKETS`, `CRYPTO`, `FUNDAMENTALS`, `COMMODITIES`, `SEALANES`, `RISK`, `OPTIONS`
+- `Research View`: `SITREP`, `EQUITY RESEARCH`, `STRATEGY LAB`, `MACRO`, `PREDICTION MARKETS`, `CRYPTO`, `FUNDAMENTALS`, `COMMODITIES`, `SEALANES`, `RISK`, `OPTIONS`
 
 The current desktop navigation model is part of the product, not an afterthought:
 
@@ -265,9 +265,9 @@ Important caveats:
 
 ### Research Workspace
 
-#### Research tab
+#### Equity Research tab
 
-This tab builds and analyzes either:
+This tab owns equity market overview and scope analysis. The scope builder analyzes either:
 
 - a `single_ticker` scope
 - a `synthetic_portfolio` scope
@@ -282,6 +282,7 @@ Main outputs:
 - constituent-level return, volatility, and drawdown
 - scope preview before execution
 - handoff actions into `Risk` and `IV`
+- handoff actions into `Strategy Lab` for read-only object composition
 
 Under the hood:
 
@@ -572,13 +573,13 @@ For the detailed V2 plan, see [`roadmap_v2.md`](./roadmap_v2.md). Roadmap V2 is 
 The main V2 buckets are:
 
 - cross-cutting platform work: provider adapters, read-only market-data boundaries, mode-level keybindings, shared cache/provenance behavior, and stronger cross-tab handoffs
-- existing-tab V2 passes: Research, Macro, IV, Crypto, Fundamentals, and Copilot hardening / extension work
+- existing-tab V2 passes: Equity Research, Strategy Lab, Macro, IV, Crypto, Fundamentals, and Copilot hardening / extension work
 - new research surfaces: a deep Commodities workspace and a Maritime Intelligence workspace if the data-provider path is viable
 - beta readiness: installer, tutorial, first-run setup, mock/demo flows, diagnostics, and friend/family testing polish
 
 The likely V2 feature direction is:
 
-- `Research`: evolve into a multi-mode workspace with current scope analysis, market overview / tree-map style views, imported strategy-return analysis, and comparison workflows
+- `Equity Research` and `Strategy Lab`: deepen market overview / tree-map views, scope analysis, comparables, saved equity research, imported return-stream analytics, weighted Gamma object compositions, and comparison workflows
 - `Macro`: finish EU/global depth, official-event breadth, policy-path interpretation, and coherence / lead-lag refinement
 - `IV`: deepen into a volatility lab with 3D surfaces, skew / term views, Greeks context, realized-vs-implied overlays, and RND-style implied-distribution work
 - `Crypto`: add real wallet analytics, stronger pool / transaction monitoring, richer peer and basket comparisons, and later derivatives overlays

@@ -13,7 +13,8 @@
   import CryptoView from "./views/CryptoView.svelte";
   import FundamentalsView from "./views/FundamentalsView.svelte";
   import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
-  import ResearchView from "./views/ResearchView.svelte";
+  import EquityResearchView from "./views/EquityResearchView.svelte";
+  import StrategyLabView from "./views/StrategyLabView.svelte";
   import RiskView from "./views/RiskView.svelte";
   import SitrepView from "./views/SitrepView.svelte";
   import IvView from "./views/IvView.svelte";
@@ -33,6 +34,7 @@
   import {
     activeTab,
     analyzeStrategyLab,
+    composeStrategyLab,
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
@@ -109,6 +111,7 @@
     researchDraft,
     researchCompareResult,
     researchResult,
+    strategyLabComposition,
     riskResult,
     riskWorkspaceBasis,
     setRiskWorkspaceMode,
@@ -192,7 +195,7 @@
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
   import type { SitrepHandoffRequest } from "./lib/view-models/sitrep";
   import type { OptionsMode } from "./lib/view-models/iv";
-  import type { ResearchMode } from "./lib/view-models/research";
+  import type { EquityResearchMode, StrategyLabMode } from "./lib/view-models/research";
   import type { RiskMode } from "./lib/risk-workspace";
 
   type ConsoleEntry = {
@@ -207,7 +210,8 @@
   let navigationSearchResetToken = 0;
   let ivRequestedSymbol = "SPY";
   let ivPollingActive = false;
-  let researchMode: ResearchMode = "overview";
+  let equityResearchMode: EquityResearchMode = "overview";
+  let strategyLabMode: StrategyLabMode = "composer";
   let cryptoMode: CryptoMode = "overview";
   let fundamentalsMode: FundamentalsMode = "overview";
   let commoditiesMode: CommodityMode = "overview";
@@ -230,6 +234,10 @@
   let synthesisCopilotSurface: CopilotSurfaceState;
   let copilotSurface: CopilotSurfaceState;
 
+  function normalizeAppTabId(tabId: TabId | "research"): TabId {
+    return tabId === "research" ? "equity_research" : tabId;
+  }
+
   $: orderedTabs =
     workspaceMode == null
       ? []
@@ -245,7 +253,11 @@
     system: $systemStatus,
     portfolio: $portfolioSnapshot,
     portfolioPerformance: $portfolioPerformance,
+    overview: $researchOverview,
     research: $researchResult,
+    strategy: $strategyLabResult,
+    strategyComposition: $strategyLabComposition,
+    compareResult: $researchCompareResult,
     macro: $macroContext,
     macroSnapshot: $macroSnapshot,
     commodities: $commoditiesWorkspace,
@@ -277,7 +289,11 @@
     system: $systemStatus,
     portfolio: $portfolioSnapshot,
     portfolioPerformance: $portfolioPerformance,
+    overview: $researchOverview,
     research: $researchResult,
+    strategy: $strategyLabResult,
+    strategyComposition: $strategyLabComposition,
+    compareResult: $researchCompareResult,
     risk: $riskResult,
     riskWorkspace: $riskWorkspaceBasis,
     ivSurface: $ivSurface,
@@ -501,7 +517,11 @@
     system,
     portfolio,
     portfolioPerformance,
+    overview,
     research,
+    strategy,
+    strategyComposition,
+    compareResult,
     macro,
     macroSnapshot,
     commodities,
@@ -518,7 +538,11 @@
     system: SystemStatus | null;
     portfolio: PortfolioSnapshot | null;
     portfolioPerformance: PortfolioPerformanceResponse | null;
+    overview: typeof $researchOverview;
     research: ResearchResult | null;
+    strategy: typeof $strategyLabResult;
+    strategyComposition: typeof $strategyLabComposition;
+    compareResult: typeof $researchCompareResult;
     macro: MacroContextState;
     macroSnapshot: MacroSnapshot | null;
     commodities: CommodityWorkspaceResponse | null;
@@ -541,7 +565,11 @@
       options.push({
         domain,
         label:
-          domain === "prediction_markets"
+          domain === "equity_research"
+            ? "Equity Research"
+            : domain === "strategy_lab"
+              ? "Strategy Lab"
+              : domain === "prediction_markets"
             ? "Prediction Markets"
             : domain === "macro"
               ? "Macro"
@@ -580,6 +608,33 @@
           ? `Result ${formatShortTimestamp(researchTimestamp)}`
           : null,
         formatWarningLabel(research.warnings.length)
+      );
+    }
+
+    if (overview || research) {
+      const overviewTimestamp = overview?.retrieved_at ?? null;
+      const researchTimestamp =
+        research?.snapshot?.timestamp ??
+        research?.performance_points[research.performance_points.length - 1]?.timestamp ??
+        null;
+      pushOption(
+        "equity_research",
+        research ? describeResearchCopilotContext(research) : (overview?.universe_label ?? "Equity overview"),
+        formatShortTimestamp(researchTimestamp ?? overviewTimestamp)
+          ? `Context ${formatShortTimestamp(researchTimestamp ?? overviewTimestamp)}`
+          : null,
+        formatWarningLabel((research?.warnings.length ?? 0) + (overview?.warnings.length ?? 0))
+      );
+    }
+
+    if (strategy || strategyComposition || compareResult) {
+      pushOption(
+        "strategy_lab",
+        strategyComposition?.name ?? strategy?.name ?? (compareResult ? `${compareResult.left.label} vs ${compareResult.right.label}` : "Strategy Lab"),
+        formatShortTimestamp(strategyComposition?.retrieved_at ?? strategy?.retrieved_at ?? null)
+          ? `Result ${formatShortTimestamp(strategyComposition?.retrieved_at ?? strategy?.retrieved_at ?? null)}`
+          : null,
+        formatWarningLabel((strategyComposition?.warnings.length ?? 0) + (strategy?.warnings.length ?? 0) + (compareResult?.warnings.length ?? 0))
       );
     }
 
@@ -690,7 +745,11 @@
     system,
     portfolio,
     portfolioPerformance,
+    overview,
     research,
+    strategy,
+    strategyComposition,
+    compareResult,
     risk,
     riskWorkspace,
     ivSurface,
@@ -708,7 +767,11 @@
     system: SystemStatus | null;
     portfolio: PortfolioSnapshot | null;
     portfolioPerformance: PortfolioPerformanceResponse | null;
+    overview: typeof $researchOverview;
     research: ResearchResult | null;
+    strategy: typeof $strategyLabResult;
+    strategyComposition: typeof $strategyLabComposition;
+    compareResult: typeof $researchCompareResult;
     risk: RiskResult | null;
     riskWorkspace: WorkspaceMode | null;
     ivSurface: IvSurface | null;
@@ -740,20 +803,44 @@
       };
     }
 
-    if (tab === "research") {
+    if (tab === "equity_research") {
       return {
-        supported: research != null,
-        domain: "research",
-        triggerLabel: research ? "Research scope" : "Run analysis",
-        contextLabel: describeResearchCopilotContext(research),
-        domainLabel: "Research",
+        supported: overview != null || research != null,
+        domain: "equity_research",
+        triggerLabel: research ? "Equity scope" : overview ? "Equity overview" : "Load overview",
+        contextLabel: research ? describeResearchCopilotContext(research) : (overview?.universe_label ?? "No equity context"),
+        domainLabel: "Equity Research",
         guidance:
-          research != null
+          overview != null || research != null
             ? "Grounded in the active research run, including weights, coverage, benchmark overlap, and forwarded snapshot context."
-            : "Run a research analysis before generating a research card from the research workspace.",
+            : "Load Equity Research overview or run Scope Analysis before generating a research card.",
         placeholder:
           "Stress-test the active scope, sharpen the hypothesis, or identify the cleanest next comparison.",
-        thread: threads.research,
+        thread: threads.equity_research,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
+      };
+    }
+
+    if (tab === "strategy_lab") {
+      const strategyContextLabel =
+        strategyComposition?.name ??
+        strategy?.name ??
+        (compareResult ? `${compareResult.left.label} vs ${compareResult.right.label}` : "No strategy context");
+      return {
+        supported: strategy != null || strategyComposition != null || compareResult != null,
+        domain: "strategy_lab",
+        triggerLabel: strategyComposition ? "Composition" : strategy ? "Strategy run" : compareResult ? "Comparison" : "Run strategy",
+        contextLabel: strategyContextLabel,
+        domainLabel: "Strategy Lab",
+        guidance:
+          strategy != null || strategyComposition != null || compareResult != null
+            ? "Grounded in imported returns, composed research objects, and comparison outputs. Gamma remains read-only and does not execute trades."
+            : "Run a Strategy Lab import, composition, or comparison before generating a research card.",
+        placeholder:
+          "Pressure-test the active strategy, identify robustness gaps, or frame the next portfolio experiment.",
+        thread: threads.strategy_lab,
         scopeOptions: [],
         selectedScopeDomains: [],
         selectionMessage: null,
@@ -1067,8 +1154,13 @@
       push("Commodities", $commoditiesWorkspace?.warnings, "warning");
       push("Coverage", $commoditiesWorkspace?.coverage.caveats, "warning");
       push("Prediction", $predictionMarketScreener?.warnings, "warning");
-    } else if ($activeTab === "research") {
-      push("Research", $researchResult?.warnings, "warning");
+    } else if ($activeTab === "equity_research") {
+      push("Equity Research", $researchResult?.warnings, "warning");
+      push("Equity Overview", $researchOverview?.warnings, "warning");
+    } else if ($activeTab === "strategy_lab") {
+      push("Strategy Lab", $strategyLabResult?.warnings, "warning");
+      push("Strategy Composition", $strategyLabComposition?.warnings, "warning");
+      push("Strategy Compare", $researchCompareResult?.warnings, "warning");
     } else if ($activeTab === "macro") {
       push("Macro", $macroSnapshot?.warnings, "warning");
     } else if ($activeTab === "commodities") {
@@ -1177,8 +1269,8 @@
       return false;
     }
 
-    if (tab === "research") {
-      researchMode = "scope_analysis";
+    if (tab === "equity_research") {
+      equityResearchMode = "scope_analysis";
       await ensureSingleEquityResearch(symbol);
       return true;
     }
@@ -1213,15 +1305,15 @@
     return false;
   }
 
-  async function selectTab(tab: TabId) {
+  async function selectTab(tab: TabId | "research") {
     if (!workspaceMode) {
       return;
     }
-    if (!isWorkspaceTab(workspaceMode, tab)) {
+    const nextTab = normalizeAppTabId(tab);
+    if (!isWorkspaceTab(workspaceMode, nextTab)) {
       resetNavigationSearch();
       return;
     }
-    const nextTab = tab;
 
     resetNavigationSearch();
     dismissSurfaces();
@@ -1234,14 +1326,19 @@
       await loadSitrepContext();
     } else if (nextTab === "copilot") {
       await handleLoadCopilotWorkspaceState();
-    } else if (nextTab === "research") {
+    } else if (nextTab === "equity_research") {
       if (await applySharedEquityToTab(nextTab)) {
         return;
       }
-      researchMode = "overview";
+      equityResearchMode = "overview";
       if (!$researchOverview) {
         await loadResearchOverview();
       }
+      if (!$savedResearchItems.length) {
+        await loadSavedResearch();
+      }
+    } else if (nextTab === "strategy_lab") {
+      strategyLabMode = "composer";
       if (!$savedResearchItems.length) {
         await loadSavedResearch();
       }
@@ -1288,7 +1385,7 @@
 
   async function runResearchFromView(options: Parameters<typeof runResearch>[0]) {
     if (options.scopeType === "single_ticker" && options.primarySymbol) {
-      selectSharedEquity(options.primarySymbol, null, "research");
+      selectSharedEquity(options.primarySymbol, null, "equity_research");
     }
     await runResearch(options);
   }
@@ -1306,6 +1403,15 @@
     const autoLoaded = await loadResearchIvContext();
     if (!autoLoaded) {
       await loadIvSession();
+    }
+  }
+
+  async function openStrategyLabFromEquityResearch() {
+    workspaceMode = "research";
+    activeTab.set("strategy_lab");
+    strategyLabMode = "composer";
+    if (!$savedResearchItems.length) {
+      await loadSavedResearch();
     }
   }
 
@@ -1360,7 +1466,7 @@
       await loadPortfolioSnapshot();
     }
 
-    if ($activeTab === "research" && researchMode === "overview") {
+    if ($activeTab === "equity_research" && equityResearchMode === "overview") {
       await loadResearchOverview({ forceRefresh: true });
     }
 
@@ -1563,7 +1669,7 @@
   }
 
   async function handleSendToCopilot(handoff: CrossTabHandoffEnvelope) {
-    const sourceTab = handoff.source_tab as TabId;
+    const sourceTab = normalizeAppTabId(handoff.source_tab as TabId | "research");
     latestCopilotHandoff = handoff;
     if (isWorkspaceTab("research", sourceTab) || isWorkspaceTab("portfolio", sourceTab)) {
       copilotContextTab = sourceTab;
@@ -1622,12 +1728,20 @@
       return false;
     }
 
-    if (tabId === "research") {
-      researchMode = modeId as ResearchMode;
-      if (researchMode === "overview" && !$researchOverview) {
+    if (tabId === "equity_research") {
+      equityResearchMode = modeId as EquityResearchMode;
+      if (equityResearchMode === "overview" && !$researchOverview) {
         await loadResearchOverview();
       }
-      if (researchMode === "saved_research") {
+      if (equityResearchMode === "saved_equity_research") {
+        await loadSavedResearch();
+      }
+      return true;
+    }
+
+    if (tabId === "strategy_lab") {
+      strategyLabMode = modeId as StrategyLabMode;
+      if (strategyLabMode === "saved_runs") {
         await loadSavedResearch();
       }
       return true;
@@ -1674,7 +1788,8 @@
   }
 
   function getCurrentModeId(tabId: TabId) {
-    if (tabId === "research") return researchMode;
+    if (tabId === "equity_research") return equityResearchMode;
+    if (tabId === "strategy_lab") return strategyLabMode;
     if (tabId === "macro") return $macroContext.mode;
     if (tabId === "crypto") return cryptoMode;
     if (tabId === "fundamentals") return fundamentalsMode;
@@ -1711,25 +1826,27 @@
   }
 
   async function selectNavigationRoute(route: NavigationRouteMatch) {
-    if (!workspaceMode || !isWorkspaceTab(workspaceMode, route.tab.id)) {
+    const routeTab = normalizeAppTabId(route.tab.id);
+    if (!workspaceMode || !isWorkspaceTab(workspaceMode, routeTab)) {
       resetNavigationSearch();
       return;
     }
-    await selectTab(route.tab.id);
+    await selectTab(routeTab);
     if (route.mode) {
-      await selectModeById(route.tab.id, route.mode.id);
+      await selectModeById(routeTab, route.mode.id);
     }
   }
 
   async function openSitrepHandoff(handoff: SitrepHandoffRequest) {
     workspaceMode = "research";
+    const targetTab = normalizeAppTabId(handoff.targetTab);
     if (handoff.symbol) {
       selectSharedEquity(handoff.symbol, handoff.label ?? null, "sitrep");
     }
 
-    await selectTab(handoff.targetTab);
+    await selectTab(targetTab);
 
-    if (handoff.targetTab === "commodities") {
+    if (targetTab === "commodities") {
       const nextMode = (handoff.targetMode ?? "overview") as CommodityMode;
       commoditiesMode = nextMode;
       await loadCommoditiesWorkspace({
@@ -1739,7 +1856,7 @@
       return;
     }
 
-    if (handoff.targetTab === "prediction_markets") {
+    if (targetTab === "prediction_markets") {
       if (handoff.marketId) {
         await selectPredictionMarket(handoff.marketId);
       }
@@ -1747,7 +1864,7 @@
     }
 
     if (handoff.targetMode) {
-      await selectModeById(handoff.targetTab, handoff.targetMode);
+      await selectModeById(targetTab, handoff.targetMode);
     }
   }
 
@@ -1970,9 +2087,9 @@
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
             onOpenHandoff={openSitrepHandoff}
           />
-        {:else if $activeTab === "research"}
-          <ResearchView
-            bind:mode={researchMode}
+        {:else if $activeTab === "equity_research"}
+          <EquityResearchView
+            bind:mode={equityResearchMode}
             overview={$researchOverview}
             result={$researchResult}
             strategyResult={$strategyLabResult}
@@ -1986,7 +2103,7 @@
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onLoadOverview={loadResearchOverview}
             onRun={runResearchFromView}
-            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "research")}
+            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, $activeTab)}
             onAnalyzeStrategy={analyzeStrategyLab}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
@@ -1995,6 +2112,35 @@
             onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
+          />
+        {:else if $activeTab === "strategy_lab"}
+          <StrategyLabView
+            bind:mode={strategyLabMode}
+            overview={$researchOverview}
+            result={$researchResult}
+            strategyResult={$strategyLabResult}
+            strategyComposition={$strategyLabComposition}
+            compareResult={$researchCompareResult}
+            savedItems={$savedResearchItems}
+            loading={$loading.research}
+            overviewLoading={$loading.researchOverview}
+            strategyLoading={$loading.strategyLab}
+            compareLoading={$loading.compareScenario}
+            savedLoading={$loading.savedResearch}
+            selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
+            onLoadOverview={loadResearchOverview}
+            onRun={runResearchFromView}
+            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "strategy_lab")}
+            onAnalyzeStrategy={analyzeStrategyLab}
+            onComposeStrategy={composeStrategyLab}
+            onCompare={compareResearch}
+            onLoadSaved={loadSavedResearch}
+            onSaveResearch={saveResearchItem}
+            onDeleteSaved={deleteSavedResearchItem}
+            onRestoreStrategy={restoreStrategyLabResult}
+            onOpenRisk={openRiskFromResearch}
+            onOpenIv={openIvFromResearch}
+            onOpenStrategyLab={openStrategyLabFromEquityResearch}
           />
         {:else if $activeTab === "macro"}
           <MacroView
