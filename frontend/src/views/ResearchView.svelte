@@ -6,6 +6,7 @@
   import type {
     ResearchConstituent,
     ResearchCoverage,
+    StrategyLabCompositionResult,
     ResearchOverviewMetricId,
     ResearchOverviewNode,
     ResearchOverviewRankItem,
@@ -52,16 +53,23 @@
     treemapDensityClass,
     treemapRectStyle,
     type ResearchCompareOption,
+    type EquityResearchMode,
     type ResearchMode,
     type ResearchPreviewRow,
+    type StrategyLabMode,
     type ResearchTreemapSection,
     type ResearchTreemapTile
   } from "../lib/view-models/research";
 
-  export let mode: ResearchMode = "overview";
+  type ResearchSurface = "legacy" | "equity" | "strategy";
+  type ResearchSurfaceMode = ResearchMode | EquityResearchMode | StrategyLabMode;
+
+  export let surface: ResearchSurface = "legacy";
+  export let mode: ResearchSurfaceMode = "overview";
   export let overview: ResearchOverviewResponse | null = null;
   export let result: ResearchResult | null = null;
   export let strategyResult: StrategyLabResult | null = null;
+  export let strategyComposition: StrategyLabCompositionResult | null = null;
   export let compareResult: ResearchCompareResult | null = null;
   export let savedItems: SavedResearchItem[] = [];
   export let loading = false;
@@ -92,12 +100,26 @@
     | "rolling_corr";
   type ResearchTimeframe = "1M" | "3M" | "6M" | "1Y" | "MAX";
 
-  const researchModes: Array<{ id: ResearchMode; label: string }> = [
+  const legacyResearchModes: Array<{ id: ResearchSurfaceMode; label: string }> = [
     { id: "overview", label: "Overview" },
     { id: "scope_analysis", label: "Scope Analysis" },
     { id: "strategy_lab", label: "Strategy Lab" },
     { id: "compare_scenario", label: "Compare / Scenario" },
     { id: "saved_research", label: "Saved Research" }
+  ];
+  const equityResearchModes: Array<{ id: ResearchSurfaceMode; label: string }> = [
+    { id: "overview", label: "Overview" },
+    { id: "scope_analysis", label: "Scope" },
+    { id: "comparables", label: "Comparables" },
+    { id: "scenario_context", label: "Scenario Context" },
+    { id: "saved_equity_research", label: "Saved" }
+  ];
+  const strategyResearchModes: Array<{ id: ResearchSurfaceMode; label: string }> = [
+    { id: "composer", label: "Composer" },
+    { id: "backtest_analyze", label: "Backtest" },
+    { id: "regime_stress", label: "Regime Stress" },
+    { id: "imports", label: "Imports" },
+    { id: "saved_runs", label: "Saved Runs" }
   ];
   const chartModeLabels: Record<ChartMode, string> = {
     performance: "Performance",
@@ -298,12 +320,53 @@
     void loadOverview({ benchmarkSymbol });
   }
 
-  function selectResearchMode(nextMode: ResearchMode) {
+  function modeForSurface(target: ResearchMode): ResearchSurfaceMode {
+    if (surface === "equity") {
+      if (target === "compare_scenario") return "comparables";
+      if (target === "saved_research") return "saved_equity_research";
+      if (target === "strategy_lab") return "scope_analysis";
+    }
+    if (surface === "strategy") {
+      if (target === "strategy_lab") return "composer";
+      if (target === "compare_scenario") return "backtest_analyze";
+      if (target === "saved_research") return "saved_runs";
+      return "composer";
+    }
+    return target;
+  }
+
+  function isOverviewMode() {
+    return mode === "overview";
+  }
+
+  function isScopeMode() {
+    return mode === "scope_analysis";
+  }
+
+  function isStrategyMode() {
+    return mode === "strategy_lab" || mode === "composer" || mode === "imports";
+  }
+
+  function isCompareMode() {
+    return (
+      mode === "compare_scenario" ||
+      mode === "comparables" ||
+      mode === "scenario_context" ||
+      mode === "backtest_analyze" ||
+      mode === "regime_stress"
+    );
+  }
+
+  function isSavedMode() {
+    return mode === "saved_research" || mode === "saved_equity_research" || mode === "saved_runs";
+  }
+
+  function selectResearchMode(nextMode: ResearchSurfaceMode) {
     mode = nextMode;
-    if (mode === "overview" && !overview) {
+    if (isOverviewMode() && !overview) {
       void loadOverview();
     }
-    if (mode === "saved_research") {
+    if (isSavedMode()) {
       void onLoadSaved();
     }
   }
@@ -324,7 +387,7 @@
     scopeType = "single_ticker";
     primarySymbol = node.symbol;
     benchmarkSymbol = overview?.benchmark_symbol ?? overviewBenchmarkSymbol;
-    mode = "scope_analysis";
+    mode = modeForSurface("scope_analysis");
     inputWarning = "";
   }
 
@@ -363,11 +426,11 @@
         returnPoints: result.performance_points
       };
     }
-    if (option.source === "strategy" && strategyResult?.returns_points?.length) {
+    if (option.source === "strategy" && activeStrategyResult?.returns_points?.length) {
       return {
         label: option.label,
         objectType: option.objectType,
-        returnPoints: strategyResult.returns_points
+        returnPoints: activeStrategyResult.returns_points
       };
     }
     if (option.source === "saved") {
@@ -427,15 +490,15 @@
   }
 
   async function saveStrategyRun() {
-    if (!strategyResult) {
+    if (!activeStrategyResult) {
       return;
     }
     await onSaveResearch({
       objectType: "strategy_lab",
-      title: savedStrategyTitle.trim() || strategyResult.name,
+      title: savedStrategyTitle.trim() || activeStrategyResult.name,
       notes: savedNotes,
-      payload: { ...strategyResult, saved_from_mode: "strategy_lab" },
-      warnings: strategyResult.warnings,
+      payload: { ...activeStrategyResult, saved_from_mode: "strategy_lab" },
+      warnings: activeStrategyResult.warnings,
       sourceProvider: "uploaded_csv",
       origin: "frontend.research.strategy_lab.save",
       transformationNote: "Saved normalized uploaded return stream; raw uploaded file is not persisted."
@@ -450,7 +513,7 @@
     } else {
       compareRightSource = sourceId;
     }
-    mode = "compare_scenario";
+    mode = modeForSurface("compare_scenario");
   }
 
   function loadSavedScope(item: SavedResearchItem) {
@@ -466,7 +529,7 @@
       syntheticText = draft.syntheticText;
     }
     inputWarning = "Loaded saved scope into the builder. Run analysis to refresh provider-backed history.";
-    mode = "scope_analysis";
+    mode = modeForSurface("scope_analysis");
   }
 
   function loadSavedStrategy(item: SavedResearchItem) {
@@ -477,7 +540,7 @@
     onRestoreStrategy?.(hydrated);
     strategyName = hydrated.name;
     strategyInputWarning = "Loaded normalized saved strategy result. Raw CSV rows were not persisted.";
-    mode = "strategy_lab";
+    mode = modeForSurface("strategy_lab");
   }
 
   function rankingMeta(item: ResearchOverviewRankItem) {
@@ -879,7 +942,7 @@
   }
 
   onMount(() => {
-    if (mode === "overview" && !overview) {
+    if (isOverviewMode() && !overview) {
       void loadOverview();
     }
   });
@@ -916,7 +979,18 @@
     }
   }
   $: savedResearchList = Array.isArray(savedItems) ? savedItems : [];
-  $: compareOptions = buildResearchCompareOptions(result, strategyResult, savedResearchList);
+  $: activeStrategyResult = strategyComposition ?? strategyResult;
+  $: compareOptions = buildResearchCompareOptions(result, activeStrategyResult, savedResearchList);
+  $: visibleResearchModes =
+    surface === "equity" ? equityResearchModes : surface === "strategy" ? strategyResearchModes : legacyResearchModes;
+  $: surfaceTitle =
+    surface === "equity" ? "Equity Research" : surface === "strategy" ? "Strategy Lab" : "Research Workspace";
+  $: surfaceSubtitle =
+    surface === "equity"
+      ? "Market map / scope / scenarios"
+      : surface === "strategy"
+        ? "Composer / backtests / saved runs"
+        : "Strategy backtests / saved screens";
   $: compareMetricRows = [
     { label: "Total Return", left: compareResult?.left.metrics.total_return, right: compareResult?.right.metrics.total_return },
     { label: "Annual Return", left: compareResult?.left.metrics.annual_return, right: compareResult?.right.metrics.annual_return },
@@ -1133,28 +1207,28 @@
       chartSeries = series;
     }
   }
-  $: strategyChartSeries = strategyResult
+  $: strategyChartSeries = activeStrategyResult
     ? [
-        ...(strategyResult.equity_curve_points.length
+        ...(activeStrategyResult.equity_curve_points.length
           ? [
               {
                 id: "strategy",
-                label: strategyResult.name,
+                label: activeStrategyResult.name,
                 color: "#7aa6c8",
                 type: "area" as const,
-                data: strategyResult.equity_curve_points.map(toChartPoint)
+                data: activeStrategyResult.equity_curve_points.map(toChartPoint)
               }
             ]
           : []),
-        ...(strategyResult.benchmark_equity_curve_points.length
+        ...(activeStrategyResult.benchmark_equity_curve_points.length
           ? [
               {
                 id: "benchmark",
-                label: strategyResult.benchmark_column ?? "Benchmark",
+                label: activeStrategyResult.benchmark_column ?? "Benchmark",
                 color: "#c49a5a",
                 type: "line" as const,
                 lineStyle: "dashed" as const,
-                data: strategyResult.benchmark_equity_curve_points.map(toChartPoint)
+                data: activeStrategyResult.benchmark_equity_curve_points.map(toChartPoint)
               }
             ]
           : [])
@@ -1196,14 +1270,14 @@
 <section class="view">
   <article class="panel header-panel">
     <div class="header-top">
-      <span class="title">Research Workspace</span>
-      <span class="subtitle">Strategy backtests · saved screens</span>
+      <span class="title">{surfaceTitle}</span>
+      <span class="subtitle">{surfaceSubtitle}</span>
       {#if loading || overviewLoading || strategyLoading || compareLoading || savedLoading}<span class="loading-pill">Refreshing</span>{/if}
     </div>
 
     <div class="mode-kpi-row">
-      <div class="mode-bar" role="tablist" aria-label="Research modes">
-        {#each researchModes as item}
+      <div class="mode-bar" role="tablist" aria-label={`${surfaceTitle} modes`}>
+        {#each visibleResearchModes as item}
           <button
             type="button"
             class:selected={mode === item.id}
@@ -1218,7 +1292,7 @@
     </div>
   </article>
 
-  {#if mode === "overview"}
+  {#if isOverviewMode()}
       <div class="overview-grid">
         <article class="panel treemap-panel">
           <div class="panel-header treemap-header">
@@ -1420,7 +1494,7 @@
           {/if}
         </article>
       </div>
-  {:else if mode === "scope_analysis"}
+  {:else if isScopeMode()}
       <div class="workspace-grid">
     <div class="primary-column">
       <article class="panel performance-panel">
@@ -1794,46 +1868,46 @@
       </article>
       </aside>
     </div>
-  {:else if mode === "strategy_lab"}
+  {:else if isStrategyMode()}
     <div class="workspace-grid">
       <div class="primary-column">
         <article class="panel performance-panel">
           <div class="panel-header top-line">
             <div class="title-block">
               <p class="eyebrow">Strategy Lab</p>
-              <h2>{strategyResult?.name ?? "Imported Return Stream"}</h2>
+              <h2>{activeStrategyResult?.name ?? "Imported Return Stream"}</h2>
               <p class="muted">CSV rows are normalized into returns for analysis only. Gamma does not run strategy code or connect this stream to execution.</p>
             </div>
             <div class="builder-actions compact">
-              <button type="button" on:click={saveStrategyRun} disabled={!strategyResult || savedLoading}>Save Strategy</button>
+              <button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
             </div>
           </div>
 
           <div class="kpi-grid">
-            <article class="metric"><span>Total Return</span><strong>{pct(strategyResult?.metrics.total_return)}</strong><small>{strategyResult?.metrics.observation_count ?? 0} observations</small></article>
-            <article class="metric"><span>Annual Return</span><strong>{pct(strategyResult?.metrics.annual_return)}</strong><small>{strategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
-            <article class="metric"><span>Annual Vol</span><strong>{pct(strategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(strategyResult?.metrics.periods_per_year, 0)}</small></article>
-            <article class="metric"><span>Sharpe</span><strong>{fmt(strategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
-            <article class="metric"><span>Sortino</span><strong>{fmt(strategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
-            <article class="metric"><span>Max Drawdown</span><strong class:negative={(strategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(strategyResult?.metrics.max_drawdown)}</strong><small>{strategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
+            <article class="metric"><span>Total Return</span><strong>{pct(activeStrategyResult?.metrics.total_return)}</strong><small>{activeStrategyResult?.metrics.observation_count ?? 0} observations</small></article>
+            <article class="metric"><span>Annual Return</span><strong>{pct(activeStrategyResult?.metrics.annual_return)}</strong><small>{activeStrategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
+            <article class="metric"><span>Annual Vol</span><strong>{pct(activeStrategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(activeStrategyResult?.metrics.periods_per_year, 0)}</small></article>
+            <article class="metric"><span>Sharpe</span><strong>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
+            <article class="metric"><span>Sortino</span><strong>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
+            <article class="metric"><span>Max Drawdown</span><strong class:negative={(activeStrategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(activeStrategyResult?.metrics.max_drawdown)}</strong><small>{activeStrategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
           </div>
 
           <TimeSeriesChart series={strategyChartSeries} height={360} emptyMessage="Import CSV returns to populate Strategy Lab." />
           <div class="chart-foot">
-            <span>{strategyResult ? `Source ${strategyResult.source_provider} / ${strategyResult.freshness_label}` : "Paste CSV text or map parsed rows from a file outside Gamma."}</span>
-            <strong>{strategyResult ? shortDate(strategyResult.retrieved_at) : "No import analyzed"}</strong>
+            <span>{activeStrategyResult ? `Source ${activeStrategyResult.source_provider} / ${activeStrategyResult.freshness_label}` : "Paste CSV text or map parsed rows from a file outside Gamma."}</span>
+            <strong>{activeStrategyResult ? shortDate(activeStrategyResult.retrieved_at) : "No import analyzed"}</strong>
           </div>
         </article>
 
         <div class="detail-split">
           <article class="panel table-panel">
-            <div class="panel-header"><div><p class="eyebrow">Monthly</p><h3>Monthly Returns</h3></div><small>{strategyResult?.monthly_returns.length ?? 0} periods</small></div>
+            <div class="panel-header"><div><p class="eyebrow">Monthly</p><h3>Monthly Returns</h3></div><small>{activeStrategyResult?.monthly_returns.length ?? 0} periods</small></div>
             <div class="table-wrap compact-table">
               <table>
                 <thead><tr><th>Period</th><th>Return</th></tr></thead>
                 <tbody>
-                  {#if strategyResult?.monthly_returns.length}
-                    {#each strategyResult.monthly_returns.slice(-18) as row}
+                  {#if activeStrategyResult?.monthly_returns.length}
+                    {#each activeStrategyResult.monthly_returns.slice(-18) as row}
                       <tr><td>{row.period}</td><td>{pct(row.value)}</td></tr>
                     {/each}
                   {:else}
@@ -1845,13 +1919,13 @@
           </article>
 
           <article class="panel table-panel">
-            <div class="panel-header"><div><p class="eyebrow">Annual</p><h3>Annual Returns</h3></div><small>{strategyResult?.annual_returns.length ?? 0} periods</small></div>
+            <div class="panel-header"><div><p class="eyebrow">Annual</p><h3>Annual Returns</h3></div><small>{activeStrategyResult?.annual_returns.length ?? 0} periods</small></div>
             <div class="table-wrap compact-table">
               <table>
                 <thead><tr><th>Period</th><th>Return</th></tr></thead>
                 <tbody>
-                  {#if strategyResult?.annual_returns.length}
-                    {#each strategyResult.annual_returns as row}
+                  {#if activeStrategyResult?.annual_returns.length}
+                    {#each activeStrategyResult.annual_returns as row}
                       <tr><td>{row.period}</td><td>{pct(row.value)}</td></tr>
                     {/each}
                   {:else}
@@ -1898,9 +1972,9 @@
 
         <article class="panel rail-panel">
           <div class="rail-header"><div><p class="eyebrow">Source</p><h3>Warnings &amp; Provenance</h3></div></div>
-          {#if strategyResult?.warnings.length}
+          {#if activeStrategyResult?.warnings.length}
             <div class="notes-list">
-              {#each strategyResult.warnings as warning}
+              {#each activeStrategyResult.warnings as warning}
                 <div class="note-row info"><span class="note-tag">Note</span><p>{warning}</p></div>
               {/each}
             </div>
@@ -1910,7 +1984,7 @@
         </article>
       </aside>
     </div>
-  {:else if mode === "compare_scenario"}
+  {:else if isCompareMode()}
     <div class="workspace-grid">
       <div class="primary-column">
         <article class="panel performance-panel">
@@ -1989,7 +2063,7 @@
         </article>
       </aside>
     </div>
-  {:else if mode === "saved_research"}
+  {:else if isSavedMode()}
     <div class="workspace-grid">
       <div class="primary-column">
         <article class="panel table-panel">
@@ -2041,7 +2115,7 @@
           <label><span>Scope Title</span><input bind:value={savedScopeTitle} /></label>
           <div class="builder-actions"><button type="button" on:click={saveScopeRun} disabled={!result || savedLoading}>Save Scope</button></div>
           <label><span>Strategy Title</span><input bind:value={savedStrategyTitle} /></label>
-          <div class="builder-actions"><button type="button" on:click={saveStrategyRun} disabled={!strategyResult || savedLoading}>Save Strategy</button></div>
+          <div class="builder-actions"><button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button></div>
           <label><span>Notes</span><textarea bind:value={savedNotes} rows="5"></textarea></label>
         </article>
 
