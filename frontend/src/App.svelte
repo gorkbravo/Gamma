@@ -2117,6 +2117,7 @@
             onRun={runResearchFromView}
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "strategy_lab")}
             onAnalyzeStrategy={analyzeStrategyLab}
+            onComposeStrategy={composeStrategyLab}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}

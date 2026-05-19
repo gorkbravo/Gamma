@@ -36,6 +36,13 @@ export interface ResearchCompareOption {
   source: "scope" | "strategy" | "saved";
 }
 
+export interface StrategyComposerObjectOption {
+  id: string;
+  label: string;
+  object: GammaResearchObject;
+  defaultWeight: number;
+}
+
 export interface SavedScopeDraft {
   scopeType: "single_ticker" | "synthetic_portfolio";
   primarySymbol: string;
@@ -212,6 +219,35 @@ export function savedResearchHasReturnStream(item: SavedResearchItem) {
       Array.isArray((candidate as Record<string, unknown>)[key])
     )
   );
+}
+
+export function buildStrategyComposerObjects(
+  scopeResult: ResearchResult | null,
+  strategyResult: StrategyLabResult | null,
+  savedItems: SavedResearchItem[]
+): StrategyComposerObjectOption[] {
+  const options: StrategyComposerObjectOption[] = [];
+  const scopeObject = buildResearchObjectFromScopeResult(scopeResult);
+  if (scopeObject) {
+    options.push({ id: "latest_scope", label: scopeObject.display_name, object: scopeObject, defaultWeight: 0.5 });
+  }
+  const strategyObject = buildResearchObjectFromStrategyResult(strategyResult);
+  if (strategyObject) {
+    options.push({ id: "latest_strategy", label: strategyObject.display_name, object: strategyObject, defaultWeight: 0.5 });
+  }
+  for (const item of savedItems) {
+    const restored = hydrateStrategyLabResultFromSaved(item);
+    const object = buildResearchObjectFromStrategyResult(restored);
+    if (object) {
+      options.push({
+        id: `saved:${item.id}`,
+        label: `Saved: ${item.title}`,
+        object: { ...object, object_id: `saved:${item.id}` },
+        defaultWeight: 0.25
+      });
+    }
+  }
+  return options;
 }
 
 export function classifySavedResearchSurface(item: SavedResearchItem): "equity" | "strategy" | "unknown" {

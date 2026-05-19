@@ -3,6 +3,7 @@ import type { ResearchResult } from "../api/types";
 import {
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
+  buildStrategyComposerObjects,
   buildResearchCompareOptions,
   buildResearchTreemapLayout,
   buildResearchTreemapSections,
@@ -199,6 +200,25 @@ describe("research view model helpers", () => {
     expect(object?.return_points).toEqual(result.performance_points);
     expect(buildResearchObjectFromScopeResult(null)).toBeNull();
     expect(buildResearchObjectFromScopeResult(makeResearchResult("single_ticker", [{ symbol: "AAPL", weight: 1 }]))).toBeNull();
+  });
+
+  it("builds strategy composer objects from latest scope, imported strategy, and saved return streams", () => {
+    const scope = makeResearchResult("single_ticker", [{ symbol: "AAPL", weight: 1 }]);
+    scope.performance_points = [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }];
+    const strategy = makeStrategyLabResult();
+    const options = buildStrategyComposerObjects(scope, strategy as any, [
+      {
+        id: "saved-1",
+        object_type: "strategy_lab",
+        title: "Saved Strategy",
+        payload: strategy as unknown as Record<string, unknown>,
+        warnings: []
+      } as any
+    ]);
+
+    expect(options.map((option) => option.object.object_type)).toContain("equity_scope");
+    expect(options.map((option) => option.object.object_type)).toContain("strategy_return_stream");
+    expect(options.map((option) => option.id)).toContain("saved:saved-1");
   });
 
   it("includes normalized weights in synthetic scope research object ids", () => {

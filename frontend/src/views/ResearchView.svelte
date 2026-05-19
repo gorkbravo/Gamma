@@ -26,10 +26,12 @@
     type ResearchRunOptions,
     type ResearchCompareOptions,
     type SavedResearchCreateOptions,
-    type StrategyLabAnalyzeOptions
+    type StrategyLabAnalyzeOptions,
+    type StrategyLabComposeOptions
   } from "../lib/stores/app";
   import {
     buildResearchCompareOptions,
+    buildStrategyComposerObjects,
     buildResearchTreemapSections,
     buildPreviewRows,
     classifySavedResearchSurface,
@@ -83,6 +85,7 @@
   export let onRun: (options: ResearchRunOptions) => void;
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | undefined = undefined;
   export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
+  export let onComposeStrategy: (options: StrategyLabComposeOptions) => Promise<StrategyLabCompositionResult | null> | void = async () => null;
   export let onCompare: (options: ResearchCompareOptions) => Promise<ResearchCompareResult | null> | void;
   export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
   export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
@@ -221,6 +224,8 @@
   let compareLeftSource = "";
   let compareRightSource = "";
   let compareWarning = "";
+  let composerSelection: Record<string, boolean> = {};
+  let composerWeights: Record<string, number> = {};
   let savedScopeTitle = "Scope Analysis Run";
   let savedStrategyTitle = "Strategy Lab Run";
   let savedNotes = "";
@@ -411,6 +416,22 @@
       valueKind: strategyValueKind,
       benchmarkColumn: strategyBenchmarkColumn && parsed.columns.includes(strategyBenchmarkColumn) ? strategyBenchmarkColumn : null,
       benchmarkValueKind: strategyBenchmarkValueKind,
+      minObservations: 5
+    });
+  }
+
+  async function composeSelectedObjects() {
+    if (!selectedComposerLegs.length) {
+      strategyInputWarning = "Select at least one return object before composing.";
+      return;
+    }
+    strategyInputWarning = "";
+    await onComposeStrategy({
+      name: "Strategy Lab Composition",
+      legs: selectedComposerLegs,
+      lenses: [],
+      overlays: [],
+      benchmarkObject: null,
       minObservations: 5
     });
   }
@@ -989,6 +1010,32 @@
     const classification = classifySavedResearchSurface(item);
     return surface === "equity" ? classification === "equity" : classification === "strategy";
   });
+  $: composerOptions = buildStrategyComposerObjects(result, strategyResult, visibleSavedItems);
+  $: {
+    const knownIds = new Set(composerOptions.map((option) => option.id));
+    composerSelection = Object.fromEntries(
+      composerOptions.map((option, index) => [
+        option.id,
+        composerSelection[option.id] ?? index < Math.min(2, composerOptions.length)
+      ])
+    );
+    composerWeights = Object.fromEntries(
+      composerOptions.map((option) => [option.id, composerWeights[option.id] ?? option.defaultWeight])
+    );
+    for (const id of Object.keys(composerSelection)) {
+      if (!knownIds.has(id)) {
+        delete composerSelection[id];
+        delete composerWeights[id];
+      }
+    }
+  }
+  $: selectedComposerLegs = composerOptions
+    .filter((option) => composerSelection[option.id])
+    .map((option) => ({
+      object: option.object,
+      weight: Number(composerWeights[option.id] ?? option.defaultWeight)
+    }))
+    .filter((leg) => Number.isFinite(leg.weight) && leg.weight > 0);
   $: visibleResearchModes =
     surface === "equity" ? equityResearchModes : surface === "strategy" ? strategyResearchModes : legacyResearchModes;
   $: surfaceTitle =
@@ -1879,6 +1926,63 @@
   {:else if isStrategyMode()}
     <div class="workspace-grid">
       <div class="primary-column">
+        {#if surface === "strategy" && mode === "composer"}
+          <article class="panel table-panel">
+            <div class="panel-header top-line">
+              <div class="title-block">
+                <p class="eyebrow">Strategy Composer</p>
+                <h2>Live Research Objects</h2>
+                <p class="muted">Compose return-bearing Gamma objects into a read-only Strategy Lab result. Weights are normalized by the backend.</p>
+              </div>
+              <div class="builder-actions compact">
+                <button type="button" on:click={composeSelectedObjects} disabled={strategyLoading || !selectedComposerLegs.length}>
+                  {strategyLoading ? "Composing..." : "Compose"}
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr><th>Use</th><th>Object</th><th>Type</th><th class="num-cell">Weight</th></tr>
+                </thead>
+                <tbody>
+                  {#if composerOptions.length}
+                    {#each composerOptions as option}
+                      <tr>
+                        <td><input type="checkbox" bind:checked={composerSelection[option.id]} /></td>
+                        <td>{option.label}</td>
+                        <td>{option.object.object_type}</td>
+                        <td class="num-cell">
+                          <input class="compact-input" type="number" min="0" step="0.01" bind:value={composerWeights[option.id]} />
+                        </td>
+                      </tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan="4">Run Scope Analysis, import CSV returns, or save a Strategy Lab return stream to compose objects.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
+            </div>
+          </article>
+          {#if strategyComposition}
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Composition Result</p>
+                  <h3>{strategyComposition.name}</h3>
+                </div>
+                <small>{strategyComposition.returns_points.length} return points</small>
+              </div>
+              <div class="kpi-grid">
+                <article class="metric"><span>Total Return</span><strong>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
+                <article class="metric"><span>Annual Vol</span><strong>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
+                <article class="metric"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
+                <article class="metric"><span>Contributions</span><strong>{Object.keys(strategyComposition.leg_contributions).length}</strong><small>weighted legs</small></article>
+              </div>
+            </article>
+          {/if}
+        {/if}
+
         <article class="panel performance-panel">
           <div class="panel-header top-line">
             <div class="title-block">
@@ -2977,6 +3081,17 @@
     text-align: left;
     white-space: nowrap;
     font-size: 0.8rem;
+  }
+
+  .num-cell {
+    text-align: right;
+  }
+
+  .compact-input {
+    width: 5.5rem;
+    min-height: 1.55rem;
+    padding: 0.2rem 0.35rem;
+    text-align: right;
   }
 
   tbody tr:hover {
