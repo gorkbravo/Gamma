@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import BarRankChart, { type RankBarItem } from "../components/BarRankChart.svelte";
+  import HeroPriceChart from "../components/HeroPriceChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
     ResearchConstituent,
@@ -63,6 +64,7 @@
     type ResearchTreemapSection,
     type ResearchTreemapTile
   } from "../lib/view-models/research";
+  import type { HeroPricePoint } from "../lib/view-models/hero-price-chart";
 
   type ResearchSurface = "legacy" | "equity" | "strategy";
   type ResearchSurfaceMode = ResearchMode | EquityResearchMode | StrategyLabMode;
@@ -845,6 +847,7 @@
   let parsedStrategyCsv = parseResearchCsvText(strategyCsvText);
   let previewRows: ResearchPreviewRow[] = [];
   let chartSeries: ChartSeries[] = [];
+  let researchHeroPricePoints: HeroPricePoint[] = [];
   let strategyChartSeries: ChartSeries[] = [];
   let compareChartSeries: ChartSeries[] = [];
   let compareRelativeDrawdownSeries: ChartSeries[] = [];
@@ -1149,6 +1152,12 @@
     const perf = slicePoints(result?.performance_points ?? []);
     const benchmark = slicePoints(result?.benchmark_points ?? []);
     const prices = slicePoints(result?.primary_price_points ?? []);
+    researchHeroPricePoints = prices
+      .map((point) => ({
+        time: Math.floor(new Date(point.timestamp).getTime() / 1000),
+        close: point.value
+      }))
+      .filter((point): point is HeroPricePoint => Number.isFinite(point.time) && Number.isFinite(point.close));
 
     if (!result) {
       chartSeries = [];
@@ -1619,7 +1628,16 @@
           </article>
         </div>
 
-        <TimeSeriesChart series={chartSeries} height={380} emptyMessage={chartEmptyMessage(chartMode, result)} />
+        {#if chartMode === "price" && result?.scope_type === "single_ticker"}
+          <HeroPriceChart
+            chartKey="research:single-ticker"
+            points={researchHeroPricePoints}
+            height={380}
+            emptyMessage={chartEmptyMessage(chartMode, result)}
+          />
+        {:else}
+          <TimeSeriesChart series={chartSeries} height={380} emptyMessage={chartEmptyMessage(chartMode, result)} />
+        {/if}
 
         <div class="chart-foot">
           <span>

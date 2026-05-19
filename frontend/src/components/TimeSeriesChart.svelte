@@ -5,9 +5,11 @@
   import { chartTheme } from "../lib/stores/app";
   import {
     AreaSeries,
+    CandlestickSeries,
     ColorType,
     createChart,
     CrosshairMode,
+    HistogramSeries,
     LineSeries,
     LineStyle,
     type IChartApi,
@@ -21,16 +23,28 @@
     tickLabel?: string;
   }
 
+  export interface CandlestickChartPoint {
+    time: UTCTimestamp;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    tickLabel?: string;
+  }
+
+  export type AnyChartPoint = ChartPoint | CandlestickChartPoint;
+
   export interface ChartSeries {
     id: string;
     label: string;
     color: string;
-    type?: "line" | "area";
+    type?: "line" | "area" | "candlestick" | "histogram";
+    priceScaleId?: string;
     lineStyle?: "solid" | "dashed";
     showPointMarkers?: boolean;
     pointMarkerRadius?: number;
     invertFilledArea?: boolean;
-    data: ChartPoint[];
+    data: AnyChartPoint[];
   }
 
   export let series: ChartSeries[] = [];
@@ -40,7 +54,7 @@
 
   let container: HTMLDivElement;
   let chart: IChartApi | null = null;
-  let seriesMap = new Map<string, ISeriesApi<"Line" | "Area">>();
+  let seriesMap = new Map<string, ISeriesApi<"Line" | "Area" | "Candlestick" | "Histogram">>();
   let resizeObserver: ResizeObserver | null = null;
   let refreshHandle = 0;
   let pendingRecreate = false;
@@ -62,7 +76,40 @@
     return tickLabels;
   }
 
-  function inferPricePrecision(data: ChartPoint[]): number {
+  function isValuePoint(point: AnyChartPoint): point is ChartPoint {
+    return "value" in point && Number.isFinite(point.time) && Number.isFinite(point.value);
+  }
+
+  function isCandlestickPoint(point: AnyChartPoint): point is CandlestickChartPoint {
+    return (
+      Number.isFinite(point.time) &&
+      "open" in point &&
+      Number.isFinite(point.open) &&
+      Number.isFinite(point.high) &&
+      Number.isFinite(point.low) &&
+      Number.isFinite(point.close)
+    );
+  }
+
+  function normalizeValueData(data: readonly AnyChartPoint[]): ChartPoint[] {
+    return normalizeChartData(data.filter(isValuePoint));
+  }
+
+  function normalizeCandlestickData(data: readonly AnyChartPoint[]): CandlestickChartPoint[] {
+    const sorted = data.filter(isCandlestickPoint).sort((left, right) => left.time - right.time);
+    const deduped: CandlestickChartPoint[] = [];
+    for (const point of sorted) {
+      const previous = deduped.at(-1);
+      if (previous && previous.time === point.time) {
+        deduped[deduped.length - 1] = point;
+        continue;
+      }
+      deduped.push(point);
+    }
+    return deduped;
+  }
+
+  function inferPricePrecision(data: readonly ChartPoint[]): number {
     const latest = data.at(-1)?.value ?? data[0]?.value ?? 0;
     const magnitude = Math.abs(latest);
     if (magnitude >= 100) return 1;
@@ -146,42 +193,79 @@
     const computedStyle = getComputedStyle(container);
 
     for (const item of series) {
-      const normalizedData = normalizeChartData(item.data);
+      const normalizedData = normalizeValueData(item.data);
       const resolvedColor = resolveChartColor(item.color, computedStyle);
+      const positiveColor = resolveChartColor("var(--positive)", computedStyle);
+      const negativeColor = resolveChartColor("var(--negative)", computedStyle);
 
-      const api =
-        item.type === "line"
-          ? chart.addSeries(LineSeries, {
-              color: resolvedColor,
-              lineWidth: 2,
-              lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
-              pointMarkersVisible: item.showPointMarkers ?? false,
-              pointMarkersRadius: item.pointMarkerRadius ?? 3,
-              priceFormat: {
-                type: "price",
-                precision: inferPricePrecision(normalizedData),
-                minMove: 10 ** -inferPricePrecision(normalizedData)
-              },
-              lastValueVisible: false,
-              priceLineVisible: false
-            })
-          : chart.addSeries(AreaSeries, {
-              lineColor: resolvedColor,
-              topColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.012) : colorWithAlpha(resolvedColor, 0.2),
-              bottomColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.2) : colorWithAlpha(resolvedColor, 0.012),
-              invertFilledArea: item.invertFilledArea ?? false,
-              lineWidth: 2,
-              pointMarkersVisible: item.showPointMarkers ?? false,
-              pointMarkersRadius: item.pointMarkerRadius ?? 3,
-              priceFormat: {
-                type: "price",
-                precision: inferPricePrecision(normalizedData),
-                minMove: 10 ** -inferPricePrecision(normalizedData)
-              },
-              lastValueVisible: false,
-              priceLineVisible: false
-            });
-      api.setData(normalizedData);
+      let api: ISeriesApi<"Line" | "Area" | "Candlestick" | "Histogram">;
+      if (item.type === "line") {
+        api = chart.addSeries(LineSeries, {
+          color: resolvedColor,
+          priceScaleId: item.priceScaleId,
+          lineWidth: 2,
+          lineStyle: item.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
+          pointMarkersVisible: item.showPointMarkers ?? false,
+          pointMarkersRadius: item.pointMarkerRadius ?? 3,
+          priceFormat: {
+            type: "price",
+            precision: inferPricePrecision(normalizedData),
+            minMove: 10 ** -inferPricePrecision(normalizedData)
+          },
+          lastValueVisible: false,
+          priceLineVisible: false
+        });
+        api.setData(normalizedData);
+      } else if (item.type === "candlestick") {
+        const candleData = normalizeCandlestickData(item.data);
+        api = chart.addSeries(CandlestickSeries, {
+          priceScaleId: item.priceScaleId,
+          upColor: positiveColor,
+          downColor: negativeColor,
+          borderUpColor: positiveColor,
+          borderDownColor: negativeColor,
+          wickUpColor: positiveColor,
+          wickDownColor: negativeColor,
+          lastValueVisible: false,
+          priceLineVisible: false
+        });
+        api.setData(candleData);
+      } else if (item.type === "histogram") {
+        api = chart.addSeries(HistogramSeries, {
+          color: colorWithAlpha(resolvedColor, 0.35),
+          priceScaleId: item.priceScaleId,
+          priceFormat: {
+            type: "volume"
+          },
+          lastValueVisible: false,
+          priceLineVisible: false
+        });
+        api.setData(normalizedData);
+        if (item.priceScaleId) {
+          chart.priceScale(item.priceScaleId).applyOptions({
+            scaleMargins: { top: 0.78, bottom: 0 }
+          });
+        }
+      } else {
+        api = chart.addSeries(AreaSeries, {
+          lineColor: resolvedColor,
+          priceScaleId: item.priceScaleId,
+          topColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.012) : colorWithAlpha(resolvedColor, 0.2),
+          bottomColor: item.invertFilledArea ? colorWithAlpha(resolvedColor, 0.2) : colorWithAlpha(resolvedColor, 0.012),
+          invertFilledArea: item.invertFilledArea ?? false,
+          lineWidth: 2,
+          pointMarkersVisible: item.showPointMarkers ?? false,
+          pointMarkersRadius: item.pointMarkerRadius ?? 3,
+          priceFormat: {
+            type: "price",
+            precision: inferPricePrecision(normalizedData),
+            minMove: 10 ** -inferPricePrecision(normalizedData)
+          },
+          lastValueVisible: false,
+          priceLineVisible: false
+        });
+        api.setData(normalizedData);
+      }
       seriesMap.set(item.id, api);
     }
 
@@ -250,6 +334,7 @@
       series.map((item) => [
         item.id,
         item.type ?? "area",
+        item.priceScaleId ?? "right",
         item.lineStyle ?? "solid",
         item.showPointMarkers ?? false,
         item.pointMarkerRadius ?? null,

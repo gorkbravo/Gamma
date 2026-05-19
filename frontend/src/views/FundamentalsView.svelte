@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import SearchDropdown from "../components/SearchDropdown.svelte";
-  import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import HeroPriceChart from "../components/HeroPriceChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
     CrossTabHandoffEnvelope,
@@ -20,6 +20,7 @@
     FundamentalsSearchOptions,
     FundamentalsSelectOptions
   } from "../lib/stores/app";
+  import type { HeroPricePoint } from "../lib/view-models/hero-price-chart";
   import {
     buildDcfSavePayload,
     createDcfDraft,
@@ -551,19 +552,12 @@
   $: marketContextMetrics = marketContextMetricIds
     .map((metricId) => headlineMetrics.find((metric) => metric.metric_id === metricId))
     .filter((metric): metric is NonNullable<typeof headlineMetrics[number]> => Boolean(metric));
-  $: priceSeries = overview?.price_history?.length
-    ? [
-        {
-          id: "price",
-          label: `${overview.company.ticker} price`,
-          color: "var(--chart-primary)",
-          type: "area",
-          data: overview.price_history
-            .map((point) => ({ time: parseApiTimestampToUtcSeconds(point.timestamp), value: point.price }))
-            .filter((point): point is { time: number; value: number } => point.time != null)
-        }
-      ] satisfies ChartSeries[]
-    : [];
+  $: heroPricePoints = (overview?.price_history ?? [])
+    .map((point) => ({
+      time: parseApiTimestampToUtcSeconds(point.timestamp),
+      close: point.price
+    }))
+    .filter((point): point is HeroPricePoint => point.time != null && Number.isFinite(point.close));
   $: groupedHeatmapRows = Object.entries(
     (overview?.peer_heatmap?.rows ?? []).reduce<Record<string, NonNullable<FundamentalsOverview["peer_heatmap"]>["rows"]>>((groups, row) => {
       const family = row.family ?? "other";
@@ -698,9 +692,9 @@
             <small>{overview?.price_history?.length ?? 0} points</small>
           </div>
 
-          {#if priceSeries.length}
+          {#if heroPricePoints.length}
             <div class="chart-panel">
-              <TimeSeriesChart series={priceSeries} height={240} emptyMessage="No price history available." />
+              <HeroPriceChart chartKey="fundamentals:equity" points={heroPricePoints} height={240} emptyMessage="No price history available." />
             </div>
           {:else}
             <div class="empty-panel">No price history</div>
