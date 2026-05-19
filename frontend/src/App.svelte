@@ -234,6 +234,10 @@
   let synthesisCopilotSurface: CopilotSurfaceState;
   let copilotSurface: CopilotSurfaceState;
 
+  function normalizeAppTabId(tabId: TabId | "research"): TabId {
+    return tabId === "research" ? "equity_research" : tabId;
+  }
+
   $: orderedTabs =
     workspaceMode == null
       ? []
@@ -1301,15 +1305,15 @@
     return false;
   }
 
-  async function selectTab(tab: TabId) {
+  async function selectTab(tab: TabId | "research") {
     if (!workspaceMode) {
       return;
     }
-    if (!isWorkspaceTab(workspaceMode, tab)) {
+    const nextTab = normalizeAppTabId(tab);
+    if (!isWorkspaceTab(workspaceMode, nextTab)) {
       resetNavigationSearch();
       return;
     }
-    const nextTab = tab;
 
     resetNavigationSearch();
     dismissSurfaces();
@@ -1399,6 +1403,15 @@
     const autoLoaded = await loadResearchIvContext();
     if (!autoLoaded) {
       await loadIvSession();
+    }
+  }
+
+  async function openStrategyLabFromEquityResearch() {
+    workspaceMode = "research";
+    activeTab.set("strategy_lab");
+    strategyLabMode = "composer";
+    if (!$savedResearchItems.length) {
+      await loadSavedResearch();
     }
   }
 
@@ -1656,7 +1669,7 @@
   }
 
   async function handleSendToCopilot(handoff: CrossTabHandoffEnvelope) {
-    const sourceTab = handoff.source_tab as TabId;
+    const sourceTab = normalizeAppTabId(handoff.source_tab as TabId | "research");
     latestCopilotHandoff = handoff;
     if (isWorkspaceTab("research", sourceTab) || isWorkspaceTab("portfolio", sourceTab)) {
       copilotContextTab = sourceTab;
@@ -1813,25 +1826,27 @@
   }
 
   async function selectNavigationRoute(route: NavigationRouteMatch) {
-    if (!workspaceMode || !isWorkspaceTab(workspaceMode, route.tab.id)) {
+    const routeTab = normalizeAppTabId(route.tab.id);
+    if (!workspaceMode || !isWorkspaceTab(workspaceMode, routeTab)) {
       resetNavigationSearch();
       return;
     }
-    await selectTab(route.tab.id);
+    await selectTab(routeTab);
     if (route.mode) {
-      await selectModeById(route.tab.id, route.mode.id);
+      await selectModeById(routeTab, route.mode.id);
     }
   }
 
   async function openSitrepHandoff(handoff: SitrepHandoffRequest) {
     workspaceMode = "research";
+    const targetTab = normalizeAppTabId(handoff.targetTab);
     if (handoff.symbol) {
       selectSharedEquity(handoff.symbol, handoff.label ?? null, "sitrep");
     }
 
-    await selectTab(handoff.targetTab);
+    await selectTab(targetTab);
 
-    if (handoff.targetTab === "commodities") {
+    if (targetTab === "commodities") {
       const nextMode = (handoff.targetMode ?? "overview") as CommodityMode;
       commoditiesMode = nextMode;
       await loadCommoditiesWorkspace({
@@ -1841,7 +1856,7 @@
       return;
     }
 
-    if (handoff.targetTab === "prediction_markets") {
+    if (targetTab === "prediction_markets") {
       if (handoff.marketId) {
         await selectPredictionMarket(handoff.marketId);
       }
@@ -1849,7 +1864,7 @@
     }
 
     if (handoff.targetMode) {
-      await selectModeById(handoff.targetTab, handoff.targetMode);
+      await selectModeById(targetTab, handoff.targetMode);
     }
   }
 
@@ -2125,6 +2140,7 @@
             onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
+            onOpenStrategyLab={openStrategyLabFromEquityResearch}
           />
         {:else if $activeTab === "macro"}
           <MacroView

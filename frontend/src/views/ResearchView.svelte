@@ -93,6 +93,7 @@
   export let onRestoreStrategy: ((result: StrategyLabResult) => void) | undefined = undefined;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
+  export let onOpenStrategyLab: (() => void) | undefined = undefined;
 
   type ChartMode =
     | "performance"
@@ -1908,6 +1909,9 @@
         <div class="builder-actions">
           <button type="button" on:click={() => onOpenRisk?.()} disabled={!result?.snapshot}>Open In Risk</button>
           <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In Options</button>
+          {#if surface === "equity"}
+            <button type="button" class="ghost-button" on:click={() => onOpenStrategyLab?.()} disabled={!result?.performance_points?.length}>Add To Strategy Lab</button>
+          {/if}
         </div>
 
         {#if result?.snapshot}

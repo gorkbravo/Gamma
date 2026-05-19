@@ -39,6 +39,7 @@
   export let onRestoreStrategy: ((result: StrategyLabResult) => void) | undefined = undefined;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
+  export let onOpenStrategyLab: (() => void) | undefined = undefined;
 </script>
 
 <ResearchView
@@ -66,4 +67,5 @@
   {onRestoreStrategy}
   {onOpenRisk}
   {onOpenIv}
+  {onOpenStrategyLab}
 />
