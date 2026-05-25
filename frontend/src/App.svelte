@@ -1330,15 +1330,19 @@
       if (await applySharedEquityToTab(nextTab)) {
         return;
       }
-      equityResearchMode = "overview";
       if (!$researchOverview) {
         await loadResearchOverview();
+      }
+      if (equityResearchMode === "saved_equity_research") {
+        await loadSavedResearch();
       }
       if (!$savedResearchItems.length) {
         await loadSavedResearch();
       }
     } else if (nextTab === "strategy_lab") {
-      strategyLabMode = "composer";
+      if (strategyLabMode === "saved_runs") {
+        await loadSavedResearch();
+      }
       if (!$savedResearchItems.length) {
         await loadSavedResearch();
       }

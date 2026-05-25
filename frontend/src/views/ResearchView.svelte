@@ -35,6 +35,7 @@
     buildStrategyComposerObjects,
     buildResearchTreemapSections,
     buildPreviewRows,
+    classifyResearchSurfaceMode,
     classifySavedResearchSurface,
     deriveConstituentsFromResearchResult,
     deriveCoverageFromResearchResult,
@@ -57,17 +58,15 @@
     treemapDensityClass,
     treemapRectStyle,
     type ResearchCompareOption,
-    type EquityResearchMode,
     type ResearchMode,
     type ResearchPreviewRow,
-    type StrategyLabMode,
+    type ResearchSurface,
+    type ResearchSurfaceMode,
+    type ResearchSurfaceModeKind,
     type ResearchTreemapSection,
     type ResearchTreemapTile
   } from "../lib/view-models/research";
   import type { HeroPricePoint } from "../lib/view-models/hero-price-chart";
-
-  type ResearchSurface = "legacy" | "equity" | "strategy";
-  type ResearchSurfaceMode = ResearchMode | EquityResearchMode | StrategyLabMode;
 
   export let surface: ResearchSurface = "legacy";
   export let mode: ResearchSurfaceMode = "overview";
@@ -344,38 +343,13 @@
     return target;
   }
 
-  function isOverviewMode() {
-    return mode === "overview";
-  }
-
-  function isScopeMode() {
-    return mode === "scope_analysis";
-  }
-
-  function isStrategyMode() {
-    return mode === "strategy_lab" || mode === "composer" || mode === "imports";
-  }
-
-  function isCompareMode() {
-    return (
-      mode === "compare_scenario" ||
-      mode === "comparables" ||
-      mode === "scenario_context" ||
-      mode === "backtest_analyze" ||
-      mode === "regime_stress"
-    );
-  }
-
-  function isSavedMode() {
-    return mode === "saved_research" || mode === "saved_equity_research" || mode === "saved_runs";
-  }
-
   function selectResearchMode(nextMode: ResearchSurfaceMode) {
     mode = nextMode;
-    if (isOverviewMode() && !overview) {
+    const nextKind = classifyResearchSurfaceMode(surface, nextMode);
+    if (nextKind === "overview" && !overview) {
       void loadOverview();
     }
-    if (isSavedMode()) {
+    if (nextKind === "legacy_saved" || nextKind === "equity_saved" || nextKind === "strategy_saved") {
       void onLoadSaved();
     }
   }
@@ -851,8 +825,22 @@
   let strategyChartSeries: ChartSeries[] = [];
   let compareChartSeries: ChartSeries[] = [];
   let compareRelativeDrawdownSeries: ChartSeries[] = [];
+  let stressDrawdownRows: TimeSeriesPoint[] = [];
+  let rollingStressRows: StrategyLabResult["rolling_points"] = [];
+  let strategyModeTitle = "Imported Return Stream";
+  let strategyModeEyebrow = "Strategy Lab";
+  let strategyModeSummary = "CSV rows are normalized into returns for analysis only. Gamma does not run strategy code or connect this stream to execution.";
+  let compareModeTitle = "Return Stream Comparison";
+  let compareModeEyebrow = "Compare / Scenario";
+  let compareModeSummary = "Scenario output is normalized historical analytics only. It does not change broker portfolios or rebalance anything.";
   let compareOptions: ResearchCompareOption[] = [];
   let compareMetricRows: Array<{ label: string; left: number | null | undefined; right: number | null | undefined }> = [];
+  let surfaceModeKind: ResearchSurfaceModeKind = "overview";
+  let overviewModeActive = true;
+  let scopeModeActive = false;
+  let strategyModeActive = false;
+  let compareModeActive = false;
+  let savedModeActive = false;
   let weightBars: RankBarItem[] = [];
   let structureMetrics: ResearchStructure = emptyStructure;
   let coverageMetrics: ResearchCoverage = emptyCoverage;
@@ -968,7 +956,7 @@
   }
 
   onMount(() => {
-    if (isOverviewMode() && !overview) {
+    if (classifyResearchSurfaceMode(surface, mode) === "overview" && !overview) {
       void loadOverview();
     }
   });
@@ -1006,6 +994,20 @@
   }
   $: savedResearchList = Array.isArray(savedItems) ? savedItems : [];
   $: activeStrategyResult = strategyComposition ?? strategyResult;
+  $: surfaceModeKind = classifyResearchSurfaceMode(surface, mode);
+  $: overviewModeActive = surfaceModeKind === "overview";
+  $: scopeModeActive = surfaceModeKind === "scope_analysis";
+  $: strategyModeActive =
+    surfaceModeKind === "legacy_strategy" ||
+    surfaceModeKind === "strategy_composer" ||
+    surfaceModeKind === "strategy_backtest" ||
+    surfaceModeKind === "strategy_regime" ||
+    surfaceModeKind === "strategy_imports";
+  $: compareModeActive =
+    surfaceModeKind === "legacy_compare" ||
+    surfaceModeKind === "equity_comparables" ||
+    surfaceModeKind === "equity_scenario_context";
+  $: savedModeActive = surfaceModeKind === "legacy_saved" || surfaceModeKind === "equity_saved" || surfaceModeKind === "strategy_saved";
   $: compareOptions = buildResearchCompareOptions(result, activeStrategyResult, savedResearchList);
   $: visibleSavedItems = savedResearchList.filter((item) => {
     if (surface === "legacy") {
@@ -1299,6 +1301,35 @@
           : [])
       ]
     : [];
+  $: stressDrawdownRows = [...(activeStrategyResult?.drawdown_points ?? [])]
+    .filter((point) => Number.isFinite(point.value))
+    .sort((left, right) => left.value - right.value)
+    .slice(0, 8);
+  $: rollingStressRows = [...(activeStrategyResult?.rolling_points ?? [])].slice(-12);
+  $: strategyModeTitle =
+    surfaceModeKind === "strategy_composer"
+      ? "Gamma Object Composer"
+      : surfaceModeKind === "strategy_imports" || surfaceModeKind === "legacy_strategy"
+        ? "Return Stream Import"
+        : surfaceModeKind === "strategy_regime"
+          ? "Regime / Stress Lens"
+          : "Backtest / Analyze";
+  $: strategyModeEyebrow =
+    surfaceModeKind === "strategy_composer"
+      ? "Strategy Composer"
+      : surfaceModeKind === "strategy_imports" || surfaceModeKind === "legacy_strategy"
+        ? "CSV Import"
+        : surfaceModeKind === "strategy_regime"
+          ? "Strategy Stress"
+          : "Strategy Analytics";
+  $: strategyModeSummary =
+    surfaceModeKind === "strategy_composer"
+      ? "Compose return-bearing Gamma objects into a read-only strategy result. Weights are normalized by the backend."
+      : surfaceModeKind === "strategy_imports" || surfaceModeKind === "legacy_strategy"
+        ? "Paste or map an external return stream. Gamma validates and normalizes the data without executing strategy code."
+        : surfaceModeKind === "strategy_regime"
+          ? "Inspect drawdown windows, rolling beta, and rolling correlation to identify where the imported stream is fragile."
+          : "Review normalized performance, benchmark-relative behavior, rolling risk, and period returns for the active strategy stream.";
   $: compareChartSeries = compareResult
     ? [
         {
@@ -1330,6 +1361,28 @@
         }
       ]
     : [];
+  $: compareModeEyebrow =
+    surfaceModeKind === "equity_comparables"
+      ? "Equity Comparables"
+      : surfaceModeKind === "equity_scenario_context"
+        ? "Scenario / Context"
+        : "Compare / Scenario";
+  $: compareModeTitle =
+    surfaceModeKind === "equity_comparables"
+      ? compareResult
+        ? `${compareResult.left.label} vs ${compareResult.right.label}`
+        : "Peer And Benchmark Comparison"
+      : surfaceModeKind === "equity_scenario_context"
+        ? activeHeadline(result)
+        : compareResult
+          ? `${compareResult.left.label} vs ${compareResult.right.label}`
+          : "Return Stream Comparison";
+  $: compareModeSummary =
+    surfaceModeKind === "equity_comparables"
+      ? "Compare the active equity scope against saved scopes, strategy streams, or benchmarks using aligned return windows."
+      : surfaceModeKind === "equity_scenario_context"
+        ? "Frame the active scope for Risk, Options, Strategy Lab, and saved-object reuse without modifying any portfolio."
+        : "Scenario output is normalized historical analytics only. It does not change broker portfolios or rebalance anything.";
 </script>
 
 <section class="view">
@@ -1357,7 +1410,7 @@
     </div>
   </article>
 
-  {#if isOverviewMode()}
+  {#if overviewModeActive}
       <div class="overview-grid">
         <article class="panel treemap-panel">
           <div class="panel-header treemap-header">
@@ -1559,7 +1612,7 @@
           {/if}
         </article>
       </div>
-  {:else if isScopeMode()}
+  {:else if scopeModeActive}
       <div class="workspace-grid">
     <div class="primary-column">
       <article class="panel performance-panel">
@@ -1945,10 +1998,10 @@
       </article>
       </aside>
     </div>
-  {:else if isStrategyMode()}
+  {:else if strategyModeActive}
     <div class="workspace-grid">
       <div class="primary-column">
-        {#if surface === "strategy" && mode === "composer"}
+        {#if surfaceModeKind === "strategy_composer"}
           <article class="panel table-panel">
             <div class="panel-header top-line">
               <div class="title-block">
@@ -2008,9 +2061,9 @@
         <article class="panel performance-panel">
           <div class="panel-header top-line">
             <div class="title-block">
-              <p class="eyebrow">Strategy Lab</p>
-              <h2>{activeStrategyResult?.name ?? "Imported Return Stream"}</h2>
-              <p class="muted">CSV rows are normalized into returns for analysis only. Gamma does not run strategy code or connect this stream to execution.</p>
+              <p class="eyebrow">{strategyModeEyebrow}</p>
+              <h2>{activeStrategyResult?.name ?? strategyModeTitle}</h2>
+              <p class="muted">{strategyModeSummary}</p>
             </div>
             <div class="builder-actions compact">
               <button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
@@ -2033,6 +2086,78 @@
           </div>
         </article>
 
+        {#if surfaceModeKind === "strategy_imports" || surfaceModeKind === "legacy_strategy"}
+          <article class="panel table-panel">
+            <div class="panel-header top-line">
+              <div class="title-block">
+                <p class="eyebrow">Import Preview</p>
+                <h3>Parsed CSV Rows</h3>
+                <p class="muted">Map the date, value, and optional benchmark columns before analysis. Raw uploaded rows are not persisted by default.</p>
+              </div>
+              <small>{parsedStrategyCsv.rows.length} rows / {parsedStrategyCsv.columns.length} columns</small>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr>{#each parsedStrategyCsv.columns.slice(0, 5) as column}<th>{column}</th>{/each}</tr></thead>
+                <tbody>
+                  {#if parsedStrategyCsv.rows.length}
+                    {#each parsedStrategyCsv.rows.slice(0, 8) as row}
+                      <tr>{#each parsedStrategyCsv.columns.slice(0, 5) as column}<td>{row[column] ?? ""}</td>{/each}</tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan={Math.max(parsedStrategyCsv.columns.slice(0, 5).length, 1)}>Paste CSV text to inspect parsed rows.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        {/if}
+
+        {#if surfaceModeKind === "strategy_regime"}
+          <div class="detail-split">
+            <article class="panel table-panel">
+              <div class="panel-header"><div><p class="eyebrow">Stress Windows</p><h3>Worst Drawdowns</h3></div><small>{stressDrawdownRows.length} points</small></div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Date</th><th>Drawdown</th></tr></thead>
+                  <tbody>
+                    {#if stressDrawdownRows.length}
+                      {#each stressDrawdownRows as point}
+                        <tr><td>{shortDate(point.timestamp)}</td><td>{pct(point.value)}</td></tr>
+                      {/each}
+                    {:else}
+                      <tr><td colspan="2">No drawdown series yet.</td></tr>
+                    {/if}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="panel table-panel">
+              <div class="panel-header"><div><p class="eyebrow">Rolling Risk</p><h3>Recent Regime Read</h3></div><small>{rollingStressRows.length} windows</small></div>
+              <div class="table-wrap compact-table">
+                <table>
+                  <thead><tr><th>Date</th><th>Roll Ret</th><th>Vol</th><th>Beta</th><th>Corr</th></tr></thead>
+                  <tbody>
+                    {#if rollingStressRows.length}
+                      {#each rollingStressRows as row}
+                        <tr>
+                          <td>{shortDate(row.timestamp)}</td>
+                          <td>{pct(row.rolling_return)}</td>
+                          <td>{pct(row.rolling_volatility)}</td>
+                          <td>{fmt(row.rolling_beta, 2)}</td>
+                          <td>{fmt(row.rolling_correlation, 2)}</td>
+                        </tr>
+                      {/each}
+                    {:else}
+                      <tr><td colspan="5">No rolling windows yet.</td></tr>
+                    {/if}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        {:else}
         <div class="detail-split">
           <article class="panel table-panel">
             <div class="panel-header"><div><p class="eyebrow">Monthly</p><h3>Monthly Returns</h3></div><small>{activeStrategyResult?.monthly_returns.length ?? 0} periods</small></div>
@@ -2070,9 +2195,11 @@
             </div>
           </article>
         </div>
+        {/if}
       </div>
 
       <aside class="support-column">
+        {#if surfaceModeKind === "strategy_imports" || surfaceModeKind === "legacy_strategy"}
         <article class="panel control-panel">
           <div class="rail-header">
             <div><p class="eyebrow">CSV Import</p><h3>Return Stream Mapping</h3></div>
@@ -2103,6 +2230,25 @@
             </div>
           {/if}
         </article>
+        {:else}
+        <article class="panel rail-panel">
+          <div class="rail-header"><div><p class="eyebrow">Mode Context</p><h3>{strategyModeTitle}</h3></div></div>
+          <div class="stack">
+            <div class="row"><span>Active Stream</span><strong>{activeStrategyResult?.name ?? "N/A"}</strong></div>
+            <div class="row"><span>Return Points</span><strong>{activeStrategyResult?.returns_points.length ?? 0}</strong></div>
+            <div class="row"><span>Benchmark Points</span><strong>{activeStrategyResult?.benchmark_points.length ?? 0}</strong></div>
+            <div class="row"><span>Rolling Windows</span><strong>{activeStrategyResult?.rolling_points.length ?? 0}</strong></div>
+            <div class="row"><span>Saved Runs</span><strong>{visibleSavedItems.length}</strong></div>
+          </div>
+          {#if surfaceModeKind === "strategy_composer"}
+            <p class="muted">Composer can combine the latest scope, latest imported stream, and saved return streams into a normalized read-only object.</p>
+          {:else if surfaceModeKind === "strategy_regime"}
+            <p class="muted">Regime/stress uses the current return stream only; macro-aware regime joins can be layered later without changing the import contract.</p>
+          {:else}
+            <p class="muted">Backtest/analyze uses the latest imported or composed stream and preserves uploaded-source provenance.</p>
+          {/if}
+        </article>
+        {/if}
 
         <article class="panel rail-panel">
           <div class="rail-header"><div><p class="eyebrow">Source</p><h3>Warnings &amp; Provenance</h3></div></div>
@@ -2118,15 +2264,15 @@
         </article>
       </aside>
     </div>
-  {:else if isCompareMode()}
+  {:else if compareModeActive}
     <div class="workspace-grid">
       <div class="primary-column">
         <article class="panel performance-panel">
           <div class="panel-header top-line">
             <div class="title-block">
-              <p class="eyebrow">Compare / Scenario</p>
-              <h2>{compareResult ? `${compareResult.left.label} vs ${compareResult.right.label}` : "Return Stream Comparison"}</h2>
-              <p class="muted">Scenario output is normalized historical analytics only. It does not change broker portfolios or rebalance anything.</p>
+              <p class="eyebrow">{compareModeEyebrow}</p>
+              <h2>{compareModeTitle}</h2>
+              <p class="muted">{compareModeSummary}</p>
             </div>
           </div>
 
@@ -2141,6 +2287,28 @@
 
           <TimeSeriesChart series={compareChartSeries} height={380} emptyMessage="Select two loaded or saved return streams to compare." />
         </article>
+
+        {#if surfaceModeKind === "equity_scenario_context"}
+          <article class="panel">
+            <div class="panel-header top-line">
+              <div class="title-block">
+                <p class="eyebrow">Scope Context</p>
+                <h3>Forwardable Research State</h3>
+              </div>
+              <div class="builder-actions compact">
+                <button type="button" on:click={() => onOpenRisk?.()} disabled={!result?.snapshot}>Risk</button>
+                <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Options</button>
+                <button type="button" class="ghost-button" on:click={() => onOpenStrategyLab?.()} disabled={!result?.performance_points?.length}>Strategy Lab</button>
+              </div>
+            </div>
+            <div class="kpi-grid">
+              <article class="metric"><span>Scope</span><strong>{formatScopeLabel(result?.scope_type)}</strong><small>{activePrimaryScopeLabel(result)}</small></article>
+              <article class="metric"><span>Benchmark</span><strong>{result?.benchmark_symbol ?? benchmarkSymbol}</strong><small>{coverageMetrics.benchmark_overlap_count} overlap obs</small></article>
+              <article class="metric"><span>Available Names</span><strong>{coverageMetrics.available_symbols.length}</strong><small>{coverageMetrics.missing_symbols.length} missing</small></article>
+              <article class="metric"><span>Effective Positions</span><strong>{fmt(structureMetrics.effective_positions, 2)}</strong><small>{pct(structureMetrics.top5_weight)} top-5</small></article>
+            </div>
+          </article>
+        {/if}
 
         <div class="detail-split">
           <article class="panel rail-panel">
@@ -2176,12 +2344,37 @@
 
       <aside class="support-column">
         <article class="panel control-panel">
-          <div class="rail-header"><div><p class="eyebrow">Objects</p><h3>Select Streams</h3></div><strong>{compareOptions.length} available</strong></div>
+          <div class="rail-header"><div><p class="eyebrow">{surfaceModeKind === "equity_scenario_context" ? "Scenario Objects" : "Comparable Objects"}</p><h3>Select Streams</h3></div><strong>{compareOptions.length} available</strong></div>
           <label><span>Left</span><select bind:value={compareLeftSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
           <label><span>Right</span><select bind:value={compareRightSource}>{#each compareOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>
           <div class="builder-actions"><button type="button" on:click={runComparison} disabled={compareLoading || compareOptions.length < 2}>{compareLoading ? "Comparing..." : "Run Compare"}</button></div>
           {#if compareWarning}<p class="warning">{compareWarning}</p>{/if}
         </article>
+
+        {#if surfaceModeKind === "equity_comparables"}
+          <article class="panel table-panel">
+            <div class="panel-header"><div><p class="eyebrow">Scope Peers</p><h3>Constituent Comparison</h3></div><small>{constituentRows.length} rows</small></div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead><tr><th>Symbol</th><th>Weight</th><th>Return</th><th>Vol</th></tr></thead>
+                <tbody>
+                  {#if constituentRows.length}
+                    {#each constituentRows.slice(0, 10) as constituent}
+                      <tr>
+                        <td>{constituent.display_symbol ?? constituent.symbol}</td>
+                        <td>{pct(constituent.weight)}</td>
+                        <td>{pct(constituent.total_return)}</td>
+                        <td>{pct(constituent.annual_vol)}</td>
+                      </tr>
+                    {/each}
+                  {:else}
+                    <tr><td colspan="4">Run Scope Analysis to seed comparable constituents.</td></tr>
+                  {/if}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        {/if}
 
         <article class="panel rail-panel">
           <div class="rail-header"><div><p class="eyebrow">Warnings</p><h3>Scenario Notes</h3></div></div>
@@ -2197,7 +2390,7 @@
         </article>
       </aside>
     </div>
-  {:else if isSavedMode()}
+  {:else if savedModeActive}
     <div class="workspace-grid">
       <div class="primary-column">
         <article class="panel table-panel">

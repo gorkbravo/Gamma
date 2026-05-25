@@ -267,7 +267,15 @@ Important caveats:
 
 #### Equity Research tab
 
-This tab owns equity market overview and scope analysis. The scope builder analyzes either:
+This tab owns equity market overview, scope analysis, comparables, scenario/context framing, and saved equity research. Its modes are:
+
+- `Overview`
+- `Scope Analysis`
+- `Comparables`
+- `Scenario / Context`
+- `Saved Equity Research`
+
+The scope builder analyzes either:
 
 - a `single_ticker` scope
 - a `synthetic_portfolio` scope
@@ -303,6 +311,18 @@ Important caveats:
 - research scopes are synthetic analysis contexts, not broker portfolios
 - missing symbols and incomplete overlap reduce the number of aligned observations
 - only single-name research can forward directly into IV
+
+#### Strategy Lab tab
+
+This tab owns read-only strategy-object work. Its modes are:
+
+- `Composer`
+- `Backtest / Analyze`
+- `Regime / Stress`
+- `Imports`
+- `Saved Runs`
+
+Current Strategy Lab flows can import CSV return streams, analyze normalized performance, compose return-bearing Gamma objects, inspect drawdown and rolling-risk stress windows, and reload saved normalized runs. It does not execute strategy code, connect to broker execution, or persist raw uploaded CSV rows by default.
 
 #### Macro tab
 

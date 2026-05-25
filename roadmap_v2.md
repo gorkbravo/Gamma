@@ -581,7 +581,7 @@ Suggested modes:
 The current Research tab should become `Scope Analysis`, not be discarded.
 
 Implementation note:
-- Research now has the intended V2 mode set registered in order: `Overview` (`Shift+1`), `Scope Analysis` (`Shift+2`), `Strategy Lab` (`Shift+3`), `Compare / Scenario` (`Shift+4`), and `Saved Research` (`Shift+5`). `Overview` remains first/default, and the existing single-ticker and synthetic-portfolio analyzer remains available under `Scope Analysis`.
+- The former combined Research tab has been split into two mode-bearing tabs. `Equity Research` owns `Overview`, `Scope Analysis`, `Comparables`, `Scenario / Context`, and `Saved Equity Research`; `Strategy Lab` owns `Composer`, `Backtest / Analyze`, `Regime / Stress`, `Imports`, and `Saved Runs`. Legacy `/Research/*` navigation still maps into the split tabs, and the existing single-ticker and synthetic-portfolio analyzer remains available under `Scope Analysis`.
 
 #### 1. Scope Analysis mode
 
@@ -751,7 +751,7 @@ Suggested progression:
 7. Add richer handoffs to Fundamentals, Risk, IV, and Copilot.
 
 Implementation note:
-- Items 1-6 now have first-pass implementations plus a second hardening pass for coverage diagnostics, saved-object reload/reuse, Strategy Lab validation, and Compare alignment/relative-drawdown diagnostics. Remaining Research V2 work is mainly provider-backed depth and cross-domain breadth: full index/reference data, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, regime slicing, and a true provider-selection layer beyond the current IBKR/mock/static-reference setup.
+- Items 1-6 now have first-pass implementations plus a second hardening pass for coverage diagnostics, saved-object reload/reuse, Strategy Lab validation, Compare alignment/relative-drawdown diagnostics, and a split Equity Research / Strategy Lab mode shell. Remaining Research V2 work is mainly provider-backed depth and cross-domain breadth: full index/reference data, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, deeper macro-aware regime slicing, and a true provider-selection layer beyond the current IBKR/mock/static-reference setup.
 
 ### Deliverable
 
