@@ -3,6 +3,19 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
+from src.api.schemas.crypto import CryptoWorkspaceRequestModel
+from src.api.schemas.prediction_markets import PredictionMarketScreenerRequestModel
+from src.api.schemas.research import StrategyLabAnalyzeRequestModel
+from src.api.schemas.risk import RiskComputeRequestModel
+from src.application.request_limits import (
+    MAX_CRYPTO_WORKSPACE_LIMIT,
+    MAX_PREDICTION_MARKET_LIMIT,
+    MAX_PREDICTION_MARKET_VENUES,
+    MAX_REQUEST_TEXT_CHARS,
+    MAX_RISK_HORIZON_DAYS,
+    MAX_RISK_MC_SIMULATIONS,
+    MAX_STRATEGY_LAB_ROWS,
+)
 from src.application.runtime import build_runtime
 from src.models.app_mode import ResearchScopeType
 from src.models.crypto import (
@@ -356,6 +369,64 @@ def test_risk_compute_endpoint(tmp_path):
         assert "fan_percentiles" in payload["monte_carlo"]
         assert "correlation_matrix" in payload
         assert "assets" in payload["correlation_matrix"]
+    finally:
+        runtime.shutdown()
+
+
+def test_expensive_request_models_reject_oversized_payloads(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        risk_response = client.post(
+            "/risk/compute",
+            json={
+                "snapshot": snapshot,
+                "mc_num_simulations": MAX_RISK_MC_SIMULATIONS + 1,
+            },
+        )
+        horizon_response = client.post(
+            "/risk/compute",
+            json={
+                "snapshot": snapshot,
+                "horizon_days": MAX_RISK_HORIZON_DAYS + 1,
+            },
+        )
+        strategy_response = client.post(
+            "/research/strategy-lab/analyze",
+            json={
+                "rows": [{"date": "2026-01-02", "return": 0.01}]
+                * (MAX_STRATEGY_LAB_ROWS + 1),
+            },
+        )
+        crypto_response = client.post(
+            "/crypto/workspace",
+            json={"query": "x" * (MAX_REQUEST_TEXT_CHARS + 1)},
+        )
+        prediction_response = client.post(
+            "/prediction-markets/screener",
+            json={"limit": MAX_PREDICTION_MARKET_LIMIT + 1},
+        )
+
+        assert RiskComputeRequestModel(
+            snapshot=snapshot,
+            mc_num_simulations=MAX_RISK_MC_SIMULATIONS,
+            horizon_days=MAX_RISK_HORIZON_DAYS,
+        )
+        assert StrategyLabAnalyzeRequestModel(
+            rows=[{"date": "2026-01-02", "return": 0.01}] * MAX_STRATEGY_LAB_ROWS
+        )
+        assert CryptoWorkspaceRequestModel(query="x" * 128, limit=MAX_CRYPTO_WORKSPACE_LIMIT)
+        assert PredictionMarketScreenerRequestModel(
+            query="x" * MAX_REQUEST_TEXT_CHARS,
+            venues=["polymarket"] * MAX_PREDICTION_MARKET_VENUES,
+            limit=MAX_PREDICTION_MARKET_LIMIT,
+        )
+
+        assert risk_response.status_code == 422
+        assert horizon_response.status_code == 422
+        assert strategy_response.status_code == 422
+        assert crypto_response.status_code == 422
+        assert prediction_response.status_code == 422
     finally:
         runtime.shutdown()
 

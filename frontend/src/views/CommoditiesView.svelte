@@ -414,6 +414,12 @@
       }));
   }
 
+  function fundamentalStackTitle(activeMode: CommodityMode) {
+    if (activeMode === "energy") return "EIA Fundamental Stack";
+    if (activeMode === "metals") return "LME / COMEX Warehouse Stocks";
+    return "Fundamental Stack";
+  }
+
   function buildMetalsCorrelationRows(
     data: CommodityWorkspaceResponse | null,
     histories: Record<string, MacroSeriesHistory>
@@ -1711,6 +1717,39 @@
           {/if}
         </article>
       </section>
+
+      <section class="panel table-panel">
+        <header class="panel-title">
+          <span>Vessel / Flow Proxy</span>
+          <span class="header-meta">{selectedCrossDomainLinks.length} links</span>
+        </header>
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead>
+              <tr>
+                <th>Target</th>
+                <th>Domain</th>
+                <th>Relationship</th>
+                <th class="num">Conf</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#if selectedCrossDomainLinks.length}
+                {#each selectedCrossDomainLinks as link}
+                  <tr>
+                    <td><strong>{link.target_label}</strong></td>
+                    <td>{humanize(link.target_domain)}</td>
+                    <td>{humanize(link.relationship)}</td>
+                    <td class="num">{formatNumber(link.confidence, 2)}</td>
+                  </tr>
+                {/each}
+              {:else}
+                <tr class="empty-row"><td colspan="4">No vessel-flow proxy linked.</td></tr>
+              {/if}
+            </tbody>
+          </table>
+        </div>
+      </section>
     {/if}
 
     <!-- 2b. Metals curve-support: Substitution Spreads + Term Structure Heatmap -->
@@ -1906,8 +1945,41 @@
     {/if}
 
     <!-- 5. Fundamentals charts (split by category group) -->
-    {#if (mode === "energy" || mode === "metals" || mode === "inventories_fundamentals") && fundamentalGroups.length}
+    {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
       <section class="fundamental-grid">
+        <article class="panel table-panel">
+          <header class="panel-title">
+            <span>{fundamentalStackTitle(mode)}</span>
+            <span class="header-meta">{fundamentalTapeRows.length} series</span>
+          </header>
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Series</th>
+                  <th>Type</th>
+                  <th class="num">Latest</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#if fundamentalTapeRows.length}
+                  {#each fundamentalTapeRows as row}
+                    <tr>
+                      <td><strong>{row.label}</strong></td>
+                      <td>{row.category}</td>
+                      <td class="num">{formatNumber(row.latest, 2)} {row.unit}</td>
+                      <td>{row.signal}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr class="empty-row"><td colspan="4">No fundamental series linked.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
         {#each fundamentalGroups as group}
           <article class="panel chart-panel">
             <header class="panel-title">
@@ -1921,7 +1993,7 @@
     {/if}
 
     <!-- 6. Fundamental Tape (full width, room to breathe) -->
-    {#if (mode === "energy" || mode === "metals" || mode === "inventories_fundamentals") && fundamentalTapeRows.length}
+    {#if mode === "energy" || mode === "metals" || mode === "inventories_fundamentals"}
       <section class="panel table-panel">
         <header class="panel-title">
           <span>Fundamental Tape</span>
@@ -1940,24 +2012,28 @@
               </tr>
             </thead>
             <tbody>
-              {#each fundamentalTapeRows as row}
-                <tr>
-                  <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
-                  <td>{row.category}</td>
-                  <td class="num">{formatNumber(row.latest, 2)} {row.unit}</td>
-                  <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
-                  <td class="num">{formatPercentile(row.percentile)}</td>
-                  <td class="sparkline-cell">
-                    {#if row.path}
-                      <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${row.label} recent path`}>
-                        <path d={row.path}></path>
-                      </svg>
-                    {:else}
-                      <span class="sparkline-empty">N/A</span>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
+              {#if fundamentalTapeRows.length}
+                {#each fundamentalTapeRows as row}
+                  <tr>
+                    <td><strong>{row.label}</strong><span class="meta">{row.source}</span></td>
+                    <td>{row.category}</td>
+                    <td class="num">{formatNumber(row.latest, 2)} {row.unit}</td>
+                    <td class="num {row.tone}">{formatNumber(row.change, 2)}</td>
+                    <td class="num">{formatPercentile(row.percentile)}</td>
+                    <td class="sparkline-cell">
+                      {#if row.path}
+                        <svg class="sparkline" viewBox="0 0 96 28" aria-label={`${row.label} recent path`}>
+                          <path d={row.path}></path>
+                        </svg>
+                      {:else}
+                        <span class="sparkline-empty">N/A</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              {:else}
+                <tr class="empty-row"><td colspan="6">No fundamental tape rows.</td></tr>
+              {/if}
             </tbody>
           </table>
         </div>
@@ -1965,34 +2041,38 @@
     {/if}
 
     <!-- 7. Inventory vs Seasonality (energy only, box-plot redesign) -->
-    {#if (mode === "energy" || mode === "metals") && inventoryCloudRows.length}
+    {#if mode === "energy" || mode === "metals"}
       <section class="panel rows-panel">
         <header class="panel-title">
           <span>Inventory vs Seasonality</span>
           <span class="header-meta">5Y · same week-of-year band</span>
         </header>
         <div class="seasonality-list">
-          {#each inventoryCloudRows as row}
-            <div class="seasonality-row">
-              <span class="row-label" title={row.label}>{row.label}</span>
-              <span class="num meta range-min">{formatNumber(row.min, 1)}</span>
-              <div class="seasonality-band">
-                <span class="band-whisker"></span>
-                {#if row.q1Pos != null && row.q3Pos != null}
-                  <span class="band-box" style={`left:${row.q1Pos}%;width:${Math.max(0.5, row.q3Pos - row.q1Pos)}%`}></span>
-                {/if}
-                {#if row.medianPos != null}
-                  <span class="band-median" style={`left:${row.medianPos}%`}></span>
-                {/if}
-                {#if row.position != null}
-                  <span class="band-marker {row.tone}" style={`left:${row.position}%`}></span>
-                {/if}
+          {#if inventoryCloudRows.length}
+            {#each inventoryCloudRows as row}
+              <div class="seasonality-row">
+                <span class="row-label" title={row.label}>{row.label}</span>
+                <span class="num meta range-min">{formatNumber(row.min, 1)}</span>
+                <div class="seasonality-band">
+                  <span class="band-whisker"></span>
+                  {#if row.q1Pos != null && row.q3Pos != null}
+                    <span class="band-box" style={`left:${row.q1Pos}%;width:${Math.max(0.5, row.q3Pos - row.q1Pos)}%`}></span>
+                  {/if}
+                  {#if row.medianPos != null}
+                    <span class="band-median" style={`left:${row.medianPos}%`}></span>
+                  {/if}
+                  {#if row.position != null}
+                    <span class="band-marker {row.tone}" style={`left:${row.position}%`}></span>
+                  {/if}
+                </div>
+                <span class="num meta range-max">{formatNumber(row.max, 1)}</span>
+                <strong class="num {row.tone}">{formatNumber(row.latest, 1)}</strong>
+                <span class="num meta pctl-cell">{formatPercentile(row.percentile)}</span>
               </div>
-              <span class="num meta range-max">{formatNumber(row.max, 1)}</span>
-              <strong class="num {row.tone}">{formatNumber(row.latest, 1)}</strong>
-              <span class="num meta pctl-cell">{formatPercentile(row.percentile)}</span>
-            </div>
-          {/each}
+            {/each}
+          {:else}
+            <div class="empty-state-inline">No inventory seasonality history.</div>
+          {/if}
         </div>
       </section>
     {/if}

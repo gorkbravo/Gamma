@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+from src.application.request_limits import (
+    MAX_PREDICTION_MARKET_LIMIT,
+    MAX_PREDICTION_MARKET_VENUES,
+    MAX_REQUEST_TEXT_CHARS,
+)
 from src.application.prediction_market_service import PredictionMarketScreenerRequest
 from src.models.prediction_markets import (
     CalibrationBucket,
@@ -22,20 +28,23 @@ from src.models.prediction_markets import (
 
 
 class PredictionMarketScreenerRequestModel(BaseModel):
-    query: str = ""
-    venues: list[str] = Field(default_factory=list)
-    status: str = "open"
+    query: str = Field(default="", max_length=MAX_REQUEST_TEXT_CHARS)
+    venues: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(
+        default_factory=list,
+        max_length=MAX_PREDICTION_MARKET_VENUES,
+    )
+    status: str = Field(default="open", min_length=1, max_length=32)
     force_refresh: bool = False
-    category: str | None = None
-    min_volume: float | None = None
-    min_liquidity: float | None = None
-    min_open_interest: float | None = None
-    min_probability: float | None = None
-    max_probability: float | None = None
-    max_days_to_resolution: float | None = None
-    min_repricing_abs: float | None = None
-    sort_by: str = "research_rank"
-    limit: int = 40
+    category: str | None = Field(default=None, max_length=64)
+    min_volume: float | None = Field(default=None, ge=0)
+    min_liquidity: float | None = Field(default=None, ge=0)
+    min_open_interest: float | None = Field(default=None, ge=0)
+    min_probability: float | None = Field(default=None, ge=0, le=1)
+    max_probability: float | None = Field(default=None, ge=0, le=1)
+    max_days_to_resolution: float | None = Field(default=None, ge=0)
+    min_repricing_abs: float | None = Field(default=None, ge=0, le=1)
+    sort_by: str = Field(default="research_rank", min_length=1, max_length=64)
+    limit: int = Field(default=40, ge=1, le=MAX_PREDICTION_MARKET_LIMIT)
 
     def to_domain(self) -> PredictionMarketScreenerRequest:
         return PredictionMarketScreenerRequest(

@@ -19,6 +19,13 @@ from src.analytics.risk_metrics import (
 )
 from src.analytics.var import historical_var_cvar, monte_carlo_var_cvar, parametric_var
 from src.application.instrument_identity import identity_for_position
+from src.application.request_limits import (
+    MAX_RISK_BETA_WINDOW_DAYS,
+    MAX_RISK_HORIZON_DAYS,
+    MAX_RISK_LOOKBACK_DAYS,
+    MAX_RISK_MC_HORIZON_DAYS,
+    MAX_RISK_MC_SIMULATIONS,
+)
 from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot, RiskResults
 from src.services.data_providers import (
@@ -48,6 +55,14 @@ class RiskComputeRequest:
     base_currency: str
     include_monte_carlo: bool = True
     recommended_min_obs: int = 60
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "alpha", min(max(float(self.alpha), 0.0001), 0.9999))
+        object.__setattr__(self, "lookback_days", min(max(int(self.lookback_days), 20), MAX_RISK_LOOKBACK_DAYS))
+        object.__setattr__(self, "horizon_days", min(max(int(self.horizon_days), 1), MAX_RISK_HORIZON_DAYS))
+        object.__setattr__(self, "mc_horizon_days", min(max(int(self.mc_horizon_days), 1), MAX_RISK_MC_HORIZON_DAYS))
+        object.__setattr__(self, "mc_num_simulations", min(max(int(self.mc_num_simulations), 100), MAX_RISK_MC_SIMULATIONS))
+        object.__setattr__(self, "beta_window", min(max(int(self.beta_window), 20), MAX_RISK_BETA_WINDOW_DAYS))
 
 
 @dataclass

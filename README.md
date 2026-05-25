@@ -100,6 +100,19 @@ The current API surface is grouped by workspace:
 - `/risk/*`: risk computation
 - `/iv/*`: IV snapshot and session loop
 
+### Request Size And Compute Limits
+
+Gamma's local API rejects oversized or obviously invalid request payloads before they reach provider adapters or analytics engines. These limits are separate from external provider rate limits; they are local safety bounds for memory, CPU, cache-key size, and accidental refresh bursts.
+
+The shared constants live in `src/application/request_limits.py`. Current public request caps include:
+
+- Risk: Monte Carlo simulations are capped at `20,000`, Monte Carlo horizon and VaR horizon at `252` trading days, VaR lookback at `2,520` trading days, and beta window at `756` trading days.
+- Strategy Lab: imported return streams are capped at `10,000` rows, with bounded column counts and text field lengths.
+- Crypto: workspace search text is capped at `128` characters, workspace results at `100`, and synthetic portfolio positions at `100`.
+- Prediction Markets: screener text is capped at `256` characters, venues at `20`, and result limit at `100`.
+
+Oversized API requests return FastAPI/Pydantic `422` validation errors. Normal UI presets stay under these ceilings, and the Risk service also clamps direct in-process callers before Monte Carlo arrays are allocated.
+
 ## Data Sources And Provenance
 
 Gamma mixes broker, public-market, public-macro, on-chain, and filing data:

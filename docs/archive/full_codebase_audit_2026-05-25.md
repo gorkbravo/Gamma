@@ -32,7 +32,9 @@ Completed after the audit:
 
 - Fixed `P1. Cache Keys Can Escape The Cache Directory On Windows` by hashing logical cache keys into bounded filenames, adding resolved-path containment checks, updating cache-backed risk discovery for hashed filenames, and adding hostile-key regression tests in `tests/test_cache_service.py`.
 - Fixed `P3. News Force Refresh Is Accepted But Ignored` by wiring `force_refresh` through `/news/latest`, adding a short service-level latest-feed cache, and proving `force_refresh=true` bypasses and replaces that cache.
-- Validation after these fixes: `.\.venv\Scripts\python.exe -m pytest` passed with `287 passed` in about 68 seconds.
+- Fixed `P2. Expensive Request Models Are Not Bounded` by adding shared request-limit constants, Pydantic bounds on expensive public request schemas, service-side Risk clamps, and oversized-payload regression coverage in `tests/test_api.py`.
+- Fixed `P2. Frontend Commodities Tests Are Red` by restoring stable dense module frames and empty states for the Energy and Metals deep-research surfaces in `frontend/src/views/CommoditiesView.svelte`.
+- Validation after these fixes: `.\.venv\Scripts\python.exe -m pytest` passed with `288 passed`; `npm run test` passed with `152 passed`; `npm run build` passed with pre-existing unused-selector and bundle-size warnings still present.
 
 ## P1. Cache Keys Can Escape The Cache Directory On Windows - Fixed 2026-05-25
 
@@ -162,7 +164,9 @@ Regression tests to add:
 - Smoke checks are updated for the new auth boundary.
 - Tests cover both allowed and denied route access.
 
-## P2. Expensive Request Models Are Not Bounded
+## P2. Expensive Request Models Are Not Bounded - Fixed 2026-05-25
+
+Status: fixed after the audit. `src/application/request_limits.py` now defines shared product-appropriate caps for expensive local API requests. Risk, Strategy Lab, Crypto, and Prediction Markets request schemas enforce bounded strings, lists, numeric fields, and row payloads with Pydantic validation, while `src/application/risk_service.py` also clamps direct `RiskComputeRequest` callers before Monte Carlo arrays are allocated. Regression coverage in `tests/test_api.py` verifies oversized Risk, Strategy Lab, Crypto, and Prediction Markets requests fail fast with `422`, and valid boundary values still construct.
 
 ### Impact
 
@@ -224,7 +228,9 @@ Add route-level tests that submit oversized payloads and assert validation error
 - Backend tests include both valid boundary values and invalid over-limit values.
 - No service can allocate arrays directly from untrusted request integers without a cap.
 
-## P2. Frontend Commodities Tests Are Red
+## P2. Frontend Commodities Tests Are Red - Fixed 2026-05-25
+
+Status: fixed after the audit. `frontend/src/views/CommoditiesView.svelte` now renders stable dense module frames for `Vessel / Flow Proxy`, `EIA Fundamental Stack`, `LME / COMEX Warehouse Stocks`, `Fundamental Tape`, and `Inventory vs Seasonality` even when backing arrays are empty. `npm run test -- src/views/CommoditiesView.test.ts` now passes with all 5 Commodities tests green, and the full frontend test suite passes.
 
 ### Impact
 
@@ -499,8 +505,8 @@ Inspect the generated chunk warning. For deeper diagnosis, add a bundle visualiz
 
 1. `Done 2026-05-25` Fix cache key path containment and add hostile-key tests.
 2. Add local API session-token protection for mutating and expensive refresh routes.
-3. Add request bounds for Risk, Strategy Lab, Crypto, and Prediction Markets.
-4. Restore green frontend tests by resolving Commodities view/test drift.
+3. `Done 2026-05-25` Add request bounds for Risk, Strategy Lab, Crypto, and Prediction Markets.
+4. `Done 2026-05-25` Restore green frontend tests by resolving Commodities view/test drift.
 5. Add and fix `npm run typecheck`.
 6. Update vulnerable frontend dependencies.
 7. `Done 2026-05-25` Implement or remove News `force_refresh`.

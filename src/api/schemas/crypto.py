@@ -4,6 +4,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from src.application.request_limits import (
+    MAX_CRYPTO_PORTFOLIO_POSITIONS,
+    MAX_CRYPTO_WORKSPACE_LIMIT,
+    MAX_REQUEST_TEXT_CHARS,
+)
 from src.models.crypto import (
     CryptoBasketConstituent,
     CryptoComparisonRecord,
@@ -25,14 +30,14 @@ from src.models.crypto import (
 
 
 class CryptoWorkspaceRequestModel(BaseModel):
-    query: str = ""
-    narrative: str | None = None
-    chain: str | None = None
-    min_market_cap: float | None = None
-    min_volume: float | None = None
-    min_turnover_ratio: float | None = None
-    sort_by: str = "market_cap_desc"
-    limit: int = 40
+    query: str = Field(default="", max_length=128)
+    narrative: str | None = Field(default=None, max_length=64)
+    chain: str | None = Field(default=None, max_length=64)
+    min_market_cap: float | None = Field(default=None, ge=0)
+    min_volume: float | None = Field(default=None, ge=0)
+    min_turnover_ratio: float | None = Field(default=None, ge=0)
+    sort_by: str = Field(default="market_cap_desc", min_length=1, max_length=64)
+    limit: int = Field(default=40, ge=1, le=MAX_CRYPTO_WORKSPACE_LIMIT)
     force_refresh: bool = False
 
     def to_domain(self) -> CryptoScreenerRequest:
@@ -278,7 +283,7 @@ class CryptoPriceHistoryResponseModel(BaseModel):
 
 
 class CryptoSyntheticPositionRequestModel(BaseModel):
-    identifier: str
+    identifier: str = Field(min_length=1, max_length=MAX_REQUEST_TEXT_CHARS)
     weight: float
 
     def to_domain(self) -> CryptoSyntheticPositionRequest:
@@ -289,8 +294,11 @@ class CryptoSyntheticPositionRequestModel(BaseModel):
 
 
 class CryptoSyntheticPortfolioRequestModel(BaseModel):
-    positions: list[CryptoSyntheticPositionRequestModel] = Field(default_factory=list)
-    benchmark_token_id: str | None = None
+    positions: list[CryptoSyntheticPositionRequestModel] = Field(
+        default_factory=list,
+        max_length=MAX_CRYPTO_PORTFOLIO_POSITIONS,
+    )
+    benchmark_token_id: str | None = Field(default=None, max_length=MAX_REQUEST_TEXT_CHARS)
     lookback_days: int = Field(default=30, ge=7, le=365)
     force_refresh: bool = False
 

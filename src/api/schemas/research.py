@@ -4,11 +4,18 @@ from datetime import datetime
 from typing import Any, Literal
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.analytics.risk_metrics import max_drawdown, realized_vol
 from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, series_to_points
 from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
+from src.application.request_limits import (
+    MAX_REQUEST_TEXT_CHARS,
+    MAX_RISK_LOOKBACK_DAYS,
+    MAX_STRATEGY_LAB_ROW_FIELDS,
+    MAX_STRATEGY_LAB_ROW_TEXT_CHARS,
+    MAX_STRATEGY_LAB_ROWS,
+)
 from src.application.research_service import ResearchAnalysisResult
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.research_lab import (
@@ -41,16 +48,16 @@ from src.models.research_overview import (
 
 
 class SyntheticPositionModel(BaseModel):
-    symbol: str
+    symbol: str = Field(min_length=1, max_length=32)
     weight: float
-    instrument_id: str | None = None
-    display_symbol: str | None = None
-    sec_type: str | None = None
-    currency: str | None = None
-    exchange: str | None = None
-    primary_exchange: str | None = None
-    provider: str | None = None
-    provider_id: str | None = None
+    instrument_id: str | None = Field(default=None, max_length=96)
+    display_symbol: str | None = Field(default=None, max_length=32)
+    sec_type: str | None = Field(default=None, max_length=16)
+    currency: str | None = Field(default=None, max_length=8)
+    exchange: str | None = Field(default=None, max_length=32)
+    primary_exchange: str | None = Field(default=None, max_length=32)
+    provider: str | None = Field(default=None, max_length=64)
+    provider_id: str | None = Field(default=None, max_length=128)
 
     def to_domain(self) -> SyntheticPosition:
         return SyntheticPosition(
@@ -69,21 +76,40 @@ class SyntheticPositionModel(BaseModel):
 
 class ResearchAnalyzeRequestModel(BaseModel):
     scope_type: ResearchScopeType
-    primary_symbol: str = ""
-    synthetic_positions: list[SyntheticPositionModel] = Field(default_factory=list)
-    benchmark_symbol: str = "SPY"
-    lookback_days: int = 252
+    primary_symbol: str = Field(default="", max_length=32)
+    synthetic_positions: list[SyntheticPositionModel] = Field(default_factory=list, max_length=100)
+    benchmark_symbol: str = Field(default="SPY", min_length=1, max_length=32)
+    lookback_days: int = Field(default=252, ge=20, le=MAX_RISK_LOOKBACK_DAYS)
 
 
 class StrategyLabAnalyzeRequestModel(BaseModel):
-    rows: list[dict[str, Any]] = Field(default_factory=list)
-    date_column: str = "date"
-    value_column: str = "return"
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=MAX_STRATEGY_LAB_ROWS)
+    date_column: str = Field(default="date", min_length=1, max_length=64)
+    value_column: str = Field(default="return", min_length=1, max_length=64)
     value_kind: Literal["return", "level"] = "return"
-    name: str = "Imported Strategy"
-    benchmark_column: str | None = None
+    name: str = Field(default="Imported Strategy", min_length=1, max_length=128)
+    benchmark_column: str | None = Field(default=None, max_length=64)
     benchmark_value_kind: Literal["return", "level"] = "return"
-    min_observations: int = 5
+    min_observations: int = Field(default=5, ge=2, le=MAX_RISK_LOOKBACK_DAYS)
+
+    @field_validator("rows")
+    @classmethod
+    def _bound_row_shape(cls, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for index, row in enumerate(rows):
+            if len(row) > MAX_STRATEGY_LAB_ROW_FIELDS:
+                raise ValueError(
+                    f"rows[{index}] has too many fields; maximum is {MAX_STRATEGY_LAB_ROW_FIELDS}"
+                )
+            for key, value in row.items():
+                if len(str(key)) > MAX_REQUEST_TEXT_CHARS:
+                    raise ValueError(
+                        f"rows[{index}] contains a field name longer than {MAX_REQUEST_TEXT_CHARS} characters"
+                    )
+                if isinstance(value, str) and len(value) > MAX_STRATEGY_LAB_ROW_TEXT_CHARS:
+                    raise ValueError(
+                        f"rows[{index}].{key} is longer than {MAX_STRATEGY_LAB_ROW_TEXT_CHARS} characters"
+                    )
+        return rows
 
     def to_domain(self) -> ImportedReturnStreamRequest:
         return ImportedReturnStreamRequest(
@@ -178,12 +204,12 @@ class StrategyLabCompositionLegModel(BaseModel):
 
 
 class StrategyLabCompositionRequestModel(BaseModel):
-    name: str = "Gamma Research Composition"
-    legs: list[StrategyLabCompositionLegModel] = Field(default_factory=list)
-    lenses: list[GammaResearchObjectModel] = Field(default_factory=list)
-    overlays: list[GammaResearchObjectModel] = Field(default_factory=list)
+    name: str = Field(default="Gamma Research Composition", min_length=1, max_length=128)
+    legs: list[StrategyLabCompositionLegModel] = Field(default_factory=list, max_length=100)
+    lenses: list[GammaResearchObjectModel] = Field(default_factory=list, max_length=100)
+    overlays: list[GammaResearchObjectModel] = Field(default_factory=list, max_length=100)
     benchmark_object: GammaResearchObjectModel | None = None
-    min_observations: int = 5
+    min_observations: int = Field(default=5, ge=2, le=MAX_RISK_LOOKBACK_DAYS)
 
     def to_domain(self) -> StrategyLabCompositionRequest:
         return StrategyLabCompositionRequest(
@@ -303,10 +329,10 @@ class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
 
 
 class ResearchComparisonLegRequestModel(BaseModel):
-    label: str = ""
-    object_type: str = "research_object"
-    return_points: list[TimeSeriesPoint] = Field(default_factory=list)
-    saved_research_id: str | None = None
+    label: str = Field(default="", max_length=128)
+    object_type: str = Field(default="research_object", min_length=1, max_length=64)
+    return_points: list[TimeSeriesPoint] = Field(default_factory=list, max_length=MAX_STRATEGY_LAB_ROWS)
+    saved_research_id: str | None = Field(default=None, max_length=96)
 
     def to_domain(self) -> ResearchComparisonLeg:
         return ResearchComparisonLeg(

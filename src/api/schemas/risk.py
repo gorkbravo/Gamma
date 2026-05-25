@@ -5,21 +5,28 @@ from pydantic import BaseModel, Field
 
 from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, series_to_points
 from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
+from src.application.request_limits import (
+    MAX_RISK_BETA_WINDOW_DAYS,
+    MAX_RISK_HORIZON_DAYS,
+    MAX_RISK_LOOKBACK_DAYS,
+    MAX_RISK_MC_HORIZON_DAYS,
+    MAX_RISK_MC_SIMULATIONS,
+)
 from src.application.risk_service import RiskComputationPayload
 from src.models.portfolio import RiskResults
 
 
 class RiskComputeRequestModel(BaseModel):
     snapshot: PortfolioSnapshotModel
-    source_scope: str = "portfolio"
-    alpha: float = 0.95
-    lookback_days: int = 252
-    horizon_days: int = 1
-    mc_horizon_days: int = 10
-    mc_simulation_model: str = "Gaussian"
-    mc_num_simulations: int = 2000
-    beta_window: int = 126
-    benchmark_symbol: str = "SPY"
+    source_scope: str = Field(default="portfolio", max_length=32, pattern="^(portfolio|research)$")
+    alpha: float = Field(default=0.95, gt=0.0, lt=1.0)
+    lookback_days: int = Field(default=252, ge=20, le=MAX_RISK_LOOKBACK_DAYS)
+    horizon_days: int = Field(default=1, ge=1, le=MAX_RISK_HORIZON_DAYS)
+    mc_horizon_days: int = Field(default=10, ge=1, le=MAX_RISK_MC_HORIZON_DAYS)
+    mc_simulation_model: str = Field(default="Gaussian", min_length=1, max_length=32)
+    mc_num_simulations: int = Field(default=2000, ge=100, le=MAX_RISK_MC_SIMULATIONS)
+    beta_window: int = Field(default=126, ge=20, le=MAX_RISK_BETA_WINDOW_DAYS)
+    benchmark_symbol: str = Field(default="SPY", min_length=1, max_length=32)
     include_monte_carlo: bool = True
 
 
