@@ -679,9 +679,7 @@ def test_cached_equity_history_discovery_dedupes_deepest_and_includes_expired_co
     cache.set("eurx_stk_eur_smart_lookback_252", deep)
     cache.set("flat_stk_usd_smart_lookback_252", flat)
     cache.set("old_stk_usd_smart_lookback_252", stale)
-    (tmp_path / "cache" / "old_stk_usd_smart_lookback_252.json").write_text(
-        json.dumps({"timestamp": "2020-01-01T00:00:00"})
-    )
+    cache._meta_path("old_stk_usd_smart_lookback_252").write_text(json.dumps({"timestamp": "2020-01-01T00:00:00"}))
 
     service = _make_risk_service(market_data=_StubMarketData(cache=cache))
     histories, warnings = service._discover_cached_equity_histories(lookback_days=252, base_currency="USD")

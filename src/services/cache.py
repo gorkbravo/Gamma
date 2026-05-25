@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -9,26 +11,61 @@ import pandas as pd
 
 
 class CacheService:
+    _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+    _MAX_SAFE_PREFIX_LENGTH = 80
+
     def __init__(self, base_dir: str | Path = "cache", ttl_hours: int = 24) -> None:
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self._resolved_base_dir = self.base_dir.resolve()
         self.ttl = timedelta(hours=ttl_hours)
 
+    def _resolve_under_base(self, path: Path) -> Path:
+        resolved = path.resolve(strict=False)
+        try:
+            resolved.relative_to(self._resolved_base_dir)
+        except ValueError as exc:
+            raise ValueError(f"Cache path escapes base directory: {path}") from exc
+        return resolved
+
+    @classmethod
+    def _safe_filename_for_key(cls, key: str) -> str:
+        logical_key = str(key or "cache")
+        digest = hashlib.sha256(logical_key.encode("utf-8")).hexdigest()
+        prefix = cls._SAFE_FILENAME_RE.sub("_", logical_key.replace("\\", "_").replace("/", "_"))
+        while ".." in prefix:
+            prefix = prefix.replace("..", "_")
+        prefix = re.sub(r"_+", "_", prefix)
+        prefix = prefix.strip("._-").lower() or "cache"
+        if len(prefix) > cls._MAX_SAFE_PREFIX_LENGTH:
+            prefix = prefix[: cls._MAX_SAFE_PREFIX_LENGTH].rstrip("._-") or "cache"
+        return f"{prefix}--{digest}"
+
+    def _path_for_key(self, key: str, suffix: str) -> Path:
+        return self._resolve_under_base(self.base_dir / f"{self._safe_filename_for_key(key)}{suffix}")
+
     def _meta_path(self, key: str) -> Path:
-        return self.base_dir / f"{key}.json"
+        return self._path_for_key(key, ".json")
 
     def _data_path(self, key: str) -> Path:
-        return self.base_dir / f"{key}.csv"
+        return self._path_for_key(key, ".csv")
 
     def _value_path(self, key: str) -> Path:
-        return self.base_dir / f"{key}.value.json"
+        return self._path_for_key(key, ".value.json")
 
     def _json_path(self, key: str) -> Path:
-        return self.base_dir / f"{key}.payload.json"
+        return self._path_for_key(key, ".payload.json")
 
     def get(self, key: str) -> Optional[pd.Series]:
         data_path = self._data_path(key)
         meta_path = self._meta_path(key)
+        return self._read_series_paths(data_path, meta_path)
+
+    def get_series_file(self, data_path: str | Path) -> Optional[pd.Series]:
+        resolved_data_path = self._resolve_under_base(Path(data_path))
+        return self._read_series_paths(resolved_data_path, resolved_data_path.with_suffix(".json"))
+
+    def _read_series_paths(self, data_path: Path, meta_path: Path) -> Optional[pd.Series]:
         if not data_path.exists() or not meta_path.exists():
             return None
         try:
@@ -96,5 +133,17 @@ class CacheService:
 
     @staticmethod
     def make_key(*parts: str) -> str:
-        safe = "_".join(p.replace(" ", "").replace("/", "_") for p in parts if p)
-        return safe.lower()
+        tokens: list[str] = []
+        for part in parts:
+            value = str(part or "").strip()
+            if not value:
+                continue
+            value = re.sub(r"[\s/\\:]+", "_", value)
+            value = CacheService._SAFE_FILENAME_RE.sub("_", value)
+            while ".." in value:
+                value = value.replace("..", "_")
+            value = re.sub(r"_+", "_", value)
+            value = value.strip("._-").lower()
+            if value:
+                tokens.append(value)
+        return "_".join(tokens) or "cache"

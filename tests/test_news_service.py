@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,6 +91,45 @@ def _item(
     )
 
 
+class _ChangingNewsProvider:
+    provider_id = "counted_news"
+    source_name = "Counted News"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def latest(self, *, limit: int = 25) -> NewsEventFeed:
+        self.calls += 1
+        item = _item(
+            f"call-{self.calls}",
+            f"https://example.com/call-{self.calls}",
+            datetime(2026, 4, 22, 12, 0) + timedelta(minutes=self.calls),
+            source_provider=self.provider_id,
+        )
+        return NewsEventFeed(
+            items=[item][:limit],
+            source_provider=self.provider_id,
+            retrieved_at=datetime(2026, 4, 22, 12, self.calls),
+            origin="counted.latest",
+            freshness_label=FreshnessLabel.DELAYED,
+        )
+
+
+class _RecordingNewsService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, bool]] = []
+
+    def latest(self, *, limit: int = 25, force_refresh: bool = False) -> NewsEventFeed:
+        self.calls.append((limit, force_refresh))
+        return NewsEventFeed(
+            items=[_item("route", "https://example.com/route", datetime(2026, 4, 22, 12, 0))],
+            source_provider="recording_news",
+            retrieved_at=datetime(2026, 4, 22, 12, 0),
+            origin="recording.latest",
+            freshness_label=FreshnessLabel.DELAYED,
+        )
+
+
 def test_news_service_dedupes_sorts_and_limits_items():
     base_time = datetime(2026, 4, 22, 12, 0)
     older_duplicate = _item("old", "https://example.com/a?utm=x", base_time - timedelta(hours=2))
@@ -109,6 +149,22 @@ def test_news_service_dedupes_sorts_and_limits_items():
     assert feed.freshness_label == FreshnessLabel.DELAYED
     assert feed.warnings == ["rss warning"]
     assert "dedupes" in (feed.transformation_note or "")
+
+
+def test_news_service_force_refresh_bypasses_latest_cache():
+    provider = _ChangingNewsProvider()
+    service = NewsService([provider], cache_ttl_seconds=300)
+
+    first = service.latest(limit=1)
+    cached = service.latest(limit=1)
+    refreshed = service.latest(limit=1, force_refresh=True)
+    cached_after_refresh = service.latest(limit=1)
+
+    assert provider.calls == 2
+    assert first.items[0].normalized_id == "call-1"
+    assert cached.items[0].normalized_id == "call-1"
+    assert refreshed.items[0].normalized_id == "call-2"
+    assert cached_after_refresh.items[0].normalized_id == "call-2"
 
 
 def test_news_service_dedupes_same_url_even_with_different_provider_item_ids():
@@ -280,6 +336,17 @@ def test_news_latest_api_returns_normalized_sample_feed(tmp_path, monkeypatch):
         assert payload["items"][0]["origin"]
     finally:
         runtime.shutdown()
+
+
+def test_news_latest_api_passes_force_refresh_to_service():
+    news_service = _RecordingNewsService()
+    runtime = SimpleNamespace(news_service=news_service, shutdown=lambda: None)
+
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/news/latest", params={"limit": 3, "force_refresh": "true"})
+
+    assert response.status_code == 200
+    assert news_service.calls == [(3, True)]
 
 
 def test_runtime_can_select_rss_news_provider(tmp_path, monkeypatch):

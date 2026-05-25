@@ -126,7 +126,8 @@ class IbkrListedMarketHistoryProvider:
     def load_history(self, instrument: InstrumentReference, lookback_days: int) -> ResearchHistoryResult:
         symbol = instrument.normalized_display_symbol()
         contract = contract_for_instrument(instrument)
-        ohlcv = self.market_data.fetch_ohlcv_history(contract, lookback_days)
+        fetch_ohlcv_history = getattr(self.market_data, "fetch_ohlcv_history", None)
+        ohlcv = fetch_ohlcv_history(contract, lookback_days) if callable(fetch_ohlcv_history) else None
         series = _close_series_from_ohlcv(ohlcv)
         if series is None or series.empty:
             series = self.market_data.fetch_history(contract, lookback_days)

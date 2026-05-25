@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 from src.models.news import NewsEventFeed, NewsEventItem, canonical_news_url
 from src.models.provenance import FreshnessLabel
@@ -9,12 +10,28 @@ from src.utils.time import now_utc
 
 
 class NewsService:
-    def __init__(self, providers: list[NewsEventProvider] | tuple[NewsEventProvider, ...]) -> None:
+    def __init__(
+        self,
+        providers: list[NewsEventProvider] | tuple[NewsEventProvider, ...],
+        *,
+        cache_ttl_seconds: int = 300,
+    ) -> None:
         self.providers = tuple(providers)
+        self.cache_ttl = timedelta(seconds=max(0, int(cache_ttl_seconds or 0)))
+        self._latest_cache: dict[int, tuple[datetime, NewsEventFeed]] = {}
 
-    def latest(self, *, limit: int = 25) -> NewsEventFeed:
+    def latest(self, *, limit: int = 25, force_refresh: bool = False) -> NewsEventFeed:
         requested_limit = max(int(limit or 0), 0)
         retrieved_at = now_utc()
+        cache_key = requested_limit
+        if not force_refresh and self.cache_ttl.total_seconds() > 0:
+            cached = self._latest_cache.get(cache_key)
+            if cached is not None:
+                cached_at, cached_feed = cached
+                if retrieved_at - cached_at <= self.cache_ttl:
+                    return cached_feed
+                self._latest_cache.pop(cache_key, None)
+
         warnings: list[str] = []
         items: list[NewsEventItem] = []
 
@@ -33,7 +50,7 @@ class NewsService:
             deduped = deduped[:requested_limit]
         source_provider = _source_provider_label(deduped)
         freshness_label = _feed_freshness(deduped)
-        return NewsEventFeed(
+        result = NewsEventFeed(
             items=deduped,
             source_provider=source_provider,
             retrieved_at=retrieved_at,
@@ -45,6 +62,9 @@ class NewsService:
                 "sorts by publication time, and applies the requested item limit."
             ),
         )
+        if self.cache_ttl.total_seconds() > 0:
+            self._latest_cache[cache_key] = (retrieved_at, result)
+        return result
 
 
 def _dedupe_items(items: list[NewsEventItem]) -> list[NewsEventItem]:

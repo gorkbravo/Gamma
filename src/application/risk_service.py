@@ -167,7 +167,7 @@ class RiskService:
     _MC_RANDOM_SEED = 42
     _DEFAULT_FRONTIER_UNIVERSE = ("SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC", "HYG")
     _CACHE_STK_HISTORY_RE = re.compile(
-        r"^(?P<symbol>.+)_stk_(?P<currency>[a-z]{3})(?:_(?P<exchange>[a-z0-9]+))?_lookback_(?P<lookback>\d+)\.csv$",
+        r"^(?P<symbol>.+)_stk_(?P<currency>[a-z]{3})(?:_(?P<exchange>[a-z0-9]+))?_lookback_(?P<lookback>\d+)(?:--[0-9a-f]{64})?\.csv$",
         re.IGNORECASE,
     )
     _MAX_CACHED_EQUITY_FRONTIER_SYMBOLS = 160
@@ -1771,7 +1771,7 @@ class RiskService:
                 continue
 
             source_provider = "market_data_cache"
-            series = cache.get(path.stem)
+            series = cache.get_series_file(path)
             if series is None or series.empty:
                 series = self._read_expired_cache_series(path)
                 if series is None or series.empty:

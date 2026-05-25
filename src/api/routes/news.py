@@ -14,7 +14,6 @@ def news_latest(
     limit: int = Query(default=25, ge=1, le=100),
     force_refresh: bool = Query(default=False),
 ) -> NewsEventFeedResponseModel:
-    del force_refresh
     runtime = request.app.state.runtime
-    feed = runtime.news_service.latest(limit=limit)
+    feed = runtime.news_service.latest(limit=limit, force_refresh=force_refresh)
     return NewsEventFeedResponseModel.from_domain(feed)
