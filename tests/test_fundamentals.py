@@ -54,6 +54,21 @@ def test_fundamentals_overview_builds_company_context_and_peer_heatmap(tmp_path)
     assert overview.peer_heatmap.transformation_note is not None
 
 
+def test_fundamentals_overview_preserves_price_ohlcv_for_hero_chart(tmp_path):
+    service = _build_service(tmp_path)
+
+    overview = service.get_overview("AAPL")
+
+    assert overview is not None
+    latest = overview.price_history[-1]
+    assert latest.price == 190.0
+    assert latest.open == 188.1
+    assert latest.high == 191.9
+    assert latest.low == 186.2
+    assert latest.close == 190.0
+    assert latest.volume == 1_900_000.0
+
+
 def test_fundamentals_financials_include_gamma_owned_ratio_views(tmp_path):
     service = _build_service(tmp_path)
 
@@ -1263,6 +1278,11 @@ def _price_context(ticker: str, price: float, scale: float) -> IbkrPriceContext:
                 timestamp=_dt("2026-01-09"),
                 price=price * 0.92,
                 source_provider="ibkr",
+                open=price * 0.91,
+                high=price * 0.93,
+                low=price * 0.90,
+                close=price * 0.92,
+                volume=scale * 1_000_000.0,
                 retrieved_at=NOW,
                 origin="fundamentals.ibkr.history",
             ),
@@ -1270,6 +1290,11 @@ def _price_context(ticker: str, price: float, scale: float) -> IbkrPriceContext:
                 timestamp=_dt("2026-03-09"),
                 price=price * 0.97,
                 source_provider="ibkr",
+                open=price * 0.96,
+                high=price * 0.98,
+                low=price * 0.95,
+                close=price * 0.97,
+                volume=scale * 1_500_000.0,
                 retrieved_at=NOW,
                 origin="fundamentals.ibkr.history",
             ),
@@ -1277,6 +1302,11 @@ def _price_context(ticker: str, price: float, scale: float) -> IbkrPriceContext:
                 timestamp=_dt("2026-04-09"),
                 price=price,
                 source_provider="ibkr",
+                open=price * 0.99,
+                high=price * 1.01,
+                low=price * 0.98,
+                close=price,
+                volume=scale * 1_900_000.0,
                 retrieved_at=NOW,
                 origin="fundamentals.ibkr.snapshot",
                 transformation_note=f"Fixture price context scale {scale:.2f}.",

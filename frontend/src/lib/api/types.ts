@@ -215,6 +215,11 @@ export interface NewsEventFeedResponse {
 export interface TimeSeriesPoint {
   timestamp: string;
   value: number;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  volume?: number | null;
 }
 
 export interface Position {
@@ -1256,6 +1261,11 @@ export interface FundamentalsMetric {
 export interface FundamentalsPricePoint {
   timestamp: string;
   price: number;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  volume?: number | null;
   source_provider: string;
   retrieved_at: string | null;
   origin: string;

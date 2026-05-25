@@ -449,6 +449,26 @@ def _format_statement_value(value: float | None, unit: str) -> str:
     return f"{value:,.0f}"
 
 
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if pd.notna(numeric) else None
+
+
+def _ohlcv_row_for_timestamp(frame: pd.DataFrame | None, timestamp: Any) -> pd.Series | None:
+    if frame is None or frame.empty:
+        return None
+    key = pd.Timestamp(timestamp)
+    if key in frame.index:
+        row = frame.loc[key]
+        return row.iloc[0] if isinstance(row, pd.DataFrame) else row
+    return None
+
+
 def _normalize_filing_text(value: str) -> str:
     text = unescape(value or "")
     text = text.replace("\xa0", " ")
@@ -1551,13 +1571,18 @@ class IbkrValuationAdapter:
                 origin="fundamentals.ibkr.price_context",
                 transformation_note="Gamma could not build price context without a ticker symbol.",
             )
-        history = self.research_provider.load_symbol_history(normalized, lookback_days)
-        history_source = "mock" if self.research_provider.client.mock else "ibkr"
-        history_origin = (
-            "fundamentals.ibkr.mock_history_fallback"
-            if self.research_provider.client.mock
-            else "fundamentals.ibkr.history"
+        history_result = self.research_provider.load_instrument_history_result(
+            InstrumentReference(symbol=normalized),
+            lookback_days,
+            defaults=self.research_provider.instrument_defaults,
+            bypass_cache=force_refresh,
         )
+        history = history_result.series
+        history_source = history_result.source_provider or ("mock" if self.research_provider.client.mock else "ibkr")
+        history_origin = history_result.origin or (
+            "fundamentals.ibkr.mock_history_fallback" if self.research_provider.client.mock else "fundamentals.ibkr.history"
+        )
+        ohlcv = history_result.ohlcv
         price_points: list[FundamentalsPricePoint] = []
         if history is not None:
             for timestamp, value in list(history.items())[-lookback_days:]:
@@ -1565,11 +1590,17 @@ class IbkrValuationAdapter:
                     price = float(value)
                 except (TypeError, ValueError):
                     continue
+                ohlcv_row = _ohlcv_row_for_timestamp(ohlcv, timestamp)
                 price_points.append(
                     FundamentalsPricePoint(
                         timestamp=_ensure_datetime(timestamp),
                         price=price,
                         source_provider=history_source,
+                        open=_to_float(ohlcv_row.get("open")) if ohlcv_row is not None else None,
+                        high=_to_float(ohlcv_row.get("high")) if ohlcv_row is not None else None,
+                        low=_to_float(ohlcv_row.get("low")) if ohlcv_row is not None else None,
+                        close=_to_float(ohlcv_row.get("close")) if ohlcv_row is not None else price,
+                        volume=_to_float(ohlcv_row.get("volume")) if ohlcv_row is not None else None,
                         retrieved_at=now_utc(),
                         origin=history_origin,
                         transformation_note=(
@@ -1580,7 +1611,7 @@ class IbkrValuationAdapter:
                     )
                 )
         current_price = price_points[-1].price if price_points else None
-        warnings: list[str] = []
+        warnings: list[str] = list(history_result.warnings)
         retrieved_at = price_points[-1].retrieved_at if price_points else now_utc()
         origin = history_origin
         transformation_note = (

@@ -2,7 +2,6 @@
   import { onDestroy, onMount } from "svelte";
   import SearchDropdown from "../components/SearchDropdown.svelte";
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
-  import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
     CrossTabHandoffEnvelope,
     FundamentalsDcfModel,
@@ -20,7 +19,7 @@
     FundamentalsSearchOptions,
     FundamentalsSelectOptions
   } from "../lib/stores/app";
-  import type { HeroPricePoint } from "../lib/view-models/hero-price-chart";
+  import { heroPricePointFromApiPoint, type HeroPricePoint } from "../lib/view-models/hero-price-chart";
   import {
     buildDcfSavePayload,
     createDcfDraft,
@@ -553,11 +552,8 @@
     .map((metricId) => headlineMetrics.find((metric) => metric.metric_id === metricId))
     .filter((metric): metric is NonNullable<typeof headlineMetrics[number]> => Boolean(metric));
   $: heroPricePoints = (overview?.price_history ?? [])
-    .map((point) => ({
-      time: parseApiTimestampToUtcSeconds(point.timestamp),
-      close: point.price
-    }))
-    .filter((point): point is HeroPricePoint => point.time != null && Number.isFinite(point.close));
+    .map((point) => heroPricePointFromApiPoint(point))
+    .filter((point): point is HeroPricePoint => point !== null);
   $: groupedHeatmapRows = Object.entries(
     (overview?.peer_heatmap?.rows ?? []).reduce<Record<string, NonNullable<FundamentalsOverview["peer_heatmap"]>["rows"]>>((groups, row) => {
       const family = row.family ?? "other";

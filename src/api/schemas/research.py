@@ -784,7 +784,7 @@ class ResearchAnalyzeResponseModel(BaseModel):
             snapshot=PortfolioSnapshotModel.from_domain(result.snapshot) if result.snapshot is not None else None,
             performance_points=series_to_points(result.perf),
             benchmark_points=series_to_points(result.benchmark_returns),
-            primary_price_points=series_to_points(result.primary_price),
+            primary_price_points=series_to_points(result.primary_price, result.primary_price_ohlcv),
             weights=[
                 _weight_point_model(result.snapshot, str(instrument_id), float(weight))
                 for instrument_id, weight in result.weights.items()

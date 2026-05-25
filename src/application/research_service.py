@@ -92,6 +92,52 @@ class ResearchAnalysisResult:
     source_provider: str = "unknown"
     history_source_label: str = "Unknown history source"
     freshness_label: FreshnessLabel = FreshnessLabel.UNKNOWN
+    primary_price_ohlcv: pd.DataFrame | None = None
+
+
+def _primary_ohlcv_for_result(
+    provider: object,
+    instrument_id: str | None,
+    primary_price: pd.Series,
+) -> pd.DataFrame | None:
+    if not instrument_id or primary_price is None or primary_price.empty:
+        return None
+    loader = getattr(provider, "last_ohlcv_for_instrument", None)
+    if not callable(loader):
+        return None
+    frame = loader(str(instrument_id))
+    return _align_ohlcv_to_close(frame, primary_price)
+
+
+def _align_ohlcv_to_close(frame: pd.DataFrame | None, close_series: pd.Series) -> pd.DataFrame | None:
+    if frame is None or frame.empty or close_series is None or close_series.empty:
+        return None
+    columns = {str(column).strip().lower(): column for column in frame.columns}
+    selected: dict[str, pd.Series] = {}
+    for key in ("open", "high", "low", "close", "volume"):
+        column = columns.get(key)
+        if column is not None:
+            selected[key] = pd.to_numeric(frame[column], errors="coerce")
+    if "close" not in selected:
+        return None
+    normalized = pd.DataFrame(selected, index=frame.index).dropna(subset=["close"])
+    if normalized.empty:
+        return None
+    clean_close = pd.to_numeric(close_series, errors="coerce").dropna()
+    common_index = normalized.index.intersection(clean_close.index)
+    if common_index.empty:
+        return None
+    aligned = normalized.reindex(common_index).copy()
+    close = clean_close.reindex(common_index).astype(float)
+    raw_close = pd.to_numeric(aligned["close"], errors="coerce").replace(0, pd.NA)
+    ratio = (close / raw_close).replace([float("inf"), float("-inf")], pd.NA).fillna(1.0)
+    for column in ("open", "high", "low", "close"):
+        if column in aligned.columns:
+            aligned[column] = pd.to_numeric(aligned[column], errors="coerce").astype(float) * ratio
+    if "volume" in aligned.columns:
+        aligned["volume"] = pd.to_numeric(aligned["volume"], errors="coerce")
+    aligned["close"] = close
+    return aligned.dropna(subset=["close"]).sort_index()
 
 
 class ResearchService:
@@ -309,10 +355,16 @@ class ResearchService:
         warnings.extend(normalized_prices.warnings)
         prices = normalized_prices.prices
         primary_price = pd.Series(dtype=float)
+        primary_price_ohlcv: pd.DataFrame | None = None
         if request.scope_type == ResearchScopeType.SINGLE_TICKER:
             primary_identity = find_identity_by_symbol(snapshot, primary_symbol)
             if primary_identity is not None:
                 primary_price = prices.get(primary_identity.instrument_id, pd.Series(dtype=float))
+                primary_price_ohlcv = _primary_ohlcv_for_result(
+                    self.provider,
+                    primary_identity.instrument_id,
+                    primary_price,
+                )
         if not prices:
             warnings.append("No valid history found for selected scope")
             return self._empty_result(
@@ -402,6 +454,7 @@ class ResearchService:
             primary_symbol=primary_symbol or None,
             weights=weights,
             primary_price=primary_price,
+            primary_price_ohlcv=primary_price_ohlcv,
             available_symbols=self._labels_for_ids(weights.index.tolist(), identity_map),
             missing_symbols=missing,
             benchmark_overlap_count=benchmark_overlap_count,
@@ -1265,6 +1318,7 @@ class ResearchService:
         primary_symbol: str | None = None,
         weights: pd.Series | None = None,
         primary_price: pd.Series | None = None,
+        primary_price_ohlcv: pd.DataFrame | None = None,
         perf: pd.Series | None = None,
         available_symbols: list[str] | None = None,
         missing_symbols: list[str] | None = None,
@@ -1281,6 +1335,7 @@ class ResearchService:
             primary_symbol=primary_symbol,
             weights=weights if weights is not None else pd.Series(dtype=float),
             primary_price=primary_price if primary_price is not None else pd.Series(dtype=float),
+            primary_price_ohlcv=primary_price_ohlcv,
             available_symbols=list(available_symbols or []),
             missing_symbols=list(missing_symbols or []),
             benchmark_overlap_count=0,

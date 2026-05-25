@@ -10,6 +10,17 @@ export interface HeroPricePoint {
   volume?: number;
 }
 
+export interface ApiHeroPricePoint {
+  timestamp: string | null | undefined;
+  value?: number | null;
+  price?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  volume?: number | null;
+}
+
 export interface HeroPriceChartSettings {
   priceStyle: HeroPriceStyle;
   volumeOverlay: boolean;
@@ -96,6 +107,22 @@ export function normalizeHeroPricePoints(points: Array<Partial<HeroPricePoint>> 
     });
   }
   return Array.from(byTime.values()).sort((left, right) => left.time - right.time);
+}
+
+export function heroPricePointFromApiPoint(point: ApiHeroPricePoint): HeroPricePoint | null {
+  const time = parseApiTimestampToUtcSeconds(point.timestamp);
+  const close = firstFiniteNumber(point.close, point.value, point.price);
+  if (!isFiniteNumber(time) || !isFiniteNumber(close)) {
+    return null;
+  }
+  return {
+    time,
+    close,
+    ...(isFiniteNumber(point.open) ? { open: point.open } : {}),
+    ...(isFiniteNumber(point.high) ? { high: point.high } : {}),
+    ...(isFiniteNumber(point.low) ? { low: point.low } : {}),
+    ...(isFiniteNumber(point.volume) ? { volume: point.volume } : {})
+  };
 }
 
 export function computeSimpleMovingAverage(points: Array<Partial<HeroPricePoint>>, window: number): HeroChartPoint[] {
@@ -208,4 +235,16 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseApiTimestampToUtcSeconds(timestamp: string | null | undefined): number | null {
+  if (!timestamp) {
+    return null;
+  }
+  const millis = new Date(timestamp).getTime();
+  return Number.isFinite(millis) ? Math.floor(millis / 1000) : null;
+}
+
+function firstFiniteNumber(...values: Array<number | null | undefined>) {
+  return values.find((value): value is number => isFiniteNumber(value)) ?? null;
 }

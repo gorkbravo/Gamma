@@ -41,6 +41,22 @@ describe("HeroPriceChart", () => {
     expect(body).not.toContain("Volume unavailable");
   });
 
+  it("server-renders candle control when every point has OHLC", () => {
+    const { body } = render(HeroPriceChart, {
+      props: {
+        chartKey: "ohlcv",
+        points: [
+          { time: 1, open: 9, high: 11, low: 8, close: 10, volume: 100 },
+          { time: 2, open: 10, high: 12, low: 9, close: 11, volume: 120 }
+        ]
+      }
+    });
+
+    expect(body).toContain("Candles");
+    expect(body).not.toContain("Candles unavailable");
+    expect(body).toContain("Volume overlay");
+  });
+
   it("loads settings for a changed chart key without writing old settings to the new key", () => {
     const writes: Array<[string, unknown]> = [];
     const next = syncHeroPriceSettingsStorage({

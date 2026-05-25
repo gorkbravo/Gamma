@@ -83,6 +83,11 @@ class FundamentalsPricePointModel(BaseModel):
     timestamp: datetime
     price: float
     source_provider: str
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume: float | None = None
     retrieved_at: datetime | None = None
     origin: str
     transformation_note: str | None = None

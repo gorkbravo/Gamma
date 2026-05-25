@@ -66,7 +66,7 @@
     type ResearchTreemapSection,
     type ResearchTreemapTile
   } from "../lib/view-models/research";
-  import type { HeroPricePoint } from "../lib/view-models/hero-price-chart";
+  import { heroPricePointFromApiPoint, type HeroPricePoint } from "../lib/view-models/hero-price-chart";
 
   export let surface: ResearchSurface = "legacy";
   export let mode: ResearchSurfaceMode = "overview";
@@ -1155,11 +1155,8 @@
     const benchmark = slicePoints(result?.benchmark_points ?? []);
     const prices = slicePoints(result?.primary_price_points ?? []);
     researchHeroPricePoints = prices
-      .map((point) => ({
-        time: Math.floor(new Date(point.timestamp).getTime() / 1000),
-        close: point.value
-      }))
-      .filter((point): point is HeroPricePoint => Number.isFinite(point.time) && Number.isFinite(point.close));
+      .map((point) => heroPricePointFromApiPoint(point))
+      .filter((point): point is HeroPricePoint => point !== null);
 
     if (!result) {
       chartSeries = [];

@@ -316,6 +316,7 @@ class ResearchDataProvider:
     _history_metadata: dict[str, ResearchHistoryResult] = field(default_factory=dict, init=False)
     _last_history_warnings: list[str] = field(default_factory=list, init=False)
     _last_history_sources: dict[str, ResearchHistoryResult] = field(default_factory=dict, init=False)
+    _last_ohlcv_histories: dict[str, pd.DataFrame] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         if self.history_providers is not None:
@@ -476,6 +477,7 @@ class ResearchDataProvider:
     def reset_history_tracking(self) -> None:
         self._last_history_warnings = []
         self._last_history_sources = {}
+        self._last_ohlcv_histories = {}
 
     def history_source_summary(self) -> ResearchHistoryResult:
         sources = list(self._last_history_sources.values())
@@ -546,6 +548,7 @@ class ResearchDataProvider:
         missing: List[str] = []
         self._last_history_warnings = []
         self._last_history_sources = {}
+        self._last_ohlcv_histories = {}
         positions = [pos for pos in snapshot.positions if not pos.symbol.startswith("CASH")]
         total = len(positions)
         for idx, position in enumerate(positions, start=1):
@@ -558,9 +561,15 @@ class ResearchDataProvider:
             else:
                 prices[instrument_id] = result.series.astype(float)
                 self._last_history_sources[instrument_id] = replace(result, series=None)
+                if result.ohlcv is not None and not result.ohlcv.empty:
+                    self._last_ohlcv_histories[instrument_id] = result.ohlcv.copy()
             if progress_cb:
                 progress_cb(idx, total, display_symbol)
         return prices, missing
+
+    def last_ohlcv_for_instrument(self, instrument_id: str) -> pd.DataFrame | None:
+        frame = self._last_ohlcv_histories.get(str(instrument_id))
+        return frame.copy() if frame is not None else None
 
     def build_snapshot(self) -> tuple[PortfolioSnapshot | None, List[str]]:
         if self.context is None:

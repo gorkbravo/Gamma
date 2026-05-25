@@ -11,6 +11,11 @@ from src.models.portfolio import PortfolioSnapshot, PositionItem
 class TimeSeriesPoint(BaseModel):
     timestamp: datetime
     value: float
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume: float | None = None
 
 
 class PositionModel(BaseModel):
@@ -173,14 +178,45 @@ class PortfolioPerformanceResponseModel(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-def series_to_points(series: pd.Series) -> list[TimeSeriesPoint]:
+def series_to_points(series: pd.Series, ohlcv: pd.DataFrame | None = None) -> list[TimeSeriesPoint]:
     if series is None or series.empty:
         return []
     clean = series.dropna()
-    return [
-        TimeSeriesPoint(timestamp=pd.Timestamp(index).to_pydatetime(), value=float(value))
-        for index, value in clean.items()
-    ]
+    normalized_ohlcv = _normalize_ohlcv_frame(ohlcv)
+    points: list[TimeSeriesPoint] = []
+    for index, value in clean.items():
+        point_kwargs = {
+            "timestamp": pd.Timestamp(index).to_pydatetime(),
+            "value": float(value),
+        }
+        if normalized_ohlcv is not None and index in normalized_ohlcv.index:
+            row = normalized_ohlcv.loc[index]
+            point_kwargs.update(
+                {
+                    "open": _to_float(row.get("open")),
+                    "high": _to_float(row.get("high")),
+                    "low": _to_float(row.get("low")),
+                    "close": _to_float(row.get("close")),
+                    "volume": _to_float(row.get("volume")),
+                }
+            )
+        points.append(TimeSeriesPoint(**point_kwargs))
+    return points
+
+
+def _normalize_ohlcv_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
+    if frame is None or frame.empty:
+        return None
+    columns = {str(column).strip().lower(): column for column in frame.columns}
+    selected: dict[str, pd.Series] = {}
+    for key in ("open", "high", "low", "close", "volume"):
+        column = columns.get(key)
+        if column is not None:
+            selected[key] = pd.to_numeric(frame[column], errors="coerce")
+    if not selected:
+        return None
+    normalized = pd.DataFrame(selected, index=frame.index).dropna(how="all")
+    return normalized.sort_index() if not normalized.empty else None
 
 
 def _to_float(value) -> float | None:

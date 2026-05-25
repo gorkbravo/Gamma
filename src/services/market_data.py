@@ -163,11 +163,20 @@ class MarketDataService:
             f"lookback_{int(lookback_days)}",
         )
 
+    def _ohlcv_cache_key(self, contract: Contract, lookback_days: int) -> str:
+        return self.cache.make_key("ohlcv", self._cache_key(contract, lookback_days))
+
     def _record_error(self, message: str) -> None:
         with self._errors_lock:
             self._errors.append(message)
 
     def _fetch_history_direct(self, contract: Contract, lookback_days: int) -> Optional[pd.Series]:
+        frame = self._fetch_ohlcv_history_direct(contract, lookback_days)
+        if frame is None or frame.empty or "close" not in frame.columns:
+            return None
+        return frame["close"].astype(float).sort_index()
+
+    def _fetch_ohlcv_history_direct(self, contract: Contract, lookback_days: int) -> Optional[pd.DataFrame]:
         if not self._is_connected():
             return None
         duration_days = max(lookback_days + 30, lookback_days)
@@ -191,9 +200,14 @@ class MarketDataService:
         if not bars:
             return None
         df = util.df(bars)
-        series = pd.Series(df["close"].values, index=pd.to_datetime(df["date"]))
-        series = series.sort_index()
-        return series
+        index = pd.to_datetime(df["date"])
+        columns = [column for column in ("open", "high", "low", "close", "volume") if column in df.columns]
+        if "close" not in columns:
+            return None
+        frame = df.loc[:, columns].apply(pd.to_numeric, errors="coerce")
+        frame.index = index
+        frame = frame.dropna(subset=["close"]).sort_index()
+        return frame if not frame.empty else None
 
     @staticmethod
     def _duration_str(days: int) -> str:
@@ -241,6 +255,49 @@ class MarketDataService:
         if not done.wait(timeout=self._history_wait_timeout()):
             self._record_error(
                 f"History request timed out for {contract.symbol} after waiting for throttled completion"
+            )
+            return None
+        return result
+
+    def fetch_ohlcv_history(self, contract: Contract, lookback_days: int) -> Optional[pd.DataFrame]:
+        key = self._ohlcv_cache_key(contract, lookback_days)
+        cached = self.cache.get(key)
+        if cached is not None:
+            with self._history_lock:
+                self._history_cache_hits += 1
+            return cached
+        with self._history_lock:
+            self._history_cache_misses += 1
+        if not self._is_connected():
+            return None
+
+        done = threading.Event()
+        result: Optional[pd.DataFrame] = None
+
+        def task() -> Optional[pd.DataFrame]:
+            return self._fetch_ohlcv_history_direct(contract, lookback_days)
+
+        def on_success(frame: Optional[pd.DataFrame]) -> None:
+            nonlocal result
+            result = frame
+            if frame is not None:
+                self.cache.set(key, frame)
+            done.set()
+
+        def on_error(exc: Exception) -> None:
+            self._record_error(f"OHLCV history request failed for {contract.symbol}: {exc}")
+            done.set()
+
+        self.queue.submit(
+            task,
+            on_success,
+            on_error,
+            max_retries=self.history_max_retries,
+            backoff_seconds=self.history_backoff_seconds,
+        )
+        if not done.wait(timeout=self._history_wait_timeout()):
+            self._record_error(
+                f"OHLCV history request timed out for {contract.symbol} after waiting for throttled completion"
             )
             return None
         return result

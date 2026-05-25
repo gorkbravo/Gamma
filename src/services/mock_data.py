@@ -98,6 +98,17 @@ class MockDataService:
         df = pd.read_csv(path, parse_dates=["date"], index_col="date")
         return df["close"]
 
+    def load_ohlcv_history(self, symbol: str) -> pd.DataFrame | None:
+        path = self.base_path / f"history_{symbol}.csv"
+        if not path.exists():
+            return None
+        df = pd.read_csv(path, parse_dates=["date"], index_col="date")
+        columns = [column for column in ("open", "high", "low", "close", "volume") if column in df.columns]
+        if "close" not in columns:
+            return None
+        frame = df[columns].apply(pd.to_numeric, errors="coerce").dropna(subset=["close"])
+        return frame.sort_index() if not frame.empty else None
+
     def load_all_histories(self) -> Dict[str, pd.Series]:
         histories: Dict[str, pd.Series] = {}
         for csv in self.base_path.glob("history_*.csv"):

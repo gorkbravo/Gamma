@@ -5,6 +5,7 @@ from datetime import datetime
 import pandas as pd
 import pytest
 
+from src.api.schemas.research import ResearchAnalyzeResponseModel
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
 from src.application.research_validation import ResearchValidationError
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
@@ -33,6 +34,7 @@ class _StubResearchProvider:
         missing: list[str] | None = None,
         benchmark_history: pd.Series | None = None,
         market_data: _StubMarketData | None = None,
+        ohlcv: dict[str, pd.DataFrame] | None = None,
     ) -> None:
         self._snapshot = snapshot
         self._snapshot_warnings = snapshot_warnings or []
@@ -40,6 +42,7 @@ class _StubResearchProvider:
         self._missing = missing or []
         self._benchmark_history = benchmark_history
         self.market_data = market_data or _StubMarketData()
+        self._ohlcv = ohlcv or {}
 
     def build_snapshot_for_scope(self, scope, primary_symbol="", synthetic_positions=None):
         return self._snapshot, list(self._snapshot_warnings)
@@ -52,6 +55,9 @@ class _StubResearchProvider:
 
     def load_benchmark_history(self, symbol, lookback_days, *, base_currency=None, warnings=None):
         return self._benchmark_history
+
+    def last_ohlcv_for_instrument(self, instrument_id: str):
+        return self._ohlcv.get(instrument_id)
 
 
 def _make_snapshot() -> PortfolioSnapshot:
@@ -154,6 +160,49 @@ def test_research_service_computes_perf_and_benchmark_returns_for_scope():
     assert result.constituent_annual_vol["QQQ"] is not None
     assert result.constituent_max_drawdown["SPY"] is not None
     assert result.warnings == []
+
+
+def test_research_analysis_response_preserves_primary_price_ohlcv_for_hero_chart():
+    idx = pd.date_range("2026-01-02", periods=5, freq="B")
+    snapshot = _make_snapshot()
+    prices = {
+        "SPY": pd.Series([100.0, 101.0, 103.0, 102.0, 104.0], index=idx),
+        "QQQ": pd.Series([200.0, 202.0, 201.0, 205.0, 207.0], index=idx),
+    }
+    ohlcv = pd.DataFrame(
+        {
+            "open": [99.0, 100.0, 101.5, 103.0, 102.5],
+            "high": [101.0, 102.0, 104.0, 104.0, 105.0],
+            "low": [98.0, 99.5, 101.0, 101.0, 102.0],
+            "close": [100.0, 101.0, 103.0, 102.0, 104.0],
+            "volume": [1000, 1100, 1200, 1300, 1400],
+        },
+        index=idx,
+    )
+    service = ResearchService(
+        _StubResearchProvider(
+            snapshot=snapshot,
+            prices=prices,
+            benchmark_history=pd.Series([300.0, 301.0, 302.0, 304.0, 305.0], index=idx),
+            ohlcv={"SPY": ohlcv},
+        )
+    )
+
+    result = service.analyze(
+        ResearchAnalysisRequest(
+            scope_type=ResearchScopeType.SINGLE_TICKER,
+            primary_symbol="SPY",
+            benchmark_symbol="IWM",
+        )
+    )
+    response = ResearchAnalyzeResponseModel.from_service_result(result)
+
+    assert response.primary_price_points[-1].value == 104.0
+    assert response.primary_price_points[-1].open == 102.5
+    assert response.primary_price_points[-1].high == 105.0
+    assert response.primary_price_points[-1].low == 102.0
+    assert response.primary_price_points[-1].close == 104.0
+    assert response.primary_price_points[-1].volume == 1400.0
 
 
 def test_research_service_preserves_synthetic_scope_weights_and_snapshot():

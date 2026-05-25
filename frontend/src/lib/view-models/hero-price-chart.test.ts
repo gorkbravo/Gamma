@@ -4,6 +4,7 @@ import {
   computeSimpleMovingAverage,
   defaultHeroPriceChartSettings,
   heroPriceChartAvailability,
+  heroPricePointFromApiPoint,
   normalizeHeroPriceChartSettings,
   normalizeHeroPricePoints
 } from "./hero-price-chart";
@@ -68,6 +69,43 @@ describe("normalizeHeroPricePoints", () => {
       { time: 2, close: 11 },
       { time: 3, close: 12 }
     ]);
+  });
+});
+
+describe("heroPricePointFromApiPoint", () => {
+  it("maps optional OHLCV fields from a generic API price point", () => {
+    expect(
+      heroPricePointFromApiPoint({
+        timestamp: "2026-03-01T00:00:00Z",
+        value: 104,
+        open: 102,
+        high: 105,
+        low: 101,
+        close: 104,
+        volume: 1400
+      })
+    ).toEqual({
+      time: 1772323200,
+      close: 104,
+      open: 102,
+      high: 105,
+      low: 101,
+      volume: 1400
+    });
+  });
+
+  it("uses fundamentals price when close is omitted", () => {
+    expect(
+      heroPricePointFromApiPoint({
+        timestamp: "2026-03-01T00:00:00Z",
+        price: 190,
+        volume: 1200
+      })
+    ).toEqual({
+      time: 1772323200,
+      close: 190,
+      volume: 1200
+    });
   });
 });
 

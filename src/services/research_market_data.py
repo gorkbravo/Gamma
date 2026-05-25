@@ -29,6 +29,7 @@ class ResearchHistoryResult:
     source_label: str
     origin: str
     freshness_label: FreshnessLabel
+    ohlcv: pd.DataFrame | None = None
     retrieved_at: datetime = field(default_factory=now_utc)
     warnings: list[str] = field(default_factory=list)
     transformation_note: str | None = None
@@ -48,6 +49,7 @@ class ResearchHistoryResult:
             source_label=source_label,
             origin=origin,
             freshness_label=FreshnessLabel.UNAVAILABLE,
+            ohlcv=None,
             warnings=[warning] if warning else [],
         )
 
@@ -109,6 +111,7 @@ class MockListedMarketHistoryProvider:
             source_label=self.source_label,
             origin="mock_data.load_history",
             freshness_label=FreshnessLabel.MOCKED,
+            ohlcv=self.mock_service.load_ohlcv_history(symbol),
             transformation_note="Loaded from local sample data for offline/demo research workflows.",
         )
 
@@ -122,7 +125,11 @@ class IbkrListedMarketHistoryProvider:
 
     def load_history(self, instrument: InstrumentReference, lookback_days: int) -> ResearchHistoryResult:
         symbol = instrument.normalized_display_symbol()
-        series = self.market_data.fetch_history(contract_for_instrument(instrument), lookback_days)
+        contract = contract_for_instrument(instrument)
+        ohlcv = self.market_data.fetch_ohlcv_history(contract, lookback_days)
+        series = _close_series_from_ohlcv(ohlcv)
+        if series is None or series.empty:
+            series = self.market_data.fetch_history(contract, lookback_days)
         if series is None or series.empty:
             return ResearchHistoryResult.unavailable(
                 source_provider=self.provider_id,
@@ -136,6 +143,7 @@ class IbkrListedMarketHistoryProvider:
             source_label=self.source_label,
             origin="ibkr.reqHistoricalData",
             freshness_label=FreshnessLabel.HISTORICAL,
+            ohlcv=ohlcv,
             transformation_note="Daily historical bars requested through Gamma's read-only IBKR/TWS market-data service.",
         )
 
@@ -185,7 +193,10 @@ class YFinanceListedMarketHistoryProvider:
                 warning=f"yfinance history unavailable for {symbol}: {exc}",
             )
 
-        series = self._close_series(frame)
+        ohlcv = self._ohlcv_frame(frame)
+        series = _close_series_from_ohlcv(ohlcv)
+        if series is None or series.empty:
+            series = self._close_series(frame)
         if series is None or series.empty:
             return ResearchHistoryResult.unavailable(
                 source_provider=self.provider_id,
@@ -199,6 +210,7 @@ class YFinanceListedMarketHistoryProvider:
             source_label=self.source_label,
             origin="yfinance.download",
             freshness_label=FreshnessLabel.HISTORICAL,
+            ohlcv=ohlcv,
             warnings=[
                 "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context, not institutional quote truth."
             ],
@@ -242,6 +254,42 @@ class YFinanceListedMarketHistoryProvider:
             series.index = series.index.tz_convert(None)
         return series.sort_index()
 
+    @staticmethod
+    def _ohlcv_frame(frame) -> pd.DataFrame | None:
+        if frame is None or getattr(frame, "empty", True):
+            return None
+        source_columns = frame.columns
+        selected: dict[str, pd.Series] = {}
+        for output, candidates in {
+            "open": ("Open", "open"),
+            "high": ("High", "high"),
+            "low": ("Low", "low"),
+            "close": ("Close", "Adj Close", "close"),
+            "volume": ("Volume", "volume"),
+        }.items():
+            raw = None
+            if isinstance(source_columns, pd.MultiIndex):
+                for candidate in candidates:
+                    matches = [column for column in source_columns if column[0] == candidate]
+                    if matches:
+                        raw = frame[matches[0]]
+                        break
+            else:
+                for candidate in candidates:
+                    if candidate in source_columns:
+                        raw = frame[candidate]
+                        break
+            if raw is not None:
+                selected[output] = pd.to_numeric(raw, errors="coerce")
+        if "close" not in selected:
+            return None
+        index = pd.to_datetime(frame.index, errors="coerce")
+        normalized = pd.DataFrame(selected, index=index).dropna(subset=["close"])
+        normalized = normalized[~normalized.index.isna()]
+        if getattr(normalized.index, "tz", None) is not None:
+            normalized.index = normalized.index.tz_convert(None)
+        return normalized.sort_index() if not normalized.empty else None
+
 
 @dataclass
 class UnavailableListedMarketHistoryProvider:
@@ -258,3 +306,10 @@ class UnavailableListedMarketHistoryProvider:
             origin=f"{self.provider_id}.history.unavailable",
             warning=f"{self.warning} ({symbol})",
         )
+
+
+def _close_series_from_ohlcv(frame: pd.DataFrame | None) -> pd.Series | None:
+    if frame is None or frame.empty or "close" not in frame.columns:
+        return None
+    series = pd.to_numeric(frame["close"], errors="coerce").dropna()
+    return series.astype(float).sort_index() if not series.empty else None
