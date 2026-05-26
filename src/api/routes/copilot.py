@@ -12,6 +12,7 @@ from src.api.schemas.copilot import (
     CopilotMemoUpdateRequestModel,
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
+    CopilotResearchPlanModel,
     CopilotSessionDetailModel,
     CopilotSessionModel,
     CopilotTurnModel,
@@ -29,6 +30,16 @@ def generate_research_card(
     runtime = request.app.state.runtime
     result = runtime.copilot_service.generate_research_card(payload.to_domain())
     return CopilotResearchCardResponseModel.from_domain(result)
+
+
+@router.post("/copilot/research-plan", response_model=CopilotResearchPlanModel)
+def plan_research(
+    payload: CopilotResearchCardRequestModel,
+    request: Request,
+) -> CopilotResearchPlanModel:
+    runtime = request.app.state.runtime
+    plan = runtime.copilot_service.plan_research(payload.to_domain())
+    return CopilotResearchPlanModel.from_domain(plan)
 
 
 @router.post("/copilot/research-card/stream")

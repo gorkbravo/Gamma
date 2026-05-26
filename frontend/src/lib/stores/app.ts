@@ -10,6 +10,7 @@ import type {
   CopilotDomain,
   CopilotMemo,
   CopilotResearchCardResult,
+  CopilotResearchPlan,
   CopilotSessionDetail,
   CopilotSessionSummary,
   CopilotThreadEntry,
@@ -358,6 +359,7 @@ export const copilotThreads = writable<Record<CopilotDomain, CopilotThreadState>
 export const copilotSessions = writable<CopilotSessionSummary[]>([]);
 export const activeCopilotSession = writable<CopilotSessionDetail | null>(null);
 export const copilotMemos = writable<CopilotMemo[]>([]);
+export const copilotResearchPlan = writable<CopilotResearchPlan | null>(null);
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -2519,6 +2521,47 @@ export async function loadCopilotResearchCard(
     const result = buildCopilotFailureResult(domain, message);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
     return result;
+  } finally {
+    setLoading("copilot", false);
+  }
+}
+
+export async function loadCopilotResearchPlan(
+  domain: CopilotDomain,
+  prompt = "",
+  options: CopilotLoadOptions = {}
+) {
+  setLoading("copilot", true);
+  try {
+    const context = buildCopilotContext(domain, options.workspaceMode);
+    if (!context) {
+      const message = "The active Copilot context is unavailable.";
+      lastError.set(message);
+      copilotResearchPlan.set(null);
+      return null;
+    }
+    const synthesis =
+      domain === "synthesis"
+        ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
+        : null;
+    const payload = {
+      domain,
+      prompt,
+      context_fingerprint: buildCopilotContextFingerprint(domain, options.workspaceMode, {
+        synthesisDomains: options.synthesisDomains,
+        activeTabId: options.activeTabId
+      }),
+      context,
+      ...(synthesis ? { synthesis } : {})
+    };
+    const plan = await postJson<CopilotResearchPlan>("/copilot/research-plan", payload);
+    copilotResearchPlan.set(plan);
+    lastError.set("");
+    return plan;
+  } catch (error) {
+    setError(error);
+    copilotResearchPlan.set(null);
+    return null;
   } finally {
     setLoading("copilot", false);
   }

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 import logging
+import re
 from typing import Any, Callable
 
 from src.application.copilot_context_helpers import (
@@ -26,6 +27,9 @@ from src.models.copilot import (
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotResearchPlan,
+    CopilotResearchPlanDomain,
+    CopilotResearchPlanEntity,
     CopilotSession,
     CopilotSourceRef,
     CopilotTurn,
@@ -464,6 +468,36 @@ class CopilotService:
                 )
         return result
 
+    def plan_research(self, request: CopilotResearchCardRequest) -> CopilotResearchPlan:
+        prompt = str(request.prompt or "").strip()
+        normalized_prompt = prompt.lower()
+        target_entities = self._extract_plan_entities(prompt, request.context)
+        depth_profile = self._infer_depth_profile(normalized_prompt)
+        intent = self._infer_plan_intent(normalized_prompt, target_entities, request.context)
+        domain_plan = self._build_domain_plan(
+            intent=intent,
+            prompt=normalized_prompt,
+            depth_profile=depth_profile,
+            target_entities=target_entities,
+            request=request,
+        )
+        warnings = self._plan_warnings(prompt, domain_plan)
+        expected_artifacts = ["session_trace"]
+        if depth_profile in {"standard", "deep"} or intent != "active_context_research":
+            expected_artifacts.append("research_memo")
+        if depth_profile == "deep":
+            expected_artifacts.append("report_outline")
+
+        return CopilotResearchPlan(
+            intent=intent,
+            target_entities=target_entities,
+            depth_profile=depth_profile,
+            domain_plan=domain_plan,
+            requires_confirmation=False,
+            expected_artifacts=expected_artifacts,
+            warnings=warnings,
+        )
+
     @classmethod
     def _normalize_result_sources(cls, result: CopilotResearchCardResult) -> CopilotResearchCardResult:
         return replace(
@@ -555,6 +589,203 @@ class CopilotService:
             {"event": "result", "data": result},
             {"event": "done", "data": {"status": result.status}},
         ]
+
+    @staticmethod
+    def _extract_plan_entities(
+        prompt: str,
+        context: CopilotRequestContext,
+    ) -> list[CopilotResearchPlanEntity]:
+        entities: list[CopilotResearchPlanEntity] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_entity(kind: str, entity_id: str, label: str | None = None, confidence: float = 0.75) -> None:
+            normalized_id = entity_id.strip().upper() if kind == "ticker" else entity_id.strip().lower()
+            if not normalized_id:
+                return
+            key = (kind, normalized_id)
+            if key in seen:
+                return
+            seen.add(key)
+            entities.append(
+                CopilotResearchPlanEntity(
+                    kind=kind,
+                    id=normalized_id,
+                    label=label or normalized_id,
+                    confidence=confidence,
+                )
+            )
+
+        for match in re.findall(r"\b[A-Z]{1,5}(?:\.[A-Z])?\b", prompt):
+            if match.lower() in {"cpi", "fed", "oil", "rate", "rates", "var"}:
+                continue
+            add_entity("ticker", match, confidence=0.72)
+
+        if context.fundamentals_ticker:
+            add_entity("ticker", context.fundamentals_ticker, confidence=0.9)
+        if context.crypto_token_id:
+            add_entity("crypto_token", context.crypto_token_id, confidence=0.85)
+        if context.prediction_market_id:
+            add_entity("prediction_market", context.prediction_market_id, confidence=0.85)
+
+        prompt_lower = prompt.lower()
+        commodity_terms = {
+            "oil": "oil",
+            "crude": "oil",
+            "brent": "brent",
+            "wti": "wti",
+            "gas": "natural_gas",
+            "gold": "gold",
+            "copper": "copper",
+        }
+        for term, entity_id in commodity_terms.items():
+            if re.search(rf"\b{re.escape(term)}\b", prompt_lower):
+                add_entity("commodity", entity_id, term.title(), confidence=0.8)
+
+        return entities
+
+    @staticmethod
+    def _infer_depth_profile(prompt: str) -> str:
+        if any(term in prompt for term in ("deep", "full", "comprehensive", "report", "memo")):
+            return "deep"
+        if any(term in prompt for term in ("quick", "brief", "fast", "summary")):
+            return "quick"
+        return "standard"
+
+    @staticmethod
+    def _infer_plan_intent(
+        prompt: str,
+        entities: list[CopilotResearchPlanEntity],
+        context: CopilotRequestContext,
+    ) -> str:
+        has_ticker = any(entity.kind == "ticker" for entity in entities)
+        has_rate_context = any(term in prompt for term in ("rate", "rates", "fed", "cpi", "inflation", "yield"))
+        has_portfolio_context = "portfolio" in prompt or context.current_tab == "portfolio"
+        has_oil_context = any(term in prompt for term in ("oil", "crude", "brent", "wti"))
+
+        if has_portfolio_context and has_rate_context:
+            return "portfolio_rate_shock_research"
+        if has_oil_context:
+            return "commodity_macro_research"
+        if has_ticker and has_rate_context:
+            return "single_company_event_research"
+        if has_ticker:
+            return "single_company_research"
+        if context.current_tab and context.current_tab not in {"copilot", "synthesis"}:
+            return "active_context_research"
+        return "cross_domain_research"
+
+    def _build_domain_plan(
+        self,
+        *,
+        intent: str,
+        prompt: str,
+        depth_profile: str,
+        target_entities: list[CopilotResearchPlanEntity],
+        request: CopilotResearchCardRequest,
+    ) -> list[CopilotResearchPlanDomain]:
+        domain_plan: list[CopilotResearchPlanDomain] = []
+        seen: set[str] = set()
+
+        def add(
+            domain: str,
+            depth: str,
+            reason: str,
+            *,
+            action_type: str = "read_context",
+            planned_tools: list[str] | None = None,
+            required_context: list[str] | None = None,
+        ) -> None:
+            if domain in seen:
+                return
+            seen.add(domain)
+            domain_plan.append(
+                CopilotResearchPlanDomain(
+                    domain=domain,
+                    depth=depth,
+                    reason=reason,
+                    action_type=action_type,
+                    planned_tools=planned_tools or self._default_plan_tools(domain),
+                    required_context=required_context or [],
+                )
+            )
+
+        if intent == "single_company_research":
+            add("fundamentals", "deep", "Single-company research needs filings, normalized statements, peers, DCF, and implied-expectation context.")
+            add("equity_research", "medium", "Market and benchmark-relative context helps frame whether the company question is idiosyncratic or factor-driven.")
+            add("iv", "medium", "Options context can surface event risk, term structure, and skew caveats if an options surface is available.")
+            add("external_context", "light", "Recent news, filings, estimates, or transcript context can add freshness when approved providers are configured.", planned_tools=[])
+        elif intent == "single_company_event_research":
+            add("fundamentals", "medium", "Company-specific financial context remains relevant but should not dominate an event-week request.")
+            add("macro", "deep", "CPI, Fed, inflation, and rates context are first-order drivers for the stated event lens.")
+            add("iv", "deep", "Options term structure and implied move context are central to event-risk framing.")
+            add("equity_research", "medium", "Benchmark and peer-relative behavior help separate company-specific movement from macro beta.")
+            add("external_context", "medium", "Recent news, calendar, estimates, and filings should be fetched only through approved read-only providers.", planned_tools=[])
+        elif intent == "commodity_macro_research":
+            add("commodities", "deep", "Commodity workspace data should anchor the price, curve, spread, inventory, and event read.")
+            add("macro", "medium", "Macro context helps separate demand, inflation, USD, and rates effects from commodity-specific supply signals.")
+            add("prediction_markets", "medium", "Related event contracts can provide cross-market expectations around geopolitics, policy, or supply disruptions.")
+            add("external_context", "medium", "Recent commodity and official event context can add freshness when provider-backed.", planned_tools=[])
+        elif intent == "portfolio_rate_shock_research":
+            add("portfolio", "deep", "Portfolio exposure, concentration, cash, and position context are required before interpreting rate sensitivity.")
+            add("risk", "deep", "Risk contribution, coverage, correlation, and scenario tools should quantify the shock path.")
+            add("macro", "deep", "Rates, policy path, curve, breakeven, and event context define the rate-shock scenario.")
+            add("iv", "light", "Options context is optional and only useful if active surfaces exist for dominant exposures.")
+        elif intent == "active_context_research":
+            active_domain = self._resolve_domain(request)
+            add(active_domain, "medium" if depth_profile != "quick" else "light", "The request is anchored to the active Gamma context.")
+            if request.synthesis is not None:
+                add("synthesis", "medium", "The supplied synthesis scope should be used to compare already-loaded Gamma contexts.")
+        else:
+            add("synthesis", "medium", "The request is broad and should start from the selected loaded Gamma contexts.")
+            add("macro", "light", "Macro is a useful default background lens for broad cross-domain research.")
+
+        if depth_profile == "quick":
+            return [
+                replace(
+                    item,
+                    depth="light" if item.depth in {"medium", "deep"} else item.depth,
+                )
+                for item in domain_plan[:3]
+            ]
+        if depth_profile == "deep" and target_entities:
+            return [
+                replace(item, depth="deep" if item.depth == "medium" else item.depth)
+                for item in domain_plan
+            ]
+        return domain_plan
+
+    @staticmethod
+    def _default_plan_tools(domain: str) -> list[str]:
+        return {
+            "portfolio": ["get_portfolio_positions_summary", "get_portfolio_performance_context"],
+            "equity_research": ["get_research_scope_summary", "get_research_coverage_context"],
+            "research": ["get_research_scope_summary", "get_research_coverage_context"],
+            "macro": ["get_macro_workspace_drilldown", "get_macro_series_history_summary"],
+            "commodities": ["get_commodities_workspace_summary"],
+            "prediction_markets": ["get_prediction_market_history_summary", "get_prediction_market_flow_context"],
+            "crypto": ["get_crypto_price_history_summary", "get_crypto_liquidity_context", "get_crypto_comparison_context"],
+            "fundamentals": [
+                "get_fundamentals_company_context",
+                "get_fundamentals_statement_context",
+                "get_fundamentals_peer_context",
+                "get_fundamentals_dcf_context",
+                "get_fundamentals_reverse_valuation_context",
+            ],
+            "risk": ["get_risk_coverage_summary", "get_risk_contribution_summary"],
+            "iv": ["get_iv_surface_context", "get_iv_session_status"],
+            "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
+        }.get(domain, [])
+
+    @staticmethod
+    def _plan_warnings(prompt: str, domain_plan: list[CopilotResearchPlanDomain]) -> list[str]:
+        warnings: list[str] = [
+            "Planner-only prototype: this preview does not execute tools or fetch provider data yet."
+        ]
+        if not prompt.strip():
+            warnings.append("No prompt was supplied; the plan falls back to active context.")
+        if any(item.domain == "external_context" for item in domain_plan):
+            warnings.append("External context is planned only through approved read-only provider adapters; general web browsing is not the default path.")
+        return warnings
 
     @staticmethod
     def _context_summary_for_persistence(context: CopilotContextBundle) -> dict[str, Any]:

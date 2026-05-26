@@ -28,6 +28,7 @@
     commoditiesWorkspace,
     activeCopilotSession,
     copilotMemos,
+    copilotResearchPlan,
     copilotSessions,
     copilotThreads,
     archiveCopilotSession,
@@ -73,6 +74,7 @@
     loadActiveCopilotSession,
     loadCopilotMemos,
     loadCopilotResearchCard,
+    loadCopilotResearchPlan,
     loadCopilotSession,
     loadCopilotSessions,
     exportCopilotMemo,
@@ -1692,6 +1694,14 @@
     });
   }
 
+  async function handlePlanCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+    return loadCopilotResearchPlan(domain, prompt, {
+      workspaceMode,
+      synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
+      activeTabId: $activeTab,
+    });
+  }
+
   async function handleCreateCopilotMemo(title?: string, notes?: string) {
     return createCopilotMemo({ title, notes });
   }
@@ -2294,9 +2304,11 @@
             sessions={$copilotSessions}
             activeSession={$activeCopilotSession}
             memos={$copilotMemos}
+            researchPlan={$copilotResearchPlan}
             latestHandoff={latestCopilotHandoff}
             loading={$loading.copilot}
             onGenerate={handleGenerateCopilotWorkspace}
+            onPlan={handlePlanCopilotWorkspace}
             onCreateMemo={handleCreateCopilotMemo}
             onUpdateMemo={handleUpdateCopilotMemo}
             onArchiveSession={handleArchiveCopilotSession}

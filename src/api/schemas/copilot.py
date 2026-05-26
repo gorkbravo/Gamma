@@ -17,6 +17,9 @@ from src.models.copilot import (
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotResearchPlan,
+    CopilotResearchPlanDomain,
+    CopilotResearchPlanEntity,
     CopilotSession,
     CopilotSynthesisRequest,
     CopilotSynthesisScope,
@@ -240,6 +243,67 @@ class CopilotResearchCardResponseModel(BaseModel):
             sources=[CopilotSourceRefModel.from_domain(item) for item in row.sources],
             tool_traces=[CopilotToolTraceModel.from_domain(item) for item in row.tool_traces],
             warnings=list(row.warnings),
+        )
+
+
+class CopilotResearchPlanEntityModel(BaseModel):
+    kind: str
+    id: str
+    label: str | None = None
+    confidence: float | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotResearchPlanEntity) -> "CopilotResearchPlanEntityModel":
+        return cls(**row.__dict__)
+
+
+class CopilotResearchPlanDomainModel(BaseModel):
+    domain: str
+    depth: str
+    reason: str
+    action_type: str
+    planned_tools: list[str] = Field(default_factory=list)
+    required_context: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotResearchPlanDomain) -> "CopilotResearchPlanDomainModel":
+        return cls(
+            domain=row.domain,
+            depth=row.depth,
+            reason=row.reason,
+            action_type=row.action_type,
+            planned_tools=list(row.planned_tools),
+            required_context=list(row.required_context),
+        )
+
+
+class CopilotResearchPlanModel(BaseModel):
+    intent: str
+    target_entities: list[CopilotResearchPlanEntityModel] = Field(default_factory=list)
+    depth_profile: str
+    domain_plan: list[CopilotResearchPlanDomainModel] = Field(default_factory=list)
+    requires_confirmation: bool
+    expected_artifacts: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    generated_at: datetime
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotResearchPlan) -> "CopilotResearchPlanModel":
+        return cls(
+            intent=row.intent,
+            target_entities=[CopilotResearchPlanEntityModel.from_domain(item) for item in row.target_entities],
+            depth_profile=row.depth_profile,
+            domain_plan=[CopilotResearchPlanDomainModel.from_domain(item) for item in row.domain_plan],
+            requires_confirmation=row.requires_confirmation,
+            expected_artifacts=list(row.expected_artifacts),
+            warnings=list(row.warnings),
+            generated_at=row.generated_at,
+            source_provider=row.source_provider,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
         )
 
 

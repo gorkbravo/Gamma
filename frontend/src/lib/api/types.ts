@@ -2821,6 +2821,36 @@ export interface CopilotResearchCardResult {
   warnings: string[];
 }
 
+export interface CopilotResearchPlanEntity {
+  kind: string;
+  id: string;
+  label: string | null;
+  confidence: number | null;
+}
+
+export interface CopilotResearchPlanDomain {
+  domain: string;
+  depth: string;
+  reason: string;
+  action_type: string;
+  planned_tools: string[];
+  required_context: string[];
+}
+
+export interface CopilotResearchPlan {
+  intent: string;
+  target_entities: CopilotResearchPlanEntity[];
+  depth_profile: string;
+  domain_plan: CopilotResearchPlanDomain[];
+  requires_confirmation: boolean;
+  expected_artifacts: string[];
+  warnings: string[];
+  generated_at: string;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface CopilotThreadEntry {
   entryId: string;
   turnIndex: number;

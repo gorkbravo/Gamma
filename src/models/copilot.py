@@ -62,6 +62,39 @@ class CopilotResearchCardRequest:
 
 
 @dataclass(frozen=True)
+class CopilotResearchPlanEntity:
+    kind: str
+    id: str
+    label: str | None = None
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
+class CopilotResearchPlanDomain:
+    domain: str
+    depth: str
+    reason: str
+    action_type: str = "read_context"
+    planned_tools: list[str] = field(default_factory=list)
+    required_context: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotResearchPlan:
+    intent: str
+    target_entities: list[CopilotResearchPlanEntity] = field(default_factory=list)
+    depth_profile: str = "standard"
+    domain_plan: list[CopilotResearchPlanDomain] = field(default_factory=list)
+    requires_confirmation: bool = False
+    expected_artifacts: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=now_utc)
+    source_provider: str = "gamma_planner"
+    origin: str = "copilot_service.plan_research"
+    transformation_note: str | None = "Deterministic planner-only Copilot V2 prototype; no tools were executed."
+
+
+@dataclass(frozen=True)
 class CopilotSourceRef:
     source_id: str
     label: str

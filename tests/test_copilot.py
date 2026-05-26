@@ -2007,6 +2007,133 @@ def test_mock_provider_generates_offline_synthesis_card(tmp_path, monkeypatch):
         runtime.shutdown()
 
 
+def test_copilot_research_plan_single_company_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research NVDA",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "single_company_research"
+        assert payload["depth_profile"] == "standard"
+        assert payload["target_entities"][0]["kind"] == "ticker"
+        assert payload["target_entities"][0]["id"] == "NVDA"
+        assert [item["domain"] for item in payload["domain_plan"][:3]] == [
+            "fundamentals",
+            "equity_research",
+            "iv",
+        ]
+        assert payload["domain_plan"][0]["depth"] == "deep"
+        assert payload["requires_confirmation"] is False
+        assert "research_memo" in payload["expected_artifacts"]
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_research_plan_event_company_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research NVDA into CPI/Fed week",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "single_company_event_research"
+        domain_depths = {item["domain"]: item["depth"] for item in payload["domain_plan"]}
+        assert domain_depths["macro"] == "deep"
+        assert domain_depths["iv"] == "deep"
+        assert domain_depths["fundamentals"] == "medium"
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_research_plan_oil_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "What is going on in oil?",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "commodity_macro_research"
+        assert payload["target_entities"][0]["kind"] == "commodity"
+        assert payload["target_entities"][0]["id"] == "oil"
+        assert [item["domain"] for item in payload["domain_plan"][:3]] == [
+            "commodities",
+            "macro",
+            "prediction_markets",
+        ]
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_research_plan_portfolio_rate_shock_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {"current_tab": "portfolio", "workspace_mode": "portfolio"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "portfolio_rate_shock_research"
+        domain_depths = {item["domain"]: item["depth"] for item in payload["domain_plan"]}
+        assert domain_depths["portfolio"] == "deep"
+        assert domain_depths["risk"] == "deep"
+        assert domain_depths["macro"] == "deep"
+        assert "fundamentals" not in domain_depths
+    finally:
+        runtime.shutdown()
+
+
 def _crypto_token_fixture() -> CryptoTokenRecord:
     return CryptoTokenRecord(
         token_id="solana",

@@ -4,6 +4,7 @@
     CopilotDomain,
     CrossTabHandoffEnvelope,
     CopilotMemo,
+    CopilotResearchPlan,
     CopilotSessionDetail,
     CopilotSessionSummary,
     CopilotThreadEntry,
@@ -37,9 +38,11 @@
   export let sessions: CopilotSessionSummary[] = [];
   export let activeSession: CopilotSessionDetail | null = null;
   export let memos: CopilotMemo[] = [];
+  export let researchPlan: CopilotResearchPlan | null = null;
   export let latestHandoff: CrossTabHandoffEnvelope | null = null;
   export let loading = false;
   export let onGenerate: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void;
+  export let onPlan: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void = () => {};
   export let onCreateMemo: (title?: string, notes?: string) => Promise<unknown> | void = () => {};
   export let onUpdateMemo: (memoId: string, title: string, body: string) => Promise<unknown> | void = () => {};
   export let onArchiveSession: (sessionId: string) => Promise<unknown> | void = () => {};
@@ -79,6 +82,13 @@
       promptText = "";
       await onLoadSessions();
     }
+  }
+
+  async function handlePlan() {
+    if (!surface.domain || loading) {
+      return;
+    }
+    await onPlan(surface.domain, promptText.trim());
   }
 
   async function handleCreateMemo() {
@@ -237,16 +247,49 @@
           bind:value={promptText}
           rows={5}
           placeholder={surface.supported ? surface.placeholder : surface.guidance}
-          disabled={!surface.supported || loading}
+          disabled={!surface.domain || loading}
           on:keydown={handleComposerKeydown}
         ></textarea>
 
         <div class="composer-footer">
           <span>{surface.selectionMessage ?? surface.guidance}</span>
-          <button type="button" disabled={!surface.supported || loading} on:click={handleGenerate}>
-            {loading ? "Generating..." : threadEntries.length ? "Follow Up" : "Generate"}
-          </button>
+          <div class="composer-actions">
+            <button type="button" class="secondary" disabled={!surface.domain || loading} on:click={handlePlan}>
+              Plan
+            </button>
+            <button type="button" disabled={!surface.supported || loading} on:click={handleGenerate}>
+              {loading ? "Generating..." : threadEntries.length ? "Follow Up" : "Generate"}
+            </button>
+          </div>
         </div>
+
+        {#if researchPlan}
+          <div class="plan-preview">
+            <div class="plan-preview-head">
+              <span>{researchPlan.depth_profile}</span>
+              <strong>{researchPlan.intent.replaceAll("_", " ")}</strong>
+            </div>
+            {#if researchPlan.target_entities.length}
+              <div class="entity-row">
+                {#each researchPlan.target_entities.slice(0, 4) as entity}
+                  <span>{entity.kind}: {entity.label ?? entity.id}</span>
+                {/each}
+              </div>
+            {/if}
+            <div class="domain-plan">
+              {#each researchPlan.domain_plan.slice(0, 5) as item}
+                <div>
+                  <strong>{item.domain.replaceAll("_", " ")}</strong>
+                  <span>{item.depth}</span>
+                  <p>{item.reason}</p>
+                </div>
+              {/each}
+            </div>
+            {#if researchPlan.warnings.length}
+              <p class="plan-warning">{researchPlan.warnings[0]}</p>
+            {/if}
+          </div>
+        {/if}
       </article>
 
       <article class="panel thread-panel">
@@ -511,6 +554,12 @@
     min-width: 0;
   }
 
+  .composer-actions {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+  }
+
   .title-line {
     justify-content: flex-start;
     gap: 0.45rem;
@@ -589,6 +638,85 @@
     letter-spacing: 0.06em;
     font-size: 0.74rem;
     white-space: nowrap;
+  }
+
+  .composer-footer button.secondary {
+    color: var(--text-1);
+    border-color: var(--panel-strong);
+  }
+
+  .plan-preview {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--divider);
+    background: var(--bg-0);
+  }
+
+  .plan-preview-head,
+  .entity-row,
+  .domain-plan div,
+  .plan-warning {
+    padding: 0.5rem 0.65rem;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .plan-preview-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+
+  .plan-preview-head span,
+  .domain-plan span,
+  .entity-row span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0;
+    font-size: 0.62rem;
+  }
+
+  .plan-preview-head strong,
+  .domain-plan strong {
+    color: var(--text-0);
+    text-transform: uppercase;
+    letter-spacing: 0;
+    font-size: 0.72rem;
+  }
+
+  .entity-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .domain-plan {
+    display: grid;
+    gap: 0;
+  }
+
+  .domain-plan div {
+    display: grid;
+    grid-template-columns: minmax(8rem, 0.35fr) 4.5rem minmax(0, 1fr);
+    gap: 0.6rem;
+    align-items: start;
+  }
+
+  .domain-plan div:last-child,
+  .plan-warning {
+    border-bottom: 0;
+  }
+
+  .domain-plan p,
+  .plan-warning {
+    margin: 0;
+    color: var(--text-1);
+    line-height: 1.35;
+    font-size: 0.76rem;
+  }
+
+  .plan-warning {
+    color: var(--warning);
   }
 
   .thread-list,
@@ -836,6 +964,12 @@
     .composer-footer {
       display: grid;
       justify-content: stretch;
+    }
+
+    .composer-actions,
+    .domain-plan div {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>
