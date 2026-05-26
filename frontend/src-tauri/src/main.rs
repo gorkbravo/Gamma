@@ -53,6 +53,7 @@ struct DesktopState {
     child: Mutex<Option<Child>>,
     frontend_loaded: AtomicBool,
     api_base: Mutex<Option<String>>,
+    api_session_token: Mutex<Option<String>>,
 }
 
 impl Default for DesktopState {
@@ -61,6 +62,7 @@ impl Default for DesktopState {
             child: Mutex::new(None),
             frontend_loaded: AtomicBool::new(false),
             api_base: Mutex::new(None),
+            api_session_token: Mutex::new(None),
         }
     }
 }
@@ -141,6 +143,7 @@ fn external_url_command(url: &str) -> Command {
 fn bootstrap_backend(app: &AppHandle) -> Result<(), String> {
     let api_port = select_api_port()?;
     let api_base = format!("http://{API_HOST}:{api_port}");
+    let api_session_token = generate_session_token()?;
     let health_url = format!("{api_base}/health");
     let launch = resolve_backend_launch(app)?;
     {
@@ -150,6 +153,11 @@ fn bootstrap_backend(app: &AppHandle) -> Result<(), String> {
             .api_base
             .lock()
             .map_err(|_| "Desktop state lock poisoned".to_string())? = Some(api_base.clone());
+        *state
+            .api_session_token
+            .lock()
+            .map_err(|_| "Desktop state lock poisoned".to_string())? =
+            Some(api_session_token.clone());
     }
 
     update_splash(
@@ -162,7 +170,7 @@ fn bootstrap_backend(app: &AppHandle) -> Result<(), String> {
         ),
     );
 
-    let mut child = spawn_backend(&launch, api_port)?;
+    let mut child = spawn_backend(&launch, api_port, &api_session_token)?;
 
     update_splash(
         app,
@@ -184,7 +192,7 @@ fn bootstrap_backend(app: &AppHandle) -> Result<(), String> {
         "Loading frontend",
         "Backend is ready. Waiting for the desktop UI to finish loading.",
     );
-    create_main_window(app, &api_base)?;
+    create_main_window(app, &api_base, &api_session_token)?;
     wait_for_frontend_load(app)?;
     reveal_main_window(app)?;
     Ok(())
@@ -339,11 +347,16 @@ fn executable_name(base_name: &str) -> String {
     }
 }
 
-fn spawn_backend(launch: &BackendLaunch, api_port: u16) -> Result<Child, String> {
+fn spawn_backend(
+    launch: &BackendLaunch,
+    api_port: u16,
+    api_session_token: &str,
+) -> Result<Child, String> {
     let mut command = Command::new(&launch.executable);
     command
         .current_dir(&launch.working_dir)
         .env("GAMMA_API_PORT", api_port.to_string())
+        .env("GAMMA_SESSION_TOKEN", api_session_token)
         .env("CACHE_DIR", &launch.cache_dir)
         .env("PORTFOLIO_HISTORY_DIR", &launch.history_dir)
         .env("SAMPLE_DATA_DIR", &launch.sample_data_dir)
@@ -476,13 +489,21 @@ fn read_tail(path: &Path) -> Option<String> {
     }
 }
 
-fn create_main_window(app: &AppHandle, api_base: &str) -> Result<(), String> {
+fn create_main_window(
+    app: &AppHandle,
+    api_base: &str,
+    api_session_token: &str,
+) -> Result<(), String> {
     if app.get_webview_window("main").is_some() {
         return Ok(());
     }
     let api_base_json =
         serde_json::to_string(api_base).unwrap_or_else(|_| "\"http://127.0.0.1:8000\"".to_string());
-    let init_script = format!("window.__GAMMA_API_BASE__ = {api_base_json};");
+    let api_session_json =
+        serde_json::to_string(api_session_token).unwrap_or_else(|_| "\"\"".to_string());
+    let init_script = format!(
+        "window.__GAMMA_API_BASE__ = {api_base_json}; window.__GAMMA_SESSION_TOKEN__ = {api_session_json};"
+    );
     let window_config = app
         .config()
         .app
@@ -565,6 +586,23 @@ fn write_smoke_marker(app: &AppHandle, window_label: &str) -> Result<(), String>
             marker.display()
         )
     })
+}
+
+fn generate_session_token() -> Result<String, String> {
+    let mut bytes = [0_u8; 32];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|error| format!("Failed to generate API session token: {error}"))?;
+    Ok(hex_encode(&bytes))
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 fn update_splash(app: &AppHandle, headline: &str, detail: &str) {

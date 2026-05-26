@@ -36,7 +36,9 @@ Completed after the audit:
 - Fixed `P2. Frontend Commodities Tests Are Red` by restoring stable dense module frames and empty states for the Energy and Metals deep-research surfaces in `frontend/src/views/CommoditiesView.svelte`.
 - Fixed `P2. TypeScript Contract Check Is Failing And Not Enforced` by adding `npm run typecheck`, correcting production type narrowing, and updating stale frontend fixtures to the current API contracts.
 - Fixed `P2. Frontend Dependency Audit Has Known Advisories` by updating the vulnerable Svelte/devalue/postcss dependency chain through `npm audit fix`.
+- Fixed `P1. Local API Control Plane Has No Session Boundary` by adding a runtime Gamma session token boundary, requiring `X-Gamma-Session` on API routes except `GET /health`, tightening localhost CORS to explicit development/Tauri origins, wiring Tauri token generation through backend launch and frontend initialization, and adding backend/frontend regression coverage.
 - Validation after these fixes: `.\.venv\Scripts\python.exe -m pytest` passed with `288 passed`; `npm run typecheck` passed; `npm run test` passed with `152 passed`; `npm run build` passed with pre-existing unused-selector and bundle-size warnings still present; `npm run desktop:check` passed; `npm audit --audit-level=moderate` passed with `0 vulnerabilities`.
+- Additional validation after the session-boundary fix: `.\.venv\Scripts\python.exe -m pytest` passed with `290 passed`; `npm run test` passed with `153 passed`; `npm run typecheck` passed; `npm run build` passed with the same pre-existing unused-selector and bundle-size warnings; `npm run desktop:check` passed; `npm run desktop:smoke` passed; `npm audit --audit-level=moderate` passed with `0 vulnerabilities`.
 
 ## P1. Cache Keys Can Escape The Cache Directory On Windows - Fixed 2026-05-25
 
@@ -104,7 +106,9 @@ Prefer eliminating path-derived keys entirely:
 - Long query strings do not create overlong filesystem names.
 - Backend test suite still passes.
 
-## P1. Local API Control Plane Has No Session Boundary
+## P1. Local API Control Plane Has No Session Boundary - Fixed 2026-05-26
+
+Status: fixed after the audit. `src/api/session_auth.py` now resolves a runtime Gamma session token and enforces `X-Gamma-Session` on every API route except unauthenticated `GET /health`. `src/api/main.py` installs that middleware and removes the broad localhost CORS regex in favor of explicit development and Tauri origins. The Tauri shell now generates a random token at backend startup, passes it through `GAMMA_SESSION_TOKEN`, and injects it into the frontend alongside the API base URL; the frontend API client sends that token on shared request helpers, with `VITE_GAMMA_SESSION_TOKEN` documented for browser development. Regression coverage in `tests/test_api.py` proves missing and invalid tokens are rejected, valid tokens succeed, `GET /health` remains public, and unknown localhost origins are rejected by CORS. Frontend client coverage proves the token header is sent, and `npm run desktop:smoke` verifies the Tauri startup path still works.
 
 ### Impact
 
@@ -510,7 +514,7 @@ Inspect the generated chunk warning. For deeper diagnosis, add a bundle visualiz
 ## Suggested Work Order
 
 1. `Done 2026-05-25` Fix cache key path containment and add hostile-key tests.
-2. Add local API session-token protection for mutating and expensive refresh routes.
+2. `Done 2026-05-26` Add local API session-token protection for mutating and expensive refresh routes.
 3. `Done 2026-05-25` Add request bounds for Risk, Strategy Lab, Crypto, and Prediction Markets.
 4. `Done 2026-05-25` Restore green frontend tests by resolving Commodities view/test drift.
 5. `Done 2026-05-25` Add and fix `npm run typecheck`.

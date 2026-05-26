@@ -4,6 +4,9 @@ import { getJson, postJson } from "./client";
 
 describe("api client errors", () => {
   afterEach(() => {
+    if (typeof window !== "undefined") {
+      delete window.__GAMMA_SESSION_TOKEN__;
+    }
     vi.unstubAllGlobals();
   });
 
@@ -38,6 +41,29 @@ describe("api client errors", () => {
 
     await expect(postJson("/research/analyze", {})).rejects.toThrow(
       "400 Bad Request: bad request detail"
+    );
+  });
+
+  it("sends the runtime Gamma session token with API requests", async () => {
+    vi.stubGlobal("window", { __GAMMA_SESSION_TOKEN__: "runtime-session" });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await postJson("/research/analyze", {});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/research/analyze",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "X-Gamma-Session": "runtime-session"
+        })
+      })
     );
   });
 });

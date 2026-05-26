@@ -231,12 +231,13 @@ describe("app store orchestration", () => {
     await loadFundamentalsSearch({ query: "msft" });
 
     expect(get(selectedFundamentalsTicker)).toBe("MSFT");
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/overview"));
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/financials"));
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/dcf"));
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/peers"));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/overview"), expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/financials"), expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/dcf"), expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/fundamentals/MSFT/peers"), expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/fundamentals/MSFT/reverse-valuation")
+      expect.stringContaining("/fundamentals/MSFT/reverse-valuation"),
+      expect.any(Object)
     );
   });
 

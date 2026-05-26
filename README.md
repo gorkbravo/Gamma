@@ -654,6 +654,7 @@ Backend:
 
 ```powershell
 $env:MOCK_DATA="true"
+$env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -662,6 +663,7 @@ Optional Commodities EIA enrichment:
 ```powershell
 $env:COMMODITIES_PROVIDER="eia"
 $env:EIA_API_KEY="<your key>"
+$env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 # Optional: set FRED_API_KEY to enrich selected spot/proxy price histories.
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
@@ -679,6 +681,7 @@ $env:IBKR_COMMODITIES_BREADTH_ENABLED="__enabled__"
 $env:IBKR_COMMODITIES_ON_DEMAND="true"
 $env:IBKR_COMMODITIES_CONTRACT_DEPTH="12"
 $env:IBKR_COMMODITIES_BREADTH_CONTRACT_DEPTH="2"
+$env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -690,6 +693,7 @@ Optional Maritime AISstream prototype:
 $env:MARITIME_PROVIDER="aisstream"
 $env:AISSTREAM_API_KEY="<your key>"
 $env:AISSTREAM_SAMPLE_SECONDS="6"
+$env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -701,6 +705,7 @@ Frontend:
 cd frontend
 npm install
 $env:VITE_API_BASE="http://127.0.0.1:8000"
+$env:VITE_GAMMA_SESSION_TOKEN="<same dev-only random token>"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 

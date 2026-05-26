@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
+from src.api.session_auth import GAMMA_SESSION_HEADER
 from src.api.schemas.crypto import CryptoWorkspaceRequestModel
 from src.api.schemas.prediction_markets import PredictionMarketScreenerRequestModel
 from src.api.schemas.research import StrategyLabAnalyzeRequestModel
@@ -132,6 +133,51 @@ def test_research_analyze_endpoint(tmp_path):
         assert payload["weights"][0]["display_symbol"] == "AAPL"
         assert payload["snapshot"]["positions"][0]["symbol"] == "AAPL"
         assert payload["snapshot"]["positions"][0]["instrument_id"] is not None
+    finally:
+        runtime.shutdown()
+
+
+def test_gamma_session_boundary_rejects_missing_or_invalid_tokens(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    app = create_app(runtime, session_token="expected-session")
+    client = TestClient(app, headers={"X-Test-No-Gamma-Session": "1"})
+    try:
+        assert client.get("/health").status_code == 200
+
+        status_response = client.get("/system/status")
+        mutating_response = client.post("/system/market-data-mode", json={"market_data_mode": "live"})
+        refresh_response = client.get("/news/latest", params={"force_refresh": "true"})
+        invalid_response = client.get("/system/status", headers={GAMMA_SESSION_HEADER: "wrong-session"})
+        valid_response = client.get("/system/status", headers={GAMMA_SESSION_HEADER: "expected-session"})
+
+        assert status_response.status_code == 401
+        assert status_response.json()["detail"] == "Missing or invalid Gamma session token."
+        assert mutating_response.status_code == 401
+        assert refresh_response.status_code == 401
+        assert invalid_response.status_code == 401
+        assert valid_response.status_code == 200
+    finally:
+        runtime.shutdown()
+
+
+def test_gamma_cors_rejects_unknown_localhost_origin(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.options(
+            "/system/status",
+            headers={
+                "Origin": "http://localhost:9999",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": GAMMA_SESSION_HEADER,
+            },
+        )
+        assert response.status_code == 400
+        assert "access-control-allow-origin" not in response.headers
     finally:
         runtime.shutdown()
 

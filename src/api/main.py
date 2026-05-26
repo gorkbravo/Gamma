@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.session_auth import GAMMA_SESSION_HEADER, GammaSessionMiddleware, resolve_session_token
 from src.api.routes import (
     copilot_router,
     commodities_router,
@@ -23,9 +24,10 @@ from src.api.routes import (
 from src.application.runtime import ApplicationRuntime, get_runtime
 
 
-def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
+def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str | None = None) -> FastAPI:
     owns_runtime = runtime is None
     runtime_instance = runtime or get_runtime()
+    resolved_session_token = resolve_session_token(session_token)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -40,6 +42,7 @@ def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.runtime = runtime_instance
+    app.state.gamma_session_token = resolved_session_token
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -53,11 +56,11 @@ def create_app(runtime: ApplicationRuntime | None = None) -> FastAPI:
             "http://tauri.localhost",
             "https://tauri.localhost",
         ],
-        allow_origin_regex=r"^http://(127\.0\.0\.1|localhost):\d+$",
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", GAMMA_SESSION_HEADER],
     )
+    app.add_middleware(GammaSessionMiddleware, session_token=resolved_session_token)
     app.include_router(system_router)
     app.include_router(copilot_router)
     app.include_router(commodities_router)
