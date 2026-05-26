@@ -499,10 +499,13 @@ Implementation note:
 
 ### Phase 3 - Smart Depth And Budgeting
 
-- [ ] Implement `quick`, `standard`, `deep`, and `user_directed` profiles.
-- [ ] Add per-domain cost/latency estimates.
-- [ ] Add max tool-call, max provider-call, and max elapsed-time guards.
-- [ ] Add "why this domain was/was not used" output.
+- [x] Implement `quick`, `standard`, `deep`, and `user_directed` profiles.
+- [x] Add per-domain cost/latency estimates.
+- [x] Add max tool-call, max provider-call, and max elapsed-time guards.
+- [x] Add "why this domain was/was not used" output.
+
+Implementation note:
+- Phase 3 keeps the deterministic planner/executor path and adds profile-level execution budgets, per-domain tool/provider/latency estimates, explicit selected/omitted domain decisions, and bounded executor guards for max domains, tool calls, provider calls, and elapsed time. The Copilot workspace plan preview now surfaces the budget envelope and domain-use rationale. Representative tests cover quick, standard, user-directed, planner-budget metadata, domain decisions, and quick executor bounds.
 
 ### Phase 4 - External Context Providers
 

@@ -18,6 +18,7 @@ from src.models.copilot import (
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
     CopilotResearchPlan,
+    CopilotResearchPlanDomainDecision,
     CopilotResearchPlanDomain,
     CopilotResearchPlanEntity,
     CopilotSession,
@@ -264,6 +265,9 @@ class CopilotResearchPlanDomainModel(BaseModel):
     action_type: str
     planned_tools: list[str] = Field(default_factory=list)
     required_context: list[str] = Field(default_factory=list)
+    estimated_tool_calls: int = 0
+    estimated_provider_calls: int = 0
+    estimated_latency_ms: int = 0
 
     @classmethod
     def from_domain(cls, row: CopilotResearchPlanDomain) -> "CopilotResearchPlanDomainModel":
@@ -274,7 +278,20 @@ class CopilotResearchPlanDomainModel(BaseModel):
             action_type=row.action_type,
             planned_tools=list(row.planned_tools),
             required_context=list(row.required_context),
+            estimated_tool_calls=row.estimated_tool_calls,
+            estimated_provider_calls=row.estimated_provider_calls,
+            estimated_latency_ms=row.estimated_latency_ms,
         )
+
+
+class CopilotResearchPlanDomainDecisionModel(BaseModel):
+    domain: str
+    used: bool
+    reason: str
+
+    @classmethod
+    def from_domain(cls, row: CopilotResearchPlanDomainDecision) -> "CopilotResearchPlanDomainDecisionModel":
+        return cls(**row.__dict__)
 
 
 class CopilotResearchPlanModel(BaseModel):
@@ -282,6 +299,10 @@ class CopilotResearchPlanModel(BaseModel):
     target_entities: list[CopilotResearchPlanEntityModel] = Field(default_factory=list)
     depth_profile: str
     domain_plan: list[CopilotResearchPlanDomainModel] = Field(default_factory=list)
+    domain_decisions: list[CopilotResearchPlanDomainDecisionModel] = Field(default_factory=list)
+    max_tool_calls: int = 0
+    max_provider_calls: int = 0
+    max_elapsed_ms: int = 0
     requires_confirmation: bool
     expected_artifacts: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -297,6 +318,10 @@ class CopilotResearchPlanModel(BaseModel):
             target_entities=[CopilotResearchPlanEntityModel.from_domain(item) for item in row.target_entities],
             depth_profile=row.depth_profile,
             domain_plan=[CopilotResearchPlanDomainModel.from_domain(item) for item in row.domain_plan],
+            domain_decisions=[CopilotResearchPlanDomainDecisionModel.from_domain(item) for item in row.domain_decisions],
+            max_tool_calls=row.max_tool_calls,
+            max_provider_calls=row.max_provider_calls,
+            max_elapsed_ms=row.max_elapsed_ms,
             requires_confirmation=row.requires_confirmation,
             expected_artifacts=list(row.expected_artifacts),
             warnings=list(row.warnings),

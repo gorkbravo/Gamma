@@ -2134,6 +2134,76 @@ def test_copilot_research_plan_portfolio_rate_shock_prompt(tmp_path, monkeypatch
         runtime.shutdown()
 
 
+def test_copilot_research_plan_phase3_depth_budget_and_domain_decisions(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Quick research NVDA",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["depth_profile"] == "quick"
+        assert payload["max_tool_calls"] == 3
+        assert payload["max_provider_calls"] == 0
+        assert len(payload["domain_plan"]) <= 3
+        assert all(item["depth"] == "light" for item in payload["domain_plan"])
+        assert all(item["estimated_tool_calls"] >= 0 for item in payload["domain_plan"])
+        assert all(item["estimated_latency_ms"] > 0 for item in payload["domain_plan"])
+        assert any(
+            decision["domain"] == "fundamentals" and decision["used"]
+            for decision in payload["domain_decisions"]
+        )
+        assert any(
+            decision["domain"] == "portfolio" and not decision["used"]
+            for decision in payload["domain_decisions"]
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_research_plan_user_directed_profile(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Use only macro and risk for this question",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["depth_profile"] == "user_directed"
+        assert [item["domain"] for item in payload["domain_plan"]] == ["risk", "macro"]
+        assert payload["max_tool_calls"] == 10
+        assert any(
+            decision["domain"] == "fundamentals" and not decision["used"]
+            for decision in payload["domain_decisions"]
+        )
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_action_registry_marks_existing_tools_read_only(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
@@ -2149,6 +2219,46 @@ def test_copilot_action_registry_marks_existing_tools_read_only(tmp_path):
         }
         assert portfolio_tools["get_portfolio_positions_summary"].action_type == "read_context"
         assert portfolio_tools["get_portfolio_positions_summary"].requires_confirmation is False
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_plan_execution_applies_quick_profile_budget(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        history = client.get("/portfolio/history").json()
+        performance = client.post(
+            "/portfolio/performance",
+            json={
+                "snapshot": snapshot,
+                "benchmark_symbol": "SPY",
+                "lookback_days": 30,
+            },
+        ).json()
+
+        response = client.post(
+            "/copilot/research-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Quick: is my portfolio exposed to rate shock?",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {
+                        "snapshot": snapshot,
+                        "history": history,
+                        "performance": performance,
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert len(payload["tool_traces"]) <= 3
+        assert any("bounded to 2 domains" in warning for warning in payload["warnings"])
     finally:
         runtime.shutdown()
 

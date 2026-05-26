@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import logging
 import re
+import time
 from typing import Any, Callable
 
 from src.application.copilot_context_helpers import (
@@ -29,6 +30,7 @@ from src.models.copilot import (
     CopilotResearchCardResult,
     CopilotResearchActionDefinition,
     CopilotResearchPlan,
+    CopilotResearchPlanDomainDecision,
     CopilotResearchPlanDomain,
     CopilotResearchPlanEntity,
     CopilotSession,
@@ -93,10 +95,15 @@ class _CopilotToolDefinition:
         )
 
 
-class CopilotService:
-    _PLAN_EXECUTION_MAX_DOMAINS = 4
-    _PLAN_EXECUTION_MAX_TOOLS = 8
+@dataclass(frozen=True)
+class _CopilotExecutionBudget:
+    max_domains: int
+    max_tool_calls: int
+    max_provider_calls: int
+    max_elapsed_ms: int
 
+
+class CopilotService:
     def __init__(
         self,
         *,
@@ -514,6 +521,12 @@ class CopilotService:
             target_entities=target_entities,
             request=request,
         )
+        budget = self._execution_budget_for_depth(depth_profile)
+        domain_decisions = self._build_domain_decisions(
+            intent=intent,
+            domain_plan=domain_plan,
+            request=request,
+        )
         warnings = self._plan_warnings(prompt, domain_plan)
         expected_artifacts = ["session_trace"]
         if depth_profile in {"standard", "deep"} or intent != "active_context_research":
@@ -526,6 +539,10 @@ class CopilotService:
             target_entities=target_entities,
             depth_profile=depth_profile,
             domain_plan=domain_plan,
+            domain_decisions=domain_decisions,
+            max_tool_calls=budget.max_tool_calls,
+            max_provider_calls=budget.max_provider_calls,
+            max_elapsed_ms=budget.max_elapsed_ms,
             requires_confirmation=False,
             expected_artifacts=expected_artifacts,
             warnings=warnings,
@@ -546,15 +563,30 @@ class CopilotService:
         executed_domains: list[str] = []
         skipped_domains: list[str] = []
         tool_outputs: dict[str, dict[str, Any]] = {}
-        remaining_tools = self._PLAN_EXECUTION_MAX_TOOLS
+        budget = self._execution_budget_for_depth(plan.depth_profile)
+        remaining_tools = budget.max_tool_calls
+        provider_calls_used = 0
+        started_at = time.perf_counter()
 
-        for planned_domain in plan.domain_plan[: self._PLAN_EXECUTION_MAX_DOMAINS]:
+        for planned_domain in plan.domain_plan[: budget.max_domains]:
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            if elapsed_ms >= budget.max_elapsed_ms:
+                warnings.append(
+                    f"Stopped plan execution after {elapsed_ms}ms, above the {budget.max_elapsed_ms}ms elapsed-time guard."
+                )
+                break
             domain = planned_domain.domain
             if domain == "external_context":
                 skipped_domains.append(domain)
-                warnings.append(
-                    "External context execution is skipped until approved provider adapters are configured."
-                )
+                if provider_calls_used + planned_domain.estimated_provider_calls > budget.max_provider_calls:
+                    warnings.append(
+                        f"Skipped external context because provider calls would exceed the {budget.max_provider_calls} call guard."
+                    )
+                else:
+                    provider_calls_used += planned_domain.estimated_provider_calls
+                    warnings.append(
+                        "External context execution is skipped until approved provider adapters are configured."
+                    )
                 continue
 
             try:
@@ -570,9 +602,15 @@ class CopilotService:
 
             domain_outputs: dict[str, Any] = {}
             for tool_name in planned_domain.planned_tools:
+                elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+                if elapsed_ms >= budget.max_elapsed_ms:
+                    warnings.append(
+                        f"Stopped plan execution after {elapsed_ms}ms, above the {budget.max_elapsed_ms}ms elapsed-time guard."
+                    )
+                    break
                 if remaining_tools <= 0:
                     warnings.append(
-                        f"Stopped plan execution after {self._PLAN_EXECUTION_MAX_TOOLS} read-only tools."
+                        f"Stopped plan execution after {budget.max_tool_calls} read-only tools."
                     )
                     break
 
@@ -590,6 +628,13 @@ class CopilotService:
                 ):
                     warnings.append(f"Skipped `{tool_name}` because it is not automatic read-only work.")
                     continue
+                if definition.external_provider:
+                    if provider_calls_used + 1 > budget.max_provider_calls:
+                        warnings.append(
+                            f"Skipped `{tool_name}` because provider calls would exceed the {budget.max_provider_calls} call guard."
+                        )
+                        continue
+                    provider_calls_used += 1
 
                 arguments = self._default_plan_execution_arguments(tool_name, context)
                 if arguments is None:
@@ -616,9 +661,9 @@ class CopilotService:
                 executed_domains.append(domain)
                 tool_outputs[domain] = domain_outputs
 
-        if len(plan.domain_plan) > self._PLAN_EXECUTION_MAX_DOMAINS:
+        if len(plan.domain_plan) > budget.max_domains:
             warnings.append(
-                f"Plan execution was bounded to {self._PLAN_EXECUTION_MAX_DOMAINS} domains."
+                f"Plan execution was bounded to {budget.max_domains} domains for the {plan.depth_profile} profile."
             )
 
         warnings = dedupe_warnings(warnings)
@@ -909,11 +954,50 @@ class CopilotService:
 
     @staticmethod
     def _infer_depth_profile(prompt: str) -> str:
+        if CopilotService._extract_user_directed_domains(prompt) or any(
+            term in prompt for term in ("use only", "only use", "just use", "only run", "run only")
+        ):
+            return "user_directed"
         if any(term in prompt for term in ("deep", "full", "comprehensive", "report", "memo")):
             return "deep"
         if any(term in prompt for term in ("quick", "brief", "fast", "summary")):
             return "quick"
         return "standard"
+
+    @staticmethod
+    def _extract_user_directed_domains(prompt: str) -> list[str]:
+        prompt = prompt.lower()
+        if not prompt.strip():
+            return []
+        explicit_markers = (
+            "use ",
+            "using ",
+            "run ",
+            "only ",
+            "just ",
+            "from ",
+            "with ",
+        )
+        if not any(marker in prompt for marker in explicit_markers):
+            return []
+
+        domain_terms: dict[str, tuple[str, ...]] = {
+            "portfolio": ("portfolio", "book", "positions"),
+            "risk": ("risk", "var", "cvar", "scenario"),
+            "macro": ("macro", "rates", "fed", "cpi", "inflation"),
+            "commodities": ("commodities", "commodity", "oil", "crude", "gold", "copper"),
+            "prediction_markets": ("prediction market", "prediction markets", "polymarket", "kalshi"),
+            "crypto": ("crypto", "token", "dex", "on-chain", "onchain"),
+            "fundamentals": ("fundamentals", "dcf", "filings", "financials"),
+            "equity_research": ("equity research", "equities", "stocks", "benchmark"),
+            "strategy_lab": ("strategy lab", "strategy", "backtest"),
+            "iv": ("options", "iv", "vol", "skew"),
+        }
+        domains: list[str] = []
+        for domain, terms in domain_terms.items():
+            if any(re.search(rf"\b{re.escape(term)}\b", prompt) for term in terms):
+                domains.append(domain)
+        return domains
 
     @staticmethod
     def _infer_plan_intent(
@@ -962,18 +1046,29 @@ class CopilotService:
             if domain in seen:
                 return
             seen.add(domain)
+            tools = planned_tools or self._default_plan_tools(domain)
+            provider_calls = self._estimated_provider_calls(domain, tools)
             domain_plan.append(
                 CopilotResearchPlanDomain(
                     domain=domain,
                     depth=depth,
                     reason=reason,
                     action_type=action_type,
-                    planned_tools=planned_tools or self._default_plan_tools(domain),
+                    planned_tools=tools,
                     required_context=required_context or [],
+                    estimated_tool_calls=len(tools),
+                    estimated_provider_calls=provider_calls,
+                    estimated_latency_ms=self._estimated_domain_latency_ms(depth, len(tools), provider_calls),
                 )
             )
 
-        if intent == "single_company_research":
+        if depth_profile == "user_directed":
+            directed_domains = self._extract_user_directed_domains(prompt)
+            if not directed_domains:
+                directed_domains = [self._resolve_domain(request)]
+            for domain in directed_domains:
+                add(domain, "medium", "The user explicitly named this Gamma domain or asked to use the active context.")
+        elif intent == "single_company_research":
             add("fundamentals", "deep", "Single-company research needs filings, normalized statements, peers, DCF, and implied-expectation context.")
             add("equity_research", "medium", "Market and benchmark-relative context helps frame whether the company question is idiosyncratic or factor-driven.")
             add("iv", "medium", "Options context can surface event risk, term structure, and skew caveats if an options surface is available.")
@@ -1005,15 +1100,12 @@ class CopilotService:
 
         if depth_profile == "quick":
             return [
-                replace(
-                    item,
-                    depth="light" if item.depth in {"medium", "deep"} else item.depth,
-                )
+                self._with_plan_depth(item, "light" if item.depth in {"medium", "deep"} else item.depth)
                 for item in domain_plan[:3]
             ]
         if depth_profile == "deep" and target_entities:
             return [
-                replace(item, depth="deep" if item.depth == "medium" else item.depth)
+                self._with_plan_depth(item, "deep" if item.depth == "medium" else item.depth)
                 for item in domain_plan
             ]
         return domain_plan
@@ -1039,6 +1131,143 @@ class CopilotService:
             "iv": ["get_iv_surface_context", "get_iv_session_status"],
             "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
         }.get(domain, [])
+
+    @staticmethod
+    def _with_plan_depth(item: CopilotResearchPlanDomain, depth: str) -> CopilotResearchPlanDomain:
+        return replace(
+            item,
+            depth=depth,
+            estimated_latency_ms=CopilotService._estimated_domain_latency_ms(
+                depth,
+                item.estimated_tool_calls,
+                item.estimated_provider_calls,
+            ),
+        )
+
+    def _estimated_provider_calls(self, domain: str, tools: list[str]) -> int:
+        calls = 1 if domain == "external_context" else 0
+        for tool_name in tools:
+            definition = self._tools.get(tool_name)
+            if definition is not None and definition.external_provider:
+                calls += 1
+        return calls
+
+    @staticmethod
+    def _estimated_domain_latency_ms(depth: str, tool_calls: int, provider_calls: int) -> int:
+        depth_multiplier = {
+            "light": 0.7,
+            "medium": 1.0,
+            "deep": 1.45,
+        }.get(depth, 1.0)
+        estimate = 250 + (tool_calls * 650 * depth_multiplier) + (provider_calls * 1500)
+        return int(round(estimate))
+
+    @staticmethod
+    def _execution_budget_for_depth(depth_profile: str) -> _CopilotExecutionBudget:
+        return {
+            "quick": _CopilotExecutionBudget(
+                max_domains=2,
+                max_tool_calls=3,
+                max_provider_calls=0,
+                max_elapsed_ms=2_500,
+            ),
+            "standard": _CopilotExecutionBudget(
+                max_domains=4,
+                max_tool_calls=8,
+                max_provider_calls=1,
+                max_elapsed_ms=8_000,
+            ),
+            "deep": _CopilotExecutionBudget(
+                max_domains=6,
+                max_tool_calls=14,
+                max_provider_calls=3,
+                max_elapsed_ms=20_000,
+            ),
+            "user_directed": _CopilotExecutionBudget(
+                max_domains=5,
+                max_tool_calls=10,
+                max_provider_calls=1,
+                max_elapsed_ms=12_000,
+            ),
+        }.get(
+            depth_profile,
+            _CopilotExecutionBudget(
+                max_domains=4,
+                max_tool_calls=8,
+                max_provider_calls=1,
+                max_elapsed_ms=8_000,
+            ),
+        )
+
+    @staticmethod
+    def _build_domain_decisions(
+        *,
+        intent: str,
+        domain_plan: list[CopilotResearchPlanDomain],
+        request: CopilotResearchCardRequest,
+    ) -> list[CopilotResearchPlanDomainDecision]:
+        selected = {item.domain: item for item in domain_plan}
+        decisions = [
+            CopilotResearchPlanDomainDecision(
+                domain=item.domain,
+                used=True,
+                reason=item.reason,
+            )
+            for item in domain_plan
+        ]
+        omitted_reasons = CopilotService._omitted_domain_reasons(intent, request)
+        for domain in CopilotService._known_research_domains():
+            if domain in selected:
+                continue
+            decisions.append(
+                CopilotResearchPlanDomainDecision(
+                    domain=domain,
+                    used=False,
+                    reason=omitted_reasons.get(domain, "Not selected because the prompt did not make this domain material to the bounded plan."),
+                )
+            )
+        return decisions
+
+    @staticmethod
+    def _known_research_domains() -> tuple[str, ...]:
+        return (
+            "portfolio",
+            "risk",
+            "equity_research",
+            "strategy_lab",
+            "macro",
+            "commodities",
+            "prediction_markets",
+            "crypto",
+            "fundamentals",
+            "iv",
+            "external_context",
+            "synthesis",
+        )
+
+    @staticmethod
+    def _omitted_domain_reasons(
+        intent: str,
+        request: CopilotResearchCardRequest,
+    ) -> dict[str, str]:
+        base = {
+            "portfolio": "Portfolio is omitted unless the request asks about the user's book, exposure, or active portfolio context.",
+            "risk": "Risk is omitted unless the request needs portfolio/scenario quantification or an active risk result.",
+            "equity_research": "Equity Research is omitted unless listed-equity market context helps answer the request.",
+            "strategy_lab": "Strategy Lab is omitted unless the request asks about imported strategies, compositions, or backtests.",
+            "macro": "Macro is omitted unless rates, inflation, policy, growth, FX, or regime context is material.",
+            "commodities": "Commodities is omitted unless the request names a commodity, curve, inventory, spread, or supply/demand theme.",
+            "prediction_markets": "Prediction Markets is omitted unless event probabilities or venue expectations add useful context.",
+            "crypto": "Crypto is omitted unless the request names a token, crypto sector, DEX/liquidity, or on-chain flow.",
+            "fundamentals": "Fundamentals is omitted unless a company, filing, DCF, financial statement, or valuation question is central.",
+            "iv": "Options is omitted unless volatility, skew, event risk, or an active IV surface is relevant.",
+            "external_context": "External context is omitted unless freshness from approved read-only providers is needed.",
+            "synthesis": "Synthesis is omitted unless the request needs comparison across already-loaded Gamma contexts.",
+        }
+        if intent == "active_context_research":
+            active_domain = request.context.current_tab or request.domain
+            base["synthesis"] = f"Synthesis is omitted because the active-context request is anchored to `{active_domain}`."
+        return base
 
     @staticmethod
     def _plan_warnings(prompt: str, domain_plan: list[CopilotResearchPlanDomain]) -> list[str]:

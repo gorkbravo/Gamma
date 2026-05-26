@@ -189,6 +189,13 @@
     return session.archived_at ? "ARCHIVED" : session.active_domain ?? "mixed";
   }
 
+  function formatMs(value: number) {
+    if (value >= 1000) {
+      return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}s`;
+    }
+    return `${value}ms`;
+  }
+
   $: surface = focusMode === "synthesis" ? synthesisSurface : activeSurface;
   $: threadEntries = surface.thread?.entries ?? [];
   $: selectedCount = synthesisSurface.selectedScopeDomains.length;
@@ -269,6 +276,11 @@
               <span>{researchPlan.depth_profile}</span>
               <strong>{researchPlan.intent.replaceAll("_", " ")}</strong>
             </div>
+            <div class="plan-budget">
+              <span>{researchPlan.max_tool_calls} tools max</span>
+              <span>{researchPlan.max_provider_calls} provider calls max</span>
+              <span>{formatMs(researchPlan.max_elapsed_ms)} guard</span>
+            </div>
             {#if researchPlan.target_entities.length}
               <div class="entity-row">
                 {#each researchPlan.target_entities.slice(0, 4) as entity}
@@ -280,11 +292,22 @@
               {#each researchPlan.domain_plan.slice(0, 5) as item}
                 <div>
                   <strong>{item.domain.replaceAll("_", " ")}</strong>
-                  <span>{item.depth}</span>
+                  <span>{item.depth} / {item.estimated_tool_calls}T / {item.estimated_provider_calls}P / {formatMs(item.estimated_latency_ms)}</span>
                   <p>{item.reason}</p>
                 </div>
               {/each}
             </div>
+            {#if researchPlan.domain_decisions.length}
+              <div class="domain-decisions">
+                {#each researchPlan.domain_decisions.slice(0, 6) as decision}
+                  <div class:omitted={!decision.used}>
+                    <strong>{decision.used ? "USED" : "SKIP"}</strong>
+                    <span>{decision.domain.replaceAll("_", " ")}</span>
+                    <p>{decision.reason}</p>
+                  </div>
+                {/each}
+              </div>
+            {/if}
             {#if researchPlan.warnings.length}
               <p class="plan-warning">{researchPlan.warnings[0]}</p>
             {/if}
@@ -653,8 +676,10 @@
   }
 
   .plan-preview-head,
+  .plan-budget,
   .entity-row,
   .domain-plan div,
+  .domain-decisions div,
   .plan-warning {
     padding: 0.5rem 0.65rem;
     border-bottom: 1px solid var(--divider);
@@ -668,7 +693,10 @@
   }
 
   .plan-preview-head span,
+  .plan-budget span,
   .domain-plan span,
+  .domain-decisions strong,
+  .domain-decisions span,
   .entity-row span {
     color: var(--text-2);
     text-transform: uppercase;
@@ -677,11 +705,18 @@
   }
 
   .plan-preview-head strong,
-  .domain-plan strong {
+  .domain-plan strong,
+  .domain-decisions span {
     color: var(--text-0);
     text-transform: uppercase;
     letter-spacing: 0;
     font-size: 0.72rem;
+  }
+
+  .plan-budget {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
   }
 
   .entity-row {
@@ -695,11 +730,16 @@
     gap: 0;
   }
 
-  .domain-plan div {
+  .domain-plan div,
+  .domain-decisions div {
     display: grid;
-    grid-template-columns: minmax(8rem, 0.35fr) 4.5rem minmax(0, 1fr);
+    grid-template-columns: minmax(8rem, 0.35fr) minmax(7rem, 0.28fr) minmax(0, 1fr);
     gap: 0.6rem;
     align-items: start;
+  }
+
+  .domain-decisions div.omitted strong {
+    color: var(--text-2);
   }
 
   .domain-plan div:last-child,
@@ -708,6 +748,7 @@
   }
 
   .domain-plan p,
+  .domain-decisions p,
   .plan-warning {
     margin: 0;
     color: var(--text-1);
@@ -967,7 +1008,8 @@
     }
 
     .composer-actions,
-    .domain-plan div {
+    .domain-plan div,
+    .domain-decisions div {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
     }

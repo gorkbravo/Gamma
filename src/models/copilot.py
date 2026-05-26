@@ -77,6 +77,16 @@ class CopilotResearchPlanDomain:
     action_type: str = "read_context"
     planned_tools: list[str] = field(default_factory=list)
     required_context: list[str] = field(default_factory=list)
+    estimated_tool_calls: int = 0
+    estimated_provider_calls: int = 0
+    estimated_latency_ms: int = 0
+
+
+@dataclass(frozen=True)
+class CopilotResearchPlanDomainDecision:
+    domain: str
+    used: bool
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -85,6 +95,10 @@ class CopilotResearchPlan:
     target_entities: list[CopilotResearchPlanEntity] = field(default_factory=list)
     depth_profile: str = "standard"
     domain_plan: list[CopilotResearchPlanDomain] = field(default_factory=list)
+    domain_decisions: list[CopilotResearchPlanDomainDecision] = field(default_factory=list)
+    max_tool_calls: int = 0
+    max_provider_calls: int = 0
+    max_elapsed_ms: int = 0
     requires_confirmation: bool = False
     expected_artifacts: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

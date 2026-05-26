@@ -2835,6 +2835,15 @@ export interface CopilotResearchPlanDomain {
   action_type: string;
   planned_tools: string[];
   required_context: string[];
+  estimated_tool_calls: number;
+  estimated_provider_calls: number;
+  estimated_latency_ms: number;
+}
+
+export interface CopilotResearchPlanDomainDecision {
+  domain: string;
+  used: boolean;
+  reason: string;
 }
 
 export interface CopilotResearchPlan {
@@ -2842,6 +2851,10 @@ export interface CopilotResearchPlan {
   target_entities: CopilotResearchPlanEntity[];
   depth_profile: string;
   domain_plan: CopilotResearchPlanDomain[];
+  domain_decisions: CopilotResearchPlanDomainDecision[];
+  max_tool_calls: number;
+  max_provider_calls: number;
+  max_elapsed_ms: number;
   requires_confirmation: boolean;
   expected_artifacts: string[];
   warnings: string[];
