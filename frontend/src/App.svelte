@@ -129,9 +129,7 @@
     clearPortfolioSnapshot,
     setBaseCurrency,
     setMarketDataMode,
-    startIvSession,
     strategyLabResult,
-    stopIvSession,
     systemStatus,
     toggleConnection,
     updateCopilotMemo
@@ -223,7 +221,7 @@
   let fundamentalsMode: FundamentalsMode = "overview";
   let commoditiesMode: CommodityMode = "overview";
   let maritimeMode: MaritimeMode = "live_map";
-  let optionsMode: OptionsMode = "surface";
+  let optionsMode: OptionsMode = "overview";
   let riskMode: RiskMode = "overview";
   let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
@@ -2331,8 +2329,6 @@
             loading={$loading.iv}
             sessionLoading={$loading.ivSession}
             onLoad={loadIvSurface}
-            onStartSession={startIvSession}
-            onStopSession={stopIvSession}
             onSendToCopilot={handleSendToCopilot}
           />
         {/if}

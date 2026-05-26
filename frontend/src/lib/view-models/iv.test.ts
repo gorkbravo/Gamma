@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { IvSurface, TimeSeriesPoint } from "../api/types";
 import {
+  buildStrategyLegFromChainRow,
+  deriveChainRows,
   daysToExpiry,
   deriveDistributionBuckets,
+  deriveOverviewSnapshot,
   deriveRealizedVolatility,
   deriveSkewRows,
+  deriveStrategyPayoff,
   deriveSurfaceStats,
   deriveTermStructure,
   nearestStrikeIndex,
@@ -34,7 +38,83 @@ function makeSurface(overrides: Partial<IvSurface> = {}): IvSurface {
     freshness_label: "delayed",
     collection: null,
     quality: null,
-    pairs: [],
+    pairs: [
+      {
+        pair_id: "20260515-95",
+        expiry: "20260515",
+        strike: 95,
+        days_to_expiry: 24,
+        call_contract_id: "c-95",
+        put_contract_id: "p-95",
+        call_midpoint: 6,
+        put_midpoint: 1,
+        call_mark_price: null,
+        put_mark_price: null,
+        call_implied_volatility: 0.21,
+        put_implied_volatility: 0.2,
+        blended_implied_volatility: 0.205,
+        call_delta: 0.7,
+        put_delta: -0.3,
+        call_open_interest: 100,
+        put_open_interest: 80,
+        call_volume: 20,
+        put_volume: 15,
+        straddle_midpoint: 7,
+        synthetic_forward_price: null,
+        implied_move_pct: 0.07,
+        call_put_parity_gap: null,
+      },
+      {
+        pair_id: "20260515-100",
+        expiry: "20260515",
+        strike: 100,
+        days_to_expiry: 24,
+        call_contract_id: "c-100",
+        put_contract_id: "p-100",
+        call_midpoint: 3,
+        put_midpoint: 3,
+        call_mark_price: null,
+        put_mark_price: null,
+        call_implied_volatility: 0.18,
+        put_implied_volatility: 0.18,
+        blended_implied_volatility: 0.18,
+        call_delta: 0.5,
+        put_delta: -0.5,
+        call_open_interest: 120,
+        put_open_interest: 150,
+        call_volume: 30,
+        put_volume: 45,
+        straddle_midpoint: 6,
+        synthetic_forward_price: null,
+        implied_move_pct: 0.06,
+        call_put_parity_gap: null,
+      },
+      {
+        pair_id: "20260515-105",
+        expiry: "20260515",
+        strike: 105,
+        days_to_expiry: 24,
+        call_contract_id: "c-105",
+        put_contract_id: "p-105",
+        call_midpoint: 1,
+        put_midpoint: 6,
+        call_mark_price: null,
+        put_mark_price: null,
+        call_implied_volatility: 0.19,
+        put_implied_volatility: 0.2,
+        blended_implied_volatility: 0.195,
+        call_delta: 0.3,
+        put_delta: -0.7,
+        call_open_interest: 90,
+        put_open_interest: 110,
+        call_volume: 12,
+        put_volume: 18,
+        straddle_midpoint: 7,
+        synthetic_forward_price: null,
+        implied_move_pct: 0.07,
+        call_put_parity_gap: null,
+      },
+    ],
     ...overrides,
   };
 }
@@ -95,6 +175,32 @@ describe("options surface view models", () => {
 
     expect(buckets).toHaveLength(9);
     expect(total).toBeCloseTo(1, 6);
+  });
+
+  it("derives chain rows and overview ratios from paired options", () => {
+    const surface = makeSurface();
+    const rows = deriveChainRows(surface, "20260515");
+    const overview = deriveOverviewSnapshot(surface, "20260515");
+
+    expect(rows.map((row) => row.strike)).toEqual([95, 100, 105]);
+    expect(overview.atmPair?.strike).toBe(100);
+    expect(overview.putCallOpenInterestRatio).toBeCloseTo(340 / 310, 8);
+    expect(overview.putCallVolumeRatio).toBeCloseTo(78 / 62, 8);
+    expect(overview.maxPainStrike).toBe(100);
+  });
+
+  it("builds expiry payoff for a simple long call strategy", () => {
+    const row = deriveChainRows(makeSurface(), "20260515")[1];
+    const leg = buildStrategyLegFromChainRow(row, "call", "long");
+    expect(leg).not.toBeNull();
+
+    const payoff = deriveStrategyPayoff(leg ? [leg] : [], 100, 9);
+
+    expect(payoff.netPremium).toBeCloseTo(-3, 8);
+    expect(payoff.maxLoss).toBeLessThanOrEqual(-3);
+    expect(payoff.points[0].payoff).toBeCloseTo(-3, 8);
+    expect(payoff.points.at(-1)?.payoff).toBeGreaterThan(0);
+    expect(payoff.breakevens[0]).toBeCloseTo(103, 0);
   });
 
   it("parses days to expiry from TWS-style expiry strings", () => {

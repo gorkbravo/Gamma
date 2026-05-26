@@ -91,11 +91,12 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
     { id: "event_replay", label: "Event Replay", defaultIndex: 4 },
   ]),
   iv: defineTabModes([
-    { id: "surface", label: "Surface", defaultIndex: 0 },
-    { id: "skew_term", label: "Skew & Term", defaultIndex: 1 },
-    { id: "realized_implied", label: "Realized vs Implied", defaultIndex: 2 },
-    { id: "distribution", label: "Implied Distribution", defaultIndex: 3 },
-    { id: "source", label: "Source", defaultIndex: 4 },
+    { id: "overview", label: "Overview", defaultIndex: 0 },
+    { id: "chain", label: "Chain", defaultIndex: 1 },
+    { id: "surface", label: "Surface", defaultIndex: 2 },
+    { id: "realized_implied", label: "Realized vs IV", defaultIndex: 3 },
+    { id: "distribution", label: "Implied Distribution", defaultIndex: 4 },
+    { id: "strategies", label: "Strategies", defaultIndex: 5 },
   ]),
   risk: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },

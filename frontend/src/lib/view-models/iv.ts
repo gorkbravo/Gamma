@@ -1,18 +1,20 @@
 import type { IvSurface, TimeSeriesPoint } from "../api/types";
 
 export type OptionsMode =
+  | "overview"
+  | "chain"
   | "surface"
-  | "skew_term"
   | "realized_implied"
   | "distribution"
-  | "source";
+  | "strategies";
 
 export const optionsModes: Array<{ id: OptionsMode; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "chain", label: "Chain" },
   { id: "surface", label: "Surface" },
-  { id: "skew_term", label: "Skew & Term" },
-  { id: "realized_implied", label: "Realized vs Implied" },
+  { id: "realized_implied", label: "Realized vs IV" },
   { id: "distribution", label: "Implied Distribution" },
-  { id: "source", label: "Source" },
+  { id: "strategies", label: "Strategies" },
 ];
 
 export interface SurfaceStats {
@@ -50,6 +52,67 @@ export interface DistributionBucket {
   price: number;
   probability: number;
   label: string;
+}
+
+export interface ChainRow {
+  pair: NonNullable<IvSurface["pairs"]>[number];
+  expiry: string;
+  strike: number;
+  moneyness: number | null;
+  distancePct: number | null;
+  callMidpoint: number | null;
+  putMidpoint: number | null;
+  callIv: number | null;
+  putIv: number | null;
+  blendedIv: number | null;
+  callDelta: number | null;
+  putDelta: number | null;
+  callOpenInterest: number | null;
+  putOpenInterest: number | null;
+  callVolume: number | null;
+  putVolume: number | null;
+  straddleMidpoint: number | null;
+  impliedMovePct: number | null;
+}
+
+export interface OverviewSnapshot {
+  stats: SurfaceStats;
+  selectedExpiry: string | null;
+  selectedExpiryDte: number | null;
+  atmPair: ChainRow | null;
+  frontChain: ChainRow[];
+  skewRows: SkewRow[];
+  termStructure: Array<{ expiry: string; iv: number | null }>;
+  putCallOpenInterestRatio: number | null;
+  putCallVolumeRatio: number | null;
+  maxPainStrike: number | null;
+}
+
+export type StrategyOptionType = "call" | "put";
+export type StrategySide = "long" | "short";
+
+export interface StrategyLeg {
+  id: string;
+  optionType: StrategyOptionType;
+  side: StrategySide;
+  expiry: string;
+  strike: number;
+  premium: number;
+  quantity: number;
+}
+
+export interface StrategyPayoffPoint {
+  underlyingPrice: number;
+  payoff: number;
+  returnPct: number | null;
+}
+
+export interface StrategyPayoffSummary {
+  points: StrategyPayoffPoint[];
+  netPremium: number;
+  maxProfit: number | null;
+  maxLoss: number | null;
+  breakevens: number[];
 }
 
 export interface SurfacePath {
@@ -118,6 +181,74 @@ export function deriveSurfaceStats(surface: IvSurface | null): SurfaceStats {
   };
 }
 
+export function selectedExpiryForSurface(surface: IvSurface | null, requestedExpiry: string | null | undefined): string | null {
+  if (!surface?.expiries.length) {
+    return null;
+  }
+  return requestedExpiry && surface.expiries.includes(requestedExpiry) ? requestedExpiry : surface.expiries[0];
+}
+
+export function deriveChainRows(surface: IvSurface | null, expiry: string | null | undefined): ChainRow[] {
+  if (!surface?.pairs?.length || !expiry) {
+    return [];
+  }
+  return surface.pairs
+    .filter((pair) => pair.expiry === expiry && Number.isFinite(pair.strike))
+    .map((pair) => {
+      const strike = Number(pair.strike);
+      const distancePct = surface.spot && Number.isFinite(surface.spot) ? strike / surface.spot - 1 : null;
+      return {
+        pair,
+        expiry: pair.expiry,
+        strike,
+        moneyness: surface.spot && Number.isFinite(surface.spot) ? strike / surface.spot : null,
+        distancePct,
+        callMidpoint: pair.call_midpoint,
+        putMidpoint: pair.put_midpoint,
+        callIv: pair.call_implied_volatility,
+        putIv: pair.put_implied_volatility,
+        blendedIv: pair.blended_implied_volatility,
+        callDelta: pair.call_delta,
+        putDelta: pair.put_delta,
+        callOpenInterest: pair.call_open_interest,
+        putOpenInterest: pair.put_open_interest,
+        callVolume: pair.call_volume,
+        putVolume: pair.put_volume,
+        straddleMidpoint: pair.straddle_midpoint,
+        impliedMovePct: pair.implied_move_pct,
+      };
+    })
+    .sort((left, right) => left.strike - right.strike);
+}
+
+export function deriveOverviewSnapshot(
+  surface: IvSurface | null,
+  requestedExpiry: string | null | undefined
+): OverviewSnapshot {
+  const stats = deriveSurfaceStats(surface);
+  const selectedExpiry = selectedExpiryForSurface(surface, requestedExpiry);
+  const frontChain = deriveChainRows(surface, selectedExpiry);
+  const atmPair = surface?.spot && frontChain.length
+    ? minBy(frontChain, (row) => Math.abs(row.strike - surface.spot!))
+    : frontChain[0] ?? null;
+  const callOi = sumFinite(frontChain.map((row) => row.callOpenInterest));
+  const putOi = sumFinite(frontChain.map((row) => row.putOpenInterest));
+  const callVolume = sumFinite(frontChain.map((row) => row.callVolume));
+  const putVolume = sumFinite(frontChain.map((row) => row.putVolume));
+  return {
+    stats,
+    selectedExpiry,
+    selectedExpiryDte: selectedExpiry ? daysToExpiry(selectedExpiry) : null,
+    atmPair,
+    frontChain,
+    skewRows: deriveSkewRows(surface),
+    termStructure: deriveTermStructure(surface),
+    putCallOpenInterestRatio: callOi > 0 ? putOi / callOi : null,
+    putCallVolumeRatio: callVolume > 0 ? putVolume / callVolume : null,
+    maxPainStrike: deriveMaxPainStrike(frontChain),
+  };
+}
+
 export function deriveSkewRows(surface: IvSurface | null): SkewRow[] {
   if (!surface?.expiries.length || !surface.strikes.length) {
     return [];
@@ -142,6 +273,81 @@ export function deriveSkewRows(surface: IvSurface | null): SkewRow[] {
       wingSpread: putWingIv != null && callWingIv != null ? putWingIv - callWingIv : null,
     };
   });
+}
+
+export function buildStrategyLegFromChainRow(
+  row: ChainRow,
+  optionType: StrategyOptionType,
+  side: StrategySide = "long",
+  quantity = 1
+): StrategyLeg | null {
+  const premium = optionType === "call" ? row.callMidpoint : row.putMidpoint;
+  if (premium == null || !Number.isFinite(premium) || premium <= 0) {
+    return null;
+  }
+  return {
+    id: `${side}-${optionType}-${row.expiry}-${row.strike}`,
+    optionType,
+    side,
+    expiry: row.expiry,
+    strike: row.strike,
+    premium,
+    quantity,
+  };
+}
+
+export function deriveStrategyPayoff(
+  legs: StrategyLeg[],
+  spot: number | null | undefined,
+  steps = 21
+): StrategyPayoffSummary {
+  const cleanLegs = legs.filter(
+    (leg) =>
+      Number.isFinite(leg.strike) &&
+      Number.isFinite(leg.premium) &&
+      Number.isFinite(leg.quantity) &&
+      leg.quantity > 0
+  );
+  const center = spot && Number.isFinite(spot) && spot > 0
+    ? spot
+    : cleanLegs.length
+      ? cleanLegs.reduce((sum, leg) => sum + leg.strike, 0) / cleanLegs.length
+      : 100;
+  const strikes = cleanLegs.map((leg) => leg.strike);
+  const minStrike = strikes.length ? Math.min(...strikes) : center * 0.85;
+  const maxStrike = strikes.length ? Math.max(...strikes) : center * 1.15;
+  const lower = Math.max(0.01, Math.min(center * 0.75, minStrike * 0.9));
+  const upper = Math.max(center * 1.25, maxStrike * 1.1);
+  const count = Math.max(7, steps | 1);
+  const step = (upper - lower) / Math.max(1, count - 1);
+  const netPremium = cleanLegs.reduce((sum, leg) => {
+    const signed = leg.side === "long" ? -leg.premium : leg.premium;
+    return sum + signed * leg.quantity;
+  }, 0);
+  const points = Array.from({ length: count }, (_, index) => {
+    const underlyingPrice = lower + step * index;
+    const payoff = cleanLegs.reduce((sum, leg) => {
+      const intrinsic =
+        leg.optionType === "call"
+          ? Math.max(0, underlyingPrice - leg.strike)
+          : Math.max(0, leg.strike - underlyingPrice);
+      const signedIntrinsic = leg.side === "long" ? intrinsic - leg.premium : leg.premium - intrinsic;
+      return sum + signedIntrinsic * leg.quantity;
+    }, 0);
+    return {
+      underlyingPrice,
+      payoff,
+      returnPct: Math.abs(netPremium) > 0 ? payoff / Math.abs(netPremium) : null,
+    };
+  });
+  const payoffs = points.map((point) => point.payoff);
+  return {
+    points,
+    netPremium,
+    maxProfit: cleanLegs.some((leg) => leg.optionType === "call" && leg.side === "short") ? null : Math.max(...payoffs, 0),
+    maxLoss: cleanLegs.some((leg) => leg.optionType === "put" && leg.side === "short") ? null : Math.min(...payoffs, 0),
+    breakevens: cleanLegs.length ? deriveBreakevens(points) : [],
+  };
 }
 
 export function deriveRealizedVolatility(
@@ -262,6 +468,66 @@ function findNearestWingIndex(strikes: number[], atmIndex: number, side: "lower"
   const index = side === "lower" ? atmIndex - targetOffset : atmIndex + targetOffset;
   const bounded = Math.max(0, Math.min(strikes.length - 1, index));
   return bounded === atmIndex ? null : bounded;
+}
+
+function deriveMaxPainStrike(rows: ChainRow[]) {
+  if (!rows.length) {
+    return null;
+  }
+  let bestStrike: number | null = null;
+  let bestPain = Number.POSITIVE_INFINITY;
+  for (const candidate of rows) {
+    const pain = rows.reduce((sum, row) => {
+      const callOi = row.callOpenInterest ?? 0;
+      const putOi = row.putOpenInterest ?? 0;
+      return (
+        sum +
+        Math.max(0, candidate.strike - row.strike) * callOi +
+        Math.max(0, row.strike - candidate.strike) * putOi
+      );
+    }, 0);
+    if (pain < bestPain) {
+      bestPain = pain;
+      bestStrike = candidate.strike;
+    }
+  }
+  return bestStrike;
+}
+
+function deriveBreakevens(points: StrategyPayoffPoint[]) {
+  const levels: number[] = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const left = points[index - 1];
+    const right = points[index];
+    if (left.payoff === 0) {
+      levels.push(left.underlyingPrice);
+      continue;
+    }
+    if ((left.payoff < 0 && right.payoff > 0) || (left.payoff > 0 && right.payoff < 0)) {
+      const slope = (right.payoff - left.payoff) / (right.underlyingPrice - left.underlyingPrice);
+      if (Number.isFinite(slope) && slope !== 0) {
+        levels.push(left.underlyingPrice - left.payoff / slope);
+      }
+    }
+  }
+  return levels;
+}
+
+function sumFinite(values: Array<number | null | undefined>) {
+  return values.reduce<number>((sum, value) => (Number.isFinite(value) ? sum + Number(value) : sum), 0);
+}
+
+function minBy<T>(items: T[], score: (item: T) => number) {
+  let best: T | null = items[0] ?? null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const item of items) {
+    const value = score(item);
+    if (value < bestScore) {
+      best = item;
+      bestScore = value;
+    }
+  }
+  return best;
 }
 
 function standardDeviation(values: number[]) {

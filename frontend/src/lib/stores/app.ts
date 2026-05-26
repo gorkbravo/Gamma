@@ -2722,7 +2722,7 @@ export async function loadIvSession() {
     const session = await getJson<IvSessionStatus>("/iv/session");
     ivSession.set(session);
     ivSurface.update((current) => {
-      if (session.running || hasRenderableIvSurface(session.surface)) {
+      if (session.running || !hasRenderableIvSurface(current)) {
         return session.surface;
       }
       return current;
