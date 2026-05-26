@@ -2134,6 +2134,82 @@ def test_copilot_research_plan_portfolio_rate_shock_prompt(tmp_path, monkeypatch
         runtime.shutdown()
 
 
+def test_copilot_action_registry_marks_existing_tools_read_only(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        del client
+        definitions = runtime.copilot_service.list_research_action_definitions()
+        assert definitions
+        assert all(definition.read_only for definition in definitions)
+        assert not any(definition.mutates_local_state for definition in definitions)
+        portfolio_tools = {
+            definition.tool_id: definition
+            for definition in definitions
+            if "portfolio" in definition.domains
+        }
+        assert portfolio_tools["get_portfolio_positions_summary"].action_type == "read_context"
+        assert portfolio_tools["get_portfolio_positions_summary"].requires_confirmation is False
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_plan_execution_runs_read_only_tools_and_persists_trace(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        history = client.get("/portfolio/history").json()
+        performance = client.post(
+            "/portfolio/performance",
+            json={
+                "snapshot": snapshot,
+                "benchmark_symbol": "SPY",
+                "lookback_days": 30,
+            },
+        ).json()
+
+        response = client.post(
+            "/copilot/research-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {
+                        "snapshot": snapshot,
+                        "history": history,
+                        "performance": performance,
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["provider"] == "gamma_executor"
+        assert payload["card"]["title"].startswith("Executed Research Plan")
+        assert any(
+            trace["tool_name"] == "get_portfolio_positions_summary"
+            for trace in payload["tool_traces"]
+        )
+        assert any(
+            source["source_id"] == "portfolio.snapshot.drilldown"
+            for source in payload["sources"]
+        )
+        assert any("Skipped risk" in warning for warning in payload["warnings"])
+
+        sessions = client.get("/copilot/sessions").json()
+        assert sessions and sessions[0]["turn_count"] == 1
+        turns = client.get(f"/copilot/sessions/{sessions[0]['session_id']}").json()["turns"]
+        assert any(
+            trace["tool_name"] == "get_portfolio_positions_summary"
+            for trace in turns[0]["result"]["tool_traces"]
+        )
+    finally:
+        runtime.shutdown()
+
+
 def _crypto_token_fixture() -> CryptoTokenRecord:
     return CryptoTokenRecord(
         token_id="solana",

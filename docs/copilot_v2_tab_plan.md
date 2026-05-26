@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-05-26
+Last updated: 2026-05-27
 
 ## Start Here
 
@@ -488,11 +488,14 @@ Future agents should update this checklist in place.
 
 ### Phase 2 - Read-Only Multi-Domain Execution
 
-- [ ] Convert current Copilot drilldown tools into action-registry entries or a compatible adapter.
-- [ ] Add bounded read-only execution against the selected plan.
-- [ ] Add tool traces to persisted sessions.
-- [ ] Add source/warning aggregation across domains.
-- [ ] Add tests for planner-to-tool execution.
+- [x] Convert current Copilot drilldown tools into action-registry entries or a compatible adapter.
+- [x] Add bounded read-only execution against the selected plan.
+- [x] Add tool traces to persisted sessions.
+- [x] Add source/warning aggregation across domains.
+- [x] Add tests for planner-to-tool execution.
+
+Implementation note:
+- First-pass execution lives at `/copilot/research-plan/execute`. It reuses the deterministic planner, executes only registered read-only Gamma tools, bounds execution to a small number of domains/tools, skips missing loaded contexts and unavailable external-provider work with explicit warnings, aggregates sources/tool traces, and persists the execution as a Copilot session turn.
 
 ### Phase 3 - Smart Depth And Budgeting
 

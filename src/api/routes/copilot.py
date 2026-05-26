@@ -42,6 +42,16 @@ def plan_research(
     return CopilotResearchPlanModel.from_domain(plan)
 
 
+@router.post("/copilot/research-plan/execute", response_model=CopilotResearchCardResponseModel)
+def execute_research_plan(
+    payload: CopilotResearchCardRequestModel,
+    request: Request,
+) -> CopilotResearchCardResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.copilot_service.execute_research_plan(payload.to_domain())
+    return CopilotResearchCardResponseModel.from_domain(result)
+
+
 @router.post("/copilot/research-card/stream")
 def stream_research_card(
     payload: CopilotResearchCardRequestModel,

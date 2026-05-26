@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import logging
 import re
@@ -27,6 +27,7 @@ from src.models.copilot import (
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotResearchActionDefinition,
     CopilotResearchPlan,
     CopilotResearchPlanDomain,
     CopilotResearchPlanEntity,
@@ -36,6 +37,9 @@ from src.models.copilot import (
     CopilotToolExecution,
     CopilotToolTrace,
     MacroCopilotContext,
+    ResearchCard,
+    ResearchClaim,
+    new_copilot_id,
 )
 from src.services.copilot_store import CopilotStore
 from src.models.macro import MacroMetricRecord, MacroSeriesHistory
@@ -52,6 +56,15 @@ class _CopilotToolDefinition:
     domains: tuple[str, ...]
     parameters_schema: dict[str, Any]
     handler: Callable[[dict[str, Any], CopilotContextBundle], CopilotToolExecution]
+    action_type: str = "read_context"
+    output_schema: dict[str, Any] | None = None
+    read_only: bool = True
+    mutates_local_state: bool = False
+    requires_confirmation: bool = False
+    external_provider: str | None = None
+    timeout_seconds: float = 30.0
+    request_limit: int = 1
+    failure_modes: tuple[str, ...] = ()
 
     def to_openai_spec(self) -> dict[str, Any]:
         return {
@@ -62,8 +75,28 @@ class _CopilotToolDefinition:
             "strict": True,
         }
 
+    def to_action_definition(self) -> CopilotResearchActionDefinition:
+        return CopilotResearchActionDefinition(
+            tool_id=self.name,
+            domains=list(self.domains),
+            action_type=self.action_type,
+            description=self.description,
+            input_schema=self.parameters_schema,
+            output_schema=self.output_schema or {},
+            read_only=self.read_only,
+            mutates_local_state=self.mutates_local_state,
+            requires_confirmation=self.requires_confirmation,
+            external_provider=self.external_provider,
+            timeout_seconds=self.timeout_seconds,
+            request_limit=self.request_limit,
+            failure_modes=list(self.failure_modes),
+        )
+
 
 class CopilotService:
+    _PLAN_EXECUTION_MAX_DOMAINS = 4
+    _PLAN_EXECUTION_MAX_TOOLS = 8
+
     def __init__(
         self,
         *,
@@ -496,6 +529,237 @@ class CopilotService:
             requires_confirmation=False,
             expected_artifacts=expected_artifacts,
             warnings=warnings,
+        )
+
+    def list_research_action_definitions(self) -> list[CopilotResearchActionDefinition]:
+        return [definition.to_action_definition() for definition in self._tools.values()]
+
+    def execute_research_plan(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
+        plan = self.plan_research(request)
+        sources: dict[str, CopilotSourceRef] = {}
+        tool_traces: list[CopilotToolTrace] = []
+        warnings = [
+            warning
+            for warning in plan.warnings
+            if not warning.startswith("Planner-only prototype")
+        ]
+        executed_domains: list[str] = []
+        skipped_domains: list[str] = []
+        tool_outputs: dict[str, dict[str, Any]] = {}
+        remaining_tools = self._PLAN_EXECUTION_MAX_TOOLS
+
+        for planned_domain in plan.domain_plan[: self._PLAN_EXECUTION_MAX_DOMAINS]:
+            domain = planned_domain.domain
+            if domain == "external_context":
+                skipped_domains.append(domain)
+                warnings.append(
+                    "External context execution is skipped until approved provider adapters are configured."
+                )
+                continue
+
+            try:
+                context = self._build_plan_execution_context(request, domain)
+            except ValueError as exc:
+                skipped_domains.append(domain)
+                warnings.append(f"Skipped {domain}: {exc}")
+                continue
+
+            for source in context.sources:
+                sources[source.source_id] = source
+            warnings.extend(context.warnings)
+
+            domain_outputs: dict[str, Any] = {}
+            for tool_name in planned_domain.planned_tools:
+                if remaining_tools <= 0:
+                    warnings.append(
+                        f"Stopped plan execution after {self._PLAN_EXECUTION_MAX_TOOLS} read-only tools."
+                    )
+                    break
+
+                definition = self._tools.get(tool_name)
+                if definition is None:
+                    warnings.append(f"Skipped unsupported Copilot tool `{tool_name}`.")
+                    continue
+                if domain not in definition.domains:
+                    warnings.append(f"Skipped `{tool_name}` because it is not registered for {domain}.")
+                    continue
+                if (
+                    not definition.read_only
+                    or definition.mutates_local_state
+                    or definition.requires_confirmation
+                ):
+                    warnings.append(f"Skipped `{tool_name}` because it is not automatic read-only work.")
+                    continue
+
+                arguments = self._default_plan_execution_arguments(tool_name, context)
+                if arguments is None:
+                    tool_traces.append(
+                        CopilotToolTrace(
+                            tool_name=tool_name,
+                            summary="Skipped because bounded plan execution could not infer required arguments.",
+                            arguments={},
+                            source_ids=[],
+                        )
+                    )
+                    continue
+
+                execution = self._execute_tool(tool_name, arguments, context)
+                remaining_tools -= 1
+                tool_traces.append(execution.trace)
+                domain_outputs[tool_name] = execution.output
+                for source in execution.sources:
+                    sources[source.source_id] = source
+                if isinstance(execution.output, dict) and execution.output.get("error"):
+                    warnings.append(f"{tool_name} failed: {execution.output['error']}")
+
+            if domain_outputs:
+                executed_domains.append(domain)
+                tool_outputs[domain] = domain_outputs
+
+        if len(plan.domain_plan) > self._PLAN_EXECUTION_MAX_DOMAINS:
+            warnings.append(
+                f"Plan execution was bounded to {self._PLAN_EXECUTION_MAX_DOMAINS} domains."
+            )
+
+        warnings = dedupe_warnings(warnings)
+        result = CopilotResearchCardResult(
+            domain="synthesis",
+            current_tab=request.context.current_tab or "copilot",
+            status="ready" if executed_domains else "error",
+            provider="gamma_executor",
+            model="gamma-plan-executor-v1",
+            response_id=new_copilot_id("planexec"),
+            message=(
+                f"Executed {len(tool_traces)} read-only tool traces across "
+                f"{len(executed_domains)} planned domains."
+            ),
+            card=self._build_plan_execution_card(
+                plan,
+                executed_domains,
+                skipped_domains,
+                list(sources.values()),
+                warnings,
+            ),
+            sources=list(sources.values()),
+            tool_traces=tool_traces,
+            warnings=warnings,
+        )
+        result = self._normalize_result_sources(result)
+
+        if self.store is not None:
+            try:
+                self.store.record_turn(
+                    session_id=request.user_session_id,
+                    title=request.session_title,
+                    domain="synthesis",
+                    current_tab=request.context.current_tab or "copilot",
+                    workspace_mode=request.context.workspace_mode,
+                    prompt=request.prompt,
+                    context_fingerprint=request.context_fingerprint,
+                    context_summary={
+                        "plan": asdict(plan),
+                        "executed_domains": executed_domains,
+                        "skipped_domains": skipped_domains,
+                        "tool_output_keys": {
+                            domain: list(outputs)
+                            for domain, outputs in tool_outputs.items()
+                        },
+                    },
+                    result=result,
+                )
+            except Exception:
+                logger.exception("Copilot plan execution persistence failed")
+                result = replace(
+                    result,
+                    warnings=dedupe_warnings(
+                        [
+                            *result.warnings,
+                            "Copilot executed the plan, but failed to persist this turn locally.",
+                        ]
+                    ),
+                )
+        return result
+
+    def _build_plan_execution_context(
+        self,
+        request: CopilotResearchCardRequest,
+        domain: str,
+    ) -> CopilotContextBundle:
+        builder = self._context_builders.get(domain)
+        if builder is None:
+            raise ValueError(f"unsupported Copilot domain `{domain}`.")
+        domain_context = replace(request.context, current_tab=domain)
+        return builder(replace(request, domain=domain, context=domain_context))
+
+    def _default_plan_execution_arguments(
+        self,
+        tool_name: str,
+        context: CopilotContextBundle,
+    ) -> dict[str, Any] | None:
+        if tool_name == "get_macro_series_history_summary":
+            for card in context.summary_data.get("snapshot_cards", []) or []:
+                for metric in card.get("metrics", []) if isinstance(card, dict) else []:
+                    series_id = metric.get("series_id") if isinstance(metric, dict) else None
+                    if series_id:
+                        return {
+                            "series_id": series_id,
+                            "region": context.summary_data.get("region"),
+                        }
+            return None
+        if tool_name == "get_synthesis_domain_context":
+            included_domains = context.summary_data.get("included_domains", []) or []
+            return {"domain": included_domains[0]} if included_domains else None
+        return {}
+
+    @staticmethod
+    def _build_plan_execution_card(
+        plan: CopilotResearchPlan,
+        executed_domains: list[str],
+        skipped_domains: list[str],
+        sources: list[CopilotSourceRef],
+        warnings: list[str],
+    ) -> ResearchCard:
+        evidence_refs = [source.source_id for source in sources[:8]]
+        intent_label = plan.intent.replace("_", " ")
+        executed_label = ", ".join(domain.replace("_", " ") for domain in executed_domains) or "none"
+        skipped_label = ", ".join(domain.replace("_", " ") for domain in skipped_domains) or "none"
+        claims = []
+        if evidence_refs:
+            claims.append(
+                ResearchClaim(
+                    claim="Gamma executed bounded read-only tools for the selected research plan.",
+                    evidence_refs=evidence_refs,
+                )
+            )
+        return ResearchCard(
+            title=f"Executed Research Plan: {intent_label}",
+            hypothesis=(
+                f"The request maps to a {plan.depth_profile} plan with "
+                f"{len(plan.domain_plan)} planned domain steps."
+            ),
+            rationale=(
+                f"Executed domains: {executed_label}. Skipped domains: {skipped_label}. "
+                "Skipped steps indicate missing loaded Gamma context or unavailable approved providers."
+            ),
+            required_data=[
+                item.domain
+                for item in plan.domain_plan
+                if item.domain not in skipped_domains
+            ],
+            proposed_test="Use the persisted tool trace as the source snapshot before synthesis or memo generation.",
+            confounders=warnings[:6],
+            next_steps=[
+                "Review warnings for missing loaded contexts.",
+                "Run synthesis after loading skipped domain state if the gaps matter.",
+            ],
+            caveats=[
+                "This first-pass executor calls Gamma-owned read-only tools only.",
+                "It does not fetch general web context or apply local research-state changes.",
+            ],
+            source_backed_claims=claims,
+            inferred_claims=[
+                "Tool outputs still need model synthesis before they become a final research conclusion."
+            ],
         )
 
     @classmethod

@@ -95,6 +95,23 @@ class CopilotResearchPlan:
 
 
 @dataclass(frozen=True)
+class CopilotResearchActionDefinition:
+    tool_id: str
+    domains: list[str]
+    action_type: str
+    description: str
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] = field(default_factory=dict)
+    read_only: bool = True
+    mutates_local_state: bool = False
+    requires_confirmation: bool = False
+    external_provider: str | None = None
+    timeout_seconds: float = 30.0
+    request_limit: int = 1
+    failure_modes: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CopilotSourceRef:
     source_id: str
     label: str
