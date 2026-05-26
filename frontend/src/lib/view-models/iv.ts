@@ -175,15 +175,17 @@ export function deriveDistributionBuckets(surface: IvSurface | null, bucketCount
   if (!surface?.spot || !stats.frontAtmIv || !stats.frontExpiry) {
     return [];
   }
+  const spot = surface.spot;
+  const frontAtmIv = stats.frontAtmIv;
   const days = daysToExpiry(stats.frontExpiry);
   const years = Math.max(days / 365, 1 / 365);
-  const sigma = stats.frontAtmIv * Math.sqrt(years);
+  const sigma = frontAtmIv * Math.sqrt(years);
   if (!Number.isFinite(sigma) || sigma <= 0) {
     return [];
   }
   const count = Math.max(7, bucketCount | 1);
-  const minPrice = surface.spot * Math.exp(-2.5 * sigma);
-  const maxPrice = surface.spot * Math.exp(2.5 * sigma);
+  const minPrice = spot * Math.exp(-2.5 * sigma);
+  const maxPrice = spot * Math.exp(2.5 * sigma);
   const step = (maxPrice - minPrice) / Math.max(1, count - 1);
   const buckets = Array.from({ length: count }, (_, index) => {
     const price = minPrice + step * index;
@@ -191,7 +193,7 @@ export function deriveDistributionBuckets(surface: IvSurface | null, bucketCount
     const upper = index === count - 1 ? Number.POSITIVE_INFINITY : price + step / 2;
     return {
       price,
-      probability: logNormalCdf(upper, surface.spot, sigma) - logNormalCdf(lower, surface.spot, sigma),
+      probability: logNormalCdf(upper, spot, sigma) - logNormalCdf(lower, spot, sigma),
       label: `${Math.round(price)}`,
     };
   });

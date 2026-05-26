@@ -446,7 +446,7 @@ export function hydrateStrategyLabResultFromSaved(item: SavedResearchItem): Stra
     value_kind: String(payload.value_kind ?? "return"),
     benchmark_column: typeof payload.benchmark_column === "string" ? payload.benchmark_column : null,
     benchmark_value_kind: String(payload.benchmark_value_kind ?? "return"),
-    metrics: payload.metrics as StrategyLabResult["metrics"],
+    metrics: payload.metrics as unknown as StrategyLabResult["metrics"],
     returns_points: payload.returns_points as StrategyLabResult["returns_points"],
     equity_curve_points: Array.isArray(payload.equity_curve_points) ? (payload.equity_curve_points as StrategyLabResult["equity_curve_points"]) : [],
     drawdown_points: Array.isArray(payload.drawdown_points) ? (payload.drawdown_points as StrategyLabResult["drawdown_points"]) : [],
@@ -476,7 +476,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function copyRecords<T extends object>(items: T[] | null | undefined): Record<string, unknown>[] {
-  return (items ?? []).map((item) => ({ ...item }));
+  return (items ?? []).map((item) => ({ ...(item as Record<string, unknown>) }));
 }
 
 function normalizeResearchObjectReturnPoints(
@@ -682,6 +682,8 @@ export function deriveConstituentsFromResearchResult(result: ResearchResult | nu
   return result.weights.map((weight) => ({
     symbol: weight.symbol,
     weight: weight.weight,
+    instrument_id: weight.instrument_id,
+    display_symbol: weight.display_symbol,
     total_return: null,
     annual_vol: null,
     max_drawdown: null,
@@ -821,7 +823,7 @@ export function getResearchOverviewSortValue(
 export function formatResearchOverviewSortValue(
   value: number | null | undefined,
   sortBy: ResearchOverviewSortId
-) {
+): string {
   if (value == null || !Number.isFinite(value)) {
     return "N/A";
   }

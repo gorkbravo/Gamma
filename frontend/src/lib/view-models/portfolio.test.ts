@@ -13,7 +13,13 @@ const positions = [
     unrealized_pnl: 0,
     weight: 0.25,
     base_market_value: 1000,
-    fx_rate: 1
+    fx_rate: 1,
+    instrument_id: "cash:usd",
+    display_symbol: "USD Cash",
+    exchange: null,
+    primary_exchange: null,
+    provider: "portfolio",
+    provider_id: "USD"
   },
   {
     symbol: "MSFT",
@@ -26,7 +32,13 @@ const positions = [
     unrealized_pnl: 100,
     weight: 0.4,
     base_market_value: 1600,
-    fx_rate: 1
+    fx_rate: 1,
+    instrument_id: "portfolio:stk:msft",
+    display_symbol: "MSFT",
+    exchange: "SMART",
+    primary_exchange: "NASDAQ",
+    provider: "ibkr",
+    provider_id: "MSFT"
   },
   {
     symbol: "SAP",
@@ -39,7 +51,13 @@ const positions = [
     unrealized_pnl: -100,
     weight: 0.35,
     base_market_value: 1100,
-    fx_rate: 1.08
+    fx_rate: 1.08,
+    instrument_id: "portfolio:stk:sap",
+    display_symbol: "SAP",
+    exchange: "SMART",
+    primary_exchange: "XETRA",
+    provider: "ibkr",
+    provider_id: "SAP"
   }
 ];
 

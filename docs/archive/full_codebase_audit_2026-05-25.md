@@ -34,7 +34,9 @@ Completed after the audit:
 - Fixed `P3. News Force Refresh Is Accepted But Ignored` by wiring `force_refresh` through `/news/latest`, adding a short service-level latest-feed cache, and proving `force_refresh=true` bypasses and replaces that cache.
 - Fixed `P2. Expensive Request Models Are Not Bounded` by adding shared request-limit constants, Pydantic bounds on expensive public request schemas, service-side Risk clamps, and oversized-payload regression coverage in `tests/test_api.py`.
 - Fixed `P2. Frontend Commodities Tests Are Red` by restoring stable dense module frames and empty states for the Energy and Metals deep-research surfaces in `frontend/src/views/CommoditiesView.svelte`.
-- Validation after these fixes: `.\.venv\Scripts\python.exe -m pytest` passed with `288 passed`; `npm run test` passed with `152 passed`; `npm run build` passed with pre-existing unused-selector and bundle-size warnings still present.
+- Fixed `P2. TypeScript Contract Check Is Failing And Not Enforced` by adding `npm run typecheck`, correcting production type narrowing, and updating stale frontend fixtures to the current API contracts.
+- Fixed `P2. Frontend Dependency Audit Has Known Advisories` by updating the vulnerable Svelte/devalue/postcss dependency chain through `npm audit fix`.
+- Validation after these fixes: `.\.venv\Scripts\python.exe -m pytest` passed with `288 passed`; `npm run typecheck` passed; `npm run test` passed with `152 passed`; `npm run build` passed with pre-existing unused-selector and bundle-size warnings still present; `npm run desktop:check` passed; `npm audit --audit-level=moderate` passed with `0 vulnerabilities`.
 
 ## P1. Cache Keys Can Escape The Cache Directory On Windows - Fixed 2026-05-25
 
@@ -279,7 +281,9 @@ Given Gamma's design principles, prefer stable dense module frames with clear em
 - Commodities deep views render predictable structures when backing arrays are empty.
 - Tests assert both populated and empty-data states for Energy and Metals.
 
-## P2. TypeScript Contract Check Is Failing And Not Enforced
+## P2. TypeScript Contract Check Is Failing And Not Enforced - Fixed 2026-05-25
+
+Status: fixed after the audit. `frontend/package.json` now exposes `npm run typecheck`, production TypeScript issues in external-link handling, risk dependency rows, crypto/IV/research view-model helpers were corrected, and stale frontend fixtures were updated to match the current API contracts. `npm run typecheck`, `npm run test`, `npm run build`, `npm run desktop:check`, and `npm audit --audit-level=moderate` pass.
 
 ### Impact
 
@@ -326,7 +330,9 @@ npx tsc --noEmit
 - `npm run test` still passes.
 - Production code has no `tsc --noEmit` errors.
 
-## P2. Frontend Dependency Audit Has Known Advisories
+## P2. Frontend Dependency Audit Has Known Advisories - Fixed 2026-05-25
+
+Status: fixed after the audit. `npm audit fix` updated Svelte to `5.55.9`, devalue to `5.8.1`, and postcss to `8.5.15` in `frontend/package-lock.json`; `@types/node` was added as a dev dependency for the now-enforced TypeScript test contract. `npm audit --audit-level=moderate` reports `0 vulnerabilities`.
 
 ### Impact
 
@@ -507,8 +513,8 @@ Inspect the generated chunk warning. For deeper diagnosis, add a bundle visualiz
 2. Add local API session-token protection for mutating and expensive refresh routes.
 3. `Done 2026-05-25` Add request bounds for Risk, Strategy Lab, Crypto, and Prediction Markets.
 4. `Done 2026-05-25` Restore green frontend tests by resolving Commodities view/test drift.
-5. Add and fix `npm run typecheck`.
-6. Update vulnerable frontend dependencies.
+5. `Done 2026-05-25` Add and fix `npm run typecheck`.
+6. `Done 2026-05-25` Update vulnerable frontend dependencies.
 7. `Done 2026-05-25` Implement or remove News `force_refresh`.
 8. Clean CSS token drift and unused selectors.
 9. Split the frontend bundle after correctness and security issues are closed.

@@ -92,7 +92,7 @@ export function medianNumbers(values: Array<number | null | undefined>) {
 }
 
 export function sumNullableNumbers(values: Array<number | null | undefined>) {
-  return values.reduce((sum, value) => sum + (value ?? 0), 0);
+  return values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
 }
 
 export function narrativePresetText(basket: CryptoNarrativeBasket) {

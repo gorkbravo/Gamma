@@ -80,7 +80,10 @@ export function installExternalLinkHandler(
   root: Document | HTMLElement = document,
   dependencies: ExternalLinkDependencies = {}
 ) {
-  const handleClick = (event: MouseEvent) => {
+  const handleClick = (event: Event) => {
+    if (!(event instanceof MouseEvent)) {
+      return;
+    }
     if (
       event.defaultPrevented ||
       event.button !== 0 ||

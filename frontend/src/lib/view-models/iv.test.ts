@@ -32,6 +32,9 @@ function makeSurface(overrides: Partial<IvSurface> = {}): IvSurface {
     origin: "gamma.iv.surface.ibkr",
     transformation_note: "test",
     freshness_label: "delayed",
+    collection: null,
+    quality: null,
+    pairs: [],
     ...overrides,
   };
 }

@@ -263,6 +263,8 @@ function makeScenario(scenarioId: string, growth: number, wacc: number) {
     overrides: {},
     assumption_rows: [],
     projection_rows: [],
+    cost_of_capital_rows: [],
+    valuation_bridge_rows: [],
     summary: null,
     source_provider: "manual",
     retrieved_at: "2026-04-09T10:00:00Z",

@@ -1,12 +1,35 @@
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
-import HeroPriceChart, {
+import * as HeroPriceChartModule from "./HeroPriceChart.svelte";
+import type { HeroPriceChartSettings, HeroPricePoint } from "../lib/view-models/hero-price-chart";
+
+interface HeroPriceSettingsStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+const HeroPriceChart = HeroPriceChartModule.default;
+const {
   canRenderHeroCandlesticks,
   readHeroPriceChartSettings,
   syncHeroPriceSettingsStorage,
-  writeHeroPriceChartSettings,
-  type HeroPriceSettingsStorage
-} from "./HeroPriceChart.svelte";
+  writeHeroPriceChartSettings
+} = HeroPriceChartModule as unknown as {
+  canRenderHeroCandlesticks(points: Array<Partial<HeroPricePoint>> | null | undefined): boolean;
+  readHeroPriceChartSettings(storage: HeroPriceSettingsStorage | null, key: string): HeroPriceChartSettings;
+  syncHeroPriceSettingsStorage(input: {
+    storageKey: string;
+    loadedStorageKey: string | null;
+    settings: HeroPriceChartSettings;
+    readSettings: (key: string) => HeroPriceChartSettings;
+    writeSettings: (key: string, value: HeroPriceChartSettings) => void;
+  }): { loadedStorageKey: string | null; settings: HeroPriceChartSettings };
+  writeHeroPriceChartSettings(
+    storage: HeroPriceSettingsStorage | null,
+    key: string,
+    value: HeroPriceChartSettings
+  ): void;
+};
 
 describe("HeroPriceChart", () => {
   it("server-renders settings controls for close-only points", () => {

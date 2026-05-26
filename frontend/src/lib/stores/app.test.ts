@@ -10,6 +10,8 @@ import type {
   CryptoWorkspaceResponse,
   DiagnosticsResponse,
   FundamentalsSearchResponse,
+  GammaResearchObject,
+  IvSurface,
   IvSessionStatus,
   MacroDivergenceListResponse,
   MacroEventsResponse,
@@ -295,7 +297,7 @@ describe("app store orchestration", () => {
       performance_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.01 }],
       benchmark_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 0.02 }],
       primary_price_points: [{ timestamp: "2026-03-01T00:00:00Z", value: 100 }],
-      weights: [{ symbol: "AAPL", weight: 1 }],
+      weights: [{ symbol: "AAPL", weight: 1, instrument_id: "portfolio:stk:aapl", display_symbol: "AAPL" }],
       summary: {
         total_return: 0.1,
         annual_return: 0.1,
@@ -321,6 +323,8 @@ describe("app store orchestration", () => {
         {
           symbol: "AAPL",
           weight: 1,
+          instrument_id: "portfolio:stk:aapl",
+          display_symbol: "AAPL",
           total_return: 0.1,
           annual_vol: 0.2,
           max_drawdown: -0.05,
@@ -373,6 +377,8 @@ describe("app store orchestration", () => {
         sample_paths: {}
       },
       frontier_points: [],
+      correlation_matrix: emptyRiskCorrelationMatrix(),
+      dependency_network: emptyRiskDependencyNetwork(),
       excluded_assets: [],
       warnings: []
     };
@@ -477,6 +483,8 @@ describe("app store orchestration", () => {
         sample_paths: {}
       },
       frontier_points: [],
+      correlation_matrix: emptyRiskCorrelationMatrix(),
+      dependency_network: emptyRiskDependencyNetwork(),
       excluded_assets: [],
       warnings: []
     });
@@ -544,6 +552,8 @@ describe("app store orchestration", () => {
         sample_paths: {}
       },
       frontier_points: [],
+      correlation_matrix: emptyRiskCorrelationMatrix(),
+      dependency_network: emptyRiskDependencyNetwork(),
       excluded_assets: [],
       warnings: []
     });
@@ -690,7 +700,7 @@ describe("app store orchestration", () => {
       lenses: [],
       overlays: []
     };
-    const scopeObject = {
+    const scopeObject: GammaResearchObject = {
       object_id: "scope-1",
       object_type: "equity_scope",
       display_name: "Scope Basket",
@@ -1211,6 +1221,8 @@ describe("app store orchestration", () => {
         sample_paths: {}
       },
       frontier_points: [],
+      correlation_matrix: emptyRiskCorrelationMatrix(),
+      dependency_network: emptyRiskDependencyNetwork(),
       excluded_assets: [],
       warnings: []
     });
@@ -1249,17 +1261,13 @@ describe("app store orchestration", () => {
       market_data_mode: "delayed",
       messages: [],
       surface: {
+        ...makeIvSurface(),
         symbol: "SPY",
-        timestamp: "2026-03-01T00:00:00Z",
-        snapshot_available: true,
         spot: 500,
         expiries: ["20260320"],
         strikes: [495, 500, 505],
         iv_grid: [[0.2, 0.19, 0.21]],
-        delayed: true,
-        points: 3,
-        warnings: [],
-        messages: []
+        points: 3
       }
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(session)));
@@ -1368,19 +1376,14 @@ describe("app store orchestration", () => {
   });
 
   it("preserves one-shot IV data when idle session polling returns an empty surface", async () => {
-    ivSurface.set({
+    ivSurface.set(makeIvSurface({
       symbol: "AAPL",
-      timestamp: "2026-03-01T00:00:00Z",
-      snapshot_available: true,
       spot: 210,
       expiries: ["20260320"],
       strikes: [205, 210, 215],
       iv_grid: [[0.28, 0.27, 0.29]],
-      delayed: true,
-      points: 3,
-      warnings: [],
-      messages: []
-    });
+      points: 3
+    }));
     const session: IvSessionStatus = {
       running: false,
       status_text: "Idle",
@@ -1388,17 +1391,13 @@ describe("app store orchestration", () => {
       market_data_mode: "delayed",
       messages: [],
       surface: {
-        symbol: "AAPL",
-        timestamp: "2026-03-01T00:00:00Z",
+        ...makeIvSurface({ symbol: "AAPL" }),
         snapshot_available: false,
         spot: null,
         expiries: [],
         strikes: [],
         iv_grid: [],
-        delayed: true,
-        points: 0,
-        warnings: [],
-        messages: []
+        points: 0
       }
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(session)));
@@ -1664,6 +1663,52 @@ function emptyCopilotThreads() {
   };
 }
 
+function emptyRiskCorrelationMatrix(): RiskResult["correlation_matrix"] {
+  return {
+    assets: [],
+    cells: []
+  };
+}
+
+function emptyRiskDependencyNetwork(): RiskResult["dependency_network"] {
+  return {
+    nodes: [],
+    edges: [],
+    clusters: [],
+    methodology: null,
+    universe_size: 0,
+    observation_count: 0,
+    edge_threshold: null,
+    warnings: [],
+    source_provider: "risk_service"
+  };
+}
+
+function makeIvSurface(overrides: Partial<IvSurface> = {}): IvSurface {
+  return {
+    symbol: "SPY",
+    timestamp: "2026-03-01T00:00:00Z",
+    retrieved_at: "2026-03-01T00:00:00Z",
+    snapshot_available: true,
+    spot: 500,
+    expiries: ["20260320"],
+    strikes: [495, 500, 505],
+    iv_grid: [[0.2, 0.19, 0.21]],
+    delayed: true,
+    points: 3,
+    warnings: [],
+    messages: [],
+    source_provider: "ibkr",
+    origin: "iv_surface_engine",
+    transformation_note: null,
+    freshness_label: "delayed",
+    collection: null,
+    quality: null,
+    pairs: [],
+    ...overrides
+  };
+}
+
 function makeSnapshot(): PortfolioSnapshot {
   return {
     timestamp: "2026-03-01T00:00:00Z",
@@ -1681,7 +1726,13 @@ function makeSnapshot(): PortfolioSnapshot {
         unrealized_pnl: 10,
         weight: 1,
         base_market_value: 110,
-        fx_rate: 1
+        fx_rate: 1,
+        instrument_id: "portfolio:stk:aapl",
+        display_symbol: "AAPL",
+        exchange: "SMART",
+        primary_exchange: "NASDAQ",
+        provider: "ibkr",
+        provider_id: "AAPL"
       }
     ],
     total_market_value: 110,
@@ -1706,7 +1757,9 @@ function makeResearchResult(scopeType: "single_ticker" | "synthetic_portfolio", 
     primary_price_points: scopeType === "single_ticker" ? [{ timestamp: "2026-03-01T00:00:00Z", value: 100 }] : [],
     weights: snapshot.positions.map((position) => ({
       symbol: position.symbol,
-      weight: position.weight ?? 0
+      weight: position.weight ?? 0,
+      instrument_id: position.instrument_id,
+      display_symbol: position.display_symbol
     })),
     summary: {
       total_return: 0.1,
@@ -1732,6 +1785,8 @@ function makeResearchResult(scopeType: "single_ticker" | "synthetic_portfolio", 
     constituents: snapshot.positions.map((position) => ({
       symbol: position.symbol,
       weight: position.weight ?? 0,
+      instrument_id: position.instrument_id,
+      display_symbol: position.display_symbol,
       total_return: 0.1,
       annual_vol: 0.2,
       max_drawdown: -0.05,
@@ -2083,6 +2138,8 @@ function makeCryptoToken(tokenId: string): CryptoToken {
     homepage_url: null,
     description: null,
     categories: [],
+    narrative_labels: [],
+    layer_bucket: "layer_1",
     turnover_ratio_24h: 0.06,
     fdv_premium_ratio: 0.2,
     screen_score: 77.4,

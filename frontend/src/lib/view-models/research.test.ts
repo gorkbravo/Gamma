@@ -337,6 +337,11 @@ function makeResearchResult(
   scopeType: "single_ticker" | "synthetic_portfolio",
   weights: Array<{ symbol: string; weight: number }>
 ): ResearchResult {
+  const normalizedWeights = weights.map((item) => ({
+    ...item,
+    instrument_id: `portfolio:stk:${item.symbol.toLowerCase()}`,
+    display_symbol: item.symbol
+  }));
   return {
     scope_type: scopeType,
     benchmark_symbol: "SPY",
@@ -346,7 +351,7 @@ function makeResearchResult(
     performance_points: [],
     benchmark_points: [],
     primary_price_points: [],
-    weights,
+    weights: normalizedWeights,
     summary: {
       total_return: null,
       annual_return: null,
@@ -368,9 +373,11 @@ function makeResearchResult(
       missing_symbols: [],
       benchmark_overlap_count: 10
     },
-    constituents: weights.map((item) => ({
+    constituents: normalizedWeights.map((item) => ({
       symbol: item.symbol,
       weight: item.weight,
+      instrument_id: item.instrument_id,
+      display_symbol: item.display_symbol,
       total_return: null,
       annual_vol: null,
       max_drawdown: null,

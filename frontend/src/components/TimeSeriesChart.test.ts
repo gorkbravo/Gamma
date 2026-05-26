@@ -1,8 +1,21 @@
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
-import TimeSeriesChart, { type ChartSeries } from "./TimeSeriesChart.svelte";
+import TimeSeriesChart from "./TimeSeriesChart.svelte";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { UTCTimestamp } from "lightweight-charts";
+
+interface ChartSeries {
+  id: string;
+  label: string;
+  color: string;
+  type?: "line" | "area" | "candlestick" | "histogram";
+  priceScaleId?: string;
+  data: Array<
+    | { time: UTCTimestamp; value: number }
+    | { time: UTCTimestamp; open: number; high: number; low: number; close: number }
+  >;
+}
 
 describe("TimeSeriesChart", () => {
   it("server-renders candlestick and histogram series metadata", () => {
@@ -12,7 +25,7 @@ describe("TimeSeriesChart", () => {
         label: "Price",
         color: "var(--accent)",
         type: "candlestick",
-        data: [{ time: 1, open: 9, high: 11, low: 8, close: 10 }]
+        data: [{ time: 1 as UTCTimestamp, open: 9, high: 11, low: 8, close: 10 }]
       },
       {
         id: "volume",
@@ -20,7 +33,7 @@ describe("TimeSeriesChart", () => {
         color: "var(--text-2)",
         type: "histogram",
         priceScaleId: "volume",
-        data: [{ time: 1, value: 100 }]
+        data: [{ time: 1 as UTCTimestamp, value: 100 }]
       }
     ];
 

@@ -521,7 +521,7 @@ function buildDependencyNeighborRows(network: RiskDependencyNetwork | null): Ris
   }
   const nodes = new Map(network.nodes.map((node) => [node.symbol, node]));
   const rows = network.edges
-    .map((edge) => {
+    .map<RiskTableRow & { strength: number } | null>((edge) => {
       const source = nodes.get(edge.source);
       const target = nodes.get(edge.target);
       const portfolioNode = source?.is_portfolio ? source : target?.is_portfolio ? target : null;
@@ -541,7 +541,7 @@ function buildDependencyNeighborRows(network: RiskDependencyNetwork | null): Ris
         strength: edge.strength,
       };
     })
-    .filter((row): row is RiskTableRow & { strength: number } => row != null)
+    .filter((row): row is RiskTableRow & { strength: number } => row !== null)
     .sort((left, right) => right.strength - left.strength)
     .slice(0, 12)
     .map((row) => ({ cells: row.cells, tone: row.tone }));

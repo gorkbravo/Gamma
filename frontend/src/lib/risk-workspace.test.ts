@@ -184,6 +184,17 @@ const riskResult: RiskResult = {
       { row: "portfolio:stk:msft", column: "portfolio:stk:msft", correlation: 1 },
     ],
   },
+  dependency_network: {
+    nodes: [],
+    edges: [],
+    clusters: [],
+    methodology: null,
+    universe_size: 0,
+    observation_count: 0,
+    edge_threshold: null,
+    warnings: [],
+    source_provider: "risk_service",
+  },
   excluded_assets: [{ symbol: "BND", instrument_id: null, display_symbol: "BND", reason: "No historical bars" }],
   warnings: ["Risk coverage below 95%; headline risk estimates may be materially incomplete."],
 };
