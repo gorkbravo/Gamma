@@ -7,7 +7,7 @@
 
 - `Solved` Cleanup 'Selected Equity' box and add the ability so that if there's a porfolio in scope, it also shows as a 'Selected Portfolio' 
 
-- Add customisation to hero charts (candlestick options, technical indicators or volume overlays)
+- `Somewhat Solved` Add customisation to hero charts (candlestick options, technical indicators or volume overlays)
 
 - `Solved` Take out logo from the top bar, and in something like 'Research and Analysis Platform' 
 
@@ -26,7 +26,7 @@
 
 ## Research tab
 
-- Decide on wether I want to separate it into Equity Research and Strategy Lab 
+- `Solved` Decide on wether I want to separate it into Equity Research and Strategy Lab
 
 - Create a sandbox for running code inside of the app. (Either here or in the dedicated Strategy tab)
 

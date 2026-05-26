@@ -1266,7 +1266,6 @@
     flex-wrap: wrap;
   }
 
-  .header-badges span,
   .badge-stack span {
     border: 1px solid var(--panel-strong);
     background: var(--surface-0);
@@ -1327,13 +1326,13 @@
 
   .mode-bar button.selected,
   .canvas-toggle button.selected {
-    background: rgba(122, 166, 200, 0.12);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
   }
 
   .mode-bar button:hover:not(:disabled),
   .canvas-toggle button:hover:not(:disabled) {
-    background: rgba(122, 166, 200, 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
     color: var(--text-0);
     border-color: var(--panel-strong);
   }
@@ -1417,16 +1416,11 @@
     line-height: 1.1;
   }
 
-  h2,
   h3,
   p,
   small,
   strong {
     margin: 0;
-  }
-
-  h2 {
-    font-size: 1rem;
   }
 
   h3 {
@@ -1541,7 +1535,7 @@
   .metric {
     padding: 0.2rem 1rem;
     border: 0;
-    border-left: 1px solid rgba(50, 56, 64, 0.52);
+    border-left: 1px solid var(--divider);
     background: none;
     display: grid;
     gap: 0.12rem;

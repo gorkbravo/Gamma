@@ -1417,9 +1417,9 @@
   }
 
   .mode-bar button:last-child { border-right: 0; }
-  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-bar button:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--text-0); }
   .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+  .mode-bar button.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 
   /* ── Controls bar ── */
   .controls-bar {
@@ -1458,16 +1458,6 @@
     font-weight: 500;
   }
 
-  .control > strong {
-    height: 28px;
-    display: flex;
-    align-items: center;
-    color: var(--text-0);
-    font-size: 12px;
-    font-weight: 500;
-    text-transform: capitalize;
-  }
-
   /* ── Inputs / buttons ── */
   input,
   select,
@@ -1494,11 +1484,11 @@
   .action-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .action-btn.primary {
-    background: rgba(122, 166, 200, 0.1);
-    border-color: rgba(122, 166, 200, 0.5);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
     color: var(--accent);
   }
-  .action-btn.primary:hover:not(:disabled) { background: rgba(122, 166, 200, 0.18); }
+  .action-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
   /* ── Panel headers ── */
   .panel-title,
@@ -1531,7 +1521,7 @@
   th, td { padding: 0.34rem 0.5rem; border-bottom: 1px solid var(--divider); text-align: left; white-space: nowrap; font-size: 12px; }
   th { color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
   td.empty { color: var(--text-2); text-align: center; padding: 0.65rem; }
-  tbody tr:hover { background: rgba(122, 166, 200, 0.06); }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 
   /* ── Lists ── */
   .list-panel { padding: 0; }
@@ -1748,7 +1738,7 @@
   }
   .sc-track {
     height: 0.6rem;
-    background: rgba(39, 53, 68, 0.8);
+    background: var(--panel-strong);
     overflow: hidden;
   }
   .sc-fill { height: 100%; transition: width 200ms ease; }
@@ -1877,12 +1867,12 @@
     background: var(--bg-1);
     border: 1px solid var(--divider);
   }
-  .frontier-label.current { color: var(--chart-secondary); border-color: rgba(196, 154, 90, 0.4); }
-  .frontier-label.candidate { color: var(--chart-primary); border-color: rgba(122, 166, 200, 0.4); }
-  .frontier-label.universe_candidate { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
+  .frontier-label.current { color: var(--chart-secondary); border-color: color-mix(in srgb, var(--chart-secondary) 40%, transparent); }
+  .frontier-label.candidate { color: var(--chart-primary); border-color: color-mix(in srgb, var(--chart-primary) 40%, transparent); }
+  .frontier-label.universe_candidate { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 40%, transparent); }
   .frontier-label.cached_equity_candidate { color: var(--text-1); border-color: var(--divider); }
-  .frontier-label.risk_free { color: var(--positive); border-color: rgba(75, 180, 116, 0.4); }
-  .frontier-label.cached_equity_frontier { color: var(--chart-primary); border-color: rgba(122, 166, 200, 0.4); }
+  .frontier-label.risk_free { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 40%, transparent); }
+  .frontier-label.cached_equity_frontier { color: var(--chart-primary); border-color: color-mix(in srgb, var(--chart-primary) 40%, transparent); }
 
   .frontier-tooltip {
     position: absolute;
@@ -1895,7 +1885,6 @@
     min-width: 150px;
     font-size: 11px;
     z-index: 2;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   }
   .frontier-tooltip strong { color: var(--text-0); font-size: 11.5px; font-weight: 600; }
   .frontier-tooltip span { color: var(--text-1); display: flex; justify-content: space-between; gap: 0.75rem; }

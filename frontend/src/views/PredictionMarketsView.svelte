@@ -893,7 +893,6 @@
   }
 
   h2,
-  h3,
   p,
   small {
     margin: 0;
@@ -980,13 +979,13 @@
   }
 
   .venue-picker button.selected {
-    border-color: rgba(122, 166, 200, 0.36);
-    background: rgba(122, 166, 200, 0.08);
+    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .venue-picker button.selected.fresh {
-    border-color: rgba(103, 189, 120, 0.35);
-    background: rgba(103, 189, 120, 0.08);
+    border-color: color-mix(in srgb, var(--positive) 35%, transparent);
+    background: color-mix(in srgb, var(--positive) 8%, transparent);
   }
 
   .venue-picker button.selected.fresh strong {
@@ -994,8 +993,8 @@
   }
 
   .venue-picker button.selected.stale {
-    border-color: rgba(214, 168, 83, 0.35);
-    background: rgba(214, 168, 83, 0.08);
+    border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
   }
 
   .venue-picker button.selected.stale strong {
@@ -1003,8 +1002,8 @@
   }
 
   .venue-picker button.selected.delayed {
-    border-color: rgba(122, 166, 200, 0.36);
-    background: rgba(122, 166, 200, 0.12);
+    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
   /* ── Badge stack ─────────────────────────────────────────── */
@@ -1017,8 +1016,8 @@
   }
 
   .badge-stack span {
-    border: 1px solid rgba(122, 166, 200, 0.14);
-    background: rgba(122, 166, 200, 0.05);
+    border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
     color: var(--text-1);
     padding: 0.22rem 0.44rem;
     text-transform: uppercase;
@@ -1047,8 +1046,8 @@
   }
 
   .tag-chip {
-    border: 1px solid rgba(122, 166, 200, 0.14);
-    background: rgba(122, 166, 200, 0.05);
+    border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
     color: var(--text-1);
     padding: 0.22rem 0.44rem;
     text-transform: uppercase;
@@ -1122,11 +1121,11 @@
   }
 
   .screener-table tbody tr:hover {
-    background: rgba(122, 166, 200, 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 
   .screener-table tbody tr.selected {
-    background: rgba(122, 166, 200, 0.08);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .market-title {
@@ -1223,26 +1222,26 @@
 
   .badge-stack span.fresh,
   .tag-chip.fresh {
-    border-color: rgba(103, 189, 120, 0.35);
-    background: rgba(103, 189, 120, 0.08);
+    border-color: color-mix(in srgb, var(--positive) 35%, transparent);
+    background: color-mix(in srgb, var(--positive) 8%, transparent);
   }
 
   .badge-stack span.stale,
   .tag-chip.stale {
-    border-color: rgba(214, 168, 83, 0.35);
-    background: rgba(214, 168, 83, 0.08);
+    border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
   }
 
   .badge-stack span.delayed,
   .tag-chip.delayed {
-    border-color: rgba(122, 166, 200, 0.36);
-    background: rgba(122, 166, 200, 0.12);
+    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
   .badge-stack span.broken,
   .tag-chip.broken {
-    border-color: rgba(214, 104, 104, 0.35);
-    background: rgba(214, 104, 104, 0.12);
+    border-color: color-mix(in srgb, var(--negative) 35%, transparent);
+    background: color-mix(in srgb, var(--negative) 12%, transparent);
   }
 
   /* ── Metadata rows ───────────────────────────────────────── */

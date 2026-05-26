@@ -166,9 +166,8 @@
     gap: 0.2rem;
     padding: 0.35rem;
     border: 1px solid var(--panel-border);
-    border-radius: 4px;
-    background: rgba(8, 12, 16, 0.98);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    border-radius: 2px;
+    background: var(--surface-0);
   }
 
   .search-result,

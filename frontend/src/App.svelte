@@ -5,19 +5,6 @@
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
-  import CommoditiesView from "./views/CommoditiesView.svelte";
-  import CopilotView from "./views/CopilotView.svelte";
-  import MacroView from "./views/MacroView.svelte";
-  import MaritimeView from "./views/MaritimeView.svelte";
-  import PortfolioView from "./views/PortfolioView.svelte";
-  import CryptoView from "./views/CryptoView.svelte";
-  import FundamentalsView from "./views/FundamentalsView.svelte";
-  import PredictionMarketsView from "./views/PredictionMarketsView.svelte";
-  import EquityResearchView from "./views/EquityResearchView.svelte";
-  import StrategyLabView from "./views/StrategyLabView.svelte";
-  import RiskView from "./views/RiskView.svelte";
-  import SitrepView from "./views/SitrepView.svelte";
-  import IvView from "./views/IvView.svelte";
   import { installExternalLinkHandler } from "./lib/external-links";
   import { matchesActionKeybinding, isEditableEventTarget } from "./lib/keybindings";
   import { openKeyBindingsWindow } from "./lib/keybindings-window";
@@ -198,6 +185,26 @@
   import type { EquityResearchMode, StrategyLabMode } from "./lib/view-models/research";
   import type { RiskMode } from "./lib/risk-workspace";
 
+  type LazyViewComponent = any;
+  type LazyViewModule = { default: LazyViewComponent };
+  type LazyViewLoader = () => Promise<LazyViewModule>;
+
+  const viewLoaders: Record<TabId, LazyViewLoader> = {
+    portfolio: () => import("./views/PortfolioView.svelte"),
+    sitrep: () => import("./views/SitrepView.svelte"),
+    equity_research: () => import("./views/EquityResearchView.svelte"),
+    strategy_lab: () => import("./views/StrategyLabView.svelte"),
+    macro: () => import("./views/MacroView.svelte"),
+    commodities: () => import("./views/CommoditiesView.svelte"),
+    prediction_markets: () => import("./views/PredictionMarketsView.svelte"),
+    crypto: () => import("./views/CryptoView.svelte"),
+    fundamentals: () => import("./views/FundamentalsView.svelte"),
+    maritime: () => import("./views/MaritimeView.svelte"),
+    copilot: () => import("./views/CopilotView.svelte"),
+    risk: () => import("./views/RiskView.svelte"),
+    iv: () => import("./views/IvView.svelte"),
+  };
+
   type ConsoleEntry = {
     label: string;
     message: string;
@@ -233,6 +240,12 @@
   let activeTabCopilotSurface: CopilotSurfaceState;
   let synthesisCopilotSurface: CopilotSurfaceState;
   let copilotSurface: CopilotSurfaceState;
+  let activeViewTab: TabId | null = null;
+  let activeViewComponent: LazyViewComponent | null = null;
+  let activeViewLoading: TabId | null = null;
+  let activeViewLoadError: string | null = null;
+  let activeViewLoadSequence = 0;
+  const loadedViewComponents: Partial<Record<TabId, LazyViewComponent>> = {};
 
   function normalizeAppTabId(tabId: TabId | "research"): TabId {
     return tabId === "research" ? "equity_research" : tabId;
@@ -314,6 +327,9 @@
     selectedDomains: selectedSynthesisDomains,
   });
   $: copilotSurface = copilotMode === "synthesis" ? synthesisCopilotSurface : activeTabCopilotSurface;
+  $: if (workspaceMode != null && activeViewTab !== $activeTab) {
+    void loadActiveView($activeTab);
+  }
 
   type CopilotDrawerMode = "active_tab" | "synthesis";
   type CopilotGroundingScopeOption = {
@@ -337,6 +353,36 @@
     selectedScopeDomains: CopilotBaseDomain[];
     selectionMessage: string | null;
   };
+
+  async function loadActiveView(tabId: TabId) {
+    const sequence = ++activeViewLoadSequence;
+    const cachedView = loadedViewComponents[tabId] ?? null;
+    activeViewTab = tabId;
+    activeViewLoadError = null;
+
+    if (cachedView) {
+      activeViewComponent = cachedView;
+      activeViewLoading = null;
+      return;
+    }
+
+    activeViewComponent = null;
+    activeViewLoading = tabId;
+
+    try {
+      const module = await viewLoaders[tabId]();
+      loadedViewComponents[tabId] = module.default;
+      if (sequence === activeViewLoadSequence) {
+        activeViewComponent = module.default;
+        activeViewLoading = null;
+      }
+    } catch (error) {
+      if (sequence === activeViewLoadSequence) {
+        activeViewLoadError = error instanceof Error ? error.message : String(error);
+        activeViewLoading = null;
+      }
+    }
+  }
 
   async function loadSitrepContext(options: { forceRefresh?: boolean } = {}) {
     await Promise.allSettled([
@@ -2052,8 +2098,18 @@
       />
 
       <section class="workspace-main">
-        {#if $activeTab === "portfolio"}
-          <PortfolioView
+        {#if activeViewLoadError}
+          <div class="view-load-state" role="alert">
+            <strong>Unable to load view</strong>
+            <span>{activeViewLoadError}</span>
+          </div>
+        {:else if activeViewComponent == null || activeViewTab !== $activeTab || activeViewLoading === $activeTab}
+          <div class="view-load-state" aria-live="polite">
+            <strong>Loading workspace</strong>
+          </div>
+        {:else if $activeTab === "portfolio"}
+          <svelte:component
+            this={activeViewComponent}
             snapshot={$portfolioSnapshot}
             history={$portfolioHistory}
             performance={$portfolioPerformance}
@@ -2072,7 +2128,8 @@
             onClearHistory={handleClearHistory}
           />
         {:else if $activeTab === "sitrep"}
-          <SitrepView
+          <svelte:component
+            this={activeViewComponent}
             system={$systemStatus}
             overview={$researchOverview}
             indicesOverview={$sitrepIndicesOverview}
@@ -2092,7 +2149,8 @@
             onOpenHandoff={openSitrepHandoff}
           />
         {:else if $activeTab === "equity_research"}
-          <EquityResearchView
+          <svelte:component
+            this={activeViewComponent}
             bind:mode={equityResearchMode}
             overview={$researchOverview}
             result={$researchResult}
@@ -2118,7 +2176,8 @@
             onOpenIv={openIvFromResearch}
           />
         {:else if $activeTab === "strategy_lab"}
-          <StrategyLabView
+          <svelte:component
+            this={activeViewComponent}
             bind:mode={strategyLabMode}
             overview={$researchOverview}
             result={$researchResult}
@@ -2147,7 +2206,8 @@
             onOpenStrategyLab={openStrategyLabFromEquityResearch}
           />
         {:else if $activeTab === "macro"}
-          <MacroView
+          <svelte:component
+            this={activeViewComponent}
             snapshot={$macroSnapshot}
             divergences={$macroDivergences}
             events={$macroEvents}
@@ -2157,7 +2217,8 @@
             onLoadSeries={loadMacroSeriesHistory}
           />
         {:else if $activeTab === "commodities"}
-          <CommoditiesView
+          <svelte:component
+            this={activeViewComponent}
             bind:mode={commoditiesMode}
             workspace={$commoditiesWorkspace}
             loading={$loading.commodities}
@@ -2166,7 +2227,8 @@
             onLoadMacroSeries={loadMacroSeriesHistory}
           />
         {:else if $activeTab === "prediction_markets"}
-          <PredictionMarketsView
+          <svelte:component
+            this={activeViewComponent}
             screener={$predictionMarketScreener}
             detail={$predictionMarketDetail}
             history={$predictionMarketHistory}
@@ -2178,7 +2240,8 @@
             onSelectMarket={selectPredictionMarket}
           />
         {:else if $activeTab === "crypto"}
-          <CryptoView
+          <svelte:component
+            this={activeViewComponent}
             bind:mode={cryptoMode}
             workspace={$cryptoWorkspace}
             detail={$cryptoTokenDetail}
@@ -2195,7 +2258,8 @@
             onClearSyntheticPortfolio={clearCryptoSyntheticPortfolio}
           />
         {:else if $activeTab === "fundamentals"}
-          <FundamentalsView
+          <svelte:component
+            this={activeViewComponent}
             bind:mode={fundamentalsMode}
             search={$fundamentalsSearch}
             selectedTicker={$selectedFundamentalsTicker}
@@ -2217,14 +2281,16 @@
             onSendToCopilot={handleSendToCopilot}
           />
         {:else if $activeTab === "maritime"}
-          <MaritimeView
+          <svelte:component
+            this={activeViewComponent}
             bind:mode={maritimeMode}
             workspace={$maritimeWorkspace}
             loading={$loading.maritime}
             onLoadWorkspace={loadMaritimeWorkspace}
           />
         {:else if $activeTab === "copilot"}
-          <CopilotView
+          <svelte:component
+            this={activeViewComponent}
             activeSurface={activeTabCopilotSurface}
             synthesisSurface={synthesisCopilotSurface}
             sessions={$copilotSessions}
@@ -2243,7 +2309,8 @@
             onToggleScope={handleToggleSynthesisScope}
           />
         {:else if $activeTab === "risk"}
-          <RiskView
+          <svelte:component
+            this={activeViewComponent}
             mode={workspaceMode}
             bind:activeMode={riskMode}
             snapshot={$portfolioSnapshot}
@@ -2253,7 +2320,8 @@
             onCompute={computeRisk}
           />
         {:else}
-          <IvView
+          <svelte:component
+            this={activeViewComponent}
             bind:mode={optionsMode}
             status={$systemStatus}
             requestedSymbol={ivRequestedSymbol}
@@ -2300,5 +2368,26 @@
 
   .workspace-main {
     min-width: 0;
+  }
+
+  .view-load-state {
+    display: grid;
+    gap: 0.25rem;
+    min-height: 12rem;
+    align-content: center;
+    padding: 1rem;
+    border: 1px solid var(--panel-border);
+    background: var(--surface-0);
+    color: var(--text-2);
+  }
+
+  .view-load-state strong {
+    color: var(--text-0);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  .view-load-state span {
+    font-size: 0.72rem;
   }
 </style>

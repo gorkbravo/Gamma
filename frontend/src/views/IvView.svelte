@@ -994,14 +994,9 @@
     text-transform: uppercase;
   }
 
-  h2,
   h3,
   p {
     margin: 0;
-  }
-
-  h2 {
-    font-size: 1.25rem;
   }
 
   h3 {
@@ -1034,9 +1029,9 @@
   }
 
   .mode-bar button:last-child { border-right: 0; }
-  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .mode-bar button:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--text-0); }
   .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+  .mode-bar button.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 
   .controls-panel {
     display: grid;
@@ -1084,8 +1079,8 @@
   }
 
   .primary-action {
-    border-color: rgba(122, 166, 200, 0.34);
-    background: rgba(122, 166, 200, 0.08);
+    border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
     min-width: 8.75rem;
   }
 
@@ -1295,7 +1290,7 @@
 
   .expiry.active {
     color: var(--accent);
-    background: rgba(122, 166, 200, 0.08);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .data {
@@ -1395,7 +1390,7 @@
   }
 
   tr:hover td {
-    background: rgba(122, 166, 200, 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 
   .positive {

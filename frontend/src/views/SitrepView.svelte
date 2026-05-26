@@ -1139,14 +1139,9 @@
     min-width: 0;
   }
 
-  h2,
   h3,
   p {
     margin: 0;
-  }
-
-  h2 {
-    font-size: 1.1rem;
   }
 
   h3 {

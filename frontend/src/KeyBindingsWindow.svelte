@@ -161,10 +161,8 @@
 <style>
   :global(body) {
     margin: 0;
-    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-    background:
-      radial-gradient(circle at top left, rgba(122, 166, 200, 0.16), transparent 28%),
-      linear-gradient(180deg, #0a0f14 0%, #080d12 100%);
+    font-family: var(--app-font), monospace;
+    background: var(--bg-0);
     color: var(--text-0);
   }
 
@@ -173,14 +171,13 @@
     margin: 0 auto;
     padding: 1.25rem 0 1.5rem;
     display: grid;
-    gap: 1rem;
+    gap: 0.5rem;
   }
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: var(--surface-0);
+    background: var(--panel-bg);
     padding: 1rem;
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
   }
 
   .hero h1,
@@ -231,10 +228,10 @@
   .row {
     display: grid;
     grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 0.9fr);
-    gap: 0.8rem;
+    gap: 0.5rem;
     align-items: center;
     padding: 0.7rem 0;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    border-top: 1px solid var(--divider);
   }
 
   .compact .row {
@@ -266,12 +263,12 @@
   .workspace-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
+    gap: 0.5rem;
   }
 
   .workspace-card {
-    border: 1px solid rgba(46, 60, 74, 0.52);
-    background: rgba(12, 18, 24, 0.72);
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
     padding: 0.9rem;
   }
 

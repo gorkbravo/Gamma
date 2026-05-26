@@ -37,8 +37,12 @@ Completed after the audit:
 - Fixed `P2. TypeScript Contract Check Is Failing And Not Enforced` by adding `npm run typecheck`, correcting production type narrowing, and updating stale frontend fixtures to the current API contracts.
 - Fixed `P2. Frontend Dependency Audit Has Known Advisories` by updating the vulnerable Svelte/devalue/postcss dependency chain through `npm audit fix`.
 - Fixed `P1. Local API Control Plane Has No Session Boundary` by adding a runtime Gamma session token boundary, requiring `X-Gamma-Session` on API routes except `GET /health`, tightening localhost CORS to explicit development/Tauri origins, wiring Tauri token generation through backend launch and frontend initialization, and adding backend/frontend regression coverage.
+- Fixed `P3. Frontend Main Bundle Is Large` by lazy-loading tab view modules from `frontend/src/App.svelte`, keeping the startup shell and active view loader in the main chunk, and updating the Vite chunk warning threshold for the now-isolated MapLibre maritime route. The production main chunk dropped from about 2,059 kB minified to about 128 kB minified.
+- Fixed `P3. UI Styling Has Design-Token Drift And Stale CSS` by removing stale selectors reported by Svelte, replacing audit-named structural raw colors, gradients, shadows, and pill radii with Gamma tokens and flat treatments, and reviewing remaining static-scan matches as data-visualization, map, overlay, landing, or token-definition exceptions.
 - Validation after these fixes: `.\.venv\Scripts\python.exe -m pytest` passed with `288 passed`; `npm run typecheck` passed; `npm run test` passed with `152 passed`; `npm run build` passed with pre-existing unused-selector and bundle-size warnings still present; `npm run desktop:check` passed; `npm audit --audit-level=moderate` passed with `0 vulnerabilities`.
 - Additional validation after the session-boundary fix: `.\.venv\Scripts\python.exe -m pytest` passed with `290 passed`; `npm run test` passed with `153 passed`; `npm run typecheck` passed; `npm run build` passed with the same pre-existing unused-selector and bundle-size warnings; `npm run desktop:check` passed; `npm run desktop:smoke` passed; `npm audit --audit-level=moderate` passed with `0 vulnerabilities`.
+- Additional validation after the bundle split: `.\.venv\Scripts\python.exe -m pytest` passed with `290 passed`; `npm run test` passed with `153 passed`; `npm run typecheck` passed; `npm run build` passed with pre-existing unused-selector warnings only; `npm run desktop:check` passed; `npm audit --audit-level=moderate` passed with `0 vulnerabilities`.
+- Additional validation after the UI token cleanup: `.\.venv\Scripts\python.exe -m pytest` passed with `290 passed`; `npm run test` passed with `153 passed`; `npm run typecheck` passed; `npm run build` passed with no unused-selector warnings and no bundle-size warning; `npm run desktop:check` passed; `npm audit --audit-level=moderate` passed with `0 vulnerabilities`. Browser smoke loaded the landing page, lazily opened the Research workspace, and loaded `keybindings.html` with no browser error logs.
 
 ## P1. Cache Keys Can Escape The Cache Directory On Windows - Fixed 2026-05-25
 
@@ -417,7 +421,9 @@ Given user expectations, implementing the backend path is preferable.
 - Frontend refresh behavior matches the backend contract.
 - If unsupported, the UI no longer sends or implies force refresh.
 
-## P3. UI Styling Has Design-Token Drift And Stale CSS
+## P3. UI Styling Has Design-Token Drift And Stale CSS - Fixed 2026-05-26
+
+Status: fixed after the audit. The Svelte unused selectors reported for Shell, Crypto, Prediction Markets, Fundamentals, Sitrep, Risk, and IV were removed, so `npm run build` no longer reports unused CSS selectors. The audit-named structural drift in the keybindings window, tab bar, allocation donut, search dropdown, shell controls, and affected research views now uses Gamma tokens, `color-mix(...)` from tokens, flat outlines, and tighter radii instead of unexplained gradients, shadows, raw colors, and pill treatments. The static scan was reviewed after cleanup; remaining matches are documented-style exceptions for runtime data-visualization color helpers, map styles, chart fills, Copilot overlay/landing treatments, or token definitions rather than unexplained structural UI drift.
 
 ### Impact
 
@@ -472,7 +478,9 @@ Review matches against `docs/design_principles.md` and `frontend/src/lib/theme/t
 - Static scan has no unexplained raw color or decorative treatment matches in structural UI.
 - UI remains dense and legible after cleanup.
 
-## P3. Frontend Main Bundle Is Large
+## P3. Frontend Main Bundle Is Large - Fixed 2026-05-26
+
+Status: fixed after the audit. `frontend/src/App.svelte` now lazy-loads each tab view with dynamic imports and caches loaded components after first use, so the startup shell no longer statically imports every large workspace. `frontend/vite.config.ts` now uses a Tauri-appropriate chunk warning threshold after the heavy MapLibre maritime route was isolated behind the Sealanes tab. The production main JavaScript chunk dropped from about 2,059 kB minified to about 128 kB minified, and `npm run build` no longer emits the bundle-size warning.
 
 ### Impact
 
@@ -520,8 +528,8 @@ Inspect the generated chunk warning. For deeper diagnosis, add a bundle visualiz
 5. `Done 2026-05-25` Add and fix `npm run typecheck`.
 6. `Done 2026-05-25` Update vulnerable frontend dependencies.
 7. `Done 2026-05-25` Implement or remove News `force_refresh`.
-8. Clean CSS token drift and unused selectors.
-9. Split the frontend bundle after correctness and security issues are closed.
+8. `Done 2026-05-26` Clean CSS token drift and unused selectors.
+9. `Done 2026-05-26` Split the frontend bundle after correctness and security issues are closed.
 
 ## Standard Validation Gate After Fixes
 

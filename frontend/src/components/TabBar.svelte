@@ -179,7 +179,7 @@
     position: fixed;
     inset: 0;
     z-index: 40;
-    background: rgba(0, 0, 0, 0.45);
+    background: color-mix(in srgb, var(--bg-0) 45%, transparent);
   }
 
   .sidebar {
@@ -189,7 +189,7 @@
     z-index: 50;
     width: 248px;
     height: 100vh;
-    background: rgba(8, 13, 18, 0.98);
+    background: color-mix(in srgb, var(--bg-0) 98%, var(--accent) 2%);
     border-right: 1px solid var(--panel-border);
     transform: translateX(-100%);
     transition: transform 180ms ease;
@@ -258,7 +258,7 @@
   .close-btn:hover,
   .tab-button:hover {
     color: var(--text-0);
-    border-color: rgba(122, 166, 200, 0.32);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
   }
 
   .tab-list {
@@ -301,7 +301,7 @@
     display: block;
     width: 0.55rem;
     height: 1.5px;
-    border-radius: 99px;
+    border-radius: 2px;
     background: currentColor;
     opacity: 0.45;
   }
@@ -334,8 +334,8 @@
 
   .tab-button.selected,
   .tab-row.selected .tab-button {
-    background: rgba(122, 166, 200, 0.08);
-    border-color: rgba(122, 166, 200, 0.36);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
     color: var(--text-0);
   }
 
@@ -346,7 +346,7 @@
   .insertion-marker {
     height: 2px;
     margin-left: 2rem;
-    background: linear-gradient(90deg, rgba(122, 166, 200, 0.85), rgba(122, 166, 200, 0.18));
-    box-shadow: 0 0 0 1px rgba(122, 166, 200, 0.14);
+    background: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   }
 </style>

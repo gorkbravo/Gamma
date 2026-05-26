@@ -246,7 +246,7 @@
   }
 
   .track {
-    stroke: rgba(39, 53, 68, 0.8);
+    stroke: var(--panel-strong);
   }
 
   .segment {
@@ -266,9 +266,8 @@
     gap: 0.55rem;
     pointer-events: none;
     padding: 0.8rem 0.9rem;
-    border: 1px solid rgba(46, 60, 74, 0.52);
+    border: 1px solid var(--panel-border);
     background: var(--surface-0);
-    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
   }
 
   .hover-tooltip::before {
@@ -278,8 +277,8 @@
     top: var(--tooltip-arrow-y, 50%);
     width: 0.75rem;
     height: 0.75rem;
-    border-left: 1px solid rgba(46, 60, 74, 0.52);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
+    border-left: 1px solid var(--panel-border);
+    border-bottom: 1px solid var(--panel-border);
     background: var(--surface-0);
     transform: translateY(-50%) rotate(45deg);
   }
@@ -289,8 +288,8 @@
     right: -0.45rem;
     border-left: 0;
     border-bottom: 0;
-    border-right: 1px solid rgba(46, 60, 74, 0.52);
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    border-right: 1px solid var(--panel-border);
+    border-top: 1px solid var(--panel-border);
   }
 
   .hover-label,
@@ -360,7 +359,7 @@
   }
 
   .legend-row {
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
+    border-top: 1px solid var(--divider);
     padding-top: 0.55rem;
     transition: opacity 120ms ease, background 120ms ease;
     width: 100%;
@@ -380,7 +379,7 @@
   .swatch {
     width: 0.6rem;
     height: 0.6rem;
-    border-radius: 999px;
+    border-radius: 2px;
     flex: 0 0 auto;
   }
 
@@ -402,7 +401,7 @@
   }
 
   .legend-row.active {
-    background: rgba(122, 166, 200, 0.08);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   .positive {

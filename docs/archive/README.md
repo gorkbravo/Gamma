@@ -7,6 +7,7 @@ They are not the primary source of truth for current development.
 ## Archived Documents
 
 - [`migration.md`](./migration.md): detailed PySide-to-Tauri migration log and audit record
+- [`full_codebase_audit_2026-05-25.md`](./full_codebase_audit_2026-05-25.md): full backend/frontend audit handoff with prioritized remediation packets
 - [`roadmap_readiness_checklist.md`](./roadmap_readiness_checklist.md): pre-roadmap readiness checklist captured during the transition period
 - [`p1_refactor_handoff.md`](./p1_refactor_handoff.md): Phase 1 refactor and handoff notes from the readiness pass
 - [`prompts/`](./prompts/README.md): archived implementation prompts, including the first-pass Crypto and Fundamentals prompts

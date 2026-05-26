@@ -2105,9 +2105,9 @@
   }
 
   .mode-bar button:last-child { border-right: 0; }
-  .mode-bar button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); border-color: var(--panel-strong); }
+  .mode-bar button:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--text-0); border-color: var(--panel-strong); }
   .mode-bar button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+  .mode-bar button.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 
   .scenario-card.selected-scenario {
     background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -2391,17 +2391,11 @@
     line-height: 1.1;
   }
 
-  h2,
   h3,
   p,
   small,
   strong {
     margin: 0;
-  }
-
-  h2 {
-    font-size: 0.95rem;
-    font-weight: 700;
   }
 
   h3 {
@@ -2699,7 +2693,8 @@
   .gamma-derived-cell {
     color: var(--data-cool);
     background: color-mix(in srgb, var(--data-cool) 10%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--data-cool) 24%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--data-cool) 24%, transparent);
+    outline-offset: -1px;
   }
 
   .statement-legend {
@@ -2745,7 +2740,8 @@
   }
 
   .selected-cell .heat-cell {
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline-offset: -1px;
   }
 
   .heat-cell {

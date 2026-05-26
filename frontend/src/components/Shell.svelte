@@ -226,8 +226,7 @@
     color: var(--text-1);
   }
 
-  .asset-chip span,
-  .asset-chip small {
+  .asset-chip span {
     color: var(--text-2);
     font-size: 0.62rem;
     text-transform: uppercase;
@@ -239,14 +238,6 @@
     color: var(--text-0);
     font-size: 0.76rem;
     line-height: 1;
-  }
-
-  .asset-chip small {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-transform: none;
-    letter-spacing: 0;
   }
 
   .asset-chip button {
@@ -285,7 +276,7 @@
 
   .hamburger:hover {
     color: var(--text-0);
-    border-color: rgba(122, 166, 200, 0.32);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
   }
 
   h1 {
@@ -325,12 +316,12 @@
   }
 
   .copilot-trigger:hover {
-    border-color: rgba(122, 166, 200, 0.32);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
     color: var(--text-0);
   }
 
   .copilot-trigger.open {
-    border-color: rgba(122, 166, 200, 0.42);
+    border-color: color-mix(in srgb, var(--accent) 42%, transparent);
     color: var(--text-0);
   }
 

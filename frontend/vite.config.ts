@@ -4,6 +4,7 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 export default defineConfig({
   plugins: [svelte()],
   build: {
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       input: {
         main: "index.html",
