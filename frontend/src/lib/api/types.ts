@@ -2864,6 +2864,72 @@ export interface CopilotResearchPlan {
   transformation_note: string | null;
 }
 
+export interface CopilotResearchActionDefinition {
+  tool_id: string;
+  domains: string[];
+  action_type: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  output_schema: Record<string, unknown>;
+  read_only: boolean;
+  mutates_local_state: boolean;
+  requires_confirmation: boolean;
+  external_provider: string | null;
+  timeout_seconds: number;
+  request_limit: number;
+  failure_modes: string[];
+  permission_policy: string;
+  provenance_behavior: string;
+  retry_policy: string;
+  can_call_external_providers: boolean;
+  test_coverage_owner: string | null;
+}
+
+export interface CopilotOperatorPlanStep {
+  step_id: string;
+  order: number;
+  title: string;
+  domain: string;
+  action_type: string;
+  tool_id: string | null;
+  status: string;
+  permission_policy: string;
+  requires_confirmation: boolean;
+  expected_artifacts: string[];
+  rationale: string | null;
+  stop_conditions: string[];
+  estimated_latency_ms: number;
+  warnings: string[];
+}
+
+export interface CopilotOperatorConfirmationCheckpoint {
+  checkpoint_id: string;
+  after_step_id: string;
+  reason: string;
+  required_for_tool_ids: string[];
+  default_policy: string;
+}
+
+export interface CopilotOperatorPlan {
+  intent: string;
+  target_entities: CopilotResearchPlanEntity[];
+  depth_profile: string;
+  role: "research_operator" | string;
+  research_plan: CopilotResearchPlan | null;
+  steps: CopilotOperatorPlanStep[];
+  confirmation_checkpoints: CopilotOperatorConfirmationCheckpoint[];
+  max_tool_calls: number;
+  max_provider_calls: number;
+  max_elapsed_ms: number;
+  requires_confirmation: boolean;
+  expected_artifacts: string[];
+  warnings: string[];
+  generated_at: string;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface CopilotReportToolTraceSummary {
   tool_name: string;
   summary: string;

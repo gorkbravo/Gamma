@@ -28,6 +28,9 @@
     commoditiesWorkspace,
     activeCopilotSession,
     copilotMemos,
+    copilotActionDefinitions,
+    copilotOperatorPlan,
+    copilotOperatorResult,
     copilotResearchPlan,
     copilotSessions,
     copilotThreads,
@@ -73,10 +76,13 @@
     loadPortfolioSnapshot,
     loadActiveCopilotSession,
     loadCopilotMemos,
+    loadCopilotActionDefinitions,
+    loadCopilotOperatorPlan,
     loadCopilotResearchCard,
     loadCopilotResearchPlan,
     loadCopilotSession,
     loadCopilotSessions,
+    executeCopilotOperatorPlan,
     exportCopilotMemo,
     macroDivergences,
     macroEvents,
@@ -1150,7 +1156,12 @@
   }
 
   async function bootstrapApp() {
-    const [status] = await Promise.all([refreshSystemStatus(), loadDiagnostics(), loadProviderUsage()]);
+    const [status] = await Promise.all([
+      refreshSystemStatus(),
+      loadDiagnostics(),
+      loadProviderUsage(),
+      loadCopilotActionDefinitions()
+    ]);
     if (status?.mock_mode || status?.connection.connected) {
       await loadPortfolioSnapshot();
     }
@@ -1696,6 +1707,22 @@
 
   async function handlePlanCopilotWorkspace(domain: CopilotDomain, prompt = "") {
     return loadCopilotResearchPlan(domain, prompt, {
+      workspaceMode,
+      synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
+      activeTabId: $activeTab,
+    });
+  }
+
+  async function handleOperatorPlanCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+    return loadCopilotOperatorPlan(domain, prompt, {
+      workspaceMode,
+      synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
+      activeTabId: $activeTab,
+    });
+  }
+
+  async function handleRunOperatorCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+    return executeCopilotOperatorPlan(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
@@ -2304,11 +2331,16 @@
             sessions={$copilotSessions}
             activeSession={$activeCopilotSession}
             memos={$copilotMemos}
+            actionDefinitions={$copilotActionDefinitions}
             researchPlan={$copilotResearchPlan}
+            operatorPlan={$copilotOperatorPlan}
+            operatorResult={$copilotOperatorResult}
             latestHandoff={latestCopilotHandoff}
             loading={$loading.copilot}
             onGenerate={handleGenerateCopilotWorkspace}
             onPlan={handlePlanCopilotWorkspace}
+            onOperatorPlan={handleOperatorPlanCopilotWorkspace}
+            onRunOperator={handleRunOperatorCopilotWorkspace}
             onCreateMemo={handleCreateCopilotMemo}
             onUpdateMemo={handleUpdateCopilotMemo}
             onArchiveSession={handleArchiveCopilotSession}
@@ -2340,6 +2372,7 @@
             underlyingPricePoints={$researchResult?.primary_price_points ?? []}
             loading={$loading.iv}
             sessionLoading={$loading.ivSession}
+            errorMessage={$lastError}
             onLoad={loadIvSurface}
             onSendToCopilot={handleSendToCopilot}
           />

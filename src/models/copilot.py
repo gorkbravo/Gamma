@@ -123,6 +123,59 @@ class CopilotResearchActionDefinition:
     timeout_seconds: float = 30.0
     request_limit: int = 1
     failure_modes: list[str] = field(default_factory=list)
+    permission_policy: str = "automatic"
+    provenance_behavior: str = "Returns Gamma source references and warnings where available."
+    retry_policy: str = "retry_safe_if_read_only"
+    can_call_external_providers: bool = False
+    test_coverage_owner: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotOperatorPlanStep:
+    step_id: str
+    order: int
+    title: str
+    domain: str
+    action_type: str
+    tool_id: str | None = None
+    status: str = "planned"
+    permission_policy: str = "automatic"
+    requires_confirmation: bool = False
+    expected_artifacts: list[str] = field(default_factory=list)
+    rationale: str | None = None
+    stop_conditions: list[str] = field(default_factory=list)
+    estimated_latency_ms: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotOperatorConfirmationCheckpoint:
+    checkpoint_id: str
+    after_step_id: str
+    reason: str
+    required_for_tool_ids: list[str] = field(default_factory=list)
+    default_policy: str = "confirmation_required"
+
+
+@dataclass(frozen=True)
+class CopilotOperatorPlan:
+    intent: str
+    target_entities: list[CopilotResearchPlanEntity] = field(default_factory=list)
+    depth_profile: str = "standard"
+    role: str = "research_operator"
+    research_plan: CopilotResearchPlan | None = None
+    steps: list[CopilotOperatorPlanStep] = field(default_factory=list)
+    confirmation_checkpoints: list[CopilotOperatorConfirmationCheckpoint] = field(default_factory=list)
+    max_tool_calls: int = 0
+    max_provider_calls: int = 0
+    max_elapsed_ms: int = 0
+    requires_confirmation: bool = False
+    expected_artifacts: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=now_utc)
+    source_provider: str = "gamma_operator_planner"
+    origin: str = "copilot_service.plan_research_operator"
+    transformation_note: str | None = "Deterministic Research Operator plan; no tools were executed."
 
 
 @dataclass(frozen=True)

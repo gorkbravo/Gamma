@@ -17,9 +17,13 @@ from src.models.copilot import (
     CopilotMemo,
     CopilotMutationApplyResult,
     CopilotMutationDiffEntry,
+    CopilotOperatorConfirmationCheckpoint,
+    CopilotOperatorPlan,
+    CopilotOperatorPlanStep,
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotResearchActionDefinition,
     CopilotResearchPlan,
     CopilotResearchPlanDomainDecision,
     CopilotResearchPlanDomain,
@@ -324,6 +328,152 @@ class CopilotResearchPlanModel(BaseModel):
             depth_profile=row.depth_profile,
             domain_plan=[CopilotResearchPlanDomainModel.from_domain(item) for item in row.domain_plan],
             domain_decisions=[CopilotResearchPlanDomainDecisionModel.from_domain(item) for item in row.domain_decisions],
+            max_tool_calls=row.max_tool_calls,
+            max_provider_calls=row.max_provider_calls,
+            max_elapsed_ms=row.max_elapsed_ms,
+            requires_confirmation=row.requires_confirmation,
+            expected_artifacts=list(row.expected_artifacts),
+            warnings=list(row.warnings),
+            generated_at=row.generated_at,
+            source_provider=row.source_provider,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
+class CopilotResearchActionDefinitionModel(BaseModel):
+    tool_id: str
+    domains: list[str] = Field(default_factory=list)
+    action_type: str
+    description: str
+    input_schema: dict[str, object] = Field(default_factory=dict)
+    output_schema: dict[str, object] = Field(default_factory=dict)
+    read_only: bool = True
+    mutates_local_state: bool = False
+    requires_confirmation: bool = False
+    external_provider: str | None = None
+    timeout_seconds: float = 30.0
+    request_limit: int = 1
+    failure_modes: list[str] = Field(default_factory=list)
+    permission_policy: str = "automatic"
+    provenance_behavior: str
+    retry_policy: str
+    can_call_external_providers: bool = False
+    test_coverage_owner: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotResearchActionDefinition) -> "CopilotResearchActionDefinitionModel":
+        return cls(
+            tool_id=row.tool_id,
+            domains=list(row.domains),
+            action_type=row.action_type,
+            description=row.description,
+            input_schema=dict(row.input_schema),
+            output_schema=dict(row.output_schema),
+            read_only=row.read_only,
+            mutates_local_state=row.mutates_local_state,
+            requires_confirmation=row.requires_confirmation,
+            external_provider=row.external_provider,
+            timeout_seconds=row.timeout_seconds,
+            request_limit=row.request_limit,
+            failure_modes=list(row.failure_modes),
+            permission_policy=row.permission_policy,
+            provenance_behavior=row.provenance_behavior,
+            retry_policy=row.retry_policy,
+            can_call_external_providers=row.can_call_external_providers,
+            test_coverage_owner=row.test_coverage_owner,
+        )
+
+
+class CopilotOperatorPlanStepModel(BaseModel):
+    step_id: str
+    order: int
+    title: str
+    domain: str
+    action_type: str
+    tool_id: str | None = None
+    status: str = "planned"
+    permission_policy: str = "automatic"
+    requires_confirmation: bool = False
+    expected_artifacts: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    stop_conditions: list[str] = Field(default_factory=list)
+    estimated_latency_ms: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotOperatorPlanStep) -> "CopilotOperatorPlanStepModel":
+        return cls(
+            step_id=row.step_id,
+            order=row.order,
+            title=row.title,
+            domain=row.domain,
+            action_type=row.action_type,
+            tool_id=row.tool_id,
+            status=row.status,
+            permission_policy=row.permission_policy,
+            requires_confirmation=row.requires_confirmation,
+            expected_artifacts=list(row.expected_artifacts),
+            rationale=row.rationale,
+            stop_conditions=list(row.stop_conditions),
+            estimated_latency_ms=row.estimated_latency_ms,
+            warnings=list(row.warnings),
+        )
+
+
+class CopilotOperatorConfirmationCheckpointModel(BaseModel):
+    checkpoint_id: str
+    after_step_id: str
+    reason: str
+    required_for_tool_ids: list[str] = Field(default_factory=list)
+    default_policy: str = "confirmation_required"
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotOperatorConfirmationCheckpoint,
+    ) -> "CopilotOperatorConfirmationCheckpointModel":
+        return cls(
+            checkpoint_id=row.checkpoint_id,
+            after_step_id=row.after_step_id,
+            reason=row.reason,
+            required_for_tool_ids=list(row.required_for_tool_ids),
+            default_policy=row.default_policy,
+        )
+
+
+class CopilotOperatorPlanModel(BaseModel):
+    intent: str
+    target_entities: list[CopilotResearchPlanEntityModel] = Field(default_factory=list)
+    depth_profile: str
+    role: str = "research_operator"
+    research_plan: CopilotResearchPlanModel | None = None
+    steps: list[CopilotOperatorPlanStepModel] = Field(default_factory=list)
+    confirmation_checkpoints: list[CopilotOperatorConfirmationCheckpointModel] = Field(default_factory=list)
+    max_tool_calls: int = 0
+    max_provider_calls: int = 0
+    max_elapsed_ms: int = 0
+    requires_confirmation: bool = False
+    expected_artifacts: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    generated_at: datetime
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotOperatorPlan) -> "CopilotOperatorPlanModel":
+        return cls(
+            intent=row.intent,
+            target_entities=[CopilotResearchPlanEntityModel.from_domain(item) for item in row.target_entities],
+            depth_profile=row.depth_profile,
+            role=row.role,
+            research_plan=CopilotResearchPlanModel.from_domain(row.research_plan) if row.research_plan else None,
+            steps=[CopilotOperatorPlanStepModel.from_domain(item) for item in row.steps],
+            confirmation_checkpoints=[
+                CopilotOperatorConfirmationCheckpointModel.from_domain(item)
+                for item in row.confirmation_checkpoints
+            ],
             max_tool_calls=row.max_tool_calls,
             max_provider_calls=row.max_provider_calls,
             max_elapsed_ms=row.max_elapsed_ms,

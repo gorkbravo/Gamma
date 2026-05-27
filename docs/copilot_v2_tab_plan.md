@@ -48,6 +48,57 @@ It should not:
 - use unrestricted web browsing as a default substitute for provider adapters;
 - hide unsupported data gaps behind confident prose.
 
+## Two Copilot Roles
+
+Copilot should develop into two related roles. They are not separate products and the user should be able to move between them naturally, but they imply different orchestration, permission, and UI expectations.
+
+### 1. Research Agent
+
+The Research Agent helps form, structure, and challenge a thesis. This is the evolution of the old Synthesis idea: the user brings a possible idea, Copilot gathers relevant Gamma context across tabs, identifies supporting evidence, counter-evidence, missing data, and outputs a structured thesis, memo, or report.
+
+Examples:
+
+- "Is the market underpricing oil disruption risk?"
+- "Research NVDA into CPI/Fed week."
+- "Compare AI crypto tokens against AI equities."
+- "Does this prediction market disagree with macro data?"
+
+Expected behavior:
+
+- select relevant domains without running every available tab;
+- read and synthesize app state and approved external context;
+- separate source-backed claims from model-inferred claims;
+- make disconfirming evidence and missing data explicit;
+- produce concise thesis structures, memos, and reports;
+- avoid changing local research state unless the user explicitly asks for an artifact to be saved.
+
+This role can remain mostly compatible with the current planner, bounded executor, session trace, and report path.
+
+### 2. Research Operator
+
+The Research Operator can run Gamma workflows on the user's behalf. It may still help form a thesis, but its distinguishing behavior is that it chooses and runs appropriate app-native tests, simulations, and local research-state workflows, then produces a traceable report the user can read before making any real-world decision.
+
+Examples:
+
+- adjust DCF assumptions, show the diff, and apply only after confirmation;
+- run reverse valuation and compare implied expectations to current model assumptions;
+- run portfolio/risk stress tests for a rate shock, oil shock, or drawdown scenario;
+- build hypothetical or saved research portfolios and compare them to benchmarks;
+- run Strategy Lab backtests over imported return streams or Gamma object compositions;
+- compare options implied moves, realized volatility, macro event context, and fundamentals for a single-name event;
+- save a final memo or report with tool traces, sources, warnings, and generated artifacts.
+
+Expected behavior:
+
+- produce a structured plan before non-trivial operation;
+- call typed Gamma tools rather than visually clicking the UI as the primary mechanism;
+- run bounded read-only analyses automatically when they fit the request;
+- draft local research-state changes automatically, but apply them only under the active confirmation policy;
+- preserve source refs, warnings, tool traces, and before/after diffs;
+- navigate the UI only as a convenience after the authoritative backend action has run.
+
+The Research Operator is the stronger justification for Agents SDK or a hybrid orchestration layer because it needs multi-step plans, tool handoffs, resumable state, progress streaming, trace inspection, and evals for whether it selected appropriate tests. Even if Agents SDK is adopted, Gamma's backend remains the authority for permissions, execution, persistence, and the read-only product boundary.
+
 ## Core Design Principle
 
 The agent should "use the app" by calling app-native tools, not by clicking the UI.
@@ -210,6 +261,13 @@ Examples:
 - `copilot.update_memo`
 
 Default permission: confirmation required unless the user explicitly requested an unambiguous save-only action.
+
+Confirmation policy can become more permissive later after trust is earned through usage, but the initial Research Operator posture should stay conservative:
+
+- automatic for read-only context loading, bounded analytics, simulations, and draft diffs;
+- automatic for passive session traces;
+- confirmation-required for durable local research-state changes such as DCF edits, saved strategy objects, saved scopes, memo overwrites, watchlists, or model snapshots unless the current user turn explicitly requested the exact save/export action;
+- never allowed for market execution, account modification, wallet signing, wallet transactions, rebalancing, or arbitrary in-app strategy code execution.
 
 ### 6. Save Artifact
 
@@ -541,12 +599,52 @@ Implementation note:
 Implementation note:
 - Phase 6 now has a narrow confirmed-mutation backend path for local Fundamentals DCF research state. `/copilot/mutations/fundamentals/dcf/propose` accepts explicit typed DCF assumption / override updates, returns a persisted draft mutation with structured diff entries, rendered diff text, warnings, and a confirmation token, and does not change the DCF model. `/copilot/mutations/{mutation_id}/apply` requires the matching confirmation token, saves a pre-change DCF snapshot as rollback context, applies the DCF payload through the existing Fundamentals service, and records the mutation as applied. The Copilot action registry now distinguishes `draft_change` from `apply_change`, with only the apply action marked as local-state mutating and confirmation-required. No other confirmed mutation families were added because DCF is the only current high-value, well-bounded research-state edit target in this phase.
 
-### Phase 7 - Agents SDK Migration Or Hybrid Orchestration
+### Phase 7 - Agents SDK Operator Orchestration
 
-- [ ] Evaluate whether current custom loop is limiting tracing, handoffs, state, or evals.
+- [x] Decide whether to adopt Agents SDK for the Research Operator path.
 - [ ] Prototype Agents SDK orchestration behind the existing Gamma action registry.
 - [ ] Preserve existing Gamma permission checks and local persistence.
 - [ ] Add traces/evals for tool selection quality.
+
+Implementation direction:
+
+- The user has approved adopting Agents SDK for the Research Operator path. Treat Phase 7 as a controlled migration, not an open-ended rewrite.
+- Keep the Research Agent path working on the current planner/executor/report foundation while the operator path is prototyped.
+- Build the Agents SDK operator behind the same Gamma action registry shape used by the current executor. Agents SDK may plan, coordinate, trace, and hand off, but it must not bypass Gamma's server-side permission checks, confirmation tokens, or persistence.
+- Compare the hybrid prototype against the current custom loop on concrete operator tasks: DCF edit proposal/apply, reverse valuation plus report, risk shock analysis, hypothetical portfolio comparison, Strategy Lab backtest, and cross-domain single-name event report.
+- Promote Agents SDK into the default Research Operator orchestrator after the prototype preserves existing behavior and materially improves progress streaming, trace quality, resumable state, handoffs, eval coverage, or maintainability as tools grow.
+
+Research Operator build path:
+
+1. Define operator-grade action contracts.
+   - Move tool metadata toward a standalone `ResearchActionRegistry`.
+   - Require every operator tool to declare action type, permission policy, input/output schema, provenance behavior, timeout, retry safety, and mutation behavior.
+   - Keep domain services as the execution authority.
+
+2. Add operator plans.
+   - Extend the planner so it can output an ordered test plan, not just domain relevance.
+   - Include intended artifacts, confirmation checkpoints, expected runtime/cost, and what would cause the plan to stop early.
+   - Show the plan to the user before long or state-changing runs.
+
+3. Expand read-only operator tools first.
+   - Prioritize `risk.run_scenario`, `risk.run_contribution`, `fundamentals.run_reverse_valuation`, `strategy_lab.run_backtest`, `research.run_scope_analysis`, options event/volatility comparisons, and portfolio/hypothetical comparison tools.
+   - These should run automatically when bounded and relevant because they do not mutate durable state.
+
+4. Expand draft-and-confirm mutation tools second.
+   - Generalize the DCF mutation pattern to other high-value local research state only after the read-only operator path is reliable.
+   - Candidate families: saved research scopes, Strategy Lab compositions, memo edits, watchlists, scenario/model snapshots, and hypothetical portfolio definitions.
+   - Every mutation must return a diff, rationale, warnings, source ids, and rollback/snapshot context where applicable.
+
+5. Add progress, trace, and report surfaces.
+   - Emit plan, step-start, tool-result, warning, confirmation-needed, artifact-created, and final-report events.
+   - Persist the full operator run as a session trace.
+   - Generate reports that distinguish source-backed claims, inferred claims, assumptions, missing data, warnings, and exact tool calls.
+
+6. Evaluate Agents SDK against the operator path.
+   - Prototype a narrow hybrid orchestrator after the action registry and read-only operator tools are stable.
+   - Run the same benchmark tasks through the custom loop and the Agents SDK-backed loop.
+   - Use evals to measure whether the orchestrator picked appropriate tools, respected permissions, stopped for confirmations, cited sources correctly, and produced useful reports.
+   - If the prototype passes the permission/eval gates, make Agents SDK the Research Operator orchestration layer while leaving Research Agent synthesis on the current path until there is a concrete reason to migrate it.
 
 ## Open Decisions
 
@@ -554,10 +652,11 @@ Future agents should update this section.
 
 | Decision | Current stance | Notes |
 |---|---|---|
-| Direct Responses API vs Agents SDK | Start with current Responses API wrapper; migrate when orchestration complexity justifies it. | Gamma already has `OpenAIResponsesCopilotProvider`; avoid premature rewrite. |
+| Direct Responses API vs Agents SDK | Adopt Agents SDK for the Research Operator path behind Gamma's action registry. | User approved the direction on 2026-05-27. Keep the Research Agent path on the current Responses/provider wrapper until a separate migration is justified. |
 | UI control vs backend tools | Backend tools are authoritative; UI navigation is convenience only. | This preserves auditability and avoids fragile DOM automation. |
 | Outside info | Provider adapters first; general web search only as fallback or explicit mode. | News and estimates are context, not execution. |
-| Local state changes | Allowed only for research state and only with confirmation when non-trivial. | Never market/account/wallet execution. |
+| Copilot roles | Research Agent plus Research Operator. | Research Agent structures theses from context; Research Operator runs app-native tests and confirmed local research-state workflows. |
+| Local state changes | Allowed only for research state and initially confirmation-required when durable or non-trivial. | Trust-based loosening can be reconsidered after usage, but never for market/account/wallet execution. |
 | DCF | Important first confirmed-mutation use case, but not the agent's whole identity. | The agent should be domain-broad. |
 
 ## Agent Handoff Notes

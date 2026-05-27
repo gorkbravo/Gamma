@@ -9,7 +9,9 @@ import type {
   CopilotBaseDomain,
   CopilotDomain,
   CopilotMemo,
+  CopilotOperatorPlan,
   CopilotResearchCardResult,
+  CopilotResearchActionDefinition,
   CopilotResearchPlan,
   CopilotResearchReport,
   CopilotSessionDetail,
@@ -361,6 +363,9 @@ export const copilotSessions = writable<CopilotSessionSummary[]>([]);
 export const activeCopilotSession = writable<CopilotSessionDetail | null>(null);
 export const copilotMemos = writable<CopilotMemo[]>([]);
 export const copilotResearchPlan = writable<CopilotResearchPlan | null>(null);
+export const copilotOperatorPlan = writable<CopilotOperatorPlan | null>(null);
+export const copilotOperatorResult = writable<CopilotResearchCardResult | null>(null);
+export const copilotActionDefinitions = writable<CopilotResearchActionDefinition[]>([]);
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -2568,6 +2573,118 @@ export async function loadCopilotResearchPlan(
   }
 }
 
+export async function loadCopilotActionDefinitions() {
+  try {
+    const definitions = await getJson<CopilotResearchActionDefinition[]>("/copilot/actions");
+    copilotActionDefinitions.set(normalizeCopilotActionDefinitions(definitions));
+    lastError.set("");
+    return definitions;
+  } catch (error) {
+    setError(error);
+    copilotActionDefinitions.set([]);
+    return [];
+  }
+}
+
+export async function loadCopilotOperatorPlan(
+  domain: CopilotDomain,
+  prompt = "",
+  options: CopilotLoadOptions = {}
+) {
+  setLoading("copilot", true);
+  try {
+    const context = buildCopilotContext(domain, options.workspaceMode);
+    if (!context) {
+      const message = "The active Copilot context is unavailable.";
+      lastError.set(message);
+      copilotOperatorPlan.set(null);
+      return null;
+    }
+    const synthesis =
+      domain === "synthesis"
+        ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
+        : null;
+    const payload = {
+      domain,
+      prompt,
+      user_session_id: getCopilotSessionId(),
+      context_fingerprint: buildCopilotContextFingerprint(domain, options.workspaceMode, {
+        synthesisDomains: options.synthesisDomains,
+        activeTabId: options.activeTabId
+      }),
+      context,
+      ...(synthesis ? { synthesis } : {})
+    };
+    const plan = normalizeCopilotOperatorPlan(await postJson<CopilotOperatorPlan>("/copilot/operator-plan", payload));
+    copilotOperatorPlan.set(plan);
+    lastError.set("");
+    return plan;
+  } catch (error) {
+    setError(error);
+    copilotOperatorPlan.set(null);
+    return null;
+  } finally {
+    setLoading("copilot", false);
+  }
+}
+
+export async function executeCopilotOperatorPlan(
+  domain: CopilotDomain,
+  prompt = "",
+  options: CopilotLoadOptions = {}
+) {
+  setLoading("copilot", true);
+  const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
+    synthesisDomains: options.synthesisDomains,
+    activeTabId: options.activeTabId
+  });
+  const activeThread = get(copilotThreads)[domain] ?? createEmptyCopilotThread(domain);
+  const baseThread =
+    activeThread.contextFingerprint === contextFingerprint
+      ? activeThread
+      : createEmptyCopilotThread(domain);
+
+  try {
+    const context = buildCopilotContext(domain, options.workspaceMode);
+    if (!context) {
+      const message = "The active Copilot context is unavailable.";
+      lastError.set(message);
+      const result = buildCopilotFailureResult(domain, message);
+      copilotOperatorResult.set(result);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
+      return result;
+    }
+    const synthesis =
+      domain === "synthesis"
+        ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
+        : null;
+    const payload = {
+      domain,
+      prompt,
+      user_session_id: getCopilotSessionId(),
+      context_fingerprint: contextFingerprint,
+      context,
+      ...(synthesis ? { synthesis } : {})
+    };
+    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/operator-plan/execute", payload);
+    const result = normalizeCopilotResearchCardResult(domain, rawResult);
+    copilotOperatorResult.set(result);
+    appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
+    await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
+    lastError.set(result.status === "ready" ? "" : result.message ?? "Research Operator failed.");
+    return result;
+  } catch (error) {
+    const message = errorMessage(error);
+    lastError.set(message);
+    const result = buildCopilotFailureResult(domain, message);
+    copilotOperatorResult.set(result);
+    appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
+    return result;
+  } finally {
+    setLoading("copilot", false);
+  }
+}
+
 function normalizeCopilotResearchPlan(plan: CopilotResearchPlan): CopilotResearchPlan {
   const domainPlan = Array.isArray(plan.domain_plan)
     ? plan.domain_plan.map((item) => ({
@@ -2598,6 +2715,61 @@ function normalizeCopilotResearchPlan(plan: CopilotResearchPlan): CopilotResearc
     max_elapsed_ms: Number.isFinite(plan.max_elapsed_ms) ? plan.max_elapsed_ms : fallbackElapsedLimit
   };
 }
+
+function normalizeCopilotActionDefinitions(
+  definitions: CopilotResearchActionDefinition[]
+): CopilotResearchActionDefinition[] {
+  return Array.isArray(definitions)
+    ? definitions.map((definition) => ({
+        ...definition,
+        domains: Array.isArray(definition.domains) ? definition.domains : [],
+        input_schema: definition.input_schema ?? {},
+        output_schema: definition.output_schema ?? {},
+        failure_modes: Array.isArray(definition.failure_modes) ? definition.failure_modes : [],
+        read_only: definition.read_only !== false,
+        mutates_local_state: definition.mutates_local_state === true,
+        requires_confirmation: definition.requires_confirmation === true,
+        can_call_external_providers: definition.can_call_external_providers === true,
+        request_limit: Number.isFinite(definition.request_limit) ? definition.request_limit : 1,
+        timeout_seconds: Number.isFinite(definition.timeout_seconds) ? definition.timeout_seconds : 30
+      }))
+    : [];
+}
+
+function normalizeCopilotOperatorPlan(plan: CopilotOperatorPlan): CopilotOperatorPlan {
+  const steps = Array.isArray(plan.steps)
+    ? plan.steps.map((step) => ({
+        ...step,
+        expected_artifacts: Array.isArray(step.expected_artifacts) ? step.expected_artifacts : [],
+        stop_conditions: Array.isArray(step.stop_conditions) ? step.stop_conditions : [],
+        warnings: Array.isArray(step.warnings) ? step.warnings : [],
+        estimated_latency_ms: Number.isFinite(step.estimated_latency_ms) ? step.estimated_latency_ms : 0,
+        requires_confirmation: step.requires_confirmation === true
+      }))
+    : [];
+  const fallbackElapsedLimit = steps.reduce((total, step) => total + step.estimated_latency_ms, 0);
+  return {
+    ...plan,
+    target_entities: Array.isArray(plan.target_entities) ? plan.target_entities : [],
+    research_plan: plan.research_plan ? normalizeCopilotResearchPlan(plan.research_plan) : null,
+    steps,
+    confirmation_checkpoints: Array.isArray(plan.confirmation_checkpoints)
+      ? plan.confirmation_checkpoints.map((checkpoint) => ({
+          ...checkpoint,
+          required_for_tool_ids: Array.isArray(checkpoint.required_for_tool_ids)
+            ? checkpoint.required_for_tool_ids
+            : []
+        }))
+      : [],
+    expected_artifacts: Array.isArray(plan.expected_artifacts) ? plan.expected_artifacts : [],
+    warnings: Array.isArray(plan.warnings) ? plan.warnings : [],
+    max_tool_calls: Number.isFinite(plan.max_tool_calls) ? plan.max_tool_calls : steps.length,
+    max_provider_calls: Number.isFinite(plan.max_provider_calls) ? plan.max_provider_calls : 0,
+    max_elapsed_ms: Number.isFinite(plan.max_elapsed_ms) ? plan.max_elapsed_ms : fallbackElapsedLimit,
+    requires_confirmation: plan.requires_confirmation === true
+  };
+}
+
 export async function loadCopilotSessions(options: { includeArchived?: boolean; search?: string } = {}) {
   try {
     const params = new URLSearchParams();
@@ -2798,6 +2970,11 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
       : options;
   setLoading("iv", true);
   try {
+    const activeSession = get(ivSession);
+    if (activeSession?.running) {
+      const stoppedSession = await postJson<IvSessionStatus>("/iv/session/stop", {});
+      ivSession.set(stoppedSession);
+    }
     const params = new URLSearchParams({
       symbol: request.symbol
     });

@@ -56,6 +56,7 @@ import {
   loadCopilotResearchCard,
   loadCryptoWorkspace,
   loadFundamentalsSearch,
+  loadIvSurface,
   loadIvSession,
   loadMacroWorkspace,
   loadNewsFeed,
@@ -1408,6 +1409,35 @@ describe("app store orchestration", () => {
     expect(get(ivSession)?.running).toBe(false);
     expect(get(ivSurface)?.symbol).toBe("AAPL");
     expect(get(ivSurface)?.points).toBe(3);
+  });
+
+  it("stops an active IV stream before loading a one-shot surface", async () => {
+    const stoppedSession: IvSessionStatus = {
+      running: false,
+      status_text: "Stopped",
+      active_symbol: "AAPL",
+      market_data_mode: "delayed",
+      messages: [],
+      surface: makeIvSurface({ symbol: "AAPL" })
+    };
+    const surface = makeIvSurface({ symbol: "AAPL" });
+    ivSession.set({
+      ...stoppedSession,
+      running: true,
+      status_text: "Running (AAPL)",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(stoppedSession))
+      .mockResolvedValueOnce(ok(surface));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadIvSurface({ symbol: "AAPL", depthPreset: "max", waitSeconds: 8 });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/iv/session/stop");
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/iv/surface?symbol=AAPL");
+    expect(get(ivSession)?.running).toBe(false);
+    expect(get(ivSurface)?.symbol).toBe("AAPL");
   });
 
   it("threads previous_response_id through follow-up copilot generations in the same macro context", async () => {

@@ -351,11 +351,21 @@ def build_runtime(
             for provider in _build_news_providers(live_mode=not bool(mock_mode))
         ]
     )
+    risk_service = RiskService(
+        client,
+        market_data,
+        mock_service,
+        risk_free_service,
+        benchmark_defaults=benchmark_defaults,
+    )
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
+        risk_service=risk_service,
+        portfolio_provider=portfolio_provider,
+        research_provider=research_provider,
         news_service=news_service,
         provider=trace_provider(
             _build_copilot_provider(allow_mock=bool(mock_mode)),
@@ -363,13 +373,6 @@ def build_runtime(
             endpoint_prefix="copilot",
         ),
         store=copilot_store,
-    )
-    risk_service = RiskService(
-        client,
-        market_data,
-        mock_service,
-        risk_free_service,
-        benchmark_defaults=benchmark_defaults,
     )
     iv_service = IVService(client, market_data_mode)
     desktop = _build_desktop_state(research_provider) if include_desktop_session else None

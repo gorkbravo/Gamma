@@ -9,7 +9,8 @@ This directory is split into active documentation and archived project history.
 - [`../roadmap_v2.md`](../roadmap_v2.md): detailed Roadmap V2 workstreams for existing-tab hardening, new research surfaces, platform foundation, provider strategy, and beta readiness
 - [`design_principles.md`](./design_principles.md): UI and interaction principles for roadmap-era product work
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
-- [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace plan, no-mode-bar rationale, and V2 build order
+- [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace and agentic research harness plan, including OpenAI references, action taxonomy, safety boundary, and editable progression checklist
+- [`copilot_v2_handoff_prompt.md`](./copilot_v2_handoff_prompt.md): reusable handoff prompt for continuing Copilot V2, including the approved Agents SDK Research Operator direction
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
 - [`fundamentals_phase6_spec.md`](./fundamentals_phase6_spec.md): product and architecture spec for the first-pass `Fundamentals` workspace
 

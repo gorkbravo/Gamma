@@ -14,8 +14,10 @@ from src.api.schemas.copilot import (
     CopilotMemoUpdateRequestModel,
     CopilotMutationApplyRequestModel,
     CopilotMutationApplyResultModel,
+    CopilotOperatorPlanModel,
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
+    CopilotResearchActionDefinitionModel,
     CopilotResearchPlanModel,
     CopilotResearchReportModel,
     CopilotResearchReportRequestModel,
@@ -46,6 +48,35 @@ def plan_research(
     runtime = request.app.state.runtime
     plan = runtime.copilot_service.plan_research(payload.to_domain())
     return CopilotResearchPlanModel.from_domain(plan)
+
+
+@router.post("/copilot/operator-plan", response_model=CopilotOperatorPlanModel)
+def plan_research_operator(
+    payload: CopilotResearchCardRequestModel,
+    request: Request,
+) -> CopilotOperatorPlanModel:
+    runtime = request.app.state.runtime
+    plan = runtime.copilot_service.plan_research_operator(payload.to_domain())
+    return CopilotOperatorPlanModel.from_domain(plan)
+
+
+@router.post("/copilot/operator-plan/execute", response_model=CopilotResearchCardResponseModel)
+def execute_research_operator_plan(
+    payload: CopilotResearchCardRequestModel,
+    request: Request,
+) -> CopilotResearchCardResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.copilot_service.execute_research_operator_plan(payload.to_domain())
+    return CopilotResearchCardResponseModel.from_domain(result)
+
+
+@router.get("/copilot/actions", response_model=list[CopilotResearchActionDefinitionModel])
+def list_copilot_actions(request: Request) -> list[CopilotResearchActionDefinitionModel]:
+    runtime = request.app.state.runtime
+    return [
+        CopilotResearchActionDefinitionModel.from_domain(item)
+        for item in runtime.copilot_service.list_research_action_definitions()
+    ]
 
 
 @router.post("/copilot/research-plan/execute", response_model=CopilotResearchCardResponseModel)

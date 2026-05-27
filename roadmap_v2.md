@@ -1509,7 +1509,9 @@ Current dedicated workspace structure:
 
 - no global mode bar,
 - a compact focus selector for `Synthesis` versus `Active Tab`,
+- a role selector for `Research Agent` versus `Research Operator`,
 - a composer grounded in Gamma context,
+- an Operator Plan / Run Operator path for ordered app-native tests and confirmed local research-state workflows,
 - session/thread history,
 - memo creation from persisted turns,
 - scope controls for cross-domain synthesis.
@@ -1524,6 +1526,7 @@ Earlier drafts considered `Ask`, `Synthesize`, `Plan`, `Memo`, `Sessions`, and l
 - `Session persistence`: ~72% complete. Local JSON persistence stores sessions, turns, context snapshots, and model/card results under the Copilot store. Remaining work: richer session titles, deletion/archive flows, search, and migration/version handling.
 - `Memos`: ~50% complete. Memos can be generated from all or selected persisted turns, linked to sessions, and listed through API/store state. Remaining work: editing, export, stronger source-backed/inferred claim separation, and richer memo templates.
 - `Read-only tools and grounding`: ~76% complete. Copilot has domain context builders and read-only tools for Portfolio, Research, Risk, IV, Macro, Commodities, Prediction Markets, Crypto, Fundamentals, and synthesis. Remaining work: Sealanes/news drilldowns, stronger provenance citations, and tool coverage parity across V2 tabs.
+- `Research Operator`: ~42% complete. Backend action registry metadata, operator plan models, `/copilot/actions`, `/copilot/operator-plan`, `/copilot/operator-plan/execute`, first read-only risk and reverse-valuation tools, DCF confirmation checkpoints, and frontend Operator Plan / Run Operator controls are live. Remaining work: progress events, broader read-only tools, richer trace/report surfaces, generalized confirmed mutations, and Agents SDK orchestration behind the registry.
 - `Voice`: ~0% complete. Voice remains out of scope until text/session/memo workflows are more mature.
 
 #### 1. Ask mode
@@ -1639,8 +1642,10 @@ Updated progression:
 3. Expand tab context-builder adoption and source-citation paths.
 4. Deepen synthesis and planning workflows inside the dedicated workspace rather than adding a global mode bar.
 5. Improve memo templates, editing, export, and source-backed versus inferred claim labels.
-6. Add richer domain tools as each V2 tab matures, especially Sealanes/news and deeper IV/Commodities drilldowns.
-7. Consider voice only after the core workspace is stable.
+6. Advance Research Operator with progress events, broader read-only tools, report/trace surfaces, and confirmed local research-state mutations.
+7. Adopt Agents SDK for the Research Operator path behind Gamma's action registry, keeping Gamma's backend permission checks, confirmation tokens, and persistence authoritative.
+8. Add richer domain tools as each V2 tab matures, especially Sealanes/news and deeper IV/Commodities drilldowns.
+9. Consider voice only after the core workspace is stable.
 
 ### Deliverable
 

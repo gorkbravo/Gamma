@@ -31,6 +31,7 @@
   export let underlyingPricePoints: TimeSeriesPoint[] = [];
   export let loading = false;
   export let sessionLoading = false;
+  export let errorMessage = "";
   export let onLoad: (options: IvLoadOptions) => void | Promise<void>;
   export let onSendToCopilot: (handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void = () => {};
 
@@ -89,6 +90,7 @@
   let maxDistributionProbability = 0.01;
   let payoffAbsMax = 1;
   let atmStrikeIndex = 0;
+  let surfaceAlerts: string[] = [];
 
   $: if (!optionsModes.some((candidate) => candidate.id === mode)) {
     mode = "overview";
@@ -115,6 +117,14 @@
   $: strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   $: payoffAbsMax = Math.max(...strategyPayoff.points.map((point) => Math.abs(point.payoff)), 1);
   $: atmStrikeIndex = nearestStrikeIndex(result);
+  $: surfaceAlerts = [
+    errorMessage?.trim(),
+    result && !result.snapshot_available ? `No options surface snapshot is available for ${result.symbol}.` : "",
+    ...(result?.warnings ?? []),
+    ...(result?.messages ?? []),
+    session?.status_text?.toLowerCase().startsWith("error") ? session.status_text : "",
+    ...(session?.messages ?? []),
+  ].filter((message): message is string => Boolean(message && message.trim()));
 
   $: if (
     mode === "surface" &&
@@ -284,6 +294,17 @@
       </div>
     </div>
   </article>
+
+  {#if surfaceAlerts.length}
+    <article class="panel alert-panel" role="alert">
+      <h3>Options Data Issue</h3>
+      <div class="warning-list">
+        {#each surfaceAlerts.slice(0, 5) as message}
+          <div>{message}</div>
+        {/each}
+      </div>
+    </article>
+  {/if}
 
   {#if mode === "overview"}
     <div class="workspace-grid overview-grid">
@@ -1037,6 +1058,15 @@
   .legs-panel {
     border-left: 1px solid var(--divider);
     padding-left: 0.75rem;
+  }
+
+  .alert-panel {
+    border-color: color-mix(in srgb, var(--warning) 44%, var(--panel-border));
+    background: color-mix(in srgb, var(--warning) 8%, var(--panel-bg));
+  }
+
+  .alert-panel h3 {
+    color: var(--warning);
   }
 
   .leg-row {

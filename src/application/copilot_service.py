@@ -25,6 +25,8 @@ from src.application.fundamentals_service import FundamentalsService
 from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.news_service import NewsService
 from src.application.prediction_market_service import PredictionMarketService
+from src.application.research_action_registry import ResearchActionRegistry
+from src.application.risk_service import RiskComputeRequest, RiskService
 from src.models.copilot import (
     CopilotContextBundle,
     CopilotDraftMutation,
@@ -35,6 +37,9 @@ from src.models.copilot import (
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
     CopilotResearchActionDefinition,
+    CopilotOperatorConfirmationCheckpoint,
+    CopilotOperatorPlan,
+    CopilotOperatorPlanStep,
     CopilotResearchPlan,
     CopilotResearchPlanDomainDecision,
     CopilotResearchPlanDomain,
@@ -53,6 +58,7 @@ from src.models.copilot import (
 from src.services.copilot_store import CopilotStore
 from src.models.macro import MacroMetricRecord, MacroSeriesHistory
 from src.models.news import NewsEventFeed, NewsEventItem
+from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.models.prediction_markets import PredictionProbabilityPoint
 from src.models.provenance import FreshnessLabel
 from src.services.copilot_provider import CopilotProvider
@@ -77,6 +83,10 @@ class _CopilotToolDefinition:
     timeout_seconds: float = 30.0
     request_limit: int = 1
     failure_modes: tuple[str, ...] = ()
+    permission_policy: str = "automatic"
+    provenance_behavior: str = "Returns Gamma source references and warnings where available."
+    retry_policy: str = "retry_safe_if_read_only"
+    test_coverage_owner: str | None = "tests/test_copilot.py"
 
     def to_openai_spec(self) -> dict[str, Any]:
         return {
@@ -102,6 +112,11 @@ class _CopilotToolDefinition:
             timeout_seconds=self.timeout_seconds,
             request_limit=self.request_limit,
             failure_modes=list(self.failure_modes),
+            permission_policy=self.permission_policy,
+            provenance_behavior=self.provenance_behavior,
+            retry_policy=self.retry_policy,
+            can_call_external_providers=self.external_provider is not None,
+            test_coverage_owner=self.test_coverage_owner,
         )
 
 
@@ -121,6 +136,9 @@ class CopilotService:
         prediction_market_service: PredictionMarketService,
         crypto_service: CryptoService,
         fundamentals_service: FundamentalsService,
+        risk_service: RiskService | None = None,
+        portfolio_provider: Any | None = None,
+        research_provider: Any | None = None,
         news_service: NewsService | None = None,
         provider: CopilotProvider,
         store: CopilotStore | None = None,
@@ -129,6 +147,9 @@ class CopilotService:
         self.prediction_market_service = prediction_market_service
         self.crypto_service = crypto_service
         self.fundamentals_service = fundamentals_service
+        self.risk_service = risk_service
+        self.portfolio_provider = portfolio_provider
+        self.research_provider = research_provider
         self.news_service = news_service
         self.provider = provider
         self.store = store
@@ -364,6 +385,27 @@ class CopilotService:
                     handler=self._tool_get_fundamentals_reverse_valuation_context,
                 ),
                 _CopilotToolDefinition(
+                    name="run_fundamentals_reverse_valuation",
+                    description="Run a read-only Fundamentals reverse-valuation analysis for the selected or supplied ticker and return implied-expectation drivers.",
+                    domains=("fundamentals",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "ticker": {
+                                "type": ["string", "null"],
+                                "description": "Optional ticker override. Use null to keep the selected Fundamentals ticker.",
+                            }
+                        },
+                        "required": ["ticker"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_fundamentals_reverse_valuation,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    permission_policy="automatic",
+                    provenance_behavior="Returns reverse-valuation drivers, sensitivity context, source refs, and warnings without changing DCF state.",
+                ),
+                _CopilotToolDefinition(
                     name="get_risk_coverage_summary",
                     description="Return a read-only risk coverage, benchmark, and warning summary for the active Gamma risk result.",
                     domains=("risk",),
@@ -386,6 +428,32 @@ class CopilotService:
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_risk_contribution_summary,
+                ),
+                _CopilotToolDefinition(
+                    name="run_risk_scenario_analysis",
+                    description="Run a bounded read-only risk computation for the active portfolio or research snapshot, including VaR, contribution, coverage, and scenario warnings.",
+                    domains=("risk",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "scenario_label": {
+                                "type": ["string", "null"],
+                                "description": "Optional label for the scenario being studied, e.g. rate_shock_baseline.",
+                            },
+                            "source_scope": {
+                                "type": ["string", "null"],
+                                "description": "portfolio or research. Use null to infer from workspace mode.",
+                            },
+                        },
+                        "required": ["scenario_label", "source_scope"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_risk_scenario_analysis,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=45.0,
+                    permission_policy="automatic",
+                    provenance_behavior="Computes read-only risk analytics from the active snapshot and returns source refs, warnings, and coverage diagnostics.",
                 ),
                 _CopilotToolDefinition(
                     name="get_iv_surface_context",
@@ -490,6 +558,10 @@ class CopilotService:
                     "Selected ticker has no Fundamentals DCF model.",
                     "No valid DCF fields are changed by the draft.",
                 ],
+                permission_policy="automatic_draft",
+                provenance_behavior="Returns a before/after diff, warnings, source ids, and confirmation token without applying local state.",
+                retry_policy="retry_safe_until_applied",
+                test_coverage_owner="tests/test_copilot.py",
             ),
             CopilotResearchActionDefinition(
                 tool_id="fundamentals.apply_dcf_update",
@@ -515,8 +587,13 @@ class CopilotService:
                     "Draft mutation has already been applied.",
                     "Underlying Fundamentals DCF model cannot be saved.",
                 ],
+                permission_policy="confirmation_required",
+                provenance_behavior="Applies a confirmed draft and records rollback/snapshot context through Copilot persistence.",
+                retry_policy="not_retry_safe_after_success",
+                test_coverage_owner="tests/test_copilot.py",
             ),
         ]
+        self.action_registry = ResearchActionRegistry(self._action_definitions())
 
     def generate_research_card(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
         resolved_domain = self._resolve_domain(request)
@@ -636,7 +713,98 @@ class CopilotService:
             warnings=warnings,
         )
 
+    def plan_research_operator(self, request: CopilotResearchCardRequest) -> CopilotOperatorPlan:
+        research_plan = self.plan_research(request)
+        steps: list[CopilotOperatorPlanStep] = []
+        checkpoints: list[CopilotOperatorConfirmationCheckpoint] = []
+        warnings = list(research_plan.warnings)
+        prompt = str(request.prompt or "").strip().lower()
+
+        step_index = 1
+        for domain_item in research_plan.domain_plan:
+            if not domain_item.planned_tools:
+                warnings.append(
+                    f"No registered Research Operator tools are available for {domain_item.domain} yet."
+                )
+                continue
+            for tool_id in domain_item.planned_tools:
+                definition = self.action_registry.get(tool_id)
+                if definition is None:
+                    warnings.append(f"Planned tool is not registered in the Research Action Registry: {tool_id}.")
+                    continue
+                steps.append(
+                    self._operator_step_from_action(
+                        definition=definition,
+                        domain_item=domain_item,
+                        order=step_index,
+                    )
+                )
+                step_index += 1
+
+        if self._prompt_requests_dcf_mutation(prompt):
+            draft_definition = self.action_registry.get("fundamentals.propose_dcf_update")
+            apply_definition = self.action_registry.get("fundamentals.apply_dcf_update")
+            ticker = self._first_entity_id(research_plan.target_entities, "ticker")
+            if ticker is None:
+                warnings.append("DCF mutation planning needs a target ticker before a draft can be generated.")
+            if draft_definition is not None:
+                draft_step = self._operator_step_from_action(
+                    definition=draft_definition,
+                    domain_item=CopilotResearchPlanDomain(
+                        domain="fundamentals",
+                        depth="medium",
+                        reason="The prompt asks the Research Operator to draft a local DCF research-state change.",
+                        action_type="draft_change",
+                        planned_tools=[draft_definition.tool_id],
+                        required_context=["fundamentals_ticker", "dcf_model"],
+                        estimated_tool_calls=1,
+                        estimated_provider_calls=0,
+                        estimated_latency_ms=900,
+                    ),
+                    order=step_index,
+                    title=f"Draft DCF update{f' for {ticker}' if ticker else ''}",
+                    expected_artifacts=["draft_mutation", "rendered_diff", "confirmation_token"],
+                    stop_conditions=[
+                        "No selected Fundamentals ticker.",
+                        "No existing local DCF model for the ticker.",
+                        "Draft does not change supported DCF fields.",
+                    ],
+                )
+                steps.append(draft_step)
+                step_index += 1
+                if apply_definition is not None:
+                    checkpoints.append(
+                        CopilotOperatorConfirmationCheckpoint(
+                            checkpoint_id="checkpoint_dcf_apply",
+                            after_step_id=draft_step.step_id,
+                            reason="Applying a DCF update mutates durable local Fundamentals research state.",
+                            required_for_tool_ids=[apply_definition.tool_id],
+                        )
+                    )
+
+        expected_artifacts = ["operator_trace", "operator_report", *research_plan.expected_artifacts]
+        if checkpoints:
+            expected_artifacts.append("confirmation_checkpoint")
+        budget = self._execution_budget_for_depth(research_plan.depth_profile)
+        return CopilotOperatorPlan(
+            intent=research_plan.intent,
+            target_entities=research_plan.target_entities,
+            depth_profile=research_plan.depth_profile,
+            research_plan=research_plan,
+            steps=steps,
+            confirmation_checkpoints=checkpoints,
+            max_tool_calls=budget.max_tool_calls,
+            max_provider_calls=budget.max_provider_calls,
+            max_elapsed_ms=budget.max_elapsed_ms,
+            requires_confirmation=bool(checkpoints),
+            expected_artifacts=dedupe_warnings(expected_artifacts),
+            warnings=dedupe_warnings(warnings),
+        )
+
     def list_research_action_definitions(self) -> list[CopilotResearchActionDefinition]:
+        return self.action_registry.list_definitions()
+
+    def _action_definitions(self) -> list[CopilotResearchActionDefinition]:
         return [
             *[definition.to_action_definition() for definition in self._tools.values()],
             *self._mutation_action_definitions,
@@ -932,6 +1100,148 @@ class CopilotService:
                 )
         return result
 
+    def execute_research_operator_plan(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
+        plan = self.plan_research_operator(request)
+        sources: dict[str, CopilotSourceRef] = {}
+        tool_traces: list[CopilotToolTrace] = []
+        warnings = list(plan.warnings)
+        executed_steps: list[str] = []
+        skipped_steps: list[str] = []
+        outputs: dict[str, Any] = {}
+        remaining_tools = plan.max_tool_calls
+        provider_calls_used = 0
+        started_at = time.perf_counter()
+
+        for step in plan.steps:
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            if elapsed_ms >= plan.max_elapsed_ms and tool_traces:
+                warnings.append(
+                    f"Stopped operator execution after {elapsed_ms}ms, above the {plan.max_elapsed_ms}ms elapsed-time guard."
+                )
+                break
+            if remaining_tools <= 0:
+                warnings.append(f"Stopped operator execution after {plan.max_tool_calls} tools.")
+                break
+            if step.requires_confirmation or step.permission_policy == "confirmation_required":
+                skipped_steps.append(step.step_id)
+                warnings.append(f"Stopped before `{step.tool_id}` because confirmation is required.")
+                break
+            if step.action_type not in {"read_context", "run_analysis", "fetch_external_context"}:
+                skipped_steps.append(step.step_id)
+                warnings.append(f"Skipped `{step.tool_id}` because this executor only runs automatic read-only operator steps.")
+                continue
+            if not step.tool_id:
+                skipped_steps.append(step.step_id)
+                warnings.append(f"Skipped {step.step_id}: no tool id was attached.")
+                continue
+            definition = self._tools.get(step.tool_id)
+            if definition is None:
+                skipped_steps.append(step.step_id)
+                warnings.append(f"Skipped unsupported operator tool `{step.tool_id}`.")
+                continue
+            if definition.external_provider:
+                if provider_calls_used + 1 > plan.max_provider_calls:
+                    skipped_steps.append(step.step_id)
+                    warnings.append(
+                        f"Skipped `{step.tool_id}` because provider calls would exceed the {plan.max_provider_calls} call guard."
+                    )
+                    continue
+                provider_calls_used += 1
+
+            try:
+                context = self._build_plan_execution_context(request, step.domain)
+            except ValueError as exc:
+                skipped_steps.append(step.step_id)
+                warnings.append(f"Skipped {step.step_id}: {exc}")
+                continue
+            for source in context.sources:
+                sources[source.source_id] = source
+            warnings.extend(context.warnings)
+
+            arguments = self._default_plan_execution_arguments(step.tool_id, context)
+            if arguments is None:
+                skipped_steps.append(step.step_id)
+                tool_traces.append(
+                    CopilotToolTrace(
+                        tool_name=step.tool_id,
+                        summary="Skipped because operator execution could not infer required arguments.",
+                        arguments={},
+                        source_ids=[],
+                    )
+                )
+                continue
+            execution = self._execute_tool(step.tool_id, arguments, context)
+            remaining_tools -= 1
+            tool_traces.append(execution.trace)
+            outputs[step.step_id] = execution.output
+            for source in execution.sources:
+                sources[source.source_id] = source
+            if isinstance(execution.output, dict) and execution.output.get("error"):
+                skipped_steps.append(step.step_id)
+                warnings.append(f"{step.tool_id} failed: {execution.output['error']}")
+            else:
+                executed_steps.append(step.step_id)
+
+        if plan.confirmation_checkpoints:
+            warnings.append("Operator plan includes confirmation checkpoints that were not applied by automatic execution.")
+
+        warnings = dedupe_warnings(warnings)
+        result = CopilotResearchCardResult(
+            domain="synthesis",
+            current_tab=request.context.current_tab or "copilot",
+            status="ready" if executed_steps else "error",
+            provider="gamma_operator_executor",
+            model="gamma-operator-executor-v1",
+            response_id=new_copilot_id("opexec"),
+            message=f"Executed {len(executed_steps)} automatic operator step(s).",
+            card=self._build_operator_execution_card(
+                plan,
+                executed_steps,
+                skipped_steps,
+                list(sources.values()),
+                warnings,
+            ),
+            sources=list(sources.values()),
+            tool_traces=tool_traces,
+            warnings=warnings,
+        )
+        result = self._normalize_result_sources(result)
+
+        if self.store is not None:
+            try:
+                self.store.record_turn(
+                    session_id=request.user_session_id,
+                    title=request.session_title,
+                    domain="synthesis",
+                    current_tab=request.context.current_tab or "copilot",
+                    workspace_mode=request.context.workspace_mode,
+                    prompt=request.prompt,
+                    context_fingerprint=request.context_fingerprint,
+                    context_summary={
+                        "operator_plan": {
+                            "intent": plan.intent,
+                            "role": plan.role,
+                            "steps": [step.__dict__ for step in plan.steps],
+                            "executed_steps": list(executed_steps),
+                            "skipped_steps": list(skipped_steps),
+                            "outputs": outputs,
+                        },
+                    },
+                    result=result,
+                )
+            except Exception:
+                logger.exception("Copilot operator execution persistence failed")
+                result = replace(
+                    result,
+                    warnings=dedupe_warnings(
+                        [
+                            *result.warnings,
+                            "Copilot executed the operator plan, but failed to persist this turn locally.",
+                        ]
+                    ),
+                )
+        return result
+
     def _build_plan_execution_context(
         self,
         request: CopilotResearchCardRequest,
@@ -1012,6 +1322,15 @@ class CopilotService:
         if tool_name == "get_synthesis_domain_context":
             included_domains = context.summary_data.get("included_domains", []) or []
             return {"domain": included_domains[0]} if included_domains else None
+        if tool_name == "run_fundamentals_reverse_valuation":
+            return {"ticker": context.summary_data.get("ticker")}
+        if tool_name == "run_risk_scenario_analysis":
+            return {
+                "scenario_label": "rate_shock_baseline"
+                if "rate" in str(context.summary_data).lower()
+                else "baseline_risk",
+                "source_scope": context.summary_data.get("workspace_mode"),
+            }
         return {}
 
     @staticmethod
@@ -1272,6 +1591,62 @@ class CopilotService:
             source_backed_claims=claims,
             inferred_claims=[
                 "Tool outputs still need model synthesis before they become a final research conclusion."
+            ],
+        )
+
+    @staticmethod
+    def _build_operator_execution_card(
+        plan: CopilotOperatorPlan,
+        executed_steps: list[str],
+        skipped_steps: list[str],
+        sources: list[CopilotSourceRef],
+        warnings: list[str],
+    ) -> ResearchCard:
+        evidence_refs = [source.source_id for source in sources[:10]]
+        step_lookup = {step.step_id: step for step in plan.steps}
+        executed_labels = [
+            step_lookup[step_id].title
+            for step_id in executed_steps
+            if step_id in step_lookup
+        ]
+        skipped_labels = [
+            step_lookup[step_id].title
+            for step_id in skipped_steps
+            if step_id in step_lookup
+        ]
+        claims = []
+        if evidence_refs:
+            claims.append(
+                ResearchClaim(
+                    claim="Gamma executed automatic read-only Research Operator steps and preserved the source trace.",
+                    evidence_refs=evidence_refs,
+                )
+            )
+        return ResearchCard(
+            title=f"Executed Research Operator Plan: {plan.intent.replace('_', ' ')}",
+            hypothesis=(
+                f"The request maps to a {plan.depth_profile} Research Operator plan with "
+                f"{len(plan.steps)} planned step(s)."
+            ),
+            rationale=(
+                f"Executed steps: {', '.join(executed_labels) or 'none'}. "
+                f"Skipped steps: {', '.join(skipped_labels) or 'none'}."
+            ),
+            required_data=[step.domain for step in plan.steps],
+            proposed_test="Review the operator trace and generated warnings before turning this into a final memo or saved research artifact.",
+            confounders=warnings[:8],
+            next_steps=[
+                "Inspect the tool traces for exact inputs and outputs.",
+                "Load missing domain state if any operator step was skipped.",
+                "Confirm any durable local research-state mutation separately.",
+            ],
+            caveats=[
+                "This executor runs automatic read-only operator steps only.",
+                "Custom shock repricing and confirmed state mutations are gated for later operator slices.",
+            ],
+            source_backed_claims=claims,
+            inferred_claims=[
+                "The operator output is an analytical workup, not an investment decision or execution instruction."
             ],
         )
 
@@ -1638,13 +2013,91 @@ class CopilotService:
                 "get_fundamentals_statement_context",
                 "get_fundamentals_peer_context",
                 "get_fundamentals_dcf_context",
-                "get_fundamentals_reverse_valuation_context",
+                "run_fundamentals_reverse_valuation",
             ],
-            "risk": ["get_risk_coverage_summary", "get_risk_contribution_summary"],
+            "risk": ["run_risk_scenario_analysis"],
             "iv": ["get_iv_surface_context", "get_iv_session_status"],
             "external_context": ["get_external_context_summary"],
             "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
         }.get(domain, [])
+
+    @staticmethod
+    def _operator_step_from_action(
+        *,
+        definition: CopilotResearchActionDefinition,
+        domain_item: CopilotResearchPlanDomain,
+        order: int,
+        title: str | None = None,
+        expected_artifacts: list[str] | None = None,
+        stop_conditions: list[str] | None = None,
+    ) -> CopilotOperatorPlanStep:
+        inferred_artifacts = expected_artifacts
+        if inferred_artifacts is None:
+            inferred_artifacts = ["tool_trace", "source_refs"]
+            if definition.action_type == "fetch_external_context":
+                inferred_artifacts.append("freshness_labels")
+            if definition.action_type == "run_analysis":
+                inferred_artifacts.append("analysis_result")
+            if definition.action_type == "draft_change":
+                inferred_artifacts.extend(["draft_diff", "confirmation_token"])
+        step_title = title or CopilotService._operator_step_title(definition)
+        return CopilotOperatorPlanStep(
+            step_id=f"step_{order:02d}_{CopilotService._safe_source_id(definition.tool_id).lower()}",
+            order=order,
+            title=step_title,
+            domain=domain_item.domain,
+            action_type=definition.action_type,
+            tool_id=definition.tool_id,
+            permission_policy=definition.permission_policy,
+            requires_confirmation=definition.requires_confirmation,
+            expected_artifacts=inferred_artifacts,
+            rationale=domain_item.reason,
+            stop_conditions=stop_conditions
+            or [
+                "Required Gamma context is missing.",
+                "Execution budget is exhausted.",
+                "Provider is unavailable or stale beyond the tool policy.",
+            ],
+            estimated_latency_ms=max(domain_item.estimated_latency_ms, int(definition.timeout_seconds * 1000 / 3)),
+            warnings=list(definition.failure_modes),
+        )
+
+    @staticmethod
+    def _operator_step_title(definition: CopilotResearchActionDefinition) -> str:
+        cleaned = definition.tool_id
+        for prefix in ("get_", "run_", "inspect_", "fetch_"):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):]
+                break
+        cleaned = cleaned.replace(".", " ").replace("_", " ")
+        return cleaned[:1].upper() + cleaned[1:]
+
+    @staticmethod
+    def _prompt_requests_dcf_mutation(prompt: str) -> bool:
+        if "dcf" not in prompt:
+            return False
+        mutation_terms = (
+            "adjust",
+            "apply",
+            "change",
+            "edit",
+            "modify",
+            "raise",
+            "lower",
+            "update",
+            "cell",
+            "cells",
+            "assumption",
+            "assumptions",
+        )
+        return any(term in prompt for term in mutation_terms)
+
+    @staticmethod
+    def _first_entity_id(entities: list[CopilotResearchPlanEntity], kind: str) -> str | None:
+        for entity in entities:
+            if entity.kind == kind:
+                return entity.id
+        return None
 
     @staticmethod
     def _with_plan_depth(item: CopilotResearchPlanDomain, depth: str) -> CopilotResearchPlanDomain:
@@ -2180,26 +2633,35 @@ class CopilotService:
     def _build_risk_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
         state = request.context.risk_state or {}
         result = state.get("result")
-        if not isinstance(result, dict):
-            raise ValueError("Risk copilot requires an active risk result.")
         snapshot = state.get("snapshot") if isinstance(state.get("snapshot"), dict) else None
+        if snapshot is None and isinstance(request.context.portfolio_state, dict):
+            portfolio_snapshot = request.context.portfolio_state.get("snapshot")
+            if isinstance(portfolio_snapshot, dict):
+                snapshot = portfolio_snapshot
+        if not isinstance(result, dict) and snapshot is None:
+            raise ValueError("Risk copilot requires an active risk result or a portfolio snapshot.")
         summary_data = {
             "workspace_mode": request.context.workspace_mode or "portfolio",
-            "risk": summarize_risk_result(result),
+            "risk": summarize_risk_result(result) if isinstance(result, dict) else None,
             "snapshot": summarize_portfolio_snapshot(snapshot),
         }
-        warnings = dedupe_warnings(result.get("warnings", []), (snapshot or {}).get("warnings", []))
-        sources = [
-            CopilotSourceRef(
-                source_id="risk.result",
-                label="Risk computation result",
-                kind="analytics",
-                provider="gamma",
-                origin="gamma.risk.compute",
-                description="Active risk computation payload returned by Gamma.",
-                retrieved_at=None,
+        warnings = dedupe_warnings(
+            result.get("warnings", []) if isinstance(result, dict) else [],
+            (snapshot or {}).get("warnings", []),
+        )
+        sources = []
+        if isinstance(result, dict):
+            sources.append(
+                CopilotSourceRef(
+                    source_id="risk.result",
+                    label="Risk computation result",
+                    kind="analytics",
+                    provider="gamma",
+                    origin="gamma.risk.compute",
+                    description="Active risk computation payload returned by Gamma.",
+                    retrieved_at=None,
+                )
             )
-        ]
         if snapshot is not None:
             sources.append(
                 CopilotSourceRef(
@@ -2217,7 +2679,7 @@ class CopilotService:
             current_tab=request.context.current_tab or "risk",
             summary_data=summary_data,
             tool_state={
-                "result": result,
+                "result": result if isinstance(result, dict) else None,
                 "snapshot": snapshot,
             },
             sources=sources,
@@ -3719,6 +4181,91 @@ class CopilotService:
             sources=[source],
         )
 
+    def _tool_run_fundamentals_reverse_valuation(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        ticker = str(arguments.get("ticker") or "").strip().upper() or self._fundamentals_ticker_from_bundle(context)
+        reverse = self.fundamentals_service.get_reverse_valuation(ticker)
+        if reverse is None:
+            raise ValueError(f"Fundamentals reverse valuation is unavailable for: {ticker}")
+        source = CopilotSourceRef(
+            source_id="fundamentals.reverse_valuation.analysis",
+            label="Fundamentals reverse-valuation analysis",
+            kind="analytics",
+            provider=reverse.source_provider,
+            origin=reverse.origin,
+            description="Read-only reverse valuation run for market-implied expectations.",
+            retrieved_at=reverse.retrieved_at,
+        )
+        output = {
+            "ticker": reverse.company.ticker,
+            "company_name": reverse.company.name,
+            "current_price": reverse.current_price,
+            "target_equity_value": reverse.target_equity_value,
+            "target_enterprise_value": reverse.target_enterprise_value,
+            "base_case": self._fundamentals_dcf_summary(reverse.base_case_summary),
+            "scenario_gap_metrics": [
+                {
+                    "metric_id": metric.metric_id,
+                    "label": metric.label,
+                    "display_value": metric.display_value,
+                    "value": metric.value,
+                    "source_provider": metric.source_provider,
+                    "origin": metric.origin,
+                    "transformation_note": metric.transformation_note,
+                }
+                for metric in reverse.scenario_gap_metrics
+            ],
+            "drivers": [
+                {
+                    "driver_id": driver.driver_id,
+                    "label": driver.label,
+                    "implied_value": driver.implied_value,
+                    "display_value": driver.display_value,
+                    "base_value": driver.base_value,
+                    "base_display_value": driver.base_display_value,
+                    "gap_to_base": driver.gap_to_base,
+                    "gap_display_value": driver.gap_display_value,
+                    "success": driver.success,
+                    "warnings": list(driver.warnings),
+                }
+                for driver in reverse.drivers
+            ],
+            "sensitivity": {
+                "wacc_values": list(reverse.sensitivity_matrix.wacc_values) if reverse.sensitivity_matrix else [],
+                "terminal_growth_values": list(reverse.sensitivity_matrix.terminal_growth_values) if reverse.sensitivity_matrix else [],
+                "rows": [
+                    [
+                        {
+                            "wacc_pct": cell.wacc_pct,
+                            "terminal_growth_pct": cell.terminal_growth_pct,
+                            "implied_revenue_growth_pct": cell.implied_revenue_growth_pct,
+                            "implied_ebit_margin_pct": cell.implied_ebit_margin_pct,
+                            "implied_fcf_cagr_pct": cell.implied_fcf_cagr_pct,
+                        }
+                        for cell in row
+                    ]
+                    for row in (reverse.sensitivity_matrix.rows if reverse.sensitivity_matrix else [])
+                ],
+            },
+            "warnings": list(reverse.warnings),
+            "source_provider": reverse.source_provider,
+            "origin": reverse.origin,
+            "transformation_note": reverse.transformation_note,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_fundamentals_reverse_valuation",
+                summary=f"Ran read-only reverse valuation for {ticker}.",
+                arguments={"ticker": ticker},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
     def _tool_get_risk_coverage_summary(
         self,
         arguments: dict[str, Any],
@@ -3749,6 +4296,59 @@ class CopilotService:
                 tool_name="get_risk_coverage_summary",
                 summary="Expanded the active risk result into coverage, benchmark, and warning context.",
                 arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_run_risk_scenario_analysis(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        if self.risk_service is None:
+            raise ValueError("Risk service is unavailable to Copilot.")
+        snapshot_payload = context.tool_state.get("snapshot")
+        if not isinstance(snapshot_payload, dict):
+            raise ValueError("Risk scenario analysis requires an active portfolio or research snapshot.")
+        snapshot = self._portfolio_snapshot_from_payload(snapshot_payload)
+        source_scope = str(arguments.get("source_scope") or context.summary_data.get("workspace_mode") or "portfolio").strip().lower()
+        if source_scope not in {"portfolio", "research"}:
+            source_scope = "portfolio"
+        data_provider = self.research_provider if source_scope == "research" else self.portfolio_provider
+        scenario_label = str(arguments.get("scenario_label") or "baseline_risk").strip() or "baseline_risk"
+        payload = self.risk_service.compute(
+            RiskComputeRequest(
+                snapshot=snapshot,
+                alpha=0.95,
+                lookback_days=252,
+                horizon_days=1,
+                mc_horizon_days=10,
+                mc_simulation_model="Gaussian",
+                mc_num_simulations=2000,
+                beta_window=126,
+                benchmark_symbol="SPY",
+                base_currency=snapshot.base_currency,
+                include_monte_carlo=True,
+            ),
+            data_provider=data_provider,
+        )
+        result_summary = self._risk_compute_summary(payload, scenario_label=scenario_label)
+        source = CopilotSourceRef(
+            source_id="risk.scenario.analysis",
+            label="Risk scenario analysis",
+            kind="analytics",
+            provider="gamma",
+            origin="gamma.risk.compute",
+            description="Read-only risk computation run by the Research Operator.",
+            retrieved_at=snapshot.timestamp,
+        )
+        return CopilotToolExecution(
+            output=result_summary,
+            trace=CopilotToolTrace(
+                tool_name="run_risk_scenario_analysis",
+                summary=f"Ran read-only risk scenario analysis for {scenario_label}.",
+                arguments={"scenario_label": scenario_label, "source_scope": source_scope},
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -4426,6 +5026,55 @@ class CopilotService:
         return snapshot
 
     @staticmethod
+    def _portfolio_snapshot_from_payload(payload: dict[str, Any]) -> PortfolioSnapshot:
+        timestamp = CopilotService._coerce_source_datetime(payload.get("timestamp")) or now_utc()
+        positions = [
+            PositionItem(
+                symbol=str(row.get("symbol") or ""),
+                sec_type=str(row.get("sec_type") or "STK"),
+                currency=str(row.get("currency") or payload.get("base_currency") or "USD"),
+                quantity=float(row.get("quantity") or 0.0),
+                avg_cost=CopilotService._optional_float(row.get("avg_cost")),
+                market_price=CopilotService._optional_float(row.get("market_price")),
+                market_value=CopilotService._optional_float(row.get("market_value")),
+                unrealized_pnl=CopilotService._optional_float(row.get("unrealized_pnl")),
+                weight=CopilotService._optional_float(row.get("weight")),
+                base_market_value=CopilotService._optional_float(row.get("base_market_value")),
+                fx_rate=CopilotService._optional_float(row.get("fx_rate")),
+                instrument_id=row.get("instrument_id"),
+                display_symbol=row.get("display_symbol"),
+                exchange=row.get("exchange"),
+                primary_exchange=row.get("primary_exchange"),
+                provider=row.get("provider"),
+                provider_id=row.get("provider_id"),
+            )
+            for row in payload.get("positions", [])
+            if isinstance(row, dict)
+        ]
+        return PortfolioSnapshot(
+            timestamp=timestamp,
+            base_currency=str(payload.get("base_currency") or "USD"),
+            account_summary=dict(payload.get("account_summary") or {}),
+            positions=positions,
+            total_market_value=CopilotService._optional_float(payload.get("total_market_value")),
+            total_cash=CopilotService._optional_float(payload.get("total_cash")),
+            net_liquidation=CopilotService._optional_float(payload.get("net_liquidation")),
+            day_pnl=CopilotService._optional_float(payload.get("day_pnl")),
+            day_pnl_pct=CopilotService._optional_float(payload.get("day_pnl_pct")),
+            day_pnl_source=payload.get("day_pnl_source"),
+            warnings=[str(item) for item in payload.get("warnings", [])],
+        )
+
+    @staticmethod
+    def _optional_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _portfolio_history_from_bundle(context: CopilotContextBundle) -> dict[str, Any] | None:
         history = context.tool_state.get("history")
         return history if isinstance(history, dict) else None
@@ -4448,6 +5097,76 @@ class CopilotService:
         if not isinstance(risk, dict):
             raise ValueError("Risk context is missing the active risk result.")
         return risk
+
+    @staticmethod
+    def _risk_compute_summary(payload: Any, *, scenario_label: str) -> dict[str, Any]:
+        results = payload.results
+        top_contributions = []
+        contribution_symbols = list(payload.returns_df.columns)
+        if not payload.contributions.empty:
+            contribution_symbols.sort(
+                key=lambda symbol: abs(float(payload.contributions.get(symbol, 0.0) or 0.0)),
+                reverse=True,
+            )
+        for symbol in contribution_symbols[:10]:
+            top_contributions.append(
+                {
+                    "symbol": str(symbol),
+                    "weight": CopilotService._series_get_float(payload.weights, symbol),
+                    "variance_contribution_pct": CopilotService._series_get_float(payload.contributions, symbol),
+                    "marginal_contribution_to_risk": CopilotService._series_get_float(
+                        payload.marginal_contribution_to_risk,
+                        symbol,
+                    ),
+                    "component_var": CopilotService._series_get_float(payload.component_var, symbol),
+                }
+            )
+        return {
+            "scenario_label": scenario_label,
+            "method": "Current snapshot risk baseline. Custom shock repricing is not applied in this first operator slice.",
+            "metrics": {
+                "portfolio_value": results.portfolio_value,
+                "historical_var": results.historical_var,
+                "historical_cvar": results.historical_cvar,
+                "parametric_var": results.parametric_var,
+                "daily_vol": results.daily_vol,
+                "annual_vol": results.annual_vol,
+                "max_drawdown": results.max_drawdown,
+                "beta": results.beta,
+                "correlation": results.correlation,
+                "risk_coverage_ratio": results.risk_coverage_ratio,
+                "covered_risk_basis_value": results.covered_risk_basis_value,
+                "risk_basis_value": results.risk_basis_value,
+                "monte_carlo_var": results.monte_carlo_var,
+                "monte_carlo_cvar": results.monte_carlo_cvar,
+                "aligned_obs_count": results.aligned_obs_count,
+                "benchmark_overlap_count": results.benchmark_overlap_count,
+                "concentration_hhi": results.concentration_hhi,
+                "top5_weight": results.top5_weight,
+                "effective_bets": results.effective_bets,
+            },
+            "top_contributions": top_contributions,
+            "excluded_assets": dict(results.excluded_assets),
+            "frontier_points": [
+                {
+                    "label": point.label,
+                    "kind": point.kind,
+                    "annual_return": point.annual_return,
+                    "annual_vol": point.annual_vol,
+                    "sharpe": point.sharpe,
+                }
+                for point in payload.frontier_points[:8]
+            ],
+            "warnings": list(results.warnings),
+        }
+
+    @staticmethod
+    def _series_get_float(series: Any, key: str) -> float | None:
+        try:
+            value = series.get(key)
+        except Exception:
+            return None
+        return CopilotService._optional_float(value)
 
     @staticmethod
     def _iv_surface_from_bundle(context: CopilotContextBundle) -> dict[str, Any] | None:

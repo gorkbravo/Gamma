@@ -207,15 +207,63 @@ class IVService:
             )
 
         depth_preset = self.normalize_depth_preset(request.depth_preset)
-        engine = self.create_engine(mode, depth_preset=depth_preset)
-        if not engine.start(symbol):
-            return IVSurfaceResult(
-                snapshot=None,
-                warnings=["Unable to start options surface engine."],
-                messages=engine.drain_messages(),
-            )
+        warnings: list[str] = []
+        if self.is_running():
+            self.stop_stream()
+            warnings.append("Stopped the previous live IV stream before loading a one-shot surface snapshot.")
 
-        deadline = time.time() + max(float(request.wait_seconds or 0.0), 0.5)
+        messages: list[str] = []
+        latest = None
+        loaded_preset: str | None = None
+        presets = self._surface_depth_attempts(depth_preset)
+        for index, preset in enumerate(presets):
+            wait_seconds = float(request.wait_seconds or 0.0) if index == 0 else min(float(request.wait_seconds or 0.0), 2.5)
+            latest, attempt_messages = self._collect_surface_snapshot(
+                symbol=symbol,
+                market_data_mode=mode,
+                depth_preset=preset,
+                wait_seconds=wait_seconds,
+            )
+            messages.extend(attempt_messages)
+            if latest is not None:
+                loaded_preset = preset
+                break
+
+        if latest is None:
+            warnings.append(f"No options surface snapshot available yet for {symbol}.")
+        elif loaded_preset and loaded_preset != depth_preset:
+            warnings.append(
+                f"Requested {depth_preset} options depth was unavailable; loaded the deepest successful "
+                f"{loaded_preset} snapshot instead."
+            )
+        return IVSurfaceResult(snapshot=latest, warnings=warnings, messages=messages)
+
+    def _mock_snapshot(self, symbol: str, depth_preset: str | None = None) -> IVSurfaceSnapshot:
+        engine = self.create_engine(self.market_data_mode, depth_preset=depth_preset)
+        return engine.build_mock_snapshot(symbol)
+
+    def _surface_depth_attempts(self, depth_preset: str) -> list[str]:
+        if depth_preset == "max":
+            return ["max", "front_deep", "deep", "standard", "compact"]
+        if depth_preset == "front_deep":
+            return ["front_deep", "deep", "standard", "compact"]
+        if depth_preset == "deep":
+            return ["deep", "standard", "compact"]
+        return [depth_preset]
+
+    def _collect_surface_snapshot(
+        self,
+        *,
+        symbol: str,
+        market_data_mode: str,
+        depth_preset: str,
+        wait_seconds: float,
+    ) -> tuple[IVSurfaceSnapshot | None, list[str]]:
+        engine = self.create_engine(market_data_mode, depth_preset=depth_preset)
+        if not engine.start(symbol):
+            return None, engine.drain_messages()
+
+        deadline = time.time() + max(float(wait_seconds or 0.0), 0.5)
         latest = None
         try:
             while time.time() < deadline:
@@ -226,12 +274,4 @@ class IVService:
         finally:
             messages = engine.drain_messages()
             engine.stop()
-
-        warnings: list[str] = []
-        if latest is None:
-            warnings.append(f"No options surface snapshot available yet for {symbol}.")
-        return IVSurfaceResult(snapshot=latest, warnings=warnings, messages=messages)
-
-    def _mock_snapshot(self, symbol: str, depth_preset: str | None = None) -> IVSurfaceSnapshot:
-        engine = self.create_engine(self.market_data_mode, depth_preset=depth_preset)
-        return engine.build_mock_snapshot(symbol)
+        return latest, messages

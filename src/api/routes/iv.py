@@ -60,6 +60,7 @@ def stop_iv_session(request: Request) -> IVSessionStatusResponseModel:
 
 def _iv_session_status(runtime, status_override: str | None = None, messages: list[str] | None = None) -> IVSessionStatusResponseModel:
     snapshot = runtime.iv_service.latest_snapshot()
+    session_messages = [*(messages or []), *runtime.iv_service.drain_messages()]
     surface = (
         IVSurfaceResponseModel.from_service_result(
             symbol=runtime.iv_service.active_symbol() or "SPY",
@@ -71,7 +72,7 @@ def _iv_session_status(runtime, status_override: str | None = None, messages: li
                 )
             )
             if snapshot is None and runtime.client.mock
-            else _iv_result_from_snapshot(snapshot, runtime.iv_service.active_symbol() or "SPY"),
+            else _iv_result_from_snapshot(snapshot, runtime.iv_service.active_symbol() or "SPY", session_messages),
         )
     )
     return IVSessionStatusResponseModel(
@@ -80,11 +81,11 @@ def _iv_session_status(runtime, status_override: str | None = None, messages: li
         active_symbol=runtime.iv_service.active_symbol(),
         market_data_mode=runtime.iv_service.market_data_mode,
         surface=surface,
-        messages=list(messages or []),
+        messages=session_messages,
     )
 
 
-def _iv_result_from_snapshot(snapshot, symbol: str):
+def _iv_result_from_snapshot(snapshot, symbol: str, messages: list[str] | None = None):
     from src.application.iv_service import IVSurfaceResult
 
-    return IVSurfaceResult(snapshot=snapshot) if snapshot is not None else IVSurfaceResult(snapshot=None)
+    return IVSurfaceResult(snapshot=snapshot, messages=list(messages or []))

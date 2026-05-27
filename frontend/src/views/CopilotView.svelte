@@ -3,7 +3,10 @@
     CopilotBaseDomain,
     CopilotDomain,
     CrossTabHandoffEnvelope,
+    CopilotResearchActionDefinition,
     CopilotMemo,
+    CopilotOperatorPlan,
+    CopilotResearchCardResult,
     CopilotResearchPlan,
     CopilotSessionDetail,
     CopilotSessionSummary,
@@ -38,11 +41,16 @@
   export let sessions: CopilotSessionSummary[] = [];
   export let activeSession: CopilotSessionDetail | null = null;
   export let memos: CopilotMemo[] = [];
+  export let actionDefinitions: CopilotResearchActionDefinition[] = [];
   export let researchPlan: CopilotResearchPlan | null = null;
+  export let operatorPlan: CopilotOperatorPlan | null = null;
+  export let operatorResult: CopilotResearchCardResult | null = null;
   export let latestHandoff: CrossTabHandoffEnvelope | null = null;
   export let loading = false;
   export let onGenerate: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void;
   export let onPlan: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void = () => {};
+  export let onOperatorPlan: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void = () => {};
+  export let onRunOperator: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void = () => {};
   export let onCreateMemo: (title?: string, notes?: string) => Promise<unknown> | void = () => {};
   export let onUpdateMemo: (memoId: string, title: string, body: string) => Promise<unknown> | void = () => {};
   export let onArchiveSession: (sessionId: string) => Promise<unknown> | void = () => {};
@@ -53,8 +61,10 @@
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
 
   type FocusMode = "synthesis" | "active_tab";
+  type CopilotRoleMode = "agent" | "operator";
 
   let focusMode: FocusMode = "synthesis";
+  let roleMode: CopilotRoleMode = "agent";
   let promptText = "";
   let surface: CopilotWorkspaceSurface = synthesisSurface;
   let threadEntries: CopilotThreadEntry[] = [];
@@ -93,8 +103,40 @@
     return researchPlan?.warnings ?? [];
   }
 
+  function operatorSteps() {
+    return operatorPlan?.steps ?? [];
+  }
+
+  function operatorCheckpoints() {
+    return operatorPlan?.confirmation_checkpoints ?? [];
+  }
+
+  function operatorWarnings() {
+    return operatorPlan?.warnings ?? [];
+  }
+
+  function actionDefinition(toolId: string | null) {
+    if (!toolId) {
+      return null;
+    }
+    return actionDefinitions.find((definition) => definition.tool_id === toolId) ?? null;
+  }
+
+  function actionPermissionLabel(toolId: string | null, fallback: string) {
+    const definition = actionDefinition(toolId);
+    return definition?.permission_policy ?? fallback;
+  }
+
+  function expectedArtifactsLabel(items: string[]) {
+    return items.length ? items.slice(0, 3).join(" / ") : "trace";
+  }
+
   function setFocusMode(nextMode: FocusMode) {
     focusMode = nextMode;
+  }
+
+  function setRoleMode(nextMode: CopilotRoleMode) {
+    roleMode = nextMode;
   }
 
   async function handleGenerate() {
@@ -112,7 +154,22 @@
     if (!surface.domain || loading) {
       return;
     }
+    if (roleMode === "operator") {
+      await onOperatorPlan(surface.domain, promptText.trim());
+      return;
+    }
     await onPlan(surface.domain, promptText.trim());
+  }
+
+  async function handleRunOperator() {
+    if (!surface.supported || !surface.domain || loading) {
+      return;
+    }
+    const result = await onRunOperator(surface.domain, promptText.trim());
+    if (result != null) {
+      promptText = "";
+      await onLoadSessions();
+    }
   }
 
   async function handleCreateMemo() {
@@ -225,6 +282,8 @@
   $: selectedCount = synthesisSurface.selectedScopeDomains.length;
   $: loadedCount = synthesisSurface.scopeOptions.length;
   $: displayedTurnCount = threadEntries.length || activeTurns().length || 0;
+  $: operatorStepCount = operatorSteps().length;
+  $: operatorCheckpointCount = operatorCheckpoints().length;
 </script>
 
 <section class="view">
@@ -237,7 +296,7 @@
     <div class="header-kpis" aria-label="Copilot workspace status">
       <div>
         <span>Primary</span>
-        <strong>{focusMode === "synthesis" ? "Synthesis" : "Active Tab"}</strong>
+        <strong>{roleMode === "operator" ? "Operator" : focusMode === "synthesis" ? "Synthesis" : "Active Tab"}</strong>
       </div>
       <div>
         <span>Loaded Contexts</span>
@@ -248,8 +307,8 @@
         <strong>{selectedCount}</strong>
       </div>
       <div>
-        <span>Thread Turns</span>
-        <strong>{displayedTurnCount}</strong>
+        <span>Operator Steps</span>
+        <strong>{operatorStepCount}</strong>
       </div>
     </div>
   </article>
@@ -274,6 +333,23 @@
           </button>
         </div>
 
+        <div class="role-tabs" role="tablist" aria-label="Copilot role">
+          <button
+            type="button"
+            class:active={roleMode === "agent"}
+            on:click={() => setRoleMode("agent")}
+          >
+            Research Agent
+          </button>
+          <button
+            type="button"
+            class:active={roleMode === "operator"}
+            on:click={() => setRoleMode("operator")}
+          >
+            Research Operator
+          </button>
+        </div>
+
         <textarea
           bind:value={promptText}
           rows={5}
@@ -286,15 +362,67 @@
           <span>{surface.selectionMessage ?? surface.guidance}</span>
           <div class="composer-actions">
             <button type="button" class="secondary" disabled={!surface.domain || loading} on:click={handlePlan}>
-              Plan
+              {roleMode === "operator" ? "Operator Plan" : "Plan"}
             </button>
-            <button type="button" disabled={!surface.supported || loading} on:click={handleGenerate}>
-              {loading ? "Generating..." : threadEntries.length ? "Follow Up" : "Generate"}
-            </button>
+            {#if roleMode === "operator"}
+              <button type="button" disabled={!surface.supported || loading} on:click={handleRunOperator}>
+                {loading ? "Running..." : "Run Operator"}
+              </button>
+            {:else}
+              <button type="button" disabled={!surface.supported || loading} on:click={handleGenerate}>
+                {loading ? "Generating..." : threadEntries.length ? "Follow Up" : "Generate"}
+              </button>
+            {/if}
           </div>
         </div>
 
-        {#if researchPlan}
+        {#if roleMode === "operator" && operatorPlan}
+          <div class="plan-preview operator-preview">
+            <div class="plan-preview-head">
+              <span>{operatorPlan.role.replaceAll("_", " ")}</span>
+              <strong>{operatorPlan.intent.replaceAll("_", " ")}</strong>
+            </div>
+            <div class="plan-budget">
+              <span>{operatorPlan.max_tool_calls} tools max</span>
+              <span>{operatorPlan.max_provider_calls} provider calls max</span>
+              <span>{formatMs(operatorPlan.max_elapsed_ms)} guard</span>
+              <span>{operatorCheckpointCount} checkpoints</span>
+            </div>
+            {#if operatorPlan.target_entities.length}
+              <div class="entity-row">
+                {#each operatorPlan.target_entities.slice(0, 4) as entity}
+                  <span>{entity.kind}: {entity.label ?? entity.id}</span>
+                {/each}
+              </div>
+            {/if}
+            <div class="operator-steps">
+              {#each operatorSteps() as step (step.step_id)}
+                <div class:checkpoint={step.requires_confirmation}>
+                  <span>{step.order}</span>
+                  <strong>{step.title}</strong>
+                  <small>{step.domain.replaceAll("_", " ")} / {step.action_type.replaceAll("_", " ")}</small>
+                  <small>{actionPermissionLabel(step.tool_id, step.permission_policy)}</small>
+                  <p>{step.rationale ?? "Operator step planned by Gamma."}</p>
+                  <em>{expectedArtifactsLabel(step.expected_artifacts)}</em>
+                </div>
+              {/each}
+            </div>
+            {#if operatorCheckpoints().length}
+              <div class="checkpoint-list">
+                {#each operatorCheckpoints() as checkpoint (checkpoint.checkpoint_id)}
+                  <div>
+                    <strong>{checkpoint.default_policy.replaceAll("_", " ")}</strong>
+                    <span>{checkpoint.required_for_tool_ids.join(" / ")}</span>
+                    <p>{checkpoint.reason}</p>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            {#if operatorWarnings().length}
+              <p class="plan-warning">{operatorWarnings()[0]}</p>
+            {/if}
+          </div>
+        {:else if roleMode === "agent" && researchPlan}
           <div class="plan-preview">
             <div class="plan-preview-head">
               <span>{researchPlan.depth_profile}</span>
@@ -335,6 +463,14 @@
             {#if planWarnings().length}
               <p class="plan-warning">{planWarnings()[0]}</p>
             {/if}
+          </div>
+        {/if}
+
+        {#if roleMode === "operator" && operatorResult}
+          <div class="operator-result">
+            <strong>{operatorResult.status}</strong>
+            <span>{operatorResult.message ?? "No operator execution message."}</span>
+            <small>{operatorResult.tool_traces.length} tool traces / {operatorResult.sources.length} sources / {operatorResult.warnings.length} warnings</small>
           </div>
         {/if}
       </article>
@@ -612,12 +748,15 @@
     gap: 0.45rem;
   }
 
-  .mode-tabs {
+  .mode-tabs,
+  .role-tabs {
     display: inline-flex;
     border: 1px solid var(--panel-strong);
+    width: max-content;
   }
 
-  .mode-tabs button {
+  .mode-tabs button,
+  .role-tabs button {
     border: 0;
     border-right: 1px solid var(--panel-strong);
     background: transparent;
@@ -631,9 +770,13 @@
   }
 
   .mode-tabs button:last-child { border-right: 0; }
+  .role-tabs button:last-child { border-right: 0; }
   .mode-tabs button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .role-tabs button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
   .mode-tabs button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .role-tabs button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   .mode-tabs button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+  .role-tabs button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   textarea {
     min-height: 8rem;
@@ -752,6 +895,71 @@
   .domain-plan {
     display: grid;
     gap: 0;
+  }
+
+  .operator-steps,
+  .checkpoint-list {
+    display: grid;
+    gap: 0;
+  }
+
+  .operator-steps div,
+  .checkpoint-list div,
+  .operator-result {
+    display: grid;
+    grid-template-columns: 2rem minmax(9rem, 0.32fr) minmax(7rem, 0.2fr) minmax(7rem, 0.2fr) minmax(0, 1fr) minmax(6rem, 0.16fr);
+    gap: 0.55rem;
+    align-items: start;
+    padding: 0.5rem 0.65rem;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .operator-steps div.checkpoint {
+    border-left: 1px solid var(--warning);
+    padding-left: 0.6rem;
+  }
+
+  .checkpoint-list div {
+    grid-template-columns: minmax(8rem, 0.3fr) minmax(10rem, 0.3fr) minmax(0, 1fr);
+  }
+
+  .operator-result {
+    grid-template-columns: minmax(7rem, 0.2fr) minmax(0, 1fr) auto;
+    border: 1px solid var(--divider);
+    background: var(--bg-0);
+  }
+
+  .operator-steps span,
+  .operator-steps small,
+  .operator-steps em,
+  .checkpoint-list strong,
+  .checkpoint-list span,
+  .operator-result strong,
+  .operator-result small {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0;
+    font-size: 0.62rem;
+    font-style: normal;
+  }
+
+  .operator-steps > div > span,
+  .operator-result strong {
+    color: var(--accent);
+  }
+
+  .operator-steps strong {
+    color: var(--text-0);
+    font-size: 0.74rem;
+  }
+
+  .operator-steps p,
+  .checkpoint-list p,
+  .operator-result span {
+    margin: 0;
+    color: var(--text-1);
+    line-height: 1.35;
+    font-size: 0.76rem;
   }
 
   .domain-plan div,
@@ -1033,7 +1241,10 @@
 
     .composer-actions,
     .domain-plan div,
-    .domain-decisions div {
+    .domain-decisions div,
+    .operator-steps div,
+    .checkpoint-list div,
+    .operator-result {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
     }

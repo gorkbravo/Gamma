@@ -467,7 +467,12 @@ class IVSurfaceEngine:
             self._sleep_with_stop(0.015)
 
         if not self._option_tickers:
-            raise RuntimeError(f"No option market-data subscriptions for {symbol}")
+            self._set_status("Error")
+            self._add_message(
+                f"No option market-data subscriptions could be opened for {symbol}. "
+                "TWS rejected the requested option quote lines or the market-data-line budget was already exhausted."
+            )
+            return
 
         mode_label = "Delayed" if self.market_data_mode == "delayed" else "Live"
         self._set_status(f"Running ({symbol}, {mode_label})")

@@ -2386,6 +2386,186 @@ def test_copilot_action_registry_marks_existing_tools_read_only(tmp_path):
         runtime.shutdown()
 
 
+def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.get("/copilot/actions")
+
+        assert response.status_code == 200
+        payload = response.json()
+        by_id = {item["tool_id"]: item for item in payload}
+        assert by_id["get_portfolio_positions_summary"]["permission_policy"] == "automatic"
+        assert by_id["get_external_context_summary"]["can_call_external_providers"] is True
+        assert by_id["fundamentals.propose_dcf_update"]["permission_policy"] == "automatic_draft"
+        assert by_id["fundamentals.apply_dcf_update"]["permission_policy"] == "confirmation_required"
+        assert by_id["fundamentals.apply_dcf_update"]["retry_policy"] == "not_retry_safe_after_success"
+        assert by_id["fundamentals.apply_dcf_update"]["test_coverage_owner"] == "tests/test_copilot.py"
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_plan_returns_ordered_steps_for_rate_shock(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {"current_tab": "portfolio", "workspace_mode": "portfolio"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["role"] == "research_operator"
+        assert payload["intent"] == "portfolio_rate_shock_research"
+        assert payload["requires_confirmation"] is False
+        assert "operator_trace" in payload["expected_artifacts"]
+        assert payload["steps"]
+        assert [step["order"] for step in payload["steps"]] == list(range(1, len(payload["steps"]) + 1))
+        assert any(step["tool_id"] == "get_portfolio_positions_summary" for step in payload["steps"])
+        assert any(step["domain"] == "risk" for step in payload["steps"])
+        assert all(step["permission_policy"] == "automatic" for step in payload["steps"])
+        assert payload["research_plan"]["intent"] == "portfolio_rate_shock_research"
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_plan_adds_dcf_confirmation_checkpoint(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research AAPL and adjust the DCF revenue growth assumption",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "single_company_research"
+        assert payload["requires_confirmation"] is True
+        draft_step = next(
+            step
+            for step in payload["steps"]
+            if step["tool_id"] == "fundamentals.propose_dcf_update"
+        )
+        assert draft_step["action_type"] == "draft_change"
+        assert draft_step["permission_policy"] == "automatic_draft"
+        assert "confirmation_token" in draft_step["expected_artifacts"]
+        assert payload["confirmation_checkpoints"] == [
+            {
+                "checkpoint_id": "checkpoint_dcf_apply",
+                "after_step_id": draft_step["step_id"],
+                "reason": "Applying a DCF update mutates durable local Fundamentals research state.",
+                "required_for_tool_ids": ["fundamentals.apply_dcf_update"],
+                "default_policy": "confirmation_required",
+            }
+        ]
+        assert "confirmation_checkpoint" in payload["expected_artifacts"]
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["provider"] == "gamma_operator_executor"
+        assert payload["card"]["title"].startswith("Executed Research Operator Plan")
+        assert any(
+            trace["tool_name"] == "run_risk_scenario_analysis"
+            for trace in payload["tool_traces"]
+        )
+        assert any(
+            source["source_id"] == "risk.scenario.analysis"
+            for source in payload["sources"]
+        )
+        sessions = client.get("/copilot/sessions").json()
+        assert sessions and sessions[0]["turn_count"] == 1
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_execution_runs_reverse_valuation_analysis(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research AAPL and run reverse valuation",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert any(
+            trace["tool_name"] == "run_fundamentals_reverse_valuation"
+            for trace in payload["tool_traces"]
+        )
+        assert any(
+            source["source_id"] == "fundamentals.reverse_valuation.analysis"
+            for source in payload["sources"]
+        )
+        assert not any("confirmation" in warning.lower() for warning in payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_execution_stops_before_confirmed_dcf_apply(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research AAPL and adjust the DCF revenue growth assumption",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert not any(
+            trace["tool_name"] == "fundamentals.apply_dcf_update"
+            for trace in payload["tool_traces"]
+        )
+        assert any(
+            "confirmation checkpoints" in warning
+            for warning in payload["warnings"]
+        )
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_confirmed_dcf_mutation_propose_and_apply_flow(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
@@ -2532,7 +2712,14 @@ def test_copilot_plan_execution_runs_read_only_tools_and_persists_trace(tmp_path
             source["source_id"] == "portfolio.snapshot.drilldown"
             for source in payload["sources"]
         )
-        assert any("Skipped risk" in warning for warning in payload["warnings"])
+        assert any(
+            trace["tool_name"] == "run_risk_scenario_analysis"
+            for trace in payload["tool_traces"]
+        )
+        assert any(
+            source["source_id"] == "risk.scenario.analysis"
+            for source in payload["sources"]
+        )
 
         sessions = client.get("/copilot/sessions").json()
         assert sessions and sessions[0]["turn_count"] == 1

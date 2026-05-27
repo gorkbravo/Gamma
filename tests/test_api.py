@@ -482,6 +482,8 @@ def test_iv_surface_and_diagnostics_endpoints(tmp_path):
     try:
         iv_response = client.get("/iv/surface", params={"symbol": "SPY"})
         iv_session_start = client.post("/iv/session/start", json={"symbol": "SPY", "market_data_mode": "delayed"})
+        if runtime.iv_service._engine is not None:
+            runtime.iv_service._engine._add_message("Option subscription failed SPY test contract")
         iv_session_status = client.get("/iv/session")
         iv_session_stop = client.post("/iv/session/stop")
         diagnostics_response = client.get("/diagnostics")
@@ -508,6 +510,7 @@ def test_iv_surface_and_diagnostics_endpoints(tmp_path):
         assert iv_session_start.json()["active_symbol"] == "SPY"
         assert iv_session_status.status_code == 200
         assert "surface" in iv_session_status.json()
+        assert "Option subscription failed SPY test contract" in iv_session_status.json()["messages"]
         assert iv_session_stop.status_code == 200
         assert iv_session_stop.json()["running"] is False
 
