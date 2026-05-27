@@ -21,6 +21,8 @@ from src.models.copilot import (
     CopilotResearchPlanDomainDecision,
     CopilotResearchPlanDomain,
     CopilotResearchPlanEntity,
+    CopilotResearchReport,
+    CopilotReportToolTraceSummary,
     CopilotSession,
     CopilotSynthesisRequest,
     CopilotSynthesisScope,
@@ -408,3 +410,60 @@ class CopilotMemoCreateRequestModel(BaseModel):
 class CopilotMemoUpdateRequestModel(BaseModel):
     title: str | None = None
     body: str | None = None
+
+
+class CopilotReportToolTraceSummaryModel(BaseModel):
+    tool_name: str
+    summary: str
+    source_ids: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotReportToolTraceSummary) -> "CopilotReportToolTraceSummaryModel":
+        return cls(**row.__dict__)
+
+
+class CopilotResearchReportModel(BaseModel):
+    report_id: str
+    session_id: str
+    title: str
+    source_turn_ids: list[str] = Field(default_factory=list)
+    source_memo_ids: list[str] = Field(default_factory=list)
+    source_backed_claims: list[ResearchClaimModel] = Field(default_factory=list)
+    inferred_claims: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    missing_data: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    tool_trace_summary: list[CopilotReportToolTraceSummaryModel] = Field(default_factory=list)
+    sources: list[CopilotSourceRefModel] = Field(default_factory=list)
+    generated_at: datetime
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotResearchReport) -> "CopilotResearchReportModel":
+        return cls(
+            report_id=row.report_id,
+            session_id=row.session_id,
+            title=row.title,
+            source_turn_ids=list(row.source_turn_ids),
+            source_memo_ids=list(row.source_memo_ids),
+            source_backed_claims=[ResearchClaimModel.from_domain(item) for item in row.source_backed_claims],
+            inferred_claims=list(row.inferred_claims),
+            assumptions=list(row.assumptions),
+            missing_data=list(row.missing_data),
+            warnings=list(row.warnings),
+            tool_trace_summary=[CopilotReportToolTraceSummaryModel.from_domain(item) for item in row.tool_trace_summary],
+            sources=[CopilotSourceRefModel.from_domain(item) for item in row.sources],
+            generated_at=row.generated_at,
+            source_provider=row.source_provider,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
+class CopilotResearchReportRequestModel(BaseModel):
+    title: str | None = None
+    notes: str | None = None
+    source_turn_ids: list[str] = Field(default_factory=list)
+    source_memo_ids: list[str] = Field(default_factory=list)

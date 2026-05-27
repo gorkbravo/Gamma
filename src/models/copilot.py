@@ -253,5 +253,32 @@ class CopilotMemo:
     transformation_note: str | None = "Gamma memo generated from persisted read-only Copilot turns."
 
 
+@dataclass(frozen=True)
+class CopilotReportToolTraceSummary:
+    tool_name: str
+    summary: str
+    source_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotResearchReport:
+    report_id: str
+    session_id: str
+    title: str
+    source_turn_ids: list[str] = field(default_factory=list)
+    source_memo_ids: list[str] = field(default_factory=list)
+    source_backed_claims: list[ResearchClaim] = field(default_factory=list)
+    inferred_claims: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
+    missing_data: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    tool_trace_summary: list[CopilotReportToolTraceSummary] = field(default_factory=list)
+    sources: list[CopilotSourceRef] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=now_utc)
+    source_provider: str = "gamma_copilot"
+    origin: str = "copilot_report_service.generate_report"
+    transformation_note: str | None = "Gamma research report generated from persisted read-only Copilot session traces."
+
+
 def new_copilot_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"

@@ -1,5 +1,5 @@
 import { get, writable } from "svelte/store";
-import { deleteJson, getJson, getText, patchJson, postJson } from "../api/client";
+import { deleteJson, getJson, getText, patchJson, postJson, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
 import type {
   ActionResponse,
@@ -11,6 +11,7 @@ import type {
   CopilotMemo,
   CopilotResearchCardResult,
   CopilotResearchPlan,
+  CopilotResearchReport,
   CopilotSessionDetail,
   CopilotSessionSummary,
   CopilotThreadEntry,
@@ -2697,6 +2698,61 @@ export async function updateCopilotMemo(memoId: string, options: { title?: strin
 export async function exportCopilotMemo(memoId: string) {
   try {
     const markdown = await getText(`/copilot/memos/${encodeURIComponent(memoId)}/export`);
+    lastError.set("");
+    return markdown;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function generateCopilotResearchReport(options: {
+  sessionId?: string | null;
+  title?: string | null;
+  notes?: string | null;
+  sourceTurnIds?: string[];
+  sourceMemoIds?: string[];
+}) {
+  setLoading("copilot", true);
+  try {
+    const sessionId = options.sessionId || getCopilotSessionId();
+    const report = await postJson<CopilotResearchReport>(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}/report`,
+      {
+        title: options.title,
+        notes: options.notes,
+        source_turn_ids: options.sourceTurnIds ?? [],
+        source_memo_ids: options.sourceMemoIds ?? []
+      }
+    );
+    lastError.set("");
+    return report;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("copilot", false);
+  }
+}
+
+export async function exportCopilotResearchReport(options: {
+  sessionId?: string | null;
+  title?: string | null;
+  notes?: string | null;
+  sourceTurnIds?: string[];
+  sourceMemoIds?: string[];
+}) {
+  try {
+    const sessionId = options.sessionId || getCopilotSessionId();
+    const markdown = await postText(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}/report/export`,
+      {
+        title: options.title,
+        notes: options.notes,
+        source_turn_ids: options.sourceTurnIds ?? [],
+        source_memo_ids: options.sourceMemoIds ?? []
+      }
+    );
     lastError.set("");
     return markdown;
   } catch (error) {

@@ -18,6 +18,7 @@ from src.application.copilot_context_helpers import (
     summarize_research_result,
     summarize_risk_result,
 )
+from src.application.copilot_report_service import CopilotReportService
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.macro_service import MacroSnapshotRequest, MacroService
@@ -34,6 +35,7 @@ from src.models.copilot import (
     CopilotResearchPlanDomainDecision,
     CopilotResearchPlanDomain,
     CopilotResearchPlanEntity,
+    CopilotResearchReport,
     CopilotSession,
     CopilotSourceRef,
     CopilotTurn,
@@ -894,6 +896,48 @@ class CopilotService:
         if memo.warnings:
             meta.extend(["", "Warnings:", *[f"- {warning}" for warning in memo.warnings]])
         return "\n".join([memo.body.strip(), "", "---", *meta]).strip() + "\n"
+
+    def generate_research_report(
+        self,
+        *,
+        session_id: str,
+        title: str | None = None,
+        notes: str | None = None,
+        source_turn_ids: list[str] | None = None,
+        source_memo_ids: list[str] | None = None,
+    ) -> CopilotResearchReport:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Copilot session not found: {session_id}")
+        return CopilotReportService.generate_report(
+            session=session,
+            turns=self.store.list_turns(session.session_id),
+            memos=self.store.list_memos(session.session_id),
+            title=title,
+            notes=notes,
+            source_turn_ids=source_turn_ids,
+            source_memo_ids=source_memo_ids,
+        )
+
+    def export_research_report_markdown(
+        self,
+        *,
+        session_id: str,
+        title: str | None = None,
+        notes: str | None = None,
+        source_turn_ids: list[str] | None = None,
+        source_memo_ids: list[str] | None = None,
+    ) -> str:
+        report = self.generate_research_report(
+            session_id=session_id,
+            title=title,
+            notes=notes,
+            source_turn_ids=source_turn_ids,
+            source_memo_ids=source_memo_ids,
+        )
+        return CopilotReportService.export_markdown(report)
 
     @staticmethod
     def stream_events_for_result(result: CopilotResearchCardResult) -> list[dict[str, Any]]:

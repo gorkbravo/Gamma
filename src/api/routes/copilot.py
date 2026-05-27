@@ -13,6 +13,8 @@ from src.api.schemas.copilot import (
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
     CopilotResearchPlanModel,
+    CopilotResearchReportModel,
+    CopilotResearchReportRequestModel,
     CopilotSessionDetailModel,
     CopilotSessionModel,
     CopilotTurnModel,
@@ -149,6 +151,46 @@ def update_copilot_memo(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CopilotMemoModel.from_domain(memo)
+
+
+@router.post("/copilot/sessions/{session_id}/report", response_model=CopilotResearchReportModel)
+def generate_copilot_research_report(
+    session_id: str,
+    payload: CopilotResearchReportRequestModel,
+    request: Request,
+) -> CopilotResearchReportModel:
+    runtime = request.app.state.runtime
+    try:
+        report = runtime.copilot_service.generate_research_report(
+            session_id=session_id,
+            title=payload.title,
+            notes=payload.notes,
+            source_turn_ids=payload.source_turn_ids,
+            source_memo_ids=payload.source_memo_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CopilotResearchReportModel.from_domain(report)
+
+
+@router.post("/copilot/sessions/{session_id}/report/export")
+def export_copilot_research_report(
+    session_id: str,
+    payload: CopilotResearchReportRequestModel,
+    request: Request,
+) -> Response:
+    runtime = request.app.state.runtime
+    try:
+        markdown = runtime.copilot_service.export_research_report_markdown(
+            session_id=session_id,
+            title=payload.title,
+            notes=payload.notes,
+            source_turn_ids=payload.source_turn_ids,
+            source_memo_ids=payload.source_memo_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=markdown, media_type="text/markdown; charset=utf-8")
 
 
 @router.get("/copilot/memos/{memo_id}/export")

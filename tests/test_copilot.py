@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 from fastapi.testclient import TestClient
@@ -1144,6 +1145,79 @@ def test_copilot_persists_sessions_turns_and_memos(tmp_path):
 
         archived_sessions = client.get("/copilot/sessions", params={"include_archived": "true", "search": "macro"})
         assert any(item["session_id"] == "session_test_persist" for item in archived_sessions.json())
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_generates_research_report_and_markdown_snapshot(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Build a report-ready macro trace.",
+                "user_session_id": "session_report_test",
+                "context_fingerprint": "fp_macro_report",
+                "context": {
+                    "current_tab": "macro",
+                    "workspace_mode": "research",
+                    "macro": {
+                        "mode": "snapshot",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "all",
+                        "comparison_region": None,
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        detail = client.get("/copilot/sessions/session_report_test").json()
+        turn_id = detail["turns"][0]["turn_id"]
+
+        memo_response = client.post(
+            "/copilot/memos",
+            json={"session_id": "session_report_test", "title": "Macro Report Memo"},
+        )
+        assert memo_response.status_code == 200
+        memo_id = memo_response.json()["memo_id"]
+
+        report_request = {
+            "title": "Macro Research Report",
+            "notes": "Treat this as a report snapshot test.",
+            "source_turn_ids": [turn_id],
+            "source_memo_ids": [memo_id],
+        }
+        report_response = client.post("/copilot/sessions/session_report_test/report", json=report_request)
+        assert report_response.status_code == 200
+        report = report_response.json()
+        assert report["title"] == "Macro Research Report"
+        assert report["source_turn_ids"] == [turn_id]
+        assert report["source_memo_ids"] == [memo_id]
+        assert report["source_backed_claims"][0]["evidence_refs"]
+        assert any(item.startswith("macro: Inflation remains") for item in report["inferred_claims"])
+        assert "User note: Treat this as a report snapshot test." in report["assumptions"]
+        assert report["missing_data"] == [
+            "No explicit missing-data warnings were recorded in the selected session trace."
+        ]
+        assert any(
+            row["tool_name"] == "get_macro_series_history_summary"
+            for row in report["tool_trace_summary"]
+        )
+
+        export_response = client.post("/copilot/sessions/session_report_test/report/export", json=report_request)
+        assert export_response.status_code == 200
+        markdown = re.sub(r"report_[a-f0-9]+", "report_TEST", export_response.text)
+        markdown = re.sub(r"turn_[a-f0-9]+", "turn_TEST", markdown)
+        markdown = re.sub(r"memo_[a-f0-9]+", "memo_TEST", markdown)
+        assert "## Source-Backed Claims" in markdown
+        assert "- The macro workspace context was available to the copilot." in markdown
+        assert "## Inferred Claims\n- macro: Inflation remains the dominant macro swing factor." in markdown
+        assert "## Missing Data\n- No explicit missing-data warnings were recorded in the selected session trace." in markdown
+        assert "- `get_macro_series_history_summary`: Loaded" in markdown
+        assert "- `macro.snapshot`: Macro snapshot" in markdown
+        assert "Source provider: gamma_copilot" in markdown
     finally:
         runtime.shutdown()
 

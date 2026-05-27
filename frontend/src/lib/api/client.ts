@@ -31,6 +31,21 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function postText(path: string, body: unknown): Promise<string> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...sessionHeaders()
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw await httpError(response);
+  }
+  return response.text();
+}
+
 export async function patchJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",

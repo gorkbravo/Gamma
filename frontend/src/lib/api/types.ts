@@ -2864,6 +2864,31 @@ export interface CopilotResearchPlan {
   transformation_note: string | null;
 }
 
+export interface CopilotReportToolTraceSummary {
+  tool_name: string;
+  summary: string;
+  source_ids: string[];
+}
+
+export interface CopilotResearchReport {
+  report_id: string;
+  session_id: string;
+  title: string;
+  source_turn_ids: string[];
+  source_memo_ids: string[];
+  source_backed_claims: ResearchClaim[];
+  inferred_claims: string[];
+  assumptions: string[];
+  missing_data: string[];
+  warnings: string[];
+  tool_trace_summary: CopilotReportToolTraceSummary[];
+  sources: CopilotSourceRef[];
+  generated_at: string;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface CopilotThreadEntry {
   entryId: string;
   turnIndex: number;

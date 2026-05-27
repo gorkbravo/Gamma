@@ -520,11 +520,14 @@ Implementation note:
 
 ### Phase 5 - Research Reports
 
-- [ ] Add report schema and templates.
-- [ ] Generate reports from session traces and selected artifacts.
-- [ ] Export memo/report as Markdown.
-- [ ] Include source-backed claims, inferred claims, assumptions, missing data, warnings, and tool trace summary.
-- [ ] Add report snapshot tests.
+- [x] Add report schema and templates.
+- [x] Generate reports from session traces and selected artifacts.
+- [x] Export memo/report as Markdown.
+- [x] Include source-backed claims, inferred claims, assumptions, missing data, warnings, and tool trace summary.
+- [x] Add report snapshot tests.
+
+Implementation note:
+- Phase 5 now has a deterministic report layer over persisted Copilot session traces. `CopilotResearchReport` and `CopilotReportToolTraceSummary` define the typed report contract, `CopilotReportService` compiles selected turns and memo artifacts into source-backed claims, inferred claims, assumptions, missing-data warnings, source refs, and tool traces, and `/copilot/sessions/{session_id}/report` plus `/copilot/sessions/{session_id}/report/export` expose JSON and Markdown outputs. Memo Markdown export remains supported through the existing memo route. Tests cover report generation and Markdown snapshot sections.
 
 ### Phase 6 - Confirmed Local Research-State Mutations
 
