@@ -531,12 +531,15 @@ Implementation note:
 
 ### Phase 6 - Confirmed Local Research-State Mutations
 
-- [ ] Add draft mutation schema and diff renderer.
-- [ ] Add confirmation token flow.
-- [ ] Add `fundamentals.propose_dcf_update`.
-- [ ] Add `fundamentals.apply_dcf_update` after confirmation.
-- [ ] Save DCF snapshot before or after confirmed edits according to UX decision.
-- [ ] Add similar confirmed flows only where there is clear product value.
+- [x] Add draft mutation schema and diff renderer.
+- [x] Add confirmation token flow.
+- [x] Add `fundamentals.propose_dcf_update`.
+- [x] Add `fundamentals.apply_dcf_update` after confirmation.
+- [x] Save DCF snapshot before or after confirmed edits according to UX decision.
+- [x] Add similar confirmed flows only where there is clear product value.
+
+Implementation note:
+- Phase 6 now has a narrow confirmed-mutation backend path for local Fundamentals DCF research state. `/copilot/mutations/fundamentals/dcf/propose` accepts explicit typed DCF assumption / override updates, returns a persisted draft mutation with structured diff entries, rendered diff text, warnings, and a confirmation token, and does not change the DCF model. `/copilot/mutations/{mutation_id}/apply` requires the matching confirmation token, saves a pre-change DCF snapshot as rollback context, applies the DCF payload through the existing Fundamentals service, and records the mutation as applied. The Copilot action registry now distinguishes `draft_change` from `apply_change`, with only the apply action marked as local-state mutating and confirmation-required. No other confirmed mutation families were added because DCF is the only current high-value, well-bounded research-state edit target in this phase.
 
 ### Phase 7 - Agents SDK Migration Or Hybrid Orchestration
 

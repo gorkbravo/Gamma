@@ -13,7 +13,10 @@ from src.api.schemas.portfolio import (
 from src.api.schemas.research import ResearchAnalyzeResponseModel
 from src.api.schemas.risk import RiskComputeResponseModel
 from src.models.copilot import (
+    CopilotDraftMutation,
     CopilotMemo,
+    CopilotMutationApplyResult,
+    CopilotMutationDiffEntry,
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
@@ -467,3 +470,100 @@ class CopilotResearchReportRequestModel(BaseModel):
     notes: str | None = None
     source_turn_ids: list[str] = Field(default_factory=list)
     source_memo_ids: list[str] = Field(default_factory=list)
+
+
+class CopilotMutationDiffEntryModel(BaseModel):
+    path: str
+    label: str
+    before: object | None = None
+    after: object | None = None
+    unit: str | None = None
+    change_type: str = "update"
+
+    @classmethod
+    def from_domain(cls, row: CopilotMutationDiffEntry) -> "CopilotMutationDiffEntryModel":
+        return cls(**row.__dict__)
+
+
+class CopilotDraftMutationModel(BaseModel):
+    mutation_id: str
+    domain: str
+    tool_id: str
+    action_type: str
+    target_id: str
+    target_label: str
+    status: str
+    requires_confirmation: bool
+    confirmation_token: str
+    diff: list[CopilotMutationDiffEntryModel] = Field(default_factory=list)
+    rendered_diff: list[str] = Field(default_factory=list)
+    proposed_payload: dict[str, object] = Field(default_factory=dict)
+    rationale: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    rollback_snapshot_id: str | None = None
+    created_at: datetime
+    expires_at: datetime | None = None
+    applied_at: datetime | None = None
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotDraftMutation) -> "CopilotDraftMutationModel":
+        return cls(
+            mutation_id=row.mutation_id,
+            domain=row.domain,
+            tool_id=row.tool_id,
+            action_type=row.action_type,
+            target_id=row.target_id,
+            target_label=row.target_label,
+            status=row.status,
+            requires_confirmation=row.requires_confirmation,
+            confirmation_token=row.confirmation_token,
+            diff=[CopilotMutationDiffEntryModel.from_domain(item) for item in row.diff],
+            rendered_diff=list(row.rendered_diff),
+            proposed_payload=dict(row.proposed_payload),
+            rationale=row.rationale,
+            warnings=list(row.warnings),
+            source_ids=list(row.source_ids),
+            rollback_snapshot_id=row.rollback_snapshot_id,
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            applied_at=row.applied_at,
+            source_provider=row.source_provider,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
+class CopilotFundamentalsDcfMutationScenarioModel(BaseModel):
+    assumptions: dict[str, object] = Field(default_factory=dict)
+    overrides: dict[str, list[float | None]] = Field(default_factory=dict)
+
+
+class CopilotFundamentalsDcfMutationRequestModel(BaseModel):
+    ticker: str
+    scenario_id: str = "base"
+    active_scenario_id: str | None = None
+    assumptions: dict[str, object] = Field(default_factory=dict)
+    overrides: dict[str, list[float | None]] = Field(default_factory=dict)
+    rationale: str | None = None
+
+
+class CopilotMutationApplyRequestModel(BaseModel):
+    confirmation_token: str
+
+
+class CopilotMutationApplyResultModel(BaseModel):
+    mutation: CopilotDraftMutationModel
+    artifact: dict[str, object] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotMutationApplyResult) -> "CopilotMutationApplyResultModel":
+        return cls(
+            mutation=CopilotDraftMutationModel.from_domain(row.mutation),
+            artifact=dict(row.artifact),
+            warnings=list(row.warnings),
+        )

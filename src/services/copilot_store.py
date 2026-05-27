@@ -9,7 +9,9 @@ from typing import Any
 
 from src.models.copilot import (
     CopilotContextSnapshot,
+    CopilotDraftMutation,
     CopilotMemo,
+    CopilotMutationDiffEntry,
     CopilotResearchCardResult,
     CopilotSession,
     CopilotSourceRef,
@@ -32,7 +34,8 @@ class CopilotStore:
         self.snapshots_dir = self.base_dir / "snapshots"
         self.turns_dir = self.base_dir / "turns"
         self.memos_dir = self.base_dir / "memos"
-        for directory in (self.sessions_dir, self.snapshots_dir, self.turns_dir, self.memos_dir):
+        self.mutations_dir = self.base_dir / "mutations"
+        for directory in (self.sessions_dir, self.snapshots_dir, self.turns_dir, self.memos_dir, self.mutations_dir):
             directory.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
@@ -244,6 +247,21 @@ class CopilotStore:
             self._write_json(self.memos_dir / f"{safe_memo_id}.json", self._memo_to_json(updated))
         return updated
 
+    def save_mutation(self, mutation: CopilotDraftMutation) -> CopilotDraftMutation:
+        safe_mutation_id = self._safe_id(mutation.mutation_id)
+        if not safe_mutation_id:
+            raise ValueError("mutation_id is required.")
+        with self._lock:
+            self._write_json(self.mutations_dir / f"{safe_mutation_id}.json", self._mutation_to_json(mutation))
+        return mutation
+
+    def get_mutation(self, mutation_id: str) -> CopilotDraftMutation | None:
+        safe_mutation_id = self._safe_id(mutation_id)
+        if not safe_mutation_id:
+            return None
+        with self._lock:
+            return self._load_mutation_path(self.mutations_dir / f"{safe_mutation_id}.json")
+
     def get_memo(self, memo_id: str) -> CopilotMemo | None:
         safe_memo_id = self._safe_id(memo_id)
         if not safe_memo_id:
@@ -308,6 +326,46 @@ class CopilotStore:
             warnings=list(payload.get("warnings") or []),
             source_provider=str(payload.get("source_provider") or "gamma_copilot"),
             origin=str(payload.get("origin") or "copilot_store.memo"),
+            transformation_note=payload.get("transformation_note"),
+        )
+
+    def _load_mutation_path(self, path: Path) -> CopilotDraftMutation | None:
+        payload = self._load_json(path)
+        if payload is None:
+            return None
+        return CopilotDraftMutation(
+            mutation_id=str(payload.get("mutation_id") or path.stem),
+            domain=str(payload.get("domain") or ""),
+            tool_id=str(payload.get("tool_id") or ""),
+            action_type=str(payload.get("action_type") or ""),
+            target_id=str(payload.get("target_id") or ""),
+            target_label=str(payload.get("target_label") or ""),
+            status=str(payload.get("status") or "pending"),
+            requires_confirmation=bool(payload.get("requires_confirmation", True)),
+            confirmation_token=str(payload.get("confirmation_token") or ""),
+            diff=[
+                CopilotMutationDiffEntry(
+                    path=str(item.get("path") or ""),
+                    label=str(item.get("label") or ""),
+                    before=item.get("before"),
+                    after=item.get("after"),
+                    unit=item.get("unit"),
+                    change_type=str(item.get("change_type") or "update"),
+                )
+                for item in list(payload.get("diff") or [])
+                if isinstance(item, dict)
+            ],
+            rendered_diff=list(payload.get("rendered_diff") or []),
+            proposed_payload=dict(payload.get("proposed_payload") or {}),
+            rationale=payload.get("rationale"),
+            warnings=list(payload.get("warnings") or []),
+            source_ids=list(payload.get("source_ids") or []),
+            rollback_snapshot_id=payload.get("rollback_snapshot_id"),
+            created_at=self._parse_datetime(payload.get("created_at")) or now_utc(),
+            expires_at=self._parse_datetime(payload.get("expires_at")),
+            applied_at=self._parse_datetime(payload.get("applied_at")),
+            source_provider=str(payload.get("source_provider") or "gamma_copilot"),
+            origin=str(payload.get("origin") or "copilot_store.mutation"),
             transformation_note=payload.get("transformation_note"),
         )
 
@@ -377,6 +435,34 @@ class CopilotStore:
             "source_provider": memo.source_provider,
             "origin": memo.origin,
             "transformation_note": memo.transformation_note,
+        }
+
+    @staticmethod
+    def _mutation_to_json(mutation: CopilotDraftMutation) -> dict[str, Any]:
+        return {
+            "schema_version": CURRENT_COPILOT_STORE_SCHEMA_VERSION,
+            "mutation_id": mutation.mutation_id,
+            "domain": mutation.domain,
+            "tool_id": mutation.tool_id,
+            "action_type": mutation.action_type,
+            "target_id": mutation.target_id,
+            "target_label": mutation.target_label,
+            "status": mutation.status,
+            "requires_confirmation": mutation.requires_confirmation,
+            "confirmation_token": mutation.confirmation_token,
+            "diff": [asdict(item) for item in mutation.diff],
+            "rendered_diff": list(mutation.rendered_diff),
+            "proposed_payload": mutation.proposed_payload,
+            "rationale": mutation.rationale,
+            "warnings": list(mutation.warnings),
+            "source_ids": list(mutation.source_ids),
+            "rollback_snapshot_id": mutation.rollback_snapshot_id,
+            "created_at": mutation.created_at.isoformat(),
+            "expires_at": mutation.expires_at.isoformat() if mutation.expires_at else None,
+            "applied_at": mutation.applied_at.isoformat() if mutation.applied_at else None,
+            "source_provider": mutation.source_provider,
+            "origin": mutation.origin,
+            "transformation_note": mutation.transformation_note,
         }
 
     @staticmethod

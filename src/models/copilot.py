@@ -126,6 +126,49 @@ class CopilotResearchActionDefinition:
 
 
 @dataclass(frozen=True)
+class CopilotMutationDiffEntry:
+    path: str
+    label: str
+    before: Any = None
+    after: Any = None
+    unit: str | None = None
+    change_type: str = "update"
+
+
+@dataclass(frozen=True)
+class CopilotDraftMutation:
+    mutation_id: str
+    domain: str
+    tool_id: str
+    action_type: str
+    target_id: str
+    target_label: str
+    status: str
+    requires_confirmation: bool
+    confirmation_token: str
+    diff: list[CopilotMutationDiffEntry] = field(default_factory=list)
+    rendered_diff: list[str] = field(default_factory=list)
+    proposed_payload: dict[str, Any] = field(default_factory=dict)
+    rationale: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_ids: list[str] = field(default_factory=list)
+    rollback_snapshot_id: str | None = None
+    created_at: datetime = field(default_factory=now_utc)
+    expires_at: datetime | None = None
+    applied_at: datetime | None = None
+    source_provider: str = "gamma_copilot"
+    origin: str = "copilot_service.mutation"
+    transformation_note: str | None = "Gamma draft mutation generated for explicit confirmation before local research-state changes are applied."
+
+
+@dataclass(frozen=True)
+class CopilotMutationApplyResult:
+    mutation: CopilotDraftMutation
+    artifact: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CopilotSourceRef:
     source_id: str
     label: str

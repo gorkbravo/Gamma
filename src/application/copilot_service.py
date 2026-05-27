@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import logging
@@ -26,7 +27,10 @@ from src.application.news_service import NewsService
 from src.application.prediction_market_service import PredictionMarketService
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotDraftMutation,
     CopilotMemo,
+    CopilotMutationApplyResult,
+    CopilotMutationDiffEntry,
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
@@ -458,6 +462,61 @@ class CopilotService:
                 ),
             )
         }
+        self._mutation_action_definitions = [
+            CopilotResearchActionDefinition(
+                tool_id="fundamentals.propose_dcf_update",
+                domains=["fundamentals"],
+                action_type="draft_change",
+                description="Draft a local Fundamentals DCF scenario update and return a diff plus confirmation token; does not apply the change.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ticker": {"type": "string"},
+                        "scenario_id": {"type": "string"},
+                        "active_scenario_id": {"type": ["string", "null"]},
+                        "assumptions": {"type": "object"},
+                        "overrides": {"type": "object"},
+                        "rationale": {"type": ["string", "null"]},
+                    },
+                    "required": ["ticker", "scenario_id", "active_scenario_id", "assumptions", "overrides", "rationale"],
+                    "additionalProperties": False,
+                },
+                output_schema={"type": "object"},
+                read_only=False,
+                mutates_local_state=False,
+                requires_confirmation=False,
+                request_limit=1,
+                failure_modes=[
+                    "Selected ticker has no Fundamentals DCF model.",
+                    "No valid DCF fields are changed by the draft.",
+                ],
+            ),
+            CopilotResearchActionDefinition(
+                tool_id="fundamentals.apply_dcf_update",
+                domains=["fundamentals"],
+                action_type="apply_change",
+                description="Apply a previously drafted Fundamentals DCF update after confirmation-token validation, saving a rollback snapshot first.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mutation_id": {"type": "string"},
+                        "confirmation_token": {"type": "string"},
+                    },
+                    "required": ["mutation_id", "confirmation_token"],
+                    "additionalProperties": False,
+                },
+                output_schema={"type": "object"},
+                read_only=False,
+                mutates_local_state=True,
+                requires_confirmation=True,
+                request_limit=1,
+                failure_modes=[
+                    "Confirmation token is missing or does not match.",
+                    "Draft mutation has already been applied.",
+                    "Underlying Fundamentals DCF model cannot be saved.",
+                ],
+            ),
+        ]
 
     def generate_research_card(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
         resolved_domain = self._resolve_domain(request)
@@ -578,7 +637,138 @@ class CopilotService:
         )
 
     def list_research_action_definitions(self) -> list[CopilotResearchActionDefinition]:
-        return [definition.to_action_definition() for definition in self._tools.values()]
+        return [
+            *[definition.to_action_definition() for definition in self._tools.values()],
+            *self._mutation_action_definitions,
+        ]
+
+    def propose_fundamentals_dcf_update(
+        self,
+        *,
+        ticker: str,
+        scenario_id: str = "base",
+        active_scenario_id: str | None = None,
+        assumptions: dict[str, Any] | None = None,
+        overrides: dict[str, list[float | None]] | None = None,
+        rationale: str | None = None,
+    ) -> CopilotDraftMutation:
+        if self.store is None:
+            raise ValueError("Copilot mutation proposals require local Copilot persistence.")
+        normalized_ticker = str(ticker or "").strip().upper()
+        normalized_scenario = str(scenario_id or "base").strip().lower()
+        if not normalized_ticker:
+            raise ValueError("ticker is required.")
+        current_model = self.fundamentals_service.get_dcf_model(normalized_ticker)
+        if current_model is None:
+            raise ValueError(f"Fundamentals DCF model not found: {normalized_ticker}")
+        current_payload = self._dcf_payload_from_model(current_model)
+        proposed_payload = self._apply_dcf_mutation_payload(
+            current_payload,
+            scenario_id=normalized_scenario,
+            active_scenario_id=active_scenario_id,
+            assumptions=assumptions or {},
+            overrides=overrides or {},
+        )
+        proposed_model = self.fundamentals_service.preview_dcf_model(normalized_ticker, proposed_payload)
+        if proposed_model is None:
+            raise ValueError(f"Fundamentals DCF model could not be previewed: {normalized_ticker}")
+
+        diff = self._build_dcf_mutation_diff(
+            current_model,
+            proposed_model,
+            current_payload,
+            proposed_payload,
+            normalized_scenario,
+        )
+        warnings = []
+        if not diff:
+            warnings.append("Draft DCF mutation does not change any supported DCF fields.")
+        mutation = CopilotDraftMutation(
+            mutation_id=new_copilot_id("mutation"),
+            domain="fundamentals",
+            tool_id="fundamentals.propose_dcf_update",
+            action_type="draft_change",
+            target_id=f"{normalized_ticker}:{normalized_scenario}",
+            target_label=f"{normalized_ticker} {normalized_scenario.title()} DCF",
+            status="pending",
+            requires_confirmation=True,
+            confirmation_token=new_copilot_id("confirm"),
+            diff=diff,
+            rendered_diff=self._render_mutation_diff(diff),
+            proposed_payload=proposed_payload,
+            rationale=str(rationale or "").strip() or None,
+            warnings=dedupe_warnings([*warnings, *proposed_model.warnings]),
+            source_ids=["fundamentals.dcf.model"],
+            origin="copilot_service.propose_fundamentals_dcf_update",
+            transformation_note=(
+                "Gamma drafted a local DCF scenario update from explicit typed inputs. "
+                "No DCF state is changed until the confirmation token is submitted."
+            ),
+        )
+        self.store.save_mutation(mutation)
+        return mutation
+
+    def apply_fundamentals_dcf_update(
+        self,
+        *,
+        mutation_id: str,
+        confirmation_token: str,
+    ) -> CopilotMutationApplyResult:
+        if self.store is None:
+            raise ValueError("Copilot mutation application requires local Copilot persistence.")
+        mutation = self.store.get_mutation(mutation_id)
+        if mutation is None:
+            raise ValueError(f"Copilot mutation not found: {mutation_id}")
+        if mutation.tool_id != "fundamentals.propose_dcf_update" or mutation.domain != "fundamentals":
+            raise ValueError(f"Unsupported Copilot mutation: {mutation.tool_id}")
+        if mutation.status != "pending":
+            raise ValueError(f"Copilot mutation is not pending: {mutation.status}")
+        if not confirmation_token or confirmation_token != mutation.confirmation_token:
+            raise ValueError("Confirmation token does not match the pending Copilot mutation.")
+        ticker = mutation.target_id.split(":", 1)[0].strip().upper()
+        if not ticker:
+            raise ValueError("Pending Copilot mutation is missing a Fundamentals ticker.")
+
+        snapshot = self.fundamentals_service.save_dcf_snapshot(
+            ticker,
+            name=f"Pre-Copilot DCF update {mutation.mutation_id[-8:]}",
+        )
+        model = self.fundamentals_service.save_dcf_model(ticker, mutation.proposed_payload)
+        if model is None:
+            raise ValueError(f"Fundamentals DCF model could not be saved: {ticker}")
+        applied = replace(
+            mutation,
+            status="applied",
+            tool_id="fundamentals.apply_dcf_update",
+            action_type="apply_change",
+            rollback_snapshot_id=snapshot.snapshot_id if snapshot else None,
+            applied_at=now_utc(),
+            warnings=dedupe_warnings(
+                [
+                    *mutation.warnings,
+                    *model.warnings,
+                    "A DCF snapshot was saved before applying the confirmed Copilot update."
+                    if snapshot is not None
+                    else "Copilot applied the DCF update, but a rollback snapshot could not be saved.",
+                ]
+            ),
+            origin="copilot_service.apply_fundamentals_dcf_update",
+            transformation_note=(
+                "Gamma applied a previously drafted DCF mutation after confirmation-token validation "
+                "and saved the pre-change DCF snapshot as rollback context."
+            ),
+        )
+        self.store.save_mutation(applied)
+        return CopilotMutationApplyResult(
+            mutation=applied,
+            artifact={
+                "ticker": model.ticker,
+                "active_scenario_id": model.active_scenario_id,
+                "projection_years": list(model.projection_years),
+                "rollback_snapshot_id": applied.rollback_snapshot_id,
+            },
+            warnings=list(applied.warnings),
+        )
 
     def execute_research_plan(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
         plan = self.plan_research(request)
@@ -772,6 +962,201 @@ class CopilotService:
             included_domains = context.summary_data.get("included_domains", []) or []
             return {"domain": included_domains[0]} if included_domains else None
         return {}
+
+    @staticmethod
+    def _dcf_payload_from_model(model: Any) -> dict[str, Any]:
+        return {
+            "ticker": model.ticker,
+            "active_scenario_id": model.active_scenario_id,
+            "projection_years": list(model.projection_years),
+            "scenarios": {
+                scenario.scenario_id: {
+                    "assumptions": dict(scenario.assumptions),
+                    "overrides": {
+                        key: list(values)
+                        for key, values in dict(scenario.overrides).items()
+                    },
+                }
+                for scenario in model.scenarios
+            },
+        }
+
+    @staticmethod
+    def _apply_dcf_mutation_payload(
+        payload: dict[str, Any],
+        *,
+        scenario_id: str,
+        active_scenario_id: str | None,
+        assumptions: dict[str, Any],
+        overrides: dict[str, list[float | None]],
+    ) -> dict[str, Any]:
+        proposed = deepcopy(payload)
+        scenarios = proposed.setdefault("scenarios", {})
+        if scenario_id not in scenarios:
+            raise ValueError(f"Unsupported DCF scenario: {scenario_id}")
+        scenario = scenarios[scenario_id]
+        scenario_assumptions = scenario.setdefault("assumptions", {})
+        for key, value in assumptions.items():
+            if key not in scenario_assumptions:
+                continue
+            default_value = scenario_assumptions[key]
+            if isinstance(default_value, list):
+                scenario_assumptions[key] = (
+                    list(value)
+                    if isinstance(value, list)
+                    else [value for _ in default_value]
+                )
+            else:
+                scenario_assumptions[key] = value
+        scenario_overrides = scenario.setdefault("overrides", {})
+        for key, values in overrides.items():
+            if isinstance(values, list):
+                scenario_overrides[key] = list(values)
+        if active_scenario_id:
+            proposed["active_scenario_id"] = str(active_scenario_id).strip().lower()
+        return proposed
+
+    @staticmethod
+    def _build_dcf_mutation_diff(
+        current_model: Any,
+        proposed_model: Any,
+        current_payload: dict[str, Any],
+        proposed_payload: dict[str, Any],
+        scenario_id: str,
+    ) -> list[CopilotMutationDiffEntry]:
+        diff: list[CopilotMutationDiffEntry] = []
+        if current_payload.get("active_scenario_id") != proposed_payload.get("active_scenario_id"):
+            diff.append(
+                CopilotMutationDiffEntry(
+                    path="active_scenario_id",
+                    label="Active Scenario",
+                    before=current_payload.get("active_scenario_id"),
+                    after=proposed_payload.get("active_scenario_id"),
+                    change_type="update",
+                )
+            )
+        current_scenario = dict(current_payload.get("scenarios", {})).get(scenario_id, {})
+        proposed_scenario = dict(proposed_payload.get("scenarios", {})).get(scenario_id, {})
+        current_assumptions = dict(current_scenario.get("assumptions", {}))
+        proposed_assumptions = dict(proposed_scenario.get("assumptions", {}))
+        for key, after_value in proposed_assumptions.items():
+            before_value = current_assumptions.get(key)
+            if before_value != after_value:
+                diff.append(
+                    CopilotMutationDiffEntry(
+                        path=f"scenarios.{scenario_id}.assumptions.{key}",
+                        label=CopilotService._dcf_field_label(key),
+                        before=before_value,
+                        after=after_value,
+                        unit=CopilotService._dcf_field_unit(key),
+                        change_type="update",
+                    )
+                )
+        current_overrides = dict(current_scenario.get("overrides", {}))
+        proposed_overrides = dict(proposed_scenario.get("overrides", {}))
+        for key, after_value in proposed_overrides.items():
+            before_value = current_overrides.get(key)
+            if before_value != after_value:
+                diff.append(
+                    CopilotMutationDiffEntry(
+                        path=f"scenarios.{scenario_id}.overrides.{key}",
+                        label=f"{CopilotService._dcf_field_label(key)} Override",
+                        before=before_value,
+                        after=after_value,
+                        unit=CopilotService._dcf_field_unit(key),
+                        change_type="update",
+                    )
+                )
+        current_summary = next(
+            (scenario.summary for scenario in current_model.scenarios if scenario.scenario_id == scenario_id),
+            None,
+        )
+        proposed_summary = next(
+            (scenario.summary for scenario in proposed_model.scenarios if scenario.scenario_id == scenario_id),
+            None,
+        )
+        if current_summary is not None and proposed_summary is not None:
+            for key, label in (
+                ("implied_value_per_share", "Implied Value / Share"),
+                ("upside_downside_pct", "Upside / Downside"),
+                ("enterprise_value", "Enterprise Value"),
+            ):
+                before_value = getattr(current_summary, key, None)
+                after_value = getattr(proposed_summary, key, None)
+                if before_value != after_value:
+                    diff.append(
+                        CopilotMutationDiffEntry(
+                            path=f"scenarios.{scenario_id}.summary.{key}",
+                            label=label,
+                            before=before_value,
+                            after=after_value,
+                            unit="percent" if key.endswith("_pct") else "currency",
+                            change_type="derived",
+                        )
+                    )
+        return diff
+
+    @staticmethod
+    def _render_mutation_diff(diff: list[CopilotMutationDiffEntry]) -> list[str]:
+        return [
+            f"{item.label}: {CopilotService._format_diff_value(item.before, item.unit)} -> {CopilotService._format_diff_value(item.after, item.unit)}"
+            for item in diff
+        ]
+
+    @staticmethod
+    def _dcf_field_label(key: str) -> str:
+        labels = {
+            "revenue_growth_pct": "Revenue Growth",
+            "ebit_margin_pct": "EBIT Margin",
+            "tax_rate_pct": "Tax Rate",
+            "da_pct_revenue": "D&A / Revenue",
+            "capex_pct_revenue": "Capex / Revenue",
+            "nwc_pct_incremental_revenue": "NWC / Incremental Revenue",
+            "share_change_pct": "Share Count Change",
+            "wacc_pct": "WACC",
+            "terminal_growth_pct": "Terminal Growth",
+            "revenue": "Revenue",
+            "ebit": "EBIT",
+            "taxes": "Taxes",
+            "depreciation_and_amortization": "D&A",
+            "capital_expenditures": "Capex",
+            "change_in_nwc": "Change In NWC",
+            "free_cash_flow": "Free Cash Flow",
+        }
+        return labels.get(key, key.replace("_", " ").title())
+
+    @staticmethod
+    def _dcf_field_unit(key: str) -> str | None:
+        if key.endswith("_pct") or "_pct_" in key:
+            return "percent"
+        if key in {
+            "revenue",
+            "ebit",
+            "taxes",
+            "depreciation_and_amortization",
+            "capital_expenditures",
+            "change_in_nwc",
+            "free_cash_flow",
+            "enterprise_value",
+        }:
+            return "currency"
+        return None
+
+    @staticmethod
+    def _format_diff_value(value: Any, unit: str | None) -> str:
+        if isinstance(value, list):
+            return "[" + ", ".join(CopilotService._format_diff_value(item, unit) for item in value[:6]) + (", ..." if len(value) > 6 else "") + "]"
+        if value is None:
+            return "None"
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if unit == "percent":
+            return f"{numeric * 100:.1f}%"
+        if unit == "currency":
+            return f"{numeric:,.2f}"
+        return f"{numeric:.4g}"
 
     @staticmethod
     def _build_plan_execution_card(

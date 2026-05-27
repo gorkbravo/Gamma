@@ -624,6 +624,21 @@ class FundamentalsService:
         self.store.save_dcf_model(sec_data.company.ticker, sanitized)
         return self._materialize_dcf_model(sec_data, market_context, sanitized)
 
+    def preview_dcf_model(
+        self,
+        ticker: str,
+        payload: dict[str, Any],
+        *,
+        force_refresh: bool = False,
+    ) -> FundamentalsDcfModelRecord | None:
+        sec_data = self.sec_adapter.load_company_data(ticker, force_refresh=force_refresh)
+        if sec_data is None:
+            return None
+        price_context = self.valuation_adapter.get_price_context(ticker, force_refresh=force_refresh)
+        market_context = self._build_market_context(sec_data, price_context)
+        sanitized = self._sanitize_dcf_payload(sec_data.company.ticker, payload, sec_data, market_context)
+        return self._materialize_dcf_model(sec_data, market_context, sanitized)
+
     def list_dcf_snapshots(
         self,
         ticker: str,

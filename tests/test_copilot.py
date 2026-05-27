@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from datetime import datetime
 
 from fastapi.testclient import TestClient
@@ -597,6 +598,8 @@ class _StubFundamentalsService:
     retrieved_at = datetime(2026, 4, 5, 10, 0, 0)
 
     def __init__(self) -> None:
+        self.saved_payload: dict | None = None
+        self.saved_snapshots: list[FundamentalsDcfSnapshotRecord] = []
         self.company = FundamentalsCompanyRecord(
             ticker="AAPL",
             cik="0000320193",
@@ -816,17 +819,90 @@ class _StubFundamentalsService:
         del force_refresh
         if ticker.upper() != "AAPL":
             return None
+        if self.saved_payload is not None:
+            return self._dcf_model_from_payload(self.saved_payload)
+        return self._dcf_model_from_payload(
+            {
+                "ticker": "AAPL",
+                "active_scenario_id": "base",
+                "projection_years": [2026, 2027, 2028],
+                "scenarios": {
+                    "base": {
+                        "assumptions": {
+                            "revenue_growth_pct": [0.05, 0.05, 0.04],
+                            "wacc_pct": 0.10,
+                        },
+                        "overrides": {},
+                    }
+                },
+            }
+        )
+
+    def preview_dcf_model(self, ticker: str, payload: dict, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        return self._dcf_model_from_payload(payload)
+
+    def save_dcf_model(self, ticker: str, payload: dict, *, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        self.saved_payload = deepcopy(payload)
+        return self._dcf_model_from_payload(self.saved_payload)
+
+    def save_dcf_snapshot(self, ticker: str, *, name: str | None = None, force_refresh: bool = False):
+        del force_refresh
+        if ticker.upper() != "AAPL":
+            return None
+        snapshot = FundamentalsDcfSnapshotRecord(
+            snapshot_id=f"fixture-snapshot-{len(self.saved_snapshots) + 1}",
+            ticker="AAPL",
+            name=name or "Fixture snapshot",
+            created_at=self.retrieved_at,
+            active_scenario_id="base",
+            projection_years=[2026, 2027, 2028],
+            scenario_summaries=[self._dcf_summary()],
+            source_provider="gamma",
+            retrieved_at=self.retrieved_at,
+            origin="tests.copilot.fundamentals.saved_snapshot",
+            transformation_note="Fixture DCF snapshot saved before applying a Copilot mutation.",
+        )
+        self.saved_snapshots.append(snapshot)
+        return snapshot
+
+    def _dcf_model_from_payload(self, payload: dict):
+        scenario_payload = dict(payload.get("scenarios", {})).get("base", {})
+        assumptions = dict(scenario_payload.get("assumptions", {}))
+        overrides = dict(scenario_payload.get("overrides", {}))
+        growth = assumptions.get("revenue_growth_pct", [0.05, 0.05, 0.04])
+        growth_level = growth[0] if isinstance(growth, list) and growth else 0.05
+        wacc = float(assumptions.get("wacc_pct", 0.10) or 0.10)
+        implied_value = 182.13 + ((float(growth_level) - 0.05) * 400.0) - ((wacc - 0.10) * 500.0)
         return FundamentalsDcfModelRecord(
             ticker="AAPL",
             company_name="Apple Inc.",
-            active_scenario_id="base",
-            projection_years=[2026, 2027, 2028],
+            active_scenario_id=str(payload.get("active_scenario_id") or "base"),
+            projection_years=list(payload.get("projection_years") or [2026, 2027, 2028]),
             scenarios=[
                 FundamentalsDcfScenarioRecord(
                     scenario_id="base",
                     label="Base",
-                    assumptions={"revenue_growth": [0.05, 0.05, 0.04]},
-                    summary=self._dcf_summary(),
+                    assumptions=assumptions,
+                    overrides=overrides,
+                    summary=FundamentalsDcfValuationSummary(
+                        scenario_id="base",
+                        label="Base",
+                        enterprise_value=2_860_000_000_000.0 + ((implied_value - 182.13) * 10_000_000_000.0),
+                        equity_value=2_823_000_000_000.0,
+                        implied_value_per_share=implied_value,
+                        upside_downside_pct=(implied_value / 190.0) - 1.0,
+                        current_price=190.0,
+                        source_provider="gamma",
+                        retrieved_at=self.retrieved_at,
+                        origin="tests.copilot.fundamentals.dcf_summary",
+                        transformation_note="Fixture DCF summary derived from normalized statements and price context.",
+                    ),
                     source_provider="gamma",
                     retrieved_at=self.retrieved_at,
                     origin="tests.copilot.fundamentals.dcf_scenario",
@@ -845,6 +921,7 @@ class _StubFundamentalsService:
         if ticker.upper() != "AAPL":
             return []
         return [
+            *self.saved_snapshots,
             FundamentalsDcfSnapshotRecord(
                 snapshot_id="fixture-base",
                 ticker="AAPL",
@@ -2285,8 +2362,13 @@ def test_copilot_action_registry_marks_existing_tools_read_only(tmp_path):
         del client
         definitions = runtime.copilot_service.list_research_action_definitions()
         assert definitions
-        assert all(definition.read_only for definition in definitions)
-        assert not any(definition.mutates_local_state for definition in definitions)
+        automatic_tools = [
+            definition
+            for definition in definitions
+            if definition.action_type in {"read_context", "run_analysis", "fetch_external_context"}
+        ]
+        assert all(definition.read_only for definition in automatic_tools)
+        assert not any(definition.mutates_local_state for definition in automatic_tools)
         portfolio_tools = {
             definition.tool_id: definition
             for definition in definitions
@@ -2294,6 +2376,74 @@ def test_copilot_action_registry_marks_existing_tools_read_only(tmp_path):
         }
         assert portfolio_tools["get_portfolio_positions_summary"].action_type == "read_context"
         assert portfolio_tools["get_portfolio_positions_summary"].requires_confirmation is False
+        mutation_tools = {definition.tool_id: definition for definition in definitions}
+        assert mutation_tools["fundamentals.propose_dcf_update"].action_type == "draft_change"
+        assert mutation_tools["fundamentals.propose_dcf_update"].mutates_local_state is False
+        assert mutation_tools["fundamentals.apply_dcf_update"].action_type == "apply_change"
+        assert mutation_tools["fundamentals.apply_dcf_update"].mutates_local_state is True
+        assert mutation_tools["fundamentals.apply_dcf_update"].requires_confirmation is True
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_confirmed_dcf_mutation_propose_and_apply_flow(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        fundamentals_service = _StubFundamentalsService()
+        runtime.copilot_service.fundamentals_service = fundamentals_service
+        current = fundamentals_service.get_dcf_model("AAPL")
+        projection_count = len(current.projection_years)
+
+        proposal = client.post(
+            "/copilot/mutations/fundamentals/dcf/propose",
+            json={
+                "ticker": "AAPL",
+                "scenario_id": "base",
+                "active_scenario_id": "base",
+                "assumptions": {
+                    "revenue_growth_pct": 0.11,
+                    "wacc_pct": 0.09,
+                },
+                "rationale": "Test a higher growth and lower discount-rate case.",
+            },
+        )
+
+        assert proposal.status_code == 200
+        draft = proposal.json()
+        assert draft["status"] == "pending"
+        assert draft["requires_confirmation"] is True
+        assert draft["confirmation_token"].startswith("confirm_")
+        assert any(item["path"] == "scenarios.base.assumptions.revenue_growth_pct" for item in draft["diff"])
+        assert any("Revenue Growth" in line for line in draft["rendered_diff"])
+        assert draft["proposed_payload"]["scenarios"]["base"]["assumptions"]["revenue_growth_pct"] == [0.11] * projection_count
+
+        rejected = client.post(
+            f"/copilot/mutations/{draft['mutation_id']}/apply",
+            json={"confirmation_token": "wrong-token"},
+        )
+        assert rejected.status_code == 400
+
+        applied = client.post(
+            f"/copilot/mutations/{draft['mutation_id']}/apply",
+            json={"confirmation_token": draft["confirmation_token"]},
+        )
+
+        assert applied.status_code == 200
+        payload = applied.json()
+        assert payload["mutation"]["status"] == "applied"
+        assert payload["mutation"]["tool_id"] == "fundamentals.apply_dcf_update"
+        assert payload["mutation"]["rollback_snapshot_id"]
+        assert payload["artifact"]["rollback_snapshot_id"] == payload["mutation"]["rollback_snapshot_id"]
+        assert any("snapshot was saved" in warning for warning in payload["warnings"])
+
+        saved = fundamentals_service.get_dcf_model("AAPL")
+        base = next(scenario for scenario in saved.scenarios if scenario.scenario_id == "base")
+        assert base.assumptions["revenue_growth_pct"] == [0.11] * projection_count
+        assert base.assumptions["wacc_pct"] == 0.09
+        assert any(
+            snapshot.snapshot_id == payload["mutation"]["rollback_snapshot_id"]
+            for snapshot in fundamentals_service.list_dcf_snapshots("AAPL")
+        )
     finally:
         runtime.shutdown()
 

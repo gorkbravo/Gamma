@@ -7,9 +7,13 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.api.schemas.copilot import (
+    CopilotDraftMutationModel,
+    CopilotFundamentalsDcfMutationRequestModel,
     CopilotMemoCreateRequestModel,
     CopilotMemoModel,
     CopilotMemoUpdateRequestModel,
+    CopilotMutationApplyRequestModel,
+    CopilotMutationApplyResultModel,
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
     CopilotResearchPlanModel,
@@ -70,6 +74,43 @@ def stream_research_card(
             yield json.dumps({"event": event["event"], "data": data}, default=str) + "\n"
 
     return StreamingResponse(iter_events(), media_type="application/x-ndjson")
+
+
+@router.post("/copilot/mutations/fundamentals/dcf/propose", response_model=CopilotDraftMutationModel)
+def propose_fundamentals_dcf_mutation(
+    payload: CopilotFundamentalsDcfMutationRequestModel,
+    request: Request,
+) -> CopilotDraftMutationModel:
+    runtime = request.app.state.runtime
+    try:
+        mutation = runtime.copilot_service.propose_fundamentals_dcf_update(
+            ticker=payload.ticker,
+            scenario_id=payload.scenario_id,
+            active_scenario_id=payload.active_scenario_id,
+            assumptions=payload.assumptions,
+            overrides=payload.overrides,
+            rationale=payload.rationale,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CopilotDraftMutationModel.from_domain(mutation)
+
+
+@router.post("/copilot/mutations/{mutation_id}/apply", response_model=CopilotMutationApplyResultModel)
+def apply_copilot_mutation(
+    mutation_id: str,
+    payload: CopilotMutationApplyRequestModel,
+    request: Request,
+) -> CopilotMutationApplyResultModel:
+    runtime = request.app.state.runtime
+    try:
+        result = runtime.copilot_service.apply_fundamentals_dcf_update(
+            mutation_id=mutation_id,
+            confirmation_token=payload.confirmation_token,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CopilotMutationApplyResultModel.from_domain(result)
 
 
 @router.get("/copilot/sessions", response_model=list[CopilotSessionModel])
