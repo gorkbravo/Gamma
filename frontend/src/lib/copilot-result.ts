@@ -1,5 +1,6 @@
 import type {
   CopilotDomain,
+  CopilotOperatorProgressEvent,
   CopilotResearchCardResult,
   CopilotSourceRef,
   CopilotToolTrace,
@@ -90,6 +91,30 @@ function normalizeToolTrace(value: unknown): CopilotToolTrace | null {
   };
 }
 
+function normalizeOperatorEvent(value: unknown): CopilotOperatorProgressEvent | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  return {
+    run_id: asString(row.run_id),
+    event_id: asString(row.event_id),
+    sequence: typeof row.sequence === "number" && Number.isFinite(row.sequence) ? row.sequence : 0,
+    event_type: asString(row.event_type),
+    timestamp: asString(row.timestamp),
+    step_id: asOptionalString(row.step_id),
+    tool_id: asOptionalString(row.tool_id),
+    title: asOptionalString(row.title),
+    message: asOptionalString(row.message),
+    payload:
+      row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+        ? (row.payload as Record<string, unknown>)
+        : {},
+    source_ids: asStringArray(row.source_ids),
+    warnings: asStringArray(row.warnings)
+  };
+}
+
 export function normalizeCopilotResearchCardResult(
   domain: CopilotDomain,
   value: unknown
@@ -119,6 +144,11 @@ export function normalizeCopilotResearchCardResult(
       ? row.tool_traces
           .map(normalizeToolTrace)
           .filter((trace): trace is CopilotToolTrace => trace != null)
+      : [],
+    operator_events: Array.isArray(row.operator_events)
+      ? row.operator_events
+          .map(normalizeOperatorEvent)
+          .filter((event): event is CopilotOperatorProgressEvent => event != null)
       : [],
     warnings: asStringArray(row.warnings)
   };

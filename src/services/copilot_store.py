@@ -12,6 +12,7 @@ from src.models.copilot import (
     CopilotDraftMutation,
     CopilotMemo,
     CopilotMutationDiffEntry,
+    CopilotOperatorProgressEvent,
     CopilotResearchCardResult,
     CopilotSession,
     CopilotSourceRef,
@@ -484,6 +485,13 @@ class CopilotStore:
                 for source in result.sources
             ],
             "tool_traces": [asdict(trace) for trace in result.tool_traces],
+            "operator_events": [
+                {
+                    **asdict(event),
+                    "timestamp": CopilotStore._datetime_to_json(event.timestamp),
+                }
+                for event in result.operator_events
+            ],
             "warnings": list(result.warnings),
         }
 
@@ -508,6 +516,11 @@ class CopilotStore:
             card=cls._card_from_json(payload.get("card")),
             sources=[cls._source_from_json(item) for item in list(payload.get("sources") or []) if isinstance(item, dict)],
             tool_traces=[cls._trace_from_json(item) for item in list(payload.get("tool_traces") or []) if isinstance(item, dict)],
+            operator_events=[
+                cls._operator_event_from_json(item)
+                for item in list(payload.get("operator_events") or [])
+                if isinstance(item, dict)
+            ],
             warnings=list(payload.get("warnings") or []),
         )
 
@@ -551,6 +564,23 @@ class CopilotStore:
             summary=str(payload.get("summary") or ""),
             arguments=dict(payload.get("arguments") or {}),
             source_ids=list(payload.get("source_ids") or []),
+        )
+
+    @classmethod
+    def _operator_event_from_json(cls, payload: dict[str, Any]) -> CopilotOperatorProgressEvent:
+        return CopilotOperatorProgressEvent(
+            run_id=str(payload.get("run_id") or ""),
+            event_id=str(payload.get("event_id") or ""),
+            sequence=int(payload.get("sequence") or 0),
+            event_type=str(payload.get("event_type") or ""),
+            timestamp=cls._parse_datetime(payload.get("timestamp")) or now_utc(),
+            step_id=payload.get("step_id"),
+            tool_id=payload.get("tool_id"),
+            title=payload.get("title"),
+            message=payload.get("message"),
+            payload=dict(payload.get("payload") or {}),
+            source_ids=list(payload.get("source_ids") or []),
+            warnings=list(payload.get("warnings") or []),
         )
 
     @staticmethod

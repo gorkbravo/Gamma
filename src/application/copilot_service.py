@@ -40,6 +40,7 @@ from src.models.copilot import (
     CopilotOperatorConfirmationCheckpoint,
     CopilotOperatorPlan,
     CopilotOperatorPlanStep,
+    CopilotOperatorProgressEvent,
     CopilotResearchPlan,
     CopilotResearchPlanDomainDecision,
     CopilotResearchPlanDomain,
@@ -1102,9 +1103,12 @@ class CopilotService:
 
     def execute_research_operator_plan(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
         plan = self.plan_research_operator(request)
+        run_id = new_copilot_id("oprun")
+        response_id = new_copilot_id("opexec")
         sources: dict[str, CopilotSourceRef] = {}
         tool_traces: list[CopilotToolTrace] = []
         warnings = list(plan.warnings)
+        events: list[CopilotOperatorProgressEvent] = []
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
         outputs: dict[str, Any] = {}
@@ -1112,39 +1116,117 @@ class CopilotService:
         provider_calls_used = 0
         started_at = time.perf_counter()
 
+        def record_event(
+            event_type: str,
+            *,
+            step: CopilotOperatorPlanStep | None = None,
+            title: str | None = None,
+            message: str | None = None,
+            payload: dict[str, Any] | None = None,
+            source_ids: list[str] | None = None,
+            event_warnings: list[str] | None = None,
+        ) -> None:
+            events.append(
+                CopilotOperatorProgressEvent(
+                    run_id=run_id,
+                    event_id=new_copilot_id("opevent"),
+                    sequence=len(events) + 1,
+                    event_type=event_type,
+                    timestamp=now_utc(),
+                    step_id=step.step_id if step else None,
+                    tool_id=step.tool_id if step else None,
+                    title=title or (step.title if step else None),
+                    message=message,
+                    payload=payload or {},
+                    source_ids=source_ids or [],
+                    warnings=event_warnings or [],
+                )
+            )
+
+        def record_warning(message: str, *, step: CopilotOperatorPlanStep | None = None) -> None:
+            warnings.append(message)
+            record_event("warning", step=step, title="Operator warning", message=message, event_warnings=[message])
+
+        record_event(
+            "plan",
+            title="Operator plan",
+            message=f"Prepared {len(plan.steps)} Research Operator step(s).",
+            payload={
+                "intent": plan.intent,
+                "role": plan.role,
+                "depth_profile": plan.depth_profile,
+                "step_count": len(plan.steps),
+                "checkpoint_count": len(plan.confirmation_checkpoints),
+                "max_tool_calls": plan.max_tool_calls,
+                "max_provider_calls": plan.max_provider_calls,
+                "max_elapsed_ms": plan.max_elapsed_ms,
+            },
+        )
+        for warning in plan.warnings:
+            record_event("warning", title="Plan warning", message=warning, event_warnings=[warning])
+
         for step in plan.steps:
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
             if elapsed_ms >= plan.max_elapsed_ms and tool_traces:
-                warnings.append(
-                    f"Stopped operator execution after {elapsed_ms}ms, above the {plan.max_elapsed_ms}ms elapsed-time guard."
+                record_warning(
+                    f"Stopped operator execution after {elapsed_ms}ms, above the {plan.max_elapsed_ms}ms elapsed-time guard.",
+                    step=step,
                 )
                 break
             if remaining_tools <= 0:
-                warnings.append(f"Stopped operator execution after {plan.max_tool_calls} tools.")
+                record_warning(f"Stopped operator execution after {plan.max_tool_calls} tools.", step=step)
                 break
+            record_event(
+                "step-start",
+                step=step,
+                message=f"Starting `{step.tool_id or step.step_id}`.",
+                payload={
+                    "order": step.order,
+                    "domain": step.domain,
+                    "action_type": step.action_type,
+                    "permission_policy": step.permission_policy,
+                },
+            )
             if step.requires_confirmation or step.permission_policy == "confirmation_required":
                 skipped_steps.append(step.step_id)
-                warnings.append(f"Stopped before `{step.tool_id}` because confirmation is required.")
+                message = f"Stopped before `{step.tool_id}` because confirmation is required."
+                record_warning(message, step=step)
+                record_event(
+                    "confirmation-needed",
+                    step=step,
+                    message=message,
+                    payload={"required_for_tool_ids": [step.tool_id] if step.tool_id else []},
+                    event_warnings=[message],
+                )
                 break
             if step.action_type not in {"read_context", "run_analysis", "fetch_external_context"}:
                 skipped_steps.append(step.step_id)
-                warnings.append(f"Skipped `{step.tool_id}` because this executor only runs automatic read-only operator steps.")
+                message = f"Skipped `{step.tool_id}` because this executor only runs automatic read-only operator steps."
+                record_warning(message, step=step)
+                record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
                 continue
             if not step.tool_id:
                 skipped_steps.append(step.step_id)
-                warnings.append(f"Skipped {step.step_id}: no tool id was attached.")
+                message = f"Skipped {step.step_id}: no tool id was attached."
+                record_warning(message, step=step)
+                record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
                 continue
             definition = self._tools.get(step.tool_id)
             if definition is None:
                 skipped_steps.append(step.step_id)
-                warnings.append(f"Skipped unsupported operator tool `{step.tool_id}`.")
+                message = f"Skipped unsupported operator tool `{step.tool_id}`."
+                record_warning(message, step=step)
+                record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
                 continue
             if definition.external_provider:
                 if provider_calls_used + 1 > plan.max_provider_calls:
                     skipped_steps.append(step.step_id)
-                    warnings.append(
-                        f"Skipped `{step.tool_id}` because provider calls would exceed the {plan.max_provider_calls} call guard."
+                    message = (
+                        f"Skipped `{step.tool_id}` because provider calls would exceed the "
+                        f"{plan.max_provider_calls} call guard."
                     )
+                    record_warning(message, step=step)
+                    record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
                     continue
                 provider_calls_used += 1
 
@@ -1152,11 +1234,14 @@ class CopilotService:
                 context = self._build_plan_execution_context(request, step.domain)
             except ValueError as exc:
                 skipped_steps.append(step.step_id)
-                warnings.append(f"Skipped {step.step_id}: {exc}")
+                message = f"Skipped {step.step_id}: {exc}"
+                record_warning(message, step=step)
+                record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
                 continue
             for source in context.sources:
                 sources[source.source_id] = source
-            warnings.extend(context.warnings)
+            for warning in context.warnings:
+                record_warning(warning, step=step)
 
             arguments = self._default_plan_execution_arguments(step.tool_id, context)
             if arguments is None:
@@ -1169,6 +1254,12 @@ class CopilotService:
                         source_ids=[],
                     )
                 )
+                record_event(
+                    "tool-result",
+                    step=step,
+                    message="Skipped because operator execution could not infer required arguments.",
+                    payload={"status": "skipped", "arguments": {}},
+                )
                 continue
             execution = self._execute_tool(step.tool_id, arguments, context)
             remaining_tools -= 1
@@ -1178,21 +1269,84 @@ class CopilotService:
                 sources[source.source_id] = source
             if isinstance(execution.output, dict) and execution.output.get("error"):
                 skipped_steps.append(step.step_id)
-                warnings.append(f"{step.tool_id} failed: {execution.output['error']}")
+                message = f"{step.tool_id} failed: {execution.output['error']}"
+                record_warning(message, step=step)
+                record_event(
+                    "tool-result",
+                    step=step,
+                    message=message,
+                    payload={"status": "failed", "trace_summary": execution.trace.summary},
+                    source_ids=list(execution.trace.source_ids),
+                    event_warnings=[message],
+                )
             else:
                 executed_steps.append(step.step_id)
+                record_event(
+                    "tool-result",
+                    step=step,
+                    message=execution.trace.summary,
+                    payload={
+                        "status": "completed",
+                        "arguments": execution.trace.arguments,
+                        "output_kind": type(execution.output).__name__,
+                    },
+                    source_ids=list(execution.trace.source_ids),
+                )
 
         if plan.confirmation_checkpoints:
-            warnings.append("Operator plan includes confirmation checkpoints that were not applied by automatic execution.")
+            message = "Operator plan includes confirmation checkpoints that were not applied by automatic execution."
+            warnings.append(message)
+            for checkpoint in plan.confirmation_checkpoints:
+                record_event(
+                    "confirmation-needed",
+                    title="Confirmation checkpoint",
+                    message=checkpoint.reason,
+                    payload={
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "after_step_id": checkpoint.after_step_id,
+                        "required_for_tool_ids": list(checkpoint.required_for_tool_ids),
+                        "default_policy": checkpoint.default_policy,
+                    },
+                    event_warnings=[message],
+                )
+
+        status = "ready" if executed_steps else "error"
 
         warnings = dedupe_warnings(warnings)
+        record_event(
+            "artifact-created",
+            title="Operator trace",
+            message="Created an operator event trace for this run.",
+            payload={"artifact_type": "operator_trace", "artifact_id": run_id, "event_count": len(events) + 3},
+        )
+        record_event(
+            "artifact-created",
+            title="Operator report",
+            message="Created the final Research Operator result card.",
+            payload={"artifact_type": "operator_report", "artifact_id": response_id},
+        )
+        record_event(
+            "final-report",
+            title="Final operator report",
+            message=f"Executed {len(executed_steps)} automatic operator step(s).",
+            payload={
+                "status": status,
+                "executed_steps": list(executed_steps),
+                "skipped_steps": list(skipped_steps),
+                "warning_count": len(warnings),
+                "source_count": len(sources),
+                "tool_trace_count": len(tool_traces),
+            },
+            source_ids=[source.source_id for source in list(sources.values())[:10]],
+            event_warnings=warnings,
+        )
         result = CopilotResearchCardResult(
             domain="synthesis",
             current_tab=request.context.current_tab or "copilot",
-            status="ready" if executed_steps else "error",
+            status=status,
             provider="gamma_operator_executor",
             model="gamma-operator-executor-v1",
-            response_id=new_copilot_id("opexec"),
+            response_id=response_id,
             message=f"Executed {len(executed_steps)} automatic operator step(s).",
             card=self._build_operator_execution_card(
                 plan,
@@ -1203,6 +1357,7 @@ class CopilotService:
             ),
             sources=list(sources.values()),
             tool_traces=tool_traces,
+            operator_events=events,
             warnings=warnings,
         )
         result = self._normalize_result_sources(result)
@@ -1226,6 +1381,7 @@ class CopilotService:
                             "skipped_steps": list(skipped_steps),
                             "outputs": outputs,
                         },
+                        "operator_events": [asdict(event) for event in events],
                     },
                     result=result,
                 )

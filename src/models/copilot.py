@@ -158,6 +158,22 @@ class CopilotOperatorConfirmationCheckpoint:
 
 
 @dataclass(frozen=True)
+class CopilotOperatorProgressEvent:
+    run_id: str
+    event_id: str
+    sequence: int
+    event_type: str
+    timestamp: datetime = field(default_factory=now_utc)
+    step_id: str | None = None
+    tool_id: str | None = None
+    title: str | None = None
+    message: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+    source_ids: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CopilotOperatorPlan:
     intent: str
     target_entities: list[CopilotResearchPlanEntity] = field(default_factory=list)
@@ -290,6 +306,7 @@ class CopilotResearchCardResult:
     card: ResearchCard | None = None
     sources: list[CopilotSourceRef] = field(default_factory=list)
     tool_traces: list[CopilotToolTrace] = field(default_factory=list)
+    operator_events: list[CopilotOperatorProgressEvent] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 

@@ -636,9 +636,12 @@ Research Operator build path:
    - Every mutation must return a diff, rationale, warnings, source ids, and rollback/snapshot context where applicable.
 
 5. Add progress, trace, and report surfaces.
-   - Emit plan, step-start, tool-result, warning, confirmation-needed, artifact-created, and final-report events.
-   - Persist the full operator run as a session trace.
+   - [x] Emit plan, step-start, tool-result, warning, confirmation-needed, artifact-created, and final-report events.
+   - [x] Persist the full operator run as a session trace.
    - Generate reports that distinguish source-backed claims, inferred claims, assumptions, missing data, warnings, and exact tool calls.
+
+Implementation note:
+- First-pass operator progress events now ride on `/copilot/operator-plan/execute` results as `operator_events` and are persisted with Copilot turns. The backend remains authoritative for execution state; the Copilot workspace renders the trace for inspection only. Events currently cover deterministic custom-loop execution and are shaped so the Agents SDK prototype can emit the same contract behind the existing action registry.
 
 6. Evaluate Agents SDK against the operator path.
    - Prototype a narrow hybrid orchestrator after the action registry and read-only operator tools are stable.

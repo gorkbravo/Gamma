@@ -2243,6 +2243,7 @@ function makeCopilotResult(
         source_ids: ["fixture.source"]
       }
     ],
+    operator_events: [],
     warnings: []
   };
 }

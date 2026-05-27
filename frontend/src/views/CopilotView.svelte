@@ -115,6 +115,14 @@
     return operatorPlan?.warnings ?? [];
   }
 
+  function operatorEvents() {
+    return operatorResult?.operator_events ?? [];
+  }
+
+  function operatorEventMeta(eventType: string) {
+    return eventType.replaceAll("-", " ");
+  }
+
   function actionDefinition(toolId: string | null) {
     if (!toolId) {
       return null;
@@ -472,6 +480,19 @@
             <span>{operatorResult.message ?? "No operator execution message."}</span>
             <small>{operatorResult.tool_traces.length} tool traces / {operatorResult.sources.length} sources / {operatorResult.warnings.length} warnings</small>
           </div>
+          {#if operatorEvents().length}
+            <div class="operator-events">
+              {#each operatorEvents() as event (event.event_id)}
+                <div class:event-warning={event.event_type === "warning" || event.event_type === "confirmation-needed"}>
+                  <span>{event.sequence}</span>
+                  <strong>{operatorEventMeta(event.event_type)}</strong>
+                  <small>{event.tool_id ?? event.step_id ?? event.run_id}</small>
+                  <p>{event.message ?? event.title ?? "Operator event recorded."}</p>
+                  <em>{event.source_ids.length} src / {event.warnings.length} warn</em>
+                </div>
+              {/each}
+            </div>
+          {/if}
         {/if}
       </article>
 
@@ -898,13 +919,15 @@
   }
 
   .operator-steps,
-  .checkpoint-list {
+  .checkpoint-list,
+  .operator-events {
     display: grid;
     gap: 0;
   }
 
   .operator-steps div,
   .checkpoint-list div,
+  .operator-events div,
   .operator-result {
     display: grid;
     grid-template-columns: 2rem minmax(9rem, 0.32fr) minmax(7rem, 0.2fr) minmax(7rem, 0.2fr) minmax(0, 1fr) minmax(6rem, 0.16fr);
@@ -929,11 +952,28 @@
     background: var(--bg-0);
   }
 
+  .operator-events {
+    border: 1px solid var(--divider);
+    border-top: 0;
+  }
+
+  .operator-events div {
+    grid-template-columns: 2rem minmax(8rem, 0.22fr) minmax(10rem, 0.26fr) minmax(0, 1fr) minmax(5rem, 0.12fr);
+  }
+
+  .operator-events div.event-warning {
+    border-left: 1px solid var(--warning);
+    padding-left: 0.6rem;
+  }
+
   .operator-steps span,
   .operator-steps small,
   .operator-steps em,
   .checkpoint-list strong,
   .checkpoint-list span,
+  .operator-events span,
+  .operator-events small,
+  .operator-events em,
   .operator-result strong,
   .operator-result small {
     color: var(--text-2);
@@ -944,17 +984,20 @@
   }
 
   .operator-steps > div > span,
+  .operator-events > div > span,
   .operator-result strong {
     color: var(--accent);
   }
 
-  .operator-steps strong {
+  .operator-steps strong,
+  .operator-events strong {
     color: var(--text-0);
     font-size: 0.74rem;
   }
 
   .operator-steps p,
   .checkpoint-list p,
+  .operator-events p,
   .operator-result span {
     margin: 0;
     color: var(--text-1);
@@ -1244,6 +1287,7 @@
     .domain-decisions div,
     .operator-steps div,
     .checkpoint-list div,
+    .operator-events div,
     .operator-result {
       display: grid;
       grid-template-columns: minmax(0, 1fr);

@@ -20,6 +20,7 @@ from src.models.copilot import (
     CopilotOperatorConfirmationCheckpoint,
     CopilotOperatorPlan,
     CopilotOperatorPlanStep,
+    CopilotOperatorProgressEvent,
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
@@ -189,6 +190,38 @@ class CopilotToolTraceModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class CopilotOperatorProgressEventModel(BaseModel):
+    run_id: str
+    event_id: str
+    sequence: int
+    event_type: str
+    timestamp: datetime
+    step_id: str | None = None
+    tool_id: str | None = None
+    title: str | None = None
+    message: str | None = None
+    payload: dict[str, object] = Field(default_factory=dict)
+    source_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotOperatorProgressEvent) -> "CopilotOperatorProgressEventModel":
+        return cls(
+            run_id=row.run_id,
+            event_id=row.event_id,
+            sequence=row.sequence,
+            event_type=row.event_type,
+            timestamp=row.timestamp,
+            step_id=row.step_id,
+            tool_id=row.tool_id,
+            title=row.title,
+            message=row.message,
+            payload=dict(row.payload),
+            source_ids=list(row.source_ids),
+            warnings=list(row.warnings),
+        )
+
+
 class ResearchClaimModel(BaseModel):
     claim: str
     evidence_refs: list[str] = Field(default_factory=list)
@@ -237,6 +270,7 @@ class CopilotResearchCardResponseModel(BaseModel):
     card: ResearchCardModel | None = None
     sources: list[CopilotSourceRefModel] = Field(default_factory=list)
     tool_traces: list[CopilotToolTraceModel] = Field(default_factory=list)
+    operator_events: list[CopilotOperatorProgressEventModel] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
     @classmethod
@@ -252,6 +286,7 @@ class CopilotResearchCardResponseModel(BaseModel):
             card=ResearchCardModel.from_domain(row.card) if row.card is not None else None,
             sources=[CopilotSourceRefModel.from_domain(item) for item in row.sources],
             tool_traces=[CopilotToolTraceModel.from_domain(item) for item in row.tool_traces],
+            operator_events=[CopilotOperatorProgressEventModel.from_domain(item) for item in row.operator_events],
             warnings=list(row.warnings),
         )
 

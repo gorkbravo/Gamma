@@ -880,6 +880,7 @@ function buildCopilotFailureResult(
     card: null,
     sources: [],
     tool_traces: [],
+    operator_events: [],
     warnings: []
   };
 }

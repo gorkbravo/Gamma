@@ -2789,6 +2789,29 @@ export interface CopilotToolTrace {
   source_ids: string[];
 }
 
+export interface CopilotOperatorProgressEvent {
+  run_id: string;
+  event_id: string;
+  sequence: number;
+  event_type:
+    | "plan"
+    | "step-start"
+    | "tool-result"
+    | "warning"
+    | "confirmation-needed"
+    | "artifact-created"
+    | "final-report"
+    | string;
+  timestamp: string;
+  step_id: string | null;
+  tool_id: string | null;
+  title: string | null;
+  message: string | null;
+  payload: Record<string, unknown>;
+  source_ids: string[];
+  warnings: string[];
+}
+
 export interface ResearchClaim {
   claim: string;
   evidence_refs: string[];
@@ -2818,6 +2841,7 @@ export interface CopilotResearchCardResult {
   card: ResearchCard | null;
   sources: CopilotSourceRef[];
   tool_traces: CopilotToolTrace[];
+  operator_events: CopilotOperatorProgressEvent[];
   warnings: string[];
 }
 

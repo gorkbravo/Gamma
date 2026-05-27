@@ -2501,8 +2501,19 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
             source["source_id"] == "risk.scenario.analysis"
             for source in payload["sources"]
         )
+        event_types = [event["event_type"] for event in payload["operator_events"]]
+        assert event_types[0] == "plan"
+        assert "step-start" in event_types
+        assert "tool-result" in event_types
+        assert "artifact-created" in event_types
+        assert event_types[-1] == "final-report"
+        assert payload["operator_events"][-1]["payload"]["status"] == "ready"
         sessions = client.get("/copilot/sessions").json()
         assert sessions and sessions[0]["turn_count"] == 1
+        detail = client.get(f"/copilot/sessions/{sessions[0]['session_id']}").json()
+        persisted_events = detail["turns"][0]["result"]["operator_events"]
+        assert persisted_events
+        assert [event["sequence"] for event in persisted_events] == list(range(1, len(persisted_events) + 1))
     finally:
         runtime.shutdown()
 
@@ -2561,6 +2572,11 @@ def test_copilot_operator_execution_stops_before_confirmed_dcf_apply(tmp_path):
         assert any(
             "confirmation checkpoints" in warning
             for warning in payload["warnings"]
+        )
+        assert any(
+            event["event_type"] == "confirmation-needed"
+            and "fundamentals.apply_dcf_update" in event["payload"]["required_for_tool_ids"]
+            for event in payload["operator_events"]
         )
     finally:
         runtime.shutdown()
