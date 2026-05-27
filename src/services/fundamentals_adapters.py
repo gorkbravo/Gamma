@@ -1559,7 +1559,6 @@ class IbkrValuationAdapter:
         lookback_days: int = 180,
         force_refresh: bool = False,
     ) -> IbkrPriceContext:
-        del force_refresh
         normalized = str(ticker or "").strip().upper()
         if not normalized:
             return IbkrPriceContext(

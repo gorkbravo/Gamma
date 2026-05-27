@@ -810,7 +810,7 @@ class CopilotService:
             domain_outputs: dict[str, Any] = {}
             for tool_name in planned_domain.planned_tools:
                 elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-                if elapsed_ms >= budget.max_elapsed_ms:
+                if elapsed_ms >= budget.max_elapsed_ms and tool_traces:
                     warnings.append(
                         f"Stopped plan execution after {elapsed_ms}ms, above the {budget.max_elapsed_ms}ms elapsed-time guard."
                     )
@@ -940,8 +940,59 @@ class CopilotService:
         builder = self._context_builders.get(domain)
         if builder is None:
             raise ValueError(f"unsupported Copilot domain `{domain}`.")
-        domain_context = replace(request.context, current_tab=domain)
+        domain_context = self._plan_execution_request_context(request, domain)
         return builder(replace(request, domain=domain, context=domain_context))
+
+    def _plan_execution_request_context(
+        self,
+        request: CopilotResearchCardRequest,
+        domain: str,
+    ) -> CopilotRequestContext:
+        domain_context = self._synthesis_scope_context_for_domain(request, domain) or request.context
+        domain_context = replace(domain_context, current_tab=domain)
+
+        if domain == "fundamentals" and not self._context_has_fundamentals_ticker(domain_context):
+            ticker = self._first_plan_entity_id(request, "ticker")
+            if ticker:
+                domain_context = replace(domain_context, fundamentals_ticker=ticker)
+
+        return domain_context
+
+    @staticmethod
+    def _synthesis_scope_context_for_domain(
+        request: CopilotResearchCardRequest,
+        domain: str,
+    ) -> CopilotRequestContext | None:
+        if request.synthesis is None:
+            return None
+        for scope in request.synthesis.included_scopes:
+            if str(scope.domain or "").strip() == domain:
+                return scope.context
+        return None
+
+    @staticmethod
+    def _context_has_fundamentals_ticker(context: CopilotRequestContext) -> bool:
+        if str(context.fundamentals_ticker or "").strip():
+            return True
+        if isinstance(context.fundamentals_state, dict):
+            return bool(
+                str(
+                    context.fundamentals_state.get("ticker")
+                    or context.fundamentals_state.get("selected_ticker")
+                    or ""
+                ).strip()
+            )
+        return False
+
+    def _first_plan_entity_id(
+        self,
+        request: CopilotResearchCardRequest,
+        kind: str,
+    ) -> str | None:
+        for entity in self._extract_plan_entities(str(request.prompt or ""), request.context):
+            if entity.kind == kind and str(entity.id or "").strip():
+                return str(entity.id).strip()
+        return None
 
     def _default_plan_execution_arguments(
         self,
@@ -997,17 +1048,18 @@ class CopilotService:
         scenario = scenarios[scenario_id]
         scenario_assumptions = scenario.setdefault("assumptions", {})
         for key, value in assumptions.items():
-            if key not in scenario_assumptions:
+            normalized_key = CopilotService._normalize_dcf_assumption_key(str(key))
+            if normalized_key not in scenario_assumptions:
                 continue
-            default_value = scenario_assumptions[key]
+            default_value = scenario_assumptions[normalized_key]
             if isinstance(default_value, list):
-                scenario_assumptions[key] = (
+                scenario_assumptions[normalized_key] = (
                     list(value)
                     if isinstance(value, list)
                     else [value for _ in default_value]
                 )
             else:
-                scenario_assumptions[key] = value
+                scenario_assumptions[normalized_key] = value
         scenario_overrides = scenario.setdefault("overrides", {})
         for key, values in overrides.items():
             if isinstance(values, list):
@@ -1015,6 +1067,20 @@ class CopilotService:
         if active_scenario_id:
             proposed["active_scenario_id"] = str(active_scenario_id).strip().lower()
         return proposed
+
+    @staticmethod
+    def _normalize_dcf_assumption_key(key: str) -> str:
+        normalized = key.strip().lower()
+        aliases = {
+            "revenue_growth": "revenue_growth_pct",
+            "growth": "revenue_growth_pct",
+            "terminal_growth": "terminal_growth_pct",
+            "wacc": "wacc_pct",
+            "discount_rate": "wacc_pct",
+            "tax_rate": "tax_rate_pct",
+            "ebit_margin": "ebit_margin_pct",
+        }
+        return aliases.get(normalized, normalized)
 
     @staticmethod
     def _build_dcf_mutation_diff(
@@ -1412,6 +1478,8 @@ class CopilotService:
     def _extract_user_directed_domains(prompt: str) -> list[str]:
         prompt = prompt.lower()
         if not prompt.strip():
+            return []
+        if re.search(r"\buse\s+(the\s+)?relevant\s+gamma\s+domains?\b", prompt):
             return []
         explicit_markers = (
             "use ",
@@ -4127,10 +4195,16 @@ class CopilotService:
             terms.append(str(entity.id or ""))
             if entity.label:
                 terms.append(str(entity.label))
+            if entity.kind == "commodity" and str(entity.id or "").lower() == "oil":
+                terms.extend(["crude", "wti", "brent"])
         for match in re.findall(r"[a-zA-Z][a-zA-Z0-9.\-]{2,}", prompt):
             value = match.lower()
             if value not in stopwords:
                 terms.append(value)
+                if value == "oil":
+                    terms.extend(["crude", "wti", "brent"])
+                elif value == "fed":
+                    terms.append("federal reserve")
         return list(dict.fromkeys(term.strip().lower() for term in terms if term.strip()))
 
     @staticmethod
@@ -4158,6 +4232,36 @@ class CopilotService:
     ) -> list[NewsEventItem]:
         terms = [str(term).lower() for term in profile.get("query_terms", []) if str(term).strip()]
         tags = {str(tag).lower() for tag in profile.get("tags", []) if str(tag).strip()}
+        entity_terms = {
+            term
+            for entity in profile.get("entities", []) or []
+            for term in (
+                str(entity.get("id") or "").lower() if isinstance(entity, dict) else "",
+                str(entity.get("label") or "").lower() if isinstance(entity, dict) else "",
+            )
+            if term.strip()
+        }
+        if "oil" in entity_terms:
+            entity_terms.update({"crude", "wti", "brent"})
+        if "fed" in entity_terms:
+            entity_terms.add("federal reserve")
+        specific_terms = {
+            term
+            for term in terms
+            if len(term) >= 3
+            and term
+            not in {
+                "latest",
+                "news",
+                "event",
+                "events",
+                "macro",
+                "market",
+                "markets",
+                "context",
+            }
+        }
+        required_terms = entity_terms or specific_terms
 
         scored: list[tuple[int, datetime, int, NewsEventItem]] = []
         for index, item in enumerate(items):
@@ -4173,18 +4277,23 @@ class CopilotService:
                 ]
             ).lower()
             score = 0
-            if tags.intersection({tag.lower() for tag in item.tags}):
+            matched_specific = False
+            item_tags = {tag.lower() for tag in item.tags}
+            if tags.intersection(item_tags):
                 score += 3
             for term in terms:
                 if term and term in haystack:
-                    score += 2 if len(term) <= 5 else 1
+                    matched_specific = matched_specific or term in required_terms
+                    score += 6 if term in entity_terms else 3 if len(term) <= 5 else 2
+            if required_terms and not matched_specific:
+                continue
             if score > 0:
                 scored.append((score, item.published_at, -index, item))
 
         if scored:
             scored.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
             return [row[3] for row in scored[:limit]]
-        return list(items[:limit])
+        return []
 
     @staticmethod
     def _external_news_stale_warning(feed: NewsEventFeed, items: list[NewsEventItem]) -> str | None:

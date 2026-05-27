@@ -2401,8 +2401,8 @@ def test_copilot_confirmed_dcf_mutation_propose_and_apply_flow(tmp_path):
                 "scenario_id": "base",
                 "active_scenario_id": "base",
                 "assumptions": {
-                    "revenue_growth_pct": 0.11,
-                    "wacc_pct": 0.09,
+                    "revenue_growth": 0.11,
+                    "wacc": 0.09,
                 },
                 "rationale": "Test a higher growth and lower discount-rate case.",
             },
@@ -2545,6 +2545,59 @@ def test_copilot_plan_execution_runs_read_only_tools_and_persists_trace(tmp_path
         runtime.shutdown()
 
 
+def test_copilot_plan_execution_uses_planned_ticker_for_fundamentals(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+
+        response = client.post(
+            "/copilot/research-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research AAPL",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert any(
+            trace["tool_name"] == "get_fundamentals_company_context"
+            for trace in payload["tool_traces"]
+        )
+        assert any(
+            source["source_id"] == "fundamentals.company"
+            for source in payload["sources"]
+        )
+        assert not any("Skipped fundamentals" in warning for warning in payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_planner_does_not_treat_relevant_gamma_domains_as_user_directed(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research NVDA into CPI/Fed week. Use the relevant Gamma domains.",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "single_company_event_research"
+        assert payload["depth_profile"] == "standard"
+        planned_domains = [item["domain"] for item in payload["domain_plan"]]
+        assert planned_domains[:3] == ["fundamentals", "macro", "iv"]
+        assert "external_context" in planned_domains
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_external_context_tool_fetches_news_and_unavailable_boundaries(tmp_path, monkeypatch):
     monkeypatch.setenv("NEWS_PROVIDER", "sample")
     client, runtime = _build_test_client(tmp_path)
@@ -2570,6 +2623,30 @@ def test_copilot_external_context_tool_fetches_news_and_unavailable_boundaries(t
             for boundary in execution.output["provider_boundaries"]
         )
         assert any(source.source_id == "external_context.news_feed" for source in execution.sources)
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_external_context_requires_specific_match_for_company_news(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEWS_PROVIDER", "sample")
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        del client
+        request = CopilotResearchCardRequest(
+            domain="external_context",
+            prompt="Research AAPL latest news",
+            context=CopilotRequestContext(current_tab="external_context", workspace_mode="research"),
+        )
+        context = runtime.copilot_service._build_plan_execution_context(request, "external_context")
+        execution = runtime.copilot_service._execute_tool("get_external_context_summary", {}, context)
+
+        assert execution.trace.tool_name == "get_external_context_summary"
+        assert execution.output["news"]["items"] == []
+        assert any(
+            "No news/event items matched" in warning
+            for warning in execution.output["warnings"]
+        )
+        assert not any(source.kind == "news_item" for source in execution.sources)
     finally:
         runtime.shutdown()
 

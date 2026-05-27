@@ -2555,7 +2555,7 @@ export async function loadCopilotResearchPlan(
       context,
       ...(synthesis ? { synthesis } : {})
     };
-    const plan = await postJson<CopilotResearchPlan>("/copilot/research-plan", payload);
+    const plan = normalizeCopilotResearchPlan(await postJson<CopilotResearchPlan>("/copilot/research-plan", payload));
     copilotResearchPlan.set(plan);
     lastError.set("");
     return plan;
@@ -2568,6 +2568,36 @@ export async function loadCopilotResearchPlan(
   }
 }
 
+function normalizeCopilotResearchPlan(plan: CopilotResearchPlan): CopilotResearchPlan {
+  const domainPlan = Array.isArray(plan.domain_plan)
+    ? plan.domain_plan.map((item) => ({
+        ...item,
+        planned_tools: Array.isArray(item.planned_tools) ? item.planned_tools : [],
+        required_context: Array.isArray(item.required_context) ? item.required_context : [],
+        estimated_tool_calls: Number.isFinite(item.estimated_tool_calls)
+          ? item.estimated_tool_calls
+          : Array.isArray(item.planned_tools)
+            ? item.planned_tools.length
+            : 0,
+        estimated_provider_calls: Number.isFinite(item.estimated_provider_calls) ? item.estimated_provider_calls : 0,
+        estimated_latency_ms: Number.isFinite(item.estimated_latency_ms) ? item.estimated_latency_ms : 0
+      }))
+    : [];
+  const fallbackToolLimit = domainPlan.reduce((total, item) => total + item.estimated_tool_calls, 0);
+  const fallbackProviderLimit = domainPlan.reduce((total, item) => total + item.estimated_provider_calls, 0);
+  const fallbackElapsedLimit = domainPlan.reduce((total, item) => total + item.estimated_latency_ms, 0);
+  return {
+    ...plan,
+    target_entities: Array.isArray(plan.target_entities) ? plan.target_entities : [],
+    domain_plan: domainPlan,
+    domain_decisions: Array.isArray(plan.domain_decisions) ? plan.domain_decisions : [],
+    expected_artifacts: Array.isArray(plan.expected_artifacts) ? plan.expected_artifacts : [],
+    warnings: Array.isArray(plan.warnings) ? plan.warnings : [],
+    max_tool_calls: Number.isFinite(plan.max_tool_calls) ? plan.max_tool_calls : fallbackToolLimit,
+    max_provider_calls: Number.isFinite(plan.max_provider_calls) ? plan.max_provider_calls : fallbackProviderLimit,
+    max_elapsed_ms: Number.isFinite(plan.max_elapsed_ms) ? plan.max_elapsed_ms : fallbackElapsedLimit
+  };
+}
 export async function loadCopilotSessions(options: { includeArchived?: boolean; search?: string } = {}) {
   try {
     const params = new URLSearchParams();

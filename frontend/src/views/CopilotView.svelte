@@ -69,6 +69,30 @@
   let sessionSearch = "";
   let includeArchivedSessions = false;
 
+  function activeTurns() {
+    return activeSession?.turns ?? [];
+  }
+
+  function hasTurns() {
+    return activeTurns().length > 0 || threadEntries.length > 0;
+  }
+
+  function planEntities() {
+    return researchPlan?.target_entities ?? [];
+  }
+
+  function planDomains() {
+    return researchPlan?.domain_plan ?? [];
+  }
+
+  function planDecisions() {
+    return researchPlan?.domain_decisions ?? [];
+  }
+
+  function planWarnings() {
+    return researchPlan?.warnings ?? [];
+  }
+
   function setFocusMode(nextMode: FocusMode) {
     focusMode = nextMode;
   }
@@ -92,7 +116,7 @@
   }
 
   async function handleCreateMemo() {
-    if (loading || !(activeSession?.turns.length || threadEntries.length)) {
+    if (loading || !hasTurns()) {
       return;
     }
     const result = await onCreateMemo(memoTitle.trim(), memoNotes.trim());
@@ -200,7 +224,7 @@
   $: threadEntries = surface.thread?.entries ?? [];
   $: selectedCount = synthesisSurface.selectedScopeDomains.length;
   $: loadedCount = synthesisSurface.scopeOptions.length;
-  $: displayedTurnCount = threadEntries.length || activeSession?.turns.length || 0;
+  $: displayedTurnCount = threadEntries.length || activeTurns().length || 0;
 </script>
 
 <section class="view">
@@ -281,15 +305,15 @@
               <span>{researchPlan.max_provider_calls} provider calls max</span>
               <span>{formatMs(researchPlan.max_elapsed_ms)} guard</span>
             </div>
-            {#if researchPlan.target_entities.length}
+            {#if planEntities().length}
               <div class="entity-row">
-                {#each researchPlan.target_entities.slice(0, 4) as entity}
+                {#each planEntities().slice(0, 4) as entity}
                   <span>{entity.kind}: {entity.label ?? entity.id}</span>
                 {/each}
               </div>
             {/if}
             <div class="domain-plan">
-              {#each researchPlan.domain_plan.slice(0, 5) as item}
+              {#each planDomains().slice(0, 5) as item}
                 <div>
                   <strong>{item.domain.replaceAll("_", " ")}</strong>
                   <span>{item.depth} / {item.estimated_tool_calls}T / {item.estimated_provider_calls}P / {formatMs(item.estimated_latency_ms)}</span>
@@ -297,9 +321,9 @@
                 </div>
               {/each}
             </div>
-            {#if researchPlan.domain_decisions.length}
+            {#if planDecisions().length}
               <div class="domain-decisions">
-                {#each researchPlan.domain_decisions.slice(0, 6) as decision}
+                {#each planDecisions().slice(0, 6) as decision}
                   <div class:omitted={!decision.used}>
                     <strong>{decision.used ? "USED" : "SKIP"}</strong>
                     <span>{decision.domain.replaceAll("_", " ")}</span>
@@ -308,8 +332,8 @@
                 {/each}
               </div>
             {/if}
-            {#if researchPlan.warnings.length}
-              <p class="plan-warning">{researchPlan.warnings[0]}</p>
+            {#if planWarnings().length}
+              <p class="plan-warning">{planWarnings()[0]}</p>
             {/if}
           </div>
         {/if}
@@ -347,9 +371,9 @@
               </section>
             {/each}
           </div>
-        {:else if activeSession?.turns.length}
+        {:else if activeTurns().length}
           <div class="thread-list">
-            {#each activeSession.turns as turn (turn.turn_id)}
+            {#each activeTurns() as turn (turn.turn_id)}
               <section class="turn-row">
                 <div class="turn-meta">
                   <span>TURN {turn.turn_index + 1}</span>
@@ -415,7 +439,7 @@
         <div class="memo-form">
           <input bind:value={memoTitle} placeholder="Memo title" disabled={loading} />
           <textarea bind:value={memoNotes} rows={3} placeholder="Optional memo note" disabled={loading}></textarea>
-          <button type="button" disabled={loading || !(activeSession?.turns.length || threadEntries.length)} on:click={handleCreateMemo}>
+          <button type="button" disabled={loading || !hasTurns()} on:click={handleCreateMemo}>
             Create Memo
           </button>
         </div>
