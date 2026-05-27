@@ -356,6 +356,7 @@ def build_runtime(
         prediction_market_service=prediction_market_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
+        news_service=news_service,
         provider=trace_provider(
             _build_copilot_provider(allow_mock=bool(mock_mode)),
             provider_usage,

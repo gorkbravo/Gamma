@@ -509,11 +509,14 @@ Implementation note:
 
 ### Phase 4 - External Context Providers
 
-- [ ] Harden news provider boundary for company, macro, commodity, and event context.
-- [ ] Add analyst estimate provider boundary if a viable provider is selected.
-- [ ] Add transcript/filing delta context if needed.
-- [ ] Add provenance and freshness labels for all external context.
-- [ ] Add fallback behavior when providers are missing or stale.
+- [x] Harden news provider boundary for company, macro, commodity, and event context.
+- [x] Add analyst estimate provider boundary if a viable provider is selected.
+- [x] Add transcript/filing delta context if needed.
+- [x] Add provenance and freshness labels for all external context.
+- [x] Add fallback behavior when providers are missing or stale.
+
+Implementation note:
+- Phase 4 now executes through the same bounded planner/executor path as the read-only Gamma tools. `external_context` is a real Copilot context domain with `get_external_context_summary`, backed by the existing normalized `NewsService` provider boundary. It classifies company, macro, commodity, and event prompts into a compact external-context profile, fetches only approved read-only news/event provider data, filters relevant items, emits source refs for the feed and individual items, and returns freshness labels on the feed and every item. Analyst estimates, transcripts, and filing deltas are represented as explicit unavailable provider boundaries until a viable adapter is selected; company filing chronology should continue to come from the SEC-backed Fundamentals context rather than invented external deltas. Missing, failing, unavailable, and stale providers return warnings and unavailable/stale freshness labels instead of confident claims. Tests cover the tool boundary and planner execution path.
 
 ### Phase 5 - Research Reports
 

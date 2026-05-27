@@ -21,6 +21,7 @@ from src.application.copilot_context_helpers import (
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.macro_service import MacroSnapshotRequest, MacroService
+from src.application.news_service import NewsService
 from src.application.prediction_market_service import PredictionMarketService
 from src.models.copilot import (
     CopilotContextBundle,
@@ -45,8 +46,11 @@ from src.models.copilot import (
 )
 from src.services.copilot_store import CopilotStore
 from src.models.macro import MacroMetricRecord, MacroSeriesHistory
+from src.models.news import NewsEventFeed, NewsEventItem
 from src.models.prediction_markets import PredictionProbabilityPoint
+from src.models.provenance import FreshnessLabel
 from src.services.copilot_provider import CopilotProvider
+from src.utils.time import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +115,7 @@ class CopilotService:
         prediction_market_service: PredictionMarketService,
         crypto_service: CryptoService,
         fundamentals_service: FundamentalsService,
+        news_service: NewsService | None = None,
         provider: CopilotProvider,
         store: CopilotStore | None = None,
     ) -> None:
@@ -118,6 +123,7 @@ class CopilotService:
         self.prediction_market_service = prediction_market_service
         self.crypto_service = crypto_service
         self.fundamentals_service = fundamentals_service
+        self.news_service = news_service
         self.provider = provider
         self.store = store
         self._context_builders = {
@@ -132,6 +138,7 @@ class CopilotService:
             "fundamentals": self._build_fundamentals_context,
             "risk": self._build_risk_context,
             "iv": self._build_iv_context,
+            "external_context": self._build_external_context,
             "synthesis": self._build_synthesis_context,
         }
         self._tools = {
@@ -399,6 +406,26 @@ class CopilotService:
                     handler=self._tool_get_iv_session_status,
                 ),
                 _CopilotToolDefinition(
+                    name="get_external_context_summary",
+                    description="Return bounded read-only company, macro, commodity, and event context from approved external provider adapters, with explicit freshness and unavailable-provider labels.",
+                    domains=("external_context",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_external_context_summary,
+                    action_type="fetch_external_context",
+                    external_provider="news",
+                    timeout_seconds=8.0,
+                    failure_modes=(
+                        "No news/event provider is configured.",
+                        "Configured provider returned no matching items.",
+                        "Estimate, transcript, or filing-delta adapters are not configured.",
+                    ),
+                ),
+                _CopilotToolDefinition(
                     name="get_synthesis_scope_summary",
                     description="Return the active cross-context Gamma synthesis scope, including included domains, context fingerprints, warnings, and source references.",
                     domains=("synthesis",),
@@ -576,18 +603,6 @@ class CopilotService:
                 )
                 break
             domain = planned_domain.domain
-            if domain == "external_context":
-                skipped_domains.append(domain)
-                if provider_calls_used + planned_domain.estimated_provider_calls > budget.max_provider_calls:
-                    warnings.append(
-                        f"Skipped external context because provider calls would exceed the {budget.max_provider_calls} call guard."
-                    )
-                else:
-                    provider_calls_used += planned_domain.estimated_provider_calls
-                    warnings.append(
-                        "External context execution is skipped until approved provider adapters are configured."
-                    )
-                continue
 
             try:
                 context = self._build_plan_execution_context(request, domain)
@@ -992,6 +1007,7 @@ class CopilotService:
             "equity_research": ("equity research", "equities", "stocks", "benchmark"),
             "strategy_lab": ("strategy lab", "strategy", "backtest"),
             "iv": ("options", "iv", "vol", "skew"),
+            "external_context": ("external context", "news", "recent news", "headlines"),
         }
         domains: list[str] = []
         for domain, terms in domain_terms.items():
@@ -1072,18 +1088,18 @@ class CopilotService:
             add("fundamentals", "deep", "Single-company research needs filings, normalized statements, peers, DCF, and implied-expectation context.")
             add("equity_research", "medium", "Market and benchmark-relative context helps frame whether the company question is idiosyncratic or factor-driven.")
             add("iv", "medium", "Options context can surface event risk, term structure, and skew caveats if an options surface is available.")
-            add("external_context", "light", "Recent news, filings, estimates, or transcript context can add freshness when approved providers are configured.", planned_tools=[])
+            add("external_context", "light", "Recent news, filings, estimates, or transcript context can add freshness when approved providers are configured.")
         elif intent == "single_company_event_research":
             add("fundamentals", "medium", "Company-specific financial context remains relevant but should not dominate an event-week request.")
             add("macro", "deep", "CPI, Fed, inflation, and rates context are first-order drivers for the stated event lens.")
             add("iv", "deep", "Options term structure and implied move context are central to event-risk framing.")
             add("equity_research", "medium", "Benchmark and peer-relative behavior help separate company-specific movement from macro beta.")
-            add("external_context", "medium", "Recent news, calendar, estimates, and filings should be fetched only through approved read-only providers.", planned_tools=[])
+            add("external_context", "medium", "Recent news, calendar, estimates, and filings should be fetched only through approved read-only providers.")
         elif intent == "commodity_macro_research":
             add("commodities", "deep", "Commodity workspace data should anchor the price, curve, spread, inventory, and event read.")
             add("macro", "medium", "Macro context helps separate demand, inflation, USD, and rates effects from commodity-specific supply signals.")
             add("prediction_markets", "medium", "Related event contracts can provide cross-market expectations around geopolitics, policy, or supply disruptions.")
-            add("external_context", "medium", "Recent commodity and official event context can add freshness when provider-backed.", planned_tools=[])
+            add("external_context", "medium", "Recent commodity and official event context can add freshness when provider-backed.")
         elif intent == "portfolio_rate_shock_research":
             add("portfolio", "deep", "Portfolio exposure, concentration, cash, and position context are required before interpreting rate sensitivity.")
             add("risk", "deep", "Risk contribution, coverage, correlation, and scenario tools should quantify the shock path.")
@@ -1129,6 +1145,7 @@ class CopilotService:
             ],
             "risk": ["get_risk_coverage_summary", "get_risk_contribution_summary"],
             "iv": ["get_iv_surface_context", "get_iv_session_status"],
+            "external_context": ["get_external_context_summary"],
             "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
         }.get(domain, [])
 
@@ -1145,7 +1162,7 @@ class CopilotService:
         )
 
     def _estimated_provider_calls(self, domain: str, tools: list[str]) -> int:
-        calls = 1 if domain == "external_context" else 0
+        calls = 0
         for tool_name in tools:
             definition = self._tools.get(tool_name)
             if definition is not None and definition.external_provider:
@@ -1348,6 +1365,46 @@ class CopilotService:
             context=nested_context,
         )
         return builder(nested_request)
+
+    def _build_external_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        prompt = str(request.prompt or "").strip()
+        target_entities = self._extract_plan_entities(prompt, request.context)
+        profile = self._external_context_profile(prompt, target_entities)
+        warnings: list[str] = []
+        if self.news_service is None:
+            warnings.append("External news/event context is unavailable because no NewsService is configured.")
+        return CopilotContextBundle(
+            domain="external_context",
+            current_tab=request.context.current_tab or "external_context",
+            summary_data={
+                "workspace_mode": request.context.workspace_mode or "research",
+                "prompt": prompt,
+                "context_types": profile["context_types"],
+                "target_entities": [asdict(entity) for entity in target_entities],
+                "provider_boundaries": self._external_provider_boundaries(
+                    news_configured=self.news_service is not None,
+                    news_freshness=None,
+                ),
+                "warnings": warnings,
+            },
+            tool_state={
+                "prompt": prompt,
+                "target_entities": target_entities,
+                "external_context_profile": profile,
+            },
+            sources=[
+                CopilotSourceRef(
+                    source_id="external_context.boundary",
+                    label="External context provider boundary",
+                    kind="provider_boundary",
+                    provider="gamma",
+                    origin="gamma.copilot.external_context",
+                    description="Gamma-approved read-only external-context boundary for Copilot plan execution.",
+                    retrieved_at=now_utc(),
+                )
+            ],
+            warnings=warnings,
+        )
 
     def _build_synthesis_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
         synthesis = request.synthesis
@@ -3296,6 +3353,149 @@ class CopilotService:
             sources=[source],
         )
 
+    def _tool_get_external_context_summary(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        profile = context.tool_state.get("external_context_profile")
+        if not isinstance(profile, dict):
+            profile = self._external_context_profile(
+                str(context.tool_state.get("prompt") or ""),
+                [],
+            )
+        warnings = list(context.warnings)
+        sources: dict[str, CopilotSourceRef] = {
+            source.source_id: source for source in context.sources
+        }
+        if self.news_service is None:
+            source = CopilotSourceRef(
+                source_id="external_context.news_feed",
+                label="External news/event feed unavailable",
+                kind="news",
+                provider="unavailable",
+                origin="gamma.copilot.external_context.news",
+                description="No approved news/event provider is configured for Copilot external context.",
+                retrieved_at=now_utc(),
+            )
+            sources[source.source_id] = source
+            warnings.append("Skipped news/event external context because no NewsService is configured.")
+            output = self._external_context_output(
+                profile=profile,
+                feed=None,
+                items=[],
+                item_source_ids=[],
+                provider_boundaries=self._external_provider_boundaries(
+                    news_configured=False,
+                    news_freshness=FreshnessLabel.UNAVAILABLE,
+                ),
+                warnings=warnings,
+            )
+            return CopilotToolExecution(
+                output=output,
+                trace=CopilotToolTrace(
+                    tool_name="get_external_context_summary",
+                    summary="External context provider boundary was unavailable; no news/event items were fetched.",
+                    arguments={},
+                    source_ids=list(sources),
+                ),
+                sources=list(sources.values()),
+            )
+
+        try:
+            feed = self.news_service.latest(limit=25, force_refresh=False)
+        except Exception as exc:
+            source = CopilotSourceRef(
+                source_id="external_context.news_feed",
+                label="External news/event feed failed",
+                kind="news",
+                provider="unavailable",
+                origin="gamma.copilot.external_context.news",
+                description="The configured news/event provider failed while serving Copilot external context.",
+                retrieved_at=now_utc(),
+            )
+            sources[source.source_id] = source
+            warnings.append(f"News/event external context provider failed: {exc}")
+            output = self._external_context_output(
+                profile=profile,
+                feed=None,
+                items=[],
+                item_source_ids=[],
+                provider_boundaries=self._external_provider_boundaries(
+                    news_configured=True,
+                    news_freshness=FreshnessLabel.UNAVAILABLE,
+                ),
+                warnings=warnings,
+            )
+            return CopilotToolExecution(
+                output=output,
+                trace=CopilotToolTrace(
+                    tool_name="get_external_context_summary",
+                    summary="Configured news/event external context provider failed.",
+                    arguments={},
+                    source_ids=list(sources),
+                ),
+                sources=list(sources.values()),
+            )
+
+        warnings.extend(feed.warnings)
+        selected_items = self._select_external_news_items(feed.items, profile, limit=8)
+        if not selected_items:
+            warnings.append("No news/event items matched the Copilot external-context profile.")
+        stale_warning = self._external_news_stale_warning(feed, selected_items)
+        if stale_warning:
+            warnings.append(stale_warning)
+
+        feed_source = CopilotSourceRef(
+            source_id="external_context.news_feed",
+            label="External news/event feed",
+            kind="news",
+            provider=feed.source_provider,
+            origin=feed.origin,
+            description=f"Approved read-only news/event feed for Copilot external context; freshness={feed.freshness_label.value}.",
+            retrieved_at=feed.retrieved_at,
+        )
+        sources[feed_source.source_id] = feed_source
+        item_source_ids: list[str] = []
+        for item in selected_items:
+            source_id = f"external_context.news_item.{self._safe_source_id(item.normalized_id)}"
+            item_source_ids.append(source_id)
+            sources[source_id] = CopilotSourceRef(
+                source_id=source_id,
+                label=item.title[:120],
+                kind="news_item",
+                provider=item.source_provider,
+                origin=item.origin,
+                description=f"{item.source_name}; freshness={item.freshness_label.value}.",
+                retrieved_at=item.retrieved_at,
+            )
+
+        output = self._external_context_output(
+            profile=profile,
+            feed=feed,
+            items=selected_items,
+            item_source_ids=item_source_ids,
+            provider_boundaries=self._external_provider_boundaries(
+                news_configured=True,
+                news_freshness=feed.freshness_label,
+            ),
+            warnings=warnings,
+        )
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_external_context_summary",
+                summary=(
+                    f"Fetched {len(selected_items)} bounded external news/event items "
+                    f"for {', '.join(profile.get('context_types', []) or ['general'])} context."
+                ),
+                arguments={},
+                source_ids=list(sources),
+            ),
+            sources=list(sources.values()),
+        )
+
     def _tool_get_synthesis_scope_summary(
         self,
         arguments: dict[str, Any],
@@ -3436,6 +3636,249 @@ class CopilotService:
                 "get_iv_session_status",
             ),
         }.get(domain, ())
+
+    @staticmethod
+    def _external_context_profile(
+        prompt: str,
+        entities: list[CopilotResearchPlanEntity],
+    ) -> dict[str, Any]:
+        prompt_lower = str(prompt or "").lower()
+        context_types: list[str] = []
+
+        def add_context_type(value: str) -> None:
+            if value not in context_types:
+                context_types.append(value)
+
+        if any(entity.kind == "ticker" for entity in entities):
+            add_context_type("company")
+        if any(entity.kind == "commodity" for entity in entities):
+            add_context_type("commodity")
+        if any(term in prompt_lower for term in ("macro", "fed", "cpi", "inflation", "rate", "rates", "yield", "policy")):
+            add_context_type("macro")
+        if any(term in prompt_lower for term in ("event", "calendar", "catalyst", "week", "news", "latest", "going on")):
+            add_context_type("event")
+        if not context_types:
+            add_context_type("event")
+
+        query_terms = CopilotService._external_query_terms(prompt, entities)
+        tags = CopilotService._external_profile_tags(context_types, query_terms)
+        return {
+            "context_types": context_types,
+            "query_terms": query_terms,
+            "tags": tags,
+            "entities": [asdict(entity) for entity in entities],
+        }
+
+    @staticmethod
+    def _external_query_terms(
+        prompt: str,
+        entities: list[CopilotResearchPlanEntity],
+    ) -> list[str]:
+        stopwords = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "into",
+            "what",
+            "going",
+            "research",
+            "quick",
+            "deep",
+            "full",
+            "week",
+            "this",
+            "that",
+            "from",
+            "only",
+            "use",
+        }
+        terms: list[str] = []
+        for entity in entities:
+            terms.append(str(entity.id or ""))
+            if entity.label:
+                terms.append(str(entity.label))
+        for match in re.findall(r"[a-zA-Z][a-zA-Z0-9.\-]{2,}", prompt):
+            value = match.lower()
+            if value not in stopwords:
+                terms.append(value)
+        return list(dict.fromkeys(term.strip().lower() for term in terms if term.strip()))
+
+    @staticmethod
+    def _external_profile_tags(context_types: list[str], query_terms: list[str]) -> list[str]:
+        tags: list[str] = []
+        by_context = {
+            "company": ("company", "equities", "fundamentals", "filings", "regulatory", "markets"),
+            "macro": ("macro", "rates", "policy", "inflation", "growth", "official", "cross_asset"),
+            "commodity": ("commodities", "commodity", "energy", "oil", "metals", "geopolitics"),
+            "event": ("events", "event", "calendar", "official", "regulatory", "geopolitics", "markets"),
+        }
+        for context_type in context_types:
+            tags.extend(by_context.get(context_type, ()))
+        commodity_terms = {"oil", "crude", "wti", "brent", "gas", "gold", "copper"}
+        if any(term in commodity_terms for term in query_terms):
+            tags.extend(["commodities", "energy", "oil"])
+        return list(dict.fromkeys(tags))
+
+    @staticmethod
+    def _select_external_news_items(
+        items: list[NewsEventItem],
+        profile: dict[str, Any],
+        *,
+        limit: int,
+    ) -> list[NewsEventItem]:
+        terms = [str(term).lower() for term in profile.get("query_terms", []) if str(term).strip()]
+        tags = {str(tag).lower() for tag in profile.get("tags", []) if str(tag).strip()}
+
+        scored: list[tuple[int, datetime, int, NewsEventItem]] = []
+        for index, item in enumerate(items):
+            haystack = " ".join(
+                [
+                    item.title,
+                    item.summary or "",
+                    item.source_name,
+                    " ".join(item.tags),
+                    " ".join(entity.label for entity in item.detected_entities),
+                    " ".join(entity.symbol or "" for entity in item.detected_entities),
+                    " ".join(entity.normalized_id or "" for entity in item.detected_entities),
+                ]
+            ).lower()
+            score = 0
+            if tags.intersection({tag.lower() for tag in item.tags}):
+                score += 3
+            for term in terms:
+                if term and term in haystack:
+                    score += 2 if len(term) <= 5 else 1
+            if score > 0:
+                scored.append((score, item.published_at, -index, item))
+
+        if scored:
+            scored.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+            return [row[3] for row in scored[:limit]]
+        return list(items[:limit])
+
+    @staticmethod
+    def _external_news_stale_warning(feed: NewsEventFeed, items: list[NewsEventItem]) -> str | None:
+        if feed.freshness_label in {FreshnessLabel.UNAVAILABLE, FreshnessLabel.STALE, FreshnessLabel.UNKNOWN}:
+            return f"News/event external context freshness is {feed.freshness_label.value}."
+        if not items:
+            return None
+        latest = max(item.published_at for item in items)
+        age_seconds = (now_utc() - latest).total_seconds()
+        if age_seconds > 72 * 60 * 60:
+            return "Matched news/event external context is older than 72 hours and should be treated as stale."
+        return None
+
+    @staticmethod
+    def _external_provider_boundaries(
+        *,
+        news_configured: bool,
+        news_freshness: FreshnessLabel | str | None,
+    ) -> list[dict[str, Any]]:
+        normalized_news_freshness = (
+            news_freshness.value if isinstance(news_freshness, FreshnessLabel) else str(news_freshness or "unknown")
+        )
+        return [
+            {
+                "provider": "news_events",
+                "status": "available" if news_configured else "unavailable",
+                "action_type": "fetch_external_context",
+                "read_only": True,
+                "freshness_label": normalized_news_freshness,
+                "source_provider": "news_service" if news_configured else "unavailable",
+                "fallback": "Return an empty item list with warnings when feeds are missing, stale, or failing.",
+            },
+            {
+                "provider": "analyst_estimates",
+                "status": "unavailable",
+                "action_type": "fetch_external_context",
+                "read_only": True,
+                "freshness_label": FreshnessLabel.UNAVAILABLE.value,
+                "source_provider": "unconfigured",
+                "fallback": "Use Gamma fundamentals/market context and emit a missing-provider warning; do not synthesize consensus estimates.",
+            },
+            {
+                "provider": "transcripts",
+                "status": "unavailable",
+                "action_type": "fetch_external_context",
+                "read_only": True,
+                "freshness_label": FreshnessLabel.UNAVAILABLE.value,
+                "source_provider": "unconfigured",
+                "fallback": "Use loaded filing/fundamentals context when available; do not invent transcript snippets.",
+            },
+            {
+                "provider": "filing_deltas",
+                "status": "unavailable",
+                "action_type": "fetch_external_context",
+                "read_only": True,
+                "freshness_label": FreshnessLabel.UNAVAILABLE.value,
+                "source_provider": "unconfigured",
+                "fallback": "Rely on Gamma's SEC-backed Fundamentals context for filing chronology until a dedicated delta adapter exists.",
+            },
+        ]
+
+    @staticmethod
+    def _external_context_output(
+        *,
+        profile: dict[str, Any],
+        feed: NewsEventFeed | None,
+        items: list[NewsEventItem],
+        item_source_ids: list[str],
+        provider_boundaries: list[dict[str, Any]],
+        warnings: list[str],
+    ) -> dict[str, Any]:
+        return {
+            "context_types": list(profile.get("context_types", []) or []),
+            "query_terms": list(profile.get("query_terms", []) or []),
+            "target_entities": list(profile.get("entities", []) or []),
+            "news": {
+                "source_provider": feed.source_provider if feed is not None else "unavailable",
+                "origin": feed.origin if feed is not None else "gamma.copilot.external_context.news",
+                "retrieved_at": feed.retrieved_at.isoformat() if feed is not None else now_utc().isoformat(),
+                "freshness_label": feed.freshness_label.value if feed is not None else FreshnessLabel.UNAVAILABLE.value,
+                "items": [
+                    {
+                        "source_id": item_source_ids[index] if index < len(item_source_ids) else None,
+                        "normalized_id": item.normalized_id,
+                        "title": item.title,
+                        "summary": item.summary,
+                        "url": item.url,
+                        "source_name": item.source_name,
+                        "source_domain": item.source_domain,
+                        "source_provider": item.source_provider,
+                        "published_at": item.published_at.isoformat(),
+                        "retrieved_at": item.retrieved_at.isoformat(),
+                        "freshness_label": item.freshness_label.value,
+                        "tags": list(item.tags),
+                        "detected_entities": [
+                            {
+                                "label": entity.label,
+                                "entity_type": entity.entity_type,
+                                "normalized_id": entity.normalized_id,
+                                "symbol": entity.symbol,
+                            }
+                            for entity in item.detected_entities
+                        ],
+                        "origin": item.origin,
+                        "transformation_note": item.transformation_note,
+                        "warnings": list(item.warnings),
+                    }
+                    for index, item in enumerate(items)
+                ],
+            },
+            "provider_boundaries": provider_boundaries,
+            "fallback_behavior": [
+                "Missing providers are represented as unavailable boundaries with warnings.",
+                "Stale or unavailable feeds are passed through as freshness labels instead of being converted into confident claims.",
+                "General web browsing is not used by this executor path.",
+            ],
+            "warnings": dedupe_warnings(warnings),
+        }
+
+    @staticmethod
+    def _safe_source_id(value: str) -> str:
+        safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value or "").strip())
+        return safe[:120] or "item"
 
     @staticmethod
     def _portfolio_snapshot_from_bundle(context: CopilotContextBundle) -> dict[str, Any]:

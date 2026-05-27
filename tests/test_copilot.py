@@ -10,6 +10,7 @@ from src.application.copilot_service import CopilotService
 from src.application.runtime import build_runtime
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
     CopilotSourceRef,
@@ -2315,6 +2316,68 @@ def test_copilot_plan_execution_runs_read_only_tools_and_persists_trace(tmp_path
         assert any(
             trace["tool_name"] == "get_portfolio_positions_summary"
             for trace in turns[0]["result"]["tool_traces"]
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_external_context_tool_fetches_news_and_unavailable_boundaries(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEWS_PROVIDER", "sample")
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        del client
+        request = CopilotResearchCardRequest(
+            domain="external_context",
+            prompt="Use only news for oil and Fed policy context",
+            context=CopilotRequestContext(current_tab="external_context", workspace_mode="research"),
+        )
+        context = runtime.copilot_service._build_plan_execution_context(request, "external_context")
+        execution = runtime.copilot_service._execute_tool("get_external_context_summary", {}, context)
+
+        assert execution.trace.tool_name == "get_external_context_summary"
+        assert execution.output["news"]["freshness_label"] == "mocked"
+        assert execution.output["news"]["items"]
+        assert any(
+            boundary["provider"] == "analyst_estimates" and boundary["status"] == "unavailable"
+            for boundary in execution.output["provider_boundaries"]
+        )
+        assert any(
+            boundary["provider"] == "transcripts" and boundary["freshness_label"] == "unavailable"
+            for boundary in execution.output["provider_boundaries"]
+        )
+        assert any(source.source_id == "external_context.news_feed" for source in execution.sources)
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_plan_execution_runs_external_context_provider(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEWS_PROVIDER", "sample")
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Use only news for oil",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert any(
+            trace["tool_name"] == "get_external_context_summary"
+            for trace in payload["tool_traces"]
+        )
+        assert any(
+            source["source_id"] == "external_context.news_feed"
+            and source["provider"] == "sample_news"
+            for source in payload["sources"]
+        )
+        assert any(
+            "Skipped commodities" in warning
+            for warning in payload["warnings"]
         )
     finally:
         runtime.shutdown()
