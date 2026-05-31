@@ -19,6 +19,7 @@ from src.application.copilot_context_helpers import (
     summarize_research_result,
     summarize_risk_result,
 )
+from src.application.copilot_agents_operator import CopilotAgentsOperatorService
 from src.application.copilot_report_service import CopilotReportService
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
@@ -154,6 +155,7 @@ class CopilotService:
         self.news_service = news_service
         self.provider = provider
         self.store = store
+        self.agents_operator_service = CopilotAgentsOperatorService()
         self._context_builders = {
             "portfolio": self._build_portfolio_context,
             "research": self._build_research_context,
@@ -1103,6 +1105,19 @@ class CopilotService:
 
     def execute_research_operator_plan(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
         plan = self.plan_research_operator(request)
+        if self.agents_operator_service.config.enabled:
+            result = self.agents_operator_service.execute(
+                request=request,
+                plan=plan,
+                action_registry=self.action_registry,
+                build_context=lambda domain: self._build_plan_execution_context(request, domain),
+                default_arguments=self._default_plan_execution_arguments,
+                execute_action=self._execute_registered_operator_action,
+                build_card=self._build_operator_execution_card,
+            )
+            result = self._normalize_result_sources(result)
+            return self._persist_agents_operator_execution_result(request, plan, result)
+
         run_id = new_copilot_id("oprun")
         response_id = new_copilot_id("opexec")
         sources: dict[str, CopilotSourceRef] = {}
@@ -1393,6 +1408,88 @@ class CopilotService:
                         [
                             *result.warnings,
                             "Copilot executed the operator plan, but failed to persist this turn locally.",
+                        ]
+                    ),
+                )
+        return result
+
+    def _execute_registered_operator_action(
+        self,
+        tool_id: str,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        definition = self.action_registry.get(tool_id)
+        if definition is None:
+            return CopilotToolExecution(
+                output={"error": f"Unsupported Research Action Registry tool: {tool_id}"},
+                trace=CopilotToolTrace(
+                    tool_name=tool_id,
+                    summary="Gamma rejected an action that is not registered.",
+                    arguments=arguments,
+                    source_ids=[],
+                ),
+            )
+        if (
+            definition.action_type not in {"read_context", "run_analysis", "fetch_external_context"}
+            or not definition.read_only
+            or definition.mutates_local_state
+            or definition.requires_confirmation
+        ):
+            return CopilotToolExecution(
+                output={"error": f"Action is not automatic read-only work: {tool_id}"},
+                trace=CopilotToolTrace(
+                    tool_name=tool_id,
+                    summary="Gamma blocked a non-automatic or state-changing operator action.",
+                    arguments=arguments,
+                    source_ids=[],
+                ),
+            )
+        return self._execute_tool(tool_id, arguments, context)
+
+    def _persist_agents_operator_execution_result(
+        self,
+        request: CopilotResearchCardRequest,
+        plan: CopilotOperatorPlan,
+        result: CopilotResearchCardResult,
+    ) -> CopilotResearchCardResult:
+        final_payload: dict[str, Any] = {}
+        for event in reversed(result.operator_events):
+            if event.event_type == "final-report":
+                final_payload = dict(event.payload)
+                break
+        if self.store is not None:
+            try:
+                self.store.record_turn(
+                    session_id=request.user_session_id,
+                    title=request.session_title,
+                    domain="synthesis",
+                    current_tab=request.context.current_tab or "copilot",
+                    workspace_mode=request.context.workspace_mode,
+                    prompt=request.prompt,
+                    context_fingerprint=request.context_fingerprint,
+                    context_summary={
+                        "operator_plan": {
+                            "intent": plan.intent,
+                            "role": plan.role,
+                            "orchestrator": result.provider,
+                            "steps": [step.__dict__ for step in plan.steps],
+                            "executed_steps": list(final_payload.get("executed_steps") or []),
+                            "skipped_steps": list(final_payload.get("skipped_steps") or []),
+                            "outputs": dict(final_payload.get("outputs") or {}),
+                        },
+                        "operator_events": [asdict(event) for event in result.operator_events],
+                    },
+                    result=result,
+                )
+            except Exception:
+                logger.exception("Copilot Agents SDK operator execution persistence failed")
+                result = replace(
+                    result,
+                    warnings=dedupe_warnings(
+                        [
+                            *result.warnings,
+                            "Copilot executed the Agents SDK operator plan, but failed to persist this turn locally.",
                         ]
                     ),
                 )

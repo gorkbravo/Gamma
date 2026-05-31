@@ -2518,6 +2518,131 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         runtime.shutdown()
 
 
+def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, monkeypatch):
+    from src.application import copilot_agents_operator as agents_operator
+
+    class _FakeAgent:
+        def __init__(self, *, name, model, instructions, tools):
+            self.name = name
+            self.model = model
+            self.instructions = instructions
+            self.tools = tools
+
+    class _FakeRunner:
+        @staticmethod
+        async def run(agent, prompt, max_turns):
+            assert agent.name == "Gamma Research Operator"
+            assert max_turns >= 1
+            assert "run_risk_scenario_analysis" in prompt
+            agent.tools[0]("run_risk_scenario_analysis", "{}")
+            return type("_FakeRunResult", (), {"final_output": "ok"})()
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL", "gpt-test-operator")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        agents_operator,
+        "_load_agents_sdk",
+        lambda: agents_operator._AgentsSdkModule(
+            Agent=_FakeAgent,
+            Runner=_FakeRunner,
+            function_tool=lambda func: func,
+        ),
+    )
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["provider"] == "openai_agents_sdk_operator"
+        assert payload["model"] == "gpt-test-operator"
+        assert any(trace["tool_name"] == "run_risk_scenario_analysis" for trace in payload["tool_traces"])
+        assert payload["operator_events"][0]["payload"]["orchestrator"] == "openai_agents_sdk_operator"
+        assert payload["operator_events"][-1]["payload"]["orchestrator"] == "openai_agents_sdk_operator"
+
+        sessions = client.get("/copilot/sessions").json()
+        assert sessions and sessions[0]["turn_count"] == 1
+        detail = client.get(f"/copilot/sessions/{sessions[0]['session_id']}").json()
+        persisted = detail["turns"][0]["result"]
+        assert persisted["provider"] == "openai_agents_sdk_operator"
+        assert persisted["operator_events"][-1]["payload"]["orchestrator"] == "openai_agents_sdk_operator"
+    finally:
+        runtime.shutdown()
+
+
+def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, monkeypatch):
+    from src.application import copilot_agents_operator as agents_operator
+
+    class _FakeAgent:
+        def __init__(self, *, name, model, instructions, tools):
+            del name
+            del model
+            del instructions
+            self.tools = tools
+
+    class _FakeRunner:
+        @staticmethod
+        async def run(agent, prompt, max_turns):
+            del max_turns
+            assert "fundamentals.apply_dcf_update" in prompt
+            agent.tools[0]("fundamentals.apply_dcf_update", "{}")
+            return type("_FakeRunResult", (), {"final_output": "ok"})()
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        agents_operator,
+        "_load_agents_sdk",
+        lambda: agents_operator._AgentsSdkModule(
+            Agent=_FakeAgent,
+            Runner=_FakeRunner,
+            function_tool=lambda func: func,
+        ),
+    )
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research AAPL and adjust the DCF revenue growth assumption",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["provider"] == "openai_agents_sdk_operator"
+        assert not any(trace["tool_name"] == "fundamentals.apply_dcf_update" for trace in payload["tool_traces"])
+        assert any("outside the operator plan" in warning for warning in payload["warnings"])
+        assert any(
+            event["event_type"] == "confirmation-needed"
+            and "fundamentals.apply_dcf_update" in event["payload"]["required_for_tool_ids"]
+            for event in payload["operator_events"]
+        )
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_operator_execution_runs_reverse_valuation_analysis(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

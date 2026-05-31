@@ -20,6 +20,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "edgartools>=5.28.4,<6",
+    "openai-agents>=0.17.4,<0.18",
     "websockets>=12",
     "yfinance>=0.2.54",
 ]

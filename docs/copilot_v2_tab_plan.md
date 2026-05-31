@@ -602,8 +602,8 @@ Implementation note:
 ### Phase 7 - Agents SDK Operator Orchestration
 
 - [x] Decide whether to adopt Agents SDK for the Research Operator path.
-- [ ] Prototype Agents SDK orchestration behind the existing Gamma action registry.
-- [ ] Preserve existing Gamma permission checks and local persistence.
+- [x] Prototype Agents SDK orchestration behind the existing Gamma action registry.
+- [x] Preserve existing Gamma permission checks and local persistence.
 - [ ] Add traces/evals for tool selection quality.
 
 Implementation direction:
@@ -642,6 +642,7 @@ Research Operator build path:
 
 Implementation note:
 - First-pass operator progress events now ride on `/copilot/operator-plan/execute` results as `operator_events` and are persisted with Copilot turns. The backend remains authoritative for execution state; the Copilot workspace renders the trace for inspection only. Events currently cover deterministic custom-loop execution and are shaped so the Agents SDK prototype can emit the same contract behind the existing action registry.
+- Agents SDK orchestration now exists behind `GAMMA_COPILOT_OPERATOR_ORCHESTRATOR=agents_sdk`. The default remains the deterministic custom loop. The SDK path exposes only a single Gamma action-registry execution tool to the agent, validates each requested action against the existing `ResearchActionRegistry`, runs only automatic read-only actions through Gamma's existing context builders and tool executors, emits the same `operator_events` contract, and persists the result as a normal Copilot session turn. It currently targets the same first-pass operator surface as the custom loop: risk scenario analysis, fundamentals reverse valuation, and DCF confirmation checkpoints without applying local DCF changes.
 
 6. Evaluate Agents SDK against the operator path.
    - Prototype a narrow hybrid orchestrator after the action registry and read-only operator tools are stable.
