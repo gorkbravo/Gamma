@@ -26,8 +26,11 @@ from src.application.fundamentals_service import FundamentalsService
 from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.news_service import NewsService
 from src.application.prediction_market_service import PredictionMarketService
+from src.application.research_service import ResearchAnalysisRequest, ResearchService
 from src.application.research_action_registry import ResearchActionRegistry
+from src.application.request_limits import MAX_RISK_LOOKBACK_DAYS
 from src.application.risk_service import RiskComputeRequest, RiskService
+from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.copilot import (
     CopilotContextBundle,
     CopilotDraftMutation,
@@ -63,6 +66,7 @@ from src.models.news import NewsEventFeed, NewsEventItem
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.models.prediction_markets import PredictionProbabilityPoint
 from src.models.provenance import FreshnessLabel
+from src.models.research_lab import ResearchComparisonLeg, ResearchComparisonRequest
 from src.services.copilot_provider import CopilotProvider
 from src.utils.time import now_utc
 
@@ -251,6 +255,79 @@ class CopilotService:
                         "Raw uploaded CSV rows are not persisted by default, so this action summarizes the active normalized result.",
                         "Benchmark-relative fields are unavailable when the active Strategy Lab result has no benchmark overlap.",
                         "Compare/Scenario results are summarized as comparison analytics rather than rerun as a new backtest.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="run_hypothetical_portfolio_comparison",
+                    description="Build a bounded read-only hypothetical research portfolio and compare its historical return stream to a benchmark.",
+                    domains=("research",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "portfolio_label": {
+                                "type": ["string", "null"],
+                                "description": "Optional label for the hypothetical portfolio.",
+                            },
+                            "benchmark_symbol": {
+                                "type": ["string", "null"],
+                                "description": "Benchmark ticker for comparison. Defaults to SPY.",
+                            },
+                            "lookback_days": {
+                                "type": ["integer", "null"],
+                                "description": "Historical lookback in days, bounded to 20-2520.",
+                            },
+                            "min_observations": {
+                                "type": ["integer", "null"],
+                                "description": "Minimum aligned observations required for the comparison, bounded to 2-2520.",
+                            },
+                            "legs": {
+                                "type": "array",
+                                "description": "Hypothetical long-only research legs. Weights are normalized by Gamma and do not modify any portfolio.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "symbol": {
+                                            "type": "string",
+                                            "description": "Ticker or instrument symbol.",
+                                        },
+                                        "weight": {
+                                            "type": "number",
+                                            "description": "Non-negative portfolio weight. Gamma normalizes the supplied weights.",
+                                        },
+                                        "sec_type": {
+                                            "type": ["string", "null"],
+                                            "description": "Optional security type, e.g. STK or ETF.",
+                                        },
+                                        "currency": {
+                                            "type": ["string", "null"],
+                                            "description": "Optional instrument currency.",
+                                        },
+                                        "exchange": {
+                                            "type": ["string", "null"],
+                                            "description": "Optional exchange.",
+                                        },
+                                    },
+                                    "required": ["symbol", "weight", "sec_type", "currency", "exchange"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["portfolio_label", "benchmark_symbol", "lookback_days", "min_observations", "legs"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_hypothetical_portfolio_comparison,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=20.0,
+                    permission_policy="automatic",
+                    provenance_behavior=(
+                        "Builds a temporary read-only synthetic research scope, compares normalized returns to a benchmark, "
+                        "and returns coverage, relative metrics, warnings, and provider provenance without saving or trading anything."
+                    ),
+                    failure_modes=(
+                        "History may be missing for one or more requested symbols.",
+                        "The comparison can be unavailable if fewer than two aligned return observations remain.",
+                        "Weights are bounded, long-only, and normalized; this does not modify broker or saved research state.",
                     ),
                 ),
                 _CopilotToolDefinition(
@@ -1660,6 +1737,8 @@ class CopilotService:
             return {"ticker": context.summary_data.get("ticker")}
         if tool_name == "run_strategy_lab_backtest":
             return {"result_kind": "auto"}
+        if tool_name == "run_hypothetical_portfolio_comparison":
+            return self._default_hypothetical_portfolio_arguments(context)
         if tool_name == "run_risk_scenario_analysis":
             is_rate_shock = "rate" in str(context.summary_data).lower()
             return {
@@ -2238,6 +2317,8 @@ class CopilotService:
         has_portfolio_context = "portfolio" in prompt or context.current_tab == "portfolio"
         has_oil_context = any(term in prompt for term in ("oil", "crude", "brent", "wti"))
 
+        if CopilotService._prompt_requests_hypothetical_portfolio(prompt):
+            return "hypothetical_portfolio_comparison"
         if has_portfolio_context and has_rate_context:
             return "portfolio_rate_shock_research"
         if has_oil_context:
@@ -2317,6 +2398,15 @@ class CopilotService:
             add("risk", "deep", "Risk contribution, coverage, correlation, and scenario tools should quantify the shock path.")
             add("macro", "deep", "Rates, policy path, curve, breakeven, and event context define the rate-shock scenario.")
             add("iv", "light", "Options context is optional and only useful if active surfaces exist for dominant exposures.")
+        elif intent == "hypothetical_portfolio_comparison":
+            add(
+                "research",
+                "deep",
+                "The request asks Gamma to compare a hypothetical research portfolio against a benchmark using read-only historical analytics.",
+                action_type="run_analysis",
+                planned_tools=["run_hypothetical_portfolio_comparison"],
+                required_context=["symbols", "weights", "benchmark_symbol"],
+            )
         elif intent == "active_context_research":
             active_domain = self._resolve_domain(request)
             add(active_domain, "medium" if depth_profile != "quick" else "light", "The request is anchored to the active Gamma context.")
@@ -2432,6 +2522,17 @@ class CopilotService:
             "assumptions",
         )
         return any(term in prompt for term in mutation_terms)
+
+    @staticmethod
+    def _prompt_requests_hypothetical_portfolio(prompt: str) -> bool:
+        normalized = str(prompt or "").lower()
+        if "portfolio" not in normalized:
+            return False
+        comparison_terms = ("compare", "comparison", "versus", " vs ", "against", "relative to", "to ")
+        hypothetical_terms = ("hypothetical", "research portfolio", "synthetic", "60/40", "70/30", "50/50")
+        return any(term in normalized for term in comparison_terms) and any(
+            term in normalized for term in hypothetical_terms
+        )
 
     @staticmethod
     def _first_entity_id(entities: list[CopilotResearchPlanEntity], kind: str) -> str | None:
@@ -2836,9 +2937,32 @@ class CopilotService:
         state = request.context.research_state or {}
         result = state.get("result")
         if not isinstance(result, dict):
+            if self._prompt_requests_hypothetical_portfolio(str(request.prompt or "").lower()):
+                source = CopilotSourceRef(
+                    source_id="research.hypothetical_request",
+                    label="Hypothetical research request",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.copilot.operator.hypothetical_portfolio",
+                    description="Prompt-derived hypothetical portfolio comparison request; no saved research state is modified.",
+                    retrieved_at=now_utc(),
+                )
+                return CopilotContextBundle(
+                    domain="research",
+                    current_tab=request.context.current_tab or "research",
+                    summary_data={
+                        "workspace_mode": request.context.workspace_mode or "research",
+                        "prompt": request.prompt,
+                        "research": None,
+                    },
+                    tool_state={},
+                    sources=[source],
+                    warnings=[],
+                )
             raise ValueError("Research copilot requires an active research result.")
         summary_data = {
             "workspace_mode": request.context.workspace_mode or "research",
+            "prompt": request.prompt,
             "research": summarize_research_result(result),
         }
         warnings = dedupe_warnings(result.get("warnings", []))
@@ -3840,6 +3964,74 @@ class CopilotService:
                 tool_name="run_strategy_lab_backtest",
                 summary=f"Summarized the active Strategy Lab {result_kind.replace('_', ' ')} as a read-only backtest.",
                 arguments={"result_kind": result_kind},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_run_hypothetical_portfolio_comparison(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        if self.research_provider is None:
+            raise ValueError("Research provider is unavailable to Copilot.")
+        normalized = self._normalize_hypothetical_portfolio_arguments(arguments)
+        research_service = ResearchService(self.research_provider)
+        analysis = research_service.analyze(
+            ResearchAnalysisRequest(
+                scope_type=ResearchScopeType.SYNTHETIC_PORTFOLIO,
+                synthetic_positions=[
+                    SyntheticPosition(
+                        symbol=leg["symbol"],
+                        weight=leg["weight"],
+                        sec_type=leg.get("sec_type") or None,
+                        currency=leg.get("currency") or None,
+                        exchange=leg.get("exchange") or None,
+                    )
+                    for leg in normalized["legs"]
+                ],
+                benchmark_symbol=normalized["benchmark_symbol"],
+                lookback_days=normalized["lookback_days"],
+            )
+        )
+        comparison = research_service.compare_research(
+            ResearchComparisonRequest(
+                left=ResearchComparisonLeg(
+                    label=normalized["portfolio_label"],
+                    object_type="hypothetical_portfolio",
+                    returns=analysis.perf,
+                ),
+                right=ResearchComparisonLeg(
+                    label=normalized["benchmark_symbol"],
+                    object_type="benchmark",
+                    returns=analysis.benchmark_returns,
+                ),
+            )
+        )
+        output = self._hypothetical_portfolio_comparison_summary(
+            normalized=normalized,
+            analysis=analysis,
+            comparison=comparison,
+        )
+        source = CopilotSourceRef(
+            source_id="research.hypothetical_portfolio.operator_comparison",
+            label="Hypothetical portfolio comparison",
+            kind="analytics",
+            provider=comparison.source_provider,
+            origin=comparison.origin,
+            description="Read-only Research Operator comparison of a temporary hypothetical portfolio against a benchmark.",
+            retrieved_at=comparison.retrieved_at,
+        )
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_hypothetical_portfolio_comparison",
+                summary=(
+                    f"Compared {normalized['portfolio_label']} against {normalized['benchmark_symbol']} "
+                    "as a read-only hypothetical research portfolio."
+                ),
+                arguments=normalized,
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -5495,6 +5687,244 @@ class CopilotService:
             if isinstance(result, dict):
                 return result_kind, result
         raise ValueError("Strategy Lab context is missing an active imported, composition, or comparison result.")
+
+    @classmethod
+    def _normalize_hypothetical_portfolio_arguments(cls, arguments: dict[str, Any]) -> dict[str, Any]:
+        raw_legs = arguments.get("legs")
+        if not isinstance(raw_legs, list):
+            raw_legs = []
+        warnings: list[str] = []
+        legs: list[dict[str, Any]] = []
+        for item in raw_legs[:25]:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            weight = cls._bounded_optional_float(
+                item.get("weight"),
+                minimum=0.0,
+                maximum=100.0,
+                field_name=f"legs.{symbol}.weight",
+                warnings=warnings,
+            )
+            if weight is None or weight <= 0:
+                continue
+            legs.append(
+                {
+                    "symbol": symbol,
+                    "weight": weight,
+                    "sec_type": cls._optional_clean_string(item.get("sec_type")),
+                    "currency": cls._optional_clean_string(item.get("currency")),
+                    "exchange": cls._optional_clean_string(item.get("exchange")),
+                }
+            )
+        if len(raw_legs) > 25:
+            warnings.append("Hypothetical portfolio legs were truncated to the first 25 entries.")
+        if not legs:
+            raise ValueError("Hypothetical portfolio comparison requires at least one positive-weight leg.")
+        weight_sum = sum(float(item["weight"]) for item in legs)
+        if weight_sum <= 0:
+            raise ValueError("Hypothetical portfolio comparison requires positive total weight.")
+        normalized_legs = [
+            {
+                **item,
+                "weight": float(item["weight"]) / weight_sum,
+            }
+            for item in legs
+        ]
+        lookback_days = cls._bounded_int(
+            arguments.get("lookback_days"),
+            default=252,
+            minimum=20,
+            maximum=MAX_RISK_LOOKBACK_DAYS,
+            field_name="lookback_days",
+            warnings=warnings,
+        )
+        min_observations = cls._bounded_int(
+            arguments.get("min_observations"),
+            default=5,
+            minimum=2,
+            maximum=MAX_RISK_LOOKBACK_DAYS,
+            field_name="min_observations",
+            warnings=warnings,
+        )
+        benchmark_symbol = str(arguments.get("benchmark_symbol") or "SPY").strip().upper() or "SPY"
+        portfolio_label = str(arguments.get("portfolio_label") or "").strip()
+        if not portfolio_label:
+            portfolio_label = "Hypothetical " + "/".join(item["symbol"] for item in normalized_legs[:4])
+        return {
+            "portfolio_label": portfolio_label[:128],
+            "benchmark_symbol": benchmark_symbol[:24],
+            "lookback_days": lookback_days,
+            "min_observations": min_observations,
+            "legs": normalized_legs,
+            "warnings": warnings,
+        }
+
+    @classmethod
+    def _default_hypothetical_portfolio_arguments(
+        cls,
+        context: CopilotContextBundle,
+    ) -> dict[str, Any] | None:
+        prompt = str(context.summary_data.get("prompt") or context.tool_state.get("prompt") or "")
+        tickers = [
+            match.upper()
+            for match in re.findall(r"\b[A-Z]{1,5}(?:\.[A-Z])?\b", prompt)
+            if match.lower() not in {"cpi", "fed", "oil", "rate", "rates", "var"}
+        ]
+        if not tickers:
+            return None
+        benchmark_symbol = "SPY"
+        benchmark_match = re.search(
+            r"\b(?:to|vs\.?|versus|against|relative to)\s+([A-Z]{1,5}(?:\.[A-Z])?)\b",
+            prompt,
+        )
+        if benchmark_match:
+            benchmark_symbol = benchmark_match.group(1).upper()
+        elif len(tickers) > 2:
+            benchmark_symbol = tickers[-1]
+        leg_symbols = [ticker for ticker in tickers if ticker != benchmark_symbol]
+        if not leg_symbols:
+            return None
+        weights = cls._extract_ratio_weights(prompt, len(leg_symbols))
+        if weights is None:
+            weights = [1.0 / len(leg_symbols)] * len(leg_symbols)
+        return {
+            "portfolio_label": "Hypothetical " + "/".join(leg_symbols[:4]),
+            "benchmark_symbol": benchmark_symbol,
+            "lookback_days": 252,
+            "min_observations": 5,
+            "legs": [
+                {
+                    "symbol": symbol,
+                    "weight": weights[index],
+                    "sec_type": None,
+                    "currency": None,
+                    "exchange": None,
+                }
+                for index, symbol in enumerate(leg_symbols)
+            ],
+        }
+
+    @staticmethod
+    def _extract_ratio_weights(prompt: str, expected_count: int) -> list[float] | None:
+        for match in re.finditer(r"\b\d{1,3}(?:\s*/\s*\d{1,3})+\b", prompt):
+            parts = [float(item) for item in re.findall(r"\d{1,3}", match.group(0))]
+            if len(parts) == expected_count and sum(parts) > 0:
+                return [value / sum(parts) for value in parts]
+        return None
+
+    @staticmethod
+    def _bounded_int(
+        value: Any,
+        *,
+        default: int,
+        minimum: int,
+        maximum: int,
+        field_name: str,
+        warnings: list[str],
+    ) -> int:
+        if value is None:
+            return default
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            warnings.append(f"Ignored non-integer {field_name}; using {default}.")
+            return default
+        if numeric < minimum:
+            warnings.append(f"{field_name} was clipped to {minimum}.")
+            return minimum
+        if numeric > maximum:
+            warnings.append(f"{field_name} was clipped to {maximum}.")
+            return maximum
+        return numeric
+
+    @staticmethod
+    def _optional_clean_string(value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text.upper() if text else None
+
+    @classmethod
+    def _hypothetical_portfolio_comparison_summary(
+        cls,
+        *,
+        normalized: dict[str, Any],
+        analysis: Any,
+        comparison: Any,
+    ) -> dict[str, Any]:
+        row = comparison.comparison
+        warnings = dedupe_warnings(
+            normalized.get("warnings", []),
+            analysis.warnings,
+            comparison.warnings,
+            [
+                "Hypothetical portfolio comparison is read-only research; Gamma does not rebalance or modify broker portfolios.",
+            ],
+        )
+        if row.aligned_observation_count < int(normalized["min_observations"]):
+            warnings = dedupe_warnings(
+                warnings,
+                [
+                    (
+                        f"Aligned observations ({row.aligned_observation_count}) are below the requested "
+                        f"minimum ({normalized['min_observations']}); treat comparison metrics as thin-window diagnostics."
+                    )
+                ],
+            )
+        return {
+            "portfolio_label": normalized["portfolio_label"],
+            "benchmark_symbol": normalized["benchmark_symbol"],
+            "lookback_days": normalized["lookback_days"],
+            "min_observations": normalized["min_observations"],
+            "legs": list(normalized["legs"]),
+            "coverage": {
+                "left_observation_count": row.left_observation_count,
+                "right_observation_count": row.right_observation_count,
+                "aligned_observation_count": row.aligned_observation_count,
+                "overlap_start": row.overlap_start,
+                "overlap_end": row.overlap_end,
+                "missing_symbols": list(getattr(analysis, "missing_symbols", []) or []),
+                "available_symbols": list(getattr(analysis, "available_symbols", []) or []),
+                "benchmark_overlap_count": getattr(analysis, "benchmark_overlap_count", None),
+            },
+            "left": {
+                "label": row.left.label,
+                "object_type": row.left.object_type,
+                "metrics": cls._metrics_to_dict(row.left.metrics),
+            },
+            "right": {
+                "label": row.right.label,
+                "object_type": row.right.object_type,
+                "metrics": cls._metrics_to_dict(row.right.metrics),
+            },
+            "relative": {
+                "relative_return": row.relative_return,
+                "volatility_difference": row.volatility_difference,
+                "max_drawdown_difference": row.max_drawdown_difference,
+                "correlation": row.correlation,
+                "beta": row.beta,
+            },
+            "provenance": {
+                "source_provider": comparison.source_provider,
+                "retrieved_at": comparison.retrieved_at,
+                "origin": comparison.origin,
+                "transformation_note": comparison.transformation_note,
+                "freshness_label": comparison.freshness_label,
+                "history_source_label": getattr(analysis, "history_source_label", None),
+            },
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _metrics_to_dict(metrics: Any) -> dict[str, Any]:
+        if hasattr(metrics, "__dict__"):
+            return {
+                key: value
+                for key, value in metrics.__dict__.items()
+                if value is not None
+            }
+        return {}
 
     @classmethod
     def _strategy_lab_operator_summary(

@@ -2414,6 +2414,10 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         assert by_id["run_strategy_lab_backtest"]["action_type"] == "run_analysis"
         assert by_id["run_strategy_lab_backtest"]["read_only"] is True
         assert by_id["run_strategy_lab_backtest"]["mutates_local_state"] is False
+        assert by_id["run_hypothetical_portfolio_comparison"]["permission_policy"] == "automatic"
+        assert by_id["run_hypothetical_portfolio_comparison"]["action_type"] == "run_analysis"
+        assert by_id["run_hypothetical_portfolio_comparison"]["read_only"] is True
+        assert by_id["run_hypothetical_portfolio_comparison"]["mutates_local_state"] is False
         assert by_id["fundamentals.propose_dcf_update"]["permission_policy"] == "automatic_draft"
         assert by_id["fundamentals.apply_dcf_update"]["permission_policy"] == "confirmation_required"
         assert by_id["fundamentals.apply_dcf_update"]["retry_policy"] == "not_retry_safe_after_success"
@@ -2539,6 +2543,79 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         persisted_events = detail["turns"][0]["result"]["operator_events"]
         assert persisted_events
         assert [event["sequence"] for event in persisted_events] == list(range(1, len(persisted_events) + 1))
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_plan_includes_hypothetical_portfolio_comparison_tool(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Compare a hypothetical 60/40 AAPL/MSFT research portfolio to SPY",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "hypothetical_portfolio_comparison"
+        assert any(step["tool_id"] == "run_hypothetical_portfolio_comparison" for step in payload["steps"])
+        assert all(step["permission_policy"] == "automatic" for step in payload["steps"])
+        assert not any("No registered Research Operator tools" in warning for warning in payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_execution_runs_hypothetical_portfolio_comparison(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Compare a hypothetical 60/40 AAPL/MSFT research portfolio to SPY",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert any(
+            trace["tool_name"] == "run_hypothetical_portfolio_comparison"
+            for trace in payload["tool_traces"]
+        )
+        comparison_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_hypothetical_portfolio_comparison"
+        )
+        assert comparison_trace["arguments"]["benchmark_symbol"] == "SPY"
+        assert comparison_trace["arguments"]["legs"] == [
+            {"symbol": "AAPL", "weight": 0.6, "sec_type": None, "currency": None, "exchange": None},
+            {"symbol": "MSFT", "weight": 0.4, "sec_type": None, "currency": None, "exchange": None},
+        ]
+        assert any(
+            source["source_id"] == "research.hypothetical_portfolio.operator_comparison"
+            for source in payload["sources"]
+        )
+        final_event = payload["operator_events"][-1]
+        outputs = final_event["payload"]["outputs"]
+        comparison_output = next(
+            output
+            for step_id, output in outputs.items()
+            if "run_hypothetical_portfolio_comparison" in step_id
+        )
+        assert comparison_output["portfolio_label"] == "Hypothetical AAPL/MSFT"
+        assert comparison_output["benchmark_symbol"] == "SPY"
+        assert comparison_output["coverage"]["aligned_observation_count"] >= 2
+        assert comparison_output["left"]["object_type"] == "hypothetical_portfolio"
+        assert comparison_output["right"]["object_type"] == "benchmark"
+        assert "relative_return" in comparison_output["relative"]
+        assert any("read-only research" in warning for warning in comparison_output["warnings"])
     finally:
         runtime.shutdown()
 

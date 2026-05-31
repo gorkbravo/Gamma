@@ -40,6 +40,11 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(tmp_path):
             and "fundamentals.apply_dcf_update" not in item.tool_traces
             for item in result.outcomes
         )
-        assert any(item.current_gap for item in result.outcomes)
+        assert not any(item.current_gap for item in result.outcomes)
+        assert all(
+            "run_hypothetical_portfolio_comparison" in item.tool_traces
+            for item in result.outcomes
+            if item.case_id == "hypothetical_portfolio_comparison"
+        )
     finally:
         runtime.shutdown()

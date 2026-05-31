@@ -112,9 +112,8 @@ def default_operator_eval_cases(*, portfolio_snapshot: dict[str, Any] | None = N
             case_id="hypothetical_portfolio_comparison",
             prompt="Compare a hypothetical 60/40 AAPL/MSFT research portfolio to SPY",
             context=copilot_context,
-            expected_events=("plan", "final-report"),
-            expected_warning_terms=("No registered Research Operator tools",),
-            current_gap="No operator-grade hypothetical portfolio comparison action is registered yet.",
+            expected_tools=("run_hypothetical_portfolio_comparison",),
+            expected_events=("plan", "tool-result", "final-report"),
         ),
         CopilotOperatorEvalCase(
             case_id="strategy_lab_backtest",
