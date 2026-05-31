@@ -223,6 +223,37 @@ class CopilotService:
                     handler=self._tool_get_research_coverage_context,
                 ),
                 _CopilotToolDefinition(
+                    name="run_strategy_lab_backtest",
+                    description="Return an operator-grade read-only Strategy Lab backtest summary from the active imported strategy, composition, or comparison result.",
+                    domains=("strategy_lab",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "result_kind": {
+                                "type": ["string", "null"],
+                                "enum": ["auto", "imported_result", "composition", "compare_result", None],
+                                "description": "Optional active Strategy Lab result kind to summarize. Use auto to prefer composition, then imported_result, then compare_result.",
+                            }
+                        },
+                        "required": ["result_kind"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_strategy_lab_backtest,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=10.0,
+                    permission_policy="automatic",
+                    provenance_behavior=(
+                        "Summarizes already-loaded Strategy Lab analytics, provenance, benchmark context, "
+                        "period tables, and warnings without executing strategy code or modifying saved research."
+                    ),
+                    failure_modes=(
+                        "Raw uploaded CSV rows are not persisted by default, so this action summarizes the active normalized result.",
+                        "Benchmark-relative fields are unavailable when the active Strategy Lab result has no benchmark overlap.",
+                        "Compare/Scenario results are summarized as comparison analytics rather than rerun as a new backtest.",
+                    ),
+                ),
+                _CopilotToolDefinition(
                     name="get_macro_workspace_drilldown",
                     description="Return a fuller read-only macro workspace payload for the currently selected Gamma context.",
                     domains=("macro",),
@@ -1400,6 +1431,7 @@ class CopilotService:
                 "warning_count": len(warnings),
                 "source_count": len(sources),
                 "tool_trace_count": len(tool_traces),
+                "outputs": outputs,
             },
             source_ids=[source.source_id for source in list(sources.values())[:10]],
             event_warnings=warnings,
@@ -1626,6 +1658,8 @@ class CopilotService:
             return {"domain": included_domains[0]} if included_domains else None
         if tool_name == "run_fundamentals_reverse_valuation":
             return {"ticker": context.summary_data.get("ticker")}
+        if tool_name == "run_strategy_lab_backtest":
+            return {"result_kind": "auto"}
         if tool_name == "run_risk_scenario_analysis":
             is_rate_shock = "rate" in str(context.summary_data).lower()
             return {
@@ -2310,6 +2344,7 @@ class CopilotService:
             "portfolio": ["get_portfolio_positions_summary", "get_portfolio_performance_context"],
             "equity_research": ["get_research_scope_summary", "get_research_coverage_context"],
             "research": ["get_research_scope_summary", "get_research_coverage_context"],
+            "strategy_lab": ["run_strategy_lab_backtest"],
             "macro": ["get_macro_workspace_drilldown", "get_macro_series_history_summary"],
             "commodities": ["get_commodities_workspace_summary"],
             "prediction_markets": ["get_prediction_market_history_summary", "get_prediction_market_flow_context"],
@@ -3783,6 +3818,33 @@ class CopilotService:
             sources=[source],
         )
 
+    def _tool_run_strategy_lab_backtest(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        result_kind, result = self._strategy_lab_active_result(context, arguments.get("result_kind"))
+        source = CopilotSourceRef(
+            source_id=f"strategy_lab.{result_kind}.operator_backtest",
+            label="Strategy Lab operator backtest",
+            kind="analytics",
+            provider=str(result.get("source_provider") or "gamma"),
+            origin=str(result.get("origin") or "gamma.strategy_lab"),
+            description="Read-only Research Operator summary of the active Strategy Lab analysis result.",
+            retrieved_at=result.get("retrieved_at"),
+        )
+        output = self._strategy_lab_operator_summary(result_kind, result)
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_strategy_lab_backtest",
+                summary=f"Summarized the active Strategy Lab {result_kind.replace('_', ' ')} as a read-only backtest.",
+                arguments={"result_kind": result_kind},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
     def _tool_get_macro_workspace_drilldown(
         self,
         arguments: dict[str, Any],
@@ -5030,7 +5092,7 @@ class CopilotService:
                 "get_research_scope_summary",
                 "get_research_coverage_context",
             ),
-            "strategy_lab": (),
+            "strategy_lab": ("run_strategy_lab_backtest",),
             "macro": ("get_macro_workspace_drilldown",),
             "commodities": ("get_commodities_workspace_summary",),
             "prediction_markets": (
@@ -5415,6 +5477,191 @@ class CopilotService:
         if not isinstance(research, dict):
             raise ValueError("Research context is missing the active research result.")
         return research
+
+    @staticmethod
+    def _strategy_lab_active_result(
+        context: CopilotContextBundle,
+        requested_kind: Any,
+    ) -> tuple[str, dict[str, Any]]:
+        valid_kinds = ("imported_result", "composition", "compare_result")
+        normalized_kind = str(requested_kind or "auto").strip()
+        if normalized_kind in valid_kinds:
+            result = context.tool_state.get(normalized_kind)
+            if isinstance(result, dict):
+                return normalized_kind, result
+            raise ValueError(f"Strategy Lab context is missing `{normalized_kind}`.")
+        for result_kind in ("composition", "imported_result", "compare_result"):
+            result = context.tool_state.get(result_kind)
+            if isinstance(result, dict):
+                return result_kind, result
+        raise ValueError("Strategy Lab context is missing an active imported, composition, or comparison result.")
+
+    @classmethod
+    def _strategy_lab_operator_summary(
+        cls,
+        result_kind: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+        warnings = dedupe_warnings(
+            result.get("warnings", []),
+            [
+                "Strategy Lab operator actions are read-only research summaries; Gamma does not execute strategy code.",
+                "Raw uploaded CSV rows are not persisted by default, so this action uses the active normalized Strategy Lab result.",
+            ],
+        )
+        if result_kind == "compare_result":
+            return cls._strategy_lab_compare_summary(result, warnings)
+
+        returns_points = cls._list_or_empty(result.get("returns_points") or result.get("return_points"))
+        benchmark_points = cls._list_or_empty(result.get("benchmark_points"))
+        rolling_points = cls._list_or_empty(result.get("rolling_points"))
+        monthly_returns = cls._list_or_empty(result.get("monthly_returns"))
+        annual_returns = cls._list_or_empty(result.get("annual_returns"))
+        output: dict[str, Any] = {
+            "result_kind": result_kind,
+            "name": result.get("name") or result.get("label") or "Strategy Lab result",
+            "value_kind": result.get("value_kind"),
+            "benchmark": {
+                "column": result.get("benchmark_column"),
+                "value_kind": result.get("benchmark_value_kind"),
+                "points": len(benchmark_points),
+                "available": bool(benchmark_points),
+            },
+            "metrics": cls._select_metric_fields(
+                metrics,
+                (
+                    "total_return",
+                    "annual_return",
+                    "annualized_return",
+                    "annual_volatility",
+                    "annualized_volatility",
+                    "sharpe_ratio",
+                    "sortino_ratio",
+                    "max_drawdown",
+                    "max_drawdown_duration",
+                    "observation_count",
+                    "frequency",
+                    "periods_per_year",
+                    "benchmark_beta",
+                    "benchmark_correlation",
+                    "upside_capture",
+                    "downside_capture",
+                ),
+            ),
+            "coverage": {
+                "return_points": len(returns_points),
+                "benchmark_points": len(benchmark_points),
+                "rolling_points": len(rolling_points),
+                "monthly_periods": len(monthly_returns),
+                "annual_periods": len(annual_returns),
+            },
+            "period_returns": {
+                "latest_month": cls._last_period_return(monthly_returns),
+                "latest_year": cls._last_period_return(annual_returns),
+                "best_year": cls._best_period_return(annual_returns, highest=True),
+                "worst_year": cls._best_period_return(annual_returns, highest=False),
+            },
+            "provenance": cls._strategy_lab_provenance(result),
+            "warnings": warnings,
+        }
+        if isinstance(result.get("leg_contributions"), dict):
+            output["leg_contributions"] = dict(result.get("leg_contributions") or {})
+        if isinstance(result.get("lenses"), list):
+            output["lens_count"] = len(result.get("lenses") or [])
+        if isinstance(result.get("overlays"), list):
+            output["overlay_count"] = len(result.get("overlays") or [])
+        return output
+
+    @classmethod
+    def _strategy_lab_compare_summary(
+        cls,
+        result: dict[str, Any],
+        warnings: list[str],
+    ) -> dict[str, Any]:
+        comparison = result.get("comparison") if isinstance(result.get("comparison"), dict) else result
+        left = comparison.get("left") if isinstance(comparison.get("left"), dict) else {}
+        right = comparison.get("right") if isinstance(comparison.get("right"), dict) else {}
+        return {
+            "result_kind": "compare_result",
+            "name": result.get("name") or "Strategy Lab comparison",
+            "left": cls._strategy_lab_comparison_leg_summary(left),
+            "right": cls._strategy_lab_comparison_leg_summary(right),
+            "relative": cls._select_metric_fields(
+                comparison,
+                (
+                    "relative_return",
+                    "volatility_gap",
+                    "max_drawdown_gap",
+                    "rolling_correlation",
+                    "rolling_beta",
+                    "overlap_count",
+                ),
+            ),
+            "provenance": cls._strategy_lab_provenance(result),
+            "warnings": warnings,
+        }
+
+    @classmethod
+    def _strategy_lab_comparison_leg_summary(cls, leg: dict[str, Any]) -> dict[str, Any]:
+        metrics = leg.get("metrics") if isinstance(leg.get("metrics"), dict) else {}
+        return {
+            "label": leg.get("label"),
+            "object_type": leg.get("object_type"),
+            "metrics": cls._select_metric_fields(
+                metrics,
+                (
+                    "total_return",
+                    "annual_return",
+                    "annual_volatility",
+                    "sharpe_ratio",
+                    "max_drawdown",
+                    "observation_count",
+                    "frequency",
+                ),
+            ),
+        }
+
+    @staticmethod
+    def _strategy_lab_provenance(result: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "source_provider": result.get("source_provider"),
+            "retrieved_at": result.get("retrieved_at"),
+            "origin": result.get("origin"),
+            "transformation_note": result.get("transformation_note"),
+            "freshness_label": result.get("freshness_label"),
+        }
+
+    @staticmethod
+    def _select_metric_fields(metrics: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+        return {
+            key: metrics.get(key)
+            for key in keys
+            if key in metrics and metrics.get(key) is not None
+        }
+
+    @staticmethod
+    def _list_or_empty(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
+
+    @classmethod
+    def _last_period_return(cls, periods: list[Any]) -> dict[str, Any] | None:
+        rows = [item for item in periods if isinstance(item, dict)]
+        return rows[-1] if rows else None
+
+    @classmethod
+    def _best_period_return(cls, periods: list[Any], *, highest: bool) -> dict[str, Any] | None:
+        rows = [
+            item
+            for item in periods
+            if isinstance(item, dict) and cls._optional_float(item.get("value")) is not None
+        ]
+        if not rows:
+            return None
+        return max(rows, key=lambda item: cls._optional_float(item.get("value")) or 0.0) if highest else min(
+            rows,
+            key=lambda item: cls._optional_float(item.get("value")) or 0.0,
+        )
 
     @staticmethod
     def _risk_result_from_bundle(context: CopilotContextBundle) -> dict[str, Any]:

@@ -120,9 +120,8 @@ def default_operator_eval_cases(*, portfolio_snapshot: dict[str, Any] | None = N
             case_id="strategy_lab_backtest",
             prompt="Run a Strategy Lab backtest on the imported strategy",
             context=strategy_context,
-            expected_events=("plan", "final-report"),
-            expected_warning_terms=("No registered Research Operator tools",),
-            current_gap="No operator-grade Strategy Lab backtest action is registered yet.",
+            expected_tools=("run_strategy_lab_backtest",),
+            expected_events=("plan", "tool-result", "final-report"),
         ),
         CopilotOperatorEvalCase(
             case_id="single_name_event_report",

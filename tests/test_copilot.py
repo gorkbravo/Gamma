@@ -2410,6 +2410,10 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         assert "Rate shock proxy uses transparent duration assumptions" in " ".join(
             by_id["run_risk_scenario_analysis"]["failure_modes"]
         )
+        assert by_id["run_strategy_lab_backtest"]["permission_policy"] == "automatic"
+        assert by_id["run_strategy_lab_backtest"]["action_type"] == "run_analysis"
+        assert by_id["run_strategy_lab_backtest"]["read_only"] is True
+        assert by_id["run_strategy_lab_backtest"]["mutates_local_state"] is False
         assert by_id["fundamentals.propose_dcf_update"]["permission_policy"] == "automatic_draft"
         assert by_id["fundamentals.apply_dcf_update"]["permission_policy"] == "confirmation_required"
         assert by_id["fundamentals.apply_dcf_update"]["retry_policy"] == "not_retry_safe_after_success"
@@ -2535,6 +2539,108 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         persisted_events = detail["turns"][0]["result"]["operator_events"]
         assert persisted_events
         assert [event["sequence"] for event in persisted_events] == list(range(1, len(persisted_events) + 1))
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_plan_includes_strategy_lab_backtest_tool(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Run a Strategy Lab backtest on the imported strategy",
+                "context": {
+                    "current_tab": "strategy_lab",
+                    "workspace_mode": "research",
+                    "strategy_lab_state": {
+                        "imported_result": {
+                            "name": "Fixture strategy",
+                            "source_provider": "uploaded_csv",
+                            "metrics": {"observation_count": 8, "annual_return": 0.12},
+                            "warnings": [],
+                            "retrieved_at": "2026-05-31T00:00:00",
+                        }
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "active_context_research"
+        assert any(step["tool_id"] == "run_strategy_lab_backtest" for step in payload["steps"])
+        assert not any("No registered Research Operator tools" in warning for warning in payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_execution_runs_strategy_lab_backtest_summary(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Run a Strategy Lab backtest on the imported strategy",
+                "context": {
+                    "current_tab": "strategy_lab",
+                    "workspace_mode": "research",
+                    "strategy_lab_state": {
+                        "imported_result": {
+                            "name": "Fixture strategy",
+                            "value_kind": "return",
+                            "benchmark_column": "SPY",
+                            "benchmark_value_kind": "return",
+                            "source_provider": "uploaded_csv",
+                            "origin": "tests.strategy_lab",
+                            "freshness_label": "derived",
+                            "retrieved_at": "2026-05-31T00:00:00",
+                            "metrics": {
+                                "observation_count": 8,
+                                "annual_return": 0.12,
+                                "annual_volatility": 0.18,
+                                "sharpe_ratio": 0.67,
+                                "max_drawdown": -0.04,
+                                "benchmark_correlation": 0.72,
+                            },
+                            "returns_points": [
+                                {"timestamp": "2026-01-02T00:00:00", "value": 0.01},
+                                {"timestamp": "2026-01-05T00:00:00", "value": -0.004},
+                            ],
+                            "benchmark_points": [
+                                {"timestamp": "2026-01-02T00:00:00", "value": 0.004},
+                                {"timestamp": "2026-01-05T00:00:00", "value": -0.002},
+                            ],
+                            "annual_returns": [{"period": "2026", "value": 0.12}],
+                            "warnings": [],
+                        }
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert any(trace["tool_name"] == "run_strategy_lab_backtest" for trace in payload["tool_traces"])
+        strategy_trace = next(
+            trace for trace in payload["tool_traces"] if trace["tool_name"] == "run_strategy_lab_backtest"
+        )
+        assert strategy_trace["arguments"] == {"result_kind": "imported_result"}
+        assert any(source["source_id"] == "strategy_lab.imported_result.operator_backtest" for source in payload["sources"])
+        final_event = payload["operator_events"][-1]
+        outputs = final_event["payload"]["outputs"]
+        strategy_output = next(
+            output
+            for step_id, output in outputs.items()
+            if "run_strategy_lab_backtest" in step_id
+        )
+        assert strategy_output["metrics"]["annual_return"] == 0.12
+        assert strategy_output["benchmark"]["available"] is True
+        assert strategy_output["coverage"]["return_points"] == 2
+        assert any("does not execute strategy code" in warning for warning in strategy_output["warnings"])
     finally:
         runtime.shutdown()
 
