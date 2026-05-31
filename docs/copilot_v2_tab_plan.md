@@ -642,9 +642,36 @@ Research Operator build path:
 
 Implementation note:
 - First-pass operator progress events now ride on `/copilot/operator-plan/execute` results as `operator_events` and are persisted with Copilot turns. The backend remains authoritative for execution state; the Copilot workspace renders the trace for inspection only. Events currently cover deterministic custom-loop execution and are shaped so the Agents SDK prototype can emit the same contract behind the existing action registry.
-- Agents SDK orchestration now exists behind `GAMMA_COPILOT_OPERATOR_ORCHESTRATOR=agents_sdk`. The default remains the deterministic custom loop. The SDK path exposes only a single Gamma action-registry execution tool to the agent, validates each requested action against the existing `ResearchActionRegistry`, runs only automatic read-only actions through Gamma's existing context builders and tool executors, emits the same `operator_events` contract, and persists the result as a normal Copilot session turn. It currently targets the same first-pass operator surface as the custom loop: risk scenario analysis, fundamentals reverse valuation, and DCF confirmation checkpoints without applying local DCF changes.
-- A local benchmark harness now lives in `evals/copilot_operator_eval.py`. It compares the deterministic custom loop with an offline stubbed Agents SDK path on the approved operator benchmark set, records current gaps for hypothetical portfolio comparison and Strategy Lab backtests, and can optionally include a live Agents SDK run when `OPENAI_API_KEY` is configured and the caller passes the live flag. A no-secret SDK contract smoke test verifies the installed SDK import shape, `function_tool` schema generation, `Runner.run(..., max_turns=...)`, and `ModelSettings(parallel_tool_calls=False)` without making an API call.
+- Agents SDK orchestration now exists behind `GAMMA_COPILOT_OPERATOR_ORCHESTRATOR=agents_sdk`. The default remains the deterministic custom loop. The SDK path exposes only a single Gamma action-registry execution tool to the agent, validates each requested action against the existing `ResearchActionRegistry`, runs only automatic read-only actions through Gamma's existing context builders and tool executors, emits the same `operator_events` contract, and persists the result as a normal Copilot session turn. It currently targets the same first-pass operator surface as the custom loop: typed risk scenario analysis, Strategy Lab backtest summaries from active normalized results, fundamentals reverse valuation, and DCF confirmation checkpoints without applying local DCF changes.
+- A local benchmark harness now lives in `evals/copilot_operator_eval.py`. It compares the deterministic custom loop with an offline stubbed Agents SDK path on the approved operator benchmark set, records the current gap for hypothetical portfolio comparison, and can optionally include a live Agents SDK run when `OPENAI_API_KEY` is configured and the caller passes the live flag. A no-secret SDK contract smoke test verifies the installed SDK import shape, `function_tool` schema generation, `Runner.run(..., max_turns=...)`, and `ModelSettings(parallel_tool_calls=False)` without making an API call.
 - Live smoke note: using the existing `.env` `OPENAI_API_KEY`, the real Agents SDK path successfully ran the bounded portfolio rate-shock operator case on 2026-05-31. The run used `GAMMA_COPILOT_MODEL=gpt-5.4`, executed registry tools through `openai_agents_sdk_operator`, emitted the normal operator event contract, and returned `ready`. The current OpenAI docs list `gpt-5.5` and medium reasoning as the newer baseline, so model/reasoning migration should be handled as a separate eval-backed tuning pass rather than folded into the operator default switch.
+
+Current Research Operator state:
+
+- `run_risk_scenario_analysis` is automatic read-only and now accepts typed, bounded shock inputs (`scenario_type`, `rate_shift_bps`, `equity_shock_pct`, `duration_proxy_years`, and explicit `symbol_shocks`). Gamma still computes VaR/contribution/frontier metrics through the existing risk engine; the new `shock_proxy` block is a transparent position-level estimate, not full curve or factor repricing.
+- `run_strategy_lab_backtest` is automatic read-only and summarizes the active normalized Strategy Lab imported result, composition, or comparison. It does not execute strategy code, restore raw uploaded CSV rows, save research objects, rebalance, or modify portfolios.
+- `run_fundamentals_reverse_valuation` remains automatic read-only. DCF update proposals stop at draft/confirmation checkpoints; `fundamentals.apply_dcf_update` remains confirmation-required and is not run by automatic operator execution.
+- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, Strategy Lab backtest, and cross-domain single-name event report. Hypothetical portfolio comparison remains the explicit expected gap.
+
+What remains for the next agents:
+
+1. Add an operator-grade hypothetical portfolio comparison action.
+   - Keep it read-only and use existing Research/Compare Scenario or Risk services as the authority.
+   - Inputs should be typed and bounded: legs/symbols, weights, benchmark, lookback, optional source objects, and min observations.
+   - Output should include aligned return-window coverage, per-leg metrics, relative return, volatility gap, drawdown gap, rolling correlation/beta where available, warnings, and provenance.
+   - Update `evals/copilot_operator_eval.py` so `hypothetical_portfolio_comparison` is no longer an expected gap.
+2. Add narrower read-only drilldowns where they materially improve operator quality:
+   - `risk.run_contribution` as an operator action instead of only a context drilldown.
+   - `research.run_scope_analysis` for active Equity Research/Scope Analysis payloads.
+   - Options realized-versus-implied or event/volatility comparison once the IV data path is strong enough.
+3. Improve reports and trace usability:
+   - Surface compact per-step outputs without flooding the final event payload.
+   - Preserve source ids and warning provenance in report generation.
+   - Make skipped steps easier to distinguish from tool failures.
+4. Keep Agents SDK behind the feature flag until the eval harness shows a practical reason to switch defaults, such as better trace quality, resumability, handoffs, or maintainability as tools grow.
+5. Do not broaden mutations yet.
+   - Candidate future mutation families remain saved research scopes, Strategy Lab compositions, memos, watchlists, scenario/model snapshots, and hypothetical portfolio definitions.
+   - Every durable or non-trivial mutation must return a diff, rationale, warnings, source ids, rollback/snapshot context where applicable, and require confirmation.
 
 6. Evaluate Agents SDK against the operator path.
    - Prototype a narrow hybrid orchestrator after the action registry and read-only operator tools are stable.
