@@ -68,6 +68,7 @@ from src.models.macro import (
     MacroSnapshotFocusItem,
     MacroSnapshotPayload,
 )
+from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 from src.services.copilot_store import CopilotStore
@@ -2396,6 +2397,19 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         by_id = {item["tool_id"]: item for item in payload}
         assert by_id["get_portfolio_positions_summary"]["permission_policy"] == "automatic"
         assert by_id["get_external_context_summary"]["can_call_external_providers"] is True
+        risk_schema = by_id["run_risk_scenario_analysis"]["input_schema"]
+        assert risk_schema["properties"]["scenario_type"]["enum"] == [
+            "baseline",
+            "rate_shock",
+            "equity_drawdown",
+            "commodity_shock",
+            "custom",
+            None,
+        ]
+        assert "rate_shift_bps" in risk_schema["required"]
+        assert "Rate shock proxy uses transparent duration assumptions" in " ".join(
+            by_id["run_risk_scenario_analysis"]["failure_modes"]
+        )
         assert by_id["fundamentals.propose_dcf_update"]["permission_policy"] == "automatic_draft"
         assert by_id["fundamentals.apply_dcf_update"]["permission_policy"] == "confirmation_required"
         assert by_id["fundamentals.apply_dcf_update"]["retry_policy"] == "not_retry_safe_after_success"
@@ -2497,6 +2511,13 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
             trace["tool_name"] == "run_risk_scenario_analysis"
             for trace in payload["tool_traces"]
         )
+        risk_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_risk_scenario_analysis"
+        )
+        assert risk_trace["arguments"]["scenario_type"] == "rate_shock"
+        assert risk_trace["arguments"]["rate_shift_bps"] == 100.0
         assert any(
             source["source_id"] == "risk.scenario.analysis"
             for source in payload["sources"]
@@ -2516,6 +2537,84 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         assert [event["sequence"] for event in persisted_events] == list(range(1, len(persisted_events) + 1))
     finally:
         runtime.shutdown()
+
+
+def test_copilot_risk_scenario_tool_applies_bounded_symbol_shock_proxy(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot_payload = client.get("/portfolio/snapshot").json()
+        context = runtime.copilot_service._build_risk_context(
+            CopilotResearchCardRequest(
+                domain="risk",
+                prompt="Run a custom symbol shock.",
+                context=CopilotRequestContext(
+                    current_tab="risk",
+                    workspace_mode="portfolio",
+                    portfolio_state={"snapshot": snapshot_payload},
+                ),
+            )
+        )
+        symbol = snapshot_payload["positions"][0]["symbol"]
+        execution = runtime.copilot_service._execute_tool(
+            "run_risk_scenario_analysis",
+            {
+                "scenario_label": "custom_symbol_shock",
+                "source_scope": "portfolio",
+                "scenario_type": "custom",
+                "rate_shift_bps": None,
+                "equity_shock_pct": None,
+                "duration_proxy_years": None,
+                "symbol_shocks": [{"symbol": symbol, "price_shock_pct": -2.0}],
+            },
+            context,
+        )
+
+        assert execution.output["scenario_type"] == "custom"
+        assert execution.output["shock_parameters"]["symbol_shocks"] == [
+            {"symbol": symbol.upper(), "price_shock_pct": -0.95}
+        ]
+        assert execution.output["shock_proxy"]["applied"] is True
+        assert execution.output["shock_proxy"]["position_impacts"][0]["basis"] == "explicit_symbol_shock"
+        assert any("symbol_shocks" in warning and "clipped" in warning for warning in execution.output["warnings"])
+        assert execution.trace.arguments["symbol_shocks"][0]["price_shock_pct"] == -0.95
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_risk_shock_proxy_uses_duration_for_rate_scenarios():
+    snapshot = PortfolioSnapshot(
+        timestamp=datetime(2026, 5, 31),
+        base_currency="USD",
+        account_summary={},
+        positions=[
+            PositionItem(
+                symbol="TLT",
+                sec_type="STK",
+                currency="USD",
+                quantity=10.0,
+                avg_cost=None,
+                market_price=100.0,
+                market_value=1000.0,
+                unrealized_pnl=None,
+                base_market_value=1000.0,
+            )
+        ],
+        net_liquidation=1000.0,
+    )
+    shock_spec = {
+        "scenario_type": "rate_shock",
+        "rate_shift_bps": 100.0,
+        "equity_shock_pct": None,
+        "duration_proxy_years": None,
+        "symbol_shocks": [],
+    }
+
+    impact = CopilotService._risk_shock_proxy_impact(snapshot, shock_spec)
+
+    assert impact["applied"] is True
+    assert impact["estimated_pnl"] == -160.0
+    assert impact["estimated_return_pct"] == -0.16
+    assert impact["position_impacts"][0]["basis"] == "duration_proxy"
 
 
 def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, monkeypatch):

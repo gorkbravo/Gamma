@@ -434,7 +434,7 @@ class CopilotService:
                 ),
                 _CopilotToolDefinition(
                     name="run_risk_scenario_analysis",
-                    description="Run a bounded read-only risk computation for the active portfolio or research snapshot, including VaR, contribution, coverage, and scenario warnings.",
+                    description="Run a bounded read-only risk computation for the active portfolio or research snapshot, including VaR, contribution, coverage, typed shock parameters, transparent proxy impact, and scenario warnings.",
                     domains=("risk",),
                     parameters_schema={
                         "type": "object",
@@ -447,8 +447,52 @@ class CopilotService:
                                 "type": ["string", "null"],
                                 "description": "portfolio or research. Use null to infer from workspace mode.",
                             },
+                            "scenario_type": {
+                                "type": ["string", "null"],
+                                "enum": ["baseline", "rate_shock", "equity_drawdown", "commodity_shock", "custom", None],
+                                "description": "Typed bounded scenario family. Use rate_shock for rate/yield shocks.",
+                            },
+                            "rate_shift_bps": {
+                                "type": ["number", "null"],
+                                "description": "Parallel rate shift in basis points, bounded to +/-300 bps. Positive means rates rise.",
+                            },
+                            "equity_shock_pct": {
+                                "type": ["number", "null"],
+                                "description": "Optional broad equity proxy shock as a decimal return, bounded to -80% to +80%.",
+                            },
+                            "duration_proxy_years": {
+                                "type": ["number", "null"],
+                                "description": "Optional duration proxy used only when a position-specific duration proxy is unavailable, bounded to 0-30 years.",
+                            },
+                            "symbol_shocks": {
+                                "type": "array",
+                                "description": "Optional explicit per-symbol price shocks. These override inferred proxies for matching positions.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "symbol": {
+                                            "type": "string",
+                                            "description": "Portfolio symbol or display symbol to shock.",
+                                        },
+                                        "price_shock_pct": {
+                                            "type": "number",
+                                            "description": "Decimal price shock, bounded to -95% to +500%.",
+                                        },
+                                    },
+                                    "required": ["symbol", "price_shock_pct"],
+                                    "additionalProperties": False,
+                                },
+                            },
                         },
-                        "required": ["scenario_label", "source_scope"],
+                        "required": [
+                            "scenario_label",
+                            "source_scope",
+                            "scenario_type",
+                            "rate_shift_bps",
+                            "equity_shock_pct",
+                            "duration_proxy_years",
+                            "symbol_shocks",
+                        ],
                         "additionalProperties": False,
                     },
                     handler=self._tool_run_risk_scenario_analysis,
@@ -456,7 +500,12 @@ class CopilotService:
                     output_schema={"type": "object"},
                     timeout_seconds=45.0,
                     permission_policy="automatic",
-                    provenance_behavior="Computes read-only risk analytics from the active snapshot and returns source refs, warnings, and coverage diagnostics.",
+                    provenance_behavior="Computes read-only risk analytics from the active snapshot and returns source refs, bounded shock parameters, transparent proxy impact, warnings, and coverage diagnostics.",
+                    failure_modes=(
+                        "Shock parameters are bounded and may be clipped before execution.",
+                        "Rate shock proxy uses transparent duration assumptions; it is not a full curve repricing model.",
+                        "Positions without explicit shocks or supported proxies are left unchanged in the proxy impact block.",
+                    ),
                 ),
                 _CopilotToolDefinition(
                     name="get_iv_surface_context",
@@ -1578,11 +1627,15 @@ class CopilotService:
         if tool_name == "run_fundamentals_reverse_valuation":
             return {"ticker": context.summary_data.get("ticker")}
         if tool_name == "run_risk_scenario_analysis":
+            is_rate_shock = "rate" in str(context.summary_data).lower()
             return {
-                "scenario_label": "rate_shock_baseline"
-                if "rate" in str(context.summary_data).lower()
-                else "baseline_risk",
+                "scenario_label": "rate_shock_plus_100bps" if is_rate_shock else "baseline_risk",
                 "source_scope": context.summary_data.get("workspace_mode"),
+                "scenario_type": "rate_shock" if is_rate_shock else "baseline",
+                "rate_shift_bps": 100.0 if is_rate_shock else None,
+                "equity_shock_pct": None,
+                "duration_proxy_years": None,
+                "symbol_shocks": [],
             }
         return {}
 
@@ -2895,6 +2948,7 @@ class CopilotService:
             raise ValueError("Risk copilot requires an active risk result or a portfolio snapshot.")
         summary_data = {
             "workspace_mode": request.context.workspace_mode or "portfolio",
+            "prompt": request.prompt,
             "risk": summarize_risk_result(result) if isinstance(result, dict) else None,
             "snapshot": summarize_portfolio_snapshot(snapshot),
         }
@@ -4570,6 +4624,11 @@ class CopilotService:
             source_scope = "portfolio"
         data_provider = self.research_provider if source_scope == "research" else self.portfolio_provider
         scenario_label = str(arguments.get("scenario_label") or "baseline_risk").strip() or "baseline_risk"
+        shock_spec, shock_warnings = self._normalize_risk_shock_arguments(
+            snapshot,
+            arguments,
+            scenario_label=scenario_label,
+        )
         payload = self.risk_service.compute(
             RiskComputeRequest(
                 snapshot=snapshot,
@@ -4586,7 +4645,12 @@ class CopilotService:
             ),
             data_provider=data_provider,
         )
-        result_summary = self._risk_compute_summary(payload, scenario_label=scenario_label)
+        result_summary = self._risk_compute_summary(
+            payload,
+            scenario_label=scenario_label,
+            shock_spec=shock_spec,
+            shock_warnings=shock_warnings,
+        )
         source = CopilotSourceRef(
             source_id="risk.scenario.analysis",
             label="Risk scenario analysis",
@@ -4601,7 +4665,15 @@ class CopilotService:
             trace=CopilotToolTrace(
                 tool_name="run_risk_scenario_analysis",
                 summary=f"Ran read-only risk scenario analysis for {scenario_label}.",
-                arguments={"scenario_label": scenario_label, "source_scope": source_scope},
+                arguments={
+                    "scenario_label": scenario_label,
+                    "source_scope": source_scope,
+                    "scenario_type": shock_spec["scenario_type"],
+                    "rate_shift_bps": shock_spec["rate_shift_bps"],
+                    "equity_shock_pct": shock_spec["equity_shock_pct"],
+                    "duration_proxy_years": shock_spec["duration_proxy_years"],
+                    "symbol_shocks": list(shock_spec["symbol_shocks"]),
+                },
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -5352,8 +5424,17 @@ class CopilotService:
         return risk
 
     @staticmethod
-    def _risk_compute_summary(payload: Any, *, scenario_label: str) -> dict[str, Any]:
+    def _risk_compute_summary(
+        payload: Any,
+        *,
+        scenario_label: str,
+        shock_spec: dict[str, Any] | None = None,
+        shock_warnings: list[str] | None = None,
+    ) -> dict[str, Any]:
         results = payload.results
+        shock_spec = shock_spec or CopilotService._default_risk_shock_spec()
+        shock_proxy = CopilotService._risk_shock_proxy_impact(payload.snapshot, shock_spec)
+        warnings = dedupe_warnings(list(results.warnings), shock_warnings or [], shock_proxy.get("warnings", []))
         top_contributions = []
         contribution_symbols = list(payload.returns_df.columns)
         if not payload.contributions.empty:
@@ -5376,7 +5457,26 @@ class CopilotService:
             )
         return {
             "scenario_label": scenario_label,
-            "method": "Current snapshot risk baseline. Custom shock repricing is not applied in this first operator slice.",
+            "scenario_type": shock_spec["scenario_type"],
+            "method": (
+                "Current snapshot risk baseline plus a transparent bounded shock proxy. "
+                "VaR, contribution, beta, and frontier metrics come from Gamma's existing historical risk engine; "
+                "shock_proxy is a read-only position-level estimate, not a full curve or factor repricing model."
+            ),
+            "shock_parameters": {
+                "scenario_type": shock_spec["scenario_type"],
+                "rate_shift_bps": shock_spec["rate_shift_bps"],
+                "equity_shock_pct": shock_spec["equity_shock_pct"],
+                "duration_proxy_years": shock_spec["duration_proxy_years"],
+                "symbol_shocks": list(shock_spec["symbol_shocks"]),
+                "bounds": {
+                    "rate_shift_bps": [-300.0, 300.0],
+                    "equity_shock_pct": [-0.8, 0.8],
+                    "duration_proxy_years": [0.0, 30.0],
+                    "symbol_price_shock_pct": [-0.95, 5.0],
+                },
+            },
+            "shock_proxy": shock_proxy,
             "metrics": {
                 "portfolio_value": results.portfolio_value,
                 "historical_var": results.historical_var,
@@ -5410,8 +5510,270 @@ class CopilotService:
                 }
                 for point in payload.frontier_points[:8]
             ],
-            "warnings": list(results.warnings),
+            "warnings": warnings,
         }
+
+    @staticmethod
+    def _default_risk_shock_spec() -> dict[str, Any]:
+        return {
+            "scenario_type": "baseline",
+            "rate_shift_bps": None,
+            "equity_shock_pct": None,
+            "duration_proxy_years": None,
+            "symbol_shocks": [],
+        }
+
+    @classmethod
+    def _normalize_risk_shock_arguments(
+        cls,
+        snapshot: PortfolioSnapshot,
+        arguments: dict[str, Any],
+        *,
+        scenario_label: str,
+    ) -> tuple[dict[str, Any], list[str]]:
+        del snapshot
+        warnings: list[str] = []
+        allowed = {"baseline", "rate_shock", "equity_drawdown", "commodity_shock", "custom"}
+        scenario_type = str(arguments.get("scenario_type") or "").strip().lower()
+        if not scenario_type:
+            label = scenario_label.lower()
+            if "rate" in label or "yield" in label:
+                scenario_type = "rate_shock"
+            elif "drawdown" in label or "equity" in label:
+                scenario_type = "equity_drawdown"
+            else:
+                scenario_type = "baseline"
+        if scenario_type not in allowed:
+            warnings.append(f"Unsupported scenario_type `{scenario_type}` was treated as custom.")
+            scenario_type = "custom"
+
+        rate_shift_bps = cls._bounded_optional_float(
+            arguments.get("rate_shift_bps"),
+            minimum=-300.0,
+            maximum=300.0,
+            field_name="rate_shift_bps",
+            warnings=warnings,
+        )
+        if scenario_type == "rate_shock" and rate_shift_bps is None:
+            rate_shift_bps = 100.0
+
+        equity_shock_pct = cls._bounded_optional_float(
+            arguments.get("equity_shock_pct"),
+            minimum=-0.8,
+            maximum=0.8,
+            field_name="equity_shock_pct",
+            warnings=warnings,
+        )
+        if scenario_type == "equity_drawdown" and equity_shock_pct is None:
+            equity_shock_pct = -0.1
+
+        duration_proxy_years = cls._bounded_optional_float(
+            arguments.get("duration_proxy_years"),
+            minimum=0.0,
+            maximum=30.0,
+            field_name="duration_proxy_years",
+            warnings=warnings,
+        )
+
+        symbol_shocks = []
+        raw_symbol_shocks = arguments.get("symbol_shocks")
+        if isinstance(raw_symbol_shocks, list):
+            for item in raw_symbol_shocks[:25]:
+                if not isinstance(item, dict):
+                    continue
+                symbol = str(item.get("symbol") or "").strip().upper()
+                if not symbol:
+                    continue
+                price_shock_pct = cls._bounded_optional_float(
+                    item.get("price_shock_pct"),
+                    minimum=-0.95,
+                    maximum=5.0,
+                    field_name=f"symbol_shocks.{symbol}.price_shock_pct",
+                    warnings=warnings,
+                )
+                if price_shock_pct is None:
+                    continue
+                symbol_shocks.append({"symbol": symbol, "price_shock_pct": price_shock_pct})
+            if len(raw_symbol_shocks) > 25:
+                warnings.append("symbol_shocks was truncated to the first 25 entries.")
+
+        return (
+            {
+                "scenario_type": scenario_type,
+                "rate_shift_bps": rate_shift_bps,
+                "equity_shock_pct": equity_shock_pct,
+                "duration_proxy_years": duration_proxy_years,
+                "symbol_shocks": symbol_shocks,
+            },
+            warnings,
+        )
+
+    @staticmethod
+    def _bounded_optional_float(
+        value: Any,
+        *,
+        minimum: float,
+        maximum: float,
+        field_name: str,
+        warnings: list[str],
+    ) -> float | None:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            warnings.append(f"Ignored non-numeric {field_name}.")
+            return None
+        if numeric < minimum:
+            warnings.append(f"{field_name} was clipped to {minimum}.")
+            return minimum
+        if numeric > maximum:
+            warnings.append(f"{field_name} was clipped to {maximum}.")
+            return maximum
+        return numeric
+
+    @classmethod
+    def _risk_shock_proxy_impact(
+        cls,
+        snapshot: PortfolioSnapshot,
+        shock_spec: dict[str, Any],
+    ) -> dict[str, Any]:
+        scenario_type = str(shock_spec.get("scenario_type") or "baseline")
+        explicit_shocks = {
+            str(item.get("symbol") or "").strip().upper(): cls._optional_float(item.get("price_shock_pct"))
+            for item in shock_spec.get("symbol_shocks", [])
+            if isinstance(item, dict)
+        }
+        position_impacts: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        total_pnl = 0.0
+        shocked_count = 0
+        for position in snapshot.positions:
+            value = cls._position_base_value(position)
+            if value is None:
+                continue
+            shock_pct, basis = cls._position_shock_pct(position, shock_spec, explicit_shocks)
+            if shock_pct is None:
+                continue
+            pnl = value * shock_pct
+            total_pnl += pnl
+            shocked_count += 1
+            position_impacts.append(
+                {
+                    "symbol": position.resolved_display_symbol(),
+                    "instrument_id": position.resolved_instrument_id(),
+                    "sec_type": position.sec_type,
+                    "base_market_value": value,
+                    "shock_pct": shock_pct,
+                    "estimated_pnl": pnl,
+                    "basis": basis,
+                }
+            )
+
+        portfolio_value = (
+            snapshot.net_liquidation
+            or snapshot.total_market_value
+            or sum(abs(cls._position_base_value(position) or 0.0) for position in snapshot.positions)
+            or None
+        )
+        if scenario_type != "baseline" and shocked_count == 0:
+            warnings.append("No positions matched the typed shock proxy; baseline risk metrics are still returned.")
+        position_impacts.sort(key=lambda item: abs(float(item["estimated_pnl"])), reverse=True)
+        return {
+            "applied": shocked_count > 0,
+            "method": cls._risk_shock_proxy_method(shock_spec),
+            "portfolio_value": portfolio_value,
+            "estimated_pnl": total_pnl if shocked_count else None,
+            "estimated_return_pct": (total_pnl / portfolio_value) if shocked_count and portfolio_value else None,
+            "shocked_position_count": shocked_count,
+            "position_impacts": position_impacts[:12],
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _position_base_value(position: PositionItem) -> float | None:
+        value = position.base_market_value
+        if value is None:
+            value = position.market_value
+        return CopilotService._optional_float(value)
+
+    @classmethod
+    def _position_shock_pct(
+        cls,
+        position: PositionItem,
+        shock_spec: dict[str, Any],
+        explicit_shocks: dict[str, float | None],
+    ) -> tuple[float | None, str | None]:
+        symbols = {
+            str(position.symbol or "").strip().upper(),
+            str(position.display_symbol or "").strip().upper(),
+            position.resolved_symbol().upper(),
+            position.resolved_display_symbol().upper(),
+        }
+        for symbol in symbols:
+            if symbol in explicit_shocks and explicit_shocks[symbol] is not None:
+                return explicit_shocks[symbol], "explicit_symbol_shock"
+
+        scenario_type = str(shock_spec.get("scenario_type") or "baseline")
+        if scenario_type == "rate_shock":
+            rate_shift_bps = cls._optional_float(shock_spec.get("rate_shift_bps"))
+            if rate_shift_bps is None:
+                return None, None
+            duration = cls._duration_proxy_for_position(position, shock_spec.get("duration_proxy_years"))
+            if duration is not None:
+                return -duration * (rate_shift_bps / 10000.0), "duration_proxy"
+            equity_shock_pct = cls._optional_float(shock_spec.get("equity_shock_pct"))
+            if equity_shock_pct is not None and cls._is_equity_like_position(position):
+                return equity_shock_pct, "optional_equity_proxy"
+            return None, None
+
+        if scenario_type == "equity_drawdown":
+            equity_shock_pct = cls._optional_float(shock_spec.get("equity_shock_pct"))
+            if equity_shock_pct is not None and cls._is_equity_like_position(position):
+                return equity_shock_pct, "equity_drawdown_proxy"
+        return None, None
+
+    @staticmethod
+    def _duration_proxy_for_position(position: PositionItem, fallback: Any) -> float | None:
+        symbol = position.resolved_display_symbol().upper()
+        duration_by_symbol = {
+            "SHY": 1.9,
+            "VGSH": 1.9,
+            "IEF": 7.0,
+            "VGIT": 5.2,
+            "TLT": 16.0,
+            "VGLT": 15.0,
+            "AGG": 6.0,
+            "BND": 6.0,
+            "LQD": 8.0,
+            "HYG": 3.5,
+            "JNK": 3.5,
+            "TBT": -16.0,
+            "TMV": -24.0,
+            "UBT": 16.0,
+        }
+        if symbol in duration_by_symbol:
+            return duration_by_symbol[symbol]
+        normalized_sec_type = str(position.sec_type or "").strip().upper()
+        fallback_value = CopilotService._optional_float(fallback)
+        if normalized_sec_type in {"BOND", "BILL", "NOTE", "FIXED_INCOME"} and fallback_value is not None:
+            return fallback_value
+        return None
+
+    @staticmethod
+    def _is_equity_like_position(position: PositionItem) -> bool:
+        return str(position.sec_type or "").strip().upper() in {"STK", "ETF", "FUND"}
+
+    @staticmethod
+    def _risk_shock_proxy_method(shock_spec: dict[str, Any]) -> str:
+        scenario_type = str(shock_spec.get("scenario_type") or "baseline")
+        if scenario_type == "rate_shock":
+            return "Parallel-rate proxy: price shock ~= -duration_proxy_years * rate_shift_decimal; explicit symbol shocks override inferred duration proxies."
+        if scenario_type == "equity_drawdown":
+            return "Equity drawdown proxy: applies bounded equity_shock_pct to equity-like positions; explicit symbol shocks override inferred proxies."
+        if scenario_type in {"commodity_shock", "custom"}:
+            return "Custom proxy: applies only explicit per-symbol shocks."
+        return "Baseline scenario: no proxy shock was applied."
 
     @staticmethod
     def _series_get_float(series: Any, key: str) -> float | None:
