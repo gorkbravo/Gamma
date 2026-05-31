@@ -604,7 +604,7 @@ Implementation note:
 - [x] Decide whether to adopt Agents SDK for the Research Operator path.
 - [x] Prototype Agents SDK orchestration behind the existing Gamma action registry.
 - [x] Preserve existing Gamma permission checks and local persistence.
-- [ ] Add traces/evals for tool selection quality.
+- [x] Add traces/evals for tool selection quality.
 
 Implementation direction:
 
@@ -643,6 +643,8 @@ Research Operator build path:
 Implementation note:
 - First-pass operator progress events now ride on `/copilot/operator-plan/execute` results as `operator_events` and are persisted with Copilot turns. The backend remains authoritative for execution state; the Copilot workspace renders the trace for inspection only. Events currently cover deterministic custom-loop execution and are shaped so the Agents SDK prototype can emit the same contract behind the existing action registry.
 - Agents SDK orchestration now exists behind `GAMMA_COPILOT_OPERATOR_ORCHESTRATOR=agents_sdk`. The default remains the deterministic custom loop. The SDK path exposes only a single Gamma action-registry execution tool to the agent, validates each requested action against the existing `ResearchActionRegistry`, runs only automatic read-only actions through Gamma's existing context builders and tool executors, emits the same `operator_events` contract, and persists the result as a normal Copilot session turn. It currently targets the same first-pass operator surface as the custom loop: risk scenario analysis, fundamentals reverse valuation, and DCF confirmation checkpoints without applying local DCF changes.
+- A local benchmark harness now lives in `evals/copilot_operator_eval.py`. It compares the deterministic custom loop with an offline stubbed Agents SDK path on the approved operator benchmark set, records current gaps for hypothetical portfolio comparison and Strategy Lab backtests, and can optionally include a live Agents SDK run when `OPENAI_API_KEY` is configured and the caller passes the live flag. A no-secret SDK contract smoke test verifies the installed SDK import shape, `function_tool` schema generation, `Runner.run(..., max_turns=...)`, and `ModelSettings(parallel_tool_calls=False)` without making an API call.
+- Live smoke note: using the existing `.env` `OPENAI_API_KEY`, the real Agents SDK path successfully ran the bounded portfolio rate-shock operator case on 2026-05-31. The run used `GAMMA_COPILOT_MODEL=gpt-5.4`, executed registry tools through `openai_agents_sdk_operator`, emitted the normal operator event contract, and returned `ready`. The current OpenAI docs list `gpt-5.5` and medium reasoning as the newer baseline, so model/reasoning migration should be handled as a separate eval-backed tuning pass rather than folded into the operator default switch.
 
 6. Evaluate Agents SDK against the operator path.
    - Prototype a narrow hybrid orchestrator after the action registry and read-only operator tools are stable.
