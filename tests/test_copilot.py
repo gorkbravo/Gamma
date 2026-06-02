@@ -2410,6 +2410,15 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         assert "Rate shock proxy uses transparent duration assumptions" in " ".join(
             by_id["run_risk_scenario_analysis"]["failure_modes"]
         )
+        assert by_id["run_risk_contribution_analysis"]["permission_policy"] == "automatic"
+        assert by_id["run_risk_contribution_analysis"]["action_type"] == "run_analysis"
+        assert by_id["run_risk_contribution_analysis"]["read_only"] is True
+        assert by_id["run_risk_contribution_analysis"]["mutates_local_state"] is False
+        assert by_id["run_risk_contribution_analysis"]["input_schema"]["required"] == [
+            "source_scope",
+            "top_n",
+            "include_monte_carlo",
+        ]
         assert by_id["run_strategy_lab_backtest"]["permission_policy"] == "automatic"
         assert by_id["run_strategy_lab_backtest"]["action_type"] == "run_analysis"
         assert by_id["run_strategy_lab_backtest"]["read_only"] is True
@@ -2447,6 +2456,7 @@ def test_copilot_operator_plan_returns_ordered_steps_for_rate_shock(tmp_path):
         assert payload["steps"]
         assert [step["order"] for step in payload["steps"]] == list(range(1, len(payload["steps"]) + 1))
         assert any(step["tool_id"] == "get_portfolio_positions_summary" for step in payload["steps"])
+        assert any(step["tool_id"] == "run_risk_contribution_analysis" for step in payload["steps"])
         assert any(step["domain"] == "risk" for step in payload["steps"])
         assert all(step["permission_policy"] == "automatic" for step in payload["steps"])
         assert payload["research_plan"]["intent"] == "portfolio_rate_shock_research"
@@ -2519,6 +2529,13 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
             trace["tool_name"] == "run_risk_scenario_analysis"
             for trace in payload["tool_traces"]
         )
+        contribution_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_risk_contribution_analysis"
+        )
+        assert contribution_trace["arguments"]["top_n"] == 10
+        assert contribution_trace["arguments"]["include_monte_carlo"] is True
         risk_trace = next(
             trace
             for trace in payload["tool_traces"]
@@ -2528,6 +2545,10 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         assert risk_trace["arguments"]["rate_shift_bps"] == 100.0
         assert any(
             source["source_id"] == "risk.scenario.analysis"
+            for source in payload["sources"]
+        )
+        assert any(
+            source["source_id"] == "risk.contribution.analysis"
             for source in payload["sources"]
         )
         event_types = [event["event_type"] for event in payload["operator_events"]]

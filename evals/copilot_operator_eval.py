@@ -105,7 +105,7 @@ def default_operator_eval_cases(*, portfolio_snapshot: dict[str, Any] | None = N
             case_id="risk_rate_shock",
             prompt="Is my portfolio exposed to a rate shock?",
             context=portfolio_context,
-            expected_tools=("run_risk_scenario_analysis",),
+            expected_tools=("run_risk_contribution_analysis", "run_risk_scenario_analysis"),
             expected_events=("plan", "step-start", "tool-result", "final-report"),
         ),
         CopilotOperatorEvalCase(

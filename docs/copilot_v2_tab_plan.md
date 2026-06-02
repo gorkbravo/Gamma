@@ -648,6 +648,7 @@ Implementation note:
 
 Current Research Operator state:
 
+- `run_risk_contribution_analysis` is automatic read-only and runs Gamma's existing risk engine from the active portfolio or research snapshot. It returns contribution rank, coverage/concentration metrics, VaR/beta/correlation context, bounded Monte Carlo diagnostics when requested, warnings, and provenance without relying on a precomputed UI risk result or changing any state.
 - `run_risk_scenario_analysis` is automatic read-only and now accepts typed, bounded shock inputs (`scenario_type`, `rate_shift_bps`, `equity_shock_pct`, `duration_proxy_years`, and explicit `symbol_shocks`). Gamma still computes VaR/contribution/frontier metrics through the existing risk engine; the new `shock_proxy` block is a transparent position-level estimate, not full curve or factor repricing.
 - `run_strategy_lab_backtest` is automatic read-only and summarizes the active normalized Strategy Lab imported result, composition, or comparison. It does not execute strategy code, restore raw uploaded CSV rows, save research objects, rebalance, or modify portfolios.
 - `run_hypothetical_portfolio_comparison` is automatic read-only and builds a temporary long-only synthetic research scope from typed legs/weights, compares its normalized return stream to a benchmark through the existing Compare/Scenario service path, and returns coverage, relative metrics, warnings, and provenance without saving or trading anything.
@@ -657,7 +658,6 @@ Current Research Operator state:
 What remains for the next agents:
 
 1. Add narrower read-only drilldowns where they materially improve operator quality:
-   - `risk.run_contribution` as an operator action instead of only a context drilldown.
    - `research.run_scope_analysis` for active Equity Research/Scope Analysis payloads.
    - Options realized-versus-implied or event/volatility comparison once the IV data path is strong enough.
 2. Expand hypothetical portfolio comparison carefully only where it stays read-only:

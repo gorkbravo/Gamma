@@ -541,6 +541,44 @@ class CopilotService:
                     handler=self._tool_get_risk_contribution_summary,
                 ),
                 _CopilotToolDefinition(
+                    name="run_risk_contribution_analysis",
+                    description="Run a bounded read-only risk contribution computation for the active portfolio or research snapshot.",
+                    domains=("risk",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "source_scope": {
+                                "type": ["string", "null"],
+                                "description": "portfolio or research. Use null to infer from workspace mode.",
+                            },
+                            "top_n": {
+                                "type": ["integer", "null"],
+                                "description": "Number of contribution rows to return, bounded to 1-25.",
+                            },
+                            "include_monte_carlo": {
+                                "type": ["boolean", "null"],
+                                "description": "Whether to include the existing bounded Monte Carlo diagnostics.",
+                            },
+                        },
+                        "required": ["source_scope", "top_n", "include_monte_carlo"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_risk_contribution_analysis,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=35.0,
+                    permission_policy="automatic",
+                    provenance_behavior=(
+                        "Computes Gamma risk contribution, coverage, concentration, VaR, beta/correlation, "
+                        "and optional Monte Carlo diagnostics from the active snapshot without changing portfolio or research state."
+                    ),
+                    failure_modes=(
+                        "Risk contribution requires an active portfolio or research snapshot.",
+                        "Contribution rows can be unavailable when return history coverage is too thin.",
+                        "Monte Carlo diagnostics remain bounded and use Gamma's existing configured simulation model.",
+                    ),
+                ),
+                _CopilotToolDefinition(
                     name="run_risk_scenario_analysis",
                     description="Run a bounded read-only risk computation for the active portfolio or research snapshot, including VaR, contribution, coverage, typed shock parameters, transparent proxy impact, and scenario warnings.",
                     domains=("risk",),
@@ -1739,6 +1777,12 @@ class CopilotService:
             return {"result_kind": "auto"}
         if tool_name == "run_hypothetical_portfolio_comparison":
             return self._default_hypothetical_portfolio_arguments(context)
+        if tool_name == "run_risk_contribution_analysis":
+            return {
+                "source_scope": context.summary_data.get("workspace_mode"),
+                "top_n": 10,
+                "include_monte_carlo": True,
+            }
         if tool_name == "run_risk_scenario_analysis":
             is_rate_shock = "rate" in str(context.summary_data).lower()
             return {
@@ -2446,7 +2490,7 @@ class CopilotService:
                 "get_fundamentals_dcf_context",
                 "run_fundamentals_reverse_valuation",
             ],
-            "risk": ["run_risk_scenario_analysis"],
+            "risk": ["run_risk_contribution_analysis", "run_risk_scenario_analysis"],
             "iv": ["get_iv_surface_context", "get_iv_session_status"],
             "external_context": ["get_external_context_summary"],
             "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
@@ -4857,6 +4901,98 @@ class CopilotService:
                 tool_name="get_risk_coverage_summary",
                 summary="Expanded the active risk result into coverage, benchmark, and warning context.",
                 arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_run_risk_contribution_analysis(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        if self.risk_service is None:
+            raise ValueError("Risk service is unavailable to Copilot.")
+        snapshot_payload = context.tool_state.get("snapshot")
+        if not isinstance(snapshot_payload, dict):
+            raise ValueError("Risk contribution analysis requires an active portfolio or research snapshot.")
+        snapshot = self._portfolio_snapshot_from_payload(snapshot_payload)
+        source_scope = str(arguments.get("source_scope") or context.summary_data.get("workspace_mode") or "portfolio").strip().lower()
+        if source_scope not in {"portfolio", "research"}:
+            source_scope = "portfolio"
+        data_provider = self.research_provider if source_scope == "research" else self.portfolio_provider
+        normalization_warnings: list[str] = []
+        top_n = self._bounded_int(
+            arguments.get("top_n"),
+            default=10,
+            minimum=1,
+            maximum=25,
+            field_name="top_n",
+            warnings=normalization_warnings,
+        )
+        include_monte_carlo = arguments.get("include_monte_carlo")
+        if include_monte_carlo is None:
+            include_monte_carlo = True
+        else:
+            include_monte_carlo = bool(include_monte_carlo)
+        payload = self.risk_service.compute(
+            RiskComputeRequest(
+                snapshot=snapshot,
+                alpha=0.95,
+                lookback_days=252,
+                horizon_days=1,
+                mc_horizon_days=10,
+                mc_simulation_model="Gaussian",
+                mc_num_simulations=2000,
+                beta_window=126,
+                benchmark_symbol="SPY",
+                base_currency=snapshot.base_currency,
+                include_monte_carlo=include_monte_carlo,
+            ),
+            data_provider=data_provider,
+        )
+        summary = self._risk_compute_summary(payload, scenario_label="risk_contribution")
+        metrics = dict(summary.get("metrics") or {})
+        output = {
+            "method": (
+                "Gamma historical risk contribution analysis using the active snapshot. "
+                "This is read-only and does not rebalance, trade, or modify saved research state."
+            ),
+            "source_scope": source_scope,
+            "top_n": top_n,
+            "include_monte_carlo": include_monte_carlo,
+            "metrics": metrics,
+            "top_contributions": list(summary.get("top_contributions", []) or [])[:top_n],
+            "excluded_assets": dict(summary.get("excluded_assets") or {}),
+            "frontier_points": list(summary.get("frontier_points", []) or []),
+            "warnings": dedupe_warnings(summary.get("warnings", []), normalization_warnings),
+        }
+        if not include_monte_carlo:
+            output["monte_carlo"] = None
+        else:
+            output["monte_carlo"] = {
+                "var": metrics.get("monte_carlo_var"),
+                "cvar": metrics.get("monte_carlo_cvar"),
+            }
+        source = CopilotSourceRef(
+            source_id="risk.contribution.analysis",
+            label="Risk contribution analysis",
+            kind="analytics",
+            provider="gamma",
+            origin="gamma.risk.compute",
+            description="Read-only risk contribution computation run by the Research Operator.",
+            retrieved_at=snapshot.timestamp,
+        )
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_risk_contribution_analysis",
+                summary=f"Ran read-only risk contribution analysis for the active {source_scope} snapshot.",
+                arguments={
+                    "source_scope": source_scope,
+                    "top_n": top_n,
+                    "include_monte_carlo": include_monte_carlo,
+                },
                 source_ids=[source.source_id],
             ),
             sources=[source],
