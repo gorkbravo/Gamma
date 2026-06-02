@@ -2427,6 +2427,10 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         assert by_id["run_hypothetical_portfolio_comparison"]["action_type"] == "run_analysis"
         assert by_id["run_hypothetical_portfolio_comparison"]["read_only"] is True
         assert by_id["run_hypothetical_portfolio_comparison"]["mutates_local_state"] is False
+        assert "include_risk_analysis" in by_id["run_hypothetical_portfolio_comparison"]["input_schema"]["required"]
+        assert "Optional Risk handoff" in " ".join(
+            by_id["run_hypothetical_portfolio_comparison"]["failure_modes"]
+        )
         assert by_id["run_research_scope_analysis"]["permission_policy"] == "automatic"
         assert by_id["run_research_scope_analysis"]["action_type"] == "run_analysis"
         assert by_id["run_research_scope_analysis"]["read_only"] is True
@@ -2654,6 +2658,7 @@ def test_copilot_operator_execution_runs_hypothetical_portfolio_comparison(tmp_p
             {"symbol": "AAPL", "weight": 0.6, "sec_type": None, "currency": None, "exchange": None},
             {"symbol": "MSFT", "weight": 0.4, "sec_type": None, "currency": None, "exchange": None},
         ]
+        assert comparison_trace["arguments"]["include_risk_analysis"] is False
         assert any(
             source["source_id"] == "research.hypothetical_portfolio.operator_comparison"
             for source in payload["sources"]
@@ -2671,7 +2676,49 @@ def test_copilot_operator_execution_runs_hypothetical_portfolio_comparison(tmp_p
         assert comparison_output["left"]["object_type"] == "hypothetical_portfolio"
         assert comparison_output["right"]["object_type"] == "benchmark"
         assert "relative_return" in comparison_output["relative"]
+        assert comparison_output["risk_handoff"]["status"] == "not_requested"
         assert any("read-only research" in warning for warning in comparison_output["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_hypothetical_portfolio_can_include_risk_handoff(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Compare risk for a hypothetical 60/40 AAPL/MSFT research portfolio to SPY",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        comparison_trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_hypothetical_portfolio_comparison"
+        )
+        assert comparison_trace["arguments"]["include_risk_analysis"] is True
+        assert "risk.hypothetical_portfolio.operator_handoff" in comparison_trace["source_ids"]
+        assert any(
+            source["source_id"] == "risk.hypothetical_portfolio.operator_handoff"
+            for source in payload["sources"]
+        )
+        final_event = payload["operator_events"][-1]
+        output = next(
+            value
+            for step_id, value in final_event["payload"]["outputs"].items()
+            if "run_hypothetical_portfolio_comparison" in step_id
+        )
+        assert output["risk_handoff"]["status"] == "completed"
+        assert output["risk_handoff"]["snapshot"]["notional_value"] == 1_000_000.0
+        assert output["risk_handoff"]["metrics"]["portfolio_value"] == 1_000_000.0
+        assert output["risk_handoff"]["top_contributions"]
+        assert any("temporary fixed-notional" in warning for warning in output["risk_handoff"]["warnings"])
     finally:
         runtime.shutdown()
 

@@ -344,7 +344,7 @@ class CopilotService:
                 ),
                 _CopilotToolDefinition(
                     name="run_hypothetical_portfolio_comparison",
-                    description="Build a bounded read-only hypothetical research portfolio and compare its historical return stream to a benchmark.",
+                    description="Build a bounded read-only hypothetical research portfolio, compare its historical return stream to a benchmark, and optionally hand it to Risk for read-only contribution analytics.",
                     domains=("research",),
                     parameters_schema={
                         "type": "object",
@@ -364,6 +364,10 @@ class CopilotService:
                             "min_observations": {
                                 "type": ["integer", "null"],
                                 "description": "Minimum aligned observations required for the comparison, bounded to 2-2520.",
+                            },
+                            "include_risk_analysis": {
+                                "type": ["boolean", "null"],
+                                "description": "Whether to run an optional bounded read-only Risk handoff against the temporary hypothetical snapshot.",
                             },
                             "legs": {
                                 "type": "array",
@@ -397,7 +401,14 @@ class CopilotService:
                                 },
                             },
                         },
-                        "required": ["portfolio_label", "benchmark_symbol", "lookback_days", "min_observations", "legs"],
+                        "required": [
+                            "portfolio_label",
+                            "benchmark_symbol",
+                            "lookback_days",
+                            "min_observations",
+                            "include_risk_analysis",
+                            "legs",
+                        ],
                         "additionalProperties": False,
                     },
                     handler=self._tool_run_hypothetical_portfolio_comparison,
@@ -407,11 +418,13 @@ class CopilotService:
                     permission_policy="automatic",
                     provenance_behavior=(
                         "Builds a temporary read-only synthetic research scope, compares normalized returns to a benchmark, "
-                        "and returns coverage, relative metrics, warnings, and provider provenance without saving or trading anything."
+                        "optionally computes Risk analytics from a temporary notional snapshot, and returns coverage, "
+                        "relative metrics, warnings, and provider provenance without saving or trading anything."
                     ),
                     failure_modes=(
                         "History may be missing for one or more requested symbols.",
                         "The comparison can be unavailable if fewer than two aligned return observations remain.",
+                        "Optional Risk handoff is skipped when RiskService is unavailable or history coverage is too thin.",
                         "Weights are bounded, long-only, and normalized; this does not modify broker or saved research state.",
                     ),
                 ),
@@ -4288,7 +4301,7 @@ class CopilotService:
             analysis=analysis,
             comparison=comparison,
         )
-        source = CopilotSourceRef(
+        comparison_source = CopilotSourceRef(
             source_id="research.hypothetical_portfolio.operator_comparison",
             label="Hypothetical portfolio comparison",
             kind="analytics",
@@ -4297,6 +4310,21 @@ class CopilotService:
             description="Read-only Research Operator comparison of a temporary hypothetical portfolio against a benchmark.",
             retrieved_at=comparison.retrieved_at,
         )
+        sources = [comparison_source]
+        source_ids = [comparison_source.source_id]
+        if normalized["include_risk_analysis"]:
+            risk_output, risk_source = self._hypothetical_portfolio_risk_handoff(normalized)
+            output["risk_handoff"] = risk_output
+            output["warnings"] = dedupe_warnings(output.get("warnings", []), risk_output.get("warnings", []))
+            if risk_source is not None:
+                sources.append(risk_source)
+                source_ids.append(risk_source.source_id)
+        else:
+            output["risk_handoff"] = {
+                "status": "not_requested",
+                "summary": "Optional read-only Risk handoff was not requested for this hypothetical comparison.",
+                "warnings": [],
+            }
         return CopilotToolExecution(
             output=output,
             trace=CopilotToolTrace(
@@ -4306,9 +4334,9 @@ class CopilotService:
                     "as a read-only hypothetical research portfolio."
                 ),
                 arguments=normalized,
-                source_ids=[source.source_id],
+                source_ids=source_ids,
             ),
-            sources=[source],
+            sources=sources,
         )
 
     def _tool_get_macro_workspace_drilldown(
@@ -6312,6 +6340,8 @@ class CopilotService:
             field_name="min_observations",
             warnings=warnings,
         )
+        include_risk_analysis = arguments.get("include_risk_analysis")
+        include_risk_analysis = False if include_risk_analysis is None else bool(include_risk_analysis)
         benchmark_symbol = str(arguments.get("benchmark_symbol") or "SPY").strip().upper() or "SPY"
         portfolio_label = str(arguments.get("portfolio_label") or "").strip()
         if not portfolio_label:
@@ -6321,6 +6351,7 @@ class CopilotService:
             "benchmark_symbol": benchmark_symbol[:24],
             "lookback_days": lookback_days,
             "min_observations": min_observations,
+            "include_risk_analysis": include_risk_analysis,
             "legs": normalized_legs,
             "warnings": warnings,
         }
@@ -6353,11 +6384,24 @@ class CopilotService:
         weights = cls._extract_ratio_weights(prompt, len(leg_symbols))
         if weights is None:
             weights = [1.0 / len(leg_symbols)] * len(leg_symbols)
+        include_risk_analysis = any(
+            term in prompt.lower()
+            for term in (
+                "risk",
+                "var",
+                "volatility",
+                "vol ",
+                "drawdown",
+                "contribution",
+                "stress",
+            )
+        )
         return {
             "portfolio_label": "Hypothetical " + "/".join(leg_symbols[:4]),
             "benchmark_symbol": benchmark_symbol,
             "lookback_days": 252,
             "min_observations": 5,
+            "include_risk_analysis": include_risk_analysis,
             "legs": [
                 {
                     "symbol": symbol,
@@ -6611,6 +6655,135 @@ class CopilotService:
             },
             "warnings": warnings,
         }
+
+    def _hypothetical_portfolio_risk_handoff(
+        self,
+        normalized: dict[str, Any],
+    ) -> tuple[dict[str, Any], CopilotSourceRef | None]:
+        if self.risk_service is None:
+            return (
+                {
+                    "status": "skipped",
+                    "summary": "Optional Risk handoff was skipped because RiskService is unavailable.",
+                    "warnings": ["Risk handoff unavailable: RiskService is not configured."],
+                },
+                None,
+            )
+        if self.research_provider is None:
+            return (
+                {
+                    "status": "skipped",
+                    "summary": "Optional Risk handoff was skipped because the research data provider is unavailable.",
+                    "warnings": ["Risk handoff unavailable: research data provider is not configured."],
+                },
+                None,
+            )
+        snapshot = self._hypothetical_portfolio_snapshot(normalized)
+        try:
+            payload = self.risk_service.compute(
+                RiskComputeRequest(
+                    snapshot=snapshot,
+                    alpha=0.95,
+                    lookback_days=int(normalized["lookback_days"]),
+                    horizon_days=1,
+                    mc_horizon_days=10,
+                    mc_simulation_model="Gaussian",
+                    mc_num_simulations=1000,
+                    beta_window=126,
+                    benchmark_symbol=str(normalized["benchmark_symbol"]),
+                    base_currency=snapshot.base_currency,
+                    include_monte_carlo=False,
+                    recommended_min_obs=max(20, min(60, int(normalized["min_observations"]))),
+                ),
+                data_provider=self.research_provider,
+            )
+        except Exception as exc:
+            return (
+                {
+                    "status": "failed",
+                    "summary": f"Optional Risk handoff failed: {exc.__class__.__name__}.",
+                    "warnings": [f"Risk handoff failed: {exc.__class__.__name__}: {exc}"],
+                },
+                None,
+            )
+
+        summary = self._risk_compute_summary(payload, scenario_label="hypothetical_portfolio_risk")
+        warnings = dedupe_warnings(
+            summary.get("warnings", []),
+            [
+                "Risk handoff used a temporary fixed-notional hypothetical snapshot; no broker portfolio or saved research object was modified.",
+                "Monte Carlo diagnostics are disabled for the optional hypothetical Risk handoff to keep the operator run bounded.",
+            ],
+        )
+        source = CopilotSourceRef(
+            source_id="risk.hypothetical_portfolio.operator_handoff",
+            label="Hypothetical portfolio Risk handoff",
+            kind="analytics",
+            provider="gamma",
+            origin="gamma.risk.compute",
+            description="Read-only Risk analytics computed from a temporary hypothetical portfolio snapshot.",
+            retrieved_at=snapshot.timestamp,
+        )
+        return (
+            {
+                "status": "completed",
+                "summary": "Computed read-only Risk analytics from the temporary hypothetical portfolio snapshot.",
+                "snapshot": {
+                    "notional_value": snapshot.net_liquidation,
+                    "base_currency": snapshot.base_currency,
+                    "position_count": len(snapshot.positions),
+                },
+                "metrics": summary.get("metrics", {}),
+                "top_contributions": list(summary.get("top_contributions", []) or [])[:10],
+                "excluded_assets": dict(summary.get("excluded_assets") or {}),
+                "frontier_points": list(summary.get("frontier_points", []) or []),
+                "warnings": warnings,
+            },
+            source,
+        )
+
+    @staticmethod
+    def _hypothetical_portfolio_snapshot(normalized: dict[str, Any]) -> PortfolioSnapshot:
+        notional_value = 1_000_000.0
+        positions: list[PositionItem] = []
+        for leg in list(normalized.get("legs") or []):
+            weight = float(leg.get("weight") or 0.0)
+            market_value = notional_value * weight
+            market_price = 100.0
+            positions.append(
+                PositionItem(
+                    symbol=str(leg.get("symbol") or "").strip().upper(),
+                    sec_type=str(leg.get("sec_type") or "STK"),
+                    currency=str(leg.get("currency") or "USD"),
+                    quantity=market_value / market_price,
+                    avg_cost=market_price,
+                    market_price=market_price,
+                    market_value=market_value,
+                    unrealized_pnl=0.0,
+                    weight=weight,
+                    base_market_value=market_value,
+                    fx_rate=1.0,
+                    display_symbol=str(leg.get("symbol") or "").strip().upper(),
+                    exchange=leg.get("exchange") or "SMART",
+                    provider="gamma_hypothetical",
+                    provider_id=str(leg.get("symbol") or "").strip().upper(),
+                )
+            )
+        return PortfolioSnapshot(
+            timestamp=now_utc(),
+            base_currency="USD",
+            account_summary={
+                "source": "temporary_hypothetical_research_snapshot",
+                "mutation_behavior": "read_only_ephemeral",
+            },
+            positions=positions,
+            total_market_value=notional_value,
+            total_cash=0.0,
+            net_liquidation=notional_value,
+            warnings=[
+                "Temporary hypothetical Risk handoff snapshot; not a broker account, saved portfolio, or rebalance instruction."
+            ],
+        )
 
     @staticmethod
     def _metrics_to_dict(metrics: Any) -> dict[str, Any]:
