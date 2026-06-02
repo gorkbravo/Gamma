@@ -66,6 +66,9 @@ import type {
   SavedResearchListResponse,
   StrategyLabCompositionLegInput,
   StrategyLabCompositionResult,
+  StrategyLabHandoffEnvelope,
+  StrategyLabHandoffQueueItem,
+  StrategyLabResolvedHandoff,
   StrategyLabPortfolioLegInput,
   StrategyLabResult,
   SystemStatus,
@@ -439,6 +442,7 @@ export const loading = writable<Record<string, boolean>>({
   researchOverview: false,
   research: false,
   strategyLab: false,
+  strategyLabHandoff: false,
   compareScenario: false,
   savedResearch: false,
   macro: false,
@@ -458,6 +462,49 @@ export const loading = writable<Record<string, boolean>>({
   iv: false,
   ivSession: false
 });
+
+const STRATEGY_LAB_HANDOFF_STORAGE_KEY = "gamma.strategyLab.handoffQueue.v1";
+
+function loadPersistedStrategyLabHandoffQueue(): StrategyLabHandoffQueueItem[] {
+  if (typeof localStorage === "undefined") {
+    return [];
+  }
+  try {
+    const raw = localStorage.getItem(STRATEGY_LAB_HANDOFF_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(isStrategyLabHandoffQueueItem).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function persistStrategyLabHandoffQueue(items: StrategyLabHandoffQueueItem[]) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    localStorage.setItem(STRATEGY_LAB_HANDOFF_STORAGE_KEY, JSON.stringify(items.slice(0, 20)));
+  } catch {
+    // Local persistence is best-effort; the in-memory queue remains authoritative.
+  }
+}
+
+function isStrategyLabHandoffQueueItem(value: unknown): value is StrategyLabHandoffQueueItem {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const item = value as Partial<StrategyLabHandoffQueueItem>;
+  return typeof item.id === "string" && Boolean(item.handoff) && typeof item.enqueued_at === "string";
+}
+
+export const strategyLabHandoffQueue = writable<StrategyLabHandoffQueueItem[]>(loadPersistedStrategyLabHandoffQueue());
+strategyLabHandoffQueue.subscribe(persistStrategyLabHandoffQueue);
 
 const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
@@ -1303,6 +1350,103 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
   } finally {
     setLoading("strategyLab", false);
   }
+}
+
+export function enqueueStrategyLabHandoff(handoff: StrategyLabHandoffEnvelope) {
+  const now = new Date().toISOString();
+  const entityId = handoff.selected_entity.normalized_id || handoff.selected_entity.native_id || handoff.selected_entity.label;
+  const id = `${handoff.source_tab}:${entityId}:${handoff.timestamp || now}`;
+  const item: StrategyLabHandoffQueueItem = {
+    id,
+    handoff: {
+      ...handoff,
+      timestamp: handoff.timestamp || now,
+      warnings: Array.isArray(handoff.warnings) ? handoff.warnings : [],
+      normalized_ids: handoff.normalized_ids ?? {}
+    },
+    status: "pending",
+    resolved: null,
+    error: null,
+    enqueued_at: now,
+    updated_at: now
+  };
+  strategyLabHandoffQueue.update((current) => {
+    const withoutDuplicate = current.filter((candidate) => candidate.id !== item.id);
+    return [item, ...withoutDuplicate].slice(0, 20);
+  });
+  lastError.set("");
+  return item;
+}
+
+export function enqueueAndOpenStrategyLab(handoff: StrategyLabHandoffEnvelope) {
+  return enqueueStrategyLabHandoff(handoff);
+}
+
+export async function resolvePendingStrategyLabHandoffs() {
+  const pending = get(strategyLabHandoffQueue).filter((item) => item.status === "pending" || item.status === "error");
+  if (!pending.length) {
+    return get(strategyLabHandoffQueue);
+  }
+  setLoading("strategyLabHandoff", true);
+  try {
+    for (const item of pending) {
+      strategyLabHandoffQueue.update((current) =>
+        current.map((candidate) =>
+          candidate.id === item.id
+            ? { ...candidate, status: "resolving", error: null, updated_at: new Date().toISOString() }
+            : candidate
+        )
+      );
+      try {
+        const resolved = await postJson<StrategyLabResolvedHandoff>("/research/strategy-lab/resolve-handoff", {
+          handoff: item.handoff
+        });
+        strategyLabHandoffQueue.update((current) =>
+          current.map((candidate) =>
+            candidate.id === item.id
+              ? {
+                  ...candidate,
+                  status: resolved.status === "resolved" ? "resolved" : "unsupported",
+                  resolved,
+                  error: resolved.unsupported_reason,
+                  updated_at: new Date().toISOString()
+                }
+              : candidate
+          )
+        );
+      } catch (error) {
+        const message = errorMessage(error);
+        strategyLabHandoffQueue.update((current) =>
+          current.map((candidate) =>
+            candidate.id === item.id
+              ? { ...candidate, status: "error", error: message, updated_at: new Date().toISOString() }
+              : candidate
+          )
+        );
+        lastError.set(message);
+      }
+    }
+    return get(strategyLabHandoffQueue);
+  } finally {
+    setLoading("strategyLabHandoff", false);
+  }
+}
+
+export function dismissStrategyLabHandoff(id: string) {
+  strategyLabHandoffQueue.update((current) => current.filter((item) => item.id !== id));
+}
+
+export function clearStrategyLabHandoffs() {
+  strategyLabHandoffQueue.set([]);
+}
+
+export function acceptResolvedStrategyLabHandoff(id: string) {
+  const item = get(strategyLabHandoffQueue).find((candidate) => candidate.id === id) ?? null;
+  if (item?.resolved?.status !== "resolved") {
+    return null;
+  }
+  dismissStrategyLabHandoff(id);
+  return item.resolved;
 }
 
 export function restoreStrategyLabResult(result: StrategyLabResult) {

@@ -21,6 +21,8 @@ from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.research_lab import (
     GammaResearchObject,
     ImportedReturnStreamRequest,
+    CrossTabHandoffEntity,
+    CrossTabHandoffTimeframe,
     ResearchComparisonLeg,
     ResearchComparisonRequest,
     ResearchComparisonResult,
@@ -31,6 +33,9 @@ from src.models.research_lab import (
     StrategyLabCompositionLeg,
     StrategyLabCompositionRequest,
     StrategyLabCompositionResult,
+    StrategyLabHandoffEnvelope,
+    StrategyLabHandoffResolveRequest,
+    StrategyLabResolvedHandoff,
     StrategyLabPortfolioCompositionRequest,
     StrategyLabPortfolioLeg,
 )
@@ -242,6 +247,174 @@ class StrategyLabPortfolioLegModel(BaseModel):
             value_kind=self.value_kind,
             return_points=[point.to_domain() for point in self.return_points],
             object=self.object.to_domain() if self.object is not None else None,
+        )
+
+    @classmethod
+    def from_domain(cls, row: StrategyLabPortfolioLeg) -> "StrategyLabPortfolioLegModel":
+        return cls(
+            label=row.label,
+            asset_class=row.asset_class,
+            identifier=row.identifier,
+            weight=row.weight,
+            value_kind=row.value_kind,
+            return_points=[ResearchObjectReturnPointModel.from_domain(point) for point in row.return_points],
+            object=GammaResearchObjectModel.from_domain(row.object) if row.object is not None else None,
+        )
+
+
+class CrossTabHandoffEntityModel(BaseModel):
+    entity_type: str = Field(min_length=1, max_length=96)
+    label: str = Field(min_length=1, max_length=256)
+    normalized_id: str = Field(min_length=1, max_length=256)
+    provider_id: str | None = Field(default=None, max_length=256)
+    native_id: str | None = Field(default=None, max_length=256)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def to_domain(self) -> CrossTabHandoffEntity:
+        return CrossTabHandoffEntity(
+            entity_type=self.entity_type,
+            label=self.label,
+            normalized_id=self.normalized_id,
+            provider_id=self.provider_id,
+            native_id=self.native_id,
+            metadata=dict(self.metadata),
+        )
+
+    @classmethod
+    def from_domain(cls, row: CrossTabHandoffEntity) -> "CrossTabHandoffEntityModel":
+        return cls(**row.__dict__)
+
+
+class CrossTabHandoffTimeframeModel(BaseModel):
+    label: str = Field(min_length=1, max_length=128)
+    start: str | None = Field(default=None, max_length=96)
+    end: str | None = Field(default=None, max_length=96)
+
+    def to_domain(self) -> CrossTabHandoffTimeframe:
+        return CrossTabHandoffTimeframe(label=self.label, start=self.start, end=self.end)
+
+    @classmethod
+    def from_domain(cls, row: CrossTabHandoffTimeframe) -> "CrossTabHandoffTimeframeModel":
+        return cls(**row.__dict__)
+
+
+class StrategyLabHandoffEnvelopeModel(BaseModel):
+    source_tab: str = Field(min_length=1, max_length=96)
+    source_mode: str | None = Field(default=None, max_length=96)
+    intended_target_tab: str = Field(default="strategy_lab", min_length=1, max_length=96)
+    intended_target_mode: str | None = Field(default="composer", max_length=96)
+    selected_entity: CrossTabHandoffEntityModel
+    resolver_capability: Literal["return_leg", "benchmark", "lens", "overlay", "reference_only"] = "return_leg"
+    asset_class: Literal[
+        "equity",
+        "etf",
+        "commodity",
+        "crypto",
+        "prediction_market",
+        "macro",
+        "fundamental",
+        "rates",
+        "fx",
+        "other",
+    ] = "other"
+    value_kind: Literal["return", "level", "probability", "price", "spread", "context"] = "context"
+    default_side: Literal["long", "short", "long_yes", "long_no", "none"] = "long"
+    default_weight: float | None = None
+    selected_timeframe: CrossTabHandoffTimeframeModel | None = None
+    provider: str | None = Field(default=None, max_length=96)
+    source: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list, max_length=64)
+    normalized_ids: dict[str, str] = Field(default_factory=dict)
+    timestamp: str = Field(default="", max_length=96)
+
+    def to_domain(self) -> StrategyLabHandoffEnvelope:
+        return StrategyLabHandoffEnvelope(
+            source_tab=self.source_tab,
+            source_mode=self.source_mode,
+            intended_target_tab=self.intended_target_tab,
+            intended_target_mode=self.intended_target_mode,
+            selected_entity=self.selected_entity.to_domain(),
+            resolver_capability=self.resolver_capability,
+            asset_class=self.asset_class,
+            value_kind=self.value_kind,
+            default_side=self.default_side,
+            default_weight=self.default_weight,
+            selected_timeframe=self.selected_timeframe.to_domain() if self.selected_timeframe is not None else None,
+            provider=self.provider,
+            source=dict(self.source) if self.source is not None else None,
+            warnings=list(self.warnings),
+            normalized_ids=dict(self.normalized_ids),
+            timestamp=self.timestamp,
+        )
+
+    @classmethod
+    def from_domain(cls, row: StrategyLabHandoffEnvelope) -> "StrategyLabHandoffEnvelopeModel":
+        return cls(
+            source_tab=row.source_tab,
+            source_mode=row.source_mode,
+            intended_target_tab=row.intended_target_tab,
+            intended_target_mode=row.intended_target_mode,
+            selected_entity=CrossTabHandoffEntityModel.from_domain(row.selected_entity),
+            resolver_capability=row.resolver_capability,
+            asset_class=row.asset_class,
+            value_kind=row.value_kind,
+            default_side=row.default_side,
+            default_weight=row.default_weight,
+            selected_timeframe=(
+                CrossTabHandoffTimeframeModel.from_domain(row.selected_timeframe)
+                if row.selected_timeframe is not None
+                else None
+            ),
+            provider=row.provider,
+            source=dict(row.source) if row.source is not None else None,
+            warnings=list(row.warnings),
+            normalized_ids=dict(row.normalized_ids),
+            timestamp=row.timestamp,
+        )
+
+
+class StrategyLabHandoffResolveRequestModel(BaseModel):
+    handoff: StrategyLabHandoffEnvelopeModel
+
+    def to_domain(self) -> StrategyLabHandoffResolveRequest:
+        return StrategyLabHandoffResolveRequest(handoff=self.handoff.to_domain())
+
+
+class StrategyLabResolvedHandoffModel(BaseModel):
+    handoff_id: str
+    envelope: StrategyLabHandoffEnvelopeModel
+    status: str
+    resolved_capability: Literal["return_leg", "benchmark", "lens", "overlay", "reference_only"]
+    composer_draft_leg: StrategyLabPortfolioLegModel | None = None
+    benchmark_draft: GammaResearchObjectModel | None = None
+    lens: GammaResearchObjectModel | None = None
+    overlay: GammaResearchObjectModel | None = None
+    date_coverage: CrossTabHandoffTimeframeModel | None = None
+    provider_summary: str | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    unsupported_reason: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: StrategyLabResolvedHandoff) -> "StrategyLabResolvedHandoffModel":
+        return cls(
+            handoff_id=row.handoff_id,
+            envelope=StrategyLabHandoffEnvelopeModel.from_domain(row.envelope),
+            status=row.status,
+            resolved_capability=row.resolved_capability,
+            composer_draft_leg=(
+                StrategyLabPortfolioLegModel.from_domain(row.composer_draft_leg)
+                if row.composer_draft_leg is not None
+                else None
+            ),
+            benchmark_draft=GammaResearchObjectModel.from_domain(row.benchmark_draft) if row.benchmark_draft else None,
+            lens=GammaResearchObjectModel.from_domain(row.lens) if row.lens else None,
+            overlay=GammaResearchObjectModel.from_domain(row.overlay) if row.overlay else None,
+            date_coverage=CrossTabHandoffTimeframeModel.from_domain(row.date_coverage) if row.date_coverage else None,
+            provider_summary=row.provider_summary,
+            provenance=dict(row.provenance),
+            warnings=list(row.warnings),
+            unsupported_reason=row.unsupported_reason,
         )
 
 

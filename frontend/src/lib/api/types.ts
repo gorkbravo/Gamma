@@ -3087,6 +3087,62 @@ export interface CrossTabHandoffEnvelope {
   intended_target_mode: string | null;
 }
 
+export type StrategyLabResolverCapability = ResearchObjectResolverCapability;
+export type StrategyLabHandoffAssetClass =
+  | "equity"
+  | "etf"
+  | "commodity"
+  | "crypto"
+  | "prediction_market"
+  | "macro"
+  | "fundamental"
+  | "rates"
+  | "fx"
+  | "other";
+export type StrategyLabHandoffValueKind = "return" | "level" | "probability" | "price" | "spread" | "context";
+export type StrategyLabHandoffDefaultSide = "long" | "short" | "long_yes" | "long_no" | "none";
+
+export interface StrategyLabHandoffEnvelope extends CrossTabHandoffEnvelope {
+  intended_target_tab: "strategy_lab" | string;
+  intended_target_mode: "composer" | "benchmark" | "lens" | string | null;
+  selected_entity: CrossTabHandoffEntity;
+  resolver_capability: StrategyLabResolverCapability;
+  asset_class: StrategyLabHandoffAssetClass;
+  value_kind: StrategyLabHandoffValueKind;
+  default_side: StrategyLabHandoffDefaultSide;
+  default_weight: number | null;
+}
+
+export interface StrategyLabHandoffResolveRequest {
+  handoff: StrategyLabHandoffEnvelope;
+}
+
+export interface StrategyLabResolvedHandoff {
+  handoff_id: string;
+  envelope: StrategyLabHandoffEnvelope;
+  status: "resolved" | "unsupported" | string;
+  resolved_capability: StrategyLabResolverCapability;
+  composer_draft_leg: StrategyLabPortfolioLegInput | null;
+  benchmark_draft: GammaResearchObject | null;
+  lens: GammaResearchObject | null;
+  overlay: GammaResearchObject | null;
+  date_coverage: CrossTabHandoffTimeframe | null;
+  provider_summary: string | null;
+  provenance: Record<string, unknown>;
+  warnings: string[];
+  unsupported_reason: string | null;
+}
+
+export interface StrategyLabHandoffQueueItem {
+  id: string;
+  handoff: StrategyLabHandoffEnvelope;
+  status: "pending" | "resolving" | "resolved" | "unsupported" | "error";
+  resolved: StrategyLabResolvedHandoff | null;
+  error: string | null;
+  enqueued_at: string;
+  updated_at: string;
+}
+
 export interface IvSurfaceCollection {
   depth_preset: string;
   market_data_mode: string;

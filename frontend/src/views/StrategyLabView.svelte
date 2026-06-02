@@ -6,6 +6,8 @@
     ResearchResult,
     SavedResearchItem,
     StrategyLabCompositionResult,
+    StrategyLabHandoffQueueItem,
+    StrategyLabResolvedHandoff,
     StrategyLabResult
   } from "../lib/api/types";
   import type {
@@ -45,6 +47,12 @@
   export let onRestoreStrategy: ((result: StrategyLabResult) => void) | undefined = undefined;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
+  export let strategyLabHandoffs: StrategyLabHandoffQueueItem[] = [];
+  export let handoffLoading = false;
+  export let onResolveStrategyLabHandoffs: (() => Promise<StrategyLabHandoffQueueItem[]> | void) | undefined = undefined;
+  export let onDismissStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
+  export let onClearStrategyLabHandoffs: (() => void) | undefined = undefined;
+  export let onAcceptStrategyLabHandoff: ((id: string) => StrategyLabResolvedHandoff | null | void) | undefined = undefined;
 </script>
 
 <ResearchView
@@ -75,4 +83,10 @@
   {onRestoreStrategy}
   {onOpenRisk}
   {onOpenIv}
+  {strategyLabHandoffs}
+  {handoffLoading}
+  {onResolveStrategyLabHandoffs}
+  {onDismissStrategyLabHandoff}
+  {onClearStrategyLabHandoffs}
+  {onAcceptStrategyLabHandoff}
 />

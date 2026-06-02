@@ -9,9 +9,11 @@
     PredictionProbabilityHistoryResponse,
     PredictionVenueStatus,
     PredictionWalletSummary,
-    RelatedPredictionMarketListResponse
+    RelatedPredictionMarketListResponse,
+    StrategyLabHandoffEnvelope
   } from "../lib/api/types";
   import type { PredictionMarketScreenerOptions, PredictionMarketSortBy } from "../lib/stores/app";
+  import { buildPredictionMarketStrategyHandoff } from "../lib/view-models/research";
 
   export let screener: PredictionMarketListResponse | null = null;
   export let detail: PredictionMarket | null = null;
@@ -22,6 +24,7 @@
   export let loading = false;
   export let onLoadScreener: (options?: PredictionMarketScreenerOptions) => Promise<unknown> | void;
   export let onSelectMarket: (marketId: string) => Promise<unknown> | void;
+  export let onSendToStrategyLab: ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void) | undefined = undefined;
 
   let query = "";
   let status: "open" | "closed" | "all" = "open";
@@ -139,6 +142,13 @@
     if (probability >= 0.7) return "hot";
     if (probability <= 0.3) return "cold";
     return "";
+  }
+
+  function sendSelectedMarketToStrategyLab(open = false) {
+    if (!detail || !onSendToStrategyLab) {
+      return;
+    }
+    onSendToStrategyLab(buildPredictionMarketStrategyHandoff(detail), { open });
   }
 
   let chartSeries: ChartSeries[] = [];
@@ -269,6 +279,16 @@
             </div>
           {/if}
         </div>
+        {#if detail}
+          <div class="strategy-actions">
+            <button type="button" class="ghost-button" on:click={() => sendSelectedMarketToStrategyLab(false)}>
+              + Strategy
+            </button>
+            <button type="button" on:click={() => sendSelectedMarketToStrategyLab(true)}>
+              Add &amp; Open
+            </button>
+          </div>
+        {/if}
 
         <div class="kpi-grid">
           <article class="metric">
@@ -1013,6 +1033,20 @@
     gap: 0.4rem;
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .strategy-actions {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .strategy-actions button {
+    width: auto;
+    min-height: 1.75rem;
+    padding: 0.24rem 0.55rem;
   }
 
   .badge-stack span {

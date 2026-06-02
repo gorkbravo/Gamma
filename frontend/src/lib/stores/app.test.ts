@@ -32,11 +32,13 @@ import type {
   ResearchResult,
   RiskResult,
   SavedResearchItem,
+  StrategyLabHandoffEnvelope,
   StrategyLabResult,
   SystemStatus
 } from "../api/types";
 import {
   analyzeStrategyLab,
+  acceptResolvedStrategyLabHandoff,
   copilotCards,
   copilotThreads,
   composeStrategyLab,
@@ -62,6 +64,9 @@ import {
   loadNewsFeed,
   loadPortfolioSnapshot,
   loadPredictionMarketScreener,
+  clearStrategyLabHandoffs,
+  dismissStrategyLabHandoff,
+  enqueueStrategyLabHandoff,
   loadResearchOverview,
   loadSavedResearch,
   previewCopilotThreadFingerprint,
@@ -86,6 +91,8 @@ import {
   researchCompareResult,
   researchResult,
   strategyLabComposition,
+  strategyLabHandoffQueue,
+  resolvePendingStrategyLabHandoffs,
   restoreStrategyLabResult,
   riskResult,
   savedResearchItems,
@@ -119,6 +126,7 @@ describe("app store orchestration", () => {
     sharedEquitySelection.set(null);
     strategyLabResult.set(null);
     strategyLabComposition.set(null);
+    strategyLabHandoffQueue.set([]);
     researchCompareResult.set(null);
     savedResearchItems.set([]);
     selectedPredictionMarketId.set(null);
@@ -163,11 +171,14 @@ describe("app store orchestration", () => {
       researchOverview: false,
       research: false,
       strategyLab: false,
+      strategyLabHandoff: false,
       compareScenario: false,
       savedResearch: false,
       macro: false,
       macroHistory: false,
       news: false,
+      commodities: false,
+      maritime: false,
       prediction: false,
       predictionDetail: false,
       crypto: false,
@@ -1409,6 +1420,84 @@ describe("app store orchestration", () => {
     expect(get(ivSession)?.running).toBe(false);
     expect(get(ivSurface)?.symbol).toBe("AAPL");
     expect(get(ivSurface)?.points).toBe(3);
+  });
+
+  it("queues, resolves, accepts, and dismisses Strategy Lab handoffs", async () => {
+    const market = makePredictionMarket("polymarket:fed-cut");
+    const handoff: StrategyLabHandoffEnvelope = {
+      source_tab: "prediction_markets",
+      source_mode: "detail",
+      intended_target_tab: "strategy_lab",
+      intended_target_mode: "composer",
+      selected_entity: {
+        entity_type: "prediction_market_contract",
+        label: market.title,
+        normalized_id: market.market_id,
+        provider_id: market.provider_market_id,
+        native_id: market.provider_condition_id,
+        metadata: {}
+      },
+      resolver_capability: "return_leg",
+      asset_class: "prediction_market",
+      value_kind: "probability",
+      default_side: "long_yes",
+      default_weight: 0.1,
+      selected_timeframe: null,
+      provider: market.source_provider,
+      source: null,
+      warnings: [],
+      normalized_ids: { market_id: market.market_id },
+      timestamp: "2026-03-01T00:00:00Z"
+    };
+    const resolved = {
+      handoff_id: "prediction_markets:polymarket:fed-cut:2026-03-01T00:00:00Z",
+      envelope: handoff,
+      status: "resolved",
+      resolved_capability: "return_leg",
+      composer_draft_leg: {
+        label: "Will the Fed cut rates in March? | YES probability",
+        asset_class: "prediction_contract",
+        identifier: market.market_id,
+        weight: 0.1,
+        value_kind: "level",
+        return_points: [
+          { timestamp: "2026-03-01T00:00:00Z", value: 0.51 },
+          { timestamp: "2026-03-02T00:00:00Z", value: 0.53 }
+        ],
+        object: null
+      },
+      benchmark_draft: null,
+      lens: null,
+      overlay: null,
+      date_coverage: { label: "Probability history", start: "2026-03-01T00:00:00Z", end: "2026-03-02T00:00:00Z" },
+      provider_summary: "polymarket",
+      provenance: { transformation: "long_yes_probability_return" },
+      warnings: ["Probability history is a research proxy."],
+      unsupported_reason: null
+    };
+    const fetchMock = vi.fn().mockResolvedValue(ok(resolved));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const queued = enqueueStrategyLabHandoff(handoff);
+    expect(get(strategyLabHandoffQueue)[0]?.id).toBe(queued.id);
+
+    await resolvePendingStrategyLabHandoffs();
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/research/strategy-lab/resolve-handoff"), expect.any(Object));
+    expect(get(strategyLabHandoffQueue)[0]?.status).toBe("resolved");
+    expect(get(strategyLabHandoffQueue)[0]?.resolved?.composer_draft_leg?.identifier).toBe(market.market_id);
+
+    const accepted = acceptResolvedStrategyLabHandoff(queued.id);
+    expect(accepted?.status).toBe("resolved");
+    expect(get(strategyLabHandoffQueue)).toHaveLength(0);
+
+    enqueueStrategyLabHandoff(handoff);
+    dismissStrategyLabHandoff(queued.id);
+    expect(get(strategyLabHandoffQueue)).toHaveLength(0);
+
+    enqueueStrategyLabHandoff(handoff);
+    clearStrategyLabHandoffs();
+    expect(get(strategyLabHandoffQueue)).toHaveLength(0);
   });
 
   it("stops an active IV stream before loading a one-shot surface", async () => {

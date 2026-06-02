@@ -18,6 +18,8 @@
     SavedResearchItem,
     StrategyLabResult,
     ResearchStructure,
+    StrategyLabHandoffQueueItem,
+    StrategyLabResolvedHandoff,
     TimeSeriesPoint
   } from "../lib/api/types";
   import {
@@ -59,6 +61,7 @@
     savedResearchCanReloadStrategy,
     savedResearchHasReturnStream,
     savedResearchScopeDraft,
+    strategyResolvedHandoffToDraftLeg,
     treemapDensityClass,
     treemapRectStyle,
     type ResearchCompareOption,
@@ -102,6 +105,12 @@
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
   export let onOpenStrategyLab: (() => void) | undefined = undefined;
+  export let strategyLabHandoffs: StrategyLabHandoffQueueItem[] = [];
+  export let handoffLoading = false;
+  export let onResolveStrategyLabHandoffs: (() => Promise<StrategyLabHandoffQueueItem[]> | void) | undefined = undefined;
+  export let onDismissStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
+  export let onClearStrategyLabHandoffs: (() => void) | undefined = undefined;
+  export let onAcceptStrategyLabHandoff: ((id: string) => StrategyLabResolvedHandoff | null | void) | undefined = undefined;
 
   type ChartMode =
     | "performance"
@@ -251,6 +260,8 @@
       historyText: "date,value\n2026-01-02,0.51\n2026-01-05,0.53\n2026-01-06,0.52\n2026-01-07,0.55\n2026-01-08,0.56\n2026-01-09,0.58"
     }
   ];
+  let showHandoffReview = true;
+  let acceptedHandoffWarnings: string[] = [];
   let savedScopeTitle = "Scope Analysis Run";
   let savedStrategyTitle = "Strategy Lab Run";
   let savedNotes = "";
@@ -434,7 +445,7 @@
       return;
     }
     strategyInputWarning = "";
-    await onComposeStrategy({
+    const result = await onComposeStrategy({
       name: "Strategy Lab Composition",
       legs: selectedComposerLegs,
       lenses: [],
@@ -442,6 +453,7 @@
       benchmarkObject: null,
       minObservations: 5
     });
+    strategyComposition = result ?? null;
   }
 
   function addPortfolioDraftLeg() {
@@ -470,6 +482,34 @@
     ];
   }
 
+  function acceptStrategyHandoff(item: StrategyLabHandoffQueueItem) {
+    const resolved = item.resolved?.status === "resolved" ? item.resolved : null;
+    if (!resolved) {
+      strategyInputWarning = item.error ?? "Resolve this handoff before accepting it into the composer.";
+      return;
+    }
+    const draftLeg = strategyResolvedHandoffToDraftLeg(resolved, portfolioDraftLegs.length + 1);
+    if (!draftLeg) {
+      strategyInputWarning = resolved.unsupported_reason ?? "Resolved handoff did not include a composer-ready leg.";
+      return;
+    }
+    portfolioDraftLegs = [...portfolioDraftLegs, draftLeg];
+    acceptedHandoffWarnings = [...acceptedHandoffWarnings, ...resolved.warnings].slice(-12);
+    onAcceptStrategyLabHandoff?.(item.id);
+    strategyInputWarning = "";
+  }
+
+  function acceptResolvedStrategyHandoffs() {
+    const resolvedItems = strategyLabHandoffs.filter((item) => item.resolved?.status === "resolved");
+    if (!resolvedItems.length) {
+      strategyInputWarning = "Resolve pending Strategy Lab handoffs before accepting them.";
+      return;
+    }
+    for (const item of resolvedItems) {
+      acceptStrategyHandoff(item);
+    }
+  }
+
   async function composePortfolioDraft() {
     const built = buildStrategyPortfolioLegInputs(portfolioDraftLegs, composerOptions);
     const summary = summarizeStrategyPortfolioDraft(portfolioDraftLegs);
@@ -479,7 +519,7 @@
       return;
     }
     strategyInputWarning = blockingWarnings.join(" ");
-    await onComposePortfolioStrategy({
+    const result = await onComposePortfolioStrategy({
       name: portfolioName.trim() || "Strategy Lab Portfolio",
       legs: built.legs,
       benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
@@ -487,6 +527,7 @@
       lookbackDays: portfolioLookbackDays,
       minObservations: 5
     });
+    strategyComposition = result ?? null;
   }
 
   function compareLegForSource(sourceId: string) {
@@ -2077,6 +2118,66 @@
     <div class="workspace-grid">
       <div class="primary-column">
         {#if surfaceModeKind === "strategy_composer"}
+          {#if strategyLabHandoffs.length}
+            <article class="panel handoff-panel">
+              <div class="handoff-strip">
+                <div class="title-block">
+                  <p class="eyebrow">Inbound Handoffs</p>
+                  <h3>{strategyLabHandoffs.length} pending object{strategyLabHandoffs.length === 1 ? "" : "s"}</h3>
+                  <p class="muted">
+                    {strategyLabHandoffs.filter((item) => item.status === "resolved").length} resolved /
+                    {strategyLabHandoffs.filter((item) => item.status === "pending" || item.status === "error").length} awaiting resolver
+                  </p>
+                </div>
+                <div class="builder-actions compact">
+                  <button type="button" class="ghost-button" on:click={() => showHandoffReview = !showHandoffReview}>
+                    {showHandoffReview ? "Hide" : "Review"}
+                  </button>
+                  <button type="button" class="ghost-button" on:click={() => onResolveStrategyLabHandoffs?.()} disabled={handoffLoading}>
+                    {handoffLoading ? "Resolving..." : "Resolve"}
+                  </button>
+                  <button type="button" on:click={acceptResolvedStrategyHandoffs} disabled={handoffLoading}>
+                    Accept All
+                  </button>
+                  <button type="button" class="ghost-button" on:click={() => onClearStrategyLabHandoffs?.()}>
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              {#if showHandoffReview}
+                <div class="handoff-list">
+                  {#each strategyLabHandoffs as item}
+                    <div class="handoff-row">
+                      <div>
+                        <strong>{item.handoff.selected_entity.label}</strong>
+                        <small>
+                          {item.handoff.source_tab} / {item.handoff.asset_class} / {item.status}
+                          {item.resolved?.date_coverage ? ` / ${item.resolved.date_coverage.start?.slice(0, 10)} - ${item.resolved.date_coverage.end?.slice(0, 10)}` : ""}
+                        </small>
+                      </div>
+                      <div class="handoff-actions">
+                        <button type="button" on:click={() => acceptStrategyHandoff(item)} disabled={item.resolved?.status !== "resolved"}>
+                          Accept
+                        </button>
+                        <button type="button" class="ghost-button" on:click={() => onDismissStrategyLabHandoff?.(item.id)}>
+                          Dismiss
+                        </button>
+                      </div>
+                      {#if item.resolved?.warnings?.length || item.error}
+                        <div class="handoff-warnings">
+                          {#each (item.resolved?.warnings ?? [item.error]).filter(Boolean).slice(0, 4) as warning}
+                            <span>{warning}</span>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </article>
+          {/if}
+
           <article class="panel table-panel">
             <div class="panel-header top-line">
               <div class="title-block">
@@ -2161,6 +2262,13 @@
             {#if portfolioDraftSummary.warnings.length || portfolioDraftBuild.warnings.length}
               <div class="warning-list compact-warning-list">
                 {#each [...portfolioDraftSummary.warnings, ...portfolioDraftBuild.warnings].slice(0, 5) as warning}
+                  <span>{warning}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if acceptedHandoffWarnings.length}
+              <div class="warning-list compact-warning-list">
+                {#each acceptedHandoffWarnings.slice(-5) as warning}
                   <span>{warning}</span>
                 {/each}
               </div>
@@ -3521,6 +3629,61 @@
     justify-content: flex-end;
   }
 
+  .handoff-panel {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .handoff-strip,
+  .handoff-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    align-items: start;
+  }
+
+  .handoff-list {
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--divider);
+  }
+
+  .handoff-row {
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--divider);
+  }
+
+  .handoff-row:first-child {
+    border-top: 0;
+  }
+
+  .handoff-row strong,
+  .handoff-row small {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  .handoff-actions {
+    display: flex;
+    gap: 0.35rem;
+    justify-content: flex-end;
+  }
+
+  .handoff-actions button {
+    width: auto;
+    min-height: 1.65rem;
+    padding: 0.25rem 0.45rem;
+    font-size: 0.72rem;
+  }
+
+  .handoff-warnings {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 0.2rem;
+    color: var(--warning);
+    font-size: 0.72rem;
+  }
+
   .table-panel td .stack,
   .table-panel td .compact-input,
   .table-panel td .history-input {
@@ -3630,6 +3793,8 @@
   @media (max-width: 980px) {
     .support-column,
     .field-grid,
+    .handoff-strip,
+    .handoff-row,
     .overview-bottom-grid,
     .ranking-grid,
     .builder-actions,

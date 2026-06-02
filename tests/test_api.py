@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from datetime import datetime, timezone
 
 from src.api.main import create_app
 from src.api.session_auth import GAMMA_SESSION_HEADER
@@ -19,6 +20,7 @@ from src.application.request_limits import (
 )
 from src.application.runtime import build_runtime
 from src.models.app_mode import ResearchScopeType
+from src.models.prediction_markets import PredictionMarketFreshness, PredictionMarketRecord, PredictionProbabilityPoint
 from src.models.crypto import (
     CryptoComparisonRecord,
     CryptoDexLiquiditySummary,
@@ -315,6 +317,65 @@ def test_strategy_lab_portfolio_compose_endpoint_accepts_signed_inline_legs(tmp_
         assert payload["leg_contributions"]["Long probability contract"] is not None
         assert payload["leg_contributions"]["Short hedge stream"] < 0
         assert "read-only research" in " ".join(payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_strategy_lab_resolve_handoff_endpoint_returns_prediction_market_draft(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+
+    class StubPredictionMarketService:
+        def get_market_detail(self, market_id: str):
+            return _prediction_market_record() if market_id == "polymarket:fed-cut" else None
+
+        def get_probability_history(self, market_id: str):
+            assert market_id == "polymarket:fed-cut"
+            return [
+                PredictionProbabilityPoint(timestamp=datetime(2026, 3, day, tzinfo=timezone.utc), probability=probability)
+                for day, probability in enumerate([0.51, 0.52, 0.5, 0.54, 0.55, 0.56], start=1)
+            ]
+
+    runtime.prediction_market_service = StubPredictionMarketService()
+    try:
+        response = client.post(
+            "/research/strategy-lab/resolve-handoff",
+            json={
+                "handoff": {
+                    "source_tab": "prediction_markets",
+                    "source_mode": "detail",
+                    "intended_target_tab": "strategy_lab",
+                    "intended_target_mode": "composer",
+                    "selected_entity": {
+                        "entity_type": "prediction_market_contract",
+                        "label": "Will the Fed cut rates in March?",
+                        "normalized_id": "polymarket:fed-cut",
+                        "provider_id": "fed-cut",
+                        "native_id": "0xabc",
+                        "metadata": {"venue": "polymarket"},
+                    },
+                    "resolver_capability": "return_leg",
+                    "asset_class": "prediction_market",
+                    "value_kind": "probability",
+                    "default_side": "long_yes",
+                    "default_weight": 0.1,
+                    "selected_timeframe": None,
+                    "provider": "polymarket",
+                    "source": {"origin": "fixture"},
+                    "warnings": [],
+                    "normalized_ids": {"market_id": "polymarket:fed-cut"},
+                    "timestamp": "2026-03-01T00:00:00Z",
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "resolved"
+        assert payload["composer_draft_leg"]["asset_class"] == "prediction_contract"
+        assert payload["composer_draft_leg"]["value_kind"] == "level"
+        assert payload["composer_draft_leg"]["return_points"][0]["value"] == 0.51
+        assert payload["provenance"]["transformation"] == "long_yes_probability_return"
+        assert "research proxy" in " ".join(payload["warnings"])
     finally:
         runtime.shutdown()
 
@@ -792,4 +853,55 @@ def _crypto_token() -> CryptoTokenRecord:
         retrieved_at=datetime(2026, 4, 5, 10, 0, tzinfo=timezone.utc),
         origin="coingecko.markets",
         transformation_note="Gamma screen score combines size, liquidity, turnover, momentum, and FDV premium heuristics.",
+    )
+
+
+def _prediction_market_record() -> PredictionMarketRecord:
+    return PredictionMarketRecord(
+        market_id="polymarket:fed-cut",
+        venue="polymarket",
+        title="Will the Fed cut rates in March?",
+        subtitle=None,
+        description="Fed decision contract",
+        status="open",
+        category="Economy",
+        event_id="event-1",
+        event_title="Fed decision",
+        series_id="series-1",
+        series_title="FOMC",
+        provider_market_id="fed-cut",
+        provider_condition_id="0xabc",
+        provider_event_id="event-1",
+        provider_series_id="series-1",
+        slug="fed-cut",
+        end_time=datetime(2026, 3, 18, tzinfo=timezone.utc),
+        open_time=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        close_time=None,
+        current_probability=0.56,
+        probability_label="Yes",
+        volume=100_000,
+        volume_24h=5_000,
+        liquidity=25_000,
+        open_interest=4_000,
+        best_bid=0.55,
+        best_ask=0.57,
+        spread=0.02,
+        recent_price_change=0.03,
+        resolved_probability=None,
+        resolution_outcome=None,
+        image_url=None,
+        resolution_source="Federal Reserve statement",
+        freshness=PredictionMarketFreshness(
+            status="fresh",
+            is_stale=False,
+            is_broken=False,
+            reason="Venue metadata is recent.",
+            last_history_point_at=datetime(2026, 3, 6, tzinfo=timezone.utc),
+            retrieval_age_seconds=120,
+            history_lag_seconds=120,
+        ),
+        source_provider="polymarket",
+        retrieved_at=datetime(2026, 3, 6, 0, 5, tzinfo=timezone.utc),
+        origin="polymarket.fixture",
+        transformation_note="Fixture market.",
     )

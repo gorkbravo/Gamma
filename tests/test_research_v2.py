@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pandas as pd
 import pytest
@@ -15,6 +16,7 @@ from src.application.research_validation import ResearchValidationError
 from src.api.schemas.research import GammaResearchObjectModel
 from src.models.research_lab import (
     GammaResearchObject,
+    CrossTabHandoffEntity,
     ImportedReturnStreamRequest,
     ResearchComparisonLeg,
     ResearchComparisonRequest,
@@ -22,7 +24,12 @@ from src.models.research_lab import (
     SavedResearchCreateRequest,
     StrategyLabCompositionLeg,
     StrategyLabCompositionRequest,
+    StrategyLabHandoffEnvelope,
+    StrategyLabHandoffResolveRequest,
+    StrategyLabPortfolioCompositionRequest,
+    StrategyLabPortfolioLeg,
 )
+from src.models.prediction_markets import PredictionMarketFreshness, PredictionMarketRecord, PredictionProbabilityPoint
 from src.services.saved_research_store import SavedResearchStore
 
 
@@ -252,6 +259,103 @@ def test_strategy_lab_composes_weighted_return_objects(tmp_path):
     assert result.overlays[0].display_name == "Flow Overlay"
     assert result.warnings[0].startswith("Strategy Lab compositions are read-only research")
     assert any("Strategy A: dropped 1 return points with invalid timestamps" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_portfolio_compose_normalizes_timezone_aware_inline_dates(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab_portfolio(
+        StrategyLabPortfolioCompositionRequest(
+            name="Prediction Proxy Portfolio",
+            benchmark_symbol=None,
+            min_observations=3,
+            legs=[
+                StrategyLabPortfolioLeg(
+                    label="Date-only probability proxy",
+                    asset_class="prediction_contract",
+                    weight=0.5,
+                    value_kind="level",
+                    return_points=[
+                        ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.50),
+                        ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.52),
+                        ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.51),
+                        ResearchObjectReturnPoint(timestamp="2026-01-07", value=0.54),
+                    ],
+                ),
+                StrategyLabPortfolioLeg(
+                    label="UTC probability proxy",
+                    asset_class="prediction_contract",
+                    weight=0.5,
+                    value_kind="level",
+                    return_points=[
+                        ResearchObjectReturnPoint(timestamp="2026-01-02T16:00:00Z", value=0.20),
+                        ResearchObjectReturnPoint(timestamp="2026-01-05T16:00:00Z", value=0.22),
+                        ResearchObjectReturnPoint(timestamp="2026-01-06T16:00:00Z", value=0.21),
+                        ResearchObjectReturnPoint(timestamp="2026-01-07T16:00:00Z", value=0.23),
+                    ],
+                ),
+            ],
+        )
+    )
+
+    assert result.metrics.observation_count == 3
+    assert result.returns.index.tz is None
+    assert result.name == "Prediction Proxy Portfolio"
+    assert any("read-only research runs" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_resolves_prediction_market_handoff_to_draft_leg(tmp_path):
+    service = _service(tmp_path)
+    market = _prediction_market_record()
+
+    class StubPredictionMarketService:
+        def get_market_detail(self, market_id: str):
+            return market if market_id == "polymarket:fed-cut" else None
+
+        def get_probability_history(self, market_id: str):
+            assert market_id == "polymarket:fed-cut"
+            return [
+                PredictionProbabilityPoint(timestamp=datetime(2026, 3, day, tzinfo=timezone.utc), probability=probability)
+                for day, probability in enumerate([0.51, 0.52, 0.5, 0.54, 0.55, 0.56], start=1)
+            ]
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="prediction_markets",
+                source_mode="detail",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="prediction_market_contract",
+                    label=market.title,
+                    normalized_id=market.market_id,
+                    provider_id=market.provider_market_id,
+                    native_id=market.provider_condition_id,
+                ),
+                resolver_capability="return_leg",
+                asset_class="prediction_market",
+                value_kind="probability",
+                default_side="long_yes",
+                default_weight=0.1,
+                provider="polymarket",
+                normalized_ids={"market_id": market.market_id},
+                timestamp="2026-03-01T00:00:00Z",
+            )
+        ),
+        prediction_market_service=StubPredictionMarketService(),
+    )
+
+    assert result.status == "resolved"
+    assert result.resolved_capability == "return_leg"
+    assert result.composer_draft_leg is not None
+    assert result.composer_draft_leg.asset_class == "prediction_contract"
+    assert result.composer_draft_leg.value_kind == "level"
+    assert result.composer_draft_leg.identifier == "polymarket:fed-cut"
+    assert len(result.composer_draft_leg.return_points) == 6
+    assert result.date_coverage is not None
+    assert result.provenance["transformation"] == "long_yes_probability_return"
+    assert any("research proxy" in warning for warning in result.warnings)
 
 
 def test_strategy_lab_ignores_thin_optional_benchmark_overlap(tmp_path):
@@ -991,3 +1095,54 @@ def test_saved_research_loads_future_schema_best_effort(tmp_path):
     assert loaded is not None
     assert loaded.schema_version == 99
     assert any("loaded best-effort" in warning for warning in loaded.warnings)
+
+
+def _prediction_market_record() -> PredictionMarketRecord:
+    return PredictionMarketRecord(
+        market_id="polymarket:fed-cut",
+        venue="polymarket",
+        title="Will the Fed cut rates in March?",
+        subtitle=None,
+        description="Fed decision contract",
+        status="open",
+        category="Economy",
+        event_id="event-1",
+        event_title="Fed decision",
+        series_id="series-1",
+        series_title="FOMC",
+        provider_market_id="fed-cut",
+        provider_condition_id="0xabc",
+        provider_event_id="event-1",
+        provider_series_id="series-1",
+        slug="fed-cut",
+        end_time=datetime(2026, 3, 18, tzinfo=timezone.utc),
+        open_time=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        close_time=None,
+        current_probability=0.56,
+        probability_label="Yes",
+        volume=100_000,
+        volume_24h=5_000,
+        liquidity=25_000,
+        open_interest=4_000,
+        best_bid=0.55,
+        best_ask=0.57,
+        spread=0.02,
+        recent_price_change=0.03,
+        resolved_probability=None,
+        resolution_outcome=None,
+        image_url=None,
+        resolution_source="Federal Reserve statement",
+        freshness=PredictionMarketFreshness(
+            status="fresh",
+            is_stale=False,
+            is_broken=False,
+            reason="Venue metadata is recent.",
+            last_history_point_at=datetime(2026, 3, 6, tzinfo=timezone.utc),
+            retrieval_age_seconds=120,
+            history_lag_seconds=120,
+        ),
+        source_provider="polymarket",
+        retrieved_at=datetime(2026, 3, 6, 0, 5, tzinfo=timezone.utc),
+        origin="polymarket.fixture",
+        transformation_note="Fixture market.",
+    )

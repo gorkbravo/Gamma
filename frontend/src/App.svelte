@@ -21,6 +21,7 @@
   import {
     activeTab,
     analyzeStrategyLab,
+    acceptResolvedStrategyLabHandoff,
     composeStrategyLab,
     composeStrategyLabPortfolio,
     diagnostics,
@@ -122,6 +123,10 @@
     runResearch,
     saveResearchItem,
     deleteSavedResearchItem,
+    clearStrategyLabHandoffs,
+    dismissStrategyLabHandoff,
+    enqueueAndOpenStrategyLab,
+    enqueueStrategyLabHandoff,
     saveFundamentalsDcfModel,
     saveFundamentalsDcfSnapshot,
     saveFundamentalsPeerBasket,
@@ -138,6 +143,8 @@
     clearPortfolioSnapshot,
     setBaseCurrency,
     setMarketDataMode,
+    resolvePendingStrategyLabHandoffs,
+    strategyLabHandoffQueue,
     strategyLabResult,
     systemStatus,
     toggleConnection,
@@ -181,6 +188,7 @@
     PredictionMarket,
     ResearchResult,
     RiskResult,
+    StrategyLabHandoffEnvelope,
     SystemStatus,
     TabId,
     WorkspaceMode
@@ -1477,6 +1485,29 @@
     }
   }
 
+  async function handlePredictionStrategyLabHandoff(
+    handoff: StrategyLabHandoffEnvelope,
+    options: { open?: boolean } = {}
+  ) {
+    if (options.open) {
+      enqueueAndOpenStrategyLab(handoff);
+      workspaceMode = "research";
+      strategyLabMode = "composer";
+      await selectTab("strategy_lab");
+      await resolvePendingStrategyLabHandoffs();
+      return;
+    }
+    enqueueStrategyLabHandoff(handoff);
+    consoleEntries = [
+      {
+        label: "Strategy Lab",
+        message: `${handoff.selected_entity.label} queued for Strategy Lab.`,
+        tone: "action"
+      },
+      ...consoleEntries
+    ].slice(0, 12);
+  }
+
   async function loadResearchIvContext() {
     if (workspaceMode !== "research") {
       return false;
@@ -2241,6 +2272,12 @@
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
             onOpenStrategyLab={openStrategyLabFromEquityResearch}
+            strategyLabHandoffs={$strategyLabHandoffQueue}
+            handoffLoading={$loading.strategyLabHandoff}
+            onResolveStrategyLabHandoffs={resolvePendingStrategyLabHandoffs}
+            onDismissStrategyLabHandoff={dismissStrategyLabHandoff}
+            onClearStrategyLabHandoffs={clearStrategyLabHandoffs}
+            onAcceptStrategyLabHandoff={acceptResolvedStrategyLabHandoff}
           />
         {:else if $activeTab === "macro"}
           <svelte:component
@@ -2275,6 +2312,7 @@
             loading={$loading.prediction || $loading.predictionDetail}
             onLoadScreener={loadPredictionMarketScreener}
             onSelectMarket={selectPredictionMarket}
+            onSendToStrategyLab={handlePredictionStrategyLabHandoff}
           />
         {:else if $activeTab === "crypto"}
           <svelte:component

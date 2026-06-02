@@ -17,13 +17,13 @@ Current snapshot:
 | Area | Status | Notes |
 | --- | --- | --- |
 | Strategy Lab mixed portfolio composer | Implemented | Strategy Lab can compose signed long/short legs from listed-market providers, existing Gamma objects, and inline history. |
-| Shared cross-tab handoff protocol | Planned | Existing `CrossTabHandoffEnvelope` covers Copilot-style handoffs, but Strategy Lab needs a typed resolver-capability extension. |
-| Strategy Lab inbound queue | Not started | No shared frontend queue currently collects objects from other tabs. |
-| Prediction Markets `+ Strategy` action | Not started | Highest-priority first source-tab implementation. |
-| Backend handoff resolver endpoint | Not started | Needed so tabs pass object identity and intent, not raw tab-specific time series transformations. |
-| Composer draft ingestion from handoff | Not started | Strategy Lab should convert resolved handoffs into editable composer rows. |
+| Shared cross-tab handoff protocol | Verified | Frontend Strategy Lab handoff envelope types extend the cross-tab envelope with resolver capability, asset class, value kind, side, timeframe, provider, warnings, and normalized ids. |
+| Strategy Lab inbound queue | Verified | Frontend store now persists pending/resolved handoffs with enqueue, resolve, accept, dismiss, and clear helpers. |
+| Prediction Markets `+ Strategy` action | Verified | Prediction Markets detail exposes `+ Strategy` and `Add & Open` for the selected contract. |
+| Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts into composer-ready draft legs. |
+| Composer draft ingestion from handoff | Verified | Accepted resolved handoffs become editable Strategy Lab composer rows with probability history and warning/provenance context. |
 | Tab-by-tab capability matrix | Planned | Capability taxonomy is defined here; each tab still needs concrete wiring. |
-| Progress tracking and validation checklist | Implemented | This document defines the implementation board and inspection workflow. |
+| Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-008 validation. |
 
 ## Product Boundary
 
@@ -255,7 +255,7 @@ Warnings should be explicit when:
 
 | Source Tab | Initial Action | Default Capability | Initial Status | Notes |
 | --- | --- | --- | --- | --- |
-| Prediction Markets | `+ Strategy` on selected contract | `return_leg` or `overlay` | Not started | First implementation target. |
+| Prediction Markets | `+ Strategy` on selected contract | `return_leg` or `overlay` | Verified | First pass resolves selected contract probability history into an editable Strategy Lab prediction leg. |
 | Equity Research | Add selected ticker/scope/basket | `return_leg` | Planned | Should use existing listed-market history resolution where possible. |
 | Commodities | Add selected instrument/proxy | `return_leg` or `benchmark` | Planned | Need clear proxy warnings for futures/spot/spreads. |
 | Crypto | Add token or basket | `return_leg` or `benchmark` | Planned | Needs provider coverage and stale-data warnings. |
@@ -271,14 +271,14 @@ Update this board as work lands.
 
 | ID | Work Item | Owner | Status | Validation |
 | --- | --- | --- | --- | --- |
-| SLH-001 | Define frontend Strategy Lab handoff types extending the existing cross-tab envelope. | TBD | Not started | Typecheck. |
-| SLH-002 | Add Strategy Lab handoff queue store with add, dismiss, clear, and persistence helpers. | TBD | Not started | Store unit tests. |
-| SLH-003 | Add backend request/response models for resolving handoffs. | TBD | Not started | API schema tests. |
-| SLH-004 | Add `/research/strategy-lab/resolve-handoff` endpoint. | TBD | Not started | API route tests. |
-| SLH-005 | Implement prediction-market resolver from selected market id to Strategy Lab draft leg. | TBD | Not started | Backend unit test with fixture history. |
-| SLH-006 | Add `+ Strategy` / `Add & Open` actions to Prediction Markets detail. | TBD | Not started | Frontend view-model/component tests. |
-| SLH-007 | Add Strategy Lab inbound strip and accept/review flow. | TBD | Not started | Browser flow verification. |
-| SLH-008 | Convert accepted resolved handoffs into editable composer rows. | TBD | Not started | Strategy Lab view-model tests. |
+| SLH-001 | Define frontend Strategy Lab handoff types extending the existing cross-tab envelope. | Codex | Verified | `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`. |
+| SLH-002 | Add Strategy Lab handoff queue store with add, dismiss, clear, and persistence helpers. | Codex | Verified | `npm run test -- src/lib/stores/app.test.ts`. |
+| SLH-003 | Add backend request/response models for resolving handoffs. | Codex | Verified | `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q`. |
+| SLH-004 | Add `/research/strategy-lab/resolve-handoff` endpoint. | Codex | Verified | API route test covers Prediction Markets handoff resolution. |
+| SLH-005 | Implement prediction-market resolver from selected market id to Strategy Lab draft leg. | Codex | Verified | Backend resolver test covers fixture probability history, warnings, coverage, and composer draft leg output. |
+| SLH-006 | Add `+ Strategy` / `Add & Open` actions to Prediction Markets detail. | Codex | Verified | Browser flow selected a live Prediction Markets contract and used `Add & Open`. |
+| SLH-007 | Add Strategy Lab inbound strip and accept/review flow. | Codex | Verified | Browser flow confirmed inbound strip, resolved warnings, Accept, Dismiss/Clear controls, and no horizontal page overflow. |
+| SLH-008 | Convert accepted resolved handoffs into editable composer rows. | Codex | Verified | Browser flow confirmed a Prediction row with contract id and YES probability history, then composed a four-leg Strategy Lab result. |
 | SLH-009 | Add Equity Research selected ticker/scope handoff. | TBD | Not started | Store and browser tests. |
 | SLH-010 | Add Commodities selected instrument handoff. | TBD | Not started | Resolver tests with proxy warning. |
 | SLH-011 | Add Macro lens handoff. | TBD | Not started | Lens attachment tests. |
@@ -340,11 +340,32 @@ Browser:
 - Run composition.
 - Confirm warnings/provenance are visible and no layout overflow occurs.
 
+## Latest Validation Results
+
+Validated on 2026-06-02:
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 40 tests passed. Added coverage for Prediction Markets resolver and timezone-aware inline probability histories. |
+| `npm run typecheck` | Passed | Frontend typecheck passed after Strategy Lab handoff type and view updates. |
+| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 18 tests passed, including handoff envelope/draft-row conversion coverage. |
+| `npm run test -- src/lib/stores/app.test.ts` | Passed | 31 tests passed, including queue resolve/accept/dismiss coverage. |
+| Local browser flow | Passed | Selected a live Kalshi contract, clicked `Add & Open`, resolved inbound handoff, accepted it into the composer, ran a four-leg composition, confirmed proxy warnings/provenance and no horizontal document overflow. |
+
+## Current Assumptions
+
+- First-pass Prediction Markets handoffs default to `long_yes_probability_return`.
+- Probability histories are resolved in the backend and enter the composer as `level`/probability histories; Strategy Lab converts them to returns for read-only composition.
+- `+ Strategy` queues without navigating; `Add & Open` queues, opens Strategy Lab composer mode, and resolves pending handoffs.
+- Pending handoffs persist in local storage across reloads until accepted, dismissed, or cleared.
+- Accepted handoff warnings remain visible near the editable composer row; computed-run warnings and provenance remain visible in the Strategy Lab rail.
+- Timezone-aware probability history timestamps are normalized to date-only UTC before return alignment, avoiding mixed timezone indexes.
+
 ## Open Questions
 
-1. Should `+ Strategy` silently queue or immediately resolve in the source tab?
-2. Should Prediction Markets default to `long_yes_probability_return` or ask the user for YES/NO side before adding?
-3. Should pending handoffs persist across browser reloads, or only within the current session?
+1. Should `+ Strategy` silently queue only, or should it also show a persistent queue badge/toast outside Strategy Lab?
+2. Should Prediction Markets keep defaulting to `long_yes_probability_return`, or ask the user for YES/NO side before adding?
+3. Should accepted composer draft rows be saved as named experiment drafts before a user runs composition?
 4. Should Strategy Lab save handoff bundles as named experiment drafts?
 5. Should Copilot be allowed to propose handoffs automatically, or only explain user-created handoffs first?
 

@@ -16,6 +16,8 @@ from src.api.schemas.research import (
     StrategyLabAnalyzeResponseModel,
     StrategyLabCompositionRequestModel,
     StrategyLabCompositionResponseModel,
+    StrategyLabHandoffResolveRequestModel,
+    StrategyLabResolvedHandoffModel,
     StrategyLabPortfolioCompositionRequestModel,
 )
 from src.application.research_service import ResearchAnalysisRequest
@@ -106,6 +108,22 @@ def compose_strategy_lab_portfolio(
     except ResearchValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
     return StrategyLabCompositionResponseModel.from_domain(result)
+
+
+@router.post("/research/strategy-lab/resolve-handoff", response_model=StrategyLabResolvedHandoffModel)
+def resolve_strategy_lab_handoff(
+    payload: StrategyLabHandoffResolveRequestModel,
+    request: Request,
+) -> StrategyLabResolvedHandoffModel:
+    runtime = request.app.state.runtime
+    try:
+        result = runtime.research_service.resolve_strategy_lab_handoff(
+            payload.to_domain(),
+            prediction_market_service=runtime.prediction_market_service,
+        )
+    except ResearchValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
+    return StrategyLabResolvedHandoffModel.from_domain(result)
 
 
 @router.post("/research/compare-scenario/analyze", response_model=ResearchCompareResponseModel)

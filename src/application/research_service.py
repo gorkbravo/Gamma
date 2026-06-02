@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import math
 from typing import Any
 
@@ -37,6 +38,9 @@ from src.models.research_lab import (
     ResearchObjectReturnPoint,
     SavedResearchCreateRequest,
     SavedResearchItem,
+    StrategyLabHandoffResolveRequest,
+    StrategyLabResolvedHandoff,
+    CrossTabHandoffTimeframe,
     StrategyLabAnalysisResult,
     StrategyLabCompositionLeg,
     StrategyLabCompositionRequest,
@@ -63,7 +67,7 @@ from src.models.research_overview import (
 from src.services.data_providers import ResearchDataProvider, normalize_snapshot_price_histories
 from src.services.research_market_data import ResearchHistoryResult
 from src.services.saved_research_store import SavedResearchStore
-from src.utils.time import now_utc
+from src.utils.time import ensure_utc, now_utc
 
 
 @dataclass(frozen=True)
@@ -551,6 +555,153 @@ class ResearchService:
             freshness_label=FreshnessLabel.DERIVED.value,
         )
 
+    def resolve_strategy_lab_handoff(
+        self,
+        request: StrategyLabHandoffResolveRequest,
+        *,
+        prediction_market_service: Any | None = None,
+    ) -> StrategyLabResolvedHandoff:
+        handoff = request.handoff
+        if handoff.intended_target_tab != "strategy_lab":
+            raise ResearchValidationError(["Strategy Lab handoff resolver only accepts strategy_lab targets."])
+        if handoff.source_tab != "prediction_markets":
+            return StrategyLabResolvedHandoff(
+                handoff_id=self._handoff_id(handoff),
+                envelope=handoff,
+                status="unsupported",
+                resolved_capability="reference_only",
+                warnings=list(handoff.warnings),
+                unsupported_reason=f"No Strategy Lab resolver is available for source tab {handoff.source_tab}.",
+            )
+        if prediction_market_service is None:
+            raise ResearchValidationError(["Prediction market resolver is unavailable in this runtime."])
+        return self._resolve_prediction_market_strategy_handoff(handoff, prediction_market_service)
+
+    def _resolve_prediction_market_strategy_handoff(
+        self,
+        handoff,
+        prediction_market_service: Any,
+    ) -> StrategyLabResolvedHandoff:
+        market_id = (
+            handoff.normalized_ids.get("market_id")
+            or handoff.selected_entity.normalized_id
+            or handoff.selected_entity.provider_id
+            or handoff.selected_entity.native_id
+        )
+        market_id = str(market_id or "").strip()
+        if not market_id:
+            raise ResearchValidationError(["Prediction-market handoff is missing a market id."])
+
+        market = prediction_market_service.get_market_detail(market_id)
+        if market is None:
+            raise ResearchValidationError([f"Prediction market not found: {market_id}"])
+        history = list(prediction_market_service.get_probability_history(market_id) or [])
+        warnings = list(handoff.warnings)
+        warnings.extend(
+            [
+                "Default Strategy Lab interpretation is long_yes_probability_return.",
+                "Prediction-market probability history is a research proxy for mark-to-market YES exposure, not executable PnL.",
+                "The resolver uses venue probability levels and leaves payout-aware contract accounting for a later pass.",
+            ]
+        )
+
+        points: list[ResearchObjectReturnPoint] = []
+        invalid_points = 0
+        for point in history:
+            probability = float(getattr(point, "probability", float("nan")))
+            timestamp = getattr(point, "timestamp", None)
+            if timestamp is None or not math.isfinite(probability):
+                invalid_points += 1
+                continue
+            points.append(ResearchObjectReturnPoint(timestamp=timestamp.isoformat(), value=probability))
+        if invalid_points:
+            warnings.append(f"Dropped {invalid_points} probability history point(s) with invalid timestamps or values.")
+
+        points.sort(key=lambda point: point.timestamp)
+        if len(points) < 2:
+            return StrategyLabResolvedHandoff(
+                handoff_id=self._handoff_id(handoff),
+                envelope=handoff,
+                status="unsupported",
+                resolved_capability="reference_only",
+                provider_summary=getattr(market, "source_provider", None),
+                provenance=self._prediction_market_handoff_provenance(market, history),
+                warnings=list(dict.fromkeys(warnings + ["Probability history is too sparse to create a return leg."])),
+                unsupported_reason="Prediction-market handoff needs at least two probability history observations.",
+            )
+        if len(points) < 6:
+            warnings.append("Probability history is sparse; Strategy Lab analytics may be unstable.")
+        if any(point.value <= 0.02 for point in points[:3]):
+            warnings.append("Initial YES probability is near zero; percentage-return conversion can become unstable.")
+
+        freshness = getattr(market, "freshness", None)
+        if freshness is not None:
+            if getattr(freshness, "is_stale", False) or getattr(freshness, "is_broken", False):
+                reason = getattr(freshness, "reason", None)
+                warnings.append(f"Market history freshness is {freshness.status}: {reason or 'review source timing.'}")
+            elif getattr(freshness, "status", "") == "delayed":
+                warnings.append("Market history is delayed relative to the latest venue snapshot.")
+
+        status = str(getattr(market, "status", "") or "").lower()
+        if status in {"closed", "resolved"} or any(getattr(outcome, "resolved", False) for outcome in getattr(market, "outcomes", [])):
+            warnings.append("Contract is closed or resolved; use the handoff for historical research only.")
+        days_to_resolution = self._days_to_resolution(getattr(market, "end_time", None), getattr(market, "retrieved_at", None))
+        if days_to_resolution is not None and 0 <= days_to_resolution <= 3:
+            warnings.append("Contract is near resolution; probability moves can be path-dependent and discontinuous.")
+
+        start = points[0].timestamp
+        end = points[-1].timestamp
+        label = f"{getattr(market, 'title', None) or handoff.selected_entity.label} | YES probability"
+        provider = getattr(market, "source_provider", None) or handoff.provider or getattr(market, "venue", None)
+        leg = StrategyLabPortfolioLeg(
+            label=label,
+            asset_class="prediction_contract",
+            identifier=market_id,
+            weight=float(handoff.default_weight if handoff.default_weight is not None else 0.1),
+            value_kind="level",
+            return_points=points,
+            object=None,
+        )
+        return StrategyLabResolvedHandoff(
+            handoff_id=self._handoff_id(handoff),
+            envelope=handoff,
+            status="resolved",
+            resolved_capability="return_leg",
+            composer_draft_leg=leg,
+            date_coverage=CrossTabHandoffTimeframe(label="Probability history", start=start, end=end),
+            provider_summary=provider,
+            provenance=self._prediction_market_handoff_provenance(market, history),
+            warnings=list(dict.fromkeys(warnings)),
+        )
+
+    @staticmethod
+    def _prediction_market_handoff_provenance(market, history) -> dict[str, Any]:
+        return {
+            "source_provider": getattr(market, "source_provider", None),
+            "venue": getattr(market, "venue", None),
+            "market_id": getattr(market, "market_id", None),
+            "provider_market_id": getattr(market, "provider_market_id", None),
+            "provider_condition_id": getattr(market, "provider_condition_id", None),
+            "retrieved_at": getattr(getattr(market, "retrieved_at", None), "isoformat", lambda: None)(),
+            "origin": getattr(market, "origin", None),
+            "history_points": len(history or []),
+            "transformation": "long_yes_probability_return",
+        }
+
+    @staticmethod
+    def _days_to_resolution(end_time: datetime | None, retrieved_at: datetime | None) -> float | None:
+        normalized_end = ensure_utc(end_time)
+        if normalized_end is None:
+            return None
+        reference = ensure_utc(retrieved_at) or now_utc()
+        return (normalized_end - reference).total_seconds() / 86400.0
+
+    @staticmethod
+    def _handoff_id(handoff) -> str:
+        entity_id = handoff.selected_entity.normalized_id or handoff.selected_entity.native_id or "unknown"
+        timestamp = handoff.timestamp or now_utc().isoformat()
+        return f"{handoff.source_tab}:{entity_id}:{timestamp}"
+
     def compose_strategy_lab(self, request: StrategyLabCompositionRequest) -> StrategyLabCompositionResult:
         warnings: list[str] = [
             "Strategy Lab compositions are read-only research runs; Gamma does not rebalance or modify broker portfolios."
@@ -868,7 +1019,7 @@ class ResearchService:
             if not math.isfinite(value):
                 non_finite_values += 1
                 continue
-            records.append((pd.Timestamp(timestamp).normalize(), value))
+            records.append((ResearchService._normalize_return_point_date(timestamp), value))
         if invalid_dates:
             warnings.append(f"{label}: dropped {invalid_dates} inline points with invalid timestamps.")
         if non_finite_values:
@@ -894,6 +1045,13 @@ class ResearchService:
         if len(series) < min_observations:
             raise ResearchValidationError([f"{label} needs at least {min_observations} inline return observations."])
         return series
+
+    @staticmethod
+    def _normalize_return_point_date(timestamp: Any) -> pd.Timestamp:
+        normalized = pd.Timestamp(timestamp)
+        if normalized.tzinfo is not None:
+            normalized = normalized.tz_convert("UTC").tz_localize(None)
+        return normalized.normalize()
 
     @staticmethod
     def _portfolio_leg_object_from_returns(
@@ -1182,7 +1340,7 @@ class ResearchService:
             if not math.isfinite(value):
                 non_finite_values += 1
                 continue
-            records.append((pd.Timestamp(timestamp).normalize(), value))
+            records.append((ResearchService._normalize_return_point_date(timestamp), value))
         if invalid_timestamps:
             warnings.append(f"{label}: dropped {invalid_timestamps} return points with invalid timestamps.")
         if invalid_values:
@@ -1234,7 +1392,7 @@ class ResearchService:
             if value is None:
                 missing_values += 1
                 continue
-            records.append((pd.Timestamp(timestamp).normalize(), value))
+            records.append((ResearchService._normalize_return_point_date(timestamp), value))
 
         if invalid_dates:
             warnings.append(f"{label}: dropped {invalid_dates} rows with invalid dates.")

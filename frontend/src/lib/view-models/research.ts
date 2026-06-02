@@ -10,8 +10,11 @@ import type {
   ResearchOverviewSortId,
   ResearchResult,
   SavedResearchItem,
+  StrategyLabHandoffEnvelope,
+  StrategyLabResolvedHandoff,
   StrategyLabPortfolioLegInput,
   StrategyLabMode,
+  StrategyLabPortfolioLegAssetClass,
   StrategyLabResult,
   ResearchStructure,
   ResearchWeightPoint
@@ -141,6 +144,113 @@ export function defaultStrategyPortfolioDraftLeg(index: number): StrategyPortfol
     historyText: "",
     objectOptionId: ""
   };
+}
+
+export function buildPredictionMarketStrategyHandoff(
+  market: {
+    market_id: string;
+    venue: string;
+    title: string;
+    provider_market_id: string;
+    provider_condition_id: string | null;
+    provider_event_id: string | null;
+    provider_series_id: string | null;
+    probability_label: string | null;
+    status: string;
+    category: string | null;
+    source_provider: string;
+    origin: string;
+    retrieved_at: string | null;
+    end_time: string | null;
+    freshness?: { status: string; is_stale: boolean; is_broken: boolean; reason: string | null } | null;
+  },
+  options: { sourceMode?: string | null; defaultWeight?: number } = {}
+): StrategyLabHandoffEnvelope {
+  const warnings = [
+    "Prediction-market contracts enter Strategy Lab as research proxies, not executable positions.",
+    "Resolver will default to long_yes_probability_return unless the user edits the draft."
+  ];
+  if (market.status !== "open") {
+    warnings.push("Selected contract is not open; use only for historical research.");
+  }
+  if (market.freshness?.is_stale || market.freshness?.is_broken) {
+    warnings.push(`Selected contract freshness is ${market.freshness.status}; resolver will re-check history.`);
+  }
+
+  return {
+    source_tab: "prediction_markets",
+    source_mode: options.sourceMode ?? "detail",
+    intended_target_tab: "strategy_lab",
+    intended_target_mode: "composer",
+    selected_entity: {
+      entity_type: "prediction_market_contract",
+      label: market.title,
+      normalized_id: market.market_id,
+      provider_id: market.provider_market_id,
+      native_id: market.provider_condition_id ?? market.provider_market_id,
+      metadata: {
+        venue: market.venue,
+        status: market.status,
+        category: market.category,
+        probability_label: market.probability_label,
+        end_time: market.end_time,
+        provider_event_id: market.provider_event_id,
+        provider_series_id: market.provider_series_id
+      }
+    },
+    resolver_capability: "return_leg",
+    asset_class: "prediction_market",
+    value_kind: "probability",
+    default_side: "long_yes",
+    default_weight: options.defaultWeight ?? 0.1,
+    selected_timeframe: null,
+    provider: market.source_provider || market.venue,
+    source: {
+      origin: market.origin,
+      retrieved_at: market.retrieved_at,
+      venue: market.venue
+    },
+    warnings,
+    normalized_ids: {
+      market_id: market.market_id,
+      provider_market_id: market.provider_market_id
+    },
+    timestamp: new Date().toISOString()
+  };
+}
+
+export function strategyResolvedHandoffToDraftLeg(
+  resolved: StrategyLabResolvedHandoff,
+  index: number
+): StrategyPortfolioDraftLeg | null {
+  const leg = resolved.composer_draft_leg;
+  if (!leg) {
+    return null;
+  }
+  return {
+    ...defaultStrategyPortfolioDraftLeg(index),
+    label: leg.label,
+    assetClass: normalizeDraftAssetClass(leg.asset_class),
+    identifier: leg.identifier,
+    weight: leg.weight,
+    valueKind: leg.value_kind,
+    historyText: strategyDraftHistoryText(leg.return_points),
+    objectOptionId: ""
+  };
+}
+
+function normalizeDraftAssetClass(assetClass: StrategyLabPortfolioLegAssetClass): StrategyPortfolioAssetClass {
+  if (assetClass === "prediction_contract") return "prediction_contract";
+  if (assetClass === "equity") return "equity";
+  if (assetClass === "etf") return "etf";
+  if (assetClass === "commodity") return "commodity";
+  if (assetClass === "crypto") return "crypto";
+  return "custom_stream";
+}
+
+function strategyDraftHistoryText(points: ResearchObjectReturnPoint[]) {
+  const rows = points.map((point) => `${point.timestamp},${point.value}`);
+  return ["date,value", ...rows].join("\n");
 }
 
 export function parseStrategyPortfolioHistoryText(text: string): {

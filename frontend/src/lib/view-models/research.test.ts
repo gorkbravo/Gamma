@@ -3,6 +3,7 @@ import type { ResearchResult } from "../api/types";
 import {
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
+  buildPredictionMarketStrategyHandoff,
   buildStrategyComposerObjects,
   buildStrategyPortfolioLegInputs,
   buildResearchCompareOptions,
@@ -26,6 +27,7 @@ import {
   savedResearchCanReloadScope,
   savedResearchCanReloadStrategy,
   savedResearchScopeDraft,
+  strategyResolvedHandoffToDraftLeg,
   summarizeStrategyPortfolioDraft
 } from "./research";
 
@@ -264,6 +266,74 @@ describe("research view model helpers", () => {
     expect(built.legs.map((leg) => leg.weight)).toEqual([0.7, -0.3]);
     expect(built.legs[0]?.asset_class).toBe("prediction_contract");
     expect(built.legs[1]?.identifier).toBe("SPY");
+  });
+
+  it("builds prediction-market handoffs and converts resolved drafts into composer rows", () => {
+    const market = {
+      market_id: "polymarket:fed-cut",
+      venue: "polymarket",
+      title: "Will the Fed cut rates in March?",
+      provider_market_id: "fed-cut",
+      provider_condition_id: "0xabc",
+      provider_event_id: "event-1",
+      provider_series_id: "series-1",
+      probability_label: "Yes",
+      status: "open",
+      category: "Economy",
+      source_provider: "polymarket",
+      origin: "polymarket.seed",
+      retrieved_at: "2026-03-01T00:05:00Z",
+      end_time: "2026-03-18T00:00:00Z",
+      freshness: {
+        status: "fresh",
+        is_stale: false,
+        is_broken: false,
+        reason: null
+      }
+    };
+    const handoff = buildPredictionMarketStrategyHandoff(market);
+
+    expect(handoff.source_tab).toBe("prediction_markets");
+    expect(handoff.intended_target_tab).toBe("strategy_lab");
+    expect(handoff.resolver_capability).toBe("return_leg");
+    expect(handoff.asset_class).toBe("prediction_market");
+    expect(handoff.default_side).toBe("long_yes");
+    expect(handoff.normalized_ids.market_id).toBe(market.market_id);
+
+    const draft = strategyResolvedHandoffToDraftLeg(
+      {
+        handoff_id: "handoff-1",
+        envelope: handoff,
+        status: "resolved",
+        resolved_capability: "return_leg",
+        composer_draft_leg: {
+          label: "Will the Fed cut rates in March? | YES probability",
+          asset_class: "prediction_contract",
+          identifier: market.market_id,
+          weight: 0.1,
+          value_kind: "level",
+          return_points: [
+            { timestamp: "2026-03-01T00:00:00Z", value: 0.51 },
+            { timestamp: "2026-03-02T00:00:00Z", value: 0.53 }
+          ],
+          object: null
+        },
+        benchmark_draft: null,
+        lens: null,
+        overlay: null,
+        date_coverage: null,
+        provider_summary: "polymarket",
+        provenance: {},
+        warnings: [],
+        unsupported_reason: null
+      },
+      4
+    );
+
+    expect(draft?.assetClass).toBe("prediction_contract");
+    expect(draft?.identifier).toBe(market.market_id);
+    expect(draft?.valueKind).toBe("level");
+    expect(draft?.historyText).toContain("2026-03-01T00:00:00Z,0.51");
   });
 
   it("includes normalized weights in synthetic scope research object ids", () => {
