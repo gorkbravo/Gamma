@@ -2578,7 +2578,21 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         assert "tool-result" in event_types
         assert "artifact-created" in event_types
         assert event_types[-1] == "final-report"
-        assert payload["operator_events"][-1]["payload"]["status"] == "ready"
+        final_payload = payload["operator_events"][-1]["payload"]
+        assert final_payload["status"] == "ready"
+        assert final_payload["failed_steps"] == []
+        assert "output_summaries" in final_payload
+        assert any(
+            "run_risk_scenario_analysis" in step_id
+            for step_id in final_payload["output_summaries"]
+        )
+        completed_events = [
+            event
+            for event in payload["operator_events"]
+            if event["event_type"] == "tool-result" and event["payload"].get("status") == "completed"
+        ]
+        assert completed_events
+        assert all("output_summary" in event["payload"] for event in completed_events)
         sessions = client.get("/copilot/sessions").json()
         assert sessions and sessions[0]["turn_count"] == 1
         detail = client.get(f"/copilot/sessions/{sessions[0]['session_id']}").json()
@@ -3015,7 +3029,21 @@ def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, mo
         assert payload["model"] == "gpt-test-operator"
         assert any(trace["tool_name"] == "run_risk_scenario_analysis" for trace in payload["tool_traces"])
         assert payload["operator_events"][0]["payload"]["orchestrator"] == "openai_agents_sdk_operator"
-        assert payload["operator_events"][-1]["payload"]["orchestrator"] == "openai_agents_sdk_operator"
+        final_payload = payload["operator_events"][-1]["payload"]
+        assert final_payload["orchestrator"] == "openai_agents_sdk_operator"
+        assert final_payload["failed_steps"] == []
+        assert "output_summaries" in final_payload
+        assert any(
+            "run_risk_scenario_analysis" in step_id
+            for step_id in final_payload["output_summaries"]
+        )
+        completed_events = [
+            event
+            for event in payload["operator_events"]
+            if event["event_type"] == "tool-result" and event["payload"].get("status") == "completed"
+        ]
+        assert completed_events
+        assert all("output_summary" in event["payload"] for event in completed_events)
 
         sessions = client.get("/copilot/sessions").json()
         assert sessions and sessions[0]["turn_count"] == 1

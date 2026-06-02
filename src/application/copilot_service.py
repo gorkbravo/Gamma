@@ -1451,7 +1451,9 @@ class CopilotService:
         events: list[CopilotOperatorProgressEvent] = []
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
+        failed_steps: list[str] = []
         outputs: dict[str, Any] = {}
+        output_summaries: dict[str, Any] = {}
         remaining_tools = plan.max_tool_calls
         provider_calls_used = 0
         started_at = time.perf_counter()
@@ -1605,17 +1607,23 @@ class CopilotService:
             remaining_tools -= 1
             tool_traces.append(execution.trace)
             outputs[step.step_id] = execution.output
+            output_summaries[step.step_id] = self._compact_operator_output(execution.output)
             for source in execution.sources:
                 sources[source.source_id] = source
             if isinstance(execution.output, dict) and execution.output.get("error"):
                 skipped_steps.append(step.step_id)
+                failed_steps.append(step.step_id)
                 message = f"{step.tool_id} failed: {execution.output['error']}"
                 record_warning(message, step=step)
                 record_event(
                     "tool-result",
                     step=step,
                     message=message,
-                    payload={"status": "failed", "trace_summary": execution.trace.summary},
+                    payload={
+                        "status": "failed",
+                        "trace_summary": execution.trace.summary,
+                        "output_summary": output_summaries[step.step_id],
+                    },
                     source_ids=list(execution.trace.source_ids),
                     event_warnings=[message],
                 )
@@ -1629,6 +1637,7 @@ class CopilotService:
                         "status": "completed",
                         "arguments": execution.trace.arguments,
                         "output_kind": type(execution.output).__name__,
+                        "output_summary": output_summaries[step.step_id],
                     },
                     source_ids=list(execution.trace.source_ids),
                 )
@@ -1673,9 +1682,11 @@ class CopilotService:
                 "status": status,
                 "executed_steps": list(executed_steps),
                 "skipped_steps": list(skipped_steps),
+                "failed_steps": list(failed_steps),
                 "warning_count": len(warnings),
                 "source_count": len(sources),
                 "tool_trace_count": len(tool_traces),
+                "output_summaries": output_summaries,
                 "outputs": outputs,
             },
             source_ids=[source.source_id for source in list(sources.values())[:10]],
@@ -1720,6 +1731,8 @@ class CopilotService:
                             "steps": [step.__dict__ for step in plan.steps],
                             "executed_steps": list(executed_steps),
                             "skipped_steps": list(skipped_steps),
+                            "failed_steps": list(failed_steps),
+                            "output_summaries": output_summaries,
                             "outputs": outputs,
                         },
                         "operator_events": [asdict(event) for event in events],
@@ -1802,6 +1815,8 @@ class CopilotService:
                             "steps": [step.__dict__ for step in plan.steps],
                             "executed_steps": list(final_payload.get("executed_steps") or []),
                             "skipped_steps": list(final_payload.get("skipped_steps") or []),
+                            "failed_steps": list(final_payload.get("failed_steps") or []),
+                            "output_summaries": dict(final_payload.get("output_summaries") or {}),
                             "outputs": dict(final_payload.get("outputs") or {}),
                         },
                         "operator_events": [asdict(event) for event in result.operator_events],
@@ -7435,6 +7450,65 @@ class CopilotService:
     @staticmethod
     def _iso_or_value(value: Any) -> Any:
         return value.isoformat() if hasattr(value, "isoformat") else value
+
+    @classmethod
+    def _compact_operator_output(cls, output: Any) -> Any:
+        if isinstance(output, list):
+            return {"kind": "list", "count": len(output), "items": output[:5]}
+        if not isinstance(output, dict):
+            return {"kind": type(output).__name__, "value": output}
+        summary: dict[str, Any] = {
+            "kind": "dict",
+            "keys": list(output.keys())[:12],
+        }
+        for key in (
+            "symbol",
+            "ticker",
+            "scenario_label",
+            "scenario_type",
+            "scope_type",
+            "result_kind",
+            "portfolio_label",
+            "benchmark_symbol",
+            "snapshot_available",
+            "source_provider",
+            "origin",
+            "freshness_label",
+        ):
+            if key in output:
+                summary[key] = output.get(key)
+        nested_summary = output.get("summary")
+        if isinstance(nested_summary, dict):
+            summary["summary"] = {
+                key: value
+                for key, value in nested_summary.items()
+                if isinstance(value, (str, int, float, bool)) or value is None
+            }
+        metrics = output.get("metrics")
+        if isinstance(metrics, dict):
+            summary["metrics"] = {
+                key: value
+                for key, value in metrics.items()
+                if isinstance(value, (str, int, float, bool)) or value is None
+            }
+        for list_key in (
+            "warnings",
+            "expiry_comparisons",
+            "top_contributions",
+            "relative_metrics",
+            "coverage",
+            "constituents",
+        ):
+            value = output.get(list_key)
+            if isinstance(value, list):
+                summary[f"{list_key}_count"] = len(value)
+            elif isinstance(value, dict):
+                summary[list_key] = {
+                    key: item
+                    for key, item in value.items()
+                    if isinstance(item, (str, int, float, bool)) or item is None
+                }
+        return summary
 
     @staticmethod
     def _macro_context_from_bundle(context: CopilotContextBundle) -> MacroCopilotContext:

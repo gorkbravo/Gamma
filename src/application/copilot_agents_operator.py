@@ -108,7 +108,9 @@ class CopilotAgentsOperatorService:
         warnings: list[str] = list(plan.warnings)
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
+        failed_steps: list[str] = []
         outputs: dict[str, Any] = {}
+        output_summaries: dict[str, Any] = {}
         remaining_tool_calls = plan.max_tool_calls
         provider_calls_used = 0
 
@@ -303,17 +305,23 @@ class CopilotAgentsOperatorService:
             remaining_tool_calls -= 1
             tool_traces.append(execution.trace)
             outputs[step.step_id] = execution.output
+            output_summaries[step.step_id] = self._compact_output(execution.output)
             for source in execution.sources:
                 sources[source.source_id] = source
             if isinstance(execution.output, dict) and execution.output.get("error"):
                 skipped_steps.append(step.step_id)
+                failed_steps.append(step.step_id)
                 message = f"{normalized_tool_id} failed: {execution.output['error']}"
                 record_warning(message, step=step)
                 record_event(
                     "tool-result",
                     step=step,
                     message=message,
-                    payload={"status": "failed", "trace_summary": execution.trace.summary},
+                    payload={
+                        "status": "failed",
+                        "trace_summary": execution.trace.summary,
+                        "output_summary": output_summaries[step.step_id],
+                    },
                     source_ids=list(execution.trace.source_ids),
                     event_warnings=[message],
                 )
@@ -328,6 +336,7 @@ class CopilotAgentsOperatorService:
                     "status": "completed",
                     "arguments": execution.trace.arguments,
                     "output_kind": type(execution.output).__name__,
+                    "output_summary": output_summaries[step.step_id],
                 },
                 source_ids=list(execution.trace.source_ids),
             )
@@ -385,9 +394,11 @@ class CopilotAgentsOperatorService:
             warnings=warnings,
             executed_steps=executed_steps,
             skipped_steps=skipped_steps,
+            failed_steps=failed_steps,
             build_card=build_card,
             status="ready" if executed_steps else "error",
             outputs=outputs,
+            output_summaries=output_summaries,
         )
 
     def _finalize_result(
@@ -402,9 +413,11 @@ class CopilotAgentsOperatorService:
         warnings: list[str],
         executed_steps: list[str],
         skipped_steps: list[str],
+        failed_steps: list[str],
         build_card: CardBuilder,
         status: str,
         outputs: dict[str, Any] | None = None,
+        output_summaries: dict[str, Any] | None = None,
     ) -> CopilotResearchCardResult:
         warnings = dedupe_warnings(warnings)
         run_id = events[0].run_id if events else new_copilot_id("oprun")
@@ -446,9 +459,11 @@ class CopilotAgentsOperatorService:
                     "orchestrator": self.provider_name,
                     "executed_steps": list(executed_steps),
                     "skipped_steps": list(skipped_steps),
+                    "failed_steps": list(failed_steps),
                     "warning_count": len(warnings),
                     "source_count": len(sources),
                     "tool_trace_count": len(tool_traces),
+                    "output_summaries": output_summaries or {},
                     "outputs": outputs or {},
                 },
                 source_ids=[source.source_id for source in list(sources.values())[:10]],
@@ -539,12 +554,59 @@ class CopilotAgentsOperatorService:
 
     @staticmethod
     def _compact_output(output: Any) -> Any:
-        if isinstance(output, dict):
-            compact = dict(output)
-            for key in list(compact):
-                if key in {"rows", "history", "sensitivity"}:
-                    compact[key] = "<omitted from agent tool echo>"
-            return compact
         if isinstance(output, list):
-            return output[:5]
-        return output
+            return {"kind": "list", "count": len(output), "items": output[:5]}
+        if not isinstance(output, dict):
+            return {"kind": type(output).__name__, "value": output}
+        summary: dict[str, Any] = {
+            "kind": "dict",
+            "keys": list(output.keys())[:12],
+        }
+        for key in (
+            "symbol",
+            "ticker",
+            "scenario_label",
+            "scenario_type",
+            "scope_type",
+            "result_kind",
+            "portfolio_label",
+            "benchmark_symbol",
+            "snapshot_available",
+            "source_provider",
+            "origin",
+            "freshness_label",
+        ):
+            if key in output:
+                summary[key] = output.get(key)
+        nested_summary = output.get("summary")
+        if isinstance(nested_summary, dict):
+            summary["summary"] = {
+                key: value
+                for key, value in nested_summary.items()
+                if isinstance(value, (str, int, float, bool)) or value is None
+            }
+        metrics = output.get("metrics")
+        if isinstance(metrics, dict):
+            summary["metrics"] = {
+                key: value
+                for key, value in metrics.items()
+                if isinstance(value, (str, int, float, bool)) or value is None
+            }
+        for list_key in (
+            "warnings",
+            "expiry_comparisons",
+            "top_contributions",
+            "relative_metrics",
+            "coverage",
+            "constituents",
+        ):
+            value = output.get(list_key)
+            if isinstance(value, list):
+                summary[f"{list_key}_count"] = len(value)
+            elif isinstance(value, dict):
+                summary[list_key] = {
+                    key: item
+                    for key, item in value.items()
+                    if isinstance(item, (str, int, float, bool)) or item is None
+                }
+        return summary
