@@ -18,6 +18,7 @@
     SavedResearchItem,
     StrategyLabResult,
     ResearchStructure,
+    StrategyLabHandoffEnvelope,
     StrategyLabHandoffQueueItem,
     StrategyLabResolvedHandoff,
     TimeSeriesPoint
@@ -35,6 +36,7 @@
   } from "../lib/stores/app";
   import {
     buildResearchCompareOptions,
+    buildEquityStrategyHandoff,
     buildStrategyComposerObjects,
     buildStrategyPortfolioLegInputs,
     buildResearchTreemapSections,
@@ -105,6 +107,9 @@
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
   export let onOpenStrategyLab: (() => void) | undefined = undefined;
+  export let onSendToStrategyLab:
+    | ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void)
+    | undefined = undefined;
   export let strategyLabHandoffs: StrategyLabHandoffQueueItem[] = [];
   export let handoffLoading = false;
   export let onResolveStrategyLabHandoffs: (() => Promise<StrategyLabHandoffQueueItem[]> | void) | undefined = undefined;
@@ -480,6 +485,43 @@
         objectOptionId: option.id
       }
     ];
+  }
+
+  function activeEquityHandoffSymbol() {
+    const resultSymbol =
+      result?.scope_type === "single_ticker" ? String(result.primary_symbol ?? "").trim().toUpperCase() : "";
+    const draftSymbol = scopeType === "single_ticker" ? primarySymbol.trim().toUpperCase() : "";
+    return resultSymbol || draftSymbol || String(selectedEquitySymbol ?? "").trim().toUpperCase();
+  }
+
+  function activeEquityHandoffLabel() {
+    const symbol = activeEquityHandoffSymbol();
+    if (result?.scope_type === "single_ticker" && result.primary_symbol === symbol) {
+      return result.primary_symbol;
+    }
+    return symbol;
+  }
+
+  function sendActiveEquityToStrategyLab(open = false) {
+    const symbol = activeEquityHandoffSymbol();
+    if (!symbol) {
+      inputWarning = "Select or enter a ticker before sending it to Strategy Lab.";
+      return;
+    }
+    if (!onSendToStrategyLab) {
+      onOpenStrategyLab?.();
+      return;
+    }
+    const handoff = buildEquityStrategyHandoff(
+      {
+        symbol,
+        label: activeEquityHandoffLabel(),
+        sourceProvider: result?.source_provider ?? null
+      },
+      { sourceMode: String(mode), defaultWeight: 0.1 }
+    );
+    onSendToStrategyLab(handoff, { open });
+    inputWarning = "";
   }
 
   function acceptStrategyHandoff(item: StrategyLabHandoffQueueItem) {
@@ -1982,6 +2024,14 @@
         <div class="builder-actions">
           <button on:click={submit} disabled={loading}>{loading ? "Running..." : "Run Analysis"}</button>
           <button type="button" class="ghost-button" on:click={resetBuilder}>Reset Builder</button>
+          {#if surface === "equity" && scopeType === "single_ticker"}
+            <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>
+              + Strategy
+            </button>
+            <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>
+              Add &amp; Open
+            </button>
+          {/if}
         </div>
 
         {#if result && !draftMatchesResult}
@@ -2097,7 +2147,8 @@
           <button type="button" on:click={() => onOpenRisk?.()} disabled={!result?.snapshot}>Open In Risk</button>
           <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In Options</button>
           {#if surface === "equity"}
-            <button type="button" class="ghost-button" on:click={() => onOpenStrategyLab?.()} disabled={!result?.performance_points?.length}>Add To Strategy Lab</button>
+            <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>+ Strategy</button>
+            <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
           {/if}
         </div>
 
@@ -2566,7 +2617,7 @@
               <div class="builder-actions compact">
                 <button type="button" on:click={() => onOpenRisk?.()} disabled={!result?.snapshot}>Risk</button>
                 <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Options</button>
-                <button type="button" class="ghost-button" on:click={() => onOpenStrategyLab?.()} disabled={!result?.performance_points?.length}>Strategy Lab</button>
+                <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
               </div>
             </div>
             <div class="kpi-grid">

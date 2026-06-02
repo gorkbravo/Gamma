@@ -564,6 +564,8 @@ class ResearchService:
         handoff = request.handoff
         if handoff.intended_target_tab != "strategy_lab":
             raise ResearchValidationError(["Strategy Lab handoff resolver only accepts strategy_lab targets."])
+        if handoff.source_tab == "equity_research":
+            return self._resolve_equity_research_strategy_handoff(handoff)
         if handoff.source_tab != "prediction_markets":
             return StrategyLabResolvedHandoff(
                 handoff_id=self._handoff_id(handoff),
@@ -576,6 +578,72 @@ class ResearchService:
         if prediction_market_service is None:
             raise ResearchValidationError(["Prediction market resolver is unavailable in this runtime."])
         return self._resolve_prediction_market_strategy_handoff(handoff, prediction_market_service)
+
+    def _resolve_equity_research_strategy_handoff(self, handoff) -> StrategyLabResolvedHandoff:
+        symbol = (
+            handoff.normalized_ids.get("symbol")
+            or handoff.selected_entity.normalized_id
+            or handoff.selected_entity.provider_id
+            or handoff.selected_entity.native_id
+        )
+        symbol = str(symbol or "").strip().upper()
+        if not symbol:
+            raise ResearchValidationError(["Equity Research handoff is missing a ticker symbol."])
+
+        label = str(handoff.selected_entity.label or symbol).strip() or symbol
+        warnings = list(handoff.warnings)
+        warnings.extend(
+            [
+                "Equity Research handoff resolved to listed-market return history for read-only Strategy Lab analysis.",
+                "Provider prices are converted to percentage returns; Gamma does not create orders or rebalance portfolios.",
+            ]
+        )
+        research_object = self._listed_history_object(
+            label=f"{label} equity return stream",
+            identifier=symbol,
+            asset_class="equity",
+            lookback_days=756,
+            min_observations=5,
+            warnings=warnings,
+            capabilities=["return_leg", "benchmark"],
+        )
+        points = list(research_object.return_points)
+        if len(points) < 5:
+            return StrategyLabResolvedHandoff(
+                handoff_id=self._handoff_id(handoff),
+                envelope=handoff,
+                status="unsupported",
+                resolved_capability="reference_only",
+                provider_summary=research_object.provider_summary,
+                provenance=self._equity_handoff_provenance(research_object, symbol),
+                warnings=list(dict.fromkeys(warnings + ["Listed equity history is too sparse to create a return leg."])),
+                unsupported_reason="Equity Research handoff needs at least five listed-market return observations.",
+            )
+
+        leg = StrategyLabPortfolioLeg(
+            label=research_object.display_name,
+            asset_class="equity",
+            identifier=symbol,
+            weight=float(handoff.default_weight if handoff.default_weight is not None else 0.1),
+            value_kind="return",
+            return_points=points,
+            object=research_object,
+        )
+        return StrategyLabResolvedHandoff(
+            handoff_id=self._handoff_id(handoff),
+            envelope=handoff,
+            status="resolved",
+            resolved_capability="return_leg",
+            composer_draft_leg=leg,
+            date_coverage=CrossTabHandoffTimeframe(
+                label="Listed return history",
+                start=research_object.available_start,
+                end=research_object.available_end,
+            ),
+            provider_summary=research_object.provider_summary,
+            provenance=self._equity_handoff_provenance(research_object, symbol),
+            warnings=list(dict.fromkeys(warnings + research_object.warnings)),
+        )
 
     def _resolve_prediction_market_strategy_handoff(
         self,
@@ -700,6 +768,20 @@ class ResearchService:
             "history_points": len(history or []),
             "transformation": transformation,
         }
+
+    @staticmethod
+    def _equity_handoff_provenance(research_object: GammaResearchObject, symbol: str) -> dict[str, Any]:
+        provenance = dict(research_object.provenance or {})
+        provenance.update(
+            {
+                "symbol": symbol,
+                "history_points": len(research_object.return_points or []),
+                "transformation": "listed_equity_return_stream",
+                "available_start": research_object.available_start,
+                "available_end": research_object.available_end,
+            }
+        )
+        return provenance
 
     @staticmethod
     def _days_to_resolution(end_time: datetime | None, retrieved_at: datetime | None) -> float | None:

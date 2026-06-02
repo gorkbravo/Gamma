@@ -6,6 +6,7 @@
     ResearchResult,
     SavedResearchItem,
     StrategyLabCompositionResult,
+    StrategyLabHandoffEnvelope,
     StrategyLabHandoffQueueItem,
     StrategyLabResolvedHandoff,
     StrategyLabResult
@@ -47,6 +48,10 @@
   export let onRestoreStrategy: ((result: StrategyLabResult) => void) | undefined = undefined;
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
+  export let onOpenStrategyLab: (() => void) | undefined = undefined;
+  export let onSendToStrategyLab:
+    | ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void)
+    | undefined = undefined;
   export let strategyLabHandoffs: StrategyLabHandoffQueueItem[] = [];
   export let handoffLoading = false;
   export let onResolveStrategyLabHandoffs: (() => Promise<StrategyLabHandoffQueueItem[]> | void) | undefined = undefined;
@@ -83,6 +88,8 @@
   {onRestoreStrategy}
   {onOpenRisk}
   {onOpenIv}
+  {onOpenStrategyLab}
+  {onSendToStrategyLab}
   {strategyLabHandoffs}
   {handoffLoading}
   {onResolveStrategyLabHandoffs}

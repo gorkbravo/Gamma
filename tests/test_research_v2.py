@@ -30,11 +30,31 @@ from src.models.research_lab import (
     StrategyLabPortfolioLeg,
 )
 from src.models.prediction_markets import PredictionMarketFreshness, PredictionMarketRecord, PredictionProbabilityPoint
+from src.models.provenance import FreshnessLabel
+from src.services.research_market_data import ResearchHistoryResult
 from src.services.saved_research_store import SavedResearchStore
 
 
 def _service(tmp_path) -> ResearchService:
     return ResearchService(SimpleNamespace(), saved_store=SavedResearchStore(tmp_path / "research"))
+
+
+class StubListedHistoryProvider:
+    def load_instrument_history_result(self, instrument, lookback_days: int) -> ResearchHistoryResult:
+        assert instrument.symbol == "MSFT"
+        assert lookback_days == 756
+        prices = pd.Series(
+            [100.0, 101.0, 100.5, 102.0, 103.0, 104.0],
+            index=pd.date_range("2026-01-02", periods=6, freq="B"),
+        )
+        return ResearchHistoryResult(
+            series=prices,
+            source_provider="fixture",
+            source_label="Fixture listed history",
+            origin="tests.equity_handoff",
+            freshness_label=FreshnessLabel.HISTORICAL,
+            warnings=["Fixture history is local test data."],
+        )
 
 
 def test_strategy_lab_analyzes_imported_return_stream_with_benchmark(tmp_path):
@@ -407,6 +427,49 @@ def test_strategy_lab_resolves_prediction_market_no_handoff_to_draft_leg(tmp_pat
     assert result.composer_draft_leg.return_points[-1].value == pytest.approx(0.44)
     assert result.provenance["transformation"] == "long_no_probability_return"
     assert any("NO exposure" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_resolves_equity_research_handoff_to_draft_leg(tmp_path):
+    service = ResearchService(StubListedHistoryProvider(), saved_store=SavedResearchStore(tmp_path / "research"))
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="equity_research",
+                source_mode="scope_analysis",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="equity_symbol",
+                    label="Microsoft",
+                    normalized_id="MSFT",
+                    provider_id="MSFT",
+                    native_id="MSFT",
+                ),
+                resolver_capability="return_leg",
+                asset_class="equity",
+                value_kind="return",
+                default_side="long",
+                default_weight=0.1,
+                provider="fixture",
+                normalized_ids={"symbol": "MSFT"},
+                timestamp="2026-03-01T00:00:00Z",
+            )
+        )
+    )
+
+    assert result.status == "resolved"
+    assert result.resolved_capability == "return_leg"
+    assert result.composer_draft_leg is not None
+    assert result.composer_draft_leg.asset_class == "equity"
+    assert result.composer_draft_leg.identifier == "MSFT"
+    assert result.composer_draft_leg.value_kind == "return"
+    assert len(result.composer_draft_leg.return_points) == 5
+    assert result.date_coverage is not None
+    assert result.provider_summary == "Fixture listed history"
+    assert result.provenance["transformation"] == "listed_equity_return_stream"
+    assert result.provenance["history_points"] == 5
+    assert any("read-only Strategy Lab analysis" in warning for warning in result.warnings)
 
 
 def test_strategy_lab_ignores_thin_optional_benchmark_overlap(tmp_path):

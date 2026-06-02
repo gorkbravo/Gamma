@@ -222,6 +222,58 @@ export function buildPredictionMarketStrategyHandoff(
   };
 }
 
+export function buildEquityStrategyHandoff(
+  equity: {
+    symbol: string;
+    label?: string | null;
+    provider?: string | null;
+    sourceProvider?: string | null;
+    origin?: string | null;
+    retrievedAt?: string | null;
+  },
+  options: { sourceMode?: string | null; defaultWeight?: number } = {}
+): StrategyLabHandoffEnvelope {
+  const symbol = equity.symbol.trim().toUpperCase();
+  const label = (equity.label ?? symbol).trim() || symbol;
+  const provider = equity.sourceProvider || equity.provider || null;
+  return {
+    source_tab: "equity_research",
+    source_mode: options.sourceMode ?? "scope_analysis",
+    intended_target_tab: "strategy_lab",
+    intended_target_mode: "composer",
+    selected_entity: {
+      entity_type: "equity_symbol",
+      label,
+      normalized_id: symbol,
+      provider_id: symbol,
+      native_id: symbol,
+      metadata: {
+        symbol,
+        asset_class: "equity"
+      }
+    },
+    resolver_capability: "return_leg",
+    asset_class: "equity",
+    value_kind: "return",
+    default_side: "long",
+    default_weight: options.defaultWeight ?? 0.1,
+    selected_timeframe: null,
+    provider,
+    source: {
+      origin: equity.origin ?? null,
+      retrieved_at: equity.retrievedAt ?? null
+    },
+    warnings: [
+      "Equity Research handoffs enter Strategy Lab as read-only research return streams, not execution instructions.",
+      "Resolver will load listed-market history and preserve provider coverage warnings before composing."
+    ],
+    normalized_ids: {
+      symbol
+    },
+    timestamp: new Date().toISOString()
+  };
+}
+
 export function strategyResolvedHandoffToDraftLeg(
   resolved: StrategyLabResolvedHandoff,
   index: number

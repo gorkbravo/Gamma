@@ -3,6 +3,7 @@ import type { ResearchResult } from "../api/types";
 import {
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
+  buildEquityStrategyHandoff,
   buildPredictionMarketStrategyHandoff,
   buildStrategyComposerObjects,
   buildStrategyPortfolioLegInputs,
@@ -338,6 +339,29 @@ describe("research view model helpers", () => {
     expect(draft?.identifier).toBe(market.market_id);
     expect(draft?.valueKind).toBe("level");
     expect(draft?.historyText).toContain("2026-03-01T00:00:00Z,0.51");
+  });
+
+  it("builds equity research strategy handoffs for selected tickers", () => {
+    const handoff = buildEquityStrategyHandoff({
+      symbol: " msft ",
+      label: "Microsoft",
+      sourceProvider: "fixture"
+    });
+
+    expect(handoff.source_tab).toBe("equity_research");
+    expect(handoff.source_mode).toBe("scope_analysis");
+    expect(handoff.intended_target_tab).toBe("strategy_lab");
+    expect(handoff.intended_target_mode).toBe("composer");
+    expect(handoff.selected_entity.entity_type).toBe("equity_symbol");
+    expect(handoff.selected_entity.normalized_id).toBe("MSFT");
+    expect(handoff.resolver_capability).toBe("return_leg");
+    expect(handoff.asset_class).toBe("equity");
+    expect(handoff.value_kind).toBe("return");
+    expect(handoff.default_side).toBe("long");
+    expect(handoff.default_weight).toBe(0.1);
+    expect(handoff.provider).toBe("fixture");
+    expect(handoff.normalized_ids.symbol).toBe("MSFT");
+    expect(handoff.warnings.join(" ")).toContain("read-only research return streams");
   });
 
   it("includes normalized weights in synthetic scope research object ids", () => {

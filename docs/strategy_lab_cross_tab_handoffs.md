@@ -20,10 +20,11 @@ Current snapshot:
 | Shared cross-tab handoff protocol | Verified | Frontend Strategy Lab handoff envelope types extend the cross-tab envelope with resolver capability, asset class, value kind, side, timeframe, provider, warnings, and normalized ids. |
 | Strategy Lab inbound queue | Verified | Frontend store now persists pending/resolved handoffs with enqueue, resolve, accept, dismiss, and clear helpers. |
 | Prediction Markets `+ Strategy` action | Verified | Prediction Markets detail exposes `+ Strategy` and `Add & Open` for the selected contract. |
-| Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts into composer-ready draft legs. |
-| Composer draft ingestion from handoff | Verified | Accepted resolved handoffs become editable Strategy Lab composer rows with probability history and warning/provenance context. |
-| Tab-by-tab capability matrix | Planned | Capability taxonomy is defined here; each tab still needs concrete wiring. |
-| Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-008 validation. |
+| Equity Research `+ Strategy` action | Verified | Equity Research Scope can queue or open a selected ticker into Strategy Lab as a listed-equity return leg. |
+| Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts and Equity Research tickers into composer-ready draft legs. |
+| Composer draft ingestion from handoff | Verified | Accepted resolved handoffs become editable Strategy Lab composer rows with probability or listed-equity history and warning/provenance context. |
+| Tab-by-tab capability matrix | In progress | Prediction Markets and Equity Research are wired; remaining tabs still need concrete handoff implementations. |
+| Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-009 validation. |
 
 ## Product Boundary
 
@@ -256,7 +257,7 @@ Warnings should be explicit when:
 | Source Tab | Initial Action | Default Capability | Initial Status | Notes |
 | --- | --- | --- | --- | --- |
 | Prediction Markets | `+ Strategy` on selected contract | `return_leg` or `overlay` | Verified | First pass resolves selected contract probability history into an editable Strategy Lab prediction leg. |
-| Equity Research | Add selected ticker/scope/basket | `return_leg` | Planned | Should use existing listed-market history resolution where possible. |
+| Equity Research | `+ Strategy` / `Add & Open` for selected ticker | `return_leg` | Verified | First pass resolves selected ticker history through listed-market providers into an editable Strategy Lab equity leg. Scope/basket handoffs remain future work. |
 | Commodities | Add selected instrument/proxy | `return_leg` or `benchmark` | Planned | Need clear proxy warnings for futures/spot/spreads. |
 | Crypto | Add token or basket | `return_leg` or `benchmark` | Planned | Needs provider coverage and stale-data warnings. |
 | Macro | Use regime/window as lens | `lens` | Planned | Macro objects should usually not become positions. |
@@ -274,12 +275,12 @@ Update this board as work lands.
 | SLH-001 | Define frontend Strategy Lab handoff types extending the existing cross-tab envelope. | Codex | Verified | `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`. |
 | SLH-002 | Add Strategy Lab handoff queue store with add, dismiss, clear, and persistence helpers. | Codex | Verified | `npm run test -- src/lib/stores/app.test.ts`. |
 | SLH-003 | Add backend request/response models for resolving handoffs. | Codex | Verified | `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q`. |
-| SLH-004 | Add `/research/strategy-lab/resolve-handoff` endpoint. | Codex | Verified | API route test covers Prediction Markets handoff resolution. |
+| SLH-004 | Add `/research/strategy-lab/resolve-handoff` endpoint. | Codex | Verified | API route tests cover Prediction Markets and Equity Research handoff resolution. |
 | SLH-005 | Implement prediction-market resolver from selected market id to Strategy Lab draft leg. | Codex | Verified | Backend resolver test covers fixture probability history, warnings, coverage, and composer draft leg output. |
 | SLH-006 | Add `+ Strategy` / `Add & Open` actions to Prediction Markets detail. | Codex | Verified | Browser flow selected a live Prediction Markets contract and used `Add & Open`. |
 | SLH-007 | Add Strategy Lab inbound strip and accept/review flow. | Codex | Verified | Browser flow confirmed inbound strip, resolved warnings, Accept, Dismiss/Clear controls, and no horizontal page overflow. |
 | SLH-008 | Convert accepted resolved handoffs into editable composer rows. | Codex | Verified | Browser flow confirmed a Prediction row with contract id and YES probability history, then composed a four-leg Strategy Lab result. |
-| SLH-009 | Add Equity Research selected ticker/scope handoff. | TBD | Not started | Store and browser tests. |
+| SLH-009 | Add Equity Research selected ticker/scope handoff. | Codex | Verified | Backend/API tests cover selected ticker resolution; browser flow sent AAPL from Equity Research Scope with `Add & Open`, accepted the resolved row, and composed the portfolio. Scope/basket handoffs remain open. |
 | SLH-010 | Add Commodities selected instrument handoff. | TBD | Not started | Resolver tests with proxy warning. |
 | SLH-011 | Add Macro lens handoff. | TBD | Not started | Lens attachment tests. |
 | SLH-012 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | TBD | Not started | Copilot context tests. |
@@ -331,14 +332,9 @@ npm run test -- src/lib/stores/app.test.ts
 Browser:
 
 - Open the app locally.
-- Select a Prediction Markets contract.
-- Click `Add & Open`.
-- Confirm Strategy Lab opens.
-- Confirm the inbound strip appears.
-- Accept the handoff.
-- Confirm the composer receives a prediction-market row.
-- Run composition.
-- Confirm warnings/provenance are visible and no layout overflow occurs.
+- For Prediction Markets: select a contract, choose a side, click `Add & Open`, confirm Strategy Lab opens, accept the resolved prediction-market row, run composition, and confirm warnings/provenance are visible.
+- For Equity Research: open Scope, confirm a selected ticker is present, click `Add & Open`, confirm Strategy Lab opens, accept the resolved equity row, run composition, and confirm warnings/provenance are visible.
+- Confirm no page-level horizontal overflow occurs at desktop and narrow viewport widths; horizontally scrollable dense tables are acceptable.
 
 ## Latest Validation Results
 
@@ -346,11 +342,11 @@ Validated on 2026-06-02:
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 41 tests passed. Added coverage for Prediction Markets YES/NO resolver behavior and timezone-aware inline probability histories. |
-| `npm run typecheck` | Passed | Frontend typecheck passed after Strategy Lab handoff type and view updates. |
-| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 18 tests passed, including handoff envelope/draft-row conversion coverage. |
+| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 43 tests passed. Added coverage for Equity Research selected ticker resolver/API behavior alongside Prediction Markets YES/NO handoffs. |
+| `npm run typecheck` | Passed | Frontend typecheck passed after Equity Research wrapper, Strategy Lab wrapper, handoff type, and view updates. |
+| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 19 tests passed, including Prediction Markets and Equity Research handoff envelope coverage plus draft-row conversion coverage. |
 | `npm run test -- src/lib/stores/app.test.ts` | Passed | 31 tests passed, including queue resolve/accept/dismiss coverage. |
-| Local browser flow | Passed | Selected a live Kalshi contract, chose NO, clicked `Add & Open`, resolved inbound handoff, accepted it into the composer, ran a four-leg composition, confirmed NO proxy warnings/provenance and no horizontal document overflow. |
+| Local browser flow | Passed | Verified Equity Research Scope AAPL `Add & Open` on a fresh mock backend/frontend pair, resolved inbound handoff, accepted the editable `AAPL equity return stream` row, ran composition, confirmed warnings/provenance, and checked desktop plus 390px viewport page-level overflow. Prior Prediction Markets NO browser flow remains verified. |
 
 ## Current Assumptions
 
@@ -360,6 +356,7 @@ Validated on 2026-06-02:
 - Pending handoffs persist in local storage across reloads until accepted, dismissed, or cleared.
 - Accepted handoff warnings remain visible near the editable composer row; computed-run warnings and provenance remain visible in the Strategy Lab rail.
 - Timezone-aware probability history timestamps are normalized to date-only UTC before return alignment, avoiding mixed timezone indexes.
+- Equity Research first pass covers selected single tickers only. The backend resolver loads listed-market provider history, converts prices to returns, and passes the resolved return points into the editable composer row.
 
 ## Open Questions
 
@@ -368,7 +365,8 @@ Validated on 2026-06-02:
 3. Should accepted composer draft rows be saved as named experiment drafts before a user runs composition?
 4. Should Strategy Lab save handoff bundles as named experiment drafts?
 5. Should Copilot be allowed to propose handoffs automatically, or only explain user-created handoffs first?
+6. Should Equity Research synthetic scopes/baskets publish as weighted scope objects through the handoff resolver, or should they rely on saved scope objects first?
 
 ## Recommended Next Step
 
-Start with `SLH-001` through `SLH-008` using Prediction Markets as the first source tab. That path proves the full cross-tab workflow without spreading partial affordances across many tabs.
+Continue with `SLH-010` Commodities selected instrument handoffs. Prediction Markets and Equity Research now prove the return-leg path for probability histories and listed-equity histories; Commodities is the next useful proxy-warning test before lens/overlay-only tabs.

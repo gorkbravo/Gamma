@@ -1485,7 +1485,7 @@
     }
   }
 
-  async function handlePredictionStrategyLabHandoff(
+  async function handleStrategyLabHandoff(
     handoff: StrategyLabHandoffEnvelope,
     options: { open?: boolean } = {}
   ) {
@@ -2241,6 +2241,8 @@
             onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
+            onOpenStrategyLab={openStrategyLabFromEquityResearch}
+            onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {:else if $activeTab === "strategy_lab"}
           <svelte:component
@@ -2272,6 +2274,7 @@
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
             onOpenStrategyLab={openStrategyLabFromEquityResearch}
+            onSendToStrategyLab={handleStrategyLabHandoff}
             strategyLabHandoffs={$strategyLabHandoffQueue}
             handoffLoading={$loading.strategyLabHandoff}
             onResolveStrategyLabHandoffs={resolvePendingStrategyLabHandoffs}
@@ -2312,7 +2315,7 @@
             loading={$loading.prediction || $loading.predictionDetail}
             onLoadScreener={loadPredictionMarketScreener}
             onSelectMarket={selectPredictionMarket}
-            onSendToStrategyLab={handlePredictionStrategyLabHandoff}
+            onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {:else if $activeTab === "crypto"}
           <svelte:component

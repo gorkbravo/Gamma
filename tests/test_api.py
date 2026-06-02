@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from datetime import datetime, timezone
 
+import pandas as pd
+
 from src.api.main import create_app
 from src.api.session_auth import GAMMA_SESSION_HEADER
 from src.api.schemas.crypto import CryptoWorkspaceRequestModel
@@ -21,6 +23,8 @@ from src.application.request_limits import (
 from src.application.runtime import build_runtime
 from src.models.app_mode import ResearchScopeType
 from src.models.prediction_markets import PredictionMarketFreshness, PredictionMarketRecord, PredictionProbabilityPoint
+from src.models.provenance import FreshnessLabel
+from src.services.research_market_data import ResearchHistoryResult
 from src.models.crypto import (
     CryptoComparisonRecord,
     CryptoDexLiquiditySummary,
@@ -41,6 +45,23 @@ def _build_test_client(tmp_path):
     )
     app = create_app(runtime)
     return TestClient(app), runtime
+
+
+class StubListedHistoryProvider:
+    def load_instrument_history_result(self, instrument, lookback_days: int) -> ResearchHistoryResult:
+        assert instrument.symbol == "MSFT"
+        prices = pd.Series(
+            [100.0, 101.0, 100.5, 102.0, 103.0, 104.0],
+            index=pd.date_range("2026-01-02", periods=6, freq="B"),
+        )
+        return ResearchHistoryResult(
+            series=prices,
+            source_provider="fixture",
+            source_label="Fixture listed history",
+            origin="tests.api.equity_handoff",
+            freshness_label=FreshnessLabel.HISTORICAL,
+            warnings=[],
+        )
 
 
 def test_health_and_system_status_endpoints(tmp_path):
@@ -385,6 +406,55 @@ def test_strategy_lab_resolve_handoff_endpoint_returns_prediction_market_draft(t
         assert no_result["composer_draft_leg"]["label"].endswith("| NO probability")
         assert abs(no_result["composer_draft_leg"]["return_points"][0]["value"] - 0.49) < 1e-9
         assert no_result["provenance"]["transformation"] == "long_no_probability_return"
+    finally:
+        runtime.shutdown()
+
+
+def test_strategy_lab_resolve_handoff_endpoint_returns_equity_draft(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    runtime.research_service.provider = StubListedHistoryProvider()
+    try:
+        response = client.post(
+            "/research/strategy-lab/resolve-handoff",
+            json={
+                "handoff": {
+                    "source_tab": "equity_research",
+                    "source_mode": "scope_analysis",
+                    "intended_target_tab": "strategy_lab",
+                    "intended_target_mode": "composer",
+                    "selected_entity": {
+                        "entity_type": "equity_symbol",
+                        "label": "Microsoft",
+                        "normalized_id": "MSFT",
+                        "provider_id": "MSFT",
+                        "native_id": "MSFT",
+                        "metadata": {"symbol": "MSFT"},
+                    },
+                    "resolver_capability": "return_leg",
+                    "asset_class": "equity",
+                    "value_kind": "return",
+                    "default_side": "long",
+                    "default_weight": 0.1,
+                    "selected_timeframe": None,
+                    "provider": "fixture",
+                    "source": {"origin": "fixture"},
+                    "warnings": [],
+                    "normalized_ids": {"symbol": "MSFT"},
+                    "timestamp": "2026-03-01T00:00:00Z",
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "resolved"
+        assert payload["composer_draft_leg"]["asset_class"] == "equity"
+        assert payload["composer_draft_leg"]["identifier"] == "MSFT"
+        assert payload["composer_draft_leg"]["value_kind"] == "return"
+        assert len(payload["composer_draft_leg"]["return_points"]) == 5
+        assert payload["provider_summary"] == "Fixture listed history"
+        assert payload["provenance"]["transformation"] == "listed_equity_return_stream"
+        assert "read-only Strategy Lab analysis" in " ".join(payload["warnings"])
     finally:
         runtime.shutdown()
 

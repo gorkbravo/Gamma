@@ -5,6 +5,7 @@
     ResearchOverviewResponse,
     ResearchResult,
     SavedResearchItem,
+    StrategyLabHandoffEnvelope,
     StrategyLabResult
   } from "../lib/api/types";
   import type {
@@ -40,6 +41,9 @@
   export let onOpenRisk: (() => void) | undefined = undefined;
   export let onOpenIv: (() => void) | undefined = undefined;
   export let onOpenStrategyLab: (() => void) | undefined = undefined;
+  export let onSendToStrategyLab:
+    | ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void)
+    | undefined = undefined;
 </script>
 
 <ResearchView
@@ -68,4 +72,5 @@
   {onOpenRisk}
   {onOpenIv}
   {onOpenStrategyLab}
+  {onSendToStrategyLab}
 />
