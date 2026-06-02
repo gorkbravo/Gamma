@@ -22,10 +22,19 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(tmp_path):
     try:
         runtime.copilot_service.fundamentals_service = fixtures._StubFundamentalsService()
         snapshot = client.get("/portfolio/snapshot").json()
+        research_result = client.post(
+            "/research/analyze",
+            json={
+                "scope_type": "single_ticker",
+                "primary_symbol": "AAPL",
+                "benchmark_symbol": "SPY",
+                "lookback_days": 252,
+            },
+        ).json()
 
         result = run_operator_eval_suite(
             client,
-            default_operator_eval_cases(portfolio_snapshot=snapshot),
+            default_operator_eval_cases(portfolio_snapshot=snapshot, research_result=research_result),
             orchestrators=("custom", "agents_sdk_stub"),
         )
 
@@ -45,6 +54,11 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(tmp_path):
             "run_hypothetical_portfolio_comparison" in item.tool_traces
             for item in result.outcomes
             if item.case_id == "hypothetical_portfolio_comparison"
+        )
+        assert all(
+            "run_research_scope_analysis" in item.tool_traces
+            for item in result.outcomes
+            if item.case_id == "research_scope_analysis"
         )
     finally:
         runtime.shutdown()

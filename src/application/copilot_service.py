@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import logging
+import math
 import re
 import time
 from typing import Any, Callable
@@ -225,6 +226,87 @@ class CopilotService:
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_research_coverage_context,
+                ),
+                _CopilotToolDefinition(
+                    name="run_research_scope_analysis",
+                    description="Run a bounded read-only Research scope analysis for the active single-name or synthetic research scope.",
+                    domains=("research", "equity_research"),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "scope_type": {
+                                "type": ["string", "null"],
+                                "enum": ["auto", "single_ticker", "synthetic_portfolio", None],
+                                "description": "Research scope type. Use auto/null to infer from the active research result.",
+                            },
+                            "primary_symbol": {
+                                "type": ["string", "null"],
+                                "description": "Ticker for single-ticker scope analysis.",
+                            },
+                            "benchmark_symbol": {
+                                "type": ["string", "null"],
+                                "description": "Benchmark ticker. Defaults to SPY.",
+                            },
+                            "lookback_days": {
+                                "type": ["integer", "null"],
+                                "description": "Historical lookback in days, bounded to 20-2520.",
+                            },
+                            "synthetic_positions": {
+                                "type": "array",
+                                "description": "Optional synthetic research positions. Weights are normalized by Gamma and do not modify saved research state.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "symbol": {"type": "string"},
+                                        "weight": {"type": "number"},
+                                        "instrument_id": {"type": ["string", "null"]},
+                                        "display_symbol": {"type": ["string", "null"]},
+                                        "sec_type": {"type": ["string", "null"]},
+                                        "currency": {"type": ["string", "null"]},
+                                        "exchange": {"type": ["string", "null"]},
+                                        "primary_exchange": {"type": ["string", "null"]},
+                                        "provider": {"type": ["string", "null"]},
+                                        "provider_id": {"type": ["string", "null"]},
+                                    },
+                                    "required": [
+                                        "symbol",
+                                        "weight",
+                                        "instrument_id",
+                                        "display_symbol",
+                                        "sec_type",
+                                        "currency",
+                                        "exchange",
+                                        "primary_exchange",
+                                        "provider",
+                                        "provider_id",
+                                    ],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": [
+                            "scope_type",
+                            "primary_symbol",
+                            "benchmark_symbol",
+                            "lookback_days",
+                            "synthetic_positions",
+                        ],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_research_scope_analysis,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=30.0,
+                    permission_policy="automatic",
+                    provenance_behavior=(
+                        "Runs Gamma's existing ResearchService.analyze path and returns scope metrics, coverage, "
+                        "constituent diagnostics, warnings, and provider provenance without saving scopes or modifying state."
+                    ),
+                    failure_modes=(
+                        "Requires an active research result or explicit scope arguments.",
+                        "History may be missing for one or more scope constituents.",
+                        "Synthetic scope positions are temporary and read-only; saved research objects are not loaded or updated by this action.",
+                    ),
                 ),
                 _CopilotToolDefinition(
                     name="run_strategy_lab_backtest",
@@ -1775,6 +1857,8 @@ class CopilotService:
             return {"ticker": context.summary_data.get("ticker")}
         if tool_name == "run_strategy_lab_backtest":
             return {"result_kind": "auto"}
+        if tool_name == "run_research_scope_analysis":
+            return self._default_research_scope_analysis_arguments(context)
         if tool_name == "run_hypothetical_portfolio_comparison":
             return self._default_hypothetical_portfolio_arguments(context)
         if tool_name == "run_risk_contribution_analysis":
@@ -2338,6 +2422,7 @@ class CopilotService:
             "commodities": ("commodities", "commodity", "oil", "crude", "gold", "copper"),
             "prediction_markets": ("prediction market", "prediction markets", "polymarket", "kalshi"),
             "crypto": ("crypto", "token", "dex", "on-chain", "onchain"),
+            "research": ("scope", "scope analysis", "research scope"),
             "fundamentals": ("fundamentals", "dcf", "filings", "financials"),
             "equity_research": ("equity research", "equities", "stocks", "benchmark"),
             "strategy_lab": ("strategy lab", "strategy", "backtest"),
@@ -2476,8 +2561,8 @@ class CopilotService:
     def _default_plan_tools(domain: str) -> list[str]:
         return {
             "portfolio": ["get_portfolio_positions_summary", "get_portfolio_performance_context"],
-            "equity_research": ["get_research_scope_summary", "get_research_coverage_context"],
-            "research": ["get_research_scope_summary", "get_research_coverage_context"],
+            "equity_research": ["run_research_scope_analysis", "get_research_scope_summary", "get_research_coverage_context"],
+            "research": ["run_research_scope_analysis", "get_research_scope_summary", "get_research_coverage_context"],
             "strategy_lab": ["run_strategy_lab_backtest"],
             "macro": ["get_macro_workspace_drilldown", "get_macro_series_history_summary"],
             "commodities": ["get_commodities_workspace_summary"],
@@ -3981,6 +4066,68 @@ class CopilotService:
                 tool_name="get_research_coverage_context",
                 summary="Expanded the active research result into coverage and constituent-level context.",
                 arguments={},
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
+    def _tool_run_research_scope_analysis(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        if self.research_provider is None:
+            raise ValueError("Research provider is unavailable to Copilot.")
+        normalized = self._normalize_research_scope_analysis_arguments(arguments, context)
+        research_service = ResearchService(self.research_provider)
+        analysis = research_service.analyze(
+            ResearchAnalysisRequest(
+                scope_type=normalized["scope_type"],
+                primary_symbol=normalized["primary_symbol"],
+                synthetic_positions=[
+                    SyntheticPosition(
+                        symbol=position["symbol"],
+                        weight=position["weight"],
+                        instrument_id=position.get("instrument_id"),
+                        display_symbol=position.get("display_symbol"),
+                        sec_type=position.get("sec_type"),
+                        currency=position.get("currency"),
+                        exchange=position.get("exchange"),
+                        primary_exchange=position.get("primary_exchange"),
+                        provider=position.get("provider"),
+                        provider_id=position.get("provider_id"),
+                    )
+                    for position in normalized["synthetic_positions"]
+                ],
+                benchmark_symbol=normalized["benchmark_symbol"],
+                lookback_days=normalized["lookback_days"],
+            )
+        )
+        output = self._research_scope_analysis_operator_summary(
+            analysis,
+            normalized=normalized,
+        )
+        source = CopilotSourceRef(
+            source_id="research.scope_analysis.operator",
+            label="Research scope operator analysis",
+            kind="analytics",
+            provider=analysis.source_provider,
+            origin="gamma.research.analyze",
+            description="Read-only Research Operator analysis of the active or supplied Research scope.",
+            retrieved_at=analysis.snapshot.timestamp if analysis.snapshot is not None else now_utc(),
+        )
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_research_scope_analysis",
+                summary=f"Ran read-only Research scope analysis for {normalized['scope_type'].value}.",
+                arguments={
+                    "scope_type": normalized["scope_type"].value,
+                    "primary_symbol": normalized["primary_symbol"],
+                    "benchmark_symbol": normalized["benchmark_symbol"],
+                    "lookback_days": normalized["lookback_days"],
+                    "synthetic_position_count": len(normalized["synthetic_positions"]),
+                },
                 source_ids=[source.source_id],
             ),
             sources=[source],
@@ -5806,6 +5953,162 @@ class CopilotService:
             raise ValueError("Research context is missing the active research result.")
         return research
 
+    @classmethod
+    def _default_research_scope_analysis_arguments(
+        cls,
+        context: CopilotContextBundle,
+    ) -> dict[str, Any] | None:
+        result = context.tool_state.get("result")
+        if not isinstance(result, dict):
+            return None
+        scope_type = result.get("scope_type") or "auto"
+        if isinstance(scope_type, ResearchScopeType):
+            scope_type = scope_type.value
+        return {
+            "scope_type": scope_type,
+            "primary_symbol": result.get("primary_symbol"),
+            "benchmark_symbol": result.get("benchmark_symbol") or "SPY",
+            "lookback_days": 252,
+            "synthetic_positions": cls._synthetic_positions_from_research_payload(result),
+        }
+
+    @classmethod
+    def _normalize_research_scope_analysis_arguments(
+        cls,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> dict[str, Any]:
+        result = context.tool_state.get("result")
+        result_payload = result if isinstance(result, dict) else {}
+        warnings: list[str] = []
+        synthetic_positions = cls._normalize_research_synthetic_positions(
+            arguments.get("synthetic_positions"),
+            warnings=warnings,
+        )
+        if not synthetic_positions:
+            synthetic_positions = cls._synthetic_positions_from_research_payload(result_payload)
+
+        raw_scope_value = arguments.get("scope_type") or result_payload.get("scope_type") or "auto"
+        raw_scope_type = raw_scope_value.value if isinstance(raw_scope_value, ResearchScopeType) else str(raw_scope_value)
+        raw_scope_type = raw_scope_type.strip().lower()
+        if raw_scope_type.startswith("researchscopetype."):
+            raw_scope_type = raw_scope_type.split(".", 1)[1]
+        if raw_scope_type in {"", "auto", "none"}:
+            raw_scope_type = "synthetic_portfolio" if synthetic_positions else "single_ticker"
+        try:
+            scope_type = ResearchScopeType(raw_scope_type)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported research scope_type: {raw_scope_type}") from exc
+        if scope_type == ResearchScopeType.NONE:
+            raise ValueError("Research scope analysis requires a configured research scope.")
+
+        primary_symbol = str(arguments.get("primary_symbol") or result_payload.get("primary_symbol") or "").strip().upper()
+        if scope_type == ResearchScopeType.SINGLE_TICKER and not primary_symbol:
+            raise ValueError("Single-ticker research scope analysis requires primary_symbol.")
+        if scope_type == ResearchScopeType.SYNTHETIC_PORTFOLIO and not synthetic_positions:
+            raise ValueError("Synthetic research scope analysis requires at least one synthetic position.")
+
+        benchmark_symbol = str(arguments.get("benchmark_symbol") or result_payload.get("benchmark_symbol") or "SPY").strip().upper() or "SPY"
+        lookback_days = cls._bounded_int(
+            arguments.get("lookback_days"),
+            default=252,
+            minimum=20,
+            maximum=MAX_RISK_LOOKBACK_DAYS,
+            field_name="lookback_days",
+            warnings=warnings,
+        )
+        return {
+            "scope_type": scope_type,
+            "primary_symbol": primary_symbol if scope_type == ResearchScopeType.SINGLE_TICKER else "",
+            "benchmark_symbol": benchmark_symbol[:32],
+            "lookback_days": lookback_days,
+            "synthetic_positions": synthetic_positions if scope_type == ResearchScopeType.SYNTHETIC_PORTFOLIO else [],
+            "warnings": warnings,
+        }
+
+    @classmethod
+    def _normalize_research_synthetic_positions(
+        cls,
+        raw_positions: Any,
+        *,
+        warnings: list[str],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(raw_positions, list):
+            return []
+        positions: list[dict[str, Any]] = []
+        for item in raw_positions[:100]:
+            if not isinstance(item, dict):
+                continue
+            symbol = str(item.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            weight = cls._bounded_optional_float(
+                item.get("weight"),
+                minimum=0.0,
+                maximum=100.0,
+                field_name=f"synthetic_positions.{symbol}.weight",
+                warnings=warnings,
+            )
+            if weight is None or weight <= 0:
+                continue
+            positions.append(
+                {
+                    "symbol": symbol,
+                    "weight": weight,
+                    "instrument_id": cls._optional_clean_string_preserve_case(item.get("instrument_id")),
+                    "display_symbol": cls._optional_clean_string(item.get("display_symbol")),
+                    "sec_type": cls._optional_clean_string(item.get("sec_type")),
+                    "currency": cls._optional_clean_string(item.get("currency")),
+                    "exchange": cls._optional_clean_string(item.get("exchange")),
+                    "primary_exchange": cls._optional_clean_string(item.get("primary_exchange")),
+                    "provider": cls._optional_clean_string_preserve_case(item.get("provider")),
+                    "provider_id": cls._optional_clean_string_preserve_case(item.get("provider_id")),
+                }
+            )
+        if len(raw_positions) > 100:
+            warnings.append("Research scope synthetic positions were truncated to the first 100 entries.")
+        weight_sum = sum(float(position["weight"]) for position in positions)
+        if weight_sum > 0:
+            positions = [
+                {
+                    **position,
+                    "weight": float(position["weight"]) / weight_sum,
+                }
+                for position in positions
+            ]
+        return positions
+
+    @classmethod
+    def _synthetic_positions_from_research_payload(cls, result: dict[str, Any]) -> list[dict[str, Any]]:
+        weights = result.get("weights")
+        if isinstance(weights, list) and weights:
+            return cls._normalize_research_synthetic_positions(weights, warnings=[])
+        snapshot = result.get("snapshot")
+        if not isinstance(snapshot, dict):
+            return []
+        positions = snapshot.get("positions")
+        if not isinstance(positions, list):
+            return []
+        rows: list[dict[str, Any]] = []
+        for item in positions:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                {
+                    "symbol": item.get("symbol") or item.get("display_symbol"),
+                    "weight": item.get("weight") or item.get("base_market_value") or item.get("market_value") or 0.0,
+                    "instrument_id": item.get("instrument_id"),
+                    "display_symbol": item.get("display_symbol"),
+                    "sec_type": item.get("sec_type"),
+                    "currency": item.get("currency"),
+                    "exchange": item.get("exchange"),
+                    "primary_exchange": item.get("primary_exchange"),
+                    "provider": item.get("provider"),
+                    "provider_id": item.get("provider_id"),
+                }
+            )
+        return cls._normalize_research_synthetic_positions(rows, warnings=[])
+
     @staticmethod
     def _strategy_lab_active_result(
         context: CopilotContextBundle,
@@ -5980,6 +6283,139 @@ class CopilotService:
     def _optional_clean_string(value: Any) -> str | None:
         text = str(value or "").strip()
         return text.upper() if text else None
+
+    @staticmethod
+    def _optional_clean_string_preserve_case(value: Any) -> str | None:
+        text = str(value or "").strip()
+        return text if text else None
+
+    @classmethod
+    def _research_scope_analysis_operator_summary(
+        cls,
+        analysis: Any,
+        *,
+        normalized: dict[str, Any],
+        constituent_limit: int = 12,
+    ) -> dict[str, Any]:
+        perf = analysis.perf
+        benchmark = analysis.benchmark_returns
+        metrics = cls._return_stream_metrics(perf, benchmark)
+        weights = analysis.weights
+        weight_values = [float(value) for value in weights.values] if not weights.empty else []
+        hhi = sum(value * value for value in weight_values) if weight_values else None
+        position_by_id = {
+            position.resolved_instrument_id(): position
+            for position in (analysis.snapshot.positions if analysis.snapshot is not None else [])
+        }
+
+        constituents: list[dict[str, Any]] = []
+        ranked_weights = weights.abs().sort_values(ascending=False) if not weights.empty else weights
+        for instrument_id, _abs_weight in ranked_weights.iloc[:constituent_limit].items():
+            raw_weight = cls._series_get_float(weights, instrument_id)
+            position = position_by_id.get(str(instrument_id))
+            symbol = position.resolved_display_symbol() if position is not None else str(instrument_id)
+            total_return = cls._series_get_float(analysis.constituent_total_returns, instrument_id)
+            constituents.append(
+                {
+                    "symbol": symbol,
+                    "instrument_id": str(instrument_id),
+                    "weight": raw_weight,
+                    "total_return": total_return,
+                    "annual_vol": cls._series_get_float(analysis.constituent_annual_vol, instrument_id),
+                    "max_drawdown": cls._series_get_float(analysis.constituent_max_drawdown, instrument_id),
+                    "weighted_return": (raw_weight * total_return) if raw_weight is not None and total_return is not None else None,
+                }
+            )
+
+        warnings = dedupe_warnings(analysis.warnings, normalized.get("warnings", []))
+        return {
+            "method": (
+                "Gamma ResearchService scope analysis over normalized daily return history. "
+                "This operator action is read-only and does not save, overwrite, rebalance, or trade any research object."
+            ),
+            "scope": {
+                "scope_type": analysis.scope_type.value,
+                "primary_symbol": analysis.primary_symbol,
+                "benchmark_symbol": analysis.benchmark_symbol,
+                "lookback_days": normalized["lookback_days"],
+                "synthetic_position_count": len(normalized.get("synthetic_positions", [])),
+            },
+            "metrics": {
+                **metrics,
+                "observations_count": int(len(perf)),
+            },
+            "structure": {
+                "total_weight": sum(weight_values) if weight_values else None,
+                "top_weight": max(weight_values) if weight_values else None,
+                "top5_weight": sum(sorted(weight_values, reverse=True)[:5]) if weight_values else None,
+                "concentration_hhi": hhi,
+                "effective_positions": (1.0 / hhi) if hhi and hhi > 0 else None,
+                "aligned_symbol_count": int(len(weights)),
+            },
+            "coverage": {
+                "available_symbols": list(analysis.available_symbols),
+                "missing_symbols": list(analysis.missing_symbols),
+                "benchmark_overlap_count": int(analysis.benchmark_overlap_count),
+                "benchmark_available": not benchmark.empty,
+            },
+            "top_constituents": constituents,
+            "provenance": {
+                "source_provider": analysis.source_provider,
+                "history_source_label": analysis.history_source_label,
+                "freshness_label": analysis.freshness_label.value,
+                "transformation_note": "ResearchService.analyze builds a scope snapshot, normalizes histories, computes weighted returns, and derives benchmark-relative diagnostics.",
+            },
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _return_stream_metrics(perf: Any, benchmark: Any) -> dict[str, Any]:
+        if perf is None or perf.empty:
+            return {
+                "total_return": None,
+                "annual_return": None,
+                "annual_vol": None,
+                "max_drawdown": None,
+                "beta": None,
+                "correlation": None,
+            }
+        clean = perf.dropna()
+        if clean.empty:
+            return {
+                "total_return": None,
+                "annual_return": None,
+                "annual_vol": None,
+                "max_drawdown": None,
+                "beta": None,
+                "correlation": None,
+            }
+        total_return = float((1.0 + clean).prod() - 1.0)
+        annual_return = None
+        if total_return > -1.0:
+            annual_return = float((1.0 + total_return) ** (252.0 / max(len(clean), 1)) - 1.0)
+        annual_vol = float(clean.std(ddof=1) * math.sqrt(252.0)) if len(clean) > 1 else None
+        cumulative = (1.0 + clean).cumprod()
+        drawdown = cumulative / cumulative.cummax() - 1.0
+        max_dd = float(drawdown.min()) if not drawdown.empty else None
+        beta = None
+        correlation = None
+        if benchmark is not None and not benchmark.empty:
+            aligned = clean.align(benchmark.dropna(), join="inner")
+            if len(aligned[0]) > 1:
+                variance = float(aligned[1].var())
+                if variance > 0:
+                    beta = float(aligned[0].cov(aligned[1]) / variance)
+                correlation_value = aligned[0].corr(aligned[1])
+                if correlation_value == correlation_value:
+                    correlation = float(correlation_value)
+        return {
+            "total_return": total_return,
+            "annual_return": annual_return,
+            "annual_vol": annual_vol,
+            "max_drawdown": max_dd,
+            "beta": beta,
+            "correlation": correlation,
+        }
 
     @classmethod
     def _hypothetical_portfolio_comparison_summary(

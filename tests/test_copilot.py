@@ -2427,6 +2427,17 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
         assert by_id["run_hypothetical_portfolio_comparison"]["action_type"] == "run_analysis"
         assert by_id["run_hypothetical_portfolio_comparison"]["read_only"] is True
         assert by_id["run_hypothetical_portfolio_comparison"]["mutates_local_state"] is False
+        assert by_id["run_research_scope_analysis"]["permission_policy"] == "automatic"
+        assert by_id["run_research_scope_analysis"]["action_type"] == "run_analysis"
+        assert by_id["run_research_scope_analysis"]["read_only"] is True
+        assert by_id["run_research_scope_analysis"]["mutates_local_state"] is False
+        assert by_id["run_research_scope_analysis"]["input_schema"]["required"] == [
+            "scope_type",
+            "primary_symbol",
+            "benchmark_symbol",
+            "lookback_days",
+            "synthetic_positions",
+        ]
         assert by_id["fundamentals.propose_dcf_update"]["permission_policy"] == "automatic_draft"
         assert by_id["fundamentals.apply_dcf_update"]["permission_policy"] == "confirmation_required"
         assert by_id["fundamentals.apply_dcf_update"]["retry_policy"] == "not_retry_safe_after_success"
@@ -2637,6 +2648,64 @@ def test_copilot_operator_execution_runs_hypothetical_portfolio_comparison(tmp_p
         assert comparison_output["right"]["object_type"] == "benchmark"
         assert "relative_return" in comparison_output["relative"]
         assert any("read-only research" in warning for warning in comparison_output["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_execution_runs_research_scope_analysis(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        research = client.post(
+            "/research/analyze",
+            json={
+                "scope_type": "single_ticker",
+                "primary_symbol": "AAPL",
+                "benchmark_symbol": "SPY",
+                "lookback_days": 252,
+            },
+        ).json()
+
+        plan = client.post(
+            "/copilot/operator-plan",
+            json={
+                "domain": "research",
+                "prompt": "Run research scope analysis on the current scope.",
+                "context": {
+                    "current_tab": "research",
+                    "workspace_mode": "research",
+                    "research_state": {"result": research},
+                },
+            },
+        ).json()
+        assert any(step["tool_id"] == "run_research_scope_analysis" for step in plan["steps"])
+
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "research",
+                "prompt": "Run research scope analysis on the current scope.",
+                "context": {
+                    "current_tab": "research",
+                    "workspace_mode": "research",
+                    "research_state": {"result": research},
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        trace = next(
+            trace
+            for trace in payload["tool_traces"]
+            if trace["tool_name"] == "run_research_scope_analysis"
+        )
+        assert trace["arguments"]["scope_type"] == "single_ticker"
+        assert trace["arguments"]["primary_symbol"] == "AAPL"
+        assert any(
+            source["source_id"] == "research.scope_analysis.operator"
+            for source in payload["sources"]
+        )
     finally:
         runtime.shutdown()
 

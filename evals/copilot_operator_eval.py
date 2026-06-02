@@ -64,7 +64,11 @@ class CopilotOperatorEvalSuiteResult:
         }
 
 
-def default_operator_eval_cases(*, portfolio_snapshot: dict[str, Any] | None = None) -> list[CopilotOperatorEvalCase]:
+def default_operator_eval_cases(
+    *,
+    portfolio_snapshot: dict[str, Any] | None = None,
+    research_result: dict[str, Any] | None = None,
+) -> list[CopilotOperatorEvalCase]:
     portfolio_context = {
         "current_tab": "portfolio",
         "workspace_mode": "portfolio",
@@ -84,7 +88,12 @@ def default_operator_eval_cases(*, portfolio_snapshot: dict[str, Any] | None = N
             }
         },
     }
-    return [
+    research_context = {
+        "current_tab": "research",
+        "workspace_mode": "research",
+        "research_state": {"result": research_result or {}},
+    }
+    cases = [
         CopilotOperatorEvalCase(
             case_id="dcf_edit_apply_stop",
             prompt="Research AAPL and adjust the DCF revenue growth assumption",
@@ -131,6 +140,17 @@ def default_operator_eval_cases(*, portfolio_snapshot: dict[str, Any] | None = N
             require_report=True,
         ),
     ]
+    if research_result:
+        cases.append(
+            CopilotOperatorEvalCase(
+                case_id="research_scope_analysis",
+                prompt="Run research scope analysis on the current scope",
+                context=research_context,
+                expected_tools=("run_research_scope_analysis",),
+                expected_events=("plan", "tool-result", "final-report"),
+            )
+        )
+    return cases
 
 
 def run_operator_eval_suite(
@@ -320,12 +340,21 @@ def main() -> int:
             headers={GAMMA_SESSION_HEADER: os.environ[GAMMA_SESSION_ENV]},
         )
         snapshot = client.get("/portfolio/snapshot").json()
+        research_result = client.post(
+            "/research/analyze",
+            json={
+                "scope_type": "single_ticker",
+                "primary_symbol": "AAPL",
+                "benchmark_symbol": "SPY",
+                "lookback_days": 252,
+            },
+        ).json()
         orchestrators = ("custom", "agents_sdk_stub")
         if args.include_agents_sdk_live and os.getenv("OPENAI_API_KEY"):
             orchestrators = (*orchestrators, "agents_sdk_live")
         result = run_operator_eval_suite(
             client,
-            default_operator_eval_cases(portfolio_snapshot=snapshot),
+            default_operator_eval_cases(portfolio_snapshot=snapshot, research_result=research_result),
             orchestrators=orchestrators,
         )
         print(json.dumps(result.to_json(), indent=2, default=str))
