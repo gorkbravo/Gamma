@@ -11,6 +11,7 @@ This directory is split into active documentation and archived project history.
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
 - [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace and agentic research harness plan, including OpenAI references, action taxonomy, safety boundary, and editable progression checklist
 - [`copilot_v2_handoff_prompt.md`](./copilot_v2_handoff_prompt.md): reusable handoff prompt for continuing Copilot V2, including the approved Agents SDK Research Operator direction
+- [`strategy_lab_cross_tab_handoffs.md`](./strategy_lab_cross_tab_handoffs.md): active spec and progress board for sending selected research objects from source tabs into the Strategy Lab composer
 - [`macro_policy_path_depth.md`](./macro_policy_path_depth.md): implementation spec for the first pass of deeper `Rates & Policy` meeting-path depth inside Macro
 - [`fundamentals_phase6_spec.md`](./fundamentals_phase6_spec.md): product and architecture spec for the first-pass `Fundamentals` workspace
 
