@@ -28,15 +28,18 @@
     type ResearchCompareOptions,
     type SavedResearchCreateOptions,
     type StrategyLabAnalyzeOptions,
-    type StrategyLabComposeOptions
+    type StrategyLabComposeOptions,
+    type StrategyLabPortfolioComposeOptions
   } from "../lib/stores/app";
   import {
     buildResearchCompareOptions,
     buildStrategyComposerObjects,
+    buildStrategyPortfolioLegInputs,
     buildResearchTreemapSections,
     buildPreviewRows,
     classifyResearchSurfaceMode,
     classifySavedResearchSurface,
+    defaultStrategyPortfolioDraftLeg,
     deriveConstituentsFromResearchResult,
     deriveCoverageFromResearchResult,
     deriveStructureFromWeights,
@@ -49,6 +52,7 @@
     normalizeSyntheticText,
     parseResearchCsvText,
     parseSyntheticText,
+    summarizeStrategyPortfolioDraft,
     researchSortMetricLabel,
     hydrateStrategyLabResultFromSaved,
     savedResearchCanReloadScope,
@@ -63,6 +67,8 @@
     type ResearchSurface,
     type ResearchSurfaceMode,
     type ResearchSurfaceModeKind,
+    type StrategyPortfolioAssetClass,
+    type StrategyPortfolioDraftLeg,
     type ResearchTreemapSection,
     type ResearchTreemapTile
   } from "../lib/view-models/research";
@@ -87,6 +93,7 @@
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | undefined = undefined;
   export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
   export let onComposeStrategy: (options: StrategyLabComposeOptions) => Promise<StrategyLabCompositionResult | null> | void = async () => null;
+  export let onComposePortfolioStrategy: (options: StrategyLabPortfolioComposeOptions) => Promise<StrategyLabCompositionResult | null> | void = async () => null;
   export let onCompare: (options: ResearchCompareOptions) => Promise<ResearchCompareResult | null> | void;
   export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
   export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
@@ -228,9 +235,33 @@
   let compareWarning = "";
   let composerSelection: Record<string, boolean> = {};
   let composerWeights: Record<string, number> = {};
+  let portfolioName = "Strategy Lab Portfolio";
+  let portfolioBenchmarkSymbol = "SPY";
+  let portfolioLookbackDays = 756;
+  let portfolioDraftLegs: StrategyPortfolioDraftLeg[] = [
+    { ...defaultStrategyPortfolioDraftLeg(1), label: "Long AI / Growth", assetClass: "etf", identifier: "QQQ", weight: 0.6 },
+    { ...defaultStrategyPortfolioDraftLeg(2), label: "Short broad beta", assetClass: "etf", identifier: "SPY", weight: -0.4 },
+    {
+      ...defaultStrategyPortfolioDraftLeg(3),
+      label: "Election contract proxy",
+      assetClass: "prediction_contract",
+      identifier: "PM-CONTRACT",
+      weight: 0.1,
+      valueKind: "level",
+      historyText: "date,value\n2026-01-02,0.51\n2026-01-05,0.53\n2026-01-06,0.52\n2026-01-07,0.55\n2026-01-08,0.56\n2026-01-09,0.58"
+    }
+  ];
   let savedScopeTitle = "Scope Analysis Run";
   let savedStrategyTitle = "Strategy Lab Run";
   let savedNotes = "";
+  const portfolioAssetClasses: Array<{ id: StrategyPortfolioAssetClass; label: string }> = [
+    { id: "equity", label: "Equity" },
+    { id: "etf", label: "ETF" },
+    { id: "commodity", label: "Commodity" },
+    { id: "prediction_contract", label: "Prediction" },
+    { id: "crypto", label: "Crypto" },
+    { id: "custom_stream", label: "Custom" }
+  ];
   const emptyStructure: ResearchStructure = {
     total_weight: null,
     top_weight: null,
@@ -409,6 +440,51 @@
       lenses: [],
       overlays: [],
       benchmarkObject: null,
+      minObservations: 5
+    });
+  }
+
+  function addPortfolioDraftLeg() {
+    portfolioDraftLegs = [...portfolioDraftLegs, defaultStrategyPortfolioDraftLeg(portfolioDraftLegs.length + 1)];
+  }
+
+  function removePortfolioDraftLeg(id: string) {
+    portfolioDraftLegs = portfolioDraftLegs.length <= 1 ? portfolioDraftLegs : portfolioDraftLegs.filter((leg) => leg.id !== id);
+  }
+
+  function addComposerObjectToPortfolio(optionId: string) {
+    const option = composerOptions.find((item) => item.id === optionId);
+    if (!option) {
+      return;
+    }
+    portfolioDraftLegs = [
+      ...portfolioDraftLegs,
+      {
+        ...defaultStrategyPortfolioDraftLeg(portfolioDraftLegs.length + 1),
+        label: option.label,
+        assetClass: option.object.object_type.includes("crypto") ? "crypto" : "custom_stream",
+        identifier: option.object.symbols[0] ?? "",
+        weight: option.defaultWeight,
+        objectOptionId: option.id
+      }
+    ];
+  }
+
+  async function composePortfolioDraft() {
+    const built = buildStrategyPortfolioLegInputs(portfolioDraftLegs, composerOptions);
+    const summary = summarizeStrategyPortfolioDraft(portfolioDraftLegs);
+    const blockingWarnings = [...summary.warnings, ...built.warnings];
+    if (!built.legs.length) {
+      strategyInputWarning = blockingWarnings[0] ?? "Add at least one portfolio leg with usable history.";
+      return;
+    }
+    strategyInputWarning = blockingWarnings.join(" ");
+    await onComposePortfolioStrategy({
+      name: portfolioName.trim() || "Strategy Lab Portfolio",
+      legs: built.legs,
+      benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
+      benchmarkObject: null,
+      lookbackDays: portfolioLookbackDays,
       minObservations: 5
     });
   }
@@ -1041,7 +1117,9 @@
       object: option.object,
       weight: Number(composerWeights[option.id] ?? option.defaultWeight)
     }))
-    .filter((leg) => Number.isFinite(leg.weight) && leg.weight > 0);
+    .filter((leg) => Number.isFinite(leg.weight) && leg.weight !== 0);
+  $: portfolioDraftSummary = summarizeStrategyPortfolioDraft(portfolioDraftLegs);
+  $: portfolioDraftBuild = buildStrategyPortfolioLegInputs(portfolioDraftLegs, composerOptions);
   $: visibleResearchModes =
     surface === "equity" ? equityResearchModes : surface === "strategy" ? strategyResearchModes : legacyResearchModes;
   $: surfaceTitle =
@@ -2003,19 +2081,98 @@
             <div class="panel-header top-line">
               <div class="title-block">
                 <p class="eyebrow">Strategy Composer</p>
-                <h2>Live Research Objects</h2>
-                <p class="muted">Compose return-bearing Gamma objects into a read-only Strategy Lab result. Weights are normalized by the backend.</p>
+                <h2>Mixed Portfolio Engine</h2>
+                <p class="muted">Build signed research books from listed histories, inline contract/commodity histories, and reusable Gamma objects. Gross exposure is normalized by the backend.</p>
               </div>
               <div class="builder-actions compact">
-                <button type="button" on:click={composeSelectedObjects} disabled={strategyLoading || !selectedComposerLegs.length}>
-                  {strategyLoading ? "Composing..." : "Compose"}
+                <button type="button" class="ghost-button" on:click={addPortfolioDraftLeg}>Add Leg</button>
+                <button type="button" on:click={composePortfolioDraft} disabled={strategyLoading || !portfolioDraftBuild.legs.length}>
+                  {strategyLoading ? "Composing..." : "Compose Portfolio"}
                 </button>
               </div>
             </div>
+
+            <div class="field-grid compact-fields">
+              <label><span>Name</span><input bind:value={portfolioName} /></label>
+              <label><span>Benchmark</span><input bind:value={portfolioBenchmarkSymbol} /></label>
+              <label><span>Lookback</span><input type="number" min="20" step="20" bind:value={portfolioLookbackDays} /></label>
+            </div>
+
+            <div class="kpi-grid compact-kpis">
+              <article class="metric"><span>Gross</span><strong>{fmt(portfolioDraftSummary.grossExposure, 2)}x</strong><small>{portfolioDraftSummary.legCount} active legs</small></article>
+              <article class="metric"><span>Net</span><strong class:negative={portfolioDraftSummary.netExposure < 0}>{fmt(portfolioDraftSummary.netExposure, 2)}x</strong><small>{fmt(portfolioDraftSummary.longExposure, 2)} long / {fmt(portfolioDraftSummary.shortExposure, 2)} short</small></article>
+              <article class="metric"><span>Listed</span><strong>{portfolioDraftSummary.listedIdentifierLegs}</strong><small>provider-resolved</small></article>
+              <article class="metric"><span>Inline</span><strong>{portfolioDraftSummary.inlineHistoryLegs}</strong><small>dated histories</small></article>
+              <article class="metric"><span>Objects</span><strong>{portfolioDraftSummary.objectLegs}</strong><small>Gamma streams</small></article>
+            </div>
+
             <div class="table-wrap compact-table">
               <table>
                 <thead>
-                  <tr><th>Use</th><th>Object</th><th>Type</th><th class="num-cell">Weight</th></tr>
+                  <tr>
+                    <th>Label</th>
+                    <th>Class</th>
+                    <th>Identifier / Object</th>
+                    <th class="num-cell">Weight</th>
+                    <th>History</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each portfolioDraftLegs as leg}
+                    <tr>
+                      <td><input class="compact-input wide" bind:value={leg.label} placeholder="Leg label" /></td>
+                      <td>
+                        <select class="compact-input" bind:value={leg.assetClass}>
+                          {#each portfolioAssetClasses as assetClass}
+                            <option value={assetClass.id}>{assetClass.label}</option>
+                          {/each}
+                        </select>
+                      </td>
+                      <td>
+                        <div class="stack tight">
+                          <input class="compact-input wide" bind:value={leg.identifier} placeholder="Ticker / contract id" />
+                          <select class="compact-input" bind:value={leg.objectOptionId}>
+                            <option value="">Provider / inline history</option>
+                            {#each composerOptions as option}
+                              <option value={option.id}>{option.label}</option>
+                            {/each}
+                          </select>
+                        </div>
+                      </td>
+                      <td class="num-cell">
+                        <input class="compact-input" type="number" step="0.05" bind:value={leg.weight} />
+                      </td>
+                      <td>
+                        <div class="stack tight">
+                          <select class="compact-input" bind:value={leg.valueKind}>
+                            <option value="return">Returns</option>
+                            <option value="level">Level / probability</option>
+                          </select>
+                          <textarea class="history-input" bind:value={leg.historyText} placeholder="date,value rows for contracts, commodities, custom streams"></textarea>
+                        </div>
+                      </td>
+                      <td class="num-cell"><button type="button" class="ghost-button" on:click={() => removePortfolioDraftLeg(leg.id)}>Remove</button></td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            {#if portfolioDraftSummary.warnings.length || portfolioDraftBuild.warnings.length}
+              <div class="warning-list compact-warning-list">
+                {#each [...portfolioDraftSummary.warnings, ...portfolioDraftBuild.warnings].slice(0, 5) as warning}
+                  <span>{warning}</span>
+                {/each}
+              </div>
+            {/if}
+          </article>
+
+          <article class="panel table-panel">
+            <div class="table-panel-header">Reusable Gamma Objects</div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr><th>Use</th><th>Object</th><th>Type</th><th class="num-cell">Weight</th><th></th></tr>
                 </thead>
                 <tbody>
                   {#if composerOptions.length}
@@ -2025,15 +2182,21 @@
                         <td>{option.label}</td>
                         <td>{option.object.object_type}</td>
                         <td class="num-cell">
-                          <input class="compact-input" type="number" min="0" step="0.01" bind:value={composerWeights[option.id]} />
+                          <input class="compact-input" type="number" step="0.05" bind:value={composerWeights[option.id]} />
                         </td>
+                        <td class="num-cell"><button type="button" class="ghost-button" on:click={() => addComposerObjectToPortfolio(option.id)}>Add</button></td>
                       </tr>
                     {/each}
                   {:else}
-                    <tr><td colspan="4">Run Scope Analysis, import CSV returns, or save a Strategy Lab return stream to compose objects.</td></tr>
+                    <tr><td colspan="5">Run Scope Analysis, import CSV returns, or save a Strategy Lab return stream to compose objects.</td></tr>
                   {/if}
                 </tbody>
               </table>
+            </div>
+            <div class="builder-actions compact object-compose-actions">
+              <button type="button" class="ghost-button" on:click={composeSelectedObjects} disabled={strategyLoading || !selectedComposerLegs.length}>
+                {strategyLoading ? "Composing..." : "Compose Selected Objects"}
+              </button>
             </div>
           </article>
           {#if strategyComposition}
@@ -3304,6 +3467,64 @@
     min-height: 1.55rem;
     padding: 0.2rem 0.35rem;
     text-align: right;
+  }
+
+  .compact-input.wide {
+    width: 100%;
+    min-width: 8rem;
+    text-align: left;
+  }
+
+  .compact-fields {
+    grid-template-columns: minmax(12rem, 1fr) minmax(7rem, 0.25fr) minmax(6rem, 0.2fr);
+  }
+
+  .compact-kpis {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .tight {
+    gap: 0.25rem;
+  }
+
+  .history-input {
+    min-width: 14rem;
+    min-height: 4.4rem;
+    max-height: 8rem;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.74rem;
+    line-height: 1.35;
+    white-space: pre;
+  }
+
+  .table-panel-header {
+    padding: 0.35rem 0.65rem;
+    border-bottom: 1px solid var(--divider);
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.64rem;
+    font-weight: 600;
+  }
+
+  .compact-warning-list {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.45rem 0.65rem;
+    border-top: 1px solid var(--divider);
+    color: var(--warning);
+    font-size: 0.72rem;
+  }
+
+  .object-compose-actions {
+    padding: 0 0.65rem 0.55rem;
+    justify-content: flex-end;
+  }
+
+  .table-panel td .stack,
+  .table-panel td .compact-input,
+  .table-panel td .history-input {
+    white-space: normal;
   }
 
   tbody tr:hover {

@@ -34,12 +34,15 @@ from src.models.research_lab import (
     ResearchComparisonLeg,
     ResearchComparisonRequest,
     ResearchComparisonResult,
+    ResearchObjectReturnPoint,
     SavedResearchCreateRequest,
     SavedResearchItem,
     StrategyLabAnalysisResult,
     StrategyLabCompositionLeg,
     StrategyLabCompositionRequest,
     StrategyLabCompositionResult,
+    StrategyLabPortfolioCompositionRequest,
+    StrategyLabPortfolioLeg,
 )
 from src.models.research_overview import (
     RESEARCH_OVERVIEW_METRIC_OPTIONS,
@@ -644,13 +647,93 @@ class ResearchService:
             retrieved_at=retrieved_at,
             origin="research_service.strategy_lab.compose",
             transformation_note=(
-                "Weighted Gamma research objects are resolved to return streams, normalized by non-negative weights, "
+                "Weighted Gamma research objects are resolved to return streams, normalized by gross signed exposure, "
                 "aligned on shared timestamps, and summed as a read-only research composition."
             ),
             freshness_label=FreshnessLabel.DERIVED.value,
             leg_contributions=leg_contributions,
             lenses=list(request.lenses),
             overlays=list(request.overlays),
+        )
+
+    def compose_strategy_lab_portfolio(
+        self,
+        request: StrategyLabPortfolioCompositionRequest,
+    ) -> StrategyLabCompositionResult:
+        warnings: list[str] = [
+            "Strategy Lab portfolio compositions are read-only research runs; Gamma does not rebalance or modify broker portfolios.",
+            "Portfolio leg weights are signed exposures normalized by gross exposure; negative weights represent short research legs.",
+        ]
+        min_observations = max(int(request.min_observations), 2)
+        lookback_days = max(int(request.lookback_days), min_observations)
+        composition_legs: list[StrategyLabCompositionLeg] = []
+        for index, leg in enumerate(request.legs, start=1):
+            weight = float(leg.weight)
+            if not math.isfinite(weight):
+                raise ResearchValidationError(["Portfolio leg weights must be finite signed values."])
+            if weight == 0:
+                continue
+            research_object = self._research_object_from_portfolio_leg(
+                leg,
+                index=index,
+                lookback_days=lookback_days,
+                min_observations=min_observations,
+                warnings=warnings,
+            )
+            composition_legs.append(StrategyLabCompositionLeg(object=research_object, weight=weight))
+
+        if not composition_legs:
+            raise ResearchValidationError(["Strategy Lab portfolio composition requires at least one non-zero leg."])
+
+        benchmark_object = request.benchmark_object
+        benchmark_symbol = str(request.benchmark_symbol or "").strip().upper()
+        if benchmark_object is None and benchmark_symbol:
+            benchmark_object = self._listed_history_object(
+                label=f"{benchmark_symbol} Benchmark",
+                identifier=benchmark_symbol,
+                asset_class="benchmark",
+                lookback_days=lookback_days,
+                min_observations=min_observations,
+                warnings=warnings,
+                capabilities=["benchmark", "return_leg"],
+            )
+
+        result = self.compose_strategy_lab(
+            StrategyLabCompositionRequest(
+                name=str(request.name or "").strip() or "Strategy Lab Portfolio",
+                legs=composition_legs,
+                lenses=[],
+                overlays=[],
+                benchmark_object=benchmark_object,
+                min_observations=min_observations,
+            )
+        )
+        return StrategyLabCompositionResult(
+            name=result.name,
+            value_kind=result.value_kind,
+            benchmark_column=result.benchmark_column,
+            benchmark_value_kind=result.benchmark_value_kind,
+            returns=result.returns,
+            equity_curve=result.equity_curve,
+            drawdowns=result.drawdowns,
+            benchmark_returns=result.benchmark_returns,
+            benchmark_equity_curve=result.benchmark_equity_curve,
+            metrics=result.metrics,
+            rolling_points=result.rolling_points,
+            monthly_returns=result.monthly_returns,
+            annual_returns=result.annual_returns,
+            warnings=list(dict.fromkeys([*warnings, *result.warnings])),
+            source_provider="gamma_strategy_lab",
+            retrieved_at=result.retrieved_at,
+            origin="research_service.strategy_lab.portfolio_compose",
+            transformation_note=(
+                "Strategy Lab portfolio legs resolve from Gamma objects, inline dated histories, or configured listed-market "
+                "history providers. Leg returns are aligned on shared timestamps and combined as signed gross-normalized exposure."
+            ),
+            freshness_label=result.freshness_label,
+            leg_contributions=result.leg_contributions,
+            lenses=result.lenses,
+            overlays=result.overlays,
         )
 
     @staticmethod
@@ -661,16 +744,200 @@ class ResearchService:
         raw_weights: list[float] = []
         for leg in legs:
             weight = float(leg.weight)
-            if not math.isfinite(weight) or weight < 0:
-                raise ResearchValidationError(["Composition leg weights must be finite non-negative values."])
+            if not math.isfinite(weight):
+                raise ResearchValidationError(["Composition leg weights must be finite signed values."])
             if weight == 0:
                 continue
             weighted_legs.append(leg)
             raw_weights.append(weight)
-        weight_sum = sum(raw_weights)
-        if weight_sum <= 0:
+        gross_weight = sum(abs(weight) for weight in raw_weights)
+        if gross_weight <= 0:
             return [], []
-        return weighted_legs, [weight / weight_sum for weight in raw_weights]
+        return weighted_legs, [weight / gross_weight for weight in raw_weights]
+
+    def _research_object_from_portfolio_leg(
+        self,
+        leg: StrategyLabPortfolioLeg,
+        *,
+        index: int,
+        lookback_days: int,
+        min_observations: int,
+        warnings: list[str],
+    ) -> GammaResearchObject:
+        label = str(leg.label or "").strip() or str(leg.identifier or "").strip() or f"Portfolio Leg {index}"
+        if leg.object is not None:
+            if "return_leg" not in leg.object.resolver_capabilities:
+                raise ResearchValidationError([f"{label} does not provide return-leg capability."])
+            return leg.object
+        if leg.return_points:
+            returns = self._returns_from_portfolio_return_points(
+                leg.return_points,
+                value_kind=leg.value_kind,
+                label=label,
+                min_observations=min_observations,
+                warnings=warnings,
+            )
+            return self._portfolio_leg_object_from_returns(
+                label=label,
+                asset_class=leg.asset_class,
+                identifier=leg.identifier,
+                returns=returns,
+                source_provider="inline_history",
+                provider_summary="Inline dated Strategy Lab history",
+                origin="research_service.strategy_lab.portfolio.inline_history",
+                warnings=[],
+            )
+        identifier = str(leg.identifier or "").strip().upper()
+        if not identifier:
+            raise ResearchValidationError([f"{label} needs an identifier or inline history."])
+        return self._listed_history_object(
+            label=label,
+            identifier=identifier,
+            asset_class=leg.asset_class,
+            lookback_days=lookback_days,
+            min_observations=min_observations,
+            warnings=warnings,
+            capabilities=["return_leg", "benchmark"],
+        )
+
+    def _listed_history_object(
+        self,
+        *,
+        label: str,
+        identifier: str,
+        asset_class: str,
+        lookback_days: int,
+        min_observations: int,
+        warnings: list[str],
+        capabilities: list[str],
+    ) -> GammaResearchObject:
+        normalized_identifier = str(identifier or "").strip().upper()
+        instrument = self._portfolio_leg_instrument(normalized_identifier, asset_class)
+        result = self.provider.load_instrument_history_result(instrument, lookback_days)
+        warnings.extend(result.warnings)
+        series = result.series
+        if series is None or series.empty:
+            raise ResearchValidationError([f"{label} history is unavailable for {normalized_identifier}."])
+        returns = compute_returns(align_prices({normalized_identifier: series.astype(float)}))[normalized_identifier]
+        returns = clean_return_series(returns)
+        if len(returns) < min_observations:
+            raise ResearchValidationError(
+                [f"{label} needs at least {min_observations} return observations from listed history."]
+            )
+        return self._portfolio_leg_object_from_returns(
+            label=label,
+            asset_class=asset_class,
+            identifier=normalized_identifier,
+            returns=returns,
+            source_provider=result.source_provider,
+            provider_summary=result.source_label,
+            origin=result.origin,
+            warnings=result.warnings,
+        )
+
+    @staticmethod
+    def _portfolio_leg_instrument(identifier: str, asset_class: str) -> InstrumentReference:
+        normalized_class = str(asset_class or "").strip().lower()
+        sec_type = "FUT" if normalized_class in {"commodity", "future", "futures"} else "STK"
+        return InstrumentReference(
+            symbol=identifier,
+            sec_type=sec_type,
+            exchange="SMART",
+            currency="USD",
+            provider="strategy_lab",
+        )
+
+    @staticmethod
+    def _returns_from_portfolio_return_points(
+        points,
+        *,
+        value_kind: str,
+        label: str,
+        min_observations: int,
+        warnings: list[str],
+    ) -> pd.Series:
+        records: list[tuple[pd.Timestamp, float]] = []
+        invalid_dates = 0
+        non_finite_values = 0
+        for point in points:
+            timestamp = pd.to_datetime(getattr(point, "timestamp", None), errors="coerce")
+            value = float(getattr(point, "value", float("nan")))
+            if pd.isna(timestamp):
+                invalid_dates += 1
+                continue
+            if not math.isfinite(value):
+                non_finite_values += 1
+                continue
+            records.append((pd.Timestamp(timestamp).normalize(), value))
+        if invalid_dates:
+            warnings.append(f"{label}: dropped {invalid_dates} inline points with invalid timestamps.")
+        if non_finite_values:
+            warnings.append(f"{label}: dropped {non_finite_values} inline points with non-finite values.")
+        if not records:
+            raise ResearchValidationError([f"{label} has no valid inline dated observations."])
+        frame = pd.DataFrame(records, columns=["date", "value"]).sort_values("date")
+        duplicate_count = int(frame.duplicated("date", keep=False).sum())
+        if duplicate_count:
+            warnings.append(f"{label}: duplicate inline timestamps detected; keeping the last point per date.")
+            frame = frame.drop_duplicates("date", keep="last")
+        series = pd.Series(frame["value"].to_numpy(dtype=float), index=pd.to_datetime(frame["date"]))
+        if str(value_kind or "return").strip().lower() == "level":
+            levels = series
+            non_positive = int((levels <= 0).sum())
+            if non_positive:
+                warnings.append(f"{label}: dropped {non_positive} non-positive level observations before return conversion.")
+                levels = levels[levels > 0]
+            series = levels.pct_change().dropna()
+        elif str(value_kind or "return").strip().lower() != "return":
+            raise ResearchValidationError([f"Unsupported {label.lower()} value interpretation: {value_kind}"])
+        series = clean_return_series(series)
+        if len(series) < min_observations:
+            raise ResearchValidationError([f"{label} needs at least {min_observations} inline return observations."])
+        return series
+
+    @staticmethod
+    def _portfolio_leg_object_from_returns(
+        *,
+        label: str,
+        asset_class: str,
+        identifier: str,
+        returns: pd.Series,
+        source_provider: str,
+        provider_summary: str,
+        origin: str,
+        warnings: list[str],
+    ) -> GammaResearchObject:
+        clean = clean_return_series(returns)
+        points = [
+            ResearchObjectReturnPoint(timestamp=pd.Timestamp(index).isoformat(), value=float(value))
+            for index, value in clean.items()
+        ]
+        start = points[0].timestamp if points else None
+        end = points[-1].timestamp if points else None
+        normalized_identifier = str(identifier or label).strip().upper()
+        normalized_class = str(asset_class or "custom").strip().lower() or "custom"
+        return GammaResearchObject(
+            object_id=f"strategy_portfolio_leg:{normalized_class}:{normalized_identifier}:{start}:{end}",
+            object_type=f"{normalized_class}_portfolio_leg",
+            display_name=label,
+            source_tab="strategy_lab",
+            source_mode="composer",
+            resolver_capabilities=["return_leg", "benchmark"],
+            symbols=[normalized_identifier] if normalized_identifier else [],
+            constituents=[{"label": label, "asset_class": normalized_class, "identifier": normalized_identifier}],
+            weights=[{"label": label, "asset_class": normalized_class, "identifier": normalized_identifier, "weight": 1.0}],
+            available_start=start,
+            available_end=end,
+            provider_summary=provider_summary,
+            provenance={
+                "source_provider": source_provider,
+                "origin": origin,
+                "asset_class": normalized_class,
+                "identifier": normalized_identifier,
+            },
+            warnings=list(warnings),
+            return_points=points,
+        )
 
     @staticmethod
     def _unique_composition_label(base_label: str, emitted_labels: set[str]) -> str:

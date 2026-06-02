@@ -509,7 +509,58 @@ def test_strategy_lab_rejects_non_finite_leg_weight(tmp_path):
             )
         )
 
-    assert exc_info.value.errors == ["Composition leg weights must be finite non-negative values."]
+    assert exc_info.value.errors == ["Composition leg weights must be finite signed values."]
+
+
+def test_strategy_lab_composes_signed_long_short_weights(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.compose_strategy_lab(
+        StrategyLabCompositionRequest(
+            name="Long Short Composition",
+            legs=[
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:long",
+                        object_type="strategy_return_stream",
+                        display_name="Long Leg",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.02),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.02),
+                        ],
+                    ),
+                    weight=0.6,
+                ),
+                StrategyLabCompositionLeg(
+                    object=GammaResearchObject(
+                        object_id="strategy:short",
+                        object_type="strategy_return_stream",
+                        display_name="Short Leg",
+                        source_tab="strategy_lab",
+                        resolver_capabilities=["return_leg"],
+                        return_points=[
+                            ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.01),
+                            ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                        ],
+                    ),
+                    weight=-0.4,
+                ),
+            ],
+            min_observations=5,
+        )
+    )
+
+    assert result.returns.tolist() == pytest.approx([0.008, 0.008, 0.008, 0.008, 0.008])
+    assert result.leg_contributions["Long Leg"] > 0
+    assert result.leg_contributions["Short Leg"] < 0
 
 
 def test_strategy_lab_drops_non_finite_return_point_values(tmp_path):

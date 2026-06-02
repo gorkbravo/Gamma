@@ -14,7 +14,8 @@
     ResearchRunOptions,
     SavedResearchCreateOptions,
     StrategyLabAnalyzeOptions,
-    StrategyLabComposeOptions
+    StrategyLabComposeOptions,
+    StrategyLabPortfolioComposeOptions
   } from "../lib/stores/app";
   import type { StrategyLabMode } from "../lib/view-models/research";
 
@@ -36,6 +37,7 @@
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | undefined = undefined;
   export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
   export let onComposeStrategy: (options: StrategyLabComposeOptions) => Promise<StrategyLabCompositionResult | null> | void;
+  export let onComposePortfolioStrategy: (options: StrategyLabPortfolioComposeOptions) => Promise<StrategyLabCompositionResult | null> | void;
   export let onCompare: (options: ResearchCompareOptions) => Promise<ResearchCompareResult | null> | void;
   export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
   export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
@@ -65,6 +67,7 @@
   {onSelectEquity}
   {onAnalyzeStrategy}
   {onComposeStrategy}
+  {onComposePortfolioStrategy}
   {onCompare}
   {onLoadSaved}
   {onSaveResearch}

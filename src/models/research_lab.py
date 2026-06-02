@@ -102,6 +102,27 @@ class StrategyLabCompositionResult(StrategyLabAnalysisResult):
 
 
 @dataclass(frozen=True)
+class StrategyLabPortfolioLeg:
+    label: str
+    asset_class: str
+    identifier: str = ""
+    weight: float = 0.0
+    value_kind: ReturnValueKind = "return"
+    return_points: list[ResearchObjectReturnPoint] = field(default_factory=list)
+    object: GammaResearchObject | None = None
+
+
+@dataclass(frozen=True)
+class StrategyLabPortfolioCompositionRequest:
+    name: str
+    legs: list[StrategyLabPortfolioLeg] = field(default_factory=list)
+    benchmark_symbol: str | None = "SPY"
+    benchmark_object: GammaResearchObject | None = None
+    lookback_days: int = 756
+    min_observations: int = 5
+
+
+@dataclass(frozen=True)
 class ResearchComparisonLeg:
     label: str
     object_type: str

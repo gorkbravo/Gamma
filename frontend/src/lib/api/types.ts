@@ -578,6 +578,25 @@ export interface StrategyLabCompositionLegInput {
   weight: number;
 }
 
+export type StrategyLabPortfolioLegAssetClass =
+  | "equity"
+  | "etf"
+  | "commodity"
+  | "prediction_contract"
+  | "crypto"
+  | "custom_stream"
+  | string;
+
+export interface StrategyLabPortfolioLegInput {
+  label: string;
+  asset_class: StrategyLabPortfolioLegAssetClass;
+  identifier: string;
+  weight: number;
+  value_kind: "return" | "level";
+  return_points: ResearchObjectReturnPoint[];
+  object?: GammaResearchObject | null;
+}
+
 export interface StrategyLabCompositionResult extends StrategyLabResult {
   leg_contributions: Record<string, number>;
   lenses: GammaResearchObject[];

@@ -22,6 +22,7 @@
     activeTab,
     analyzeStrategyLab,
     composeStrategyLab,
+    composeStrategyLabPortfolio,
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
@@ -2231,6 +2232,7 @@
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "strategy_lab")}
             onAnalyzeStrategy={analyzeStrategyLab}
             onComposeStrategy={composeStrategyLab}
+            onComposePortfolioStrategy={composeStrategyLabPortfolio}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}

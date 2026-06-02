@@ -66,6 +66,7 @@ import type {
   SavedResearchListResponse,
   StrategyLabCompositionLegInput,
   StrategyLabCompositionResult,
+  StrategyLabPortfolioLegInput,
   StrategyLabResult,
   SystemStatus,
   TabId,
@@ -110,6 +111,15 @@ export interface StrategyLabComposeOptions {
   lenses: GammaResearchObject[];
   overlays: GammaResearchObject[];
   benchmarkObject?: StrategyLabCompositionLegInput["object"] | null;
+  minObservations?: number;
+}
+
+export interface StrategyLabPortfolioComposeOptions {
+  name: string;
+  legs: StrategyLabPortfolioLegInput[];
+  benchmarkSymbol?: string | null;
+  benchmarkObject?: StrategyLabCompositionLegInput["object"] | null;
+  lookbackDays?: number;
   minObservations?: number;
 }
 
@@ -1256,6 +1266,30 @@ export async function composeStrategyLab(options: StrategyLabComposeOptions) {
       lenses: options.lenses,
       overlays: options.overlays,
       benchmark_object: options.benchmarkObject ?? null,
+      min_observations: options.minObservations ?? 5
+    });
+    strategyLabComposition.set(result);
+    researchCompareResult.set(null);
+    resetCopilotCard("research");
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("strategyLab", false);
+  }
+}
+
+export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
+  setLoading("strategyLab", true);
+  try {
+    const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", {
+      name: options.name,
+      legs: options.legs,
+      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+      benchmark_object: options.benchmarkObject ?? null,
+      lookback_days: options.lookbackDays ?? 756,
       min_observations: options.minObservations ?? 5
     });
     strategyLabComposition.set(result);

@@ -4,12 +4,14 @@ import {
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
   buildStrategyComposerObjects,
+  buildStrategyPortfolioLegInputs,
   buildResearchCompareOptions,
   buildResearchTreemapLayout,
   buildResearchTreemapSections,
   buildPreviewRows,
   classifyResearchSurfaceMode,
   classifySavedResearchSurface,
+  defaultStrategyPortfolioDraftLeg,
   deriveConstituentsFromResearchResult,
   deriveCoverageFromResearchResult,
   deriveStructureFromWeights,
@@ -19,10 +21,12 @@ import {
   hydrateStrategyLabResultFromSaved,
   normalizeSyntheticText,
   parseResearchCsvText,
+  parseStrategyPortfolioHistoryText,
   parseSyntheticText,
   savedResearchCanReloadScope,
   savedResearchCanReloadStrategy,
-  savedResearchScopeDraft
+  savedResearchScopeDraft,
+  summarizeStrategyPortfolioDraft
 } from "./research";
 
 describe("research view model helpers", () => {
@@ -238,6 +242,28 @@ describe("research view model helpers", () => {
     expect(options.map((option) => option.object.object_type)).toContain("equity_scope");
     expect(options.map((option) => option.object.object_type)).toContain("strategy_return_stream");
     expect(options.map((option) => option.id)).toContain("saved:saved-1");
+  });
+
+  it("parses inline Strategy Lab portfolio history and signed exposures", () => {
+    const parsed = parseStrategyPortfolioHistoryText("date,value\n2026-01-02,51%\n2026-01-05,0.53");
+    const legs = [
+      { ...defaultStrategyPortfolioDraftLeg(1), label: "Long Contract", assetClass: "prediction_contract" as const, weight: 0.7, historyText: "date,value\n2026-01-02,0.51\n2026-01-05,0.53" },
+      { ...defaultStrategyPortfolioDraftLeg(2), label: "Short ETF", assetClass: "etf" as const, identifier: "SPY", weight: -0.3 }
+    ];
+    const summary = summarizeStrategyPortfolioDraft(legs);
+    const built = buildStrategyPortfolioLegInputs(legs, []);
+
+    expect(parsed.points).toEqual([
+      { timestamp: "2026-01-02", value: 0.51 },
+      { timestamp: "2026-01-05", value: 0.53 }
+    ]);
+    expect(summary.grossExposure).toBeCloseTo(1.0);
+    expect(summary.netExposure).toBeCloseTo(0.4);
+    expect(summary.inlineHistoryLegs).toBe(1);
+    expect(summary.listedIdentifierLegs).toBe(1);
+    expect(built.legs.map((leg) => leg.weight)).toEqual([0.7, -0.3]);
+    expect(built.legs[0]?.asset_class).toBe("prediction_contract");
+    expect(built.legs[1]?.identifier).toBe("SPY");
   });
 
   it("includes normalized weights in synthetic scope research object ids", () => {

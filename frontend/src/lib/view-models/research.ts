@@ -10,6 +10,7 @@ import type {
   ResearchOverviewSortId,
   ResearchResult,
   SavedResearchItem,
+  StrategyLabPortfolioLegInput,
   StrategyLabMode,
   StrategyLabResult,
   ResearchStructure,
@@ -95,12 +96,163 @@ export interface StrategyComposerObjectOption {
   defaultWeight: number;
 }
 
+export type StrategyPortfolioAssetClass = "equity" | "etf" | "commodity" | "prediction_contract" | "crypto" | "custom_stream";
+export type StrategyPortfolioValueKind = "return" | "level";
+
+export interface StrategyPortfolioDraftLeg {
+  id: string;
+  label: string;
+  assetClass: StrategyPortfolioAssetClass;
+  identifier: string;
+  weight: number;
+  valueKind: StrategyPortfolioValueKind;
+  historyText: string;
+  objectOptionId: string;
+}
+
+export interface StrategyPortfolioDraftSummary {
+  legCount: number;
+  grossExposure: number;
+  netExposure: number;
+  longExposure: number;
+  shortExposure: number;
+  inlineHistoryLegs: number;
+  objectLegs: number;
+  listedIdentifierLegs: number;
+  warnings: string[];
+}
+
 export interface SavedScopeDraft {
   scopeType: "single_ticker" | "synthetic_portfolio";
   primarySymbol: string;
   benchmarkSymbol: string;
   lookbackDays: number;
   syntheticText: string;
+}
+
+export function defaultStrategyPortfolioDraftLeg(index: number): StrategyPortfolioDraftLeg {
+  return {
+    id: `draft-leg-${index}`,
+    label: "",
+    assetClass: "equity",
+    identifier: "",
+    weight: index === 1 ? 0.6 : index === 2 ? -0.4 : 0.1,
+    valueKind: "return",
+    historyText: "",
+    objectOptionId: ""
+  };
+}
+
+export function parseStrategyPortfolioHistoryText(text: string): {
+  points: ResearchObjectReturnPoint[];
+  warnings: string[];
+} {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { points: [], warnings: [] };
+  }
+  const parsed = parseResearchCsvText(trimmed.includes("\n") ? trimmed : `date,value\n${trimmed}`);
+  const columns = parsed.columns;
+  const dateColumn = columns.find((column) => /^date|time|timestamp$/i.test(column)) ?? columns[0] ?? "date";
+  const valueColumn =
+    columns.find((column) => /return|value|level|nav|prob|price/i.test(column) && column !== dateColumn) ??
+    columns.find((column) => column !== dateColumn) ??
+    columns[1] ??
+    "value";
+  const warnings = [...parsed.warnings];
+  const points: ResearchObjectReturnPoint[] = [];
+  parsed.rows.forEach((row, index) => {
+    const timestamp = String(row[dateColumn] ?? "").trim();
+    const rawValue = String(row[valueColumn] ?? "").trim();
+    const value = parsePortfolioHistoryNumber(rawValue);
+    if (!timestamp || value == null) {
+      warnings.push(`Inline history row ${index + 2} is missing a usable date or value.`);
+      return;
+    }
+    points.push({ timestamp, value });
+  });
+  return { points, warnings };
+}
+
+function parsePortfolioHistoryNumber(value: string): number | null {
+  const raw = value.trim();
+  if (!raw) {
+    return null;
+  }
+  const isPercent = raw.endsWith("%");
+  const normalized = Number(raw.replace(/%$/, "").replaceAll(",", ""));
+  if (!Number.isFinite(normalized)) {
+    return null;
+  }
+  return isPercent ? normalized / 100 : normalized;
+}
+
+export function summarizeStrategyPortfolioDraft(legs: StrategyPortfolioDraftLeg[]): StrategyPortfolioDraftSummary {
+  const active = legs.filter((leg) => Number.isFinite(Number(leg.weight)) && Number(leg.weight) !== 0);
+  const grossExposure = active.reduce((sum, leg) => sum + Math.abs(Number(leg.weight)), 0);
+  const longExposure = active.filter((leg) => Number(leg.weight) > 0).reduce((sum, leg) => sum + Number(leg.weight), 0);
+  const shortExposure = active.filter((leg) => Number(leg.weight) < 0).reduce((sum, leg) => sum + Math.abs(Number(leg.weight)), 0);
+  const inlineHistoryLegs = active.filter((leg) => leg.historyText.trim()).length;
+  const objectLegs = active.filter((leg) => leg.objectOptionId).length;
+  const listedIdentifierLegs = active.filter((leg) => !leg.objectOptionId && !leg.historyText.trim() && leg.identifier.trim()).length;
+  const warnings: string[] = [];
+  if (!active.length) {
+    warnings.push("Add at least one non-zero portfolio leg.");
+  }
+  const missing = active.filter((leg) => !leg.objectOptionId && !leg.identifier.trim() && !leg.historyText.trim());
+  if (missing.length) {
+    warnings.push(`${missing.length} active leg(s) need an object, identifier, or inline history.`);
+  }
+  if (grossExposure > 0 && Math.abs(longExposure - shortExposure) < 0.05 * grossExposure) {
+    warnings.push("Net exposure is close to market neutral; performance will be dominated by relative leg moves.");
+  }
+  return {
+    legCount: active.length,
+    grossExposure,
+    netExposure: longExposure - shortExposure,
+    longExposure,
+    shortExposure,
+    inlineHistoryLegs,
+    objectLegs,
+    listedIdentifierLegs,
+    warnings
+  };
+}
+
+export function buildStrategyPortfolioLegInputs(
+  legs: StrategyPortfolioDraftLeg[],
+  objectOptions: StrategyComposerObjectOption[]
+): { legs: StrategyLabPortfolioLegInput[]; warnings: string[] } {
+  const objectById = new Map(objectOptions.map((option) => [option.id, option.object]));
+  const warnings: string[] = [];
+  const inputs: StrategyLabPortfolioLegInput[] = [];
+  for (const leg of legs) {
+    const weight = Number(leg.weight);
+    if (!Number.isFinite(weight) || weight === 0) {
+      continue;
+    }
+    const selectedObject = leg.objectOptionId ? objectById.get(leg.objectOptionId) ?? null : null;
+    if (leg.objectOptionId && !selectedObject) {
+      warnings.push(`${leg.label || leg.objectOptionId} is no longer available as a Strategy Lab object.`);
+      continue;
+    }
+    const parsedHistory = parseStrategyPortfolioHistoryText(leg.historyText);
+    warnings.push(...parsedHistory.warnings.map((warning) => `${leg.label || leg.identifier || leg.id}: ${warning}`));
+    if (!selectedObject && !parsedHistory.points.length && !leg.identifier.trim()) {
+      warnings.push(`${leg.label || leg.id} needs an object, identifier, or inline history.`);
+      continue;
+    }
+    inputs.push({
+      label: leg.label.trim() || selectedObject?.display_name || leg.identifier.trim().toUpperCase() || leg.id,
+      asset_class: leg.assetClass,
+      identifier: leg.identifier.trim().toUpperCase(),
+      weight,
+      value_kind: leg.valueKind,
+      return_points: parsedHistory.points,
+      object: selectedObject
+    });
+  }
+  return { legs: inputs, warnings };
 }
 
 export interface ResearchPreviewRow {

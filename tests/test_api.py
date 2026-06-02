@@ -265,6 +265,60 @@ def test_research_v2_strategy_saved_and_compare_endpoints(tmp_path):
         runtime.shutdown()
 
 
+def test_strategy_lab_portfolio_compose_endpoint_accepts_signed_inline_legs(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/research/strategy-lab/portfolio-compose",
+            json={
+                "name": "Mixed Research Book",
+                "benchmark_symbol": None,
+                "lookback_days": 252,
+                "legs": [
+                    {
+                        "label": "Long probability contract",
+                        "asset_class": "prediction_contract",
+                        "identifier": "PM:TEST-LONG",
+                        "weight": 0.7,
+                        "value_kind": "level",
+                        "return_points": [
+                            {"timestamp": "2026-01-02T00:00:00Z", "value": 0.50},
+                            {"timestamp": "2026-01-05T00:00:00Z", "value": 0.52},
+                            {"timestamp": "2026-01-06T00:00:00Z", "value": 0.51},
+                            {"timestamp": "2026-01-07T00:00:00Z", "value": 0.55},
+                            {"timestamp": "2026-01-08T00:00:00Z", "value": 0.57},
+                            {"timestamp": "2026-01-09T00:00:00Z", "value": 0.58},
+                        ],
+                    },
+                    {
+                        "label": "Short hedge stream",
+                        "asset_class": "custom_stream",
+                        "identifier": "HEDGE",
+                        "weight": -0.3,
+                        "value_kind": "return",
+                        "return_points": [
+                            {"timestamp": "2026-01-05T00:00:00Z", "value": 0.01},
+                            {"timestamp": "2026-01-06T00:00:00Z", "value": 0.01},
+                            {"timestamp": "2026-01-07T00:00:00Z", "value": -0.01},
+                            {"timestamp": "2026-01-08T00:00:00Z", "value": 0.00},
+                            {"timestamp": "2026-01-09T00:00:00Z", "value": 0.02},
+                        ],
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["origin"] == "research_service.strategy_lab.portfolio_compose"
+        assert payload["metrics"]["observation_count"] == 5
+        assert payload["leg_contributions"]["Long probability contract"] is not None
+        assert payload["leg_contributions"]["Short hedge stream"] < 0
+        assert "read-only research" in " ".join(payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
 def test_research_context_replaces_scope_after_mode_switch(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

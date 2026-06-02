@@ -31,6 +31,8 @@ from src.models.research_lab import (
     StrategyLabCompositionLeg,
     StrategyLabCompositionRequest,
     StrategyLabCompositionResult,
+    StrategyLabPortfolioCompositionRequest,
+    StrategyLabPortfolioLeg,
 )
 from src.models.research_overview import (
     ResearchOverviewCoverage,
@@ -218,6 +220,46 @@ class StrategyLabCompositionRequestModel(BaseModel):
             lenses=[item.to_domain() for item in self.lenses],
             overlays=[item.to_domain() for item in self.overlays],
             benchmark_object=self.benchmark_object.to_domain() if self.benchmark_object is not None else None,
+            min_observations=max(int(self.min_observations), 2),
+        )
+
+
+class StrategyLabPortfolioLegModel(BaseModel):
+    label: str = Field(default="", max_length=128)
+    asset_class: str = Field(default="equity", min_length=1, max_length=48)
+    identifier: str = Field(default="", max_length=160)
+    weight: float
+    value_kind: Literal["return", "level"] = "return"
+    return_points: list[ResearchObjectReturnPointModel] = Field(default_factory=list, max_length=MAX_STRATEGY_LAB_ROWS)
+    object: GammaResearchObjectModel | None = None
+
+    def to_domain(self) -> StrategyLabPortfolioLeg:
+        return StrategyLabPortfolioLeg(
+            label=self.label,
+            asset_class=self.asset_class,
+            identifier=self.identifier,
+            weight=float(self.weight),
+            value_kind=self.value_kind,
+            return_points=[point.to_domain() for point in self.return_points],
+            object=self.object.to_domain() if self.object is not None else None,
+        )
+
+
+class StrategyLabPortfolioCompositionRequestModel(BaseModel):
+    name: str = Field(default="Strategy Lab Portfolio", min_length=1, max_length=128)
+    legs: list[StrategyLabPortfolioLegModel] = Field(default_factory=list, max_length=100)
+    benchmark_symbol: str | None = Field(default="SPY", max_length=32)
+    benchmark_object: GammaResearchObjectModel | None = None
+    lookback_days: int = Field(default=756, ge=20, le=MAX_RISK_LOOKBACK_DAYS)
+    min_observations: int = Field(default=5, ge=2, le=MAX_RISK_LOOKBACK_DAYS)
+
+    def to_domain(self) -> StrategyLabPortfolioCompositionRequest:
+        return StrategyLabPortfolioCompositionRequest(
+            name=self.name,
+            legs=[leg.to_domain() for leg in self.legs],
+            benchmark_symbol=self.benchmark_symbol,
+            benchmark_object=self.benchmark_object.to_domain() if self.benchmark_object is not None else None,
+            lookback_days=int(self.lookback_days),
             min_observations=max(int(self.min_observations), 2),
         )
 
