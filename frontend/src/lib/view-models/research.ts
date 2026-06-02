@@ -10,6 +10,7 @@ import type {
   ResearchOverviewSortId,
   ResearchResult,
   SavedResearchItem,
+  StrategyLabHandoffDefaultSide,
   StrategyLabHandoffEnvelope,
   StrategyLabResolvedHandoff,
   StrategyLabPortfolioLegInput,
@@ -164,11 +165,13 @@ export function buildPredictionMarketStrategyHandoff(
     end_time: string | null;
     freshness?: { status: string; is_stale: boolean; is_broken: boolean; reason: string | null } | null;
   },
-  options: { sourceMode?: string | null; defaultWeight?: number } = {}
+  options: { sourceMode?: string | null; defaultWeight?: number; defaultSide?: StrategyLabHandoffDefaultSide } = {}
 ): StrategyLabHandoffEnvelope {
+  const defaultSide = options.defaultSide === "long_no" ? "long_no" : "long_yes";
+  const transformation = defaultSide === "long_no" ? "long_no_probability_return" : "long_yes_probability_return";
   const warnings = [
     "Prediction-market contracts enter Strategy Lab as research proxies, not executable positions.",
-    "Resolver will default to long_yes_probability_return unless the user edits the draft."
+    `Resolver will default to ${transformation} unless the user edits the draft.`
   ];
   if (market.status !== "open") {
     warnings.push("Selected contract is not open; use only for historical research.");
@@ -201,7 +204,7 @@ export function buildPredictionMarketStrategyHandoff(
     resolver_capability: "return_leg",
     asset_class: "prediction_market",
     value_kind: "probability",
-    default_side: "long_yes",
+    default_side: defaultSide,
     default_weight: options.defaultWeight ?? 0.1,
     selected_timeframe: null,
     provider: market.source_provider || market.venue,

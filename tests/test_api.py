@@ -337,35 +337,36 @@ def test_strategy_lab_resolve_handoff_endpoint_returns_prediction_market_draft(t
 
     runtime.prediction_market_service = StubPredictionMarketService()
     try:
+        request_body = {
+            "handoff": {
+                "source_tab": "prediction_markets",
+                "source_mode": "detail",
+                "intended_target_tab": "strategy_lab",
+                "intended_target_mode": "composer",
+                "selected_entity": {
+                    "entity_type": "prediction_market_contract",
+                    "label": "Will the Fed cut rates in March?",
+                    "normalized_id": "polymarket:fed-cut",
+                    "provider_id": "fed-cut",
+                    "native_id": "0xabc",
+                    "metadata": {"venue": "polymarket"},
+                },
+                "resolver_capability": "return_leg",
+                "asset_class": "prediction_market",
+                "value_kind": "probability",
+                "default_side": "long_yes",
+                "default_weight": 0.1,
+                "selected_timeframe": None,
+                "provider": "polymarket",
+                "source": {"origin": "fixture"},
+                "warnings": [],
+                "normalized_ids": {"market_id": "polymarket:fed-cut"},
+                "timestamp": "2026-03-01T00:00:00Z",
+            }
+        }
         response = client.post(
             "/research/strategy-lab/resolve-handoff",
-            json={
-                "handoff": {
-                    "source_tab": "prediction_markets",
-                    "source_mode": "detail",
-                    "intended_target_tab": "strategy_lab",
-                    "intended_target_mode": "composer",
-                    "selected_entity": {
-                        "entity_type": "prediction_market_contract",
-                        "label": "Will the Fed cut rates in March?",
-                        "normalized_id": "polymarket:fed-cut",
-                        "provider_id": "fed-cut",
-                        "native_id": "0xabc",
-                        "metadata": {"venue": "polymarket"},
-                    },
-                    "resolver_capability": "return_leg",
-                    "asset_class": "prediction_market",
-                    "value_kind": "probability",
-                    "default_side": "long_yes",
-                    "default_weight": 0.1,
-                    "selected_timeframe": None,
-                    "provider": "polymarket",
-                    "source": {"origin": "fixture"},
-                    "warnings": [],
-                    "normalized_ids": {"market_id": "polymarket:fed-cut"},
-                    "timestamp": "2026-03-01T00:00:00Z",
-                }
-            },
+            json=request_body,
         )
 
         assert response.status_code == 200
@@ -376,6 +377,14 @@ def test_strategy_lab_resolve_handoff_endpoint_returns_prediction_market_draft(t
         assert payload["composer_draft_leg"]["return_points"][0]["value"] == 0.51
         assert payload["provenance"]["transformation"] == "long_yes_probability_return"
         assert "research proxy" in " ".join(payload["warnings"])
+
+        no_request = {"handoff": {**request_body["handoff"], "default_side": "long_no"}}
+        no_response = client.post("/research/strategy-lab/resolve-handoff", json=no_request)
+        assert no_response.status_code == 200
+        no_result = no_response.json()
+        assert no_result["composer_draft_leg"]["label"].endswith("| NO probability")
+        assert abs(no_result["composer_draft_leg"]["return_points"][0]["value"] - 0.49) < 1e-9
+        assert no_result["provenance"]["transformation"] == "long_no_probability_return"
     finally:
         runtime.shutdown()
 

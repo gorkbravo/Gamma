@@ -346,15 +346,15 @@ Validated on 2026-06-02:
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 40 tests passed. Added coverage for Prediction Markets resolver and timezone-aware inline probability histories. |
+| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 41 tests passed. Added coverage for Prediction Markets YES/NO resolver behavior and timezone-aware inline probability histories. |
 | `npm run typecheck` | Passed | Frontend typecheck passed after Strategy Lab handoff type and view updates. |
 | `npm run test -- src/lib/view-models/research.test.ts` | Passed | 18 tests passed, including handoff envelope/draft-row conversion coverage. |
 | `npm run test -- src/lib/stores/app.test.ts` | Passed | 31 tests passed, including queue resolve/accept/dismiss coverage. |
-| Local browser flow | Passed | Selected a live Kalshi contract, clicked `Add & Open`, resolved inbound handoff, accepted it into the composer, ran a four-leg composition, confirmed proxy warnings/provenance and no horizontal document overflow. |
+| Local browser flow | Passed | Selected a live Kalshi contract, chose NO, clicked `Add & Open`, resolved inbound handoff, accepted it into the composer, ran a four-leg composition, confirmed NO proxy warnings/provenance and no horizontal document overflow. |
 
 ## Current Assumptions
 
-- First-pass Prediction Markets handoffs default to `long_yes_probability_return`.
+- Prediction Markets handoffs support `long_yes_probability_return` and `long_no_probability_return`; the detail view exposes a compact YES/NO side selector before `+ Strategy` or `Add & Open`.
 - Probability histories are resolved in the backend and enter the composer as `level`/probability histories; Strategy Lab converts them to returns for read-only composition.
 - `+ Strategy` queues without navigating; `Add & Open` queues, opens Strategy Lab composer mode, and resolves pending handoffs.
 - Pending handoffs persist in local storage across reloads until accepted, dismissed, or cleared.
@@ -364,7 +364,7 @@ Validated on 2026-06-02:
 ## Open Questions
 
 1. Should `+ Strategy` silently queue only, or should it also show a persistent queue badge/toast outside Strategy Lab?
-2. Should Prediction Markets keep defaulting to `long_yes_probability_return`, or ask the user for YES/NO side before adding?
+2. Should Prediction Markets add payout-aware contract PnL after the YES/NO probability-return proxy is stable?
 3. Should accepted composer draft rows be saved as named experiment drafts before a user runs composition?
 4. Should Strategy Lab save handoff bundles as named experiment drafts?
 5. Should Copilot be allowed to propose handoffs automatically, or only explain user-created handoffs first?

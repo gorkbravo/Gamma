@@ -358,6 +358,57 @@ def test_strategy_lab_resolves_prediction_market_handoff_to_draft_leg(tmp_path):
     assert any("research proxy" in warning for warning in result.warnings)
 
 
+def test_strategy_lab_resolves_prediction_market_no_handoff_to_draft_leg(tmp_path):
+    service = _service(tmp_path)
+    market = _prediction_market_record()
+
+    class StubPredictionMarketService:
+        def get_market_detail(self, market_id: str):
+            return market if market_id == "polymarket:fed-cut" else None
+
+        def get_probability_history(self, market_id: str):
+            assert market_id == "polymarket:fed-cut"
+            return [
+                PredictionProbabilityPoint(timestamp=datetime(2026, 3, day, tzinfo=timezone.utc), probability=probability)
+                for day, probability in enumerate([0.51, 0.52, 0.5, 0.54, 0.55, 0.56], start=1)
+            ]
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="prediction_markets",
+                source_mode="detail",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="prediction_market_contract",
+                    label=market.title,
+                    normalized_id=market.market_id,
+                    provider_id=market.provider_market_id,
+                    native_id=market.provider_condition_id,
+                ),
+                resolver_capability="return_leg",
+                asset_class="prediction_market",
+                value_kind="probability",
+                default_side="long_no",
+                default_weight=0.1,
+                provider="polymarket",
+                normalized_ids={"market_id": market.market_id},
+                timestamp="2026-03-01T00:00:00Z",
+            )
+        ),
+        prediction_market_service=StubPredictionMarketService(),
+    )
+
+    assert result.status == "resolved"
+    assert result.composer_draft_leg is not None
+    assert result.composer_draft_leg.label.endswith("| NO probability")
+    assert result.composer_draft_leg.return_points[0].value == pytest.approx(0.49)
+    assert result.composer_draft_leg.return_points[-1].value == pytest.approx(0.44)
+    assert result.provenance["transformation"] == "long_no_probability_return"
+    assert any("NO exposure" in warning for warning in result.warnings)
+
+
 def test_strategy_lab_ignores_thin_optional_benchmark_overlap(tmp_path):
     service = _service(tmp_path)
 

@@ -10,6 +10,7 @@
     PredictionVenueStatus,
     PredictionWalletSummary,
     RelatedPredictionMarketListResponse,
+    StrategyLabHandoffDefaultSide,
     StrategyLabHandoffEnvelope
   } from "../lib/api/types";
   import type { PredictionMarketScreenerOptions, PredictionMarketSortBy } from "../lib/stores/app";
@@ -30,6 +31,7 @@
   let status: "open" | "closed" | "all" = "open";
   let sortBy: PredictionMarketSortBy = "volume_desc";
   let category = "";
+  let strategySide: Extract<StrategyLabHandoffDefaultSide, "long_yes" | "long_no"> = "long_yes";
   type VenueKey = "polymarket" | "kalshi";
   const allVenues: VenueKey[] = ["polymarket", "kalshi"];
   let venueSelection: VenueKey[] = [...allVenues];
@@ -148,7 +150,7 @@
     if (!detail || !onSendToStrategyLab) {
       return;
     }
-    onSendToStrategyLab(buildPredictionMarketStrategyHandoff(detail), { open });
+    onSendToStrategyLab(buildPredictionMarketStrategyHandoff(detail, { defaultSide: strategySide }), { open });
   }
 
   let chartSeries: ChartSeries[] = [];
@@ -281,6 +283,14 @@
         </div>
         {#if detail}
           <div class="strategy-actions">
+            <div class="side-toggle" aria-label="Strategy Lab contract side">
+              <button type="button" class:selected={strategySide === "long_yes"} on:click={() => strategySide = "long_yes"}>
+                YES
+              </button>
+              <button type="button" class:selected={strategySide === "long_no"} on:click={() => strategySide = "long_no"}>
+                NO
+              </button>
+            </div>
             <button type="button" class="ghost-button" on:click={() => sendSelectedMarketToStrategyLab(false)}>
               + Strategy
             </button>
@@ -1047,6 +1057,32 @@
     width: auto;
     min-height: 1.75rem;
     padding: 0.24rem 0.55rem;
+  }
+
+  .side-toggle {
+    display: inline-flex;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+  }
+
+  .side-toggle button {
+    min-width: 2.5rem;
+    min-height: 1.75rem;
+    border: 0;
+    border-right: 1px solid var(--divider);
+    background: transparent;
+    color: var(--text-2);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+  }
+
+  .side-toggle button:last-child {
+    border-right: 0;
+  }
+
+  .side-toggle button.selected {
+    color: var(--text-0);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
   }
 
   .badge-stack span {

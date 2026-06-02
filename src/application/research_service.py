@@ -596,11 +596,13 @@ class ResearchService:
         if market is None:
             raise ResearchValidationError([f"Prediction market not found: {market_id}"])
         history = list(prediction_market_service.get_probability_history(market_id) or [])
+        side = self._prediction_market_handoff_side(handoff.default_side)
+        transformation = f"long_{side.lower()}_probability_return"
         warnings = list(handoff.warnings)
         warnings.extend(
             [
-                "Default Strategy Lab interpretation is long_yes_probability_return.",
-                "Prediction-market probability history is a research proxy for mark-to-market YES exposure, not executable PnL.",
+                f"Default Strategy Lab interpretation is {transformation}.",
+                f"Prediction-market probability history is a research proxy for mark-to-market {side} exposure, not executable PnL.",
                 "The resolver uses venue probability levels and leaves payout-aware contract accounting for a later pass.",
             ]
         )
@@ -613,7 +615,11 @@ class ResearchService:
             if timestamp is None or not math.isfinite(probability):
                 invalid_points += 1
                 continue
-            points.append(ResearchObjectReturnPoint(timestamp=timestamp.isoformat(), value=probability))
+            if probability < 0 or probability > 1:
+                invalid_points += 1
+                continue
+            value = probability if side == "YES" else 1.0 - probability
+            points.append(ResearchObjectReturnPoint(timestamp=timestamp.isoformat(), value=value))
         if invalid_points:
             warnings.append(f"Dropped {invalid_points} probability history point(s) with invalid timestamps or values.")
 
@@ -625,14 +631,14 @@ class ResearchService:
                 status="unsupported",
                 resolved_capability="reference_only",
                 provider_summary=getattr(market, "source_provider", None),
-                provenance=self._prediction_market_handoff_provenance(market, history),
+                provenance=self._prediction_market_handoff_provenance(market, history, transformation=transformation),
                 warnings=list(dict.fromkeys(warnings + ["Probability history is too sparse to create a return leg."])),
                 unsupported_reason="Prediction-market handoff needs at least two probability history observations.",
             )
         if len(points) < 6:
             warnings.append("Probability history is sparse; Strategy Lab analytics may be unstable.")
         if any(point.value <= 0.02 for point in points[:3]):
-            warnings.append("Initial YES probability is near zero; percentage-return conversion can become unstable.")
+            warnings.append(f"Initial {side} probability is near zero; percentage-return conversion can become unstable.")
 
         freshness = getattr(market, "freshness", None)
         if freshness is not None:
@@ -651,7 +657,7 @@ class ResearchService:
 
         start = points[0].timestamp
         end = points[-1].timestamp
-        label = f"{getattr(market, 'title', None) or handoff.selected_entity.label} | YES probability"
+        label = f"{getattr(market, 'title', None) or handoff.selected_entity.label} | {side} probability"
         provider = getattr(market, "source_provider", None) or handoff.provider or getattr(market, "venue", None)
         leg = StrategyLabPortfolioLeg(
             label=label,
@@ -670,12 +676,19 @@ class ResearchService:
             composer_draft_leg=leg,
             date_coverage=CrossTabHandoffTimeframe(label="Probability history", start=start, end=end),
             provider_summary=provider,
-            provenance=self._prediction_market_handoff_provenance(market, history),
+            provenance=self._prediction_market_handoff_provenance(market, history, transformation=transformation),
             warnings=list(dict.fromkeys(warnings)),
         )
 
     @staticmethod
-    def _prediction_market_handoff_provenance(market, history) -> dict[str, Any]:
+    def _prediction_market_handoff_side(default_side: str | None) -> str:
+        normalized = str(default_side or "").strip().lower()
+        if normalized == "long_no":
+            return "NO"
+        return "YES"
+
+    @staticmethod
+    def _prediction_market_handoff_provenance(market, history, *, transformation: str) -> dict[str, Any]:
         return {
             "source_provider": getattr(market, "source_provider", None),
             "venue": getattr(market, "venue", None),
@@ -685,7 +698,7 @@ class ResearchService:
             "retrieved_at": getattr(getattr(market, "retrieved_at", None), "isoformat", lambda: None)(),
             "origin": getattr(market, "origin", None),
             "history_points": len(history or []),
-            "transformation": "long_yes_probability_return",
+            "transformation": transformation,
         }
 
     @staticmethod

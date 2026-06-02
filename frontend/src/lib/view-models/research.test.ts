@@ -300,6 +300,10 @@ describe("research view model helpers", () => {
     expect(handoff.default_side).toBe("long_yes");
     expect(handoff.normalized_ids.market_id).toBe(market.market_id);
 
+    const noHandoff = buildPredictionMarketStrategyHandoff(market, { defaultSide: "long_no" });
+    expect(noHandoff.default_side).toBe("long_no");
+    expect(noHandoff.warnings.join(" ")).toContain("long_no_probability_return");
+
     const draft = strategyResolvedHandoffToDraftLeg(
       {
         handoff_id: "handoff-1",
