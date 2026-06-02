@@ -604,6 +604,11 @@ class CopilotReportToolTraceSummaryModel(BaseModel):
     tool_name: str
     summary: str
     source_ids: list[str] = Field(default_factory=list)
+    status: str = "recorded"
+    step_id: str | None = None
+    event_type: str | None = None
+    output_summary: dict[str, object] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, row: CopilotReportToolTraceSummary) -> "CopilotReportToolTraceSummaryModel":

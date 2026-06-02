@@ -3094,6 +3094,7 @@ def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, mon
             json={
                 "domain": "synthesis",
                 "prompt": "Research AAPL and adjust the DCF revenue growth assumption",
+                "user_session_id": "session_operator_confirmation_report",
                 "context": {"current_tab": "copilot", "workspace_mode": "research"},
             },
         )
@@ -3108,6 +3109,23 @@ def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, mon
             and "fundamentals.apply_dcf_update" in event["payload"]["required_for_tool_ids"]
             for event in payload["operator_events"]
         )
+
+        report_response = client.post(
+            "/copilot/sessions/session_operator_confirmation_report/report",
+            json={"title": "Operator Confirmation Report"},
+        )
+        assert report_response.status_code == 200
+        report = report_response.json()
+        assert any("confirmation checkpoints" in warning for warning in report["warnings"])
+        apply_summary = next(
+            row
+            for row in report["tool_trace_summary"]
+            if row["tool_name"] == "fundamentals.apply_dcf_update"
+        )
+        assert apply_summary["status"] == "confirmation_required"
+        assert apply_summary["event_type"] == "confirmation-needed"
+        assert "dcf update mutates" in apply_summary["summary"].lower()
+        assert any("confirmation checkpoints" in warning for warning in apply_summary["warnings"])
     finally:
         runtime.shutdown()
 

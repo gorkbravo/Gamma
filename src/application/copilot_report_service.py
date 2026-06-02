@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 from src.application.copilot_context_helpers import dedupe_warnings
 from src.models.copilot import (
@@ -45,9 +45,12 @@ class CopilotReportService:
         )
         warnings = dedupe_warnings(
             [
-                warning
-                for turn in selected_turns
-                for warning in turn.result.warnings
+                *[
+                    warning
+                    for turn in selected_turns
+                    for warning in turn.result.warnings
+                ],
+                *cls._operator_event_warnings(selected_turns),
             ]
         )
         missing_data = cls._missing_data_from_warnings(warnings)
@@ -195,13 +198,37 @@ class CopilotReportService:
         return missing or ["No explicit missing-data warnings were recorded in the selected session trace."]
 
     @staticmethod
+    def _operator_event_warnings(turns: list[CopilotTurn]) -> list[str]:
+        warnings: list[str] = []
+        for turn in turns:
+            for event in turn.result.operator_events:
+                warnings.extend(event.warnings)
+                if event.event_type == "warning" and event.message:
+                    warnings.append(event.message)
+        return [warning for warning in warnings if warning]
+
+    @staticmethod
     def _tool_trace_summary(turns: list[CopilotTurn]) -> list[CopilotReportToolTraceSummary]:
         rows: list[CopilotReportToolTraceSummary] = []
-        seen: set[tuple[str, str, tuple[str, ...]]] = set()
+        seen: set[tuple[str, str | None, str | None, str]] = set()
         for turn in turns:
+            tool_events = [
+                event
+                for event in turn.result.operator_events
+                if event.event_type in {"tool-result", "confirmation-needed"}
+            ]
             for trace in turn.result.tool_traces:
-                source_ids = tuple(trace.source_ids)
-                key = (trace.tool_name, trace.summary, source_ids)
+                event = CopilotReportService._matching_tool_event(trace.tool_name, tool_events)
+                status = CopilotReportService._event_status(event) if event is not None else "recorded"
+                source_ids = CopilotReportService._dedupe_strings(
+                    [
+                        *trace.source_ids,
+                        *(event.source_ids if event is not None else []),
+                    ]
+                )
+                output_summary = CopilotReportService._event_output_summary(event) if event is not None else {}
+                event_warnings = list(event.warnings) if event is not None else []
+                key = (trace.tool_name, event.step_id if event is not None else None, event.event_type if event is not None else None, trace.summary)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -209,10 +236,87 @@ class CopilotReportService:
                     CopilotReportToolTraceSummary(
                         tool_name=trace.tool_name,
                         summary=trace.summary,
-                        source_ids=list(trace.source_ids),
+                        source_ids=source_ids,
+                        status=status,
+                        step_id=event.step_id if event is not None else None,
+                        event_type=event.event_type if event is not None else None,
+                        output_summary=output_summary,
+                        warnings=event_warnings,
                     )
                 )
+            for event in tool_events:
+                tool_names = CopilotReportService._event_tool_names(event)
+                for tool_name in tool_names:
+                    summary = event.message or CopilotReportService._status_summary(tool_name, CopilotReportService._event_status(event))
+                    key = (tool_name, event.step_id, event.event_type, summary)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append(
+                        CopilotReportToolTraceSummary(
+                            tool_name=tool_name,
+                            summary=summary,
+                            source_ids=list(event.source_ids),
+                            status=CopilotReportService._event_status(event),
+                            step_id=event.step_id,
+                            event_type=event.event_type,
+                            output_summary=CopilotReportService._event_output_summary(event),
+                            warnings=list(event.warnings),
+                        )
+                    )
         return rows
+
+    @staticmethod
+    def _matching_tool_event(tool_name: str, events: list[object]) -> Any | None:
+        for event in reversed(events):
+            if getattr(event, "tool_id", None) == tool_name:
+                return event
+            payload = getattr(event, "payload", {})
+            if isinstance(payload, dict) and tool_name in list(payload.get("required_for_tool_ids") or []):
+                return event
+        return None
+
+    @staticmethod
+    def _event_tool_names(event: object) -> list[str]:
+        tool_id = getattr(event, "tool_id", None)
+        if tool_id:
+            return [str(tool_id)]
+        payload = getattr(event, "payload", {})
+        if not isinstance(payload, dict):
+            return []
+        return [str(item) for item in list(payload.get("required_for_tool_ids") or []) if item]
+
+    @staticmethod
+    def _event_status(event: object | None) -> str:
+        if event is None:
+            return "recorded"
+        payload = getattr(event, "payload", {})
+        event_type = str(getattr(event, "event_type", "") or "")
+        if event_type == "confirmation-needed":
+            return "confirmation_required"
+        if isinstance(payload, dict) and payload.get("status"):
+            return str(payload["status"])
+        return event_type or "recorded"
+
+    @staticmethod
+    def _event_output_summary(event: object | None) -> dict[str, Any]:
+        if event is None:
+            return {}
+        payload = getattr(event, "payload", {})
+        if isinstance(payload, dict) and isinstance(payload.get("output_summary"), dict):
+            return dict(payload["output_summary"])
+        return {}
+
+    @staticmethod
+    def _status_summary(tool_name: str, status: str) -> str:
+        label = tool_name or "operator step"
+        if status == "confirmation_required":
+            return f"{label} stopped at a confirmation checkpoint."
+        return f"{label} recorded operator event status `{status}`."
+
+    @staticmethod
+    def _dedupe_strings(values: Iterable[str]) -> list[str]:
+        return list(dict.fromkeys(item for item in values if item))
 
     @staticmethod
     def _claim_lines(claims: list[ResearchClaim]) -> list[str]:
@@ -235,7 +339,9 @@ class CopilotReportService:
         lines: list[str] = []
         for trace in traces:
             refs = f" Sources: {', '.join(trace.source_ids)}." if trace.source_ids else ""
-            lines.append(f"- `{trace.tool_name}`: {trace.summary}{refs}")
+            status = f" Status: {trace.status}." if trace.status and trace.status != "recorded" else ""
+            warnings = f" Warnings: {'; '.join(trace.warnings)}." if trace.warnings else ""
+            lines.append(f"- `{trace.tool_name}`: {trace.summary}{status}{refs}{warnings}")
         return lines
 
     @staticmethod

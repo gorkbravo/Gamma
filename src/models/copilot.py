@@ -371,6 +371,11 @@ class CopilotReportToolTraceSummary:
     tool_name: str
     summary: str
     source_ids: list[str] = field(default_factory=list)
+    status: str = "recorded"
+    step_id: str | None = None
+    event_type: str | None = None
+    output_summary: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
