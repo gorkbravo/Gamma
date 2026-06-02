@@ -24,6 +24,7 @@ from src.application.copilot_agents_operator import CopilotAgentsOperatorService
 from src.application.copilot_report_service import CopilotReportService
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
+from src.application.iv_service import IVService, IVSurfaceRequest
 from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.news_service import NewsService
 from src.application.prediction_market_service import PredictionMarketService
@@ -144,6 +145,7 @@ class CopilotService:
         crypto_service: CryptoService,
         fundamentals_service: FundamentalsService,
         risk_service: RiskService | None = None,
+        iv_service: IVService | None = None,
         portfolio_provider: Any | None = None,
         research_provider: Any | None = None,
         news_service: NewsService | None = None,
@@ -155,6 +157,7 @@ class CopilotService:
         self.crypto_service = crypto_service
         self.fundamentals_service = fundamentals_service
         self.risk_service = risk_service
+        self.iv_service = iv_service
         self.portfolio_provider = portfolio_provider
         self.research_provider = research_provider
         self.news_service = news_service
@@ -733,6 +736,51 @@ class CopilotService:
                         "Shock parameters are bounded and may be clipped before execution.",
                         "Rate shock proxy uses transparent duration assumptions; it is not a full curve repricing model.",
                         "Positions without explicit shocks or supported proxies are left unchanged in the proxy impact block.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="run_options_realized_implied_comparison",
+                    description="Run a bounded read-only Options/IV realized-versus-implied volatility comparison for the active or supplied symbol.",
+                    domains=("iv",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": ["string", "null"],
+                                "description": "Optional ticker override. Use null to keep the active Options symbol.",
+                            },
+                            "max_expiries": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum expiry rows to return, bounded to 1-8.",
+                            },
+                            "depth_preset": {
+                                "type": ["string", "null"],
+                                "enum": ["compact", "standard", "deep", "front_deep", "max", None],
+                                "description": "IV surface collection depth. The operator defaults to compact for bounded automatic execution.",
+                            },
+                            "market_data_mode": {
+                                "type": ["string", "null"],
+                                "enum": ["live", "delayed", "auto", None],
+                                "description": "Optional market-data mode override. Null keeps the active IV service mode.",
+                            },
+                        },
+                        "required": ["symbol", "max_expiries", "depth_preset", "market_data_mode"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_run_options_realized_implied_comparison,
+                    action_type="run_analysis",
+                    output_schema={"type": "object"},
+                    timeout_seconds=20.0,
+                    permission_policy="automatic",
+                    provenance_behavior=(
+                        "Uses Gamma's existing IVService surface path and loaded Options state to compare ATM implied volatility, "
+                        "available historical-volatility fields, implied moves, surface quality, warnings, and source provenance without "
+                        "calling providers directly from Copilot or modifying state."
+                    ),
+                    failure_modes=(
+                        "Requires an active IV surface, a supplied ticker, or an IV service able to load a compact read-only surface.",
+                        "Historical-volatility fields can be unavailable for some or all contracts, in which case rows are marked insufficient rather than inferred.",
+                        "Sparse or delayed option chains can limit comparison confidence and surface quality is returned transparently.",
                     ),
                 ),
                 _CopilotToolDefinition(
@@ -1796,6 +1844,12 @@ class CopilotService:
             ticker = self._first_plan_entity_id(request, "ticker")
             if ticker:
                 domain_context = replace(domain_context, fundamentals_ticker=ticker)
+        if domain == "iv":
+            ticker = self._first_plan_entity_id(request, "ticker")
+            if ticker:
+                state = dict(domain_context.iv_state or {})
+                state.setdefault("target_symbol", ticker)
+                domain_context = replace(domain_context, iv_state=state)
 
         return domain_context
 
@@ -1861,6 +1915,13 @@ class CopilotService:
             return self._default_research_scope_analysis_arguments(context)
         if tool_name == "run_hypothetical_portfolio_comparison":
             return self._default_hypothetical_portfolio_arguments(context)
+        if tool_name == "run_options_realized_implied_comparison":
+            return {
+                "symbol": context.summary_data.get("target_symbol"),
+                "max_expiries": 6,
+                "depth_preset": "compact",
+                "market_data_mode": None,
+            }
         if tool_name == "run_risk_contribution_analysis":
             return {
                 "source_scope": context.summary_data.get("workspace_mode"),
@@ -2357,7 +2418,7 @@ class CopilotService:
             )
 
         for match in re.findall(r"\b[A-Z]{1,5}(?:\.[A-Z])?\b", prompt):
-            if match.lower() in {"cpi", "fed", "oil", "rate", "rates", "var"}:
+            if match.lower() in {"cpi", "fed", "iv", "oil", "rate", "rates", "var"}:
                 continue
             add_entity("ticker", match, confidence=0.72)
 
@@ -2576,7 +2637,7 @@ class CopilotService:
                 "run_fundamentals_reverse_valuation",
             ],
             "risk": ["run_risk_contribution_analysis", "run_risk_scenario_analysis"],
-            "iv": ["get_iv_surface_context", "get_iv_session_status"],
+            "iv": ["run_options_realized_implied_comparison", "get_iv_surface_context", "get_iv_session_status"],
             "external_context": ["get_external_context_summary"],
             "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
         }.get(domain, [])
@@ -3286,23 +3347,28 @@ class CopilotService:
         surface = state.get("surface") if isinstance(state.get("surface"), dict) else None
         session = state.get("session") if isinstance(state.get("session"), dict) else None
         active_surface = resolve_iv_surface(surface, session)
-        if not isinstance(active_surface, dict):
-            raise ValueError("Options copilot requires a loaded options surface.")
+        target_symbol = self._iv_target_symbol_from_state(state, surface, session)
         summary = summarize_iv_state(surface, session)
         if summary is None:
-            raise ValueError("Options copilot requires a loaded options surface.")
+            summary = {
+                "symbol": target_symbol,
+                "snapshot_available": False,
+                "warnings": ["No active Options surface is loaded; operator tools may request a bounded service snapshot."],
+            }
         warnings = dedupe_warnings(summary.get("warnings", []))
-        sources = [
-            CopilotSourceRef(
-                source_id="iv.surface",
-                label="Options surface snapshot",
-                kind="workspace",
-                provider="gamma",
-                origin="gamma.iv.surface",
-                description="Loaded options implied-volatility surface payload from Gamma.",
-                retrieved_at=active_surface.get("timestamp"),
+        sources = []
+        if isinstance(active_surface, dict):
+            sources.append(
+                CopilotSourceRef(
+                    source_id="iv.surface",
+                    label="Options surface snapshot",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.iv.surface",
+                    description="Loaded options implied-volatility surface payload from Gamma.",
+                    retrieved_at=active_surface.get("timestamp"),
+                )
             )
-        ]
         if session is not None:
             sources.append(
                 CopilotSourceRef(
@@ -3320,11 +3386,13 @@ class CopilotService:
             current_tab=request.context.current_tab or "iv",
             summary_data={
                 "workspace_mode": request.context.workspace_mode,
+                "target_symbol": target_symbol,
                 "iv": summary,
             },
             tool_state={
                 "surface": surface,
                 "session": session,
+                "target_symbol": target_symbol,
             },
             sources=sources,
             warnings=warnings,
@@ -5278,6 +5346,46 @@ class CopilotService:
             sources=[source],
         )
 
+    def _tool_run_options_realized_implied_comparison(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        normalized = self._normalize_options_realized_implied_arguments(arguments, context)
+        surface, service_warnings, service_messages = self._options_surface_for_operator(normalized, context)
+        output = self._options_realized_implied_summary(
+            surface=surface,
+            normalized=normalized,
+            service_warnings=service_warnings,
+            service_messages=service_messages,
+        )
+        source = CopilotSourceRef(
+            source_id=f"iv.realized_implied.{self._safe_source_id(output.get('symbol') or normalized['symbol'])}",
+            label="Options realized versus implied comparison",
+            kind="analytics",
+            provider=str(output.get("source_provider") or "gamma"),
+            origin=str(output.get("origin") or "gamma.iv.surface"),
+            description="Read-only Research Operator comparison of available historical-volatility fields against ATM implied volatility.",
+            retrieved_at=(
+                self._coerce_source_datetime(output.get("retrieved_at"))
+                or self._coerce_source_datetime(output.get("timestamp"))
+                or now_utc()
+            ),
+        )
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="run_options_realized_implied_comparison",
+                summary=(
+                    f"Compared available historical volatility against ATM implied volatility for "
+                    f"{output.get('symbol') or normalized['symbol']} across {len(output.get('expiry_comparisons') or [])} expiry row(s)."
+                ),
+                arguments=normalized,
+                source_ids=[source.source_id],
+            ),
+            sources=[source],
+        )
+
     def _tool_get_iv_session_status(
         self,
         arguments: dict[str, Any],
@@ -5591,6 +5699,7 @@ class CopilotService:
                 "get_risk_contribution_summary",
             ),
             "iv": (
+                "run_options_realized_implied_comparison",
                 "get_iv_surface_context",
                 "get_iv_session_status",
             ),
@@ -7041,6 +7150,291 @@ class CopilotService:
     def _iv_session_from_bundle(context: CopilotContextBundle) -> dict[str, Any] | None:
         session = context.tool_state.get("session")
         return session if isinstance(session, dict) else None
+
+    @staticmethod
+    def _iv_target_symbol_from_state(
+        state: dict[str, Any],
+        surface: dict[str, Any] | None,
+        session: dict[str, Any] | None,
+    ) -> str:
+        active_surface = resolve_iv_surface(surface, session)
+        candidates = [
+            state.get("target_symbol"),
+            (active_surface or {}).get("symbol") if isinstance(active_surface, dict) else None,
+            (session or {}).get("active_symbol"),
+            (surface or {}).get("symbol"),
+        ]
+        for candidate in candidates:
+            symbol = str(candidate or "").strip().upper()
+            if symbol:
+                return symbol
+        return "SPY"
+
+    def _normalize_options_realized_implied_arguments(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> dict[str, Any]:
+        surface = self._iv_surface_from_bundle(context)
+        session = self._iv_session_from_bundle(context)
+        target_symbol = str(context.summary_data.get("target_symbol") or context.tool_state.get("target_symbol") or "")
+        symbol = str(arguments.get("symbol") or target_symbol or "").strip().upper()
+        if not symbol:
+            symbol = self._iv_target_symbol_from_state({}, surface, session)
+        max_expiries = int(self._optional_float(arguments.get("max_expiries")) or 6)
+        max_expiries = max(1, min(8, max_expiries))
+        depth_preset = str(arguments.get("depth_preset") or "compact").strip().lower().replace("-", "_")
+        if depth_preset not in {"compact", "standard", "deep", "front_deep", "max"}:
+            depth_preset = "compact"
+        market_data_mode = str(arguments.get("market_data_mode") or "").strip().lower() or None
+        if self.iv_service is not None:
+            market_data_mode = self.iv_service.normalize_market_data_mode(market_data_mode or self.iv_service.market_data_mode)
+        elif market_data_mode not in {"live", "delayed", "auto"}:
+            market_data_mode = None
+        return {
+            "symbol": symbol or "SPY",
+            "max_expiries": max_expiries,
+            "depth_preset": depth_preset,
+            "market_data_mode": market_data_mode,
+        }
+
+    def _options_surface_for_operator(
+        self,
+        normalized: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> tuple[dict[str, Any], list[str], list[str]]:
+        requested_symbol = str(normalized.get("symbol") or "").strip().upper()
+        surface = self._iv_surface_from_bundle(context)
+        session = self._iv_session_from_bundle(context)
+        active_surface = resolve_iv_surface(surface, session)
+        if isinstance(active_surface, dict) and active_surface.get("snapshot_available", True):
+            active_symbol = str(active_surface.get("symbol") or "").strip().upper()
+            if not requested_symbol or active_symbol == requested_symbol:
+                return active_surface, [], []
+
+        if self.iv_service is None:
+            if isinstance(active_surface, dict):
+                return active_surface, [], []
+            raise ValueError("Options IV service is unavailable and no active IV surface is loaded.")
+
+        result = self.iv_service.get_surface(
+            IVSurfaceRequest(
+                symbol=requested_symbol or "SPY",
+                market_data_mode=str(normalized.get("market_data_mode") or self.iv_service.market_data_mode),
+                wait_seconds=2.5,
+                depth_preset=str(normalized.get("depth_preset") or "compact"),
+            )
+        )
+        if result.snapshot is None:
+            return {
+                "symbol": requested_symbol or "SPY",
+                "timestamp": now_utc(),
+                "retrieved_at": now_utc(),
+                "snapshot_available": False,
+                "warnings": list(result.warnings),
+                "messages": list(result.messages),
+                "source_provider": "iv_service",
+                "origin": "gamma.iv.surface",
+                "freshness_label": "unavailable",
+            }, list(result.warnings), list(result.messages)
+        snapshot = result.snapshot
+        iv_grid = snapshot.iv_grid.tolist() if hasattr(snapshot.iv_grid, "tolist") else list(snapshot.iv_grid)
+        return {
+            "symbol": snapshot.symbol,
+            "timestamp": snapshot.timestamp,
+            "retrieved_at": now_utc(),
+            "snapshot_available": True,
+            "spot": snapshot.spot,
+            "expiries": list(snapshot.expiries),
+            "strikes": [float(strike) for strike in snapshot.strikes],
+            "iv_grid": iv_grid,
+            "delayed": snapshot.delayed,
+            "points": snapshot.points,
+            "warnings": list(result.warnings),
+            "messages": list(result.messages),
+            "source_provider": snapshot.source_provider,
+            "origin": snapshot.origin,
+            "transformation_note": snapshot.transformation_note,
+            "freshness_label": snapshot.freshness_label,
+            "contracts": [asdict(item) for item in snapshot.contracts],
+            "pairs": [asdict(item) for item in snapshot.pairs],
+            "collection": asdict(snapshot.collection) if snapshot.collection is not None else None,
+            "quality": asdict(snapshot.quality) if snapshot.quality is not None else None,
+            "expiry_analytics": [asdict(item) for item in snapshot.expiry_analytics],
+            "pricing_assumptions": asdict(snapshot.pricing_assumptions) if snapshot.pricing_assumptions is not None else None,
+        }, list(result.warnings), list(result.messages)
+
+    def _options_realized_implied_summary(
+        self,
+        *,
+        surface: dict[str, Any],
+        normalized: dict[str, Any],
+        service_warnings: list[str],
+        service_messages: list[str],
+    ) -> dict[str, Any]:
+        warnings = dedupe_warnings(
+            surface.get("warnings", []) if isinstance(surface.get("warnings"), list) else [],
+            service_warnings,
+            service_messages,
+        )
+        if not surface.get("snapshot_available", True):
+            warnings = dedupe_warnings(warnings, ["No IV surface snapshot was available for realized-versus-implied comparison."])
+            return {
+                "symbol": surface.get("symbol") or normalized["symbol"],
+                "timestamp": self._iso_or_value(surface.get("timestamp")),
+                "retrieved_at": self._iso_or_value(surface.get("retrieved_at")),
+                "snapshot_available": False,
+                "requested": dict(normalized),
+                "expiry_comparisons": [],
+                "summary": {
+                    "expiry_count": 0,
+                    "ok_count": 0,
+                    "missing_historical_volatility_count": 0,
+                    "missing_implied_volatility_count": 0,
+                },
+                "quality": surface.get("quality"),
+                "warnings": warnings,
+                "source_provider": surface.get("source_provider"),
+                "origin": surface.get("origin"),
+                "transformation_note": surface.get("transformation_note"),
+                "freshness_label": surface.get("freshness_label"),
+            }
+
+        expiry_rows = [row for row in surface.get("expiry_analytics", []) or [] if isinstance(row, dict)]
+        contracts = [row for row in surface.get("contracts", []) or [] if isinstance(row, dict)]
+        rows: list[dict[str, Any]] = []
+        for row in expiry_rows[: int(normalized["max_expiries"])]:
+            expiry = str(row.get("expiry") or "")
+            implied_vol = self._first_optional_float(
+                row.get("atm_blended_implied_volatility"),
+                row.get("atm_call_implied_volatility"),
+                row.get("atm_put_implied_volatility"),
+            )
+            historical_vol = self._expiry_historical_volatility(
+                expiry=expiry,
+                atm_strike=self._optional_float(row.get("atm_strike")),
+                contracts=contracts,
+            )
+            comparison_status = "ok"
+            if implied_vol is None and historical_vol is None:
+                comparison_status = "insufficient_data"
+            elif implied_vol is None:
+                comparison_status = "missing_implied_volatility"
+            elif historical_vol is None:
+                comparison_status = "missing_historical_volatility"
+            rows.append(
+                {
+                    "expiry": expiry,
+                    "days_to_expiry": row.get("days_to_expiry"),
+                    "atm_strike": row.get("atm_strike"),
+                    "atm_implied_volatility": implied_vol,
+                    "historical_volatility": historical_vol,
+                    "volatility_premium": implied_vol - historical_vol if implied_vol is not None and historical_vol is not None else None,
+                    "implied_to_historical_ratio": implied_vol / historical_vol if implied_vol is not None and historical_vol not in {None, 0.0} else None,
+                    "implied_move_pct": row.get("implied_move_pct"),
+                    "atm_straddle_midpoint": row.get("atm_straddle_midpoint"),
+                    "pair_count": row.get("pair_count"),
+                    "pair_count_with_both_sides": row.get("pair_count_with_both_sides"),
+                    "comparison_status": comparison_status,
+                }
+            )
+
+        if not rows:
+            warnings = dedupe_warnings(warnings, ["IV surface contained no expiry analytics rows for comparison."])
+        if any(row["comparison_status"] == "missing_historical_volatility" for row in rows):
+            warnings = dedupe_warnings(
+                warnings,
+                ["One or more expiry rows lack provider historical-volatility fields; Gamma did not infer realized volatility from price history."],
+            )
+        quality = surface.get("quality") if isinstance(surface.get("quality"), dict) else {}
+        collection = surface.get("collection") if isinstance(surface.get("collection"), dict) else {}
+        return {
+            "symbol": surface.get("symbol") or normalized["symbol"],
+            "timestamp": self._iso_or_value(surface.get("timestamp")),
+            "retrieved_at": self._iso_or_value(surface.get("retrieved_at")),
+            "snapshot_available": True,
+            "requested": dict(normalized),
+            "spot": self._optional_float(surface.get("spot")),
+            "delayed": surface.get("delayed"),
+            "surface_points": surface.get("points"),
+            "expiry_comparisons": rows,
+            "summary": {
+                "expiry_count": len(rows),
+                "ok_count": sum(1 for row in rows if row["comparison_status"] == "ok"),
+                "missing_historical_volatility_count": sum(1 for row in rows if row["comparison_status"] == "missing_historical_volatility"),
+                "missing_implied_volatility_count": sum(1 for row in rows if row["comparison_status"] == "missing_implied_volatility"),
+                "insufficient_data_count": sum(1 for row in rows if row["comparison_status"] == "insufficient_data"),
+                "average_volatility_premium": self._average_optional(
+                    row.get("volatility_premium") for row in rows if row.get("volatility_premium") is not None
+                ),
+            },
+            "quality": {
+                "expected_surface_cells": quality.get("expected_surface_cells"),
+                "observed_surface_cells": quality.get("observed_surface_cells"),
+                "interpolated_surface_cells": quality.get("interpolated_surface_cells"),
+                "interpolation_ratio": quality.get("interpolation_ratio"),
+                "pairs_with_both_sides": quality.get("pairs_with_both_sides"),
+                "contracts_with_provider_greeks": quality.get("contracts_with_provider_greeks"),
+                "contracts_with_derived_greeks": quality.get("contracts_with_derived_greeks"),
+            },
+            "collection": {
+                "depth_preset": collection.get("depth_preset"),
+                "market_data_mode": collection.get("market_data_mode"),
+                "selected_expiry_count": collection.get("selected_expiry_count"),
+                "selected_strike_count": collection.get("selected_strike_count"),
+                "subscribed_contract_count": collection.get("subscribed_contract_count"),
+                "market_data_line_utilization": collection.get("market_data_line_utilization"),
+                "contract_selection_note": collection.get("contract_selection_note"),
+            },
+            "warnings": warnings,
+            "source_provider": surface.get("source_provider"),
+            "origin": surface.get("origin"),
+            "transformation_note": surface.get("transformation_note"),
+            "freshness_label": surface.get("freshness_label"),
+        }
+
+    @classmethod
+    def _expiry_historical_volatility(
+        cls,
+        *,
+        expiry: str,
+        atm_strike: float | None,
+        contracts: list[dict[str, Any]],
+    ) -> float | None:
+        expiry_contracts = [row for row in contracts if str(row.get("expiry") or "") == expiry]
+        if not expiry_contracts:
+            return None
+        if atm_strike is not None:
+            expiry_contracts = sorted(
+                expiry_contracts,
+                key=lambda row: abs((cls._optional_float(row.get("strike")) or atm_strike) - atm_strike),
+            )
+            nearest_distance = abs((cls._optional_float(expiry_contracts[0].get("strike")) or atm_strike) - atm_strike)
+            expiry_contracts = [
+                row
+                for row in expiry_contracts
+                if abs((cls._optional_float(row.get("strike")) or atm_strike) - atm_strike) <= max(nearest_distance, 0.01)
+            ]
+        values = [cls._optional_float(row.get("historical_volatility")) for row in expiry_contracts]
+        clean_values = [value for value in values if value is not None and value > 0]
+        return cls._average_optional(clean_values)
+
+    @staticmethod
+    def _first_optional_float(*values: Any) -> float | None:
+        for value in values:
+            normalized = CopilotService._optional_float(value)
+            if normalized is not None:
+                return normalized
+        return None
+
+    @staticmethod
+    def _average_optional(values: Any) -> float | None:
+        clean = [float(value) for value in values if value is not None]
+        return sum(clean) / len(clean) if clean else None
+
+    @staticmethod
+    def _iso_or_value(value: Any) -> Any:
+        return value.isoformat() if hasattr(value, "isoformat") else value
 
     @staticmethod
     def _macro_context_from_bundle(context: CopilotContextBundle) -> MacroCopilotContext:

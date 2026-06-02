@@ -60,5 +60,10 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(tmp_path):
             for item in result.outcomes
             if item.case_id == "research_scope_analysis"
         )
+        assert all(
+            "run_options_realized_implied_comparison" in item.tool_traces
+            for item in result.outcomes
+            if item.case_id == "options_realized_implied"
+        )
     finally:
         runtime.shutdown()

@@ -2438,6 +2438,16 @@ def test_copilot_actions_route_exposes_operator_contract_metadata(tmp_path):
             "lookback_days",
             "synthetic_positions",
         ]
+        assert by_id["run_options_realized_implied_comparison"]["permission_policy"] == "automatic"
+        assert by_id["run_options_realized_implied_comparison"]["action_type"] == "run_analysis"
+        assert by_id["run_options_realized_implied_comparison"]["read_only"] is True
+        assert by_id["run_options_realized_implied_comparison"]["mutates_local_state"] is False
+        iv_schema = by_id["run_options_realized_implied_comparison"]["input_schema"]
+        assert iv_schema["required"] == ["symbol", "max_expiries", "depth_preset", "market_data_mode"]
+        assert iv_schema["properties"]["market_data_mode"]["enum"] == ["live", "delayed", "auto", None]
+        assert "historical-volatility fields" in " ".join(
+            by_id["run_options_realized_implied_comparison"]["failure_modes"]
+        ).lower()
         assert by_id["fundamentals.propose_dcf_update"]["permission_policy"] == "automatic_draft"
         assert by_id["fundamentals.apply_dcf_update"]["permission_policy"] == "confirmation_required"
         assert by_id["fundamentals.apply_dcf_update"]["retry_policy"] == "not_retry_safe_after_success"
@@ -2808,6 +2818,65 @@ def test_copilot_operator_execution_runs_strategy_lab_backtest_summary(tmp_path)
         assert strategy_output["benchmark"]["available"] is True
         assert strategy_output["coverage"]["return_points"] == 2
         assert any("does not execute strategy code" in warning for warning in strategy_output["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_plan_includes_options_realized_implied_tool(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": "Research AAPL into CPI week and compare options implied versus realized volatility",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["intent"] == "single_company_event_research"
+        assert any(step["tool_id"] == "run_options_realized_implied_comparison" for step in payload["steps"])
+        iv_step = next(step for step in payload["steps"] if step["tool_id"] == "run_options_realized_implied_comparison")
+        assert iv_step["domain"] == "iv"
+        assert iv_step["permission_policy"] == "automatic"
+        assert iv_step["action_type"] == "run_analysis"
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_execution_runs_options_realized_implied_comparison(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Run options IV realized implied comparison for AAPL",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert any(trace["tool_name"] == "run_options_realized_implied_comparison" for trace in payload["tool_traces"])
+        assert any(source["source_id"].startswith("iv.realized_implied.") for source in payload["sources"])
+        final_event = payload["operator_events"][-1]
+        assert final_event["event_type"] == "final-report"
+        output = next(
+            value
+            for key, value in final_event["payload"]["outputs"].items()
+            if "run_options_realized_implied_comparison" in key
+        )
+        assert output["symbol"] == "AAPL"
+        assert output["snapshot_available"] is True
+        assert output["expiry_comparisons"]
+        assert output["summary"]["expiry_count"] <= 6
+        assert output["summary"]["ok_count"] >= 1
+        assert output["source_provider"] in {"mock", "ibkr"}
+        assert output["origin"].startswith("gamma.iv.surface")
     finally:
         runtime.shutdown()
 

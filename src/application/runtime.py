@@ -358,12 +358,14 @@ def build_runtime(
         risk_free_service,
         benchmark_defaults=benchmark_defaults,
     )
+    iv_service = IVService(client, market_data_mode)
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
         risk_service=risk_service,
+        iv_service=iv_service,
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,
         news_service=news_service,
@@ -374,7 +376,6 @@ def build_runtime(
         ),
         store=copilot_store,
     )
-    iv_service = IVService(client, market_data_mode)
     desktop = _build_desktop_state(research_provider) if include_desktop_session else None
 
     return ApplicationRuntime(

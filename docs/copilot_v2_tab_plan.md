@@ -653,13 +653,14 @@ Current Research Operator state:
 - `run_research_scope_analysis` is automatic read-only and runs Gamma's existing ResearchService scope analysis from an active single-name or synthetic research result, or explicit typed scope arguments. It returns scope metrics, structure, coverage, constituent diagnostics, warnings, and provider provenance without saving scopes, loading durable research objects, rebalancing, or modifying state.
 - `run_strategy_lab_backtest` is automatic read-only and summarizes the active normalized Strategy Lab imported result, composition, or comparison. It does not execute strategy code, restore raw uploaded CSV rows, save research objects, rebalance, or modify portfolios.
 - `run_hypothetical_portfolio_comparison` is automatic read-only and builds a temporary long-only synthetic research scope from typed legs/weights, compares its normalized return stream to a benchmark through the existing Compare/Scenario service path, and returns coverage, relative metrics, warnings, and provenance without saving or trading anything.
+- `run_options_realized_implied_comparison` is automatic read-only and uses Gamma's existing IVService surface path or active Options state to compare ATM implied volatility against available provider historical-volatility fields by expiry. It returns implied moves, vol premium/ratio rows where data is sufficient, missing-history or missing-IV statuses where it is not, surface quality/collection metadata, warnings, and provenance without direct Copilot provider calls or state changes.
 - `run_fundamentals_reverse_valuation` remains automatic read-only. DCF update proposals stop at draft/confirmation checkpoints; `fundamentals.apply_dcf_update` remains confirmation-required and is not run by automatic operator execution.
-- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, and cross-domain single-name event report. There are no expected-gap cases left in the current benchmark set.
+- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, Options realized-versus-implied comparison, research scope analysis, and cross-domain single-name event report. There are no expected-gap cases left in the current benchmark set.
 
 What remains for the next agents:
 
 1. Add narrower read-only drilldowns where they materially improve operator quality:
-   - Options realized-versus-implied or event/volatility comparison once the IV data path is strong enough.
+   - Options event/volatility comparison can build on the new realized-versus-implied operator action once event/calendar context is strong enough.
 2. Expand hypothetical portfolio comparison carefully only where it stays read-only:
    - Consider saved research object inputs, Strategy Lab result inputs, and optional handoff to Risk for deeper risk analytics.
    - Keep durable hypothetical portfolio definitions as a later confirmed-mutation family, not automatic operator behavior.

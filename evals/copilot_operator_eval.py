@@ -132,6 +132,13 @@ def default_operator_eval_cases(
             expected_events=("plan", "tool-result", "final-report"),
         ),
         CopilotOperatorEvalCase(
+            case_id="options_realized_implied",
+            prompt="Run options IV realized implied comparison for AAPL",
+            context=copilot_context,
+            expected_tools=("run_options_realized_implied_comparison",),
+            expected_events=("plan", "tool-result", "final-report"),
+        ),
+        CopilotOperatorEvalCase(
             case_id="single_name_event_report",
             prompt="Research AAPL into CPI/Fed week and produce a cross-domain event report",
             context=copilot_context,
