@@ -25,6 +25,8 @@ from src.models.copilot import (
 )
 from src.utils.time import now_utc
 
+MAX_OPERATOR_FINAL_OUTPUT_BYTES = 50_000
+
 
 ContextBuilder = Callable[[str], CopilotContextBundle]
 DefaultArgumentBuilder = Callable[[str, CopilotContextBundle], dict[str, Any] | None]
@@ -448,6 +450,7 @@ class CopilotAgentsOperatorService:
     ) -> CopilotResearchCardResult:
         warnings = dedupe_warnings(warnings)
         run_id = events[0].run_id if events else new_copilot_id("oprun")
+        final_outputs, output_retention = self._bounded_outputs(outputs or {}, output_summaries or {})
         events.append(
             CopilotOperatorProgressEvent(
                 run_id=run_id,
@@ -496,7 +499,8 @@ class CopilotAgentsOperatorService:
                     "sdk_duration_ms": sdk_duration_ms,
                     "model_usage": model_usage or {},
                     "output_summaries": output_summaries or {},
-                    "outputs": outputs or {},
+                    "output_retention": output_retention,
+                    "outputs": final_outputs,
                 },
                 source_ids=[source.source_id for source in list(sources.values())[:10]],
                 warnings=warnings,
@@ -707,3 +711,40 @@ class CopilotAgentsOperatorService:
                     if isinstance(item, (str, int, float, bool)) or item is None
                 }
         return summary
+
+    @classmethod
+    def _bounded_outputs(
+        cls,
+        outputs: dict[str, Any],
+        output_summaries: dict[str, Any],
+        *,
+        max_bytes: int = MAX_OPERATOR_FINAL_OUTPUT_BYTES,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        estimated_bytes = cls._json_size_bytes(outputs)
+        retention = {
+            "mode": "full",
+            "reason": None,
+            "output_count": len(outputs),
+            "estimated_full_output_bytes": estimated_bytes,
+            "max_full_output_bytes": max_bytes,
+        }
+        if estimated_bytes <= max_bytes:
+            return outputs, retention
+        compact_outputs = {
+            step_id: {
+                "truncated": True,
+                "retention_reason": "full_output_exceeded_payload_budget",
+                "output_summary": output_summaries.get(step_id) or cls._compact_output(output),
+            }
+            for step_id, output in outputs.items()
+        }
+        retention["mode"] = "compact"
+        retention["reason"] = "full_output_exceeded_payload_budget"
+        return compact_outputs, retention
+
+    @staticmethod
+    def _json_size_bytes(value: Any) -> int:
+        try:
+            return len(json.dumps(value, ensure_ascii=True, default=str).encode("utf-8"))
+        except (TypeError, ValueError):
+            return len(str(value).encode("utf-8"))

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
+import json
 import logging
 import math
 import re
@@ -73,6 +74,8 @@ from src.services.copilot_provider import CopilotProvider
 from src.utils.time import now_utc
 
 logger = logging.getLogger(__name__)
+
+MAX_OPERATOR_FINAL_OUTPUT_BYTES = 50_000
 
 
 @dataclass(frozen=True)
@@ -1687,6 +1690,7 @@ class CopilotService:
             message="Created the final Research Operator result card.",
             payload={"artifact_type": "operator_report", "artifact_id": response_id},
         )
+        final_outputs, output_retention = self._bounded_operator_outputs(outputs, output_summaries)
         record_event(
             "final-report",
             title="Final operator report",
@@ -1700,7 +1704,8 @@ class CopilotService:
                 "source_count": len(sources),
                 "tool_trace_count": len(tool_traces),
                 "output_summaries": output_summaries,
-                "outputs": outputs,
+                "output_retention": output_retention,
+                "outputs": final_outputs,
             },
             source_ids=[source.source_id for source in list(sources.values())[:10]],
             event_warnings=warnings,
@@ -1746,7 +1751,8 @@ class CopilotService:
                             "skipped_steps": list(skipped_steps),
                             "failed_steps": list(failed_steps),
                             "output_summaries": output_summaries,
-                            "outputs": outputs,
+                            "output_retention": output_retention,
+                            "outputs": final_outputs,
                         },
                         "operator_events": [asdict(event) for event in events],
                     },
@@ -1830,6 +1836,7 @@ class CopilotService:
                             "skipped_steps": list(final_payload.get("skipped_steps") or []),
                             "failed_steps": list(final_payload.get("failed_steps") or []),
                             "output_summaries": dict(final_payload.get("output_summaries") or {}),
+                            "output_retention": dict(final_payload.get("output_retention") or {}),
                             "outputs": dict(final_payload.get("outputs") or {}),
                         },
                         "operator_events": [asdict(event) for event in result.operator_events],
@@ -7682,6 +7689,43 @@ class CopilotService:
                     if isinstance(item, (str, int, float, bool)) or item is None
                 }
         return summary
+
+    @classmethod
+    def _bounded_operator_outputs(
+        cls,
+        outputs: dict[str, Any],
+        output_summaries: dict[str, Any],
+        *,
+        max_bytes: int = MAX_OPERATOR_FINAL_OUTPUT_BYTES,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        estimated_bytes = cls._json_size_bytes(outputs)
+        retention = {
+            "mode": "full",
+            "reason": None,
+            "output_count": len(outputs),
+            "estimated_full_output_bytes": estimated_bytes,
+            "max_full_output_bytes": max_bytes,
+        }
+        if estimated_bytes <= max_bytes:
+            return outputs, retention
+        compact_outputs = {
+            step_id: {
+                "truncated": True,
+                "retention_reason": "full_output_exceeded_payload_budget",
+                "output_summary": output_summaries.get(step_id) or cls._compact_operator_output(output),
+            }
+            for step_id, output in outputs.items()
+        }
+        retention["mode"] = "compact"
+        retention["reason"] = "full_output_exceeded_payload_budget"
+        return compact_outputs, retention
+
+    @staticmethod
+    def _json_size_bytes(value: Any) -> int:
+        try:
+            return len(json.dumps(value, ensure_ascii=True, default=str).encode("utf-8"))
+        except (TypeError, ValueError):
+            return len(str(value).encode("utf-8"))
 
     @staticmethod
     def _macro_context_from_bundle(context: CopilotContextBundle) -> MacroCopilotContext:

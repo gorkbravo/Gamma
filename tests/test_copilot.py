@@ -7,6 +7,7 @@ from datetime import datetime
 
 from fastapi.testclient import TestClient
 
+from src.application.copilot_agents_operator import CopilotAgentsOperatorService
 from src.api.main import create_app
 from src.application.copilot_service import CopilotService
 from src.application.runtime import build_runtime
@@ -2587,6 +2588,7 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         final_payload = payload["operator_events"][-1]["payload"]
         assert final_payload["status"] == "ready"
         assert final_payload["failed_steps"] == []
+        assert final_payload["output_retention"]["mode"] == "full"
         assert "output_summaries" in final_payload
         assert any(
             "run_risk_scenario_analysis" in step_id
@@ -2607,6 +2609,43 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         assert [event["sequence"] for event in persisted_events] == list(range(1, len(persisted_events) + 1))
     finally:
         runtime.shutdown()
+
+
+def test_copilot_operator_final_outputs_compact_when_payload_is_large():
+    outputs = {
+        "step_run_large_analysis": {
+            "symbol": "AAPL",
+            "rows": [{"note": "x" * 1000} for _ in range(8)],
+            "warnings": ["Large output warning"],
+        }
+    }
+    summaries = {
+        "step_run_large_analysis": {
+            "kind": "dict",
+            "symbol": "AAPL",
+            "warnings_count": 1,
+        }
+    }
+
+    bounded, retention = CopilotService._bounded_operator_outputs(outputs, summaries, max_bytes=500)
+
+    assert retention["mode"] == "compact"
+    assert retention["reason"] == "full_output_exceeded_payload_budget"
+    assert retention["estimated_full_output_bytes"] > retention["max_full_output_bytes"]
+    assert bounded["step_run_large_analysis"]["truncated"] is True
+    assert bounded["step_run_large_analysis"]["output_summary"]["symbol"] == "AAPL"
+    assert "rows" not in bounded["step_run_large_analysis"]
+
+
+def test_agents_sdk_operator_final_outputs_compact_when_payload_is_large():
+    outputs = {"step_agents_large": {"rows": ["x" * 1000 for _ in range(8)]}}
+    summaries = {"step_agents_large": {"kind": "dict", "rows_count": 8}}
+
+    bounded, retention = CopilotAgentsOperatorService._bounded_outputs(outputs, summaries, max_bytes=500)
+
+    assert retention["mode"] == "compact"
+    assert bounded["step_agents_large"]["truncated"] is True
+    assert bounded["step_agents_large"]["output_summary"]["rows_count"] == 8
 
 
 def test_copilot_operator_plan_includes_hypothetical_portfolio_comparison_tool(tmp_path):
