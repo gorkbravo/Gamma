@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import { parseApiTimestampToUtcSeconds } from "../lib/chart-data";
   import type {
@@ -32,6 +33,12 @@
   let sortBy: PredictionMarketSortBy = "volume_desc";
   let category = "";
   let strategySide: Extract<StrategyLabHandoffDefaultSide, "long_yes" | "long_no"> = "long_yes";
+  let strategyContextMenu = {
+    open: false,
+    x: 0,
+    y: 0,
+    market: null as PredictionMarket | null
+  };
   type VenueKey = "polymarket" | "kalshi";
   const allVenues: VenueKey[] = ["polymarket", "kalshi"];
   let venueSelection: VenueKey[] = [...allVenues];
@@ -151,6 +158,49 @@
       return;
     }
     onSendToStrategyLab(buildPredictionMarketStrategyHandoff(detail, { defaultSide: strategySide }), { open });
+  }
+
+  function sendMarketRowToStrategyLab(market: PredictionMarket, open = false) {
+    if (!onSendToStrategyLab) {
+      return;
+    }
+    onSendToStrategyLab(
+      buildPredictionMarketStrategyHandoff(market, { sourceMode: "screener", defaultSide: strategySide }),
+      { open }
+    );
+  }
+
+  function contextMenuPosition(event: MouseEvent | KeyboardEvent) {
+    if (event instanceof MouseEvent && event.type === "contextmenu") {
+      return { x: event.clientX, y: event.clientY };
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: rect.left + 12, y: rect.top + Math.min(rect.height, 32) };
+  }
+
+  function openMarketStrategyMenu(event: MouseEvent | KeyboardEvent, market: PredictionMarket) {
+    event.preventDefault();
+    void onSelectMarket(market.market_id);
+    const position = contextMenuPosition(event);
+    strategyContextMenu = { open: true, x: position.x, y: position.y, market };
+  }
+
+  function handleMarketRowKeydown(event: KeyboardEvent, market: PredictionMarket) {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      openMarketStrategyMenu(event, market);
+    }
+  }
+
+  function handleStrategyMenuSelect(action: string) {
+    const market = strategyContextMenu.market;
+    if (!market) {
+      return;
+    }
+    sendMarketRowToStrategyLab(market, action === "add-open");
+  }
+
+  function closeStrategyMenu() {
+    strategyContextMenu = { ...strategyContextMenu, open: false };
   }
 
   let chartSeries: ChartSeries[] = [];
@@ -709,8 +759,12 @@
             {#if screener?.markets?.length}
               {#each screener.markets as market}
                 <tr
+                  tabindex="0"
+                  aria-label={`Strategy actions for ${market.title}`}
                   class:selected={market.market_id === detail?.market_id}
                   on:click={() => onSelectMarket(market.market_id)}
+                  on:contextmenu={(event) => openMarketStrategyMenu(event, market)}
+                  on:keydown={(event) => handleMarketRowKeydown(event, market)}
                 >
                   <td>
                     <div class="market-title">
@@ -757,6 +811,19 @@
       </article>
     </aside>
   </div>
+
+  <CompactContextMenu
+    open={strategyContextMenu.open}
+    x={strategyContextMenu.x}
+    y={strategyContextMenu.y}
+    label="Prediction market Strategy Lab actions"
+    items={[
+      { id: "add", label: "Add to Strategy", disabled: !onSendToStrategyLab },
+      { id: "add-open", label: "Add and Open", disabled: !onSendToStrategyLab }
+    ]}
+    onSelect={handleStrategyMenuSelect}
+    onClose={closeStrategyMenu}
+  />
 </section>
 
 <style>

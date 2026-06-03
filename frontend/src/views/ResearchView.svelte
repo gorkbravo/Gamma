@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import BarRankChart, { type RankBarItem } from "../components/BarRankChart.svelte";
+  import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
@@ -270,6 +271,20 @@
   let acceptedStrategyLenses: GammaResearchObject[] = [];
   let acceptedStrategyOverlays: GammaResearchObject[] = [];
   let acceptedHandoffWarnings: string[] = [];
+  type EquityStrategyRow = {
+    symbol: string;
+    label: string;
+    defaultWeight: number;
+    sourceProvider: string | null;
+    origin?: string | null;
+    retrievedAt?: string | null;
+  };
+  let equityStrategyContextMenu = {
+    open: false,
+    x: 0,
+    y: 0,
+    row: null as EquityStrategyRow | null
+  };
   let savedScopeTitle = "Scope Analysis Run";
   let savedStrategyTitle = "Strategy Lab Run";
   let savedNotes = "";
@@ -525,6 +540,80 @@
     );
     onSendToStrategyLab(handoff, { open });
     inputWarning = "";
+  }
+
+  function sendEquityRowToStrategyLab(row: EquityStrategyRow, open = false) {
+    if (!onSendToStrategyLab) {
+      onOpenStrategyLab?.();
+      return;
+    }
+    const handoff = buildEquityStrategyHandoff(
+      {
+        symbol: row.symbol,
+        label: row.label,
+        sourceProvider: row.sourceProvider,
+        origin: row.origin,
+        retrievedAt: row.retrievedAt
+      },
+      { sourceMode: String(mode), defaultWeight: row.defaultWeight }
+    );
+    onSendToStrategyLab(handoff, { open });
+    inputWarning = "";
+  }
+
+  function equityRowFromPreview(row: ResearchPreviewRow): EquityStrategyRow {
+    return {
+      symbol: row.symbol,
+      label: row.symbol,
+      defaultWeight: row.normalizedWeight,
+      sourceProvider: result?.source_provider ?? null
+    };
+  }
+
+  function equityRowFromConstituent(row: ResearchConstituent): EquityStrategyRow {
+    const symbol = String(row.display_symbol ?? row.symbol ?? "").trim().toUpperCase();
+    return {
+      symbol,
+      label: symbol,
+      defaultWeight: row.weight,
+      sourceProvider: result?.source_provider ?? null
+    };
+  }
+
+  function contextMenuPosition(event: MouseEvent | KeyboardEvent) {
+    if (event instanceof MouseEvent && event.type === "contextmenu") {
+      return { x: event.clientX, y: event.clientY };
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: rect.left + 12, y: rect.top + Math.min(rect.height, 32) };
+  }
+
+  function openEquityStrategyMenu(event: MouseEvent | KeyboardEvent, row: EquityStrategyRow) {
+    if (!row.symbol) {
+      return;
+    }
+    event.preventDefault();
+    onSelectEquity?.(row.symbol, row.label);
+    const position = contextMenuPosition(event);
+    equityStrategyContextMenu = { open: true, x: position.x, y: position.y, row };
+  }
+
+  function handleEquityRowKeydown(event: KeyboardEvent, row: EquityStrategyRow) {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      openEquityStrategyMenu(event, row);
+    }
+  }
+
+  function handleEquityStrategyMenuSelect(action: string) {
+    const row = equityStrategyContextMenu.row;
+    if (!row) {
+      return;
+    }
+    sendEquityRowToStrategyLab(row, action === "add-open");
+  }
+
+  function closeEquityStrategyMenu() {
+    equityStrategyContextMenu = { ...equityStrategyContextMenu, open: false };
   }
 
   function acceptStrategyHandoff(item: StrategyLabHandoffQueueItem) {
@@ -1959,7 +2048,13 @@
             <tbody>
               {#if constituentRows.length}
                 {#each constituentRows as constituent}
-                  <tr>
+                  {@const equityRow = equityRowFromConstituent(constituent)}
+                  <tr
+                    tabindex="0"
+                    aria-label={`Strategy actions for ${equityRow.label}`}
+                    on:contextmenu={(event) => openEquityStrategyMenu(event, equityRow)}
+                    on:keydown={(event) => handleEquityRowKeydown(event, equityRow)}
+                  >
                     <td>{constituent.display_symbol ?? constituent.symbol}</td>
                     <td>{pct(constituent.weight)}</td>
                     <td>{pct(constituent.total_return)}</td>
@@ -2077,7 +2172,13 @@
               <tbody>
                 {#if previewRows.length}
                   {#each previewRows as row}
-                    <tr>
+                    {@const equityRow = equityRowFromPreview(row)}
+                    <tr
+                      tabindex="0"
+                      aria-label={`Strategy actions for ${equityRow.label}`}
+                      on:contextmenu={(event) => openEquityStrategyMenu(event, equityRow)}
+                      on:keydown={(event) => handleEquityRowKeydown(event, equityRow)}
+                    >
                       <td>{row.symbol}</td>
                       <td>{fmt(row.inputWeight, 4)}</td>
                       <td>{pct(row.normalizedWeight)}</td>
@@ -2840,6 +2941,19 @@
       </aside>
     </div>
   {/if}
+
+  <CompactContextMenu
+    open={equityStrategyContextMenu.open}
+    x={equityStrategyContextMenu.x}
+    y={equityStrategyContextMenu.y}
+    label="Equity Research Strategy Lab actions"
+    items={[
+      { id: "add", label: "Add to Strategy", disabled: !onSendToStrategyLab },
+      { id: "add-open", label: "Add and Open", disabled: !onSendToStrategyLab }
+    ]}
+    onSelect={handleEquityStrategyMenuSelect}
+    onClose={closeEquityStrategyMenu}
+  />
 </section>
 
 <style>

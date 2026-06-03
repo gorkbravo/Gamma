@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
     CommodityCurveSnapshot,
@@ -110,6 +111,12 @@
   let scatterShellEl: HTMLElement | null = null;
   let tooltipPoint: (typeof scatterState.points)[0] | null = null;
   let tooltipPos = { x: 0, y: 0 };
+  let strategyContextMenu = {
+    open: false,
+    x: 0,
+    y: 0,
+    summary: null as CommodityMarketSummary | null
+  };
 
   function handleScatterMouseMove(event: MouseEvent) {
     if (!scatterShellEl) return;
@@ -166,6 +173,78 @@
       { sourceMode: mode }
     );
     onSendToStrategyLab(handoff, { open });
+  }
+
+  function sendCommodityRowToStrategyLab(summary: CommodityMarketSummary, open = false) {
+    if (!onSendToStrategyLab) {
+      return;
+    }
+    const instrumentId = summary.instrument.instrument_id;
+    const handoff = buildCommodityStrategyHandoff(
+      {
+        instrument: summary.instrument,
+        summary,
+        history: findSelectedHistory(workspace, instrumentId),
+        curve: findSelectedCurve(workspace, instrumentId),
+        workspace,
+        sourceMode: mode
+      },
+      { sourceMode: mode }
+    );
+    onSendToStrategyLab(handoff, { open });
+  }
+
+  function contextMenuPosition(event: MouseEvent | KeyboardEvent) {
+    if (event instanceof MouseEvent && event.type === "contextmenu") {
+      return { x: event.clientX, y: event.clientY };
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: rect.left + 12, y: rect.top + Math.min(rect.height, 32) };
+  }
+
+  function openCommodityStrategyMenu(event: MouseEvent | KeyboardEvent, summary: CommodityMarketSummary) {
+    event.preventDefault();
+    selectedInstrumentId = summary.instrument.instrument_id;
+    const position = contextMenuPosition(event);
+    strategyContextMenu = { open: true, x: position.x, y: position.y, summary };
+  }
+
+  function openCommodityOverviewStrategyMenu(
+    event: MouseEvent | KeyboardEvent,
+    row: { instrumentId: string; symbol: string }
+  ) {
+    const summary = findSelectedSummary(workspace, row.instrumentId);
+    if (!summary) {
+      return;
+    }
+    openCommodityStrategyMenu(event, summary);
+  }
+
+  function handleCommodityRowKeydown(event: KeyboardEvent, summary: CommodityMarketSummary) {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      openCommodityStrategyMenu(event, summary);
+    }
+  }
+
+  function handleCommodityOverviewRowKeydown(
+    event: KeyboardEvent,
+    row: { instrumentId: string; symbol: string }
+  ) {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      openCommodityOverviewStrategyMenu(event, row);
+    }
+  }
+
+  function handleStrategyMenuSelect(action: string) {
+    const summary = strategyContextMenu.summary;
+    if (!summary) {
+      return;
+    }
+    sendCommodityRowToStrategyLab(summary, action === "add-open");
+  }
+
+  function closeStrategyMenu() {
+    strategyContextMenu = { ...strategyContextMenu, open: false };
   }
 
   function findSelectedSummary(data: CommodityWorkspaceResponse | null, instrumentId: string) {
@@ -1261,7 +1340,14 @@
               <tbody>
                 {#if overviewRows.length}
                   {#each overviewRows as row}
-                    <tr>
+                    <tr
+                      tabindex="0"
+                      aria-label={`Strategy actions for ${row.symbol}`}
+                      class:selected={row.instrumentId === selectedInstrumentId}
+                      on:click={() => selectInstrument(row.instrumentId)}
+                      on:contextmenu={(event) => openCommodityOverviewStrategyMenu(event, row)}
+                      on:keydown={(event) => handleCommodityOverviewRowKeydown(event, row)}
+                    >
                       {#if row.showFamily}
                         <td class="sector-cell" rowspan={row.familyRowspan}>{humanize(row.family)}</td>
                       {/if}
@@ -1609,7 +1695,13 @@
               <tbody>
                 {#if visibleSummaries.length}
                   {#each visibleSummaries as summary}
-                    <tr class:selected={summary.instrument.instrument_id === selectedInstrumentId}>
+                    <tr
+                      tabindex="0"
+                      aria-label={`Strategy actions for ${summary.instrument.symbol}`}
+                      class:selected={summary.instrument.instrument_id === selectedInstrumentId}
+                      on:contextmenu={(event) => openCommodityStrategyMenu(event, summary)}
+                      on:keydown={(event) => handleCommodityRowKeydown(event, summary)}
+                    >
                       <td>
                         <button
                           class="market-button"
@@ -2253,6 +2345,19 @@
       <p>{loading ? "Gamma is preparing the commodities workspace." : "No commodities payload is loaded yet."}</p>
     </article>
   {/if}
+
+  <CompactContextMenu
+    open={strategyContextMenu.open}
+    x={strategyContextMenu.x}
+    y={strategyContextMenu.y}
+    label="Commodity Strategy Lab actions"
+    items={[
+      { id: "add", label: "Add to Strategy", disabled: !onSendToStrategyLab },
+      { id: "add-open", label: "Add and Open", disabled: !onSendToStrategyLab }
+    ]}
+    onSelect={handleStrategyMenuSelect}
+    onClose={closeStrategyMenu}
+  />
 </section>
 
 <style>

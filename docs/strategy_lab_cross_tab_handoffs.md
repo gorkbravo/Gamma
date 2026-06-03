@@ -23,6 +23,7 @@ Current snapshot:
 | Equity Research `+ Strategy` action | Verified | Equity Research Scope can queue or open a selected ticker into Strategy Lab as a listed-equity return leg. |
 | Commodities `+ Strategy` action | Verified | Commodities Matrix can queue or open the selected instrument into Strategy Lab as a commodity proxy return leg. |
 | Macro `Use as Lens` action | Verified | Macro can queue or open the active region/timeframe/theme/mode context into Strategy Lab as a read-only lens. |
+| Shared right-click instrument handoff menu | Implemented | Prediction Markets contract rows, Equity Research scope/constituent rows, and Commodities matrix/market rows expose a shared compact Strategy Lab context menu with `Add to Strategy` and `Add and Open`, plus `Shift+F10` / context-menu-key fallback. Browser validation confirmed row menu dispatch; live Equity/Commodity resolver acceptance was blocked by provider/history availability in the current session. |
 | Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts, Equity Research tickers, Commodities instruments, and Macro lens context into Strategy Lab-ready objects. |
 | Composer draft ingestion from handoff | Verified | Accepted resolved return-leg handoffs become editable composer rows; accepted Macro lenses attach as read-only context and pass through composition results. |
 | Tab-by-tab capability matrix | In progress | Prediction Markets, Equity Research, Commodities, and Macro are wired; remaining tabs still need concrete handoff implementations. |
@@ -56,7 +57,8 @@ The core flow is:
 
 ```text
 Source tab selection
-  -> Add to Strategy Lab action
+  -> right-click selected instrument row
+  -> Add to Strategy / Add and Open context-menu action
   -> shared handoff envelope
   -> backend resolver
   -> Strategy Lab inbound queue
@@ -184,16 +186,16 @@ The queue should persist across route changes and ideally across reloads with lo
 
 ### Source Tab
 
-Place actions close to the selected object, usually in detail panel headers or compact action bars.
+For instrument-like objects shown in tables or lists, the default handoff interaction is row right-click. When the user hovers or focuses a row and opens its context menu, Gamma should show a small dense action widget with:
 
-Preferred controls:
+- `Add to Strategy`: queue the exact row object and show a lightweight confirmation.
+- `Add and Open`: queue the exact row object, navigate to Strategy Lab composer mode, and resolve pending handoffs.
 
-- `+ Strategy`: queue the object and show a toast.
-- `Add & Open`: queue the object and navigate to Strategy Lab.
-- `Use as Benchmark`: for benchmark-capable objects.
-- `Use as Lens`: for regime/window objects.
+The row should provide the selected entity identity directly: ticker, futures/commodity contract or proxy id, prediction-market contract and side, option contract key, crypto token, rate/fx instrument, or other provider-native id. Backend resolvers remain responsible for loading history, transforming value kinds, and emitting warnings/provenance.
 
-Avoid putting heavyweight action buttons on every dense table row unless the row already has an action menu. In tables, prefer selected-row batch actions or row overflow menus.
+Right-click must not be the only accessible path. Add a keyboard/action fallback for the same focused or selected row, such as a compact row action button, row action menu, or `Shift+F10`/context-menu-key support. Existing visible `+ Strategy`, `Add & Open`, `Use as Benchmark`, and `Use as Lens` controls may remain as temporary fallback or for non-tabular contexts.
+
+Macro lens/context handoffs are the exception to the row-instrument rule. Macro can keep header-level `Use as Lens` / `Lens & Open` actions until Macro exposes concrete tabular regime/window rows.
 
 ### Strategy Lab
 
@@ -225,13 +227,14 @@ Prediction Markets should be the first source tab because it tests the hardest s
 ### User Flow
 
 1. User opens Prediction Markets.
-2. User selects a contract.
-3. Detail panel shows `+ Strategy` and `Add & Open`.
-4. User clicks `Add & Open`.
-5. Gamma creates a handoff envelope with the selected market id, venue, native id, provider, probability history capability, and warnings.
-6. Strategy Lab opens in composer mode.
-7. Resolver loads probability history.
-8. Composer receives an editable prediction-market leg.
+2. User hovers or focuses a contract row.
+3. User right-clicks the row.
+4. Context menu shows `Add to Strategy` and `Add and Open`.
+5. User clicks `Add and Open`.
+6. Gamma creates a handoff envelope with the selected market id, venue, native id, provider, probability history capability, and warnings.
+7. Strategy Lab opens in composer mode.
+8. Resolver loads probability history.
+9. Composer receives an editable prediction-market leg.
 
 ### Required Semantics
 
@@ -258,14 +261,14 @@ Warnings should be explicit when:
 
 | Source Tab | Initial Action | Default Capability | Initial Status | Notes |
 | --- | --- | --- | --- | --- |
-| Prediction Markets | `+ Strategy` on selected contract | `return_leg` or `overlay` | Verified | First pass resolves selected contract probability history into an editable Strategy Lab prediction leg. |
-| Equity Research | `+ Strategy` / `Add & Open` for selected ticker | `return_leg` | Verified | First pass resolves selected ticker history through listed-market providers into an editable Strategy Lab equity leg. Scope/basket handoffs remain future work. |
-| Commodities | `+ Strategy` / `Add & Open` for selected instrument/proxy | `return_leg` or `benchmark` | Verified | First pass resolves selected commodity instrument history into an editable Strategy Lab commodity leg with explicit spot/front-month/proxy, roll, stale/sparse, and provider limitation warnings. |
+| Prediction Markets | Right-click selected contract row, then `Add to Strategy` / `Add and Open` | `return_leg` or `overlay` | Verified backend, row UX implemented | First pass resolves selected contract probability history into an editable Strategy Lab prediction leg. Row context menu is now the primary contract-row interaction; detail-panel buttons remain as fallback. |
+| Equity Research | Right-click selected ticker row, then `Add to Strategy` / `Add and Open` | `return_leg` | Verified backend, row UX implemented | First pass resolves selected ticker history through listed-market providers into an editable Strategy Lab equity leg when provider history is available. Scope/basket object handoffs remain future work. |
+| Commodities | Right-click selected instrument/proxy row, then `Add to Strategy` / `Add and Open` | `return_leg` or `benchmark` | Verified backend, row UX implemented | First pass resolves selected commodity instrument history into an editable Strategy Lab commodity leg when history is adequate, with explicit spot/front-month/proxy, roll, stale/sparse, and provider limitation warnings. |
 | Macro | `Use as Lens` / `Lens & Open` for active macro context | `lens` | Verified | First pass resolves active region/timeframe/theme/mode/comparison context into a `macro_lens`, not a weighted return leg, with event/provider provenance and read-only interpretation warnings. |
-| Crypto | Add token or basket | `return_leg` or `benchmark` | Planned | Needs provider coverage and stale-data warnings. |
-| Fundamentals | Attach company case | `overlay` or `reference_only` | Planned | Ticker history may become a separate equity leg. |
+| Crypto | Right-click token row, then `Add to Strategy` / `Add and Open` | `return_leg` or `benchmark` | Planned | Needs provider coverage and stale-data warnings. |
+| Fundamentals | Right-click company/security row or attach company case | `overlay` or `reference_only` | Planned | Ticker history may become a separate equity leg. |
 | Risk | Attach scenario/stress result | `lens` or `overlay` | Planned | Useful after Strategy Lab has saved runs. |
-| IV/Options | Attach vol context | `overlay` | Planned | Underlying can become an equity/ETF leg separately. |
+| IV/Options | Right-click option-chain contract row or attach vol context | `overlay` or `return_leg` | Planned | Specific option contracts should be row-addressable; underlying can become an equity/ETF leg separately. |
 | Copilot | Summarize or explain active handoff | `reference_only` | Planned | Copilot can later propose handoffs, but user should confirm. |
 
 ## Implementation Board
@@ -285,7 +288,8 @@ Update this board as work lands.
 | SLH-009 | Add Equity Research selected ticker/scope handoff. | Codex | Verified | Backend/API tests cover selected ticker resolution; browser flow sent AAPL from Equity Research Scope with `Add & Open`, accepted the resolved row, and composed the portfolio. Scope/basket handoffs remain open. |
 | SLH-010 | Add Commodities selected instrument handoff. | Codex | Verified | Backend/API/frontend tests cover resolved and unsupported commodity handoffs; browser flow sent WTI from Commodities with `Add & Open`, accepted the resolved row, and composed the portfolio with warnings/provenance visible. |
 | SLH-011 | Add Macro lens handoff. | Codex | Verified | Backend/API/frontend tests cover Macro lens resolution and reference-only downgrade behavior; browser flow sent active Macro context with `Lens & Open`, accepted the resolved lens, and composed a portfolio with the lens attached. |
-| SLH-012 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | TBD | Not started | Copilot context tests. |
+| SLH-012 | Add shared right-click Strategy handoff menu for instrument rows. | Codex | Implemented | `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`; `npm run test -- src/lib/stores/app.test.ts`; `npm run test -- src/components/CompactContextMenu.test.ts src/views/CommoditiesView.test.ts`; browser verified row menus on Prediction Markets, Equity Research, and Commodities with provider caveats noted below. |
+| SLH-013 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | TBD | Not started | Copilot context tests. |
 
 ## Inspection Workflow
 
@@ -305,15 +309,16 @@ Anyone resuming implementation should inspect progress in this order:
 4. Inspect cross-tab envelope and navigation code in:
    - `frontend/src/lib/api/types.ts`
    - `frontend/src/App.svelte`
-5. Inspect Prediction Markets selection state in:
+5. Inspect existing table/list row components and any local context-menu primitives before adding new UI.
+6. Inspect Prediction Markets selection state in:
    - `frontend/src/lib/stores/app.ts`
    - `frontend/src/views/PredictionMarketsView.svelte`
    - `src/api/routes/prediction_markets.py`
    - `src/services/prediction_market_adapters.py`
-6. Implement the smallest next board item.
-7. Run focused backend and frontend tests.
-8. If UI changed, verify the local browser flow.
-9. Update this document's status snapshot and implementation board.
+7. Implement the smallest next board item.
+8. Run focused backend and frontend tests.
+9. If UI changed, verify the local browser flow.
+10. Update this document's status snapshot and implementation board.
 
 ## Validation Plan
 
@@ -334,13 +339,27 @@ npm run test -- src/lib/stores/app.test.ts
 Browser:
 
 - Open the app locally.
-- For Prediction Markets: select a contract, choose a side, click `Add & Open`, confirm Strategy Lab opens, accept the resolved prediction-market row, run composition, and confirm warnings/provenance are visible.
-- For Equity Research: open Scope, confirm a selected ticker is present, click `Add & Open`, confirm Strategy Lab opens, accept the resolved equity row, run composition, and confirm warnings/provenance are visible.
-- For Commodities: select an instrument, click `Add & Open`, confirm Strategy Lab opens, accept the resolved commodity row, run composition, and confirm proxy, futures/spot, roll, provider, sparse/stale, and read-only warnings/provenance are visible.
+- For Prediction Markets: right-click a contract row, choose side when applicable, click `Add and Open`, confirm Strategy Lab opens, accept the resolved prediction-market row, run composition, and confirm warnings/provenance are visible.
+- For Equity Research: open Scope, right-click a selected ticker row, click `Add and Open`, confirm Strategy Lab opens, accept the resolved equity row, run composition, and confirm warnings/provenance are visible.
+- For Commodities: right-click an instrument/proxy row, click `Add and Open`, confirm Strategy Lab opens, accept the resolved commodity row, run composition, and confirm proxy, futures/spot, roll, provider, sparse/stale, and read-only warnings/provenance are visible.
+- For right-click UX accessibility: verify the same row handoff actions are reachable without a mouse through a row action button, context-menu key, or `Shift+F10`.
 - For Macro: open Macro, choose the active context, click `Lens & Open`, confirm Strategy Lab opens, accept the resolved lens, run composition, and confirm the attached lens, warnings, and provenance are visible.
 - Confirm no page-level horizontal overflow occurs at desktop and narrow viewport widths; horizontally scrollable dense tables are acceptable.
 
 ## Latest Validation Results
+
+Validated for SLH-012 on 2026-06-03:
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| `npm run typecheck` | Passed | Frontend typecheck passed after adding the shared compact context menu and row handlers. |
+| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 21 tests passed; existing handoff builder and resolved-draft coverage remains green. |
+| `npm run test -- src/lib/stores/app.test.ts` | Passed | 32 tests passed; existing Strategy Lab queue, resolve, accept, dismiss, and composition payload coverage remains green. |
+| `npm run test -- src/components/CompactContextMenu.test.ts src/views/CommoditiesView.test.ts` | Passed | 7 tests passed, covering shared menu render behavior and Commodities row accessibility hooks. |
+| Browser: Prediction Markets row menu | Passed with caveat | Right-clicked a contract row, selected `Add and Open`, Strategy Lab opened in Composer, the row resolved, and Accept added the prediction leg with the exact contract identity/history. `Compose Portfolio` did not produce a visible portfolio result in the current persisted browser session, despite a clean console; the accepted row remained visible in the composer. |
+| Browser: Equity Research row menu | Passed with provider caveat | Right-clicked the `AAPL` Scope Preview row and selected `Add and Open`; Strategy Lab opened with an `AAPL` pending handoff. The live resolver returned `unsupported`, so Accept/Compose could not be completed in this session. |
+| Browser: Commodities row menu | Passed with provider caveat | Verified `Shift+F10` opened the compact menu on the focused `CL` row, then right-clicked `CL` and selected `Add and Open`; Strategy Lab opened with a WTI handoff. The live official-partial commodity workspace resolved WTI as `unsupported`, so Accept/Compose could not be completed in this session. |
+| Browser: page-level overflow | Passed with viewport caveat | Desktop check showed no page-level overflow (`bodyWidth` 1596, viewport 1600). Requested a 390px viewport, but the in-app browser reported an effective minimum width of 487px; at that width no page-level overflow was present. |
 
 Validated on 2026-06-03:
 
@@ -366,7 +385,9 @@ Validated on 2026-06-02:
 
 - Prediction Markets handoffs support `long_yes_probability_return` and `long_no_probability_return`; the detail view exposes a compact YES/NO side selector before `+ Strategy` or `Add & Open`.
 - Probability histories are resolved in the backend and enter the composer as `level`/probability histories; Strategy Lab converts them to returns for read-only composition.
-- `+ Strategy` queues without navigating; `Add & Open` queues, opens Strategy Lab composer mode, and resolves pending handoffs.
+- For instrument-like rows, right-click `Add to Strategy` queues without navigating; right-click `Add and Open` queues, opens Strategy Lab composer mode, and resolves pending handoffs.
+- Existing visible `+ Strategy` / `Add & Open` buttons are fallback controls until the shared right-click menu is wired and verified across the supported row sources.
+- The shared row context menu uses the exact row object available in the source table/list: Prediction Markets screener market rows, Equity Research scope preview/constituent rows, and Commodities overview/deep market rows. The backend resolver remains responsible for history loading, transformations, provenance, and unsupported downgrades.
 - Pending handoffs persist in local storage across reloads until accepted, dismissed, or cleared.
 - Accepted handoff warnings remain visible near the editable composer row; computed-run warnings and provenance remain visible in the Strategy Lab rail.
 - Timezone-aware probability history timestamps are normalized to date-only UTC before return alignment, avoiding mixed timezone indexes.
@@ -380,7 +401,7 @@ Validated on 2026-06-02:
 
 ## Open Questions
 
-1. Should `+ Strategy` silently queue only, or should it also show a persistent queue badge/toast outside Strategy Lab?
+1. Should `Add to Strategy` from the right-click menu silently queue only, or should it also show a persistent queue badge/toast outside Strategy Lab?
 2. Should Prediction Markets add payout-aware contract PnL after the YES/NO probability-return proxy is stable?
 3. Should accepted composer draft rows be saved as named experiment drafts before a user runs composition?
 4. Should Strategy Lab save handoff bundles as named experiment drafts?
@@ -388,7 +409,8 @@ Validated on 2026-06-02:
 6. Should Equity Research synthetic scopes/baskets publish as weighted scope objects through the handoff resolver, or should they rely on saved scope objects first?
 7. Should commodity curve, spread, or benchmark handoffs wait for saved commodity objects, or should selected instruments expose separate `Use as Benchmark` and curve-overlay actions?
 8. Should Macro lenses eventually apply date-window filtering or regime segmentation to Strategy Lab metrics, or remain provenance-only until Regime Stress mode is deeper?
+9. Should the shared row context menu include future `Use as Benchmark` / `Attach as Context` slots now, or stay limited to `Add to Strategy` and `Add and Open` for the first retrofit?
 
 ## Recommended Next Step
 
-Continue with `SLH-012` Copilot context builder coverage for pending and resolved Strategy Lab handoffs. Prediction Markets, Equity Research, Commodities, and Macro now prove the return-leg and lens paths; Copilot should be able to explain those handoff queues and accepted objects without inventing execution behavior.
+Continue with `SLH-012` shared right-click Strategy handoff menu for instrument rows. Prediction Markets, Equity Research, and Commodities already prove the resolver paths; the next slice should make right-click row selection the canonical instrument-level UX before Copilot context coverage moves forward as `SLH-013`.

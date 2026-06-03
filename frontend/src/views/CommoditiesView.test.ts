@@ -29,6 +29,8 @@ describe("CommoditiesView", () => {
     expect(body).toContain("EIA Weekly Petroleum Status Report");
     expect(body).toContain("Macro Inflation");
     expect(body).toContain("Sample Commodities Dataset");
+    expect(body).toContain('aria-label="Strategy actions for CL"');
+    expect(body).toContain('tabindex="0"');
   });
 
   it("surfaces degraded provider notices without requiring inventory data", () => {
