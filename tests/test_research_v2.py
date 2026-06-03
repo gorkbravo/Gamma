@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
+from src.application.commodities_service import CommoditiesService
 from src.application.research_service import ResearchService
 from src.application.runtime import build_runtime
 from src.application.research_validation import ResearchValidationError
@@ -32,6 +33,7 @@ from src.models.research_lab import (
 from src.models.prediction_markets import PredictionMarketFreshness, PredictionMarketRecord, PredictionProbabilityPoint
 from src.models.provenance import FreshnessLabel
 from src.services.research_market_data import ResearchHistoryResult
+from src.services.commodities_adapters import SampleCommoditiesDataProvider
 from src.services.saved_research_store import SavedResearchStore
 
 
@@ -470,6 +472,126 @@ def test_strategy_lab_resolves_equity_research_handoff_to_draft_leg(tmp_path):
     assert result.provenance["transformation"] == "listed_equity_return_stream"
     assert result.provenance["history_points"] == 5
     assert any("read-only Strategy Lab analysis" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_resolves_commodity_handoff_to_draft_leg(tmp_path):
+    service = _service(tmp_path)
+    commodities_service = CommoditiesService(provider=SampleCommoditiesDataProvider())
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="commodities",
+                source_mode="overview",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="commodity_instrument",
+                    label="WTI Crude Oil",
+                    normalized_id="wti",
+                    provider_id="CL",
+                    native_id="CL",
+                ),
+                resolver_capability="return_leg",
+                asset_class="commodity",
+                value_kind="price",
+                default_side="long",
+                default_weight=0.1,
+                provider="sample_data",
+                normalized_ids={"instrument_id": "wti"},
+                timestamp="2026-03-01T00:00:00Z",
+            )
+        ),
+        commodities_service=commodities_service,
+    )
+
+    assert result.status == "resolved"
+    assert result.resolved_capability == "return_leg"
+    assert result.composer_draft_leg is not None
+    assert result.composer_draft_leg.asset_class == "commodity"
+    assert result.composer_draft_leg.identifier == "wti"
+    assert result.composer_draft_leg.value_kind == "return"
+    assert len(result.composer_draft_leg.return_points) >= 5
+    assert result.provenance["transformation"] == "commodity_price_level_to_return_stream"
+    assert result.provenance["instrument_id"] == "wti"
+    assert any("read-only Strategy Lab research" in warning for warning in result.warnings)
+    assert any("roll-adjusted strategy performance" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_unsupported_commodity_handoff_returns_reference_only(tmp_path):
+    service = _service(tmp_path)
+
+    class ThinCommoditiesService:
+        def get_workspace(self, request):
+            point = SimpleNamespace(
+                timestamp=datetime(2026, 1, 2, tzinfo=timezone.utc),
+                value=100.0,
+            )
+            instrument = SimpleNamespace(
+                instrument_id="thin",
+                symbol="THN",
+                name="Thin Commodity",
+                family="energy",
+                subgroup="test",
+                quote_unit="USD/unit",
+                source_provider="fixture",
+                front_symbol="THN",
+                exchange="TEST",
+            )
+            history = SimpleNamespace(
+                instrument_id="thin",
+                label="Thin Commodity",
+                unit="USD/unit",
+                points=[point],
+                source_provider="fixture",
+                retrieved_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+                origin="tests.thin_commodity",
+            )
+            return SimpleNamespace(
+                selected_instrument_id=request.selected_instrument_id,
+                instruments=[instrument],
+                price_histories=[history],
+                market_summaries=[],
+                curves=[],
+                warnings=[],
+                source_provider="fixture",
+                retrieved_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+                origin="tests.thin_commodity",
+                coverage=SimpleNamespace(coverage_status="partial", provider_label="Fixture"),
+            )
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="commodities",
+                source_mode="overview",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="commodity_instrument",
+                    label="Thin Commodity",
+                    normalized_id="thin",
+                    provider_id="THN",
+                    native_id="THN",
+                ),
+                resolver_capability="return_leg",
+                asset_class="commodity",
+                value_kind="price",
+                default_side="long",
+                default_weight=0.1,
+                provider="fixture",
+                normalized_ids={"instrument_id": "thin"},
+                timestamp="2026-03-01T00:00:00Z",
+            )
+        ),
+        commodities_service=ThinCommoditiesService(),
+    )
+
+    assert result.status == "unsupported"
+    assert result.resolved_capability == "reference_only"
+    assert result.composer_draft_leg is None
+    assert result.unsupported_reason == "Commodity handoff needs at least five computable return observations from price history."
+    assert any("too sparse" in warning for warning in result.warnings)
 
 
 def test_strategy_lab_ignores_thin_optional_benchmark_overlap(tmp_path):

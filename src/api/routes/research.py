@@ -120,6 +120,7 @@ def resolve_strategy_lab_handoff(
         result = runtime.research_service.resolve_strategy_lab_handoff(
             payload.to_domain(),
             prediction_market_service=runtime.prediction_market_service,
+            commodities_service=runtime.commodities_service,
         )
     except ResearchValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc

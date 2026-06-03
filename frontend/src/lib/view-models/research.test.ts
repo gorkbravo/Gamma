@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ResearchResult } from "../api/types";
 import {
+  buildCommodityStrategyHandoff,
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
   buildEquityStrategyHandoff,
@@ -362,6 +363,74 @@ describe("research view model helpers", () => {
     expect(handoff.provider).toBe("fixture");
     expect(handoff.normalized_ids.symbol).toBe("MSFT");
     expect(handoff.warnings.join(" ")).toContain("read-only research return streams");
+  });
+
+  it("builds commodity strategy handoffs for selected instruments", () => {
+    const instrument = {
+      instrument_id: "wti",
+      symbol: "CL",
+      name: "WTI Crude Oil",
+      family: "energy",
+      subgroup: "crude",
+      quote_unit: "USD/bbl",
+      currency: "USD",
+      exchange: "NYMEX",
+      front_symbol: "CL",
+      provider_symbols: { sample_data: "CL" },
+      aliases: ["wti"],
+      description: "Crude oil proxy",
+      source_provider: "sample_data",
+      retrieved_at: "2026-03-01T00:00:00Z",
+      origin: "sample",
+      transformation_note: null
+    };
+    const handoff = buildCommodityStrategyHandoff({
+      instrument,
+      history: {
+        instrument_id: "wti",
+        label: "WTI Crude Oil",
+        unit: "USD/bbl",
+        points: [
+          {
+            instrument_id: "wti",
+            timestamp: "2026-02-01T00:00:00Z",
+            value: 72,
+            unit: "USD/bbl",
+            source_provider: "sample_data",
+            retrieved_at: "2026-03-01T00:00:00Z",
+            origin: "sample",
+            transformation_note: null
+          },
+          {
+            instrument_id: "wti",
+            timestamp: "2026-03-01T00:00:00Z",
+            value: 75,
+            unit: "USD/bbl",
+            source_provider: "sample_data",
+            retrieved_at: "2026-03-01T00:00:00Z",
+            origin: "sample",
+            transformation_note: null
+          }
+        ],
+        source_provider: "sample_data",
+        retrieved_at: "2026-03-01T00:00:00Z",
+        origin: "sample",
+        transformation_note: null
+      },
+      sourceMode: "overview"
+    });
+
+    expect(handoff.source_tab).toBe("commodities");
+    expect(handoff.source_mode).toBe("overview");
+    expect(handoff.intended_target_tab).toBe("strategy_lab");
+    expect(handoff.selected_entity.entity_type).toBe("commodity_instrument");
+    expect(handoff.selected_entity.normalized_id).toBe("wti");
+    expect(handoff.resolver_capability).toBe("return_leg");
+    expect(handoff.asset_class).toBe("commodity");
+    expect(handoff.value_kind).toBe("price");
+    expect(handoff.default_side).toBe("long");
+    expect(handoff.normalized_ids.instrument_id).toBe("wti");
+    expect(handoff.warnings.join(" ")).toContain("not roll-adjusted futures strategies");
   });
 
   it("includes normalized weights in synthetic scope research object ids", () => {

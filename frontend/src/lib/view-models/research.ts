@@ -1,5 +1,10 @@
 import type {
   EquityResearchMode,
+  CommodityCurveSnapshot,
+  CommodityInstrument,
+  CommodityMarketSummary,
+  CommodityPriceHistory,
+  CommodityWorkspaceResponse,
   GammaResearchObject,
   ResearchConstituent,
   ResearchCoverage,
@@ -269,6 +274,92 @@ export function buildEquityStrategyHandoff(
     ],
     normalized_ids: {
       symbol
+    },
+    timestamp: new Date().toISOString()
+  };
+}
+
+export function buildCommodityStrategyHandoff(
+  commodity: {
+    instrument: CommodityInstrument;
+    summary?: CommodityMarketSummary | null;
+    history?: CommodityPriceHistory | null;
+    curve?: CommodityCurveSnapshot | null;
+    workspace?: CommodityWorkspaceResponse | null;
+    provider?: string | null;
+    sourceMode?: string | null;
+  },
+  options: { sourceMode?: string | null; defaultWeight?: number } = {}
+): StrategyLabHandoffEnvelope {
+  const instrument = commodity.instrument;
+  const history = commodity.history ?? null;
+  const curve = commodity.curve ?? null;
+  const workspace = commodity.workspace ?? null;
+  const provider = commodity.provider || history?.source_provider || instrument.source_provider || workspace?.source_provider || null;
+  const sourceMode = options.sourceMode ?? commodity.sourceMode ?? "overview";
+  const warnings = [
+    "Commodity handoffs enter Strategy Lab as read-only research return streams, not execution instructions.",
+    "Resolver will convert loaded commodity price/proxy history to returns and preserve futures, spot, proxy, and provider caveats.",
+    "Commodity rows are not roll-adjusted futures strategies and do not model executable PnL."
+  ];
+  if (!history?.points.length) {
+    warnings.push("Selected commodity has no loaded price history; resolver may attach it as reference-only.");
+  } else if (history.points.length < 6) {
+    warnings.push("Selected commodity history is sparse; resolver may reject it as reference-only.");
+  }
+  if (workspace?.coverage.coverage_status && workspace.coverage.coverage_status !== "live") {
+    warnings.push(`Commodity coverage is ${workspace.coverage.coverage_status}; review provider/source limitations.`);
+  }
+  if (curve?.warnings.length) {
+    warnings.push(...curve.warnings.slice(0, 3));
+  }
+
+  return {
+    source_tab: "commodities",
+    source_mode: sourceMode,
+    intended_target_tab: "strategy_lab",
+    intended_target_mode: "composer",
+    selected_entity: {
+      entity_type: "commodity_instrument",
+      label: instrument.name,
+      normalized_id: instrument.instrument_id,
+      provider_id: instrument.front_symbol ?? instrument.provider_symbols[provider ?? ""] ?? instrument.symbol,
+      native_id: instrument.front_symbol ?? instrument.symbol,
+      metadata: {
+        symbol: instrument.symbol,
+        family: instrument.family,
+        subgroup: instrument.subgroup,
+        quote_unit: instrument.quote_unit,
+        currency: instrument.currency,
+        exchange: instrument.exchange,
+        front_symbol: instrument.front_symbol,
+        curve_state: commodity.summary?.curve_state ?? curve?.shape_label ?? null,
+        history_points: history?.points.length ?? 0
+      }
+    },
+    resolver_capability: "return_leg",
+    asset_class: "commodity",
+    value_kind: "price",
+    default_side: "long",
+    default_weight: options.defaultWeight ?? 0.1,
+    selected_timeframe: history?.points.length
+      ? {
+          label: "Loaded commodity history",
+          start: history.points[0]?.timestamp ?? null,
+          end: history.points.at(-1)?.timestamp ?? null
+        }
+      : null,
+    provider,
+    source: {
+      origin: history?.origin ?? instrument.origin ?? workspace?.origin ?? null,
+      retrieved_at: history?.retrieved_at ?? instrument.retrieved_at ?? workspace?.retrieved_at ?? null,
+      coverage_status: workspace?.coverage.coverage_status ?? null,
+      source_provider: workspace?.source_provider ?? provider
+    },
+    warnings,
+    normalized_ids: {
+      instrument_id: instrument.instrument_id,
+      symbol: instrument.symbol
     },
     timestamp: new Date().toISOString()
   };

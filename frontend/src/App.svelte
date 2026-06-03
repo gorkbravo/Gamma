@@ -2302,6 +2302,7 @@
             onLoadWorkspace={loadCommoditiesWorkspace}
             macroHistories={$macroSeriesHistories}
             onLoadMacroSeries={loadMacroSeriesHistory}
+            onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {:else if $activeTab === "prediction_markets"}
           <svelte:component

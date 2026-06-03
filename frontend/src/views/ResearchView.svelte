@@ -536,7 +536,7 @@
       return;
     }
     portfolioDraftLegs = [...portfolioDraftLegs, draftLeg];
-    acceptedHandoffWarnings = [...acceptedHandoffWarnings, ...resolved.warnings].slice(-12);
+    acceptedHandoffWarnings = [...resolved.warnings, ...acceptedHandoffWarnings].slice(0, 12);
     onAcceptStrategyLabHandoff?.(item.id);
     strategyInputWarning = "";
   }
@@ -2319,7 +2319,7 @@
             {/if}
             {#if acceptedHandoffWarnings.length}
               <div class="warning-list compact-warning-list">
-                {#each acceptedHandoffWarnings.slice(-5) as warning}
+                {#each acceptedHandoffWarnings.slice(0, 5) as warning}
                   <span>{warning}</span>
                 {/each}
               </div>

@@ -10,9 +10,11 @@
     CommodityPriceHistory,
     CommoditySpreadSnapshot,
     MacroSeriesHistory,
+    StrategyLabHandoffEnvelope,
     CommodityWorkspaceResponse
   } from "../lib/api/types";
   import type { CommodityWorkspaceLoadOptions } from "../lib/stores/app";
+  import { buildCommodityStrategyHandoff } from "../lib/view-models/research";
 
   export let workspace: CommodityWorkspaceResponse | null = null;
   export let loading = false;
@@ -20,6 +22,9 @@
   export let onLoadWorkspace: (options?: CommodityWorkspaceLoadOptions) => Promise<unknown> | void;
   export let macroHistories: Record<string, MacroSeriesHistory> = {};
   export let onLoadMacroSeries: (seriesId: string, options?: { region?: string; timeframe?: string; forceRefresh?: boolean }) => Promise<unknown> | void = () => undefined;
+  export let onSendToStrategyLab:
+    | ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void)
+    | undefined = undefined;
 
   const modes: Array<{ id: CommodityMode; label: string }> = [
     { id: "overview", label: "Overview" },
@@ -143,6 +148,24 @@
     }
     selectedInstrumentId = instrumentId;
     await refresh(mode, false, instrumentId);
+  }
+
+  function sendSelectedCommodityToStrategyLab(open = false) {
+    if (!selectedInstrument || !onSendToStrategyLab) {
+      return;
+    }
+    const handoff = buildCommodityStrategyHandoff(
+      {
+        instrument: selectedInstrument,
+        summary: selectedSummary,
+        history: selectedHistory,
+        curve: selectedCurve,
+        workspace,
+        sourceMode: mode
+      },
+      { sourceMode: mode }
+    );
+    onSendToStrategyLab(handoff, { open });
   }
 
   function findSelectedSummary(data: CommodityWorkspaceResponse | null, instrumentId: string) {
@@ -1139,6 +1162,25 @@
         <span class="subtitle">{workspace.coverage.provider_label} · as of {formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)}</span>
       {/if}
       {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if workspace && selectedInstrument}
+        <div class="handoff-actions" aria-label="Strategy Lab commodity handoff actions">
+          <button
+            type="button"
+            class="ghost-action"
+            on:click={() => sendSelectedCommodityToStrategyLab(false)}
+            disabled={loading || !onSendToStrategyLab}
+          >
+            + Strategy
+          </button>
+          <button
+            type="button"
+            on:click={() => sendSelectedCommodityToStrategyLab(true)}
+            disabled={loading || !onSendToStrategyLab}
+          >
+            Add & Open
+          </button>
+        </div>
+      {/if}
       <button type="button" class="refresh-button" on:click={() => refresh(mode, true)} disabled={loading || !workspace}>
         {loading ? "LOADING..." : "Refresh"}
       </button>
@@ -2266,6 +2308,24 @@
     font-size: 9.5px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
+  }
+
+  .handoff-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+  }
+
+  .handoff-actions button {
+    min-height: 25px;
+    padding: 4px 8px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .handoff-actions .ghost-action {
+    background: transparent;
   }
 
   .refresh-button {

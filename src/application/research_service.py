@@ -23,6 +23,7 @@ from src.analytics.research_returns import (
 )
 from src.analytics.returns import align_prices, compute_returns
 from src.analytics.risk_metrics import compute_weights, max_drawdown, portfolio_returns, realized_vol
+from src.application.commodities_service import CommodityWorkspaceRequest
 from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.research_validation import ResearchValidationError, ensure_valid_research_scope
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
@@ -560,12 +561,17 @@ class ResearchService:
         request: StrategyLabHandoffResolveRequest,
         *,
         prediction_market_service: Any | None = None,
+        commodities_service: Any | None = None,
     ) -> StrategyLabResolvedHandoff:
         handoff = request.handoff
         if handoff.intended_target_tab != "strategy_lab":
             raise ResearchValidationError(["Strategy Lab handoff resolver only accepts strategy_lab targets."])
         if handoff.source_tab == "equity_research":
             return self._resolve_equity_research_strategy_handoff(handoff)
+        if handoff.source_tab == "commodities":
+            if commodities_service is None:
+                raise ResearchValidationError(["Commodities resolver is unavailable in this runtime."])
+            return self._resolve_commodity_strategy_handoff(handoff, commodities_service)
         if handoff.source_tab != "prediction_markets":
             return StrategyLabResolvedHandoff(
                 handoff_id=self._handoff_id(handoff),
@@ -643,6 +649,164 @@ class ResearchService:
             provider_summary=research_object.provider_summary,
             provenance=self._equity_handoff_provenance(research_object, symbol),
             warnings=list(dict.fromkeys(warnings + research_object.warnings)),
+        )
+
+    def _resolve_commodity_strategy_handoff(self, handoff, commodities_service: Any) -> StrategyLabResolvedHandoff:
+        instrument_id = (
+            handoff.normalized_ids.get("instrument_id")
+            or handoff.selected_entity.normalized_id
+            or handoff.selected_entity.provider_id
+            or handoff.selected_entity.native_id
+        )
+        instrument_id = str(instrument_id or "").strip().lower()
+        if not instrument_id:
+            raise ResearchValidationError(["Commodity handoff is missing an instrument id."])
+
+        workspace = commodities_service.get_workspace(
+            CommodityWorkspaceRequest(mode="overview", selected_instrument_id=instrument_id)
+        )
+        resolved_id = str(getattr(workspace, "selected_instrument_id", instrument_id) or instrument_id)
+        instrument = next(
+            (row for row in getattr(workspace, "instruments", []) if getattr(row, "instrument_id", None) == resolved_id),
+            None,
+        )
+        history = next(
+            (row for row in getattr(workspace, "price_histories", []) if getattr(row, "instrument_id", None) == resolved_id),
+            None,
+        )
+        summary = next(
+            (
+                row
+                for row in getattr(workspace, "market_summaries", [])
+                if getattr(getattr(row, "instrument", None), "instrument_id", None) == resolved_id
+            ),
+            None,
+        )
+        curve = next(
+            (row for row in getattr(workspace, "curves", []) if getattr(row, "instrument_id", None) == resolved_id),
+            None,
+        )
+        label = str(
+            getattr(instrument, "name", None)
+            or getattr(history, "label", None)
+            or getattr(handoff.selected_entity, "label", None)
+            or resolved_id.upper()
+        ).strip()
+        provider = (
+            getattr(history, "source_provider", None)
+            or getattr(instrument, "source_provider", None)
+            or getattr(workspace, "source_provider", None)
+            or handoff.provider
+        )
+        warnings = list(handoff.warnings)
+        warnings.extend(
+            [
+                "Commodity handoff resolved for read-only Strategy Lab research only.",
+                "Loaded commodity price history is treated as a spot/front-month/proxy level; it is not an executable futures PnL series.",
+                "Strategy Lab converts commodity levels to percentage returns and does not claim roll-adjusted strategy performance.",
+            ]
+        )
+        coverage = getattr(workspace, "coverage", None)
+        coverage_status = str(getattr(coverage, "coverage_status", "") or "").lower()
+        if coverage_status in {"sample", "mock", "official_partial", "partial", "unavailable"}:
+            warnings.append(f"Commodity provider coverage is {coverage_status or 'limited'}; review source/proxy limitations.")
+        warnings.extend(getattr(workspace, "warnings", []) or [])
+        warnings.extend(getattr(summary, "warnings", []) or [])
+        warnings.extend(getattr(curve, "warnings", []) or [])
+
+        prices: dict[pd.Timestamp, float] = {}
+        invalid_points = 0
+        for point in getattr(history, "points", []) if history is not None else []:
+            timestamp = pd.to_datetime(getattr(point, "timestamp", None), errors="coerce")
+            value = getattr(point, "value", None)
+            try:
+                price = float(value)
+            except (TypeError, ValueError):
+                invalid_points += 1
+                continue
+            if pd.isna(timestamp) or not math.isfinite(price) or price <= 0:
+                invalid_points += 1
+                continue
+            prices[self._normalize_return_point_date(timestamp)] = price
+        if invalid_points:
+            warnings.append(f"Dropped {invalid_points} commodity history point(s) with invalid timestamps or prices.")
+
+        price_series = pd.Series(prices).sort_index().astype(float) if prices else pd.Series(dtype=float)
+        returns = clean_return_series(price_series.pct_change().dropna())
+        points = [
+            ResearchObjectReturnPoint(timestamp=pd.Timestamp(index).isoformat(), value=float(value))
+            for index, value in returns.items()
+        ]
+        if len(points) < 20:
+            warnings.append("Commodity history is sparse; Strategy Lab analytics may be unstable.")
+        self._append_commodity_staleness_warning(warnings, price_series, history, workspace)
+
+        provenance = self._commodity_handoff_provenance(
+            workspace=workspace,
+            instrument=instrument,
+            history=history,
+            curve=curve,
+            instrument_id=resolved_id,
+            transformation="commodity_price_level_to_return_stream",
+            return_points=len(points),
+        )
+        if len(points) < 5:
+            return StrategyLabResolvedHandoff(
+                handoff_id=self._handoff_id(handoff),
+                envelope=handoff,
+                status="unsupported",
+                resolved_capability="reference_only",
+                provider_summary=provider,
+                provenance=provenance,
+                warnings=list(dict.fromkeys(warnings + ["Commodity price history is too sparse to create a return leg."])),
+                unsupported_reason="Commodity handoff needs at least five computable return observations from price history.",
+            )
+
+        research_object = GammaResearchObject(
+            object_id=f"commodities:{resolved_id}:return_stream:{points[0].timestamp}:{points[-1].timestamp}",
+            object_type="commodity_return_stream",
+            display_name=f"{label} commodity return stream",
+            source_tab="commodities",
+            source_mode=handoff.source_mode,
+            resolver_capabilities=["return_leg", "benchmark"],
+            symbols=[str(getattr(instrument, "symbol", resolved_id.upper()))],
+            constituents=[
+                {
+                    "label": label,
+                    "asset_class": "commodity",
+                    "instrument_id": resolved_id,
+                    "symbol": getattr(instrument, "symbol", None),
+                    "family": getattr(instrument, "family", None),
+                    "quote_unit": getattr(instrument, "quote_unit", None),
+                }
+            ],
+            weights=[{"label": label, "asset_class": "commodity", "identifier": resolved_id, "weight": 1.0}],
+            available_start=points[0].timestamp,
+            available_end=points[-1].timestamp,
+            provider_summary=provider,
+            provenance=provenance,
+            warnings=list(dict.fromkeys(warnings)),
+            return_points=points,
+        )
+        leg = StrategyLabPortfolioLeg(
+            label=research_object.display_name,
+            asset_class="commodity",
+            identifier=resolved_id,
+            weight=float(handoff.default_weight if handoff.default_weight is not None else 0.1),
+            value_kind="return",
+            return_points=points,
+            object=research_object,
+        )
+        return StrategyLabResolvedHandoff(
+            handoff_id=self._handoff_id(handoff),
+            envelope=handoff,
+            status="resolved",
+            resolved_capability="return_leg",
+            composer_draft_leg=leg,
+            date_coverage=CrossTabHandoffTimeframe(label="Commodity return history", start=points[0].timestamp, end=points[-1].timestamp),
+            provider_summary=provider,
+            provenance=provenance,
+            warnings=list(dict.fromkeys(warnings)),
         )
 
     def _resolve_prediction_market_strategy_handoff(
@@ -782,6 +946,69 @@ class ResearchService:
             }
         )
         return provenance
+
+    @staticmethod
+    def _commodity_handoff_provenance(
+        *,
+        workspace: Any,
+        instrument: Any,
+        history: Any,
+        curve: Any,
+        instrument_id: str,
+        transformation: str,
+        return_points: int,
+    ) -> dict[str, Any]:
+        coverage = getattr(workspace, "coverage", None)
+        history_points = list(getattr(history, "points", []) or [])
+        latest_history_point: pd.Timestamp | None = None
+        for point in history_points:
+            timestamp = pd.to_datetime(getattr(point, "timestamp", None), errors="coerce")
+            if pd.isna(timestamp):
+                continue
+            candidate = pd.Timestamp(timestamp)
+            if latest_history_point is None or candidate > latest_history_point:
+                latest_history_point = candidate
+
+        return {
+            "source_provider": getattr(history, "source_provider", None) or getattr(workspace, "source_provider", None),
+            "coverage_status": getattr(coverage, "coverage_status", None),
+            "provider_label": getattr(coverage, "provider_label", None),
+            "instrument_id": instrument_id,
+            "symbol": getattr(instrument, "symbol", None),
+            "front_symbol": getattr(instrument, "front_symbol", None),
+            "exchange": getattr(instrument, "exchange", None),
+            "family": getattr(instrument, "family", None),
+            "quote_unit": getattr(instrument, "quote_unit", None),
+            "history_points": len(history_points),
+            "return_points": return_points,
+            "latest_history_point": latest_history_point.isoformat() if latest_history_point is not None else None,
+            "curve_shape": getattr(curve, "shape_label", None),
+            "curve_nodes": len(getattr(curve, "nodes", []) or []),
+            "origin": getattr(history, "origin", None) or getattr(workspace, "origin", None),
+            "transformation": transformation,
+            "interpretation": "Loaded commodity proxy levels are converted to returns; roll, storage, collateral, and execution costs are not modeled.",
+        }
+
+    @staticmethod
+    def _append_commodity_staleness_warning(
+        warnings: list[str],
+        price_series: pd.Series,
+        history: Any,
+        workspace: Any,
+    ) -> None:
+        if price_series.empty:
+            return
+        latest = ensure_utc(pd.Timestamp(price_series.index[-1]).to_pydatetime())
+        reference = (
+            ensure_utc(getattr(history, "retrieved_at", None))
+            or ensure_utc(getattr(workspace, "retrieved_at", None))
+            or now_utc()
+        )
+        if latest is None:
+            return
+        age_days = (reference - latest).total_seconds() / 86400.0
+        if age_days > 14:
+            warnings.append(f"Latest commodity history point is stale by about {age_days:.0f} days versus retrieval time.")
 
     @staticmethod
     def _days_to_resolution(end_time: datetime | None, retrieved_at: datetime | None) -> float | None:

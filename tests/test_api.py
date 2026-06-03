@@ -459,6 +459,53 @@ def test_strategy_lab_resolve_handoff_endpoint_returns_equity_draft(tmp_path):
         runtime.shutdown()
 
 
+def test_strategy_lab_resolve_handoff_endpoint_returns_commodity_draft(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/research/strategy-lab/resolve-handoff",
+            json={
+                "handoff": {
+                    "source_tab": "commodities",
+                    "source_mode": "overview",
+                    "intended_target_tab": "strategy_lab",
+                    "intended_target_mode": "composer",
+                    "selected_entity": {
+                        "entity_type": "commodity_instrument",
+                        "label": "WTI Crude Oil",
+                        "normalized_id": "wti",
+                        "provider_id": "CL",
+                        "native_id": "CL",
+                        "metadata": {"symbol": "CL", "family": "energy"},
+                    },
+                    "resolver_capability": "return_leg",
+                    "asset_class": "commodity",
+                    "value_kind": "price",
+                    "default_side": "long",
+                    "default_weight": 0.1,
+                    "selected_timeframe": None,
+                    "provider": "sample_data",
+                    "source": {"origin": "fixture"},
+                    "warnings": [],
+                    "normalized_ids": {"instrument_id": "wti"},
+                    "timestamp": "2026-03-01T00:00:00Z",
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "resolved"
+        assert payload["composer_draft_leg"]["asset_class"] == "commodity"
+        assert payload["composer_draft_leg"]["identifier"] == "wti"
+        assert payload["composer_draft_leg"]["value_kind"] == "return"
+        assert len(payload["composer_draft_leg"]["return_points"]) >= 5
+        assert payload["provenance"]["transformation"] == "commodity_price_level_to_return_stream"
+        assert "roll-adjusted strategy performance" in " ".join(payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
 def test_research_context_replaces_scope_after_mode_switch(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
