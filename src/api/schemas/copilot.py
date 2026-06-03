@@ -30,6 +30,7 @@ from src.models.copilot import (
     CopilotResearchPlanDomain,
     CopilotResearchPlanEntity,
     CopilotResearchReport,
+    CopilotReportWarningProvenance,
     CopilotReportToolTraceSummary,
     CopilotSession,
     CopilotSynthesisRequest,
@@ -615,6 +616,20 @@ class CopilotReportToolTraceSummaryModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class CopilotReportWarningProvenanceModel(BaseModel):
+    warning: str
+    source_ids: list[str] = Field(default_factory=list)
+    tool_name: str | None = None
+    step_id: str | None = None
+    event_type: str | None = None
+    event_id: str | None = None
+    sequence: int | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotReportWarningProvenance) -> "CopilotReportWarningProvenanceModel":
+        return cls(**row.__dict__)
+
+
 class CopilotResearchReportModel(BaseModel):
     report_id: str
     session_id: str
@@ -626,6 +641,7 @@ class CopilotResearchReportModel(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     missing_data: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    warning_provenance: list[CopilotReportWarningProvenanceModel] = Field(default_factory=list)
     tool_trace_summary: list[CopilotReportToolTraceSummaryModel] = Field(default_factory=list)
     sources: list[CopilotSourceRefModel] = Field(default_factory=list)
     generated_at: datetime
@@ -646,6 +662,10 @@ class CopilotResearchReportModel(BaseModel):
             assumptions=list(row.assumptions),
             missing_data=list(row.missing_data),
             warnings=list(row.warnings),
+            warning_provenance=[
+                CopilotReportWarningProvenanceModel.from_domain(item)
+                for item in row.warning_provenance
+            ],
             tool_trace_summary=[CopilotReportToolTraceSummaryModel.from_domain(item) for item in row.tool_trace_summary],
             sources=[CopilotSourceRefModel.from_domain(item) for item in row.sources],
             generated_at=row.generated_at,

@@ -379,6 +379,17 @@ class CopilotReportToolTraceSummary:
 
 
 @dataclass(frozen=True)
+class CopilotReportWarningProvenance:
+    warning: str
+    source_ids: list[str] = field(default_factory=list)
+    tool_name: str | None = None
+    step_id: str | None = None
+    event_type: str | None = None
+    event_id: str | None = None
+    sequence: int | None = None
+
+
+@dataclass(frozen=True)
 class CopilotResearchReport:
     report_id: str
     session_id: str
@@ -390,6 +401,7 @@ class CopilotResearchReport:
     assumptions: list[str] = field(default_factory=list)
     missing_data: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    warning_provenance: list[CopilotReportWarningProvenance] = field(default_factory=list)
     tool_trace_summary: list[CopilotReportToolTraceSummary] = field(default_factory=list)
     sources: list[CopilotSourceRef] = field(default_factory=list)
     generated_at: datetime = field(default_factory=now_utc)

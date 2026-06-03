@@ -6,6 +6,7 @@ from typing import Any, Iterable
 from src.application.copilot_context_helpers import dedupe_warnings
 from src.models.copilot import (
     CopilotMemo,
+    CopilotReportWarningProvenance,
     CopilotReportToolTraceSummary,
     CopilotResearchReport,
     CopilotSession,
@@ -66,6 +67,7 @@ class CopilotReportService:
             assumptions=cls._assumptions(selected_turns, notes),
             missing_data=missing_data,
             warnings=warnings,
+            warning_provenance=cls._warning_provenance(selected_turns),
             tool_trace_summary=cls._tool_trace_summary(selected_turns),
             sources=sources,
             generated_at=now_utc(),
@@ -97,6 +99,9 @@ class CopilotReportService:
             "",
             "## Warnings",
             *cls._bullet_lines(report.warnings),
+            "",
+            "## Warning Provenance",
+            *cls._warning_provenance_lines(report.warning_provenance),
             "",
             "## Tool Trace Summary",
             *cls._tool_lines(report.tool_trace_summary),
@@ -206,6 +211,91 @@ class CopilotReportService:
                 if event.event_type == "warning" and event.message:
                     warnings.append(event.message)
         return [warning for warning in warnings if warning]
+
+    @staticmethod
+    def _warning_provenance(turns: list[CopilotTurn]) -> list[CopilotReportWarningProvenance]:
+        rows: list[CopilotReportWarningProvenance] = []
+        seen: set[tuple[str, str | None, str | None, str | None, tuple[str, ...]]] = set()
+        seen_warning_texts: set[str] = set()
+
+        def append_row(
+            warning: str,
+            *,
+            source_ids: Iterable[str] = (),
+            tool_name: str | None = None,
+            step_id: str | None = None,
+            event_type: str | None = None,
+            event_id: str | None = None,
+            sequence: int | None = None,
+        ) -> bool:
+            text = str(warning or "").strip()
+            if not text:
+                return False
+            deduped_sources = tuple(CopilotReportService._dedupe_strings(source_ids))
+            key = (text, tool_name, step_id, event_type, deduped_sources)
+            if key in seen:
+                return False
+            seen.add(key)
+            seen_warning_texts.add(text)
+            rows.append(
+                CopilotReportWarningProvenance(
+                    warning=text,
+                    source_ids=list(deduped_sources),
+                    tool_name=tool_name,
+                    step_id=step_id,
+                    event_type=event_type,
+                    event_id=event_id,
+                    sequence=sequence,
+                )
+            )
+            return True
+
+        for turn in turns:
+            final_report_events = [
+                event for event in turn.result.operator_events if event.event_type == "final-report"
+            ]
+            for event in turn.result.operator_events:
+                event_type = str(event.event_type or "")
+                if event_type == "final-report":
+                    continue
+                source_ids = list(event.source_ids)
+                tool_name = str(event.tool_id) if event.tool_id else None
+                for warning in event.warnings:
+                    append_row(
+                        warning,
+                        source_ids=source_ids,
+                        tool_name=tool_name,
+                        step_id=event.step_id,
+                        event_type=event_type,
+                        event_id=event.event_id,
+                        sequence=event.sequence,
+                    )
+                if event_type == "warning" and event.message:
+                    append_row(
+                        event.message,
+                        source_ids=source_ids,
+                        tool_name=tool_name,
+                        step_id=event.step_id,
+                        event_type=event_type,
+                        event_id=event.event_id,
+                        sequence=event.sequence,
+                    )
+            for event in final_report_events:
+                for warning in event.warnings:
+                    if str(warning or "").strip() in seen_warning_texts:
+                        continue
+                    append_row(
+                        warning,
+                        source_ids=list(event.source_ids),
+                        event_type="final-report",
+                        event_id=event.event_id,
+                        sequence=event.sequence,
+                    )
+            for warning in turn.result.warnings:
+                if str(warning or "").strip() in seen_warning_texts:
+                    continue
+                append_row(warning, event_type="result-warning")
+        return rows
 
     @staticmethod
     def _tool_trace_summary(turns: list[CopilotTurn]) -> list[CopilotReportToolTraceSummary]:
@@ -331,6 +421,26 @@ class CopilotReportService:
     @staticmethod
     def _bullet_lines(items: list[str]) -> list[str]:
         return [f"- {item}" for item in items] if items else ["- None recorded."]
+
+    @staticmethod
+    def _warning_provenance_lines(rows: list[CopilotReportWarningProvenance]) -> list[str]:
+        if not rows:
+            return ["- None recorded."]
+        lines: list[str] = []
+        for row in rows:
+            location = []
+            if row.tool_name:
+                location.append(f"tool `{row.tool_name}`")
+            if row.step_id:
+                location.append(f"step `{row.step_id}`")
+            if row.event_type:
+                location.append(f"event `{row.event_type}`")
+            if row.sequence is not None:
+                location.append(f"sequence {row.sequence}")
+            refs = f" Sources: {', '.join(row.source_ids)}." if row.source_ids else ""
+            prefix = f" ({'; '.join(location)})" if location else ""
+            lines.append(f"- {row.warning}{prefix}.{refs}")
+        return lines
 
     @staticmethod
     def _tool_lines(traces: list[CopilotReportToolTraceSummary]) -> list[str]:

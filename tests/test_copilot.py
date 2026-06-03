@@ -1279,6 +1279,7 @@ def test_copilot_generates_research_report_and_markdown_snapshot(tmp_path):
         assert report["missing_data"] == [
             "No explicit missing-data warnings were recorded in the selected session trace."
         ]
+        assert report["warning_provenance"] == []
         assert any(
             row["tool_name"] == "get_macro_series_history_summary"
             for row in report["tool_trace_summary"]
@@ -1293,6 +1294,7 @@ def test_copilot_generates_research_report_and_markdown_snapshot(tmp_path):
         assert "- The macro workspace context was available to the copilot." in markdown
         assert "## Inferred Claims\n- macro: Inflation remains the dominant macro swing factor." in markdown
         assert "## Missing Data\n- No explicit missing-data warnings were recorded in the selected session trace." in markdown
+        assert "## Warning Provenance\n- None recorded." in markdown
         assert "- `get_macro_series_history_summary`: Loaded" in markdown
         assert "- `macro.snapshot`: Macro snapshot" in markdown
         assert "Source provider: gamma_copilot" in markdown
@@ -3164,6 +3166,12 @@ def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, mon
         assert report_response.status_code == 200
         report = report_response.json()
         assert any("confirmation checkpoints" in warning for warning in report["warnings"])
+        assert any(
+            row["event_type"] == "confirmation-needed"
+            and row["warning"]
+            == "Operator plan includes confirmation checkpoints that were not applied by automatic execution."
+            for row in report["warning_provenance"]
+        )
         apply_summary = next(
             row
             for row in report["tool_trace_summary"]
@@ -3173,6 +3181,14 @@ def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, mon
         assert apply_summary["event_type"] == "confirmation-needed"
         assert "dcf update mutates" in apply_summary["summary"].lower()
         assert any("confirmation checkpoints" in warning for warning in apply_summary["warnings"])
+
+        export_response = client.post(
+            "/copilot/sessions/session_operator_confirmation_report/report/export",
+            json={"title": "Operator Confirmation Report"},
+        )
+        assert export_response.status_code == 200
+        assert "## Warning Provenance" in export_response.text
+        assert "event `confirmation-needed`" in export_response.text
     finally:
         runtime.shutdown()
 
