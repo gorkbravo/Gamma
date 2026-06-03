@@ -42,6 +42,7 @@ import {
   copilotCards,
   copilotThreads,
   composeStrategyLab,
+  composeStrategyLabPortfolio,
   compareResearch,
   computeRisk,
   cryptoComparison,
@@ -753,6 +754,60 @@ describe("app store orchestration", () => {
     expect(get(strategyLabComposition)?.leg_contributions).toEqual({ "scope-1": 0.6, "strategy-1": 0.4 });
     expect(get(researchCompareResult)).toBeNull();
     expect(get(lastError)).toBe("");
+  });
+
+  it("sends accepted Strategy Lab lenses through portfolio composition", async () => {
+    const lens: GammaResearchObject = {
+      object_id: "macro:us:3m:policy:snapshot:none",
+      object_type: "macro_lens",
+      display_name: "US Policy lens",
+      source_tab: "macro",
+      source_mode: "snapshot",
+      resolver_capabilities: ["lens"],
+      symbols: [],
+      constituents: [{ region: "US", timeframe: "3M", theme: "policy" }],
+      weights: [],
+      available_start: null,
+      available_end: "2026-06-03T00:00:00Z",
+      provider_summary: "fixture_macro",
+      provenance: { transformation: "macro_context_to_strategy_lab_lens" },
+      warnings: ["Macro lens is context only."],
+      return_points: []
+    };
+    const composition = {
+      ...makeStrategyLabResult(),
+      name: "Portfolio With Lens",
+      leg_contributions: { QQQ: 1 },
+      lenses: [lens],
+      overlays: []
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(composition));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await composeStrategyLabPortfolio({
+      name: "Portfolio With Lens",
+      legs: [
+        {
+          label: "QQQ",
+          asset_class: "etf",
+          identifier: "QQQ",
+          weight: 1,
+          value_kind: "return",
+          return_points: []
+        }
+      ],
+      lenses: [lens],
+      overlays: [],
+      benchmarkSymbol: null,
+      lookbackDays: 252,
+      minObservations: 5
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/research/strategy-lab/portfolio-compose");
+    expect(body.lenses[0].object_id).toBe(lens.object_id);
+    expect(body.overlays).toEqual([]);
+    expect(get(strategyLabComposition)?.lenses[0]?.object_id).toBe(lens.object_id);
   });
 
   it("restores a normalized saved Strategy Lab result without an API call", () => {

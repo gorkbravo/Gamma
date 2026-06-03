@@ -120,6 +120,8 @@ export interface StrategyLabComposeOptions {
 export interface StrategyLabPortfolioComposeOptions {
   name: string;
   legs: StrategyLabPortfolioLegInput[];
+  lenses?: GammaResearchObject[];
+  overlays?: GammaResearchObject[];
   benchmarkSymbol?: string | null;
   benchmarkObject?: StrategyLabCompositionLegInput["object"] | null;
   lookbackDays?: number;
@@ -1334,6 +1336,8 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", {
       name: options.name,
       legs: options.legs,
+      lenses: options.lenses ?? [],
+      overlays: options.overlays ?? [],
       benchmark_symbol: options.benchmarkSymbol ?? "SPY",
       benchmark_object: options.benchmarkObject ?? null,
       lookback_days: options.lookbackDays ?? 756,

@@ -291,6 +291,15 @@ def test_strategy_lab_portfolio_compose_normalizes_timezone_aware_inline_dates(t
             name="Prediction Proxy Portfolio",
             benchmark_symbol=None,
             min_observations=3,
+            lenses=[
+                GammaResearchObject(
+                    object_id="macro:us-policy",
+                    object_type="macro_lens",
+                    display_name="US Policy Lens",
+                    source_tab="macro",
+                    resolver_capabilities=["lens"],
+                )
+            ],
             legs=[
                 StrategyLabPortfolioLeg(
                     label="Date-only probability proxy",
@@ -323,6 +332,7 @@ def test_strategy_lab_portfolio_compose_normalizes_timezone_aware_inline_dates(t
     assert result.metrics.observation_count == 3
     assert result.returns.index.tz is None
     assert result.name == "Prediction Proxy Portfolio"
+    assert result.lenses[0].object_id == "macro:us-policy"
     assert any("read-only research runs" in warning for warning in result.warnings)
 
 
@@ -592,6 +602,92 @@ def test_strategy_lab_unsupported_commodity_handoff_returns_reference_only(tmp_p
     assert result.composer_draft_leg is None
     assert result.unsupported_reason == "Commodity handoff needs at least five computable return observations from price history."
     assert any("too sparse" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_resolves_macro_handoff_to_lens(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="macro",
+                source_mode="events_regimes",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="lens",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="macro_lens",
+                    label="US policy lens (3M, events regimes)",
+                    normalized_id="macro:us:3m:policy:events_regimes:none",
+                    provider_id="fixture_macro",
+                    native_id="macro:us:3m:policy:events_regimes:none",
+                    metadata={
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "policy",
+                        "mode": "events_regimes",
+                        "event_count": 2,
+                        "next_event_title": "FOMC decision",
+                    },
+                ),
+                resolver_capability="lens",
+                asset_class="macro",
+                value_kind="context",
+                default_side="none",
+                default_weight=None,
+                selected_timeframe=SimpleNamespace(label="3M", start=None, end="2026-06-03T00:00:00Z"),
+                provider="fixture_macro",
+                source={"origin": "tests.macro", "retrieved_at": "2026-06-03T00:00:00Z"},
+                normalized_ids={
+                    "macro_lens_id": "macro:us:3m:policy:events_regimes:none",
+                    "region": "US",
+                    "timeframe": "3M",
+                    "theme": "policy",
+                },
+                timestamp="2026-06-03T00:00:00Z",
+            )
+        )
+    )
+
+    assert result.status == "resolved"
+    assert result.resolved_capability == "lens"
+    assert result.composer_draft_leg is None
+    assert result.lens is not None
+    assert result.lens.object_type == "macro_lens"
+    assert result.lens.resolver_capabilities == ["lens"]
+    assert result.lens.provenance["transformation"] == "macro_context_to_strategy_lab_lens"
+    assert any("not weighted portfolio legs" in warning for warning in result.warnings)
+
+
+def test_strategy_lab_macro_return_handoff_is_reference_only(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="macro",
+                source_mode="snapshot",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="macro_lens",
+                    label="US macro",
+                    normalized_id="macro:us:3m:all:snapshot:none",
+                ),
+                resolver_capability="return_leg",
+                asset_class="macro",
+                value_kind="context",
+                default_side="none",
+                default_weight=None,
+                normalized_ids={"macro_lens_id": "macro:us:3m:all:snapshot:none"},
+                timestamp="2026-06-03T00:00:00Z",
+            )
+        )
+    )
+
+    assert result.status == "unsupported"
+    assert result.resolved_capability == "reference_only"
+    assert result.lens is None
+    assert result.unsupported_reason == "Macro handoffs currently resolve as lens/context objects only."
 
 
 def test_strategy_lab_ignores_thin_optional_benchmark_overlap(tmp_path):

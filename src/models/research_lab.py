@@ -189,6 +189,8 @@ class StrategyLabResolvedHandoff:
 class StrategyLabPortfolioCompositionRequest:
     name: str
     legs: list[StrategyLabPortfolioLeg] = field(default_factory=list)
+    lenses: list[GammaResearchObject] = field(default_factory=list)
+    overlays: list[GammaResearchObject] = field(default_factory=list)
     benchmark_symbol: str | None = "SPY"
     benchmark_object: GammaResearchObject | None = None
     lookback_days: int = 756

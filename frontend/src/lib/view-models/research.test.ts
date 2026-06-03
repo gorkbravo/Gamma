@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ResearchResult } from "../api/types";
 import {
   buildCommodityStrategyHandoff,
+  buildMacroStrategyLensHandoff,
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
   buildEquityStrategyHandoff,
@@ -431,6 +432,68 @@ describe("research view model helpers", () => {
     expect(handoff.default_side).toBe("long");
     expect(handoff.normalized_ids.instrument_id).toBe("wti");
     expect(handoff.warnings.join(" ")).toContain("not roll-adjusted futures strategies");
+  });
+
+  it("builds macro Strategy Lab lens handoffs from active context", () => {
+    const handoff = buildMacroStrategyLensHandoff({
+      context: {
+        mode: "events_regimes",
+        region: "US",
+        timeframe: "3M",
+        theme: "policy",
+        comparisonRegion: "EU"
+      },
+      snapshot: {
+        region: "US",
+        timeframe: "3M",
+        theme: "policy",
+        comparison_region: "EU",
+        available_regions: ["US", "EU", "Global"],
+        available_timeframes: ["1M", "3M", "6M", "1Y"],
+        available_themes: ["all", "growth", "inflation", "policy", "recession_risk"],
+        focus_items: [],
+        snapshot_cards: [],
+        rates_policy: null,
+        cross_asset: [],
+        trade_partners: null,
+        country_compare: null,
+        top_divergences: [],
+        event_studies: [],
+        upcoming_events: [
+          {
+            event_id: "fomc-june",
+            title: "FOMC decision",
+            category: "policy",
+            region: "US",
+            scheduled_at: "2026-06-17T18:00:00Z",
+            relative_label: "upcoming",
+            importance: "high",
+            source_provider: "fixture",
+            retrieved_at: "2026-06-03T00:00:00Z",
+            origin: "tests.macro",
+            transformation_note: null
+          }
+        ],
+        warnings: [],
+        source_provider: "fixture_macro",
+        retrieved_at: "2026-06-03T00:00:00Z",
+        origin: "tests.macro_snapshot",
+        transformation_note: "Fixture macro snapshot."
+      }
+    });
+
+    expect(handoff.source_tab).toBe("macro");
+    expect(handoff.source_mode).toBe("events_regimes");
+    expect(handoff.intended_target_mode).toBe("lens");
+    expect(handoff.selected_entity.entity_type).toBe("macro_lens");
+    expect(handoff.selected_entity.normalized_id).toContain("macro:us:3m:policy:events_regimes:eu");
+    expect(handoff.resolver_capability).toBe("lens");
+    expect(handoff.asset_class).toBe("macro");
+    expect(handoff.value_kind).toBe("context");
+    expect(handoff.default_side).toBe("none");
+    expect(handoff.default_weight).toBeNull();
+    expect(handoff.normalized_ids.macro_lens_id).toBe(handoff.selected_entity.normalized_id);
+    expect(handoff.warnings.join(" ")).toContain("not weighted portfolio legs");
   });
 
   it("includes normalized weights in synthetic scope research object ids", () => {

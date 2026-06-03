@@ -14,8 +14,10 @@
     MacroSeriesHistory,
     MacroSnapshot as MacroSnapshotType,
     MacroTheme,
+    StrategyLabHandoffEnvelope,
   } from "../lib/api/types";
   import { macroContext, setMacroContext } from "../lib/stores/app";
+  import { buildMacroStrategyLensHandoff } from "../lib/view-models/research";
 
   export let snapshot: MacroSnapshotType | null = null;
   export let divergences: MacroDivergenceListResponse | null = null;
@@ -24,6 +26,9 @@
   export let loading = false;
   export let onLoadWorkspace: (options?: Partial<MacroContextState> & { forceRefresh?: boolean }) => Promise<unknown> | void;
   export let onLoadSeries: (seriesId: string, options?: Partial<MacroContextState> & { forceRefresh?: boolean }) => Promise<unknown> | void;
+  export let onSendToStrategyLab:
+    | ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void)
+    | undefined = undefined;
 
   /* ── Mode definitions ── */
   const modes: Array<{ id: MacroMode; label: string }> = [
@@ -125,6 +130,18 @@
 
   async function drillTo(mode: MacroMode, theme?: string | null) {
     await refreshContext({ mode, ...(theme ? { theme: theme as MacroTheme } : {}) });
+  }
+
+  function sendMacroLensToStrategyLab(open = false) {
+    if (!onSendToStrategyLab) {
+      return;
+    }
+    const handoff = buildMacroStrategyLensHandoff({
+      context: $macroContext,
+      snapshot,
+      events
+    });
+    onSendToStrategyLab(handoff, { open });
   }
 
   /* ── Series loading ── */
@@ -242,6 +259,23 @@
       <span class="title">Macro Research</span>
       <span class="subtitle">{$macroContext.region} · {$macroContext.timeframe} · {themeLabels[$macroContext.theme] ?? $macroContext.theme}</span>
       {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      <div class="handoff-actions" aria-label="Strategy Lab macro lens actions">
+        <button
+          type="button"
+          class="ghost-action"
+          on:click={() => sendMacroLensToStrategyLab(false)}
+          disabled={loading || !onSendToStrategyLab}
+        >
+          Use as Lens
+        </button>
+        <button
+          type="button"
+          on:click={() => sendMacroLensToStrategyLab(true)}
+          disabled={loading || !onSendToStrategyLab}
+        >
+          Lens &amp; Open
+        </button>
+      </div>
       {#if nextEvent}
         <span class="next-event">
           <span class="next-event-label">Next</span>
@@ -346,6 +380,7 @@
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
   .title {
@@ -360,6 +395,24 @@
     color: var(--text-2);
     font-size: 10.5px;
     letter-spacing: 0.04em;
+  }
+
+  .handoff-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+  }
+
+  .handoff-actions button {
+    min-height: 25px;
+    padding: 4px 8px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .handoff-actions .ghost-action {
+    background: transparent;
   }
 
   /* ── Headline KPI strip ── */

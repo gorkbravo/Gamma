@@ -297,6 +297,25 @@ def test_strategy_lab_portfolio_compose_endpoint_accepts_signed_inline_legs(tmp_
                 "name": "Mixed Research Book",
                 "benchmark_symbol": None,
                 "lookback_days": 252,
+                "lenses": [
+                    {
+                        "object_id": "macro:us:3m:policy:snapshot:none",
+                        "object_type": "macro_lens",
+                        "display_name": "US Policy lens",
+                        "source_tab": "macro",
+                        "source_mode": "snapshot",
+                        "resolver_capabilities": ["lens"],
+                        "symbols": [],
+                        "constituents": [{"region": "US", "timeframe": "3M", "theme": "policy"}],
+                        "weights": [],
+                        "available_start": None,
+                        "available_end": "2026-06-03T00:00:00Z",
+                        "provider_summary": "fixture_macro",
+                        "provenance": {"transformation": "macro_context_to_strategy_lab_lens"},
+                        "warnings": ["Macro lens is context only."],
+                        "return_points": [],
+                    }
+                ],
                 "legs": [
                     {
                         "label": "Long probability contract",
@@ -337,6 +356,7 @@ def test_strategy_lab_portfolio_compose_endpoint_accepts_signed_inline_legs(tmp_
         assert payload["metrics"]["observation_count"] == 5
         assert payload["leg_contributions"]["Long probability contract"] is not None
         assert payload["leg_contributions"]["Short hedge stream"] < 0
+        assert payload["lenses"][0]["object_id"] == "macro:us:3m:policy:snapshot:none"
         assert "read-only research" in " ".join(payload["warnings"])
     finally:
         runtime.shutdown()
@@ -502,6 +522,69 @@ def test_strategy_lab_resolve_handoff_endpoint_returns_commodity_draft(tmp_path)
         assert len(payload["composer_draft_leg"]["return_points"]) >= 5
         assert payload["provenance"]["transformation"] == "commodity_price_level_to_return_stream"
         assert "roll-adjusted strategy performance" in " ".join(payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_strategy_lab_resolve_handoff_endpoint_returns_macro_lens(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/research/strategy-lab/resolve-handoff",
+            json={
+                "handoff": {
+                    "source_tab": "macro",
+                    "source_mode": "events_regimes",
+                    "intended_target_tab": "strategy_lab",
+                    "intended_target_mode": "lens",
+                    "selected_entity": {
+                        "entity_type": "macro_lens",
+                        "label": "US policy lens (3M, events regimes)",
+                        "normalized_id": "macro:us:3m:policy:events_regimes:none",
+                        "provider_id": "fixture_macro",
+                        "native_id": "macro:us:3m:policy:events_regimes:none",
+                        "metadata": {
+                            "region": "US",
+                            "timeframe": "3M",
+                            "theme": "policy",
+                            "mode": "events_regimes",
+                            "event_count": 2,
+                            "next_event_title": "FOMC decision",
+                        },
+                    },
+                    "resolver_capability": "lens",
+                    "asset_class": "macro",
+                    "value_kind": "context",
+                    "default_side": "none",
+                    "default_weight": None,
+                    "selected_timeframe": {
+                        "label": "3M",
+                        "start": None,
+                        "end": "2026-06-03T00:00:00Z",
+                    },
+                    "provider": "fixture_macro",
+                    "source": {"origin": "tests.macro", "retrieved_at": "2026-06-03T00:00:00Z"},
+                    "warnings": [],
+                    "normalized_ids": {
+                        "macro_lens_id": "macro:us:3m:policy:events_regimes:none",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "policy",
+                    },
+                    "timestamp": "2026-06-03T00:00:00Z",
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "resolved"
+        assert payload["resolved_capability"] == "lens"
+        assert payload["composer_draft_leg"] is None
+        assert payload["lens"]["object_type"] == "macro_lens"
+        assert payload["lens"]["resolver_capabilities"] == ["lens"]
+        assert payload["provenance"]["transformation"] == "macro_context_to_strategy_lab_lens"
+        assert "not weighted portfolio legs" in " ".join(payload["warnings"])
     finally:
         runtime.shutdown()
 

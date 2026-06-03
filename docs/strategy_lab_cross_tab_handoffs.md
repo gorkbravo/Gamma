@@ -22,10 +22,11 @@ Current snapshot:
 | Prediction Markets `+ Strategy` action | Verified | Prediction Markets detail exposes `+ Strategy` and `Add & Open` for the selected contract. |
 | Equity Research `+ Strategy` action | Verified | Equity Research Scope can queue or open a selected ticker into Strategy Lab as a listed-equity return leg. |
 | Commodities `+ Strategy` action | Verified | Commodities Matrix can queue or open the selected instrument into Strategy Lab as a commodity proxy return leg. |
-| Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts, Equity Research tickers, and Commodities instruments into composer-ready draft legs. |
-| Composer draft ingestion from handoff | Verified | Accepted resolved handoffs become editable Strategy Lab composer rows with probability, listed-equity, or commodity proxy history and warning/provenance context. |
-| Tab-by-tab capability matrix | In progress | Prediction Markets, Equity Research, and Commodities are wired; remaining tabs still need concrete handoff implementations. |
-| Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-010 validation. |
+| Macro `Use as Lens` action | Verified | Macro can queue or open the active region/timeframe/theme/mode context into Strategy Lab as a read-only lens. |
+| Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts, Equity Research tickers, Commodities instruments, and Macro lens context into Strategy Lab-ready objects. |
+| Composer draft ingestion from handoff | Verified | Accepted resolved return-leg handoffs become editable composer rows; accepted Macro lenses attach as read-only context and pass through composition results. |
+| Tab-by-tab capability matrix | In progress | Prediction Markets, Equity Research, Commodities, and Macro are wired; remaining tabs still need concrete handoff implementations. |
+| Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-011 validation. |
 
 ## Product Boundary
 
@@ -260,8 +261,8 @@ Warnings should be explicit when:
 | Prediction Markets | `+ Strategy` on selected contract | `return_leg` or `overlay` | Verified | First pass resolves selected contract probability history into an editable Strategy Lab prediction leg. |
 | Equity Research | `+ Strategy` / `Add & Open` for selected ticker | `return_leg` | Verified | First pass resolves selected ticker history through listed-market providers into an editable Strategy Lab equity leg. Scope/basket handoffs remain future work. |
 | Commodities | `+ Strategy` / `Add & Open` for selected instrument/proxy | `return_leg` or `benchmark` | Verified | First pass resolves selected commodity instrument history into an editable Strategy Lab commodity leg with explicit spot/front-month/proxy, roll, stale/sparse, and provider limitation warnings. |
+| Macro | `Use as Lens` / `Lens & Open` for active macro context | `lens` | Verified | First pass resolves active region/timeframe/theme/mode/comparison context into a `macro_lens`, not a weighted return leg, with event/provider provenance and read-only interpretation warnings. |
 | Crypto | Add token or basket | `return_leg` or `benchmark` | Planned | Needs provider coverage and stale-data warnings. |
-| Macro | Use regime/window as lens | `lens` | Planned | Macro objects should usually not become positions. |
 | Fundamentals | Attach company case | `overlay` or `reference_only` | Planned | Ticker history may become a separate equity leg. |
 | Risk | Attach scenario/stress result | `lens` or `overlay` | Planned | Useful after Strategy Lab has saved runs. |
 | IV/Options | Attach vol context | `overlay` | Planned | Underlying can become an equity/ETF leg separately. |
@@ -283,7 +284,7 @@ Update this board as work lands.
 | SLH-008 | Convert accepted resolved handoffs into editable composer rows. | Codex | Verified | Browser flow confirmed a Prediction row with contract id and YES probability history, then composed a four-leg Strategy Lab result. |
 | SLH-009 | Add Equity Research selected ticker/scope handoff. | Codex | Verified | Backend/API tests cover selected ticker resolution; browser flow sent AAPL from Equity Research Scope with `Add & Open`, accepted the resolved row, and composed the portfolio. Scope/basket handoffs remain open. |
 | SLH-010 | Add Commodities selected instrument handoff. | Codex | Verified | Backend/API/frontend tests cover resolved and unsupported commodity handoffs; browser flow sent WTI from Commodities with `Add & Open`, accepted the resolved row, and composed the portfolio with warnings/provenance visible. |
-| SLH-011 | Add Macro lens handoff. | TBD | Not started | Lens attachment tests. |
+| SLH-011 | Add Macro lens handoff. | Codex | Verified | Backend/API/frontend tests cover Macro lens resolution and reference-only downgrade behavior; browser flow sent active Macro context with `Lens & Open`, accepted the resolved lens, and composed a portfolio with the lens attached. |
 | SLH-012 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | TBD | Not started | Copilot context tests. |
 
 ## Inspection Workflow
@@ -336,6 +337,7 @@ Browser:
 - For Prediction Markets: select a contract, choose a side, click `Add & Open`, confirm Strategy Lab opens, accept the resolved prediction-market row, run composition, and confirm warnings/provenance are visible.
 - For Equity Research: open Scope, confirm a selected ticker is present, click `Add & Open`, confirm Strategy Lab opens, accept the resolved equity row, run composition, and confirm warnings/provenance are visible.
 - For Commodities: select an instrument, click `Add & Open`, confirm Strategy Lab opens, accept the resolved commodity row, run composition, and confirm proxy, futures/spot, roll, provider, sparse/stale, and read-only warnings/provenance are visible.
+- For Macro: open Macro, choose the active context, click `Lens & Open`, confirm Strategy Lab opens, accept the resolved lens, run composition, and confirm the attached lens, warnings, and provenance are visible.
 - Confirm no page-level horizontal overflow occurs at desktop and narrow viewport widths; horizontally scrollable dense tables are acceptable.
 
 ## Latest Validation Results
@@ -344,11 +346,11 @@ Validated on 2026-06-03:
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 46 tests passed. Added coverage for Commodities resolved and reference-only handoff behavior alongside Prediction Markets and Equity Research. |
-| `npm run typecheck` | Passed | Frontend typecheck passed after Commodities action wiring, handoff builder, and Strategy Lab accepted-warning updates. |
-| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 20 tests passed, including Commodity handoff envelope coverage plus existing draft-row conversion coverage. |
-| `npm run test -- src/lib/stores/app.test.ts` | Passed | 31 tests passed, including queue resolve/accept/dismiss coverage. |
-| Local browser flow | Passed | Verified Commodities WTI `Add & Open` on a fresh mock backend/frontend pair, resolved inbound handoff, accepted the editable `WTI Crude Oil commodity return stream` row, ran composition, confirmed proxy/roll/provider/read-only warnings and provenance, and checked desktop plus 390px viewport page-level overflow. |
+| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 49 tests passed. Added Macro lens resolver/API coverage alongside Prediction Markets, Equity Research, and Commodities handoffs. |
+| `npm run typecheck` | Passed | Frontend typecheck passed after Macro handoff builder, Strategy Lab lens attachment, and composition payload updates. |
+| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 21 tests passed, including Macro Strategy Lab lens envelope coverage plus existing draft-row conversion coverage. |
+| `npm run test -- src/lib/stores/app.test.ts` | Passed | 32 tests passed, including composition payload coverage for accepted Strategy Lab lenses. |
+| Local browser flow | Passed | Verified Macro `Lens & Open` on a fresh backend/frontend pair, resolved inbound handoff, accepted the `US All macro lens (3M, snapshot)` context object, ran composition, confirmed `LENSES 1`, warnings/provenance, and no desktop or 390px viewport page-level horizontal overflow. Live FRED snapshot fetch hit an HTTP 429 during validation, so the browser check relied on active Macro UI context rather than fresh FRED snapshot details. |
 
 Validated on 2026-06-02:
 
@@ -372,6 +374,9 @@ Validated on 2026-06-02:
 - Commodities first pass covers selected single instruments only. The backend resolver loads the commodity workspace/history, converts loaded spot/front-month/proxy price levels into returns, and passes a commodity return stream into the editable composer row when history is adequate.
 - Commodity handoffs are research proxies. Gamma does not claim executable commodity PnL, roll-adjusted futures returns, storage/collateral/carry modeling, broker mutations, wallet signing, live trading, or rebalance behavior from these handoffs.
 - Unsupported commodity handoffs return `reference_only` with an explicit reason when the selected instrument cannot be resolved or lacks enough computable history.
+- Macro first pass emits the active Macro workspace context as a Strategy Lab lens only. It is not a weighted return leg and does not create strategy signals, executable rules, broker mutations, or rebalance behavior.
+- Macro lens resolution preserves region, timeframe, theme, mode, comparison region, selected entity ids, provider/source, and snapshot/event metadata carried by the handoff envelope.
+- Strategy Lab portfolio math remains driven by return-bearing legs; accepted lenses and overlays annotate interpretation and are carried through composition results for future regime/stress slicing.
 
 ## Open Questions
 
@@ -382,7 +387,8 @@ Validated on 2026-06-02:
 5. Should Copilot be allowed to propose handoffs automatically, or only explain user-created handoffs first?
 6. Should Equity Research synthetic scopes/baskets publish as weighted scope objects through the handoff resolver, or should they rely on saved scope objects first?
 7. Should commodity curve, spread, or benchmark handoffs wait for saved commodity objects, or should selected instruments expose separate `Use as Benchmark` and curve-overlay actions?
+8. Should Macro lenses eventually apply date-window filtering or regime segmentation to Strategy Lab metrics, or remain provenance-only until Regime Stress mode is deeper?
 
 ## Recommended Next Step
 
-Continue with `SLH-011` Macro lens handoffs. Prediction Markets, Equity Research, and Commodities now prove the return-leg path across probability histories, listed-equity histories, and commodity proxy histories; Macro is the next useful test for lens/overlay-only objects.
+Continue with `SLH-012` Copilot context builder coverage for pending and resolved Strategy Lab handoffs. Prediction Markets, Equity Research, Commodities, and Macro now prove the return-leg and lens paths; Copilot should be able to explain those handoff queues and accepted objects without inventing execution behavior.

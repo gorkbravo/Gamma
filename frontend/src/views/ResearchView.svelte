@@ -5,6 +5,7 @@
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
   import type {
+    GammaResearchObject,
     ResearchConstituent,
     ResearchCoverage,
     StrategyLabCompositionResult,
@@ -266,6 +267,8 @@
     }
   ];
   let showHandoffReview = true;
+  let acceptedStrategyLenses: GammaResearchObject[] = [];
+  let acceptedStrategyOverlays: GammaResearchObject[] = [];
   let acceptedHandoffWarnings: string[] = [];
   let savedScopeTitle = "Scope Analysis Run";
   let savedStrategyTitle = "Strategy Lab Run";
@@ -453,8 +456,8 @@
     const result = await onComposeStrategy({
       name: "Strategy Lab Composition",
       legs: selectedComposerLegs,
-      lenses: [],
-      overlays: [],
+      lenses: acceptedStrategyLenses,
+      overlays: acceptedStrategyOverlays,
       benchmarkObject: null,
       minObservations: 5
     });
@@ -530,6 +533,26 @@
       strategyInputWarning = item.error ?? "Resolve this handoff before accepting it into the composer.";
       return;
     }
+    if (resolved.lens) {
+      acceptedStrategyLenses = [
+        resolved.lens,
+        ...acceptedStrategyLenses.filter((lens) => lens.object_id !== resolved.lens?.object_id)
+      ].slice(0, 12);
+      acceptedHandoffWarnings = [...resolved.warnings, ...acceptedHandoffWarnings].slice(0, 12);
+      onAcceptStrategyLabHandoff?.(item.id);
+      strategyInputWarning = "";
+      return;
+    }
+    if (resolved.overlay) {
+      acceptedStrategyOverlays = [
+        resolved.overlay,
+        ...acceptedStrategyOverlays.filter((overlay) => overlay.object_id !== resolved.overlay?.object_id)
+      ].slice(0, 12);
+      acceptedHandoffWarnings = [...resolved.warnings, ...acceptedHandoffWarnings].slice(0, 12);
+      onAcceptStrategyLabHandoff?.(item.id);
+      strategyInputWarning = "";
+      return;
+    }
     const draftLeg = strategyResolvedHandoffToDraftLeg(resolved, portfolioDraftLegs.length + 1);
     if (!draftLeg) {
       strategyInputWarning = resolved.unsupported_reason ?? "Resolved handoff did not include a composer-ready leg.";
@@ -564,6 +587,8 @@
     const result = await onComposePortfolioStrategy({
       name: portfolioName.trim() || "Strategy Lab Portfolio",
       legs: built.legs,
+      lenses: acceptedStrategyLenses,
+      overlays: acceptedStrategyOverlays,
       benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
       benchmarkObject: null,
       lookbackDays: portfolioLookbackDays,
@@ -2256,7 +2281,27 @@
               <article class="metric"><span>Listed</span><strong>{portfolioDraftSummary.listedIdentifierLegs}</strong><small>provider-resolved</small></article>
               <article class="metric"><span>Inline</span><strong>{portfolioDraftSummary.inlineHistoryLegs}</strong><small>dated histories</small></article>
               <article class="metric"><span>Objects</span><strong>{portfolioDraftSummary.objectLegs}</strong><small>Gamma streams</small></article>
+              <article class="metric"><span>Context</span><strong>{acceptedStrategyLenses.length + acceptedStrategyOverlays.length}</strong><small>lenses / overlays</small></article>
             </div>
+
+            {#if acceptedStrategyLenses.length || acceptedStrategyOverlays.length}
+              <div class="attached-context-list" aria-label="Attached Strategy Lab context">
+                {#each acceptedStrategyLenses as lens}
+                  <div class="attached-context-row">
+                    <span>Lens</span>
+                    <strong>{lens.display_name}</strong>
+                    <small>{lens.source_tab} / {lens.source_mode ?? "context"} / {lens.provider_summary ?? "Gamma"}</small>
+                  </div>
+                {/each}
+                {#each acceptedStrategyOverlays as overlay}
+                  <div class="attached-context-row">
+                    <span>Overlay</span>
+                    <strong>{overlay.display_name}</strong>
+                    <small>{overlay.source_tab} / {overlay.source_mode ?? "context"} / {overlay.provider_summary ?? "Gamma"}</small>
+                  </div>
+                {/each}
+              </div>
+            {/if}
 
             <div class="table-wrap compact-table">
               <table>
@@ -2372,7 +2417,26 @@
                 <article class="metric"><span>Annual Vol</span><strong>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
                 <article class="metric"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
                 <article class="metric"><span>Contributions</span><strong>{Object.keys(strategyComposition.leg_contributions).length}</strong><small>weighted legs</small></article>
+                <article class="metric"><span>Lenses</span><strong>{strategyComposition.lenses.length}</strong><small>{strategyComposition.overlays.length} overlays</small></article>
               </div>
+              {#if strategyComposition.lenses.length || strategyComposition.overlays.length}
+                <div class="attached-context-list">
+                  {#each strategyComposition.lenses as lens}
+                    <div class="attached-context-row">
+                      <span>Lens</span>
+                      <strong>{lens.display_name}</strong>
+                      <small>{lens.provider_summary ?? lens.source_tab}</small>
+                    </div>
+                  {/each}
+                  {#each strategyComposition.overlays as overlay}
+                    <div class="attached-context-row">
+                      <span>Overlay</span>
+                      <strong>{overlay.display_name}</strong>
+                      <small>{overlay.provider_summary ?? overlay.source_tab}</small>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             </article>
           {/if}
         {/if}
@@ -3675,6 +3739,39 @@
     font-size: 0.72rem;
   }
 
+  .attached-context-list {
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--divider);
+  }
+
+  .attached-context-row {
+    display: grid;
+    grid-template-columns: 4.5rem minmax(0, 1fr) minmax(8rem, auto);
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.4rem 0.65rem;
+    border-bottom: 1px solid var(--divider);
+    font-size: 0.74rem;
+  }
+
+  .attached-context-row span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.66rem;
+  }
+
+  .attached-context-row strong,
+  .attached-context-row small {
+    overflow-wrap: anywhere;
+  }
+
+  .attached-context-row small {
+    color: var(--text-2);
+    text-align: right;
+  }
+
   .object-compose-actions {
     padding: 0 0.65rem 0.55rem;
     justify-content: flex-end;
@@ -3846,6 +3943,7 @@
     .field-grid,
     .handoff-strip,
     .handoff-row,
+    .attached-context-row,
     .overview-bottom-grid,
     .ranking-grid,
     .builder-actions,
@@ -3891,6 +3989,10 @@
 
     .header-actions {
       justify-content: stretch;
+    }
+
+    .attached-context-row small {
+      text-align: left;
     }
 
     .header-actions > * {

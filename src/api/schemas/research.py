@@ -421,6 +421,8 @@ class StrategyLabResolvedHandoffModel(BaseModel):
 class StrategyLabPortfolioCompositionRequestModel(BaseModel):
     name: str = Field(default="Strategy Lab Portfolio", min_length=1, max_length=128)
     legs: list[StrategyLabPortfolioLegModel] = Field(default_factory=list, max_length=100)
+    lenses: list[GammaResearchObjectModel] = Field(default_factory=list, max_length=100)
+    overlays: list[GammaResearchObjectModel] = Field(default_factory=list, max_length=100)
     benchmark_symbol: str | None = Field(default="SPY", max_length=32)
     benchmark_object: GammaResearchObjectModel | None = None
     lookback_days: int = Field(default=756, ge=20, le=MAX_RISK_LOOKBACK_DAYS)
@@ -430,6 +432,8 @@ class StrategyLabPortfolioCompositionRequestModel(BaseModel):
         return StrategyLabPortfolioCompositionRequest(
             name=self.name,
             legs=[leg.to_domain() for leg in self.legs],
+            lenses=[item.to_domain() for item in self.lenses],
+            overlays=[item.to_domain() for item in self.overlays],
             benchmark_symbol=self.benchmark_symbol,
             benchmark_object=self.benchmark_object.to_domain() if self.benchmark_object is not None else None,
             lookback_days=int(self.lookback_days),

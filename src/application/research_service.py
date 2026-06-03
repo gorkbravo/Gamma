@@ -566,6 +566,8 @@ class ResearchService:
         handoff = request.handoff
         if handoff.intended_target_tab != "strategy_lab":
             raise ResearchValidationError(["Strategy Lab handoff resolver only accepts strategy_lab targets."])
+        if handoff.source_tab == "macro":
+            return self._resolve_macro_strategy_handoff(handoff)
         if handoff.source_tab == "equity_research":
             return self._resolve_equity_research_strategy_handoff(handoff)
         if handoff.source_tab == "commodities":
@@ -584,6 +586,88 @@ class ResearchService:
         if prediction_market_service is None:
             raise ResearchValidationError(["Prediction market resolver is unavailable in this runtime."])
         return self._resolve_prediction_market_strategy_handoff(handoff, prediction_market_service)
+
+    def _resolve_macro_strategy_handoff(self, handoff) -> StrategyLabResolvedHandoff:
+        lens_id = (
+            handoff.normalized_ids.get("macro_lens_id")
+            or handoff.selected_entity.normalized_id
+            or handoff.selected_entity.native_id
+        )
+        lens_id = str(lens_id or "").strip()
+        if not lens_id:
+            raise ResearchValidationError(["Macro handoff is missing a lens id."])
+        if handoff.resolver_capability != "lens":
+            return StrategyLabResolvedHandoff(
+                handoff_id=self._handoff_id(handoff),
+                envelope=handoff,
+                status="unsupported",
+                resolved_capability="reference_only",
+                provider_summary=handoff.provider,
+                provenance=self._macro_handoff_provenance(handoff, lens_id),
+                warnings=list(dict.fromkeys(handoff.warnings + ["Macro handoffs are Strategy Lab lenses, not weighted return legs."])),
+                unsupported_reason="Macro handoffs currently resolve as lens/context objects only.",
+            )
+
+        metadata = dict(handoff.selected_entity.metadata or {})
+        region = str(metadata.get("region") or handoff.normalized_ids.get("region") or "").strip()
+        timeframe = str(metadata.get("timeframe") or handoff.normalized_ids.get("timeframe") or "").strip()
+        theme = str(metadata.get("theme") or handoff.normalized_ids.get("theme") or "").strip()
+        mode = str(handoff.source_mode or metadata.get("mode") or "").strip()
+        label = str(handoff.selected_entity.label or "Macro lens").strip() or "Macro lens"
+        warnings = list(handoff.warnings)
+        warnings.extend(
+            [
+                "Macro handoff resolved as a Strategy Lab lens for read-only research context.",
+                "Macro lenses annotate or filter interpretation; they are not weighted portfolio legs or executable strategy rules.",
+                "Portfolio return math remains driven by selected return legs; this lens preserves macro regime, region, theme, timeframe, and provenance context.",
+            ]
+        )
+        if region.lower() == "global":
+            warnings.append("Global Macro remains a light V1 comparative lens with US-first coverage in some analytics.")
+        if region.upper() == "EU":
+            warnings.append("EU Macro coverage is structurally compatible but lighter than the US-first Macro implementation.")
+        if not timeframe:
+            warnings.append("Macro lens timeframe was not provided; Strategy Lab will keep it as context only.")
+
+        provenance = self._macro_handoff_provenance(handoff, lens_id)
+        lens = GammaResearchObject(
+            object_id=f"macro:{lens_id}",
+            object_type="macro_lens",
+            display_name=label,
+            source_tab="macro",
+            source_mode=mode or None,
+            resolver_capabilities=["lens"],
+            symbols=[],
+            constituents=[
+                {
+                    "label": label,
+                    "asset_class": "macro",
+                    "region": region or None,
+                    "timeframe": timeframe or None,
+                    "theme": theme or None,
+                    "mode": mode or None,
+                    "comparison_region": metadata.get("comparison_region"),
+                }
+            ],
+            weights=[],
+            available_start=handoff.selected_timeframe.start if handoff.selected_timeframe else None,
+            available_end=handoff.selected_timeframe.end if handoff.selected_timeframe else None,
+            provider_summary=handoff.provider,
+            provenance=provenance,
+            warnings=list(dict.fromkeys(warnings)),
+            return_points=[],
+        )
+        return StrategyLabResolvedHandoff(
+            handoff_id=self._handoff_id(handoff),
+            envelope=handoff,
+            status="resolved",
+            resolved_capability="lens",
+            lens=lens,
+            date_coverage=handoff.selected_timeframe,
+            provider_summary=handoff.provider,
+            provenance=provenance,
+            warnings=list(dict.fromkeys(warnings)),
+        )
 
     def _resolve_equity_research_strategy_handoff(self, handoff) -> StrategyLabResolvedHandoff:
         symbol = (
@@ -948,6 +1032,31 @@ class ResearchService:
         return provenance
 
     @staticmethod
+    def _macro_handoff_provenance(handoff, lens_id: str) -> dict[str, Any]:
+        metadata = dict(handoff.selected_entity.metadata or {})
+        source = dict(handoff.source or {})
+        provenance = {
+            "lens_id": lens_id,
+            "region": metadata.get("region") or handoff.normalized_ids.get("region"),
+            "timeframe": metadata.get("timeframe") or handoff.normalized_ids.get("timeframe"),
+            "theme": metadata.get("theme") or handoff.normalized_ids.get("theme"),
+            "mode": handoff.source_mode or metadata.get("mode"),
+            "comparison_region": metadata.get("comparison_region"),
+            "snapshot_focus_count": metadata.get("focus_count"),
+            "snapshot_card_count": metadata.get("snapshot_card_count"),
+            "divergence_count": metadata.get("divergence_count"),
+            "event_count": metadata.get("event_count"),
+            "next_event_title": metadata.get("next_event_title"),
+            "next_event_at": metadata.get("next_event_at"),
+            "source_provider": handoff.provider or source.get("source_provider"),
+            "origin": source.get("origin"),
+            "retrieved_at": source.get("retrieved_at"),
+            "transformation": "macro_context_to_strategy_lab_lens",
+            "interpretation": "Macro context is attached as a read-only lens and does not become a weighted return stream.",
+        }
+        return {key: value for key, value in provenance.items() if value is not None}
+
+    @staticmethod
     def _commodity_handoff_provenance(
         *,
         workspace: Any,
@@ -1175,8 +1284,8 @@ class ResearchService:
             StrategyLabCompositionRequest(
                 name=str(request.name or "").strip() or "Strategy Lab Portfolio",
                 legs=composition_legs,
-                lenses=[],
-                overlays=[],
+                lenses=list(request.lenses),
+                overlays=list(request.overlays),
                 benchmark_object=benchmark_object,
                 min_observations=min_observations,
             )

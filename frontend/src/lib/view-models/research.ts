@@ -6,6 +6,9 @@ import type {
   CommodityPriceHistory,
   CommodityWorkspaceResponse,
   GammaResearchObject,
+  MacroContextState,
+  MacroEventsResponse,
+  MacroSnapshot,
   ResearchConstituent,
   ResearchCoverage,
   ResearchObjectReturnPoint,
@@ -360,6 +363,98 @@ export function buildCommodityStrategyHandoff(
     normalized_ids: {
       instrument_id: instrument.instrument_id,
       symbol: instrument.symbol
+    },
+    timestamp: new Date().toISOString()
+  };
+}
+
+export function buildMacroStrategyLensHandoff(
+  macro: {
+    context: MacroContextState;
+    snapshot?: MacroSnapshot | null;
+    events?: MacroEventsResponse | null;
+  },
+  options: { sourceMode?: MacroContextState["mode"] | null } = {}
+): StrategyLabHandoffEnvelope {
+  const context = macro.context;
+  const snapshot = macro.snapshot ?? null;
+  const events = macro.events ?? null;
+  const sourceMode = options.sourceMode ?? context.mode;
+  const themeLabel = context.theme === "all" ? "All macro" : context.theme.replace(/_/g, " ");
+  const modeLabel = sourceMode.replace(/_/g, " ");
+  const comparisonLabel = context.comparisonRegion ? ` vs ${context.comparisonRegion}` : "";
+  const lensId = [
+    "macro",
+    context.region.toLowerCase(),
+    context.timeframe.toLowerCase(),
+    context.theme,
+    sourceMode,
+    context.comparisonRegion?.toLowerCase() ?? "none"
+  ].join(":");
+  const nextEvent = (events?.events ?? snapshot?.upcoming_events ?? [])[0] ?? null;
+  const warnings = [
+    "Macro handoffs enter Strategy Lab as read-only lenses, not weighted portfolio legs.",
+    "Resolver will preserve region, timeframe, theme, mode, comparison, event, and provider context.",
+    "Macro lenses annotate Strategy Lab interpretation; they do not create executable signals, orders, or rebalance rules."
+  ];
+  if (context.region === "Global") {
+    warnings.push("Global Macro is a light V1 comparative lens; some analytics reuse US-first coverage.");
+  } else if (context.region === "EU") {
+    warnings.push("EU Macro coverage is lighter than the US-first Macro implementation.");
+  }
+  if (snapshot?.warnings.length) {
+    warnings.push(...snapshot.warnings.slice(0, 3));
+  }
+
+  return {
+    source_tab: "macro",
+    source_mode: sourceMode,
+    intended_target_tab: "strategy_lab",
+    intended_target_mode: "lens",
+    selected_entity: {
+      entity_type: "macro_lens",
+      label: `${context.region}${comparisonLabel} ${themeLabel} lens (${context.timeframe}, ${modeLabel})`,
+      normalized_id: lensId,
+      provider_id: snapshot?.source_provider ?? null,
+      native_id: lensId,
+      metadata: {
+        region: context.region,
+        timeframe: context.timeframe,
+        theme: context.theme,
+        mode: sourceMode,
+        comparison_region: context.comparisonRegion,
+        focus_count: snapshot?.focus_items?.length ?? 0,
+        snapshot_card_count: snapshot?.snapshot_cards?.length ?? 0,
+        divergence_count: snapshot?.top_divergences?.length ?? 0,
+        event_count: events?.events?.length ?? snapshot?.upcoming_events?.length ?? 0,
+        next_event_title: nextEvent?.title ?? null,
+        next_event_at: nextEvent?.scheduled_at ?? null
+      }
+    },
+    resolver_capability: "lens",
+    asset_class: "macro",
+    value_kind: "context",
+    default_side: "none",
+    default_weight: null,
+    selected_timeframe: {
+      label: context.timeframe,
+      start: null,
+      end: snapshot?.retrieved_at ?? null
+    },
+    provider: snapshot?.source_provider ?? null,
+    source: {
+      origin: snapshot?.origin ?? null,
+      retrieved_at: snapshot?.retrieved_at ?? null,
+      source_provider: snapshot?.source_provider ?? null,
+      transformation_note: snapshot?.transformation_note ?? null
+    },
+    warnings,
+    normalized_ids: {
+      macro_lens_id: lensId,
+      region: context.region,
+      timeframe: context.timeframe,
+      theme: context.theme,
+      mode: sourceMode
     },
     timestamp: new Date().toISOString()
   };

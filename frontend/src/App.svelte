@@ -2292,6 +2292,7 @@
             loading={$loading.macro || $loading.macroHistory}
             onLoadWorkspace={loadMacroWorkspace}
             onLoadSeries={loadMacroSeriesHistory}
+            onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {:else if $activeTab === "commodities"}
           <svelte:component
