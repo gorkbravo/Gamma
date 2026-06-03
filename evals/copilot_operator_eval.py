@@ -3,11 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Iterable
 
 from fastapi.testclient import TestClient
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from src.application.copilot_agents_operator import CopilotAgentsOperatorConfig
 from src.api.session_auth import GAMMA_SESSION_ENV, GAMMA_SESSION_HEADER
@@ -35,6 +41,13 @@ class CopilotOperatorEvalOutcome:
     passed: bool
     score: float
     checks: dict[str, bool]
+    model: str | None = None
+    reasoning_effort: str | None = None
+    duration_ms: int | None = None
+    sdk_duration_ms: int | None = None
+    model_usage: dict[str, Any] = field(default_factory=dict)
+    tool_selection_quality: float = 0.0
+    trace_report_quality: float = 0.0
     tool_traces: list[str] = field(default_factory=list)
     event_types: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -179,15 +192,18 @@ def _run_eval_case(
     case: CopilotOperatorEvalCase,
     orchestrator: str,
 ) -> CopilotOperatorEvalOutcome:
+    started_at = perf_counter()
     response = client.post(
         "/copilot/operator-plan/execute",
         json={"domain": "synthesis", "prompt": case.prompt, "context": case.context},
     )
+    duration_ms = int((perf_counter() - started_at) * 1000)
     payload = response.json()
     tool_traces = [str(item.get("tool_name")) for item in payload.get("tool_traces", [])]
     event_types = [str(item.get("event_type")) for item in payload.get("operator_events", [])]
     warnings = [str(item) for item in payload.get("warnings", [])]
     report_generated = _maybe_generate_report(client, case)
+    final_payload = _final_event_payload(payload)
     checks = {
         "http_ok": response.status_code == 200,
         "status_ready_or_gap": payload.get("status") == "ready" or bool(case.current_gap),
@@ -205,6 +221,11 @@ def _run_eval_case(
         ),
         "trace_completeness": bool(event_types) and event_types[0] == "plan" and event_types[-1] == "final-report",
         "report_generated": (not case.require_report) or report_generated,
+        "trace_has_outputs": (
+            not case.expected_tools
+            or bool(final_payload.get("output_summaries"))
+            or any(event.get("event_type") == "confirmation-needed" for event in payload.get("operator_events", []))
+        ),
     }
     if case.current_gap:
         checks["expected_tools"] = True
@@ -212,6 +233,13 @@ def _run_eval_case(
         checks["report_generated"] = True
     passed = all(checks.values())
     score = sum(1 for value in checks.values() if value) / len(checks)
+    tool_selection_quality = _tool_selection_quality(case, tool_traces)
+    trace_report_quality = _trace_report_quality(
+        event_types=event_types,
+        final_payload=final_payload,
+        report_generated=report_generated,
+        require_report=case.require_report,
+    )
     return CopilotOperatorEvalOutcome(
         case_id=case.case_id,
         orchestrator=orchestrator,
@@ -219,12 +247,66 @@ def _run_eval_case(
         passed=passed,
         score=score,
         checks=checks,
+        model=str(payload.get("model") or final_payload.get("model") or "") or None,
+        reasoning_effort=str(final_payload.get("reasoning_effort") or "") or None,
+        duration_ms=duration_ms,
+        sdk_duration_ms=(
+            int(final_payload["sdk_duration_ms"])
+            if isinstance(final_payload.get("sdk_duration_ms"), int)
+            else None
+        ),
+        model_usage=final_payload.get("model_usage") if isinstance(final_payload.get("model_usage"), dict) else {},
+        tool_selection_quality=tool_selection_quality,
+        trace_report_quality=trace_report_quality,
         tool_traces=tool_traces,
         event_types=event_types,
         warnings=warnings,
         current_gap=case.current_gap,
         report_generated=report_generated,
     )
+
+
+def _final_event_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    events = payload.get("operator_events", [])
+    if not isinstance(events, list):
+        return {}
+    for event in reversed(events):
+        if isinstance(event, dict) and event.get("event_type") == "final-report":
+            event_payload = event.get("payload")
+            return event_payload if isinstance(event_payload, dict) else {}
+    return {}
+
+
+def _tool_selection_quality(case: CopilotOperatorEvalCase, tool_traces: list[str]) -> float:
+    required = set(case.expected_tools)
+    forbidden = set(case.forbidden_tools)
+    if not required and not forbidden:
+        return 1.0
+    if not required:
+        return 0.0 if forbidden.intersection(tool_traces) else 1.0
+    hits = len(required.intersection(tool_traces))
+    misses = len(required.difference(tool_traces))
+    violations = len(forbidden.intersection(tool_traces))
+    denominator = max(1, len(required) + len(forbidden))
+    return max(0.0, (hits - misses - violations) / denominator)
+
+
+def _trace_report_quality(
+    *,
+    event_types: list[str],
+    final_payload: dict[str, Any],
+    report_generated: bool,
+    require_report: bool,
+) -> float:
+    checks = [
+        bool(event_types) and event_types[0] == "plan",
+        "step-start" in event_types or "confirmation-needed" in event_types,
+        "tool-result" in event_types or "confirmation-needed" in event_types,
+        bool(final_payload.get("output_summaries")) or "confirmation-needed" in event_types,
+        event_types[-1] == "final-report" if event_types else False,
+        report_generated if require_report else True,
+    ]
+    return sum(1 for item in checks if item) / len(checks)
 
 
 def _maybe_generate_report(client: TestClient, case: CopilotOperatorEvalCase) -> bool:
@@ -276,7 +358,20 @@ class _operator_orchestrator:
         if self.orchestrator == "agents_sdk_live":
             self.runtime.copilot_service.agents_operator_service.config = CopilotAgentsOperatorConfig(
                 orchestrator="agents_sdk",
-                model=os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL", "gpt-5.4"),
+                model=os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL", "gpt-5.5"),
+                reasoning_effort=os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_REASONING_EFFORT") or "low",
+                max_turns=8,
+            )
+            return
+        if self.orchestrator.startswith("agents_sdk_live:"):
+            _prefix, model, reasoning = (*self.orchestrator.split(":", 2), None, None)[:3]
+            del _prefix
+            self.runtime.copilot_service.agents_operator_service.config = CopilotAgentsOperatorConfig(
+                orchestrator="agents_sdk",
+                model=model or "gpt-5.5",
+                reasoning_effort=reasoning or None,
+                verbosity="low",
+                include_usage=True,
                 max_turns=8,
             )
             return
@@ -298,8 +393,18 @@ def _load_stub_agents_sdk() -> Any:
     from src.application.copilot_agents_operator import _AgentsSdkModule
 
     class _StubModelSettings:
-        def __init__(self, *, parallel_tool_calls: bool | None = None) -> None:
+        def __init__(
+            self,
+            *,
+            parallel_tool_calls: bool | None = None,
+            reasoning: dict[str, Any] | None = None,
+            verbosity: str | None = None,
+            include_usage: bool | None = None,
+        ) -> None:
             self.parallel_tool_calls = parallel_tool_calls
+            self.reasoning = reasoning
+            self.verbosity = verbosity
+            self.include_usage = include_usage
 
     class _StubAgent:
         def __init__(self, *, name, model, instructions, tools, model_settings=None) -> None:
@@ -329,6 +434,11 @@ def _load_stub_agents_sdk() -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run local Copilot Research Operator evals.")
     parser.add_argument("--include-agents-sdk-live", action="store_true")
+    parser.add_argument(
+        "--compare-gpt55",
+        action="store_true",
+        help="Run live Agents SDK variants for the current gpt-5.4 path plus gpt-5.5 medium/low.",
+    )
     args = parser.parse_args()
 
     from src.api.main import create_app
@@ -359,6 +469,13 @@ def main() -> int:
         orchestrators = ("custom", "agents_sdk_stub")
         if args.include_agents_sdk_live and os.getenv("OPENAI_API_KEY"):
             orchestrators = (*orchestrators, "agents_sdk_live")
+        if args.compare_gpt55 and os.getenv("OPENAI_API_KEY"):
+            orchestrators = (
+                "custom",
+                "agents_sdk_live:gpt-5.4:low",
+                "agents_sdk_live:gpt-5.5:medium",
+                "agents_sdk_live:gpt-5.5:low",
+            )
         result = run_operator_eval_suite(
             client,
             default_operator_eval_cases(portfolio_snapshot=snapshot, research_result=research_result),

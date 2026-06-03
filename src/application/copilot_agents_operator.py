@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time
+from time import perf_counter
 from typing import Any, Callable
 
 from src.application.copilot_context_helpers import dedupe_warnings
@@ -59,7 +60,10 @@ def _parse_positive_int_env(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class CopilotAgentsOperatorConfig:
     orchestrator: str = "custom"
-    model: str = "gpt-5.4"
+    model: str = "gpt-5.5"
+    reasoning_effort: str | None = "low"
+    verbosity: str | None = "low"
+    include_usage: bool = True
     max_turns: int = 8
 
     @property
@@ -74,9 +78,22 @@ class CopilotAgentsOperatorConfig:
             .lower(),
             model=(
                 os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL")
-                or os.getenv("GAMMA_COPILOT_MODEL")
-                or "gpt-5.4"
+                or "gpt-5.5"
             ).strip(),
+            reasoning_effort=(
+                os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_REASONING_EFFORT")
+                or "low"
+            ).strip()
+            or None,
+            verbosity=(
+                os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_VERBOSITY")
+                or "low"
+            ).strip()
+            or None,
+            include_usage=(os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_INCLUDE_USAGE", "true") or "true")
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
             max_turns=_parse_positive_int_env("GAMMA_COPILOT_OPERATOR_AGENTS_MAX_TURNS", 8),
         )
 
@@ -113,6 +130,8 @@ class CopilotAgentsOperatorService:
         output_summaries: dict[str, Any] = {}
         remaining_tool_calls = plan.max_tool_calls
         provider_calls_used = 0
+        sdk_duration_ms: int | None = None
+        model_usage: dict[str, Any] = {}
 
         def record_event(
             event_type: str,
@@ -174,6 +193,7 @@ class CopilotAgentsOperatorService:
                 "max_elapsed_ms": plan.max_elapsed_ms,
                 "orchestrator": self.provider_name,
                 "model": self.config.model,
+                "reasoning_effort": self.config.reasoning_effort,
                 "allowed_tool_ids": list(allowed_tool_ids),
             },
         )
@@ -358,12 +378,15 @@ class CopilotAgentsOperatorService:
             "tools": [execute_gamma_action],
         }
         if sdk.ModelSettings is not None:
-            agent_kwargs["model_settings"] = sdk.ModelSettings(parallel_tool_calls=False)
+            agent_kwargs["model_settings"] = sdk.ModelSettings(**self._model_settings_kwargs())
         agent = sdk.Agent(**agent_kwargs)
         prompt = self._operator_prompt(request, plan, allowed_tool_ids)
 
         try:
-            asyncio.run(sdk.Runner.run(agent, prompt, max_turns=self.config.max_turns))
+            started_at = perf_counter()
+            run_result = asyncio.run(sdk.Runner.run(agent, prompt, max_turns=self.config.max_turns))
+            sdk_duration_ms = int((perf_counter() - started_at) * 1000)
+            model_usage = self._extract_run_usage(run_result)
         except Exception as exc:
             record_warning(f"Agents SDK operator run failed: {exc.__class__.__name__}: {exc}")
 
@@ -399,6 +422,8 @@ class CopilotAgentsOperatorService:
             status="ready" if executed_steps else "error",
             outputs=outputs,
             output_summaries=output_summaries,
+            sdk_duration_ms=sdk_duration_ms,
+            model_usage=model_usage,
         )
 
     def _finalize_result(
@@ -418,6 +443,8 @@ class CopilotAgentsOperatorService:
         status: str,
         outputs: dict[str, Any] | None = None,
         output_summaries: dict[str, Any] | None = None,
+        sdk_duration_ms: int | None = None,
+        model_usage: dict[str, Any] | None = None,
     ) -> CopilotResearchCardResult:
         warnings = dedupe_warnings(warnings)
         run_id = events[0].run_id if events else new_copilot_id("oprun")
@@ -463,6 +490,11 @@ class CopilotAgentsOperatorService:
                     "warning_count": len(warnings),
                     "source_count": len(sources),
                     "tool_trace_count": len(tool_traces),
+                    "model": self.config.model,
+                    "reasoning_effort": self.config.reasoning_effort,
+                    "verbosity": self.config.verbosity,
+                    "sdk_duration_ms": sdk_duration_ms,
+                    "model_usage": model_usage or {},
                     "output_summaries": output_summaries or {},
                     "outputs": outputs or {},
                 },
@@ -489,11 +521,14 @@ class CopilotAgentsOperatorService:
     def _instructions() -> str:
         return (
             "You are Gamma's Research Operator orchestrator. "
-            "Call only the provided Gamma action-registry tool. "
-            "Use only action ids listed in the user payload under allowed_tool_ids. "
+            "Your outcome is a traceable, read-only Gamma research run with the right tools selected, "
+            "explicit confirmation stops, compact evidence-backed trace output, and no durable side effects. "
+            "Call only the provided Gamma action-registry tool and only action ids listed in the user payload "
+            "under allowed_tool_ids. "
             "Do not apply local state changes, place trades, modify accounts, sign wallet messages, "
             "rebalance portfolios, or run arbitrary strategy code. "
-            "Stop at confirmation checkpoints and leave durable research-state changes to Gamma's confirmation flow."
+            "Stop at confirmation checkpoints and leave durable research-state changes to Gamma's confirmation flow. "
+            "Prefer the smallest set of relevant allowed actions that satisfies the user's requested research task."
         )
 
     @classmethod
@@ -521,13 +556,35 @@ class CopilotAgentsOperatorService:
                 for step in plan.steps
             ],
             "confirmation_checkpoints": [asdict(item) for item in plan.confirmation_checkpoints],
+            "success_criteria": [
+                "Select only Gamma registry actions that directly support the user request and operator plan.",
+                "Run automatic read-only analysis tools when they are relevant and bounded.",
+                "Never run tools that require confirmation; leave those for Gamma's confirmation checkpoints.",
+                "Produce enough tool results for Gamma to build a useful trace and final report.",
+            ],
+            "stopping_rules": [
+                "Stop after the relevant allowed read-only plan actions have completed or been skipped with warnings.",
+                "Stop before any durable local research-state change or action outside the allowed_tool_ids list.",
+                "Stop if Gamma returns a confirmation checkpoint, permission warning, or tool-call budget guard.",
+            ],
             "required_behavior": (
-                "Call execute_registered_action for each relevant allowed read-only action. "
+                "Call execute_registered_action for each relevant allowed read-only action needed for the request. "
                 "Pass an empty JSON object for arguments when Gamma should infer defaults. "
                 "Do not call tools that are missing from allowed_tool_ids."
             ),
         }
         return cls._json_dumps(payload)
+
+    def _model_settings_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "parallel_tool_calls": False,
+            "include_usage": self.config.include_usage,
+        }
+        if self.config.reasoning_effort:
+            kwargs["reasoning"] = {"effort": self.config.reasoning_effort}
+        if self.config.verbosity:
+            kwargs["verbosity"] = self.config.verbosity
+        return kwargs
 
     @staticmethod
     def _parse_json_object(value: Any) -> dict[str, Any]:
@@ -551,6 +608,46 @@ class CopilotAgentsOperatorService:
         if isinstance(value, (datetime, date, time)):
             return value.isoformat()
         return str(value)
+
+    @classmethod
+    def _extract_run_usage(cls, run_result: Any) -> dict[str, Any]:
+        usage: dict[str, Any] = {}
+        raw_responses = getattr(run_result, "raw_responses", None)
+        if not isinstance(raw_responses, list):
+            return usage
+        for response in raw_responses:
+            response_usage = cls._object_to_mapping(getattr(response, "usage", None))
+            if response_usage:
+                cls._merge_usage(usage, response_usage)
+        return usage
+
+    @classmethod
+    def _merge_usage(cls, total: dict[str, Any], item: dict[str, Any]) -> None:
+        for key, value in item.items():
+            if isinstance(value, (int, float)):
+                total[key] = total.get(key, 0) + value
+            elif isinstance(value, dict):
+                nested = total.setdefault(key, {})
+                if isinstance(nested, dict):
+                    cls._merge_usage(nested, value)
+
+    @classmethod
+    def _object_to_mapping(cls, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if value is None:
+            return {}
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump()
+            return dumped if isinstance(dumped, dict) else {}
+        return {
+            key: item
+            for key in dir(value)
+            if not key.startswith("_")
+            for item in [getattr(value, key, None)]
+            if isinstance(item, (int, float, dict))
+        }
 
     @staticmethod
     def _compact_output(output: Any) -> Any:
