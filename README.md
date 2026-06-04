@@ -27,7 +27,7 @@ Gamma currently lets a user:
 - inspect company fundamentals, financial statements, peer context, and persistent DCF scenarios
 - research commodities across energy, metals, curves, spreads, inventories, events, and cross-domain handoffs
 - inspect implied-volatility surfaces through the IV explorer
-- generate shell-level Copilot research cards and cross-context synthesis from loaded Gamma state
+- generate Copilot research cards, synthesis, operator plans, and memos from loaded Gamma state through both the shell shelf and the dedicated Copilot workspace
 - navigate the app as a desktop product with reorderable tabs and keyboard shortcuts
 
 ## What Gamma Does Not Do
@@ -55,7 +55,7 @@ Gamma opens on a landing screen that shows connection state and lets the user en
 Within each workspace, tabs can be reordered in the sidebar. The default layout is:
 
 - `Portfolio View`: `PORTFOLIO`, `RISK`, `OPTIONS`
-- `Research View`: `SITREP`, `EQUITY RESEARCH`, `STRATEGY LAB`, `MACRO`, `PREDICTION MARKETS`, `CRYPTO`, `FUNDAMENTALS`, `COMMODITIES`, `SEALANES`, `RISK`, `OPTIONS`
+- `Research View`: `SITREP`, `EQUITY RESEARCH`, `STRATEGY LAB`, `MACRO`, `PREDICTION MARKETS`, `CRYPTO`, `FUNDAMENTALS`, `COMMODITIES`, `SEALANES`, `COPILOT`, `RISK`, `OPTIONS`
 
 The current desktop navigation model is part of the product, not an afterthought:
 
@@ -115,7 +115,7 @@ Oversized API requests return FastAPI/Pydantic `422` validation errors. Normal U
 
 ## Data Sources And Provenance
 
-Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
+Gamma mixes broker, public-market, public-macro, on-chain, and filing data. The product expectation is provider-backed data wherever the needed public endpoint, API key, entitlement, or TWS session is available. Mock and sample providers are useful for development, demos, offline fallback, and explicit degraded states, but they are not the success criterion for a completed feature when a real provider path exists.
 
 - `IBKR`: portfolio snapshots, security history when explicitly configured or needed as fallback, FX spot/history, IV surfaces, fundamentals market-price context, and commodity futures curves where the user has entitlements
 - `Yahoo Finance / yfinance`: default public live-ish listed-market history for Research Overview and SITREP boards; unofficial and not institutional quote truth
@@ -131,7 +131,7 @@ Gamma mixes broker, public-market, public-macro, on-chain, and filing data:
 - `GeckoTerminal`: DEX network metadata, pool search, token-pool lookup, and liquidity context
 - `SEC EDGAR / data.sec.gov via EdgarTools`: company resolution, filing chronology, company facts, and statement inputs
 - `OpenAI`: optional Copilot model provider behind Gamma's AI service boundary
-- `sample_data/` and generated sample providers: local offline development data when `MOCK_DATA=true` or a domain provider is not configured
+- `sample_data/` and generated sample providers: local offline development, demos, and explicit fallback/degraded behavior when `MOCK_DATA=true` or a domain provider is not configured
 
 A lot of the app's trust model depends on provenance. Many returned entities carry:
 
@@ -156,6 +156,7 @@ For Roadmap V2 planning, the intended provider stance is:
 - use official/free sources such as `FRED`, `BLS`, `BEA`, `EIA`, `ECB`, `Eurostat`, `US Treasury`, and `SEC EDGAR` for macro, energy, economic, and filing-backed datasets
 - consider specialist providers only where they add a structurally different surface, such as AIS/maritime data, deeper futures history, or on-chain analytics
 - keep every provider path read-only; market-data access must not imply order placement or execution features
+- treat sample-only behavior as degraded or incomplete when the relevant live/provider-backed path is configured and expected to work
 
 The current listed-market policy is configured server-side:
 
@@ -257,9 +258,9 @@ The IV explorer is a surface-inspection tool, not an options pricer.
 
 It provides:
 
-- one-shot IV surface loads
-- a Python-owned session loop for repeated refreshes
-- selectable surface depth presets that trade expiry count and strike width against TWS market-data-line usage
+- max-depth IV surface snapshots as the primary UI workflow
+- a Python-owned session loop for explicit repeated refreshes
+- backend depth presets that trade expiry count and strike width against TWS market-data-line usage; the UI favors the `Max` preset so line budget goes toward strike breadth
 - expiry/strike heatmap
 - selected expiry slice
 - ATM term structure
@@ -267,7 +268,7 @@ It provides:
 Under the hood:
 
 - live mode requests an IV surface snapshot from the backend IV engine over IBKR
-- `Compact`, `Standard`, `Deep`, `Front Deep`, and `Max Reload` presets tune the backend's expiry count, strike band, contract cap, and line budget; the UI shows line utilization and observed/interpolated surface cells
+- `Compact`, `Standard`, `Deep`, `Front Deep`, and `Max` presets tune the backend's expiry count, strike band, contract cap, and line budget; the default max surface keeps expiries tight so calls and puts can cover more strikes
 - the frontend highlights the strike nearest to spot and uses that strike to derive ATM term structure
 - in mock mode, Gamma generates a synthetic surface with a simple skew/term-structure shape so the UI remains testable
 
@@ -569,7 +570,7 @@ Important caveats:
 
 #### Copilot layer
 
-Copilot is currently a shell-level research assistant rather than a normal tab. It generates structured research cards from the active Gamma context and can synthesize across multiple loaded domains.
+Copilot now exists in two places: a shell shelf for quick active-context research cards, and a dedicated Research workspace tab for synthesis, active-tab focus, operator plans, session history, and memo-oriented workflows. Both surfaces remain read-only and grounded in loaded Gamma state.
 
 Current behavior:
 
@@ -578,26 +579,28 @@ Current behavior:
 - forwards compatible follow-up turns through the provider boundary
 - exposes scope, provenance, warnings, and tool traces in generated outputs
 - supports first-pass cross-context synthesis across loaded Gamma domains
+- stores local sessions, turns, context snapshots, and first-pass memos
+- exposes a feature-flagged operator path for bounded read-only research actions
 
 Important caveats:
 
 - Copilot is read-only and should remain grounded in Gamma state, not external execution
-- streaming, richer session persistence, saved memos, dedicated workspace flows, and voice interaction are V2 work
+- provider-level streaming, richer archive/search/title handling, memo editing/export, stricter source-backed/inferred labeling, and voice interaction remain V2 work
 
 ## Current Roadmap Position
 
 Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 
 - `Phase 1 - Prediction Markets`: complete at a first-pass level
-- `Phase 2 - Macro`: paused around 84%, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes already live
+- `Phase 2 - Macro`: paused around 84% in the original roadmap, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes as the first-pass checkpoint; Roadmap V2 has since expanded the live tab to include Trade Partners and Country Compare
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
-- `Phase 4 - AI Copilot`: paused around 70%, with a shell-level read-only Copilot that can generate structured research cards across the current tab set, sustain lightweight same-domain follow-up threads, and produce scope-aware cross-context synthesis across multiple loaded Gamma domains
+- `Phase 4 - AI Copilot`: paused around 70% in the original roadmap; Roadmap V2 has since added a dedicated Copilot workspace alongside the shell shelf, with local sessions, synthesis, memos, and bounded read-only operator actions
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
 - `Roadmap V2 Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
 - `Roadmap V2 Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 
-That means the app already has meaningful portfolio/risk/IV capabilities, a first-pass SITREP entry surface, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus an intermediate Phase 4 AI layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
+That means the app already has meaningful portfolio/risk/IV capabilities, a first-pass SITREP entry surface, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus a live Copilot workspace and shell layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
 
 ## Roadmap V2 Direction
 

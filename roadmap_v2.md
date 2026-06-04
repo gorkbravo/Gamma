@@ -44,7 +44,7 @@ That means provider adapters, data models, reusable analytics, provenance, cross
 
 ## Current App State Snapshot
 
-_Updated: 2026-05-08_
+_Updated: 2026-06-03_
 
 Gamma is now a broad read-only research application with two primary workspaces:
 
@@ -55,7 +55,7 @@ The implemented app state is materially ahead of the original V2 starting point:
 
 - `Portfolio` is a working account and history surface with IBKR/mock data paths, base-currency conversion, persisted local history, benchmark-aware performance, diagnostics, and account-subscribe helpers.
 - `Risk` is a real read-only analytics surface for Portfolio and Research contexts, including contribution, concentration, drawdown/cumulative/rolling analytics, beta/correlation style views, Monte Carlo-style terminal return modeling, and coverage warnings.
-- `Options` now has a registered multi-mode IV workspace with Surface, Skew & Term, Realized vs Implied, Implied Distribution, and Source views. It has live/mock IV surface collection, session start/stop/status routes, market-data mode controls, option-chain quality metadata, derived skew/term/realized/distribution analytics, and Copilot tools.
+- `Options` now has a registered multi-mode IV workspace with Overview, Chain, Surface, Realized vs IV, Implied Distribution, and Strategies views. It has live/mock IV surface collection, session start/stop/status routes, market-data mode controls, option-chain quality metadata, derived skew/term/realized/distribution analytics, strategy-payoff inspection, and Copilot tools.
 - `SITREP` is the locked Research home and cross-domain triage surface. It reuses Research, Macro, Commodities, Prediction Markets, and News payloads, plus media/provider/status context, rather than acting as a standalone provider.
 - `Equity Research` owns equity market overview, scope analysis, comparables, scenario context, and saved equity research. `Strategy Lab` owns imported return streams, weighted Gamma object compositions, backtest/analyze views, regime/stress lenses, and saved runs.
 - `Macro` is now a six-mode workspace with Snapshot, Cross-Asset, Rates & Policy, Events / Regimes, Trade Partners, and Country Compare. It has FRED, Treasury, DB.nomics, Census trade-partner, IBKR FX proxy, US event, prediction-market linkage, coherence/lead-lag, policy path, event-study, bilateral trade-context, and country-comparison logic.
@@ -68,11 +68,11 @@ The implemented app state is materially ahead of the original V2 starting point:
 - `System` now exposes health, status, provider capabilities, provider usage diagnostics with activation-aware health labels, read-only boundary metadata, diagnostics, connection toggles, market-data mode, base-currency mutation, and account-subscribe helpers.
 - `News` has a first-pass sample/RSS provider boundary and `/news/latest` feed route for lightweight event context.
 
-The main remaining V2 gaps are no longer "make the tabs exist." They are provider depth, provenance adoption consistency, real cross-tab handoff actions, saved workflow depth, live-provider smoke coverage, installer/first-run readiness, tutorial flows, and richer beta-facing diagnostics/error states built on the new provider usage visibility.
+The main remaining V2 gaps are no longer "make the tabs exist." They are live/provider-backed reliability, provider depth, provenance adoption consistency, real cross-tab handoff actions, saved workflow depth, live-provider smoke coverage, installer/first-run readiness, tutorial flows, and richer beta-facing diagnostics/error states built on the new provider usage visibility.
 
 ### Current Tab Progress Snapshot
 
-This table tracks the visible app tabs as of 2026-05-08. Percentages are pragmatic implementation snapshots, not release promises.
+This table tracks the visible app tabs as of 2026-06-03. Percentages are pragmatic implementation snapshots, not release promises.
 
 | Workspace | Tab | Current completion | What is left |
 | --- | --- | ---: | --- |
@@ -89,6 +89,22 @@ This table tracks the visible app tabs as of 2026-05-08. Percentages are pragmat
 | Research | `Commodities` | ~73% | Add vendor-grade futures-chain history, continuous/roll-adjusted mapping, historical curve snapshots, real metals warehouse data, seasonal inventory surprise models, and live cross-domain handoff flows. |
 | Research | `Sealanes` | Paused ~45% | Evaluate AIS/historical data providers, add durable AIS caching, improve chokepoint baselines, build real event replay, enrich vessel metadata, and avoid risk labels until methodology is validated. |
 | Research | `Copilot` | ~64% | Replace wrapper streaming with provider-level streaming, improve session archive/search/title handling, add memo editing/export, strengthen source-backed versus inferred labels, and expand Sealanes/news drilldowns. |
+
+### Completion Boundary For The Current Pass
+
+Gamma should not keep adding major tabs or broad new domains just to fill Roadmap V2. For the current pass, "complete for now" means the app is ready to be treated as a stable first-pass personal research environment and a candidate for controlled external testing. The bar is provider-backed/live behavior where Gamma has configured credentials or public provider access; mock/sample data is fallback, demo, and test support, not the definition of completeness.
+
+The current pass should be considered complete when:
+
+- active docs agree on the current app shape, tab list, mode registry, and product boundary;
+- the existing Portfolio, Risk, Options, SITREP, Equity Research, Strategy Lab, Macro, Prediction Markets, Crypto, Fundamentals, Commodities, Sealanes, and Copilot surfaces keep their current first-pass workflows working against live or provider-backed data wherever the required credentials, public endpoints, entitlements, or TWS session are available;
+- provider-backed paths have smoke coverage or explicit unavailable/degraded labels, rather than silently falling back to sample data or blank states;
+- cross-tab handoffs that already exist preserve the selected entity/lens well enough for normal research use;
+- provider usage, provenance, freshness, and read-only boundary warnings are visible enough that a user can tell what is live/provider-backed, delayed, cached, sample, stale, derived, or unsupported;
+- README run commands, validation commands, and provider setup notes are accurate;
+- beta-facing diagnostics, empty states, and first-run guidance are good enough for a trusted tester who has not read the code.
+
+Everything beyond that line should be treated as targeted Roadmap V2 deepening, not as required to call the current app "complete for now." In particular, deeper wallet analytics, vendor-grade futures history, full global macro coverage, exhaustive options modeling, broader non-US fundamentals, richer maritime AIS history, and Copilot voice/true provider streaming are valuable future work, but they are not blockers for this completion boundary. A feature that only works through sample data when a real provider path is available should be treated as incomplete or degraded, not as done.
 
 ---
 
@@ -991,15 +1007,17 @@ At the end of Macro V2, Gamma should have a more globally useful macro workspace
 _Status: In progress (~58%)_
 _Dependency marker: Parallelizable, but dependent on IBKR / options data quality_
 _Parallelization note: UI and analytics can progress incrementally, but live coverage depends on options entitlements and provider behavior._
-_Recent progress: Options now has registered modes for Surface, Skew & Term, Realized vs Implied, Implied Distribution, and Source; `/iv/surface`, `/iv/session`, start/stop session routes; live/mock surface collection; market-data mode/depth controls; option-contract, pair, quality, expiry analytics, and pricing-assumption models; frontend derived surface paths, skew rows, realized-volatility comparisons, distribution buckets; and Copilot IV surface/session tools._
+_Recent progress: Options now has registered modes for Overview, Chain, Surface, Realized vs IV, Implied Distribution, and Strategies; `/iv/surface`, `/iv/session`, start/stop session routes; live/mock surface collection; market-data mode/depth controls; option-contract, pair, quality, expiry analytics, and pricing-assumption models; frontend derived surface paths, skew rows, term-structure rows, realized-volatility comparisons, distribution buckets, strategy-payoff inspection, and Copilot IV surface/session tools._
 
 #### Completion snapshot
 
-- `Surface mode`: ~70% complete. The mode can request live/mock surfaces, display surface statistics, render heatmap/3D-style paths, and expose provider/session/source warnings. Remaining work: richer 3D interaction, historical surface comparison, and better expiry/strike filtering.
-- `Skew & Term mode`: ~58% complete. Derived term structure and wing-skew rows are live from the current surface. Remaining work: persistent skew history, richer smile diagnostics, event annotations, and cross-symbol comparison.
-- `Realized vs Implied mode`: ~45% complete. Realized-volatility windows and front-IV spreads can be derived when price history is available. Remaining work: more durable underlying history sourcing, configurable windows, and regime/event overlays.
+- `Overview and Chain modes`: ~60% complete. The workspace can orient around a selected underlying, expose the front expiry chain, summarize ATM/skew/term context, and support basic option-leg selection. Remaining work: better expiry/strike filtering, more explicit source quality, and richer chain diagnostics.
+- `Surface mode`: ~70% complete. The mode can request live/mock surfaces, display surface statistics, render heatmap/3D-style paths, and expose provider/session/source warnings. Remaining work: richer 3D interaction, historical surface comparison, and better moneyness controls.
+- `Skew and term-structure modules`: ~58% complete. Derived term structure and wing-skew rows are live from the current surface, but they are currently modules inside the registered workspace rather than a standalone mode. Remaining work: persistent skew history, richer smile diagnostics, event annotations, and cross-symbol comparison.
+- `Realized vs IV mode`: ~45% complete. Realized-volatility windows and front-IV spreads can be derived when price history is available. Remaining work: more durable underlying history sourcing, configurable windows, and regime/event overlays.
 - `Implied Distribution mode`: ~42% complete. A first-pass lognormal bucket view is derived from front ATM IV. Remaining work: risk-neutral density methods, skew-aware distribution estimates, and clearer methodology warnings.
-- `Greeks / source quality`: ~62% complete. The backend models carry provider/derived Greeks, quality metrics, contract selection metadata, and market-data line pressure. Remaining work: fuller UI inspection, Greeks-specific mode, and broader entitlement/session diagnostics.
+- `Strategies mode`: ~40% complete. Basic selected-leg payoff inspection exists. Remaining work: richer multi-leg templates, scenario context, and clearer non-execution warnings.
+- `Greeks / source quality`: ~62% complete. The backend models carry provider/derived Greeks, quality metrics, contract selection metadata, and market-data line pressure. Remaining work: fuller UI inspection, possible Greeks-specific mode, and broader entitlement/session diagnostics.
 - `Copilot integration`: ~70% complete. Copilot can inspect IV surface context and session status. Remaining work: deeper skew/term/realized drilldowns and cross-tab handoffs from Research/Fundamentals.
 
 ### Why this workstream matters
@@ -1025,13 +1043,14 @@ It should answer:
 
 Current registered modes:
 
+- `Overview`
+- `Chain`
 - `Surface`
-- `Skew & Term`
-- `Realized vs Implied`
+- `Realized vs IV`
 - `Implied Distribution`
-- `Source`
+- `Strategies`
 
-Earlier V2 planning treated `Greeks` and `Events / Cross-Tab` as possible modes. The current implementation keeps Greeks and source quality inside the backend/source inspection path for now, and leaves event/cross-tab behavior as future handoff work rather than a separate mode.
+Earlier V2 planning treated `Skew & Term`, `Source`, `Greeks`, and `Events / Cross-Tab` as possible standalone modes. The current implementation keeps skew, term, Greeks, and source quality inside the registered workspace modules for now, and leaves event/cross-tab behavior as future handoff work rather than a separate mode.
 
 #### 1. Surface mode
 
@@ -1050,9 +1069,9 @@ V2 improvements:
 
 The first pass should prioritize clarity and stability over complex model fitting.
 
-#### 2. Skew & Term mode
+#### 2. Skew and term-structure modules
 
-This mode should focus on structure.
+These modules should focus on structure.
 
 It should show ATM term structure, put skew by expiry, call skew by expiry, selected delta/moneyness slices, skew change versus prior snapshot where available, term-structure slope, and event-related kinks.
 
@@ -1060,9 +1079,9 @@ This mode should help answer:
 
 **Where is the market paying for asymmetry or event risk?**
 
-#### 3. Greeks mode
+#### 3. Greeks and source-quality inspection
 
-This mode should add basic options sensitivity context.
+This inspection layer should add basic options sensitivity context without requiring a standalone mode until the provider/model inputs justify it.
 
 Potential outputs:
 
@@ -1077,7 +1096,7 @@ This mode should be framed as research context, not a position-management or exe
 
 If Gamma lacks reliable option model inputs, the UI should clearly distinguish provider-returned fields from Gamma-derived estimates.
 
-#### 4. Realized vs Implied mode
+#### 4. Realized vs IV mode
 
 This mode should compare market-implied volatility against realized behavior.
 
@@ -1135,15 +1154,15 @@ Suggested progression:
 
 1. Stabilize the current surface data model and provenance.
 2. Add 3D surface and better moneyness/expiry controls.
-3. Add Skew & Term mode.
-4. Add Realized vs Implied mode.
-5. Add Greeks mode if provider/model inputs are reliable.
-6. Add Implied Distribution mode.
-7. Add deeper handoffs to Research, Fundamentals, and Copilot.
+3. Deepen skew and term-structure modules inside the current workspace.
+4. Harden Realized vs IV mode.
+5. Add a Greeks-specific mode only if provider/model inputs are reliable enough.
+6. Deepen Implied Distribution mode.
+7. Add richer Strategies behavior and deeper handoffs to Research, Fundamentals, and Copilot.
 
 ### Deliverable
 
-At the end of IV V2, Gamma should have a volatility lab that can inspect surfaces, skew, term structure, realized-versus-implied context, Greeks, and implied distributions while remaining read-only.
+At the end of IV V2, Gamma should have a volatility lab that can inspect chains, surfaces, skew, term structure, realized-versus-IV context, strategy payoffs, Greeks/source quality, and implied distributions while remaining read-only.
 
 ---
 
@@ -2435,7 +2454,7 @@ After data shapes are proven:
 - Strategy Lab saved/reuse hardening,
 - Market Overview provider breadth,
 - Commodities Energy/Curves hardening and Metals/Events deepening,
-- IV Skew & Term and Realized vs Implied,
+- IV skew/term modules and Realized vs IV,
 - Crypto Wallets & Flows,
 - Fundamentals Reverse Valuation,
 - Copilot true streaming, session search/archive, and memo polish,

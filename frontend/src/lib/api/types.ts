@@ -3190,6 +3190,10 @@ export interface IvOptionPair {
   put_midpoint: number | null;
   call_mark_price: number | null;
   put_mark_price: number | null;
+  call_price: number | null;
+  put_price: number | null;
+  call_price_source: string | null;
+  put_price_source: string | null;
   call_implied_volatility: number | null;
   put_implied_volatility: number | null;
   blended_implied_volatility: number | null;

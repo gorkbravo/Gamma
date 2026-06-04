@@ -18,7 +18,7 @@ def iv_surface(
     request: Request,
     symbol: str = Query(default="SPY"),
     market_data_mode: str | None = Query(default=None),
-    wait_seconds: float = Query(default=2.5, ge=0.5, le=30.0),
+    wait_seconds: float = Query(default=2.5, ge=0.5, le=90.0),
     depth_preset: str | None = Query(default=None),
 ) -> IVSurfaceResponseModel:
     runtime = request.app.state.runtime

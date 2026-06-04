@@ -411,11 +411,11 @@ class IVSurfaceEngine:
         selection_note = None
         if len(strikes) > max_strikes_per_expiry:
             original_count = len(strikes)
-            strikes = sorted(strikes, key=lambda x: abs(x - spot))[:max_strikes_per_expiry]
-            strikes = sorted(strikes)
+            strikes = self._sample_strikes_for_surface(strikes, spot, max_strikes_per_expiry)
             selection_note = (
-                f"Trimmed the near-spot strike set from {original_count} to {len(strikes)} strikes to stay within "
-                f"the configured working budget of {option_contract_budget} option quote lines."
+                f"Sampled the strike set from {original_count} to {len(strikes)} strikes across the configured "
+                f"{self.strike_band_pct:.1%} band to stay within the working budget of "
+                f"{option_contract_budget} option quote lines."
             )
         if len(expiries) * len(strikes) * len(rights) > option_contract_budget:
             raise RuntimeError(
@@ -536,9 +536,38 @@ class IVSurfaceEngine:
         return candidates[0]
 
     def _choose_expiries(self, expirations: Sequence[str]) -> List[str]:
-        today = datetime.utcnow().strftime("%Y%m%d")
-        valid = sorted(str(e) for e in expirations if str(e) >= today)
-        return valid[: self.max_expiries]
+        today = datetime.utcnow().date()
+        valid: list[tuple[str, int]] = []
+        for raw_expiry in expirations:
+            expiry = str(raw_expiry)
+            parsed = self._parse_expiry_date(expiry)
+            if parsed is None or parsed < today:
+                continue
+            valid.append((expiry, (parsed - today).days))
+        valid.sort(key=lambda item: (item[1], item[0]))
+        if len(valid) <= self.max_expiries:
+            return [expiry for expiry, _dte in valid]
+
+        selected: list[tuple[str, int]] = []
+        remaining = list(valid)
+        for target_dte in self._target_expiry_dtes():
+            if len(selected) >= self.max_expiries or not remaining:
+                break
+            best = min(remaining, key=lambda item: (abs(item[1] - target_dte), item[1], item[0]))
+            selected.append(best)
+            remaining.remove(best)
+
+        if len(selected) < self.max_expiries:
+            selected_keys = {expiry for expiry, _dte in selected}
+            for candidate in valid:
+                if candidate[0] in selected_keys:
+                    continue
+                selected.append(candidate)
+                if len(selected) >= self.max_expiries:
+                    break
+
+        selected.sort(key=lambda item: (item[1], item[0]))
+        return [expiry for expiry, _dte in selected[: self.max_expiries]]
 
     def _choose_strikes(self, strikes: Sequence[float], spot: float) -> List[float]:
         clean = sorted(float(s) for s in strikes if self._coerce_positive(s) is not None)
@@ -552,6 +581,47 @@ class IVSurfaceEngine:
         nearest = sorted(clean, key=lambda x: abs(x - spot))[:15]
         return sorted(nearest)
 
+    @staticmethod
+    def _parse_expiry_date(expiry: str):
+        clean = str(expiry or "").replace("-", "")
+        if len(clean) < 8:
+            return None
+        try:
+            return datetime.strptime(clean[:8], "%Y%m%d").date()
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _target_expiry_dtes() -> list[int]:
+        return [0, 7, 14, 30, 45, 60, 90, 120, 180, 270, 365]
+
+    def _sample_strikes_for_surface(self, strikes: Sequence[float], spot: float, limit: int) -> list[float]:
+        clean = sorted(float(strike) for strike in strikes if self._coerce_positive(strike) is not None)
+        if len(clean) <= limit:
+            return clean
+        limit = max(1, int(limit))
+        span = max(self.strike_band_pct, 0.01)
+        positions = np.linspace(-1.0, 1.0, limit)
+        target_offsets = [float(np.sign(pos) * (abs(pos) ** 1.45) * span) for pos in positions]
+        selected: list[float] = []
+        remaining = list(clean)
+        for offset in target_offsets:
+            target = spot * (1.0 + offset)
+            best = min(remaining, key=lambda strike: (abs(strike - target), abs(strike - spot), strike))
+            selected.append(best)
+            remaining.remove(best)
+            if not remaining:
+                break
+        if len(selected) < limit:
+            selected_keys = set(selected)
+            for strike in sorted(clean, key=lambda item: (abs(item - spot), item)):
+                if strike in selected_keys:
+                    continue
+                selected.append(strike)
+                if len(selected) >= limit:
+                    break
+        return sorted(selected[:limit])
+
     def _resolve_option_subscription_candidates(
         self,
         *,
@@ -563,6 +633,17 @@ class IVSurfaceEngine:
         strikes: list[float],
         rights: list[str],
     ) -> tuple[list[OptionSubscriptionCandidate], str | None]:
+        if self.depth_preset == "max":
+            return self._build_direct_option_subscription_candidates(
+                symbol=symbol,
+                underlying_currency=underlying_currency,
+                trading_class=trading_class,
+                multiplier=multiplier,
+                expiries=expiries,
+                strikes=strikes,
+                rights=rights,
+            )
+
         strike_keys = {self._strike_key(strike) for strike in strikes}
         requested_keys = {
             (expiry, self._strike_key(strike), right)
@@ -634,6 +715,42 @@ class IVSurfaceEngine:
                 "before requesting market data."
             )
         return candidates, note
+
+    def _build_direct_option_subscription_candidates(
+        self,
+        *,
+        symbol: str,
+        underlying_currency: str,
+        trading_class: str,
+        multiplier: str,
+        expiries: list[str],
+        strikes: list[float],
+        rights: list[str],
+    ) -> tuple[list[OptionSubscriptionCandidate], str | None]:
+        candidates: list[OptionSubscriptionCandidate] = []
+        for expiry in expiries:
+            for strike in strikes:
+                for right in rights:
+                    contract = Contract(
+                        symbol=symbol,
+                        secType="OPT",
+                        exchange="SMART",
+                        currency=underlying_currency,
+                        lastTradeDateOrContractMonth=expiry,
+                        strike=float(strike),
+                        right=right,
+                        tradingClass=trading_class,
+                        multiplier=multiplier,
+                    )
+                    candidates.append(
+                        OptionSubscriptionCandidate(
+                            contract=contract,
+                            expiry=expiry,
+                            strike=float(strike),
+                            right=right,
+                        )
+                    )
+        return candidates, "Used option-chain parameters directly for max-depth subscriptions to avoid slow per-expiry contract-detail validation."
 
     @staticmethod
     def _combine_notes(*notes: str | None) -> str | None:
@@ -962,17 +1079,19 @@ class IVSurfaceEngine:
     ) -> IVOptionPairRecord:
         call_mid = call_contract.midpoint if call_contract is not None else None
         put_mid = put_contract.midpoint if put_contract is not None else None
+        call_price, call_price_source = self._contract_display_price(call_contract)
+        put_price, put_price_source = self._contract_display_price(put_contract)
         call_iv = self._contract_surface_iv(call_contract)
         put_iv = self._contract_surface_iv(put_contract)
         blended = np.mean([value for value in (call_iv, put_iv) if value is not None]) if any(
             value is not None for value in (call_iv, put_iv)
         ) else None
-        straddle_mid = (call_mid + put_mid) if call_mid is not None and put_mid is not None else None
-        synthetic_forward = (strike + call_mid - put_mid) if call_mid is not None and put_mid is not None else None
-        implied_move_pct = (straddle_mid / spot) if straddle_mid is not None and spot > 0 else None
+        straddle_price = (call_price + put_price) if call_price is not None and put_price is not None else None
+        synthetic_forward = (strike + call_price - put_price) if call_price is not None and put_price is not None else None
+        implied_move_pct = (straddle_price / spot) if straddle_price is not None and spot > 0 else None
         parity_gap = (
-            call_mid - put_mid - (spot - strike)
-            if call_mid is not None and put_mid is not None and spot > 0
+            call_price - put_price - (spot - strike)
+            if call_price is not None and put_price is not None and spot > 0
             else None
         )
         return IVOptionPairRecord(
@@ -986,6 +1105,10 @@ class IVSurfaceEngine:
             put_midpoint=put_mid,
             call_mark_price=call_contract.mark_price if call_contract is not None else None,
             put_mark_price=put_contract.mark_price if put_contract is not None else None,
+            call_price=call_price,
+            put_price=put_price,
+            call_price_source=call_price_source,
+            put_price_source=put_price_source,
             call_implied_volatility=call_iv,
             put_implied_volatility=put_iv,
             blended_implied_volatility=float(blended) if blended is not None else None,
@@ -995,7 +1118,7 @@ class IVSurfaceEngine:
             put_open_interest=put_contract.open_interest if put_contract is not None else None,
             call_volume=call_contract.volume if call_contract is not None else None,
             put_volume=put_contract.volume if put_contract is not None else None,
-            straddle_midpoint=straddle_mid,
+            straddle_midpoint=straddle_price,
             synthetic_forward_price=synthetic_forward,
             implied_move_pct=implied_move_pct,
             call_put_parity_gap=parity_gap,
@@ -1164,6 +1287,33 @@ class IVSurfaceEngine:
             if numeric is not None:
                 return numeric
         return contract.implied_volatility_30d
+
+    @staticmethod
+    def _contract_display_price(contract: IVOptionContractRecord | None) -> tuple[float | None, str | None]:
+        if contract is None:
+            return None, None
+        for source, value in (
+            ("midpoint", contract.midpoint),
+            ("mark", contract.mark_price),
+            ("last", contract.last),
+            ("close", contract.close),
+        ):
+            numeric = IVSurfaceEngine._coerce_positive(value)
+            if numeric is not None:
+                return numeric, source
+        for source, greeks in (
+            ("model", contract.model_greeks),
+            ("derived", contract.derived_greeks),
+            ("bid_greeks", contract.bid_greeks),
+            ("ask_greeks", contract.ask_greeks),
+            ("last_greeks", contract.last_greeks),
+        ):
+            if greeks is None:
+                continue
+            numeric = IVSurfaceEngine._coerce_positive(greeks.option_price)
+            if numeric is not None:
+                return numeric, source
+        return None, None
 
     @staticmethod
     def _pair_blended_iv(pair: IVOptionPairRecord) -> float | None:

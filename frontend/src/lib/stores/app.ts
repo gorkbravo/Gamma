@@ -186,6 +186,7 @@ export interface IvLoadOptions {
   marketDataMode?: string;
   waitSeconds?: number;
   depthPreset?: string;
+  preserveExisting?: boolean;
 }
 
 export interface PredictionMarketScreenerOptions {
@@ -3171,10 +3172,18 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
       params.set("depth_preset", request.depthPreset);
     }
     const surface = await getJson<IvSurface>(`/iv/surface?${params.toString()}`);
-    ivSurface.set(surface);
-    ivSession.update((current) => (current == null ? current : { ...current, surface }));
+    const shouldReplaceSurface = hasRenderableIvSurface(surface) || !hasRenderableIvSurface(get(ivSurface));
+    if (shouldReplaceSurface || request.preserveExisting === false) {
+      ivSurface.set(surface);
+      ivSession.update((current) => (current == null ? current : { ...current, surface }));
+    } else {
+      const message = surface.warnings[0] ?? surface.messages[0] ?? `No options surface snapshot available for ${request.symbol}.`;
+      lastError.set(message);
+    }
     resetCopilotCard("iv");
-    lastError.set("");
+    if (shouldReplaceSurface || request.preserveExisting === false) {
+      lastError.set("");
+    }
   } catch (error) {
     setError(error);
   } finally {
@@ -3211,7 +3220,7 @@ export async function loadIvSession() {
     const session = await getJson<IvSessionStatus>("/iv/session");
     ivSession.set(session);
     ivSurface.update((current) => {
-      if (session.running || !hasRenderableIvSurface(current)) {
+      if (hasRenderableIvSurface(session.surface)) {
         return session.surface;
       }
       return current;
@@ -3233,7 +3242,7 @@ export async function startIvSession(options: IvLoadOptions) {
       depth_preset: options.depthPreset ?? null
     });
     ivSession.set(session);
-    ivSurface.set(session.surface);
+    ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
     resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {
@@ -3248,7 +3257,7 @@ export async function stopIvSession() {
   try {
     const session = await postJson<IvSessionStatus>("/iv/session/stop", {});
     ivSession.set(session);
-    ivSurface.set(session.surface);
+    ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
     resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {

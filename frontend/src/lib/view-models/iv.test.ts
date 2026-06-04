@@ -50,6 +50,10 @@ function makeSurface(overrides: Partial<IvSurface> = {}): IvSurface {
         put_midpoint: 1,
         call_mark_price: null,
         put_mark_price: null,
+        call_price: 6,
+        put_price: 1,
+        call_price_source: "midpoint",
+        put_price_source: "midpoint",
         call_implied_volatility: 0.21,
         put_implied_volatility: 0.2,
         blended_implied_volatility: 0.205,
@@ -75,6 +79,10 @@ function makeSurface(overrides: Partial<IvSurface> = {}): IvSurface {
         put_midpoint: 3,
         call_mark_price: null,
         put_mark_price: null,
+        call_price: 3,
+        put_price: 3,
+        call_price_source: "midpoint",
+        put_price_source: "midpoint",
         call_implied_volatility: 0.18,
         put_implied_volatility: 0.18,
         blended_implied_volatility: 0.18,
@@ -100,6 +108,10 @@ function makeSurface(overrides: Partial<IvSurface> = {}): IvSurface {
         put_midpoint: 6,
         call_mark_price: null,
         put_mark_price: null,
+        call_price: 1,
+        put_price: 6,
+        call_price_source: "midpoint",
+        put_price_source: "midpoint",
         call_implied_volatility: 0.19,
         put_implied_volatility: 0.2,
         blended_implied_volatility: 0.195,
@@ -187,6 +199,31 @@ describe("options surface view models", () => {
     expect(overview.putCallOpenInterestRatio).toBeCloseTo(340 / 310, 8);
     expect(overview.putCallVolumeRatio).toBeCloseTo(78 / 62, 8);
     expect(overview.maxPainStrike).toBe(100);
+  });
+
+  it("uses display price fallbacks for chain rows", () => {
+    const surface = makeSurface({
+      pairs: [
+        {
+          ...makeSurface().pairs[0],
+          call_midpoint: null,
+          put_midpoint: null,
+          call_mark_price: 6.1,
+          put_mark_price: 1.1,
+          call_price: 6.2,
+          put_price: 1.2,
+          call_price_source: "last",
+          put_price_source: "mark",
+        },
+      ],
+    });
+
+    const [row] = deriveChainRows(surface, "20260515");
+
+    expect(row.callMidpoint).toBe(6.2);
+    expect(row.putMidpoint).toBe(1.2);
+    expect(row.callPriceSource).toBe("last");
+    expect(row.putPriceSource).toBe("mark");
   });
 
   it("builds expiry payoff for a simple long call strategy", () => {

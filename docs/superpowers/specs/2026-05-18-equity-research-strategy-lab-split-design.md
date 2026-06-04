@@ -209,7 +209,7 @@ Both tabs should follow Gamma's standard tab architecture:
 Tab -> shared context -> mode bar -> mode modules
 ```
 
-Both tabs should use visible horizontal mode bars, compact context controls, and the existing plane-model styling. The Macro tab remains the benchmark for density and layout discipline.
+Both tabs should use visible horizontal mode bars, compact context controls, and the existing plane-model styling. Use the mature Gamma surfaces as references by workflow: Macro for shared context and mode switching, Fundamentals for deep entity work, Commodities for provider caveats and cross-domain context, and Risk for compact quantitative diagnostics.
 
 The sidebar should show `Equity Research` and `Strategy Lab` as separate research workspace tabs. Existing keyboard and tab-order persistence should treat them as normal top-level research tabs.
 

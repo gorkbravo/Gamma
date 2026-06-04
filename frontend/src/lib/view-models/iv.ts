@@ -62,6 +62,8 @@ export interface ChainRow {
   distancePct: number | null;
   callMidpoint: number | null;
   putMidpoint: number | null;
+  callPriceSource: string | null;
+  putPriceSource: string | null;
   callIv: number | null;
   putIv: number | null;
   blendedIv: number | null;
@@ -203,8 +205,10 @@ export function deriveChainRows(surface: IvSurface | null, expiry: string | null
         strike,
         moneyness: surface.spot && Number.isFinite(surface.spot) ? strike / surface.spot : null,
         distancePct,
-        callMidpoint: pair.call_midpoint,
-        putMidpoint: pair.put_midpoint,
+        callMidpoint: pair.call_price ?? pair.call_midpoint ?? pair.call_mark_price,
+        putMidpoint: pair.put_price ?? pair.put_midpoint ?? pair.put_mark_price,
+        callPriceSource: pair.call_price_source ?? (pair.call_midpoint != null ? "midpoint" : pair.call_mark_price != null ? "mark" : null),
+        putPriceSource: pair.put_price_source ?? (pair.put_midpoint != null ? "midpoint" : pair.put_mark_price != null ? "mark" : null),
         callIv: pair.call_implied_volatility,
         putIv: pair.put_implied_volatility,
         blendedIv: pair.blended_implied_volatility,

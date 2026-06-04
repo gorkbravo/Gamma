@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import type { CrossTabHandoffEnvelope, IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../lib/api/types";
   import type { IvLoadOptions } from "../lib/stores/app";
   import {
@@ -25,7 +24,7 @@
 
   export let mode: OptionsMode = "overview";
   export let status: SystemStatus | null = null;
-  export let requestedSymbol = "SPY";
+  export let requestedSymbol = "";
   export let result: IvSurface | null = null;
   export let session: IvSessionStatus | null = null;
   export let underlyingPricePoints: TimeSeriesPoint[] = [];
@@ -33,16 +32,15 @@
   export let sessionLoading = false;
   export let errorMessage = "";
   export let onLoad: (options: IvLoadOptions) => void | Promise<void>;
+  export let onStopSession: () => void | Promise<void>;
   export let onSendToCopilot: (handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void = () => {};
 
-  let symbol = requestedSymbol || "SPY";
+  let symbol = requestedSymbol || "";
   let lastRequestedSymbol = requestedSymbol;
   let selectedExpiry: string | null = null;
   let selectedOptionType: StrategyOptionType = "call";
   let selectedSide: StrategySide = "long";
   let strategyLegs: StrategyLeg[] = [];
-  let deepRequestedFor: string | null = null;
-  let overviewRequestedFor: string | null = null;
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
@@ -76,7 +74,7 @@
         ? "Front Deep"
         : value
           ? value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
-          : "Standard";
+          : "N/A";
 
   let activeExpiry: string | null = null;
   let chainRows: ChainRow[] = [];
@@ -91,6 +89,8 @@
   let payoffAbsMax = 1;
   let atmStrikeIndex = 0;
   let surfaceAlerts: string[] = [];
+  let requestSymbol = "";
+  let displayedSymbol = "No surface";
 
   $: if (!optionsModes.some((candidate) => candidate.id === mode)) {
     mode = "overview";
@@ -100,9 +100,6 @@
     lastRequestedSymbol = requestedSymbol;
     symbol = requestedSymbol.toUpperCase();
     selectedExpiry = null;
-    overviewRequestedFor = null;
-    deepRequestedFor = null;
-    void loadSnapshot(false);
   }
 
   $: activeExpiry = selectedExpiryForSurface(result, selectedExpiry);
@@ -117,6 +114,8 @@
   $: strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   $: payoffAbsMax = Math.max(...strategyPayoff.points.map((point) => Math.abs(point.payoff)), 1);
   $: atmStrikeIndex = nearestStrikeIndex(result);
+  $: requestSymbol = symbol.trim().toUpperCase() || result?.symbol?.trim().toUpperCase() || "";
+  $: displayedSymbol = result?.symbol ?? (symbol.trim() ? normalizedSymbol() : "No surface");
   $: surfaceAlerts = [
     errorMessage?.trim(),
     result && !result.snapshot_available ? `No options surface snapshot is available for ${result.symbol}.` : "",
@@ -126,42 +125,29 @@
     ...(session?.messages ?? []),
   ].filter((message): message is string => Boolean(message && message.trim()));
 
-  $: if (
-    mode === "surface" &&
-    result?.symbol &&
-    result.symbol === normalizedSymbol() &&
-    result.collection?.depth_preset !== "max" &&
-    deepRequestedFor !== result.symbol &&
-    !loading
-  ) {
-    deepRequestedFor = result.symbol;
-    void loadSnapshot(true);
-  }
-
-  onMount(() => {
-    if (!result && overviewRequestedFor !== normalizedSymbol()) {
-      overviewRequestedFor = normalizedSymbol();
-      void loadSnapshot(false);
-    }
-  });
-
   function normalizedSymbol() {
-    return symbol.trim().toUpperCase() || "SPY";
+    return requestSymbol;
   }
 
-  async function loadSnapshot(deep: boolean) {
+  function activeMarketDataMode() {
+    return status?.market_data_mode ?? result?.collection?.market_data_mode ?? session?.market_data_mode ?? "delayed";
+  }
+
+  async function loadMaxSurface() {
     const nextSymbol = normalizedSymbol();
-    if (deep) {
-      deepRequestedFor = nextSymbol;
-    } else {
-      overviewRequestedFor = nextSymbol;
+    if (!nextSymbol) {
+      return;
     }
     await onLoad({
       symbol: nextSymbol,
-      marketDataMode: "delayed",
-      waitSeconds: deep ? 8 : 2.5,
-      depthPreset: deep ? "max" : "standard",
+      marketDataMode: activeMarketDataMode(),
+      waitSeconds: 60,
+      depthPreset: "max",
     });
+  }
+
+  async function stopSession() {
+    await onStopSession();
   }
 
   function chooseMode(nextMode: OptionsMode) {
@@ -256,16 +242,21 @@
     <div class="header-top">
       <div>
         <span class="eyebrow">OPTIONS WORKSPACE</span>
-        <h2>{result?.symbol ?? normalizedSymbol()}</h2>
+        <h2>{displayedSymbol}</h2>
       </div>
       <div class="header-actions">
         <label class="symbol-control">
           <span>Symbol</span>
-          <input bind:value={symbol} on:keydown={(event) => event.key === "Enter" && loadSnapshot(false)} placeholder="SPY" />
+          <input bind:value={symbol} on:keydown={(event) => event.key === "Enter" && loadMaxSurface()} placeholder="SPY" />
         </label>
-        <button class="primary-action" type="button" on:click={() => loadSnapshot(mode === "surface")} disabled={loading}>
-          {loading ? "LOADING..." : mode === "surface" ? "Load Deep Surface" : "Load Snapshot"}
+        <button class="primary-action" type="button" on:click={loadMaxSurface} disabled={loading || sessionLoading || !requestSymbol}>
+          {loading ? "LOADING..." : result ? "Reload Max Surface" : "Load Max Surface"}
         </button>
+        {#if session?.running}
+          <button type="button" on:click={stopSession} disabled={sessionLoading}>
+            {sessionLoading ? "STOPPING..." : "Stop Stream"}
+          </button>
+        {/if}
         <button type="button" on:click={sendSurfaceToCopilot} disabled={loading || !result}>Copilot</button>
       </div>
     </div>
@@ -333,7 +324,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>Strike</th><th>Call Mid</th><th>Call IV</th><th>Delta</th><th>Put Mid</th><th>Put IV</th><th>Delta</th><th>Move</th>
+                  <th>Strike</th><th>Call Px</th><th>Call IV</th><th>Delta</th><th>Put Px</th><th>Put IV</th><th>Delta</th><th>Move</th>
                 </tr>
               </thead>
               <tbody>
@@ -466,7 +457,9 @@
       <article class="panel table-panel">
         <div class="table-header">
           <h3>IV Surface</h3>
-          <button type="button" on:click={() => loadSnapshot(true)} disabled={loading}>{loading ? "LOADING..." : "Reload Deep"}</button>
+          <button type="button" on:click={loadMaxSurface} disabled={loading || sessionLoading || !requestSymbol}>
+            {loading ? "LOADING..." : "Reload Max"}
+          </button>
         </div>
         {#if result?.expiries.length && result.strikes.length}
           <div class="surface-scroll">
@@ -492,7 +485,7 @@
             </table>
           </div>
         {:else}
-          <p class="muted pad">Load a deep surface snapshot to inspect expiry/strike volatility.</p>
+          <p class="muted pad">Load a max-depth surface snapshot to inspect expiry/strike volatility.</p>
         {/if}
       </article>
 

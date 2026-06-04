@@ -63,6 +63,7 @@
     loadProviderUsage,
     loadIvSession,
     loadIvSurface,
+    stopIvSession,
     loadFundamentalsSearch,
     loadResearchOverview,
     loadSitrepIndicesOverview,
@@ -230,7 +231,7 @@
   let ivPollHandle: ReturnType<typeof setInterval> | undefined;
   let workspaceMode: WorkspaceMode | null = null;
   let navigationSearchResetToken = 0;
-  let ivRequestedSymbol = "SPY";
+  let ivRequestedSymbol = "";
   let ivPollingActive = false;
   let equityResearchMode: EquityResearchMode = "overview";
   let strategyLabMode: StrategyLabMode = "composer";
@@ -1362,7 +1363,9 @@
       ivRequestedSymbol = symbol;
       await loadIvSurface({
         symbol,
-        marketDataMode: $systemStatus?.market_data_mode ?? "delayed"
+        marketDataMode: $systemStatus?.market_data_mode ?? "delayed",
+        waitSeconds: 60,
+        depthPreset: "max"
       });
       await loadIvSession();
       return true;
@@ -2419,6 +2422,7 @@
             sessionLoading={$loading.ivSession}
             errorMessage={$lastError}
             onLoad={loadIvSurface}
+            onStopSession={stopIvSession}
             onSendToCopilot={handleSendToCopilot}
           />
         {/if}

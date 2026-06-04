@@ -22,7 +22,9 @@ describe("workspace context forwarding", () => {
     expect(buildIvRequestFromResearch(makeResearchResult("synthetic_portfolio"), "live")).toBeNull();
     expect(buildIvRequestFromResearch(makeResearchResult("single_ticker"), "live")).toEqual({
       symbol: "AAPL",
-      marketDataMode: "live"
+      marketDataMode: "live",
+      waitSeconds: 60,
+      depthPreset: "max"
     });
   });
 });

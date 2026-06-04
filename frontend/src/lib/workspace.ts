@@ -32,6 +32,8 @@ export function buildIvRequestFromResearch(
   }
   return {
     symbol,
-    marketDataMode: marketDataMode ?? "delayed"
+    marketDataMode: marketDataMode ?? "delayed",
+    waitSeconds: 60,
+    depthPreset: "max"
   };
 }

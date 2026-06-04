@@ -118,7 +118,7 @@ class IVService:
         elif preset == "max":
             config.update(
                 {
-                    "max_expiries": max(config["max_expiries"], int(os.getenv("IV_MAX_SURFACE_EXPIRIES", "8") or 8)),
+                    "max_expiries": max(1, int(os.getenv("IV_MAX_SURFACE_EXPIRIES", "8") or 8)),
                     "strike_band_pct": max(
                         config["strike_band_pct"],
                         float(os.getenv("IV_MAX_SURFACE_STRIKE_BAND_PCT", "0.12") or 0.12),

@@ -106,7 +106,7 @@
   <div class="backdrop" on:click={onClose} on:keydown={(event) => event.key === "Escape" && onClose()} role="presentation"></div>
 {/if}
 
-<nav class="sidebar" class:open aria-label="Workspace navigation">
+<nav class="sidebar" data-open={open ? "true" : "false"} aria-label="Workspace navigation">
   <div class="sidebar-header">
     <div>
       <span class="sidebar-title">Navigation</span>
@@ -198,7 +198,7 @@
     padding: 0;
   }
 
-  .sidebar.open {
+  .sidebar[data-open="true"] {
     transform: translateX(0);
   }
 

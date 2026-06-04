@@ -31,7 +31,7 @@ In practice this means:
 Gamma is a research environment, not a schema browser.
 
 ### What "Good" Looks Like
-The **Macro → Cross-Asset** mode is the current gold standard. It is dense text, numbers, signal badges, and thin borders on a single flat surface. Content is the structure. There are no filled card backgrounds, no decorative spacing, no visual chrome competing with the data. All tabs should converge toward this level of flatness and density.
+Gamma's mature research surfaces should be used as references for different parts of the product rather than treating one tab as the universal template. Macro remains a useful reference for shared context, mode switching, and cross-asset density; Fundamentals is a better reference for deep entity work and editable local scenarios; Commodities is a better reference for provider warnings, curve/fundamental panels, and cross-domain handoff context; Risk is a better reference for compact quantitative diagnostics. Content is the structure: dense text, numbers, signal badges, thin borders, and minimal visual chrome.
 
 ---
 
@@ -211,7 +211,7 @@ Every tab represents a **research domain**. Tabs are not single-purpose views �
 Each tab should support **modes**: distinct but related views that share the tab's data context. Modes are accessed via a segmented control / mode bar at the top of the tab content.
 
 **Current implementation — Macro tab:**
-- Snapshot | Cross-Asset | Rates & Policy | Events / Regimes
+- Snapshot | Cross-Asset | Rates & Policy | Events / Regimes | Trade Partners | Country Compare
 
 Modes share state where it makes sense (selected region, timeframe, theme) and diverge in presentation. They are depth within a domain, not separate tabs.
 
@@ -454,11 +454,11 @@ When building a new tab, follow this exact checklist:
 6. **Charts**: use `TimeSeriesChart` component. Background `var(--bg-0)`, border `1px solid var(--divider)`.
 7. **Colors**: only `--accent` for interactive elements. Signal colors only in data values.
 8. **No gradients, no shadows, no opacity layering on panels.**
-9. **Mode bar**: if the tab supports multiple modes, add a segmented control matching the Macro tab pattern.
+9. **Mode bar**: if the tab supports multiple modes, add a segmented control matching the registered tab-mode pattern.
 10. **Copilot**: ensure the tab can provide grounding context to the Copilot via `copilot_context_helpers`.
 11. **Keyboard bindings**: register tab-specific actions in the keybindings system.
 12. **Responsive**: `workspace-grid` should collapse to single column at narrow widths.
-13. **Test against the Macro Cross-Asset benchmark**: does your tab feel as flat and dense? If not, reduce spacing, remove fills, simplify chrome.
+13. **Test against mature surfaces**: does the tab feel as flat, dense, and data-led as Gamma's strongest current views? If not, reduce spacing, remove fills, simplify chrome, and compare against the closest reference surface for that workflow.
 
 ---
 

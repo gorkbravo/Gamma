@@ -78,6 +78,10 @@ class IVOptionPairRecord:
     put_midpoint: float | None = None
     call_mark_price: float | None = None
     put_mark_price: float | None = None
+    call_price: float | None = None
+    put_price: float | None = None
+    call_price_source: str | None = None
+    put_price_source: str | None = None
     call_implied_volatility: float | None = None
     put_implied_volatility: float | None = None
     blended_implied_volatility: float | None = None

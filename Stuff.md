@@ -13,8 +13,6 @@
 
 - `Solved` Add deeper navigation into the search bar, something like /tab/mode
 
-- Copilot button in a box, next to change view
-
 
 ## Sitrep tab
 
@@ -23,16 +21,6 @@
 - Add more Rates, and add a regional column
 
 - Eliminate irrelevant warnings
-
-## Research tab
-
-- `Solved` Decide on wether I want to separate it into Equity Research and Strategy Lab
-
-- Create a sandbox for running code inside of the app. (Either here or in the dedicated Strategy tab)
-
-- I'm sure there's more 
-
-- `Solved` It would be pretty great if in the scope builder the preset portfolio were deeper, have more positions and be overall more interesting. 
 
 
 
