@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { IvSurface, TimeSeriesPoint } from "../api/types";
 import {
+  blackScholesPrice,
   buildStrategyLegFromChainRow,
   deriveChainRows,
   daysToExpiry,
   deriveDistributionBuckets,
+  deriveIvSmile,
+  deriveOptionPayoffMatrix,
   deriveOverviewSnapshot,
   deriveRealizedVolatility,
   deriveSkewRows,
   deriveStrategyPayoff,
   deriveSurfaceStats,
+  deriveTermCurve,
   deriveTermStructure,
   nearestStrikeIndex,
 } from "./iv";
@@ -238,6 +242,104 @@ describe("options surface view models", () => {
     expect(payoff.points[0].payoff).toBeCloseTo(-3, 8);
     expect(payoff.points.at(-1)?.payoff).toBeGreaterThan(0);
     expect(payoff.breakevens[0]).toBeCloseTo(103, 0);
+  });
+
+  it("prices options with Black-Scholes and respects intrinsic boundaries", () => {
+    // ATM call with time value must exceed its (zero) intrinsic value.
+    const atmCall = blackScholesPrice("call", 100, 100, 30 / 365, 0.2);
+    expect(atmCall).toBeGreaterThan(0);
+
+    // At expiry, value collapses to intrinsic.
+    expect(blackScholesPrice("call", 110, 100, 0, 0.2)).toBeCloseTo(10, 6);
+    expect(blackScholesPrice("put", 90, 100, 0, 0.2)).toBeCloseTo(10, 6);
+    expect(blackScholesPrice("call", 90, 100, 0, 0.2)).toBe(0);
+
+    // Put-call parity with zero rate: C - P == S - K.
+    const call = blackScholesPrice("call", 105, 100, 0.5, 0.25);
+    const put = blackScholesPrice("put", 105, 100, 0.5, 0.25);
+    expect(call - put).toBeCloseTo(5, 6);
+  });
+
+  it("builds an IV smile geometry from front chain rows", () => {
+    const rows = deriveChainRows(makeSurface(), "20260515");
+    const smile = deriveIvSmile(rows, 100, 320, 150);
+
+    expect(smile).not.toBeNull();
+    expect(smile!.points.map((point) => point.strike)).toEqual([95, 100, 105]);
+    expect(smile!.points.find((point) => point.isAtm)?.strike).toBe(100);
+    expect(smile!.linePath.startsWith("M")).toBe(true);
+    expect(smile!.areaPath.endsWith("Z")).toBe(true);
+    expect(smile!.atmX).not.toBeNull();
+    // X is monotonic with strike, Y stays inside the viewBox.
+    expect(smile!.points[0].x).toBeLessThan(smile!.points[2].x);
+    for (const point of smile!.points) {
+      expect(point.y).toBeGreaterThanOrEqual(0);
+      expect(point.y).toBeLessThanOrEqual(150);
+    }
+  });
+
+  it("derives an ATM call payoff matrix across price levels and DTE", () => {
+    const rows = deriveChainRows(makeSurface(), "20260515");
+    const matrix = deriveOptionPayoffMatrix(rows, 100, "call", 24);
+
+    expect(matrix).not.toBeNull();
+    expect(matrix!.optionType).toBe("call");
+    expect(matrix!.strike).toBe(100);
+    // Premium is the ATM call midpoint = max risk for a long call.
+    expect(matrix!.premium).toBe(3);
+    // Columns run from the longest DTE down to expiry (0).
+    expect(matrix!.dteColumns[0]).toBe(24);
+    expect(matrix!.dteColumns.at(-1)).toBe(0);
+    // Rows run top (highest price) to bottom (lowest price).
+    expect(matrix!.rows[0].price).toBeGreaterThan(matrix!.rows.at(-1)!.price);
+
+    const expiryCol = matrix!.dteColumns.length - 1;
+    const topRow = matrix!.rows[0];
+    const bottomRow = matrix!.rows.at(-1)!;
+    // Deep ITM at expiry is a large gain; deep OTM at expiry is a total (-100%) loss.
+    expect(topRow.cells[expiryCol].pct).toBeGreaterThan(0);
+    expect(bottomRow.cells[expiryCol].pct).toBeCloseTo(-1, 6);
+    // movePct sign tracks distance from spot.
+    expect(topRow.movePct).toBeGreaterThan(0);
+    expect(bottomRow.movePct).toBeLessThan(0);
+  });
+
+  it("returns no payoff matrix without a priced ATM pair", () => {
+    const rows = deriveChainRows(makeSurface(), "20260515");
+    expect(deriveOptionPayoffMatrix([], 100, "call")).toBeNull();
+    expect(deriveOptionPayoffMatrix(rows, null, "call")).toBeNull();
+  });
+
+  it("falls back to the nearest priced strike when the exact ATM strike is unquoted", () => {
+    // Strike 100 sits nearest spot but is fully unquoted; 95 is the closest priced call.
+    const surface = makeSurface();
+    surface.pairs = surface.pairs.map((pair) =>
+      pair.strike === 100
+        ? { ...pair, call_midpoint: null, call_price: null, call_mark_price: null, call_implied_volatility: null, blended_implied_volatility: null }
+        : pair
+    );
+    const rows = deriveChainRows(surface, "20260515");
+    const matrix = deriveOptionPayoffMatrix(rows, 100, "call", 24);
+
+    expect(matrix).not.toBeNull();
+    expect(matrix!.strike).toBe(95);
+    expect(matrix!.premium).toBe(6);
+  });
+
+  it("builds a term-structure curve ordered by DTE", () => {
+    const term = deriveTermStructure(makeSurface());
+    const curve = deriveTermCurve(term, 300, 130);
+
+    expect(curve).not.toBeNull();
+    expect(curve!.points.map((point) => point.expiry)).toEqual(["20260515", "20260619", "20260717"]);
+    // DTE strictly increasing, X strictly increasing with it.
+    for (let i = 1; i < curve!.points.length; i += 1) {
+      expect(curve!.points[i].dte).toBeGreaterThanOrEqual(curve!.points[i - 1].dte);
+      expect(curve!.points[i].x).toBeGreaterThanOrEqual(curve!.points[i - 1].x);
+    }
+    expect(curve!.linePath.startsWith("M")).toBe(true);
+    expect(curve!.areaPath.endsWith("Z")).toBe(true);
+    expect(deriveTermCurve([], 300, 130)).toBeNull();
   });
 
   it("parses days to expiry from TWS-style expiry strings", () => {
