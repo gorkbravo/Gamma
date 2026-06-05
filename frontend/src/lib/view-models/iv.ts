@@ -123,6 +123,53 @@ export interface SurfacePath {
   value: number | null;
 }
 
+export interface IvSmilePoint {
+  strike: number;
+  iv: number;
+  x: number;
+  y: number;
+  isAtm: boolean;
+}
+
+export interface IvSmile {
+  width: number;
+  height: number;
+  points: IvSmilePoint[];
+  linePath: string;
+  areaPath: string;
+  atmX: number | null;
+  minIv: number;
+  maxIv: number;
+  minStrike: number;
+  maxStrike: number;
+}
+
+export interface OptionPayoffCell {
+  dte: number;
+  /** P/L expressed as a fraction of premium (max risk). -1 == total loss. */
+  pct: number;
+  pl: number;
+  value: number;
+}
+
+export interface OptionPayoffRow {
+  price: number;
+  movePct: number;
+  cells: OptionPayoffCell[];
+}
+
+export interface OptionPayoffMatrix {
+  optionType: StrategyOptionType;
+  strike: number;
+  premium: number;
+  sigma: number;
+  spot: number;
+  maxDte: number;
+  dteColumns: number[];
+  rows: OptionPayoffRow[];
+  maxGain: number;
+}
+
 export function nearestStrikeIndex(surface: IvSurface | null): number {
   if (!surface?.strikes.length || surface.spot == null) {
     return 0;
@@ -449,6 +496,271 @@ export function deriveSurfacePaths(surface: IvSurface | null, width = 520, heigh
     });
   }
   return paths;
+}
+
+export function deriveIvSmile(
+  rows: ChainRow[],
+  atmStrike: number | null | undefined,
+  width = 320,
+  height = 150
+): IvSmile | null {
+  const padLeft = 32;
+  const padRight = 8;
+  const padTop = 10;
+  const padBottom = 18;
+  const samples = rows
+    .map((row) => ({
+      strike: row.strike,
+      iv:
+        row.blendedIv ??
+        (row.callIv != null && row.putIv != null
+          ? (row.callIv + row.putIv) / 2
+          : row.callIv ?? row.putIv ?? null),
+    }))
+    .filter((sample): sample is { strike: number; iv: number } => Number.isFinite(sample.strike) && sample.iv != null && Number.isFinite(sample.iv))
+    .sort((left, right) => left.strike - right.strike);
+  if (samples.length < 2) {
+    return null;
+  }
+
+  const strikes = samples.map((sample) => sample.strike);
+  const ivs = samples.map((sample) => sample.iv);
+  const minStrike = Math.min(...strikes);
+  const maxStrike = Math.max(...strikes);
+  const rawMinIv = Math.min(...ivs);
+  const rawMaxIv = Math.max(...ivs);
+  const ivPad = Math.max((rawMaxIv - rawMinIv) * 0.12, 0.005);
+  const minIv = Math.max(0, rawMinIv - ivPad);
+  const maxIv = rawMaxIv + ivPad;
+  const strikeRange = Math.max(maxStrike - minStrike, 1e-6);
+  const ivRange = Math.max(maxIv - minIv, 1e-6);
+
+  const projectX = (strike: number) => padLeft + ((strike - minStrike) / strikeRange) * (width - padLeft - padRight);
+  const projectY = (iv: number) => height - padBottom - ((iv - minIv) / ivRange) * (height - padTop - padBottom);
+
+  const points: IvSmilePoint[] = samples.map((sample) => ({
+    strike: sample.strike,
+    iv: sample.iv,
+    x: projectX(sample.strike),
+    y: projectY(sample.iv),
+    isAtm: atmStrike != null && sample.strike === atmStrike,
+  }));
+
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`)
+    .join(" ");
+  const baseline = height - padBottom;
+  const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)} L${points[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
+  const atmX = atmStrike != null && Number.isFinite(atmStrike) ? projectX(atmStrike) : null;
+
+  return {
+    width,
+    height,
+    points,
+    linePath,
+    areaPath,
+    atmX,
+    minIv,
+    maxIv,
+    minStrike,
+    maxStrike,
+  };
+}
+
+export interface TermCurvePoint {
+  expiry: string;
+  dte: number;
+  iv: number;
+  x: number;
+  y: number;
+}
+
+export interface TermCurve {
+  width: number;
+  height: number;
+  points: TermCurvePoint[];
+  linePath: string;
+  areaPath: string;
+  minIv: number;
+  maxIv: number;
+}
+
+export function deriveTermCurve(
+  term: Array<{ expiry: string; iv: number | null }>,
+  width = 300,
+  height = 132
+): TermCurve | null {
+  const padLeft = 34;
+  const padRight = 10;
+  const padTop = 10;
+  const padBottom = 20;
+  const samples = (term ?? [])
+    .map((point) => ({ expiry: point.expiry, dte: daysToExpiry(point.expiry), iv: point.iv }))
+    .filter((point): point is TermCurvePoint => point.iv != null && Number.isFinite(point.iv))
+    .sort((left, right) => left.dte - right.dte);
+  if (samples.length < 2) {
+    return null;
+  }
+
+  const dtes = samples.map((point) => point.dte);
+  const ivs = samples.map((point) => point.iv);
+  const minDte = Math.min(...dtes);
+  const maxDte = Math.max(...dtes);
+  const rawMinIv = Math.min(...ivs);
+  const rawMaxIv = Math.max(...ivs);
+  const ivPad = Math.max((rawMaxIv - rawMinIv) * 0.12, 0.004);
+  const minIv = Math.max(0, rawMinIv - ivPad);
+  const maxIv = rawMaxIv + ivPad;
+  const dteRange = Math.max(maxDte - minDte, 1e-6);
+  const ivRange = Math.max(maxIv - minIv, 1e-6);
+
+  const projectX = (d: number) => padLeft + ((d - minDte) / dteRange) * (width - padLeft - padRight);
+  const projectY = (iv: number) => height - padBottom - ((iv - minIv) / ivRange) * (height - padTop - padBottom);
+
+  const points: TermCurvePoint[] = samples.map((point) => ({
+    ...point,
+    x: projectX(point.dte),
+    y: projectY(point.iv),
+  }));
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`)
+    .join(" ");
+  const baseline = height - padBottom;
+  const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)} L${points[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
+
+  return { width, height, points, linePath, areaPath, minIv, maxIv };
+}
+
+export function blackScholesPrice(
+  optionType: StrategyOptionType,
+  spot: number,
+  strike: number,
+  years: number,
+  sigma: number,
+  rate = 0
+): number {
+  const intrinsic = optionType === "call" ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
+  if (!(spot > 0) || !(strike > 0)) {
+    return intrinsic;
+  }
+  if (!(years > 0) || !(sigma > 0)) {
+    return intrinsic;
+  }
+  const sqrtT = Math.sqrt(years);
+  const d1 = (Math.log(spot / strike) + (rate + (sigma * sigma) / 2) * years) / (sigma * sqrtT);
+  const d2 = d1 - sigma * sqrtT;
+  const discount = Math.exp(-rate * years);
+  if (optionType === "call") {
+    return spot * normalCdf(d1) - strike * discount * normalCdf(d2);
+  }
+  return strike * discount * normalCdf(-d2) - spot * normalCdf(-d1);
+}
+
+/**
+ * Pick the strike nearest spot that is actually priced for the requested option
+ * type (finite premium and IV). The literal nearest-to-spot strike is often
+ * unquoted on illiquid/odd strikes, so we fall back outward to the closest
+ * tradable contract rather than failing.
+ */
+export function selectPricedAtmRow(
+  rows: ChainRow[] | null | undefined,
+  spot: number | null | undefined,
+  optionType: StrategyOptionType
+): ChainRow | null {
+  if (!rows?.length || !(spot != null && Number.isFinite(spot) && spot > 0)) {
+    return null;
+  }
+  const priced = rows.filter((row) => {
+    const premium = optionType === "call" ? row.callMidpoint : row.putMidpoint;
+    const sigma = (optionType === "call" ? row.callIv : row.putIv) ?? row.blendedIv ?? null;
+    return (
+      Number.isFinite(row.strike) &&
+      premium != null &&
+      Number.isFinite(premium) &&
+      premium > 0 &&
+      sigma != null &&
+      Number.isFinite(sigma) &&
+      sigma > 0
+    );
+  });
+  if (!priced.length) {
+    return null;
+  }
+  return minBy(priced, (row) => Math.abs(row.strike - spot));
+}
+
+export function deriveOptionPayoffMatrix(
+  rows: ChainRow[] | null | undefined,
+  spot: number | null | undefined,
+  optionType: StrategyOptionType,
+  maxDte: number | null | undefined = null,
+  priceSteps = 15,
+  dteSteps = 9,
+  rate = 0
+): OptionPayoffMatrix | null {
+  if (!(spot != null && Number.isFinite(spot) && spot > 0)) {
+    return null;
+  }
+  const atmRow = selectPricedAtmRow(rows, spot, optionType);
+  if (!atmRow) {
+    return null;
+  }
+  const strike = atmRow.strike;
+  const premium = (optionType === "call" ? atmRow.callMidpoint : atmRow.putMidpoint) as number;
+  const sigma = ((optionType === "call" ? atmRow.callIv : atmRow.putIv) ?? atmRow.blendedIv) as number;
+  const resolvedMaxDte = maxDte ?? daysToExpiry(atmRow.expiry);
+  const boundedMaxDte = Math.max(0, Math.round(resolvedMaxDte));
+
+  // DTE columns: highest remaining DTE on the left, expiry (0) on the right.
+  const columnCount = Math.max(2, dteSteps);
+  const dteColumns: number[] = [];
+  for (let index = 0; index < columnCount; index += 1) {
+    const dte = Math.round(boundedMaxDte * (1 - index / (columnCount - 1)));
+    if (!dteColumns.includes(dte)) {
+      dteColumns.push(dte);
+    }
+  }
+  if (dteColumns[dteColumns.length - 1] !== 0) {
+    dteColumns.push(0);
+  }
+
+  // Price levels: span ±2.5 sigma over the longest horizon, clamped to a readable band.
+  const horizonYears = Math.max(boundedMaxDte / 365, 1 / 365);
+  const span = Math.min(0.6, Math.max(0.2, 2.5 * sigma * Math.sqrt(horizonYears)));
+  const rowCount = Math.max(7, priceSteps | 1);
+  const upper = spot * (1 + span);
+  const lower = spot * (1 - span);
+  const priceStep = (upper - lower) / Math.max(1, rowCount - 1);
+
+  const matrixRows: OptionPayoffRow[] = [];
+  let maxGain = 0.01;
+  for (let index = 0; index < rowCount; index += 1) {
+    // Top row = highest price.
+    const price = upper - priceStep * index;
+    const cells: OptionPayoffCell[] = dteColumns.map((dte) => {
+      const years = dte / 365;
+      const value = blackScholesPrice(optionType, price, strike, years, sigma, rate);
+      const pl = value - premium;
+      const pct = pl / premium;
+      if (pct > maxGain) {
+        maxGain = pct;
+      }
+      return { dte, pct, pl, value };
+    });
+    matrixRows.push({ price, movePct: price / spot - 1, cells });
+  }
+
+  return {
+    optionType,
+    strike,
+    premium,
+    sigma,
+    spot,
+    maxDte: boundedMaxDte,
+    dteColumns,
+    rows: matrixRows,
+    maxGain,
+  };
 }
 
 export function daysToExpiry(expiry: string | null | undefined, now = new Date()): number {

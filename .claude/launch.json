@@ -13,6 +13,13 @@
       "runtimeExecutable": "C:/Users/User/Desktop/Gamma/.venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "uvicorn", "src.api.main:app", "--host", "127.0.0.1", "--port", "8000"],
       "port": 8000
+    },
+    {
+      "name": "frontend-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/User/Desktop/Gamma/frontend/node_modules/vite/bin/vite.js", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"],
+      "port": 4173,
+      "cwd": "frontend"
     }
   ]
 }
