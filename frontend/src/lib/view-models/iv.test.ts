@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { IvSurface, TimeSeriesPoint } from "../api/types";
 import {
   blackScholesPrice,
+  blackScholesGreeks,
   buildStrategyLegFromChainRow,
   deriveChainRows,
   daysToExpiry,
+  deriveChainGreekRows,
   deriveDistributionBuckets,
   deriveImpliedProbabilitySelection,
   deriveImpliedProbabilitySlice,
@@ -16,6 +18,7 @@ import {
   deriveSkewRows,
   deriveStrategyPayoff,
   deriveStrategyPayoffMatrix,
+  deriveStrategyGreeks,
   deriveSurfaceStats,
   deriveTermCurve,
   deriveTermStructure,
@@ -292,6 +295,25 @@ describe("options surface view models", () => {
     const call = blackScholesPrice("call", 105, 100, 0.5, 0.25);
     const put = blackScholesPrice("put", 105, 100, 0.5, 0.25);
     expect(call - put).toBeCloseTo(5, 6);
+  });
+
+  it("derives Gamma-owned Greeks from the fitted surface grid", () => {
+    const surface = makeSurface();
+    const atmCall = blackScholesGreeks("call", 100, 100, 30 / 365, 0.2);
+    const greekRows = deriveChainGreekRows(surface, "20260515");
+    const chainRows = deriveChainRows(surface, "20260515");
+    const leg = buildStrategyLegFromChainRow(chainRows[1], "call", "long");
+    const summary = deriveStrategyGreeks(leg ? [leg] : [], surface);
+
+    expect(atmCall.delta).toBeGreaterThan(0.5);
+    expect(atmCall.gamma).toBeGreaterThan(0);
+    expect(atmCall.vega).toBeGreaterThan(0);
+    expect(greekRows).toHaveLength(surface.strikes.length);
+    expect(greekRows[2].call?.sigma).toBeCloseTo(surface.iv_grid[0][2], 8);
+    expect(greekRows[2].put?.delta).toBeLessThan(0);
+    expect(summary).not.toBeNull();
+    expect(summary!.delta).toBeGreaterThan(0);
+    expect(summary!.legCount).toBe(1);
   });
 
   it("builds an IV smile geometry from front chain rows", () => {

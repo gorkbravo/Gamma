@@ -92,6 +92,24 @@ export interface OverviewSnapshot {
 
 export type StrategyOptionType = "call" | "put";
 export type StrategySide = "long" | "short";
+export type GreekMetric = "delta" | "gamma" | "vega" | "theta" | "rho";
+
+export interface OptionGreekSet {
+  delta: number;
+  gamma: number;
+  vega: number;
+  theta: number;
+  rho: number;
+  sigma: number;
+}
+
+export interface ChainGreekRow {
+  expiry: string;
+  strike: number;
+  dte: number;
+  call: OptionGreekSet | null;
+  put: OptionGreekSet | null;
+}
 
 export interface StrategyLeg {
   id: string;
@@ -212,6 +230,15 @@ export interface StrategyPayoffMatrix {
   rows: OptionPayoffRow[];
   maxAbsPl: number;
   riskBasis: number;
+}
+
+export interface StrategyGreekSummary {
+  delta: number;
+  gamma: number;
+  vega: number;
+  theta: number;
+  rho: number;
+  legCount: number;
 }
 
 export function nearestStrikeIndex(surface: IvSurface | null): number {
@@ -913,6 +940,93 @@ export function blackScholesPrice(
   return strike * discount * normalCdf(-d2) - spot * normalCdf(-d1);
 }
 
+export function blackScholesGreeks(
+  optionType: StrategyOptionType,
+  spot: number,
+  strike: number,
+  years: number,
+  sigma: number,
+  rate = 0
+): OptionGreekSet {
+  if (!(spot > 0) || !(strike > 0) || !(years > 0) || !(sigma > 0)) {
+    const intrinsicDelta =
+      optionType === "call"
+        ? spot > strike ? 1 : 0
+        : spot < strike ? -1 : 0;
+    return { delta: intrinsicDelta, gamma: 0, vega: 0, theta: 0, rho: 0, sigma: Math.max(sigma || 0, 0) };
+  }
+  const sqrtT = Math.sqrt(years);
+  const d1 = (Math.log(spot / strike) + (rate + (sigma * sigma) / 2) * years) / (sigma * sqrtT);
+  const d2 = d1 - sigma * sqrtT;
+  const discount = Math.exp(-rate * years);
+  const pdf = normalPdf(d1);
+  const gamma = pdf / (spot * sigma * sqrtT);
+  const vega = (spot * pdf * sqrtT) / 100;
+  const carryTheta = optionType === "call"
+    ? -rate * strike * discount * normalCdf(d2)
+    : rate * strike * discount * normalCdf(-d2);
+  const theta = (-(spot * pdf * sigma) / (2 * sqrtT) + carryTheta) / 365;
+  const delta = optionType === "call" ? normalCdf(d1) : normalCdf(d1) - 1;
+  const rho = optionType === "call"
+    ? (strike * years * discount * normalCdf(d2)) / 100
+    : (-strike * years * discount * normalCdf(-d2)) / 100;
+  return { delta, gamma, vega, theta, rho, sigma };
+}
+
+export function deriveChainGreekRows(surface: IvSurface | null, expiry: string | null | undefined): ChainGreekRow[] {
+  if (!surface?.spot || !expiry || !surface.expiries.length || !surface.strikes.length) {
+    return [];
+  }
+  const rowIndex = surface.expiries.indexOf(expiry);
+  if (rowIndex < 0) {
+    return [];
+  }
+  const dte = daysToExpiry(expiry);
+  const years = Math.max(dte / 365, 1 / 365);
+  return surface.strikes.map((strike, colIndex) => {
+    const sigma = surface.iv_grid[rowIndex]?.[colIndex];
+    const hasSigma = sigma != null && Number.isFinite(sigma) && sigma > 0;
+    return {
+      expiry,
+      strike,
+      dte,
+      call: hasSigma ? blackScholesGreeks("call", surface.spot!, strike, years, sigma as number) : null,
+      put: hasSigma ? blackScholesGreeks("put", surface.spot!, strike, years, sigma as number) : null,
+    };
+  });
+}
+
+export function deriveStrategyGreeks(legs: StrategyLeg[], surface: IvSurface | null): StrategyGreekSummary | null {
+  if (!surface?.spot || !legs.length) {
+    return null;
+  }
+  let summary: StrategyGreekSummary = { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, legCount: 0 };
+  for (const leg of legs) {
+    const expiryIndex = surface.expiries.indexOf(leg.expiry);
+    const strikeIndex = surface.strikes.findIndex((strike) => Math.abs(strike - leg.strike) < 1e-8);
+    if (expiryIndex < 0 || strikeIndex < 0) {
+      continue;
+    }
+    const sigma = surface.iv_grid[expiryIndex]?.[strikeIndex];
+    if (!(sigma != null && Number.isFinite(sigma) && sigma > 0)) {
+      continue;
+    }
+    const years = Math.max(daysToExpiry(leg.expiry) / 365, 1 / 365);
+    const greeks = blackScholesGreeks(leg.optionType, surface.spot, leg.strike, years, sigma);
+    const side = leg.side === "long" ? 1 : -1;
+    const weight = side * leg.quantity;
+    summary = {
+      delta: summary.delta + greeks.delta * weight,
+      gamma: summary.gamma + greeks.gamma * weight,
+      vega: summary.vega + greeks.vega * weight,
+      theta: summary.theta + greeks.theta * weight,
+      rho: summary.rho + greeks.rho * weight,
+      legCount: summary.legCount + 1,
+    };
+  }
+  return summary.legCount ? summary : null;
+}
+
 /**
  * Pick the strike nearest spot that is actually priced for the requested option
  * type (finite premium and IV). The literal nearest-to-spot strike is often
@@ -1185,6 +1299,10 @@ function projectSliceY(slice: ImpliedProbabilitySlice, density: number) {
 
 function normalCdf(value: number) {
   return 0.5 * (1 + erf(value / Math.SQRT2));
+}
+
+function normalPdf(value: number) {
+  return Math.exp(-0.5 * value * value) / Math.sqrt(2 * Math.PI);
 }
 
 function erf(value: number) {

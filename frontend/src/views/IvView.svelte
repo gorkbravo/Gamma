@@ -4,6 +4,7 @@
   import {
     buildStrategyLegFromChainRow,
     daysToExpiry,
+    deriveChainGreekRows,
     deriveChainRows,
     deriveImpliedProbabilitySelection,
     deriveImpliedProbabilitySlice,
@@ -15,6 +16,7 @@
     deriveSkewRows,
     deriveStrategyPayoff,
     deriveStrategyPayoffMatrix,
+    deriveStrategyGreeks,
     deriveSurfaceStats,
     deriveTermCurve,
     deriveTermStructure,
@@ -22,6 +24,8 @@
     optionsModes,
     selectedExpiryForSurface,
     type ChainRow,
+    type ChainGreekRow,
+    type GreekMetric,
     type IvSmile,
     type IvSmilePoint,
     type ImpliedProbabilitySelection,
@@ -30,6 +34,7 @@
     type OptionPayoffMatrix,
     type OptionsMode,
     type StrategyLeg,
+    type StrategyGreekSummary,
     type StrategyPayoffMatrix,
     type StrategyOptionType,
     type StrategySide,
@@ -57,6 +62,7 @@
   let selectedOptionType: StrategyOptionType = "call";
   let selectedSide: StrategySide = "long";
   let payoffOptionType: StrategyOptionType = "call";
+  let selectedGreekMetric: GreekMetric = "delta";
   let strategyLegs: StrategyLeg[] = [];
   let surfaceModel: SurfaceModel = "linear";
   let probabilityRange: { lower: number; upper: number } | null = null;
@@ -81,6 +87,10 @@
     value == null || !Number.isFinite(value)
       ? "N/A"
       : `${value >= 0 ? "+" : ""}${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const greek = (value: number | null | undefined, digits = 3) =>
+    value == null || !Number.isFinite(value) ? "N/A" : value.toFixed(digits);
+  const signedGreek = (value: number | null | undefined, digits = 3) =>
+    value == null || !Number.isFinite(value) ? "N/A" : `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
   const shortTime = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
   const formatExpiry = (expiry: string | null | undefined) => {
@@ -99,6 +109,7 @@
 
   let activeExpiry: string | null = null;
   let chainRows: ChainRow[] = [];
+  let chainGreekRows: ChainGreekRow[] = [];
   let overview = deriveOverviewSnapshot(result, selectedExpiry);
   let surfaceStats = deriveSurfaceStats(result);
   let termStructure = deriveTermStructure(result);
@@ -106,6 +117,7 @@
   let realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
   let strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   let strategyPayoffMatrix: StrategyPayoffMatrix | null = null;
+  let strategyGreeks: StrategyGreekSummary | null = null;
   let probabilitySurface: ImpliedProbabilitySurface | null = null;
   let probabilitySlice: ImpliedProbabilitySlice | null = null;
   let probabilitySelection: ImpliedProbabilitySelection | null = null;
@@ -132,6 +144,7 @@
 
   $: activeExpiry = selectedExpiryForSurface(result, selectedExpiry);
   $: chainRows = deriveChainRows(result, activeExpiry);
+  $: chainGreekRows = deriveChainGreekRows(result, activeExpiry);
   $: overview = deriveOverviewSnapshot(result, activeExpiry);
   $: surfaceStats = deriveSurfaceStats(result);
   $: termStructure = deriveTermStructure(result);
@@ -147,6 +160,7 @@
   $: probabilitySelection = deriveImpliedProbabilitySelection(probabilitySlice, probabilityRange?.lower, probabilityRange?.upper);
   $: strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   $: strategyPayoffMatrix = deriveStrategyPayoffMatrix(strategyLegs, chainRows, result?.spot);
+  $: strategyGreeks = deriveStrategyGreeks(strategyLegs, result);
   $: ivSmile = deriveIvSmile(chainRows, overview.atmPair?.strike);
   $: payoffMatrix = deriveOptionPayoffMatrix(chainRows, result?.spot, payoffOptionType);
   $: atmStrikeIndex = nearestStrikeIndex(result);
@@ -301,6 +315,21 @@
   }
 
   const densityPct = (value: number) => `${(value * 100).toFixed(value >= 0.1 ? 1 : 2)}%`;
+  const greekMetricLabel: Record<GreekMetric, string> = {
+    delta: "Delta",
+    gamma: "Gamma",
+    vega: "Vega",
+    theta: "Theta",
+    rho: "Rho",
+  };
+
+  function formatGreekMetric(row: ChainGreekRow, side: "call" | "put") {
+    const value = row[side]?.[selectedGreekMetric];
+    const digits = selectedGreekMetric === "gamma" ? 4 : selectedGreekMetric === "theta" ? 3 : 3;
+    return selectedGreekMetric === "delta" || selectedGreekMetric === "theta" || selectedGreekMetric === "rho"
+      ? signedGreek(value, digits)
+      : greek(value, digits);
+  }
 
   function defaultProbabilityRange(slice: ImpliedProbabilitySlice, spot: number | null | undefined) {
     const center = spot && Number.isFinite(spot) ? spot : (slice.minStrike + slice.maxStrike) / 2;
@@ -606,6 +635,39 @@
             <div><span>ATM Pair</span><strong>{fmt(overview.atmPair?.strike, 2)}</strong></div>
             <div><span>Straddle</span><strong>{money(overview.atmPair?.straddleMidpoint)}</strong></div>
           </div>
+        </article>
+        <article class="panel greek-panel">
+          <div class="panel-head">
+            <h3>Gamma-Owned Greeks</h3>
+            <select bind:value={selectedGreekMetric} aria-label="Greek metric">
+              <option value="delta">Delta</option>
+              <option value="gamma">Gamma</option>
+              <option value="vega">Vega</option>
+              <option value="theta">Theta</option>
+              <option value="rho">Rho</option>
+            </select>
+          </div>
+          {#if chainGreekRows.length}
+            <div class="compact-table">
+              <table>
+                <thead>
+                  <tr><th>Strike</th><th>C {greekMetricLabel[selectedGreekMetric]}</th><th>P {greekMetricLabel[selectedGreekMetric]}</th><th>IV</th></tr>
+                </thead>
+                <tbody>
+                  {#each chainGreekRows as row}
+                    <tr class:atm={row.strike === overview.atmPair?.strike}>
+                      <td>{fmt(row.strike, 1)}</td>
+                      <td>{formatGreekMetric(row, "call")}</td>
+                      <td>{formatGreekMetric(row, "put")}</td>
+                      <td>{pct(row.call?.sigma ?? row.put?.sigma)}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {:else}
+            <p class="muted">Load a fitted surface to calculate Gamma-owned Greeks.</p>
+          {/if}
         </article>
         {@render DiagnosticsPanel(result, session, status, sessionLoading)}
       </div>
@@ -964,6 +1026,11 @@
             <div><span>Max Profit</span><strong>{strategyPayoff.maxProfit == null ? "Open" : signedMoney(strategyPayoff.maxProfit)}</strong></div>
             <div><span>Max Loss</span><strong>{strategyPayoff.maxLoss == null ? "Open" : signedMoney(strategyPayoff.maxLoss)}</strong></div>
             <div><span>Breakevens</span><strong>{strategyPayoff.breakevens.length ? strategyPayoff.breakevens.map((value) => fmt(value, 2)).join(", ") : "N/A"}</strong></div>
+            <div><span>Net Delta</span><strong>{signedGreek(strategyGreeks?.delta, 3)}</strong></div>
+            <div><span>Net Gamma</span><strong>{signedGreek(strategyGreeks?.gamma, 4)}</strong></div>
+            <div><span>Net Vega</span><strong>{signedGreek(strategyGreeks?.vega, 3)}</strong></div>
+            <div><span>Net Theta</span><strong>{signedGreek(strategyGreeks?.theta, 3)}</strong></div>
+            <div><span>Net Rho</span><strong>{signedGreek(strategyGreeks?.rho, 3)}</strong></div>
           </div>
         </article>
         {@render DiagnosticsPanel(result, session, status, sessionLoading)}
