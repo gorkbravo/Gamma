@@ -186,6 +186,7 @@ export interface IvLoadOptions {
   marketDataMode?: string;
   waitSeconds?: number;
   depthPreset?: string;
+  surfaceModel?: string;
   preserveExisting?: boolean;
 }
 
@@ -3171,6 +3172,9 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
     if (request.depthPreset) {
       params.set("depth_preset", request.depthPreset);
     }
+    if (request.surfaceModel) {
+      params.set("surface_model", request.surfaceModel);
+    }
     const surface = await getJson<IvSurface>(`/iv/surface?${params.toString()}`);
     const shouldReplaceSurface = hasRenderableIvSurface(surface) || !hasRenderableIvSurface(get(ivSurface));
     if (shouldReplaceSurface || request.preserveExisting === false) {
@@ -3239,7 +3243,8 @@ export async function startIvSession(options: IvLoadOptions) {
     const session = await postJson<IvSessionStatus>("/iv/session/start", {
       symbol: options.symbol,
       market_data_mode: options.marketDataMode ?? null,
-      depth_preset: options.depthPreset ?? null
+      depth_preset: options.depthPreset ?? null,
+      surface_model: options.surfaceModel ?? null
     });
     ivSession.set(session);
     ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));

@@ -12,6 +12,7 @@ from src.models.iv import (
     IVOptionPairRecord,
     IVPricingAssumptionsRecord,
     IVSurfaceCollectionMetadata,
+    IVSurfaceModelMetadata,
     IVSurfaceQualityMetrics,
 )
 
@@ -177,6 +178,19 @@ class IVSurfaceQualityMetricsModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class IVSurfaceModelMetadataModel(BaseModel):
+    model: str
+    label: str
+    status: str = "applied"
+    notes: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: IVSurfaceModelMetadata | None) -> "IVSurfaceModelMetadataModel":
+        if row is None:
+            return cls(model="linear", label="Line interpolation", status="applied")
+        return cls(**row.__dict__)
+
+
 class IVExpiryAnalyticsModel(BaseModel):
     expiry: str
     days_to_expiry: int | None = None
@@ -231,6 +245,10 @@ class IVSurfaceResponseModel(BaseModel):
     pairs: list[IVOptionPairModel] = Field(default_factory=list)
     collection: IVSurfaceCollectionMetadataModel | None = None
     quality: IVSurfaceQualityMetricsModel | None = None
+    surface_model: str = "linear"
+    surface_model_label: str = "Line interpolation"
+    surface_model_status: str = "applied"
+    surface_model_notes: list[str] = Field(default_factory=list)
     expiry_analytics: list[IVExpiryAnalyticsModel] = Field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsModel | None = None
 
@@ -244,9 +262,14 @@ class IVSurfaceResponseModel(BaseModel):
                 snapshot_available=False,
                 warnings=list(result.warnings),
                 messages=list(result.messages),
+                surface_model=result.surface_model,
+                surface_model_label=result.surface_model_label,
+                surface_model_status=result.surface_model_status,
+                surface_model_notes=list(result.surface_model_notes),
                 freshness_label="unavailable",
             )
         snapshot = result.snapshot
+        surface_model = IVSurfaceModelMetadataModel.from_domain(snapshot.surface_model)
         return cls(
             symbol=snapshot.symbol,
             timestamp=snapshot.timestamp,
@@ -268,6 +291,10 @@ class IVSurfaceResponseModel(BaseModel):
             pairs=[IVOptionPairModel.from_domain(item) for item in snapshot.pairs],
             collection=IVSurfaceCollectionMetadataModel.from_domain(snapshot.collection),
             quality=IVSurfaceQualityMetricsModel.from_domain(snapshot.quality),
+            surface_model=surface_model.model,
+            surface_model_label=surface_model.label,
+            surface_model_status=surface_model.status,
+            surface_model_notes=list(surface_model.notes),
             expiry_analytics=[IVExpiryAnalyticsModel.from_domain(item) for item in snapshot.expiry_analytics],
             pricing_assumptions=IVPricingAssumptionsModel.from_domain(snapshot.pricing_assumptions),
         )
@@ -277,6 +304,7 @@ class IVSessionRequestModel(BaseModel):
     symbol: str = "SPY"
     market_data_mode: str | None = None
     depth_preset: str | None = None
+    surface_model: str | None = None
 
 
 class IVSessionStatusResponseModel(BaseModel):

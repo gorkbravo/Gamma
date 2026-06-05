@@ -29,7 +29,7 @@
     type TermCurve,
     type TermCurvePoint,
   } from "../lib/view-models/iv";
-  import Surface3D from "../components/Surface3D.svelte";
+  import Surface3D, { type SurfaceModel } from "../components/Surface3D.svelte";
 
   export let mode: OptionsMode = "overview";
   export let status: SystemStatus | null = null;
@@ -51,6 +51,7 @@
   let selectedSide: StrategySide = "long";
   let payoffOptionType: StrategyOptionType = "call";
   let strategyLegs: StrategyLeg[] = [];
+  let surfaceModel: SurfaceModel = "linear";
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
@@ -135,6 +136,9 @@
   $: atmStrikeIndex = nearestStrikeIndex(result);
   $: requestSymbol = symbol.trim().toUpperCase() || result?.symbol?.trim().toUpperCase() || "";
   $: displayedSymbol = result?.symbol ?? (symbol.trim() ? normalizedSymbol() : "No surface");
+  $: if (!loading && isSurfaceModel(result?.surface_model) && result?.surface_model !== surfaceModel) {
+    surfaceModel = result.surface_model;
+  }
   $: surfaceAlerts = [
     errorMessage?.trim(),
     result && !result.snapshot_available ? `No options surface snapshot is available for ${result.symbol}.` : "",
@@ -162,6 +166,22 @@
       marketDataMode: activeMarketDataMode(),
       waitSeconds: 60,
       depthPreset: "max",
+      surfaceModel,
+    });
+  }
+
+  async function chooseSurfaceModel(nextModel: SurfaceModel) {
+    surfaceModel = nextModel;
+    const nextSymbol = normalizedSymbol();
+    if (!nextSymbol || !result) {
+      return;
+    }
+    await onLoad({
+      symbol: nextSymbol,
+      marketDataMode: activeMarketDataMode(),
+      waitSeconds: 60,
+      depthPreset: result.collection?.depth_preset ?? "max",
+      surfaceModel: nextModel,
     });
   }
 
@@ -255,6 +275,10 @@
   function rowClass(value: number | null | undefined) {
     if (value == null) return "";
     return value >= 0 ? "positive" : "negative";
+  }
+
+  function isSurfaceModel(value: string | null | undefined): value is SurfaceModel {
+    return value === "linear" || value === "spline" || value === "ssvi";
   }
 </script>
 
@@ -540,6 +564,10 @@
             grid={result?.iv_grid ?? []}
             dte={(result?.expiries ?? []).map((expiry) => daysToExpiry(expiry))}
             {atmStrikeIndex}
+            {surfaceModel}
+            surfaceModelStatus={result?.surface_model_status ?? null}
+            modelLoading={loading}
+            onSurfaceModelChange={chooseSurfaceModel}
           />
         </article>
 
@@ -812,6 +840,7 @@
       <div><span>Provider</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
       <div><span>Backend Mode</span><strong>{status?.market_data_mode ?? result?.collection?.market_data_mode ?? "unknown"}</strong></div>
       <div><span>Session</span><strong>{sessionLoading ? "loading" : session?.running ? "running" : session?.status_text ?? "idle"}</strong></div>
+      <div><span>Fit</span><strong>{result?.surface_model_label ?? "Line interpolation"}</strong></div>
       <div><span>Cells</span><strong>{result?.quality ? `${result.quality.observed_surface_cells}/${result.quality.expected_surface_cells}` : "N/A"}</strong></div>
       <div><span>Lines</span><strong>{result?.collection ? `${result.collection.estimated_total_market_data_lines}/${result.collection.configured_market_data_line_budget}` : "N/A"}</strong></div>
       <div><span>Updated</span><strong>{shortTime(result?.timestamp)}</strong></div>
@@ -819,9 +848,9 @@
     {#if result?.transformation_note}
       <p class="note">{result.transformation_note}</p>
     {/if}
-    {#if result?.warnings?.length || result?.messages?.length || session?.messages?.length}
+    {#if result?.warnings?.length || result?.messages?.length || result?.surface_model_notes?.length || session?.messages?.length}
       <div class="warning-list">
-        {#each [...(result?.warnings ?? []), ...(result?.messages ?? []), ...(session?.messages ?? [])].slice(0, 4) as message}
+        {#each [...(result?.warnings ?? []), ...(result?.messages ?? []), ...(result?.surface_model_notes ?? []), ...(session?.messages ?? [])].slice(0, 4) as message}
           <div>{message}</div>
         {/each}
       </div>

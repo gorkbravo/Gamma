@@ -1,5 +1,12 @@
 <script lang="ts" context="module">
   type RGB = [number, number, number];
+  export type SurfaceModel = "linear" | "spline" | "ssvi";
+
+  export const SURFACE_MODEL_OPTIONS: Array<{ id: SurfaceModel; label: string }> = [
+    { id: "linear", label: "Line interpolation" },
+    { id: "spline", label: "Spline interpolation" },
+    { id: "ssvi", label: "SSVI" },
+  ];
 
   export const SURFACE_COLORMAPS: Record<string, RGB[]> = {
     viridis: [
@@ -57,6 +64,10 @@
   export let dte: number[] = [];
   export let atmStrikeIndex = -1;
   export let height = 380;
+  export let surfaceModel: SurfaceModel = "linear";
+  export let surfaceModelStatus: string | null = null;
+  export let modelLoading = false;
+  export let onSurfaceModelChange: (model: SurfaceModel) => void | Promise<void> = () => {};
 
   type RenderMode = "surface" | "wireframe" | "points";
   let colormap: keyof typeof SURFACE_COLORMAPS = "viridis";
@@ -457,6 +468,14 @@
     scheduleRender();
   }
 
+  function chooseSurfaceModel(event: Event) {
+    const next = (event.currentTarget as HTMLSelectElement).value as SurfaceModel;
+    if (next === surfaceModel) {
+      return;
+    }
+    void onSurfaceModelChange(next);
+  }
+
   onMount(() => {
     ctx = canvas.getContext("2d");
     readTheme();
@@ -489,6 +508,17 @@
     >⚙</button>
     {#if settingsOpen}
       <div class="surface3d-settings">
+        <label>
+          <span>Fit</span>
+          <select value={surfaceModel} on:change={chooseSurfaceModel} disabled={modelLoading}>
+            {#each SURFACE_MODEL_OPTIONS as option}
+              <option value={option.id}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        {#if surfaceModelStatus && surfaceModelStatus !== "applied"}
+          <div class="model-status">{surfaceModelStatus}</div>
+        {/if}
         <label>
           <span>Colormap</span>
           <select bind:value={colormap}>
@@ -634,6 +664,13 @@
     padding: 0.22rem 0.4rem;
     border-radius: 2px;
     cursor: pointer;
+  }
+
+  .surface3d-settings .model-status {
+    color: var(--warning);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .surface3d-canvas {

@@ -19,6 +19,7 @@ from src.models.iv import (
     IVOptionPairRecord,
     IVPricingAssumptionsRecord,
     IVSurfaceCollectionMetadata,
+    IVSurfaceModelMetadata,
     IVSurfaceQualityMetrics,
 )
 from src.services.ibkr_client import IBKRClient
@@ -65,6 +66,9 @@ class IVSurfaceSnapshot:
     pairs: list[IVOptionPairRecord] = field(default_factory=list)
     collection: IVSurfaceCollectionMetadata | None = None
     quality: IVSurfaceQualityMetrics | None = None
+    surface_model: IVSurfaceModelMetadata = field(
+        default_factory=lambda: IVSurfaceModelMetadata(model="linear", label="Line interpolation")
+    )
     expiry_analytics: list[IVExpiryAnalyticsRecord] = field(default_factory=list)
     pricing_assumptions: IVPricingAssumptionsRecord | None = None
 
@@ -83,6 +87,7 @@ class IVSurfaceEngine:
         include_calls: bool = True,
         include_puts: bool = True,
         depth_preset: str = "standard",
+        surface_model: str = "linear",
     ) -> None:
         self.client = client
         self.market_data_mode = self._normalize_market_data_mode(market_data_mode)
@@ -95,6 +100,7 @@ class IVSurfaceEngine:
         self.reserved_market_data_lines = max(0, int(reserved_market_data_lines))
         self.include_calls = bool(include_calls)
         self.include_puts = bool(include_puts)
+        self.surface_model = self.normalize_surface_model(surface_model)
 
         self._latest: IVSurfaceSnapshot | None = None
         self._lock = threading.Lock()
@@ -124,6 +130,30 @@ class IVSurfaceEngine:
         if preset in {"compact", "standard", "deep", "front_deep", "max"}:
             return preset
         return "standard"
+
+    @staticmethod
+    def normalize_surface_model(value: str | None) -> str:
+        model = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "line": "linear",
+            "line_interpolation": "linear",
+            "linear_interpolation": "linear",
+            "spline_interpolation": "spline",
+            "ssvi_interpolation": "ssvi",
+        }
+        model = aliases.get(model, model)
+        if model in {"linear", "spline", "ssvi"}:
+            return model
+        return "linear"
+
+    @staticmethod
+    def surface_model_label(value: str | None) -> str:
+        model = IVSurfaceEngine.normalize_surface_model(value)
+        return {
+            "linear": "Line interpolation",
+            "spline": "Spline interpolation",
+            "ssvi": "SSVI",
+        }[model]
 
     def is_running(self) -> bool:
         return self._running
@@ -319,13 +349,16 @@ class IVSurfaceEngine:
             expected_surface_cells=raw_grid.size,
             pairs=pairs,
         )
+        display_grid, model_metadata = self._fit_surface_grid(raw_grid, expiries, strikes, spot)
+        if display_grid is None:
+            display_grid = np.clip(raw_grid, 0.01, 5.0)
         expiry_analytics = self._build_expiry_analytics(expiries=expiries, pairs=pairs, spot=spot)
         return IVSurfaceSnapshot(
             symbol=symbol,
             spot=float(spot),
             expiries=list(expiries),
             strikes=list(strikes),
-            iv_grid=np.clip(raw_grid, 0.01, 5.0),
+            iv_grid=display_grid,
             timestamp=now,
             delayed=True,
             points=int(np.isfinite(raw_grid).sum()),
@@ -340,6 +373,7 @@ class IVSurfaceEngine:
             pairs=pairs,
             collection=collection,
             quality=quality,
+            surface_model=model_metadata,
             expiry_analytics=expiry_analytics,
             pricing_assumptions=IVPricingAssumptionsRecord(
                 spot_reference=spot,
@@ -813,8 +847,8 @@ class IVSurfaceEngine:
         if observed_cells < max(8, len(strikes) // 2):
             return None
 
-        interpolated_grid = self._interpolate_grid(raw_grid, expiries, strikes)
-        if interpolated_grid is None:
+        display_grid, model_metadata = self._fit_surface_grid(raw_grid, expiries, strikes, self._spot)
+        if display_grid is None:
             return None
 
         quality = self._build_quality_metrics(
@@ -836,7 +870,7 @@ class IVSurfaceEngine:
             spot=float(self._spot if self._coerce_positive(self._spot) is not None else 0.0),
             expiries=list(expiries),
             strikes=list(strikes),
-            iv_grid=interpolated_grid,
+            iv_grid=display_grid,
             timestamp=datetime.utcnow(),
             delayed=bool(delayed),
             points=observed_cells,
@@ -852,6 +886,7 @@ class IVSurfaceEngine:
             pairs=pairs,
             collection=collection,
             quality=quality,
+            surface_model=model_metadata,
             expiry_analytics=expiry_analytics,
             pricing_assumptions=IVPricingAssumptionsRecord(
                 spot_reference=self._spot if self._coerce_positive(self._spot) is not None else None,
@@ -865,7 +900,35 @@ class IVSurfaceEngine:
             ),
         )
 
-    def _interpolate_grid(self, raw_grid: np.ndarray, expiries: list[str], strikes: list[float]) -> np.ndarray | None:
+    def _fit_surface_grid(
+        self,
+        raw_grid: np.ndarray,
+        expiries: list[str],
+        strikes: list[float],
+        spot: float | None,
+    ) -> tuple[np.ndarray | None, IVSurfaceModelMetadata]:
+        model = self.normalize_surface_model(self.surface_model)
+        label = self.surface_model_label(model)
+        if model == "spline":
+            grid, notes = self._spline_interpolate_grid(raw_grid, expiries, strikes)
+        elif model == "ssvi":
+            grid, notes = self._ssvi_fit_grid(raw_grid, expiries, strikes, spot)
+        else:
+            grid = self._linear_interpolate_grid(raw_grid, expiries, strikes)
+            notes = ["Linear interpolation filled missing cells across expiry and strike axes."] if grid is not None else []
+
+        if grid is None:
+            fallback = self._linear_interpolate_grid(raw_grid, expiries, strikes)
+            status = "fallback" if fallback is not None else "unavailable"
+            fallback_notes = notes + ["Requested surface model could not be applied; linear interpolation was used instead."]
+            return fallback, IVSurfaceModelMetadata(model="linear", label=self.surface_model_label("linear"), status=status, notes=fallback_notes)
+
+        status = "applied"
+        if notes and any("fallback" in note.lower() for note in notes):
+            status = "partial"
+        return grid, IVSurfaceModelMetadata(model=model, label=label, status=status, notes=notes)
+
+    def _linear_interpolate_grid(self, raw_grid: np.ndarray, expiries: list[str], strikes: list[float]) -> np.ndarray | None:
         table = pd.DataFrame(raw_grid, index=expiries, columns=strikes)
         table = table.interpolate(method="linear", axis=0, limit_direction="both")
         table = table.interpolate(method="linear", axis=1, limit_direction="both")
@@ -874,6 +937,167 @@ class IVSurfaceEngine:
             return None
         clean_grid = table.to_numpy(dtype=float)
         return np.clip(clean_grid, 0.01, 5.0)
+
+    def _spline_interpolate_grid(self, raw_grid: np.ndarray, expiries: list[str], strikes: list[float]) -> tuple[np.ndarray | None, list[str]]:
+        base = self._linear_interpolate_grid(raw_grid, expiries, strikes)
+        if base is None:
+            return None, []
+
+        grid = np.array(raw_grid, dtype=float, copy=True)
+        strike_axis = np.array([float(strike) for strike in strikes], dtype=float)
+        dte_axis = np.array([float(self._days_to_expiry(expiry, datetime.utcnow())) for expiry in expiries], dtype=float)
+        row_spline_count = 0
+        term_spline_count = 0
+
+        for row_index in range(grid.shape[0]):
+            row = grid[row_index, :]
+            mask = np.isfinite(row)
+            if int(mask.sum()) >= 3:
+                grid[row_index, :] = self._natural_cubic_interpolate(strike_axis[mask], row[mask], strike_axis)
+                row_spline_count += 1
+
+        for col_index in range(grid.shape[1]):
+            col = grid[:, col_index]
+            mask = np.isfinite(col)
+            if int(mask.sum()) >= 3:
+                grid[:, col_index] = self._natural_cubic_interpolate(dte_axis[mask], col[mask], dte_axis)
+                term_spline_count += 1
+
+        grid = np.where(np.isfinite(grid), grid, base)
+        notes = [f"Spline interpolation used {row_spline_count} strike slices and {term_spline_count} term slices."]
+        if int((~np.isfinite(raw_grid)).sum()) and (row_spline_count < grid.shape[0] or term_spline_count < grid.shape[1]):
+            notes.append("Spline fallback used linear interpolation for sparse strike or term slices.")
+        return np.clip(grid, 0.01, 5.0), notes
+
+    def _ssvi_fit_grid(
+        self,
+        raw_grid: np.ndarray,
+        expiries: list[str],
+        strikes: list[float],
+        spot: float | None,
+    ) -> tuple[np.ndarray | None, list[str]]:
+        base = self._linear_interpolate_grid(raw_grid, expiries, strikes)
+        clean_spot = self._coerce_positive(spot)
+        if base is None or clean_spot is None:
+            return base, ["SSVI fit fallback: missing baseline grid or positive spot reference."]
+
+        strike_axis = np.array([float(strike) for strike in strikes], dtype=float)
+        valid_strikes = strike_axis > 0
+        if int(valid_strikes.sum()) < 4:
+            return base, ["SSVI fit fallback: fewer than four positive strikes."]
+
+        log_moneyness = np.log(strike_axis / clean_spot)
+        output = np.array(base, dtype=float, copy=True)
+        fitted_rows = 0
+        fallback_rows = 0
+        today = datetime.utcnow()
+
+        for row_index, expiry in enumerate(expiries):
+            row = np.array(raw_grid[row_index, :], dtype=float)
+            mask = np.isfinite(row) & (row > 0) & valid_strikes
+            if int(mask.sum()) < 4:
+                fallback_rows += 1
+                continue
+
+            dte = self._days_to_expiry(expiry, today)
+            t_years = max(dte / 365.0, 1.0 / 365.0)
+            variance = np.square(np.clip(row[mask], 0.01, 5.0)) * t_years
+            params = self._fit_ssvi_slice(log_moneyness[mask], variance)
+            if params is None:
+                fallback_rows += 1
+                continue
+
+            theta, rho, phi = params
+            modeled_variance = self._ssvi_total_variance(log_moneyness, theta, rho, phi)
+            modeled_iv = np.sqrt(np.maximum(modeled_variance / t_years, 0.0001))
+            output[row_index, :] = modeled_iv
+            fitted_rows += 1
+
+        notes = [f"SSVI fitted {fitted_rows}/{len(expiries)} expiry slices from observed blended IV cells."]
+        if fallback_rows:
+            notes.append(f"SSVI fallback used linear interpolation for {fallback_rows} sparse or unstable expiry slices.")
+        return np.clip(output, 0.01, 5.0), notes
+
+    @staticmethod
+    def _natural_cubic_interpolate(x_values: np.ndarray, y_values: np.ndarray, targets: np.ndarray) -> np.ndarray:
+        order = np.argsort(x_values)
+        x = np.asarray(x_values[order], dtype=float)
+        y = np.asarray(y_values[order], dtype=float)
+        unique_x, unique_indices = np.unique(x, return_index=True)
+        x = unique_x
+        y = y[unique_indices]
+        n = len(x)
+        if n < 3:
+            return np.interp(targets, x, y)
+
+        h = np.diff(x)
+        if np.any(h <= 0):
+            return np.interp(targets, x, y)
+
+        alpha = np.zeros(n, dtype=float)
+        for i in range(1, n - 1):
+            alpha[i] = (3.0 / h[i]) * (y[i + 1] - y[i]) - (3.0 / h[i - 1]) * (y[i] - y[i - 1])
+
+        l = np.ones(n, dtype=float)
+        mu = np.zeros(n, dtype=float)
+        z = np.zeros(n, dtype=float)
+        for i in range(1, n - 1):
+            l[i] = 2.0 * (x[i + 1] - x[i - 1]) - h[i - 1] * mu[i - 1]
+            if abs(l[i]) < 1e-12:
+                return np.interp(targets, x, y)
+            mu[i] = h[i] / l[i]
+            z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i]
+
+        b = np.zeros(n - 1, dtype=float)
+        c = np.zeros(n, dtype=float)
+        d = np.zeros(n - 1, dtype=float)
+        for j in range(n - 2, -1, -1):
+            c[j] = z[j] - mu[j] * c[j + 1]
+            b[j] = (y[j + 1] - y[j]) / h[j] - h[j] * (c[j + 1] + 2.0 * c[j]) / 3.0
+            d[j] = (c[j + 1] - c[j]) / (3.0 * h[j])
+
+        target_array = np.asarray(targets, dtype=float)
+        indices = np.searchsorted(x, target_array, side="right") - 1
+        indices = np.clip(indices, 0, n - 2)
+        dx = target_array - x[indices]
+        result = y[indices] + b[indices] * dx + c[indices] * np.square(dx) + d[indices] * np.power(dx, 3)
+        edge = np.interp(target_array, x, y)
+        return np.where((target_array < x[0]) | (target_array > x[-1]), edge, result)
+
+    @staticmethod
+    def _ssvi_total_variance(k: np.ndarray, theta: float, rho: float, phi: float) -> np.ndarray:
+        inner = phi * k + rho
+        return 0.5 * theta * (1.0 + rho * phi * k + np.sqrt(np.square(inner) + 1.0 - rho * rho))
+
+    def _fit_ssvi_slice(self, k: np.ndarray, variance: np.ndarray) -> tuple[float, float, float] | None:
+        clean_k = np.asarray(k, dtype=float)
+        clean_variance = np.asarray(variance, dtype=float)
+        if len(clean_k) < 4 or not np.all(np.isfinite(clean_variance)):
+            return None
+
+        best: tuple[float, float, float, float] | None = None
+        rho_candidates = np.linspace(-0.85, 0.85, 18)
+        phi_candidates = np.geomspace(0.5, 80.0, 24)
+        for rho in rho_candidates:
+            for phi in phi_candidates:
+                shape = 0.5 * (1.0 + rho * phi * clean_k + np.sqrt(np.square(phi * clean_k + rho) + 1.0 - rho * rho))
+                if not np.all(np.isfinite(shape)) or np.any(shape <= 0):
+                    continue
+                denom = float(np.dot(shape, shape))
+                if denom <= 1e-12:
+                    continue
+                theta = float(np.dot(clean_variance, shape) / denom)
+                if theta <= 0 or not np.isfinite(theta):
+                    continue
+                fitted = theta * shape
+                loss = float(np.mean(np.square(fitted - clean_variance)))
+                if best is None or loss < best[0]:
+                    best = (loss, theta, float(rho), float(phi))
+
+        if best is None:
+            return None
+        _, theta, rho, phi = best
+        return theta, rho, phi
 
     def _build_collection_metadata(
         self,

@@ -20,6 +20,7 @@ def iv_surface(
     market_data_mode: str | None = Query(default=None),
     wait_seconds: float = Query(default=2.5, ge=0.5, le=90.0),
     depth_preset: str | None = Query(default=None),
+    surface_model: str | None = Query(default=None),
 ) -> IVSurfaceResponseModel:
     runtime = request.app.state.runtime
     result = runtime.iv_service.get_surface(
@@ -28,6 +29,7 @@ def iv_surface(
             market_data_mode=market_data_mode or runtime.market_data_mode,
             wait_seconds=wait_seconds,
             depth_preset=depth_preset or "standard",
+            surface_model=surface_model or "linear",
         )
     )
     return IVSurfaceResponseModel.from_service_result(symbol=symbol, result=result)
@@ -47,7 +49,11 @@ def start_iv_session(
     runtime = request.app.state.runtime
     if payload.market_data_mode:
         runtime.set_market_data_mode(payload.market_data_mode)
-    start_result = runtime.iv_service.start_stream_session(payload.symbol, depth_preset=payload.depth_preset)
+    start_result = runtime.iv_service.start_stream_session(
+        payload.symbol,
+        depth_preset=payload.depth_preset,
+        surface_model=payload.surface_model,
+    )
     return _iv_session_status(runtime, status_override=start_result.status, messages=start_result.messages)
 
 
@@ -69,6 +75,7 @@ def _iv_session_status(runtime, status_override: str | None = None, messages: li
                     symbol=runtime.iv_service.active_symbol() or "SPY",
                     market_data_mode=runtime.iv_service.market_data_mode,
                     wait_seconds=0.5,
+                    surface_model=runtime.iv_service.active_surface_model(),
                 )
             )
             if snapshot is None and runtime.client.mock
@@ -88,4 +95,13 @@ def _iv_session_status(runtime, status_override: str | None = None, messages: li
 def _iv_result_from_snapshot(snapshot, symbol: str, messages: list[str] | None = None):
     from src.application.iv_service import IVSurfaceResult
 
-    return IVSurfaceResult(snapshot=snapshot, messages=list(messages or []))
+    if snapshot is None:
+        return IVSurfaceResult(snapshot=None, messages=list(messages or []))
+    return IVSurfaceResult(
+        snapshot=snapshot,
+        messages=list(messages or []),
+        surface_model=snapshot.surface_model.model,
+        surface_model_label=snapshot.surface_model.label,
+        surface_model_status=snapshot.surface_model.status,
+        surface_model_notes=list(snapshot.surface_model.notes),
+    )

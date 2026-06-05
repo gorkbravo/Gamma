@@ -3226,6 +3226,10 @@ export interface IvSurface {
   origin: string;
   transformation_note: string | null;
   freshness_label: string;
+  surface_model?: string;
+  surface_model_label?: string;
+  surface_model_status?: string;
+  surface_model_notes?: string[];
   collection: IvSurfaceCollection | null;
   quality: IvSurfaceQuality | null;
   pairs: IvOptionPair[];

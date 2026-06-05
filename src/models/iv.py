@@ -136,6 +136,14 @@ class IVSurfaceQualityMetrics:
 
 
 @dataclass(frozen=True)
+class IVSurfaceModelMetadata:
+    model: str
+    label: str
+    status: str = "applied"
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class IVExpiryAnalyticsRecord:
     expiry: str
     days_to_expiry: int | None = None

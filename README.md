@@ -264,17 +264,19 @@ It provides:
 - expiry/strike heatmap
 - selected expiry slice
 - ATM term structure
+- selectable display-grid fitting for the 3D surface: line interpolation, spline interpolation, or SSVI
 
 Under the hood:
 
 - live mode requests an IV surface snapshot from the backend IV engine over IBKR
 - `Compact`, `Standard`, `Deep`, `Front Deep`, and `Max` presets tune the backend's expiry count, strike band, contract cap, and line budget; the default max surface keeps expiries tight so calls and puts can cover more strikes
+- the backend preserves observed option-chain rows and applies the selected model only to the display IV grid, with fit/fallback metadata returned in the surface payload
 - the frontend highlights the strike nearest to spot and uses that strike to derive ATM term structure
 - in mock mode, Gamma generates a synthetic surface with a simple skew/term-structure shape so the UI remains testable
 
 Important caveats:
 
-- this tab shows the returned surface; it does not derive Greeks, fit a surface model, or run an options valuation stack
+- this tab shows the returned surface, contract rows, and display-grid fit; it does not run an options valuation or execution stack
 - if IBKR is disconnected, the live surface path is unavailable
 
 ### Research Workspace

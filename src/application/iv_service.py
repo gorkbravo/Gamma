@@ -15,6 +15,7 @@ class IVSurfaceRequest:
     market_data_mode: str = "delayed"
     wait_seconds: float = 2.5
     depth_preset: str = "standard"
+    surface_model: str = "linear"
 
 
 @dataclass
@@ -22,6 +23,10 @@ class IVSurfaceResult:
     snapshot: IVSurfaceSnapshot | None
     warnings: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
+    surface_model: str = "linear"
+    surface_model_label: str = "Line interpolation"
+    surface_model_status: str = "unavailable"
+    surface_model_notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -39,6 +44,7 @@ class IVService:
         self._engine: IVSurfaceEngine | None = None
         self._active_symbol = "SPY"
         self._active_depth_preset = "standard"
+        self._active_surface_model = "linear"
         self._engine_config = {
             "max_expiries": int(os.getenv("IV_MAX_EXPIRIES", "6") or 6),
             "strike_band_pct": float(os.getenv("IV_STRIKE_BAND_PCT", "0.02") or 0.02),
@@ -62,7 +68,7 @@ class IVService:
         self.stop_stream()
         self.market_data_mode = normalized
         if was_running:
-            self.start_stream(active_symbol or "SPY", depth_preset=self._active_depth_preset)
+            self.start_stream(active_symbol or "SPY", depth_preset=self._active_depth_preset, surface_model=self._active_surface_model)
 
     @staticmethod
     def normalize_depth_preset(value: str | None) -> str:
@@ -70,6 +76,14 @@ class IVService:
         if preset in {"compact", "standard", "deep", "front_deep", "max"}:
             return preset
         return "standard"
+
+    @staticmethod
+    def normalize_surface_model(value: str | None) -> str:
+        return IVSurfaceEngine.normalize_surface_model(value)
+
+    @staticmethod
+    def surface_model_label(value: str | None) -> str:
+        return IVSurfaceEngine.surface_model_label(value)
 
     def _depth_config(self, depth_preset: str | None) -> dict:
         preset = self.normalize_depth_preset(depth_preset)
@@ -133,18 +147,34 @@ class IVService:
         config["depth_preset"] = preset
         return config
 
-    def create_engine(self, market_data_mode: str | None = None, depth_preset: str | None = None) -> IVSurfaceEngine:
+    def create_engine(
+        self,
+        market_data_mode: str | None = None,
+        depth_preset: str | None = None,
+        surface_model: str | None = None,
+    ) -> IVSurfaceEngine:
         mode = normalize_market_data_mode(market_data_mode or self.market_data_mode)
-        return IVSurfaceEngine(client=self.client, market_data_mode=mode, **self._depth_config(depth_preset))
+        return IVSurfaceEngine(
+            client=self.client,
+            market_data_mode=mode,
+            surface_model=self.normalize_surface_model(surface_model or self._active_surface_model),
+            **self._depth_config(depth_preset),
+        )
 
-    def start_stream(self, symbol: str = "SPY", depth_preset: str | None = None) -> bool:
+    def start_stream(self, symbol: str = "SPY", depth_preset: str | None = None, surface_model: str | None = None) -> bool:
         self.stop_stream()
         self._active_symbol = str(symbol or "").strip().upper() or "SPY"
         self._active_depth_preset = self.normalize_depth_preset(depth_preset or self._active_depth_preset)
-        self._engine = self.create_engine(depth_preset=self._active_depth_preset)
+        self._active_surface_model = self.normalize_surface_model(surface_model or self._active_surface_model)
+        self._engine = self.create_engine(depth_preset=self._active_depth_preset, surface_model=self._active_surface_model)
         return self._engine.start(self._active_symbol)
 
-    def start_stream_session(self, symbol: str = "SPY", depth_preset: str | None = None) -> IVStreamResult:
+    def start_stream_session(
+        self,
+        symbol: str = "SPY",
+        depth_preset: str | None = None,
+        surface_model: str | None = None,
+    ) -> IVStreamResult:
         normalized_symbol = str(symbol or "").strip().upper() or "SPY"
         if not self.client.mock and not self.client.is_connected():
             return IVStreamResult(
@@ -153,7 +183,7 @@ class IVService:
                 status="Error: Not connected",
                 messages=["Connect to IBKR first, then start the surface."],
             )
-        if self.start_stream(normalized_symbol, depth_preset=depth_preset):
+        if self.start_stream(normalized_symbol, depth_preset=depth_preset, surface_model=surface_model):
             return IVStreamResult(
                 success=True,
                 symbol=normalized_symbol,
@@ -195,15 +225,32 @@ class IVService:
             return snapshot.symbol
         return self._active_symbol
 
+    def active_surface_model(self) -> str:
+        snapshot = self.latest_snapshot()
+        if snapshot is not None:
+            return snapshot.surface_model.model
+        return self._active_surface_model
+
     def get_surface(self, request: IVSurfaceRequest) -> IVSurfaceResult:
         symbol = str(request.symbol or "").strip().upper() or "SPY"
         mode = self.normalize_market_data_mode(request.market_data_mode or self.market_data_mode)
+        surface_model = self.normalize_surface_model(request.surface_model)
+        surface_model_label = self.surface_model_label(surface_model)
         if self.client.mock:
-            return IVSurfaceResult(snapshot=self._mock_snapshot(symbol, depth_preset=request.depth_preset))
+            snapshot = self._mock_snapshot(symbol, depth_preset=request.depth_preset, surface_model=surface_model)
+            return IVSurfaceResult(
+                snapshot=snapshot,
+                surface_model=snapshot.surface_model.model,
+                surface_model_label=snapshot.surface_model.label,
+                surface_model_status=snapshot.surface_model.status,
+                surface_model_notes=list(snapshot.surface_model.notes),
+            )
         if not self.client.is_connected():
             return IVSurfaceResult(
                 snapshot=None,
                 warnings=["Connect to IBKR before requesting an options surface."],
+                surface_model=surface_model,
+                surface_model_label=surface_model_label,
             )
 
         depth_preset = self.normalize_depth_preset(request.depth_preset)
@@ -222,6 +269,7 @@ class IVService:
                 symbol=symbol,
                 market_data_mode=mode,
                 depth_preset=preset,
+                surface_model=surface_model,
                 wait_seconds=wait_seconds,
             )
             messages.extend(attempt_messages)
@@ -236,10 +284,31 @@ class IVService:
                 f"Requested {depth_preset} options depth was unavailable; loaded the deepest successful "
                 f"{loaded_preset} snapshot instead."
             )
-        return IVSurfaceResult(snapshot=latest, warnings=warnings, messages=messages)
+        if latest is None:
+            return IVSurfaceResult(
+                snapshot=None,
+                warnings=warnings,
+                messages=messages,
+                surface_model=surface_model,
+                surface_model_label=surface_model_label,
+            )
+        return IVSurfaceResult(
+            snapshot=latest,
+            warnings=warnings,
+            messages=messages,
+            surface_model=latest.surface_model.model,
+            surface_model_label=latest.surface_model.label,
+            surface_model_status=latest.surface_model.status,
+            surface_model_notes=list(latest.surface_model.notes),
+        )
 
-    def _mock_snapshot(self, symbol: str, depth_preset: str | None = None) -> IVSurfaceSnapshot:
-        engine = self.create_engine(self.market_data_mode, depth_preset=depth_preset)
+    def _mock_snapshot(
+        self,
+        symbol: str,
+        depth_preset: str | None = None,
+        surface_model: str | None = None,
+    ) -> IVSurfaceSnapshot:
+        engine = self.create_engine(self.market_data_mode, depth_preset=depth_preset, surface_model=surface_model)
         return engine.build_mock_snapshot(symbol)
 
     def _surface_depth_attempts(self, depth_preset: str) -> list[str]:
@@ -257,9 +326,10 @@ class IVService:
         symbol: str,
         market_data_mode: str,
         depth_preset: str,
+        surface_model: str,
         wait_seconds: float,
     ) -> tuple[IVSurfaceSnapshot | None, list[str]]:
-        engine = self.create_engine(market_data_mode, depth_preset=depth_preset)
+        engine = self.create_engine(market_data_mode, depth_preset=depth_preset, surface_model=surface_model)
         if not engine.start(symbol):
             return None, engine.drain_messages()
 

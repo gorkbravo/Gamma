@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+import numpy as np
+
 from src.models.iv import IVOptionContractRecord
 from src.services.iv_surface_engine import IVSurfaceEngine
 
@@ -71,3 +73,51 @@ def test_pair_record_uses_display_price_fallback_for_straddle_and_move():
     assert pair.put_price_source == "last"
     assert pair.straddle_midpoint == 4.5
     assert pair.implied_move_pct == 0.045
+
+
+def test_surface_model_normalization_accepts_common_labels():
+    assert IVSurfaceEngine.normalize_surface_model("Line interpolation") == "linear"
+    assert IVSurfaceEngine.normalize_surface_model("spline-interpolation") == "spline"
+    assert IVSurfaceEngine.normalize_surface_model("SSVI") == "ssvi"
+    assert IVSurfaceEngine.normalize_surface_model("unsupported") == "linear"
+
+
+def test_spline_surface_model_fills_missing_cells_with_metadata():
+    engine = object.__new__(IVSurfaceEngine)
+    engine.surface_model = "spline"
+    raw_grid = np.array(
+        [
+            [0.24, np.nan, 0.2, np.nan, 0.24],
+            [0.26, 0.23, np.nan, 0.23, 0.26],
+            [0.28, np.nan, 0.24, np.nan, 0.28],
+        ],
+        dtype=float,
+    )
+
+    grid, metadata = engine._fit_surface_grid(raw_grid, ["20260619", "20260717", "20260821"], [90, 95, 100, 105, 110], 100)
+
+    assert grid is not None
+    assert np.isfinite(grid).all()
+    assert metadata.model == "spline"
+    assert metadata.status == "applied"
+
+
+def test_ssvi_surface_model_fits_dense_smile_slices():
+    engine = object.__new__(IVSurfaceEngine)
+    engine.surface_model = "ssvi"
+    strikes = [85, 90, 95, 100, 105, 110, 115]
+    raw_grid = np.array(
+        [
+            [0.31, 0.27, 0.23, 0.2, 0.205, 0.22, 0.245],
+            [0.34, 0.3, 0.26, 0.23, 0.235, 0.25, 0.275],
+        ],
+        dtype=float,
+    )
+
+    grid, metadata = engine._fit_surface_grid(raw_grid, ["20260619", "20260717"], strikes, 100)
+
+    assert grid is not None
+    assert np.isfinite(grid).all()
+    assert metadata.model == "ssvi"
+    assert metadata.status == "applied"
+    assert grid.shape == raw_grid.shape
