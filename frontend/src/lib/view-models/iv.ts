@@ -207,6 +207,13 @@ export interface OptionPayoffMatrix {
   maxGain: number;
 }
 
+export interface StrategyPayoffMatrix {
+  dteColumns: number[];
+  rows: OptionPayoffRow[];
+  maxAbsPl: number;
+  riskBasis: number;
+}
+
 export function nearestStrikeIndex(surface: IvSurface | null): number {
   if (!surface?.strikes.length || surface.spot == null) {
     return 0;
@@ -436,6 +443,95 @@ export function deriveStrategyPayoff(
     maxLoss: cleanLegs.some((leg) => leg.optionType === "put" && leg.side === "short") ? null : Math.min(...payoffs, 0),
     breakevens: cleanLegs.length ? deriveBreakevens(points) : [],
   };
+}
+
+export function deriveStrategyPayoffMatrix(
+  legs: StrategyLeg[],
+  rows: ChainRow[] | null | undefined,
+  spot: number | null | undefined,
+  priceSteps = 15,
+  dteSteps = 9,
+  rate = 0
+): StrategyPayoffMatrix | null {
+  if (!(spot != null && Number.isFinite(spot) && spot > 0)) {
+    return null;
+  }
+  const chainByKey = new Map((rows ?? []).map((row) => [`${row.expiry}:${row.strike}`, row]));
+  const pricedLegs = legs
+    .map((leg) => {
+      const chainRow = chainByKey.get(`${leg.expiry}:${leg.strike}`);
+      const sigma = (leg.optionType === "call" ? chainRow?.callIv : chainRow?.putIv) ?? chainRow?.blendedIv ?? null;
+      const dte = daysToExpiry(leg.expiry);
+      return { ...leg, sigma, dte };
+    })
+    .filter(
+      (leg): leg is StrategyLeg & { sigma: number; dte: number } =>
+        Number.isFinite(leg.strike) &&
+        Number.isFinite(leg.premium) &&
+        leg.premium > 0 &&
+        Number.isFinite(leg.quantity) &&
+        leg.quantity > 0 &&
+        leg.sigma != null &&
+        Number.isFinite(leg.sigma) &&
+        leg.sigma > 0
+    );
+  if (!pricedLegs.length) {
+    return null;
+  }
+
+  const maxDte = Math.max(...pricedLegs.map((leg) => leg.dte), 0);
+  const columnCount = Math.max(2, dteSteps);
+  const dteColumns: number[] = [];
+  for (let index = 0; index < columnCount; index += 1) {
+    const dte = Math.round(maxDte * (1 - index / (columnCount - 1)));
+    if (!dteColumns.includes(dte)) {
+      dteColumns.push(dte);
+    }
+  }
+  if (dteColumns[dteColumns.length - 1] !== 0) {
+    dteColumns.push(0);
+  }
+
+  const weightedSigma =
+    pricedLegs.reduce((sum, leg) => sum + leg.sigma * Math.max(Math.abs(leg.quantity), 1), 0) /
+    pricedLegs.reduce((sum, leg) => sum + Math.max(Math.abs(leg.quantity), 1), 0);
+  const horizonYears = Math.max(maxDte / 365, 1 / 365);
+  const span = Math.min(0.65, Math.max(0.2, 2.5 * weightedSigma * Math.sqrt(horizonYears)));
+  const rowCount = Math.max(7, priceSteps | 1);
+  const upper = spot * (1 + span);
+  const lower = Math.max(0.01, spot * (1 - span));
+  const priceStep = (upper - lower) / Math.max(1, rowCount - 1);
+  const riskBasis = Math.max(
+    pricedLegs
+      .filter((leg) => leg.side === "long")
+      .reduce((sum, leg) => sum + leg.premium * leg.quantity, 0),
+    Math.abs(
+      pricedLegs.reduce((sum, leg) => {
+        const signed = leg.side === "long" ? -leg.premium : leg.premium;
+        return sum + signed * leg.quantity;
+      }, 0)
+    ),
+    0.01
+  );
+
+  let maxAbsPl = 0.01;
+  const matrixRows: OptionPayoffRow[] = [];
+  for (let index = 0; index < rowCount; index += 1) {
+    const price = upper - priceStep * index;
+    const cells: OptionPayoffCell[] = dteColumns.map((dte) => {
+      const pl = pricedLegs.reduce((sum, leg) => {
+        const years = Math.min(dte, leg.dte) / 365;
+        const value = blackScholesPrice(leg.optionType, price, leg.strike, years, leg.sigma, rate);
+        const legPl = leg.side === "long" ? value - leg.premium : leg.premium - value;
+        return sum + legPl * leg.quantity;
+      }, 0);
+      maxAbsPl = Math.max(maxAbsPl, Math.abs(pl));
+      return { dte, pct: pl / riskBasis, pl, value: pl };
+    });
+    matrixRows.push({ price, movePct: price / spot - 1, cells });
+  }
+
+  return { dteColumns, rows: matrixRows, maxAbsPl, riskBasis };
 }
 
 export function deriveRealizedVolatility(

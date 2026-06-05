@@ -14,6 +14,7 @@
     deriveRealizedVolatility,
     deriveSkewRows,
     deriveStrategyPayoff,
+    deriveStrategyPayoffMatrix,
     deriveSurfaceStats,
     deriveTermCurve,
     deriveTermStructure,
@@ -29,6 +30,7 @@
     type OptionPayoffMatrix,
     type OptionsMode,
     type StrategyLeg,
+    type StrategyPayoffMatrix,
     type StrategyOptionType,
     type StrategySide,
     type TermCurve,
@@ -103,10 +105,10 @@
   let skewRows = deriveSkewRows(result);
   let realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
   let strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
+  let strategyPayoffMatrix: StrategyPayoffMatrix | null = null;
   let probabilitySurface: ImpliedProbabilitySurface | null = null;
   let probabilitySlice: ImpliedProbabilitySlice | null = null;
   let probabilitySelection: ImpliedProbabilitySelection | null = null;
-  let payoffAbsMax = 1;
   let ivSmile: IvSmile | null = null;
   let hoverSmile: IvSmilePoint | null = null;
   let termCurve: TermCurve | null = null;
@@ -144,7 +146,7 @@
   }
   $: probabilitySelection = deriveImpliedProbabilitySelection(probabilitySlice, probabilityRange?.lower, probabilityRange?.upper);
   $: strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
-  $: payoffAbsMax = Math.max(...strategyPayoff.points.map((point) => Math.abs(point.payoff)), 1);
+  $: strategyPayoffMatrix = deriveStrategyPayoffMatrix(strategyLegs, chainRows, result?.spot);
   $: ivSmile = deriveIvSmile(chainRows, overview.atmPair?.strike);
   $: payoffMatrix = deriveOptionPayoffMatrix(chainRows, result?.spot, payoffOptionType);
   $: atmStrikeIndex = nearestStrikeIndex(result);
@@ -262,17 +264,20 @@
     strategyLegs = [];
   }
 
-  function payoffCellStyle(value: number) {
-    const color = value >= 0 ? "var(--positive)" : "var(--negative)";
-    const intensity = Math.min(0.26, Math.abs(value) / payoffAbsMax * 0.26);
-    return `background: color-mix(in srgb, ${color} ${Math.round(intensity * 100)}%, transparent); color: ${color};`;
-  }
-
   function payoffHeatStyle(pct: number, maxGain: number) {
     const color = pct >= 0 ? "var(--positive)" : "var(--negative)";
     const denom = pct >= 0 ? Math.max(maxGain, 0.01) : 1;
     const intensity = Math.min(0.52, (Math.abs(pct) / denom) * 0.52);
     return `background: color-mix(in srgb, ${color} ${Math.round(intensity * 100)}%, transparent);`;
+  }
+
+  function strategyPayoffHeatStyle(value: number | null | undefined) {
+    if (value == null || !strategyPayoffMatrix) {
+      return "";
+    }
+    const color = value >= 0 ? "var(--positive)" : "var(--negative)";
+    const intensity = Math.min(0.52, (Math.abs(value) / Math.max(strategyPayoffMatrix.maxAbsPl, 0.01)) * 0.52);
+    return `background: color-mix(in srgb, ${color} ${Math.round(intensity * 100)}%, transparent); color: ${color};`;
   }
 
   const payoffPct = (value: number) => `${value >= 0 ? "+" : ""}${Math.round(Math.max(-1, value) * 100)}`;
@@ -914,19 +919,46 @@
             {/if}
           </div>
         </div>
+
+        {#if strategyPayoffMatrix}
+          <div class="strategy-payoff-table">
+            <div class="table-header">
+              <h3>Payoff Matrix</h3>
+              <span class="payoff-meta">% of risk basis {money(strategyPayoffMatrix.riskBasis)} · mark-to-model by remaining DTE</span>
+            </div>
+            <div class="payoff-heatmap-wrap">
+              <table class="payoff-heatmap">
+                <thead>
+                  <tr>
+                    <th class="price-col">Price</th>
+                    {#each strategyPayoffMatrix.dteColumns as dte}
+                      <th>{dte === 0 ? "Exp" : `${dte}d`}</th>
+                    {/each}
+                    <th class="move-col">+/-%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each strategyPayoffMatrix.rows as row}
+                    <tr class:atm={Math.abs(row.movePct) < 1e-9}>
+                      <th class="price-col">{fmt(row.price, 0)}</th>
+                      {#each row.cells as cell}
+                        <td style={strategyPayoffHeatStyle(cell.pl)}>{signedMoney(cell.pl)}</td>
+                      {/each}
+                      <td class="move-col {rowClass(row.movePct)}">{signedPct(row.movePct, 0)}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {:else}
+          <p class="muted pad">Add priced legs from the chain to populate the strategy payoff matrix.</p>
+        {/if}
       </article>
 
       <div class="support-column">
         <article class="panel">
-          <h3>Payoff Matrix</h3>
-          <div class="payoff-matrix">
-            {#each strategyPayoff.points as point}
-              <div style={payoffCellStyle(point.payoff)}>
-                <span>{fmt(point.underlyingPrice, 0)}</span>
-                <strong>{signedMoney(point.payoff)}</strong>
-              </div>
-            {/each}
-          </div>
+          <h3>Strategy Summary</h3>
           <div class="metric-list">
             <div><span>Net Premium</span><strong>{signedMoney(strategyPayoff.netPremium)}</strong></div>
             <div><span>Max Profit</span><strong>{strategyPayoff.maxProfit == null ? "Open" : signedMoney(strategyPayoff.maxProfit)}</strong></div>
@@ -1408,23 +1440,6 @@
     border-bottom: 1px solid var(--divider);
   }
 
-  .payoff-strip,
-  .payoff-matrix {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(4.8rem, 1fr));
-    border: 1px solid var(--divider);
-  }
-
-  .payoff-strip > div,
-  .payoff-matrix > div {
-    min-height: 3rem;
-    padding: 0.38rem;
-    border-right: 1px solid var(--divider);
-    border-bottom: 1px solid var(--divider);
-    display: grid;
-    gap: 0.18rem;
-  }
-
   .payoff-controls {
     display: flex;
     align-items: center;
@@ -1499,6 +1514,16 @@
 
   .payoff-heatmap .move-col {
     color: var(--text-2);
+  }
+
+  .strategy-payoff-table {
+    margin-top: 0.55rem;
+    border-top: 1px solid var(--divider);
+  }
+
+  .strategy-payoff-table .table-header {
+    padding-left: 0;
+    padding-right: 0;
   }
 
   .smile-chart {

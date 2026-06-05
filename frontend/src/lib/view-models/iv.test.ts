@@ -15,6 +15,7 @@ import {
   deriveRealizedVolatility,
   deriveSkewRows,
   deriveStrategyPayoff,
+  deriveStrategyPayoffMatrix,
   deriveSurfaceStats,
   deriveTermCurve,
   deriveTermStructure,
@@ -260,6 +261,21 @@ describe("options surface view models", () => {
     expect(payoff.points[0].payoff).toBeCloseTo(-3, 8);
     expect(payoff.points.at(-1)?.payoff).toBeGreaterThan(0);
     expect(payoff.breakevens[0]).toBeCloseTo(103, 0);
+  });
+
+  it("builds a strategy payoff matrix from selected legs and chain IV", () => {
+    const surface = makeSurface();
+    const rows = deriveChainRows(surface, "20260515");
+    const callLeg = buildStrategyLegFromChainRow(rows[1], "call", "long");
+    const putLeg = buildStrategyLegFromChainRow(rows[1], "put", "short");
+    const matrix = deriveStrategyPayoffMatrix([callLeg!, putLeg!], rows, surface.spot, 9, 5);
+
+    expect(matrix).not.toBeNull();
+    expect(matrix!.dteColumns.at(-1)).toBe(0);
+    expect(matrix!.rows).toHaveLength(9);
+    expect(matrix!.rows[0].cells).toHaveLength(matrix!.dteColumns.length);
+    expect(matrix!.maxAbsPl).toBeGreaterThan(0);
+    expect(matrix!.riskBasis).toBeGreaterThan(0);
   });
 
   it("prices options with Black-Scholes and respects intrinsic boundaries", () => {
