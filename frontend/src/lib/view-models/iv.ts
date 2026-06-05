@@ -13,7 +13,7 @@ export const optionsModes: Array<{ id: OptionsMode; label: string }> = [
   { id: "chain", label: "Chain" },
   { id: "surface", label: "Surface" },
   { id: "realized_implied", label: "Realized vs IV" },
-  { id: "distribution", label: "Implied Distribution" },
+  { id: "distribution", label: "Implied Probabilities" },
   { id: "strategies", label: "Strategies" },
 ];
 
@@ -121,6 +121,43 @@ export interface SurfacePath {
   id: string;
   points: string;
   value: number | null;
+}
+
+export interface ImpliedProbabilitySurface {
+  expiries: string[];
+  strikes: number[];
+  densityGrid: number[][];
+  maxDensity: number;
+  coverageByExpiry: number[];
+}
+
+export interface ImpliedProbabilityPoint {
+  strike: number;
+  density: number;
+  x: number;
+  y: number;
+}
+
+export interface ImpliedProbabilitySlice {
+  expiry: string;
+  dte: number;
+  width: number;
+  height: number;
+  points: ImpliedProbabilityPoint[];
+  linePath: string;
+  areaPath: string;
+  minStrike: number;
+  maxStrike: number;
+  maxDensity: number;
+  coverageMass: number;
+  baseline: number;
+}
+
+export interface ImpliedProbabilitySelection {
+  lowerStrike: number;
+  upperStrike: number;
+  probabilityMass: number;
+  areaPath: string;
 }
 
 export interface IvSmilePoint {
@@ -458,6 +495,130 @@ export function deriveDistributionBuckets(surface: IvSurface | null, bucketCount
   return total > 0
     ? buckets.map((bucket) => ({ ...bucket, probability: bucket.probability / total }))
     : buckets;
+}
+
+export function deriveImpliedProbabilitySurface(surface: IvSurface | null): ImpliedProbabilitySurface | null {
+  if (!surface?.spot || !surface.expiries.length || surface.strikes.length < 2) {
+    return null;
+  }
+  const strikes = surface.strikes.map(Number).filter((strike) => Number.isFinite(strike) && strike > 0);
+  if (strikes.length !== surface.strikes.length) {
+    return null;
+  }
+
+  const densityGrid = surface.expiries.map((expiry, rowIndex) => {
+    const years = Math.max(daysToExpiry(expiry) / 365, 1 / 365);
+    return strikes.map((strike, colIndex) => {
+      const iv = surface.iv_grid[rowIndex]?.[colIndex];
+      const sigma = iv != null && Number.isFinite(iv) && iv > 0 ? iv * Math.sqrt(years) : null;
+      return sigma != null ? logNormalPdf(strike, surface.spot!, sigma) : 0;
+    });
+  });
+
+  const coverageByExpiry = densityGrid.map((row) => integrateDensity(strikes, row));
+  const normalizedDensityGrid = densityGrid.map((row, rowIndex) => {
+    const coverage = coverageByExpiry[rowIndex] ?? 0;
+    return coverage > 0 ? row.map((density) => density / coverage) : row;
+  });
+  const maxDensity = Math.max(...normalizedDensityGrid.flat().filter((value) => Number.isFinite(value)), 0);
+
+  return {
+    expiries: [...surface.expiries],
+    strikes,
+    densityGrid: normalizedDensityGrid,
+    maxDensity,
+    coverageByExpiry,
+  };
+}
+
+export function deriveImpliedProbabilitySlice(
+  probabilitySurface: ImpliedProbabilitySurface | null,
+  expiry: string | null | undefined,
+  width = 620,
+  height = 220
+): ImpliedProbabilitySlice | null {
+  if (!probabilitySurface || !expiry) {
+    return null;
+  }
+  const rowIndex = probabilitySurface.expiries.indexOf(expiry);
+  const row = rowIndex >= 0 ? probabilitySurface.densityGrid[rowIndex] : null;
+  if (!row || row.length < 2) {
+    return null;
+  }
+
+  const padLeft = 44;
+  const padRight = 12;
+  const padTop = 10;
+  const padBottom = 24;
+  const strikes = probabilitySurface.strikes;
+  const minStrike = Math.min(...strikes);
+  const maxStrike = Math.max(...strikes);
+  const maxDensity = Math.max(...row.filter((value) => Number.isFinite(value)), 0);
+  if (maxDensity <= 0) {
+    return null;
+  }
+  const strikeRange = Math.max(maxStrike - minStrike, 1e-6);
+  const baseline = height - padBottom;
+  const projectX = (strike: number) => padLeft + ((strike - minStrike) / strikeRange) * (width - padLeft - padRight);
+  const projectY = (density: number) => baseline - (density / maxDensity) * (height - padTop - padBottom);
+
+  const points = strikes.map((strike, index) => ({
+    strike,
+    density: row[index] ?? 0,
+    x: projectX(strike),
+    y: projectY(row[index] ?? 0),
+  }));
+  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)} L${points[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
+
+  return {
+    expiry,
+    dte: daysToExpiry(expiry),
+    width,
+    height,
+    points,
+    linePath,
+    areaPath,
+    minStrike,
+    maxStrike,
+    maxDensity,
+    coverageMass: probabilitySurface.coverageByExpiry[rowIndex] ?? 0,
+    baseline,
+  };
+}
+
+export function deriveImpliedProbabilitySelection(
+  slice: ImpliedProbabilitySlice | null,
+  lowerStrike: number | null | undefined,
+  upperStrike: number | null | undefined
+): ImpliedProbabilitySelection | null {
+  if (!slice || lowerStrike == null || upperStrike == null || !Number.isFinite(lowerStrike) || !Number.isFinite(upperStrike)) {
+    return null;
+  }
+  const lower = Math.max(slice.minStrike, Math.min(lowerStrike, upperStrike));
+  const upper = Math.min(slice.maxStrike, Math.max(lowerStrike, upperStrike));
+  if (upper <= lower) {
+    return null;
+  }
+  const samples = slice.points
+    .filter((point) => point.strike > lower && point.strike < upper)
+    .map((point) => ({ strike: point.strike, density: point.density }));
+  const selected = [
+    { strike: lower, density: interpolateSliceDensity(slice, lower) },
+    ...samples,
+    { strike: upper, density: interpolateSliceDensity(slice, upper) },
+  ];
+  const probabilityMass = integrateDensity(
+    selected.map((point) => point.strike),
+    selected.map((point) => point.density)
+  );
+  const areaPoints = selected.map((point) => ({
+    x: projectSliceX(slice, point.strike),
+    y: projectSliceY(slice, point.density),
+  }));
+  const areaLine = areaPoints.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const areaPath = `${areaLine} L${areaPoints[areaPoints.length - 1].x.toFixed(1)},${slice.baseline.toFixed(1)} L${areaPoints[0].x.toFixed(1)},${slice.baseline.toFixed(1)} Z`;
+  return { lowerStrike: lower, upperStrike: upper, probabilityMass, areaPath };
 }
 
 export function deriveSurfacePaths(surface: IvSurface | null, width = 520, height = 240): SurfacePath[] {
@@ -863,6 +1024,67 @@ function logNormalCdf(price: number, spot: number, sigma: number) {
     return 1;
   }
   return normalCdf(Math.log(price / spot) / sigma);
+}
+
+function logNormalPdf(price: number, spot: number, sigma: number) {
+  if (price <= 0 || spot <= 0 || sigma <= 0 || !Number.isFinite(price) || !Number.isFinite(spot) || !Number.isFinite(sigma)) {
+    return 0;
+  }
+  const z = Math.log(price / spot) / sigma;
+  return Math.exp(-0.5 * z * z) / (price * sigma * Math.sqrt(2 * Math.PI));
+}
+
+function integrateDensity(strikes: number[], densities: number[]) {
+  let area = 0;
+  for (let index = 1; index < strikes.length; index += 1) {
+    const leftStrike = strikes[index - 1];
+    const rightStrike = strikes[index];
+    const leftDensity = densities[index - 1] ?? 0;
+    const rightDensity = densities[index] ?? 0;
+    if (
+      Number.isFinite(leftStrike) &&
+      Number.isFinite(rightStrike) &&
+      Number.isFinite(leftDensity) &&
+      Number.isFinite(rightDensity) &&
+      rightStrike > leftStrike
+    ) {
+      area += ((leftDensity + rightDensity) / 2) * (rightStrike - leftStrike);
+    }
+  }
+  return area;
+}
+
+function interpolateSliceDensity(slice: ImpliedProbabilitySlice, strike: number) {
+  const points = slice.points;
+  if (!points.length) {
+    return 0;
+  }
+  if (strike <= points[0].strike) {
+    return points[0].density;
+  }
+  for (let index = 1; index < points.length; index += 1) {
+    const left = points[index - 1];
+    const right = points[index];
+    if (strike <= right.strike) {
+      const span = Math.max(right.strike - left.strike, 1e-6);
+      const t = (strike - left.strike) / span;
+      return left.density + (right.density - left.density) * t;
+    }
+  }
+  return points[points.length - 1].density;
+}
+
+function projectSliceX(slice: ImpliedProbabilitySlice, strike: number) {
+  const range = Math.max(slice.maxStrike - slice.minStrike, 1e-6);
+  const leftPad = slice.points[0]?.x ?? 44;
+  const rightPad = slice.width - (slice.points.at(-1)?.x ?? slice.width - 12);
+  return leftPad + ((strike - slice.minStrike) / range) * (slice.width - leftPad - rightPad);
+}
+
+function projectSliceY(slice: ImpliedProbabilitySlice, density: number) {
+  const top = Math.min(...slice.points.map((point) => point.y));
+  const drawableHeight = Math.max(slice.baseline - top, 1);
+  return slice.baseline - (density / Math.max(slice.maxDensity, 1e-9)) * drawableHeight;
 }
 
 function normalCdf(value: number) {

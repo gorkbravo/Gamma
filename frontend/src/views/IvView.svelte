@@ -5,7 +5,9 @@
     buildStrategyLegFromChainRow,
     daysToExpiry,
     deriveChainRows,
-    deriveDistributionBuckets,
+    deriveImpliedProbabilitySelection,
+    deriveImpliedProbabilitySlice,
+    deriveImpliedProbabilitySurface,
     deriveIvSmile,
     deriveOptionPayoffMatrix,
     deriveOverviewSnapshot,
@@ -21,6 +23,9 @@
     type ChainRow,
     type IvSmile,
     type IvSmilePoint,
+    type ImpliedProbabilitySelection,
+    type ImpliedProbabilitySlice,
+    type ImpliedProbabilitySurface,
     type OptionPayoffMatrix,
     type OptionsMode,
     type StrategyLeg,
@@ -52,6 +57,9 @@
   let payoffOptionType: StrategyOptionType = "call";
   let strategyLegs: StrategyLeg[] = [];
   let surfaceModel: SurfaceModel = "linear";
+  let probabilityRange: { lower: number; upper: number } | null = null;
+  let probabilityDragStart: number | null = null;
+  let lastProbabilityExpiry: string | null = null;
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
@@ -94,9 +102,10 @@
   let termStructure = deriveTermStructure(result);
   let skewRows = deriveSkewRows(result);
   let realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
-  let distributionBuckets = deriveDistributionBuckets(result);
   let strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
-  let maxDistributionProbability = 0.01;
+  let probabilitySurface: ImpliedProbabilitySurface | null = null;
+  let probabilitySlice: ImpliedProbabilitySlice | null = null;
+  let probabilitySelection: ImpliedProbabilitySelection | null = null;
   let payoffAbsMax = 1;
   let ivSmile: IvSmile | null = null;
   let hoverSmile: IvSmilePoint | null = null;
@@ -127,8 +136,13 @@
   $: termCurve = deriveTermCurve(termStructure);
   $: skewRows = deriveSkewRows(result);
   $: realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
-  $: distributionBuckets = deriveDistributionBuckets(result);
-  $: maxDistributionProbability = Math.max(...distributionBuckets.map((bucket) => bucket.probability), 0.01);
+  $: probabilitySurface = deriveImpliedProbabilitySurface(result);
+  $: probabilitySlice = deriveImpliedProbabilitySlice(probabilitySurface, activeExpiry);
+  $: if (probabilitySlice && lastProbabilityExpiry !== probabilitySlice.expiry) {
+    lastProbabilityExpiry = probabilitySlice.expiry;
+    probabilityRange = defaultProbabilityRange(probabilitySlice, result?.spot);
+  }
+  $: probabilitySelection = deriveImpliedProbabilitySelection(probabilitySlice, probabilityRange?.lower, probabilityRange?.upper);
   $: strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   $: payoffAbsMax = Math.max(...strategyPayoff.points.map((point) => Math.abs(point.payoff)), 1);
   $: ivSmile = deriveIvSmile(chainRows, overview.atmPair?.strike);
@@ -279,6 +293,46 @@
 
   function isSurfaceModel(value: string | null | undefined): value is SurfaceModel {
     return value === "linear" || value === "spline" || value === "ssvi";
+  }
+
+  const densityPct = (value: number) => `${(value * 100).toFixed(value >= 0.1 ? 1 : 2)}%`;
+
+  function defaultProbabilityRange(slice: ImpliedProbabilitySlice, spot: number | null | undefined) {
+    const center = spot && Number.isFinite(spot) ? spot : (slice.minStrike + slice.maxStrike) / 2;
+    const halfWidth = Math.max((slice.maxStrike - slice.minStrike) * 0.16, 1);
+    return {
+      lower: Math.max(slice.minStrike, center - halfWidth),
+      upper: Math.min(slice.maxStrike, center + halfWidth),
+    };
+  }
+
+  function probabilityStrikeFromEvent(event: MouseEvent, slice: ImpliedProbabilitySlice) {
+    const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * slice.width;
+    const leftX = slice.points[0]?.x ?? 44;
+    const rightX = slice.points.at(-1)?.x ?? slice.width - 12;
+    const t = Math.max(0, Math.min(1, (x - leftX) / Math.max(rightX - leftX, 1)));
+    return slice.minStrike + t * (slice.maxStrike - slice.minStrike);
+  }
+
+  function startProbabilitySelection(event: MouseEvent) {
+    if (!probabilitySlice) return;
+    const strike = probabilityStrikeFromEvent(event, probabilitySlice);
+    probabilityDragStart = strike;
+    probabilityRange = { lower: strike, upper: strike };
+  }
+
+  function moveProbabilitySelection(event: MouseEvent) {
+    if (probabilityDragStart == null || !probabilitySlice) return;
+    const strike = probabilityStrikeFromEvent(event, probabilitySlice);
+    probabilityRange = {
+      lower: Math.min(probabilityDragStart, strike),
+      upper: Math.max(probabilityDragStart, strike),
+    };
+  }
+
+  function endProbabilitySelection() {
+    probabilityDragStart = null;
   }
 </script>
 
@@ -722,31 +776,84 @@
     </div>
   {:else if mode === "distribution"}
     <div class="workspace-grid">
-      <article class="panel">
-        <h3>Front Expiry Implied Distribution</h3>
-        {#if distributionBuckets.length}
-          <div class="distribution">
-            {#each distributionBuckets as bucket}
-              <div class="dist-row">
-                <span>{bucket.label}</span>
-                <div class="bar"><div class="fill" style={`width:${(bucket.probability / maxDistributionProbability) * 100}%`}></div></div>
-                <strong>{pct(bucket.probability, 1)}</strong>
-              </div>
-            {/each}
+      <div class="primary-column">
+        <article class="panel surface-hero">
+          <div class="panel-head">
+            <h3>Implied Probability Surface</h3>
           </div>
-        {:else}
-          <p class="muted">Load a surface with spot and front ATM IV to inspect the first-pass distribution proxy.</p>
-        {/if}
-      </article>
+          <Surface3D
+            strikes={probabilitySurface?.strikes ?? []}
+            expiries={probabilitySurface?.expiries ?? []}
+            grid={probabilitySurface?.densityGrid ?? []}
+            dte={(probabilitySurface?.expiries ?? []).map((expiry) => daysToExpiry(expiry))}
+            {atmStrikeIndex}
+            {surfaceModel}
+            surfaceModelStatus={result?.surface_model_status ?? null}
+            modelLoading={loading}
+            onSurfaceModelChange={chooseSurfaceModel}
+            valueAxisLabel="Density"
+            formatValue={densityPct}
+            emptyMessage="Load a max-depth surface to render the implied probability surface."
+          />
+        </article>
+
+        <article class="panel probability-slice-panel">
+          <div class="panel-head">
+            <h3>
+              Probability Slice
+              {#if probabilitySelection}
+                <span class="surface-readout">
+                  {fmt(probabilitySelection.lowerStrike, 1)}-{fmt(probabilitySelection.upperStrike, 1)} · {pct(probabilitySelection.probabilityMass, 2)}
+                </span>
+              {/if}
+            </h3>
+            <select value={activeExpiry ?? ""} on:change={(event) => selectedExpiry = event.currentTarget.value}>
+              {#each result?.expiries ?? [] as expiry}
+                <option value={expiry}>{formatExpiry(expiry)} / {daysToExpiry(expiry)}D</option>
+              {/each}
+            </select>
+          </div>
+          {#if probabilitySlice}
+            <div class="probability-chart">
+              <svg
+                viewBox={`0 0 ${probabilitySlice.width} ${probabilitySlice.height}`}
+                role="img"
+                aria-label="Implied probability density slice"
+                on:mousedown={startProbabilitySelection}
+                on:mousemove={moveProbabilitySelection}
+                on:mouseup={endProbabilitySelection}
+                on:mouseleave={endProbabilitySelection}
+              >
+                <line class="prob-axis" x1={probabilitySlice.points[0].x} y1={probabilitySlice.baseline} x2={probabilitySlice.points[probabilitySlice.points.length - 1].x} y2={probabilitySlice.baseline} />
+                <path class="prob-area" d={probabilitySlice.areaPath} />
+                {#if probabilitySelection}
+                  <path class="prob-selected" d={probabilitySelection.areaPath} />
+                {/if}
+                <path class="prob-line" d={probabilitySlice.linePath} />
+                {#each probabilitySlice.points as point}
+                  <circle class="prob-dot" cx={point.x} cy={point.y} r="2" />
+                {/each}
+                <text class="smile-label" x="2" y="14">{densityPct(probabilitySlice.maxDensity)}</text>
+                <text class="smile-label" x={probabilitySlice.points[0].x} y={probabilitySlice.height - 6}>{fmt(probabilitySlice.minStrike, 0)}</text>
+                <text class="smile-label strike-max" x={probabilitySlice.points[probabilitySlice.points.length - 1].x} y={probabilitySlice.height - 6}>{fmt(probabilitySlice.maxStrike, 0)}</text>
+              </svg>
+            </div>
+          {:else}
+            <p class="muted">Load a surface with spot, expiries, strikes, and fitted IV cells to inspect implied probabilities.</p>
+          {/if}
+        </article>
+      </div>
 
       <div class="support-column">
         <article class="panel">
           <h3>Assumptions</h3>
           <div class="metric-list">
-            <div><span>Method</span><strong>Lognormal proxy</strong></div>
-            <div><span>Expiry</span><strong>{formatExpiry(surfaceStats.frontExpiry)}</strong></div>
-            <div><span>DTE</span><strong>{surfaceStats.frontExpiry ? daysToExpiry(surfaceStats.frontExpiry) : "N/A"}</strong></div>
-            <div><span>Vol Input</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
+            <div><span>Method</span><strong>Local lognormal RND proxy</strong></div>
+            <div><span>Fit</span><strong>{result?.surface_model_label ?? "Line interpolation"}</strong></div>
+            <div><span>Expiry</span><strong>{formatExpiry(probabilitySlice?.expiry)}</strong></div>
+            <div><span>DTE</span><strong>{probabilitySlice?.dte ?? "N/A"}</strong></div>
+            <div><span>Visible Mass</span><strong>{pct(probabilitySelection?.probabilityMass, 2)}</strong></div>
+            <div><span>Range</span><strong>{probabilitySelection ? `${fmt(probabilitySelection.lowerStrike, 1)}-${fmt(probabilitySelection.upperStrike, 1)}` : "N/A"}</strong></div>
           </div>
         </article>
         {@render DiagnosticsPanel(result, session, status, sessionLoading)}
@@ -1213,6 +1320,53 @@
   .compact-table th,
   .compact-table td {
     padding: 0.28rem 0.42rem;
+  }
+
+  .probability-slice-panel {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .probability-slice-panel .panel-head {
+    min-height: 32px;
+    padding: 0.35rem 0.7rem;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .probability-chart {
+    height: 260px;
+    padding: 0.5rem 0.6rem 0.35rem;
+  }
+
+  .probability-chart svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: crosshair;
+  }
+
+  .prob-axis {
+    stroke: var(--panel-strong);
+    stroke-width: 1;
+  }
+
+  .prob-area {
+    fill: color-mix(in srgb, var(--chart-primary) 10%, transparent);
+  }
+
+  .prob-selected {
+    fill: color-mix(in srgb, var(--chart-secondary) 38%, transparent);
+  }
+
+  .prob-line {
+    fill: none;
+    stroke: var(--chart-primary);
+    stroke-width: 1.7;
+  }
+
+  .prob-dot {
+    fill: var(--chart-primary);
+    opacity: 0.72;
   }
 
   .action-cell {

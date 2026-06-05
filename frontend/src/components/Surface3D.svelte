@@ -67,6 +67,9 @@
   export let surfaceModel: SurfaceModel = "linear";
   export let surfaceModelStatus: string | null = null;
   export let modelLoading = false;
+  export let valueAxisLabel = "IV";
+  export let emptyMessage = "Load a max-depth surface to render the volatility surface.";
+  export let formatValue: (value: number) => string = (value) => `${(value * 100).toFixed(1)}%`;
   export let onSurfaceModelChange: (model: SurfaceModel) => void | Promise<void> = () => {};
 
   type RenderMode = "surface" | "wireframe" | "points";
@@ -345,8 +348,9 @@
     const ivTop = project(-1, 0.45, 1);
     const ivBot = project(-1, lo, 1);
     ctx.textAlign = "right";
-    ctx.fillText(`${(vMax * 100).toFixed(0)}%`, ivTop.sx - 6, ivTop.sy);
-    ctx.fillText(`${(vMin * 100).toFixed(0)}%`, ivBot.sx - 6, ivBot.sy);
+    ctx.fillText(formatValue(vMax), ivTop.sx - 6, ivTop.sy);
+    ctx.fillText(formatValue(vMin), ivBot.sx - 6, ivBot.sy);
+    ctx.fillText(valueAxisLabel.toUpperCase(), ivTop.sx - 6, ivTop.sy - 12);
   }
 
   function render() {
@@ -494,7 +498,7 @@
   <div class="surface3d-toolbar">
     <span class="surface3d-hint">
       {#if hoverPick}
-        <strong class="pick">{Math.round(hoverPick.strike)} · {hoverPick.dte}D · {(hoverPick.iv * 100).toFixed(1)}%</strong>
+        <strong class="pick">{Math.round(hoverPick.strike)} · {hoverPick.dte}D · {formatValue(hoverPick.iv)}</strong>
       {:else}
         Drag to orbit · scroll to zoom
       {/if}
@@ -547,7 +551,7 @@
 
   <div class="surface3d-canvas" bind:this={wrap}>
     {#if !hasData}
-      <p class="surface3d-empty">Load a max-depth surface to render the volatility surface.</p>
+      <p class="surface3d-empty">{emptyMessage}</p>
     {/if}
     <canvas
       bind:this={canvas}
@@ -560,9 +564,9 @@
   </div>
 
   <div class="surface3d-legend">
-    <span>{(vMin * 100).toFixed(0)}%</span>
+    <span>{formatValue(vMin)}</span>
     <div class="legend-bar" style={`background:${legendGradient}`}></div>
-    <span>{(vMax * 100).toFixed(0)}%</span>
+    <span>{formatValue(vMax)}</span>
   </div>
 </div>
 

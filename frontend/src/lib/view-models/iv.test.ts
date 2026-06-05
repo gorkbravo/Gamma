@@ -6,6 +6,9 @@ import {
   deriveChainRows,
   daysToExpiry,
   deriveDistributionBuckets,
+  deriveImpliedProbabilitySelection,
+  deriveImpliedProbabilitySlice,
+  deriveImpliedProbabilitySurface,
   deriveIvSmile,
   deriveOptionPayoffMatrix,
   deriveOverviewSnapshot,
@@ -191,6 +194,21 @@ describe("options surface view models", () => {
 
     expect(buckets).toHaveLength(9);
     expect(total).toBeCloseTo(1, 6);
+  });
+
+  it("derives implied probability surface slices and selected probability mass", () => {
+    const probabilitySurface = deriveImpliedProbabilitySurface(makeSurface());
+    const slice = deriveImpliedProbabilitySlice(probabilitySurface, "20260515", 420, 180);
+    const selection = deriveImpliedProbabilitySelection(slice, 95, 105);
+
+    expect(probabilitySurface).not.toBeNull();
+    expect(probabilitySurface!.densityGrid).toHaveLength(3);
+    expect(slice).not.toBeNull();
+    expect(slice!.points.map((point) => point.strike)).toEqual([90, 95, 100, 105, 110]);
+    expect(selection).not.toBeNull();
+    expect(selection!.probabilityMass).toBeGreaterThan(0);
+    expect(selection!.probabilityMass).toBeLessThanOrEqual(1);
+    expect(selection!.areaPath.endsWith("Z")).toBe(true);
   });
 
   it("derives chain rows and overview ratios from paired options", () => {
