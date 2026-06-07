@@ -574,6 +574,8 @@ class ResearchService:
             if commodities_service is None:
                 raise ResearchValidationError(["Commodities resolver is unavailable in this runtime."])
             return self._resolve_commodity_strategy_handoff(handoff, commodities_service)
+        if handoff.source_tab == "iv":
+            return self._resolve_iv_strategy_handoff(handoff)
         if handoff.source_tab != "prediction_markets":
             return StrategyLabResolvedHandoff(
                 handoff_id=self._handoff_id(handoff),
@@ -586,6 +588,94 @@ class ResearchService:
         if prediction_market_service is None:
             raise ResearchValidationError(["Prediction market resolver is unavailable in this runtime."])
         return self._resolve_prediction_market_strategy_handoff(handoff, prediction_market_service)
+
+    def _resolve_iv_strategy_handoff(self, handoff) -> StrategyLabResolvedHandoff:
+        metadata = dict(handoff.selected_entity.metadata or {})
+        option_id = (
+            handoff.normalized_ids.get("option_contract_id")
+            or handoff.selected_entity.normalized_id
+            or handoff.selected_entity.provider_id
+            or handoff.selected_entity.native_id
+        )
+        option_id = str(option_id or "").strip()
+        if not option_id:
+            raise ResearchValidationError(["Options handoff is missing an option contract id."])
+
+        symbol = str(metadata.get("symbol") or handoff.normalized_ids.get("symbol") or "").strip().upper()
+        expiry = str(metadata.get("expiry") or handoff.normalized_ids.get("expiry") or "").strip()
+        right = str(metadata.get("right") or handoff.normalized_ids.get("right") or "").strip().upper()
+        label = str(handoff.selected_entity.label or option_id).strip() or option_id
+        warnings = list(handoff.warnings)
+        warnings.extend(
+            [
+                "Options handoff resolved as a Strategy Lab overlay for read-only volatility context.",
+                "The selected option contract is not a weighted return leg because Gamma does not have durable contract price history in the current Options workspace.",
+                "This overlay preserves chain row, IV, Greek, surface-quality, provider, and snapshot provenance only; it does not create orders, execution instructions, broker mutations, or rebalance rules.",
+            ]
+        )
+        if handoff.resolver_capability != "overlay":
+            return StrategyLabResolvedHandoff(
+                handoff_id=self._handoff_id(handoff),
+                envelope=handoff,
+                status="unsupported",
+                resolved_capability="reference_only",
+                provider_summary=handoff.provider,
+                provenance=self._iv_handoff_provenance(handoff, option_id),
+                warnings=list(dict.fromkeys(warnings + ["Options handoffs currently resolve as overlays, not return legs."])),
+                unsupported_reason="Options handoffs currently resolve as volatility/context overlays only.",
+            )
+
+        overlay = GammaResearchObject(
+            object_id=f"iv:{option_id}",
+            object_type="options_contract_overlay",
+            display_name=label,
+            source_tab="iv",
+            source_mode=handoff.source_mode,
+            resolver_capabilities=["overlay"],
+            symbols=[symbol] if symbol else [],
+            constituents=[
+                {
+                    "label": label,
+                    "asset_class": "option",
+                    "symbol": symbol or None,
+                    "expiry": expiry or None,
+                    "right": right or None,
+                    "strike": metadata.get("strike"),
+                    "spot": metadata.get("spot"),
+                    "days_to_expiry": metadata.get("days_to_expiry"),
+                    "premium": metadata.get("premium"),
+                    "price_source": metadata.get("price_source"),
+                    "implied_volatility": metadata.get("implied_volatility"),
+                    "blended_implied_volatility": metadata.get("blended_implied_volatility"),
+                    "delta": metadata.get("delta"),
+                    "open_interest": metadata.get("open_interest"),
+                    "volume": metadata.get("volume"),
+                    "moneyness": metadata.get("moneyness"),
+                    "distance_pct": metadata.get("distance_pct"),
+                    "implied_move_pct": metadata.get("implied_move_pct"),
+                    "snapshot_timestamp": metadata.get("snapshot_timestamp"),
+                    "quality": metadata.get("quality"),
+                }
+            ],
+            weights=[],
+            available_start=handoff.selected_timeframe.start if handoff.selected_timeframe else None,
+            available_end=handoff.selected_timeframe.end if handoff.selected_timeframe else None,
+            provider_summary=handoff.provider,
+            provenance=self._iv_handoff_provenance(handoff, option_id),
+            warnings=list(dict.fromkeys(warnings)),
+            return_points=[],
+        )
+        return StrategyLabResolvedHandoff(
+            handoff_id=self._handoff_id(handoff),
+            envelope=handoff,
+            status="resolved",
+            resolved_capability="overlay",
+            overlay=overlay,
+            date_coverage=handoff.selected_timeframe,
+            provider_summary=handoff.provider,
+            provenance=overlay.provenance,
+            warnings=list(dict.fromkeys(warnings)),
+        )
 
     def _resolve_macro_strategy_handoff(self, handoff) -> StrategyLabResolvedHandoff:
         lens_id = (
@@ -1057,6 +1147,35 @@ class ResearchService:
         return {key: value for key, value in provenance.items() if value is not None}
 
     @staticmethod
+    def _iv_handoff_provenance(handoff, option_id: str) -> dict[str, Any]:
+        metadata = dict(handoff.selected_entity.metadata or {})
+        source = dict(handoff.source or {})
+        quality = metadata.get("quality") if isinstance(metadata.get("quality"), dict) else {}
+        provenance = {
+            "source_provider": handoff.provider or source.get("source_provider"),
+            "origin": source.get("origin"),
+            "retrieved_at": source.get("retrieved_at"),
+            "freshness_label": source.get("freshness_label") or metadata.get("freshness_label"),
+            "market_data_mode": source.get("market_data_mode"),
+            "depth_preset": source.get("depth_preset"),
+            "symbol": metadata.get("symbol") or handoff.normalized_ids.get("symbol"),
+            "option_contract_id": option_id,
+            "provider_contract_id": handoff.normalized_ids.get("provider_contract_id") or handoff.selected_entity.provider_id,
+            "expiry": metadata.get("expiry") or handoff.normalized_ids.get("expiry"),
+            "right": metadata.get("right") or handoff.normalized_ids.get("right"),
+            "strike": metadata.get("strike") or handoff.normalized_ids.get("strike"),
+            "snapshot_timestamp": metadata.get("snapshot_timestamp"),
+            "surface_model": metadata.get("surface_model"),
+            "expected_surface_cells": quality.get("expected_surface_cells"),
+            "observed_surface_cells": quality.get("observed_surface_cells"),
+            "interpolated_surface_cells": quality.get("interpolated_surface_cells"),
+            "interpolation_ratio": quality.get("interpolation_ratio"),
+            "transformation": "options_chain_row_to_strategy_lab_overlay",
+            "interpretation": "Options chain rows are attached as read-only volatility context; no option-contract return stream or executable order is created.",
+        }
+        return {key: value for key, value in provenance.items() if value not in (None, "")}
+
+    @staticmethod
     def _commodity_handoff_provenance(
         *,
         workspace: Any,
@@ -1151,6 +1270,7 @@ class ResearchService:
         leg_series: dict[str, pd.Series] = {}
         leg_weight_map: dict[str, float] = {}
         leg_display_labels: dict[str, str] = {}
+        leg_diagnostics: list[dict[str, Any]] = []
         emitted_labels: set[str] = set()
         for index, (leg, normalized_weight) in enumerate(zip(weighted_legs, normalized_weights, strict=True), start=1):
             if "return_leg" not in leg.object.resolver_capabilities:
@@ -1164,12 +1284,34 @@ class ResearchService:
             leg_series[internal_key] = returns
             leg_weight_map[internal_key] = normalized_weight
             leg_display_labels[internal_key] = contribution_label
+            leg_diagnostics.append(
+                self._composition_leg_diagnostic(
+                    leg.object,
+                    label=contribution_label,
+                    raw_weight=float(leg.weight),
+                    normalized_weight=normalized_weight,
+                    returns=returns,
+                )
+            )
 
         aligned = pd.DataFrame(leg_series).dropna(how="any")
         if len(aligned) < min_observations:
             raise ResearchValidationError(
-                [f"Strategy Lab composition needs at least {min_observations} shared return observations."]
+                self._composition_alignment_failure_errors(
+                    leg_diagnostics,
+                    aligned_observations=len(aligned),
+                    min_observations=min_observations,
+                )
             )
+        alignment_diagnostics: dict[str, Any] = {
+            "min_observations": min_observations,
+            "aligned_observation_count": int(len(aligned)),
+            "aligned_start": self._series_boundary(aligned.index, first=True),
+            "aligned_end": self._series_boundary(aligned.index, first=False),
+            "legs": leg_diagnostics,
+            "benchmark": None,
+            "fail_closed": True,
+        }
         weighted_columns = aligned.mul(pd.Series(leg_weight_map), axis="columns")
         composition_returns = weighted_columns.sum(axis="columns").astype(float)
         contribution_columns = weighted_columns
@@ -1185,6 +1327,13 @@ class ResearchService:
                     label=benchmark_object.display_name or "Benchmark",
                     warnings=warnings,
                 )
+                alignment_diagnostics["benchmark"] = self._composition_leg_diagnostic(
+                    benchmark_object,
+                    label=benchmark_object.display_name or "Benchmark",
+                    raw_weight=0.0,
+                    normalized_weight=0.0,
+                    returns=candidate,
+                )
                 benchmark_aligned = composition_returns.to_frame("strategy").join(
                     candidate.to_frame("benchmark"),
                     how="inner",
@@ -1193,7 +1342,17 @@ class ResearchService:
                     composition_returns = benchmark_aligned["strategy"]
                     benchmark_returns = benchmark_aligned["benchmark"]
                     contribution_columns = weighted_columns.reindex(benchmark_aligned.index)
+                    alignment_diagnostics["benchmark_overlap_count"] = int(len(benchmark_aligned))
+                    alignment_diagnostics["benchmark_overlap_start"] = self._series_boundary(
+                        benchmark_aligned.index,
+                        first=True,
+                    )
+                    alignment_diagnostics["benchmark_overlap_end"] = self._series_boundary(
+                        benchmark_aligned.index,
+                        first=False,
+                    )
                 else:
+                    alignment_diagnostics["benchmark_overlap_count"] = int(len(benchmark_aligned))
                     warnings.append("Benchmark overlap is too thin; benchmark-relative metrics are unavailable.")
 
         leg_contributions = {
@@ -1236,6 +1395,7 @@ class ResearchService:
             leg_contributions=leg_contributions,
             lenses=list(request.lenses),
             overlays=list(request.overlays),
+            alignment_diagnostics=alignment_diagnostics,
         )
 
     def compose_strategy_lab_portfolio(
@@ -1316,7 +1476,67 @@ class ResearchService:
             leg_contributions=result.leg_contributions,
             lenses=result.lenses,
             overlays=result.overlays,
+            alignment_diagnostics=result.alignment_diagnostics,
         )
+
+    @staticmethod
+    def _composition_leg_diagnostic(
+        research_object: GammaResearchObject,
+        *,
+        label: str,
+        raw_weight: float,
+        normalized_weight: float,
+        returns: pd.Series,
+    ) -> dict[str, Any]:
+        provenance = dict(research_object.provenance)
+        source_provider = provenance.get("source_provider") or research_object.provider_summary or research_object.source_tab
+        return {
+            "label": label,
+            "object_id": research_object.object_id,
+            "object_type": research_object.object_type,
+            "source_provider": source_provider,
+            "provider_summary": research_object.provider_summary,
+            "origin": provenance.get("origin"),
+            "asset_class": provenance.get("asset_class"),
+            "identifier": provenance.get("identifier") or (research_object.symbols[0] if research_object.symbols else None),
+            "raw_weight": raw_weight,
+            "normalized_weight": normalized_weight,
+            "observation_count": int(len(returns)),
+            "available_start": ResearchService._series_boundary(returns.index, first=True),
+            "available_end": ResearchService._series_boundary(returns.index, first=False),
+            "warnings": list(research_object.warnings),
+        }
+
+    @staticmethod
+    def _series_boundary(index: Any, *, first: bool) -> str | None:
+        if len(index) == 0:
+            return None
+        value = index[0] if first else index[-1]
+        return pd.Timestamp(value).isoformat()
+
+    @staticmethod
+    def _composition_alignment_failure_errors(
+        leg_diagnostics: list[dict[str, Any]],
+        *,
+        aligned_observations: int,
+        min_observations: int,
+    ) -> list[str]:
+        leg_summaries = []
+        for diagnostic in leg_diagnostics:
+            window = "no usable window"
+            if diagnostic.get("available_start") and diagnostic.get("available_end"):
+                window = f"{diagnostic['available_start']} to {diagnostic['available_end']}"
+            leg_summaries.append(
+                f"{diagnostic['label']} [{diagnostic.get('source_provider') or 'unknown'}] "
+                f"{diagnostic['observation_count']} obs, {window}"
+            )
+        return [
+            (
+                f"Strategy Lab composition needs at least {min_observations} shared return observations; "
+                f"only {aligned_observations} overlap after source alignment."
+            ),
+            "Alignment diagnostics: " + "; ".join(leg_summaries),
+        ]
 
     @staticmethod
     def _normalize_composition_weights(

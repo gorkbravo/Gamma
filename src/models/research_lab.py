@@ -113,6 +113,7 @@ class StrategyLabCompositionResult(StrategyLabAnalysisResult):
     leg_contributions: dict[str, float] = field(default_factory=dict)
     lenses: list[GammaResearchObject] = field(default_factory=list)
     overlays: list[GammaResearchObject] = field(default_factory=list)
+    alignment_diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

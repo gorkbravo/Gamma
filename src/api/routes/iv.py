@@ -6,8 +6,10 @@ from src.api.schemas.iv import (
     IVSessionRequestModel,
     IVSessionStatusResponseModel,
     IVSurfaceResponseModel,
+    IVUnderlyingHistoryResponseModel,
 )
 from src.application.iv_service import IVSurfaceRequest
+from src.models.instruments import InstrumentReference
 
 
 router = APIRouter(tags=["iv"])
@@ -33,6 +35,27 @@ def iv_surface(
         )
     )
     return IVSurfaceResponseModel.from_service_result(symbol=symbol, result=result)
+
+
+@router.get("/iv/underlying-history", response_model=IVUnderlyingHistoryResponseModel)
+def iv_underlying_history(
+    request: Request,
+    symbol: str = Query(default="SPY"),
+    lookback_days: int = Query(default=252, ge=30, le=1260),
+    force_refresh: bool = Query(default=False),
+) -> IVUnderlyingHistoryResponseModel:
+    runtime = request.app.state.runtime
+    normalized_symbol = symbol.strip().upper() or "SPY"
+    result = runtime.research_provider.load_instrument_history_result(
+        InstrumentReference(symbol=normalized_symbol),
+        lookback_days,
+        bypass_cache=force_refresh,
+    )
+    return IVUnderlyingHistoryResponseModel.from_history_result(
+        symbol=normalized_symbol,
+        lookback_days=lookback_days,
+        result=result,
+    )
 
 
 @router.get("/iv/session", response_model=IVSessionStatusResponseModel)

@@ -658,6 +658,91 @@ def test_strategy_lab_resolves_macro_handoff_to_lens(tmp_path):
     assert any("not weighted portfolio legs" in warning for warning in result.warnings)
 
 
+def test_strategy_lab_resolves_options_handoff_to_overlay(tmp_path):
+    service = _service(tmp_path)
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="iv",
+                source_mode="chain",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="option_contract",
+                    label="SPY 20260619 500 P",
+                    normalized_id="iv:SPY:20260619:P:500",
+                    provider_id="put-500",
+                    native_id="put-500",
+                    metadata={
+                        "symbol": "SPY",
+                        "expiry": "20260619",
+                        "right": "P",
+                        "strike": 500,
+                        "spot": 500,
+                        "days_to_expiry": 13,
+                        "premium": 11.8,
+                        "price_source": "midpoint",
+                        "implied_volatility": 0.24,
+                        "blended_implied_volatility": 0.23,
+                        "delta": -0.48,
+                        "open_interest": 980,
+                        "volume": 180,
+                        "moneyness": 1,
+                        "distance_pct": 0,
+                        "implied_move_pct": 0.048,
+                        "snapshot_timestamp": "2026-06-05T14:30:00Z",
+                        "quality": {
+                            "expected_surface_cells": 3,
+                            "observed_surface_cells": 3,
+                            "interpolated_surface_cells": 0,
+                            "interpolation_ratio": 0,
+                        },
+                    },
+                ),
+                resolver_capability="overlay",
+                asset_class="other",
+                value_kind="context",
+                default_side="none",
+                default_weight=None,
+                selected_timeframe=SimpleNamespace(label="Options snapshot SPY", start=None, end="2026-06-05T14:30:00Z"),
+                provider="ibkr",
+                source={
+                    "origin": "gamma.iv.surface.fixture",
+                    "retrieved_at": "2026-06-05T14:30:02Z",
+                    "source_provider": "ibkr",
+                    "freshness_label": "delayed",
+                    "market_data_mode": "delayed",
+                },
+                warnings=["Options handoffs enter Strategy Lab as read-only volatility overlays."],
+                normalized_ids={
+                    "symbol": "SPY",
+                    "option_contract_id": "iv:SPY:20260619:P:500",
+                    "provider_contract_id": "put-500",
+                    "expiry": "20260619",
+                    "right": "P",
+                    "strike": "500",
+                },
+                timestamp="2026-06-05T14:31:00Z",
+            )
+        )
+    )
+
+    assert result.status == "resolved"
+    assert result.resolved_capability == "overlay"
+    assert result.composer_draft_leg is None
+    assert result.overlay is not None
+    assert result.overlay.object_type == "options_contract_overlay"
+    assert result.overlay.resolver_capabilities == ["overlay"]
+    assert result.overlay.symbols == ["SPY"]
+    assert result.overlay.constituents[0]["right"] == "P"
+    assert result.overlay.constituents[0]["premium"] == 11.8
+    assert result.provenance["transformation"] == "options_chain_row_to_strategy_lab_overlay"
+    assert result.provenance["option_contract_id"] == "iv:SPY:20260619:P:500"
+    assert any("not a weighted return leg" in warning for warning in result.warnings)
+    assert any("does not create orders" in warning for warning in result.warnings)
+
+
 def test_strategy_lab_macro_return_handoff_is_reference_only(tmp_path):
     service = _service(tmp_path)
 
@@ -997,6 +1082,62 @@ def test_strategy_lab_composes_signed_long_short_weights(tmp_path):
     assert result.returns.tolist() == pytest.approx([0.008, 0.008, 0.008, 0.008, 0.008])
     assert result.leg_contributions["Long Leg"] > 0
     assert result.leg_contributions["Short Leg"] < 0
+    assert result.alignment_diagnostics["aligned_observation_count"] == 5
+    assert result.alignment_diagnostics["legs"][0]["source_provider"] == "strategy_lab"
+    assert result.alignment_diagnostics["legs"][1]["normalized_weight"] == pytest.approx(-0.4)
+
+
+def test_strategy_lab_fails_closed_with_alignment_diagnostics_on_thin_overlap(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ResearchValidationError) as exc_info:
+        service.compose_strategy_lab(
+            StrategyLabCompositionRequest(
+                name="Thin Overlap",
+                legs=[
+                    StrategyLabCompositionLeg(
+                        object=GammaResearchObject(
+                            object_id="strategy:left",
+                            object_type="strategy_return_stream",
+                            display_name="Left Leg",
+                            source_tab="strategy_lab",
+                            resolver_capabilities=["return_leg"],
+                            return_points=[
+                                ResearchObjectReturnPoint(timestamp="2026-01-02", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-03", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-04", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-05", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-01-06", value=0.01),
+                            ],
+                        ),
+                        weight=0.5,
+                    ),
+                    StrategyLabCompositionLeg(
+                        object=GammaResearchObject(
+                            object_id="strategy:right",
+                            object_type="strategy_return_stream",
+                            display_name="Right Leg",
+                            source_tab="strategy_lab",
+                            resolver_capabilities=["return_leg"],
+                            provenance={"source_provider": "inline_history"},
+                            return_points=[
+                                ResearchObjectReturnPoint(timestamp="2026-02-02", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-02-03", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-02-04", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-02-05", value=0.01),
+                                ResearchObjectReturnPoint(timestamp="2026-02-06", value=0.01),
+                            ],
+                        ),
+                        weight=-0.5,
+                    ),
+                ],
+                min_observations=5,
+            )
+        )
+
+    assert "only 0 overlap" in exc_info.value.errors[0]
+    assert "Left Leg [strategy_lab] 5 obs" in exc_info.value.errors[1]
+    assert "Right Leg [inline_history] 5 obs" in exc_info.value.errors[1]
 
 
 def test_strategy_lab_drops_non_finite_return_point_values(tmp_path):

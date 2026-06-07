@@ -589,6 +589,95 @@ def test_strategy_lab_resolve_handoff_endpoint_returns_macro_lens(tmp_path):
         runtime.shutdown()
 
 
+def test_strategy_lab_resolve_handoff_endpoint_returns_options_overlay(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/research/strategy-lab/resolve-handoff",
+            json={
+                "handoff": {
+                    "source_tab": "iv",
+                    "source_mode": "chain",
+                    "intended_target_tab": "strategy_lab",
+                    "intended_target_mode": "composer",
+                    "selected_entity": {
+                        "entity_type": "option_contract",
+                        "label": "SPY 20260619 500 P",
+                        "normalized_id": "iv:SPY:20260619:P:500",
+                        "provider_id": "put-500",
+                        "native_id": "put-500",
+                        "metadata": {
+                            "symbol": "SPY",
+                            "expiry": "20260619",
+                            "right": "P",
+                            "strike": 500,
+                            "spot": 500,
+                            "days_to_expiry": 13,
+                            "premium": 11.8,
+                            "price_source": "midpoint",
+                            "implied_volatility": 0.24,
+                            "blended_implied_volatility": 0.23,
+                            "delta": -0.48,
+                            "open_interest": 980,
+                            "volume": 180,
+                            "moneyness": 1,
+                            "distance_pct": 0,
+                            "implied_move_pct": 0.048,
+                            "snapshot_timestamp": "2026-06-05T14:30:00Z",
+                            "quality": {
+                                "expected_surface_cells": 3,
+                                "observed_surface_cells": 3,
+                                "interpolated_surface_cells": 0,
+                                "interpolation_ratio": 0,
+                            },
+                        },
+                    },
+                    "resolver_capability": "overlay",
+                    "asset_class": "other",
+                    "value_kind": "context",
+                    "default_side": "none",
+                    "default_weight": None,
+                    "selected_timeframe": {
+                        "label": "Options snapshot SPY",
+                        "start": None,
+                        "end": "2026-06-05T14:30:00Z",
+                    },
+                    "provider": "ibkr",
+                    "source": {
+                        "origin": "gamma.iv.surface.fixture",
+                        "retrieved_at": "2026-06-05T14:30:02Z",
+                        "source_provider": "ibkr",
+                        "freshness_label": "delayed",
+                        "market_data_mode": "delayed",
+                    },
+                    "warnings": ["Options handoffs enter Strategy Lab as read-only volatility overlays."],
+                    "normalized_ids": {
+                        "symbol": "SPY",
+                        "option_contract_id": "iv:SPY:20260619:P:500",
+                        "provider_contract_id": "put-500",
+                        "expiry": "20260619",
+                        "right": "P",
+                        "strike": "500",
+                    },
+                    "timestamp": "2026-06-05T14:31:00Z",
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "resolved"
+        assert payload["resolved_capability"] == "overlay"
+        assert payload["composer_draft_leg"] is None
+        assert payload["overlay"]["object_type"] == "options_contract_overlay"
+        assert payload["overlay"]["constituents"][0]["right"] == "P"
+        assert payload["overlay"]["constituents"][0]["premium"] == 11.8
+        assert payload["provenance"]["transformation"] == "options_chain_row_to_strategy_lab_overlay"
+        assert "does not create orders" in " ".join(payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
 def test_research_context_replaces_scope_after_mode_switch(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

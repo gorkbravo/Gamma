@@ -1,6 +1,16 @@
 <script lang="ts">
-  import type { CrossTabHandoffEnvelope, IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../lib/api/types";
+  import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import type {
+    CrossTabHandoffEnvelope,
+    IvSessionStatus,
+    IvSurface,
+    IvUnderlyingHistoryResponse,
+    StrategyLabHandoffEnvelope,
+    SystemStatus,
+    TimeSeriesPoint
+  } from "../lib/api/types";
   import type { IvLoadOptions } from "../lib/stores/app";
+  import { buildOptionsStrategyHandoff } from "../lib/view-models/research";
   import {
     buildStrategyLegFromChainRow,
     daysToExpiry,
@@ -48,13 +58,16 @@
   export let requestedSymbol = "";
   export let result: IvSurface | null = null;
   export let session: IvSessionStatus | null = null;
+  export let underlyingHistory: IvUnderlyingHistoryResponse | null = null;
   export let underlyingPricePoints: TimeSeriesPoint[] = [];
+  export let researchPrimarySymbol: string | null = null;
   export let loading = false;
   export let sessionLoading = false;
   export let errorMessage = "";
   export let onLoad: (options: IvLoadOptions) => void | Promise<void>;
   export let onStopSession: () => void | Promise<void>;
   export let onSendToCopilot: (handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void = () => {};
+  export let onSendToStrategyLab: ((handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void) | undefined = undefined;
 
   let symbol = requestedSymbol || "";
   let lastRequestedSymbol = requestedSymbol;
@@ -68,6 +81,12 @@
   let probabilityRange: { lower: number; upper: number } | null = null;
   let probabilityDragStart: number | null = null;
   let lastProbabilityExpiry: string | null = null;
+  let strategyContextMenu = {
+    open: false,
+    x: 0,
+    y: 0,
+    row: null as ChainRow | null
+  };
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
@@ -114,7 +133,7 @@
   let surfaceStats = deriveSurfaceStats(result);
   let termStructure = deriveTermStructure(result);
   let skewRows = deriveSkewRows(result);
-  let realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
+  let realizedRows = deriveRealizedVolatility([], surfaceStats.frontAtmIv);
   let strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   let strategyPayoffMatrix: StrategyPayoffMatrix | null = null;
   let strategyGreeks: StrategyGreekSummary | null = null;
@@ -131,6 +150,11 @@
   let surfaceAlerts: string[] = [];
   let requestSymbol = "";
   let displayedSymbol = "No surface";
+  let historySymbol = "";
+  let optionsHistoryMatches = false;
+  let researchHistoryMatches = false;
+  let realizedPricePoints: TimeSeriesPoint[] = [];
+  let realizedSourceLabel = "N/A";
 
   $: if (!optionsModes.some((candidate) => candidate.id === mode)) {
     mode = "overview";
@@ -150,7 +174,26 @@
   $: termStructure = deriveTermStructure(result);
   $: termCurve = deriveTermCurve(termStructure);
   $: skewRows = deriveSkewRows(result);
-  $: realizedRows = deriveRealizedVolatility(underlyingPricePoints, surfaceStats.frontAtmIv);
+  $: historySymbol = (result?.symbol ?? requestSymbol).trim().toUpperCase();
+  $: optionsHistoryMatches = Boolean(
+    historySymbol && underlyingHistory?.symbol?.trim().toUpperCase() === historySymbol
+  );
+  $: researchHistoryMatches = Boolean(
+    historySymbol && researchPrimarySymbol?.trim().toUpperCase() === historySymbol && underlyingPricePoints.length
+  );
+  $: realizedPricePoints =
+    optionsHistoryMatches && underlyingHistory?.points.length
+      ? underlyingHistory.points
+      : researchHistoryMatches
+        ? underlyingPricePoints
+        : [];
+  $: realizedSourceLabel =
+    optionsHistoryMatches && underlyingHistory?.points.length
+      ? underlyingHistory.source_label || "Options underlying history"
+      : researchHistoryMatches
+        ? "Equity Research price history"
+        : "N/A";
+  $: realizedRows = deriveRealizedVolatility(realizedPricePoints, surfaceStats.frontAtmIv);
   $: probabilitySurface = deriveImpliedProbabilitySurface(result);
   $: probabilitySlice = deriveImpliedProbabilitySlice(probabilitySurface, activeExpiry);
   $: if (probabilitySlice && lastProbabilityExpiry !== probabilitySlice.expiry) {
@@ -259,6 +302,59 @@
       intended_target_mode: "active_tab",
     };
     void onSendToCopilot(handoff);
+  }
+
+  function sendOptionRowToStrategyLab(row: ChainRow, optionType: StrategyOptionType, open = false) {
+    if (!result || !onSendToStrategyLab) {
+      return;
+    }
+    onSendToStrategyLab(
+      buildOptionsStrategyHandoff(
+        {
+          surface: result,
+          row,
+          optionType,
+          sourceMode: mode
+        },
+        { sourceMode: mode }
+      ),
+      { open }
+    );
+  }
+
+  function contextMenuPosition(event: MouseEvent | KeyboardEvent) {
+    if (event instanceof MouseEvent && event.type === "contextmenu") {
+      return { x: event.clientX, y: event.clientY };
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: rect.left + 12, y: rect.top + Math.min(rect.height, 32) };
+  }
+
+  function openOptionStrategyMenu(event: MouseEvent | KeyboardEvent, row: ChainRow) {
+    event.preventDefault();
+    const position = contextMenuPosition(event);
+    strategyContextMenu = { open: true, x: position.x, y: position.y, row };
+  }
+
+  function handleOptionRowKeydown(event: KeyboardEvent, row: ChainRow) {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      openOptionStrategyMenu(event, row);
+    }
+  }
+
+  function handleOptionStrategyMenuSelect(action: string) {
+    const row = strategyContextMenu.row;
+    if (!row) {
+      return;
+    }
+    if (action === "add-call") sendOptionRowToStrategyLab(row, "call", false);
+    if (action === "add-call-open") sendOptionRowToStrategyLab(row, "call", true);
+    if (action === "add-put") sendOptionRowToStrategyLab(row, "put", false);
+    if (action === "add-put-open") sendOptionRowToStrategyLab(row, "put", true);
+  }
+
+  function closeStrategyMenu() {
+    strategyContextMenu = { ...strategyContextMenu, open: false };
   }
 
   function addLeg(row: ChainRow, optionType = selectedOptionType, side = selectedSide) {
@@ -464,7 +560,13 @@
                 {#each chainRows as row}
                   {@const callItm = row.distancePct != null && row.distancePct < 0}
                   {@const putItm = row.distancePct != null && row.distancePct > 0}
-                  <tr class:atm={row.strike === overview.atmPair?.strike}>
+                  <tr
+                    class:atm={row.strike === overview.atmPair?.strike}
+                    class:handoff-row={Boolean(onSendToStrategyLab)}
+                    tabindex={onSendToStrategyLab ? 0 : undefined}
+                    on:contextmenu={(event) => openOptionStrategyMenu(event, row)}
+                    on:keydown={(event) => handleOptionRowKeydown(event, row)}
+                  >
                     <td class:itm={callItm}>{fmt(row.callDelta, 3)}</td>
                     <td class:itm={callItm}>{pct(row.callIv)}</td>
                     <td class:itm={callItm}>{money(row.callMidpoint)}</td>
@@ -601,7 +703,13 @@
               {#each chainRows as row}
                 {@const callItm = row.distancePct != null && row.distancePct < 0}
                 {@const putItm = row.distancePct != null && row.distancePct > 0}
-                <tr class:atm={row.strike === overview.atmPair?.strike}>
+                <tr
+                  class:atm={row.strike === overview.atmPair?.strike}
+                  class:handoff-row={Boolean(onSendToStrategyLab)}
+                  tabindex={onSendToStrategyLab ? 0 : undefined}
+                  on:contextmenu={(event) => openOptionStrategyMenu(event, row)}
+                  on:keydown={(event) => handleOptionRowKeydown(event, row)}
+                >
                   <td class:itm={callItm}>{fmt(row.callOpenInterest, 0)}</td>
                   <td class:itm={callItm}>{fmt(row.callDelta, 3)}</td>
                   <td class:itm={callItm}>{pct(row.callIv)}</td>
@@ -615,6 +723,7 @@
                   <td class="action-cell">
                     <button type="button" on:click={() => addLeg(row, "call")}>+C</button>
                     <button type="button" on:click={() => addLeg(row, "put")}>+P</button>
+                    <button type="button" on:click={() => sendOptionRowToStrategyLab(row, "call", true)} disabled={!onSendToStrategyLab}>SL</button>
                   </td>
                 </tr>
               {/each}
@@ -824,7 +933,9 @@
             </tbody>
           </table>
         {:else}
-          <p class="muted pad">No underlying price history is loaded. Open a single-ticker Equity Research context first, then return to Options.</p>
+          <p class="muted pad">
+            No underlying price history is available for {historySymbol || displayedSymbol}. Refresh the Options surface to retry the listed-market history provider.
+          </p>
         {/if}
       </article>
 
@@ -833,8 +944,9 @@
           <h3>Boundary</h3>
           <div class="metric-list">
             <div><span>Implied Source</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
-            <div><span>Realized Source</span><strong>{underlyingPricePoints.length ? "Research price history" : "N/A"}</strong></div>
-            <div><span>Price Points</span><strong>{underlyingPricePoints.length}</strong></div>
+            <div><span>Realized Source</span><strong>{realizedSourceLabel}</strong></div>
+            <div><span>Price Points</span><strong>{realizedPricePoints.length}</strong></div>
+            <div><span>History Freshness</span><strong>{optionsHistoryMatches ? (underlyingHistory?.freshness_label ?? "unknown") : "N/A"}</strong></div>
             <div><span>Front ATM IV</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
           </div>
         </article>
@@ -955,7 +1067,13 @@
               <thead><tr><th>Strike</th><th>Call</th><th>Put</th><th>Add</th></tr></thead>
               <tbody>
                 {#each chainRows as row}
-                  <tr class:atm={row.strike === overview.atmPair?.strike}>
+                  <tr
+                    class:atm={row.strike === overview.atmPair?.strike}
+                    class:handoff-row={Boolean(onSendToStrategyLab)}
+                    tabindex={onSendToStrategyLab ? 0 : undefined}
+                    on:contextmenu={(event) => openOptionStrategyMenu(event, row)}
+                    on:keydown={(event) => handleOptionRowKeydown(event, row)}
+                  >
                     <td>{fmt(row.strike, 2)}</td>
                     <td>{money(row.callMidpoint)}</td>
                     <td>{money(row.putMidpoint)}</td>
@@ -1037,6 +1155,21 @@
       </div>
     </div>
   {/if}
+
+  <CompactContextMenu
+    open={strategyContextMenu.open}
+    x={strategyContextMenu.x}
+    y={strategyContextMenu.y}
+    label="Options Strategy Lab actions"
+    items={[
+      { id: "add-call", label: "Add Call Context", disabled: !onSendToStrategyLab },
+      { id: "add-call-open", label: "Call and Open", disabled: !onSendToStrategyLab },
+      { id: "add-put", label: "Add Put Context", disabled: !onSendToStrategyLab },
+      { id: "add-put-open", label: "Put and Open", disabled: !onSendToStrategyLab }
+    ]}
+    onSelect={handleOptionStrategyMenuSelect}
+    onClose={closeStrategyMenu}
+  />
 </section>
 
 {#snippet DiagnosticsPanel(result: IvSurface | null, session: IvSessionStatus | null, status: SystemStatus | null, sessionLoading: boolean)}
@@ -1319,6 +1452,16 @@
 
   tbody tr:hover td {
     background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
+  tbody tr.handoff-row {
+    cursor: context-menu;
+  }
+
+  tbody tr.handoff-row:focus-visible td {
+    outline: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+    outline-offset: -1px;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   tr.atm td,

@@ -222,6 +222,19 @@ export interface TimeSeriesPoint {
   volume?: number | null;
 }
 
+export interface IvUnderlyingHistoryResponse {
+  symbol: string;
+  lookback_days: number;
+  points: TimeSeriesPoint[];
+  source_provider: string;
+  source_label: string;
+  origin: string;
+  freshness_label: string;
+  retrieved_at: string;
+  warnings: string[];
+  transformation_note: string | null;
+}
+
 export interface Position {
   symbol: string;
   sec_type: string;
@@ -601,6 +614,7 @@ export interface StrategyLabCompositionResult extends StrategyLabResult {
   leg_contributions: Record<string, number>;
   lenses: GammaResearchObject[];
   overlays: GammaResearchObject[];
+  alignment_diagnostics: Record<string, unknown>;
 }
 
 export interface ResearchComparisonLegResult {

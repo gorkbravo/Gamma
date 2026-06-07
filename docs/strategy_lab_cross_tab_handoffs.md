@@ -26,7 +26,7 @@ Current snapshot:
 | Shared right-click instrument handoff menu | Implemented | Prediction Markets contract rows, Equity Research scope/constituent rows, and Commodities matrix/market rows expose a shared compact Strategy Lab context menu with `Add to Strategy` and `Add and Open`, plus `Shift+F10` / context-menu-key fallback. Browser validation confirmed row menu dispatch; live Equity/Commodity resolver acceptance was blocked by provider/history availability in the current session. |
 | Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts, Equity Research tickers, Commodities instruments, and Macro lens context into Strategy Lab-ready objects. |
 | Composer draft ingestion from handoff | Verified | Accepted resolved return-leg handoffs become editable composer rows; accepted Macro lenses attach as read-only context and pass through composition results. |
-| Tab-by-tab capability matrix | In progress | Prediction Markets, Equity Research, Commodities, and Macro are wired; remaining tabs still need concrete handoff implementations. |
+| Tab-by-tab capability matrix | In progress | Prediction Markets, Equity Research, Commodities, Macro, and IV/Options are wired; remaining tabs still need concrete handoff implementations. |
 | Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-011 validation. |
 
 ## Product Boundary
@@ -268,7 +268,7 @@ Warnings should be explicit when:
 | Crypto | Right-click token row, then `Add to Strategy` / `Add and Open` | `return_leg` or `benchmark` | Planned | Needs provider coverage and stale-data warnings. |
 | Fundamentals | Right-click company/security row or attach company case | `overlay` or `reference_only` | Planned | Ticker history may become a separate equity leg. |
 | Risk | Attach scenario/stress result | `lens` or `overlay` | Planned | Useful after Strategy Lab has saved runs. |
-| IV/Options | Right-click option-chain contract row or attach vol context | `overlay` or `return_leg` | Planned | Specific option contracts should be row-addressable; underlying can become an equity/ETF leg separately. |
+| IV/Options | Right-click option-chain contract row, then choose call/put context or call/put and open | `overlay` | Implemented with provider caveat | First pass emits selected option-chain call/put rows as read-only Strategy Lab overlays. The resolver preserves contract id, premium, IV, Greek, surface-quality, provider, and snapshot provenance. Option contracts are not weighted return legs until Gamma has durable option-contract price history. |
 | Copilot | Summarize or explain active handoff | `reference_only` | Planned | Copilot can later propose handoffs, but user should confirm. |
 
 ## Implementation Board
@@ -289,7 +289,8 @@ Update this board as work lands.
 | SLH-010 | Add Commodities selected instrument handoff. | Codex | Verified | Backend/API/frontend tests cover resolved and unsupported commodity handoffs; browser flow sent WTI from Commodities with `Add & Open`, accepted the resolved row, and composed the portfolio with warnings/provenance visible. |
 | SLH-011 | Add Macro lens handoff. | Codex | Verified | Backend/API/frontend tests cover Macro lens resolution and reference-only downgrade behavior; browser flow sent active Macro context with `Lens & Open`, accepted the resolved lens, and composed a portfolio with the lens attached. |
 | SLH-012 | Add shared right-click Strategy handoff menu for instrument rows. | Codex | Implemented | `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`; `npm run test -- src/lib/stores/app.test.ts`; `npm run test -- src/components/CompactContextMenu.test.ts src/views/CommoditiesView.test.ts`; browser verified row menus on Prediction Markets, Equity Research, and Commodities with provider caveats noted below. |
-| SLH-013 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | TBD | Not started | Copilot context tests. |
+| SLH-013 | Add IV/Options option-chain row overlay handoff. | Codex | Implemented | `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q`; `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`; `npm run test -- src/components/CompactContextMenu.test.ts`; browser verified live option-chain row menu and Strategy Lab open/warning path, with full accept blocked by local provider/session split noted below. |
+| SLH-014 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | TBD | Not started | Copilot context tests. |
 
 ## Inspection Workflow
 
@@ -344,9 +345,22 @@ Browser:
 - For Commodities: right-click an instrument/proxy row, click `Add and Open`, confirm Strategy Lab opens, accept the resolved commodity row, run composition, and confirm proxy, futures/spot, roll, provider, sparse/stale, and read-only warnings/provenance are visible.
 - For right-click UX accessibility: verify the same row handoff actions are reachable without a mouse through a row action button, context-menu key, or `Shift+F10`.
 - For Macro: open Macro, choose the active context, click `Lens & Open`, confirm Strategy Lab opens, accept the resolved lens, run composition, and confirm the attached lens, warnings, and provenance are visible.
+- For IV/Options: load an option surface, open Chain, right-click a contract row, choose `Call and Open` or `Put and Open`, confirm Strategy Lab opens, resolve and accept the overlay, and confirm it appears as attached context rather than a weighted return leg with read-only/no-execution warnings and provider/snapshot provenance.
 - Confirm no page-level horizontal overflow occurs at desktop and narrow viewport widths; horizontally scrollable dense tables are acceptable.
 
 ## Latest Validation Results
+
+Validated for SLH-013 on 2026-06-06:
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q` | Passed | 51 tests passed, including backend resolver and API coverage for IV option-contract overlays. |
+| `npm run typecheck` | Passed | Frontend typecheck passed after wiring IV row handoffs into the shared Strategy Lab path. |
+| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 22 tests passed, including Options handoff envelope coverage for a selected put row. |
+| `npm run test -- src/components/CompactContextMenu.test.ts` | Passed | Shared compact context-menu coverage remains green. |
+| `npm run test -- src/lib/stores/app.test.ts` | Failed with unrelated IV-store regression | Existing test `stops an active IV stream before loading a one-shot surface` still fails because the expected `/iv/session/stop` fetch is absent. Strategy Lab handoff queue tests in the same file passed. |
+| Browser: IV/Options row menu | Passed with provider/session caveat | On the existing live Options session, loaded SPY chain rows, switched to Chain mode, right-clicked the ATM row, and confirmed `Add Call Context`, `Call and Open`, `Add Put Context`, and `Put and Open`. `Put and Open` opened Strategy Lab and displayed the IV handoff with explicit read-only, no durable option history, no orders/signals/broker mutation/rebalance, and delayed-source warnings. Full accept could not be completed in that browser session because it was bound to an older desktop backend resolver. |
+| Browser/API split check | Passed with provider caveat | A clean current-code backend on port 8765 resolved the same IV overlay envelope to `status: resolved`, `resolved_capability: overlay`, and an `options_contract_overlay` object with provenance transformation `options_chain_row_to_strategy_lab_overlay`. The clean backend could not generate live option-chain rows because IBKR was not connected, so the current-code browser flow could not be completed end to end in one session. |
 
 Validated for SLH-012 on 2026-06-03:
 
@@ -398,6 +412,8 @@ Validated on 2026-06-02:
 - Macro first pass emits the active Macro workspace context as a Strategy Lab lens only. It is not a weighted return leg and does not create strategy signals, executable rules, broker mutations, or rebalance behavior.
 - Macro lens resolution preserves region, timeframe, theme, mode, comparison region, selected entity ids, provider/source, and snapshot/event metadata carried by the handoff envelope.
 - Strategy Lab portfolio math remains driven by return-bearing legs; accepted lenses and overlays annotate interpretation and are carried through composition results for future regime/stress slicing.
+- IV/Options first pass emits selected option-chain call/put rows as Strategy Lab overlays only. The handoff preserves contract id, symbol, expiry, right, strike, premium, IV, delta, open interest, volume, surface quality, provider/source, and snapshot timestamp when present.
+- IV/Options overlays are read-only context. They do not become weighted return legs, executable option orders, strategy signals, broker mutations, or rebalance behavior because the current Options workspace has snapshot contract data but no durable option-contract return stream.
 
 ## Open Questions
 
@@ -413,4 +429,4 @@ Validated on 2026-06-02:
 
 ## Recommended Next Step
 
-Continue with `SLH-012` shared right-click Strategy handoff menu for instrument rows. Prediction Markets, Equity Research, and Commodities already prove the resolver paths; the next slice should make right-click row selection the canonical instrument-level UX before Copilot context coverage moves forward as `SLH-013`.
+Continue with `SLH-014` Copilot context builder coverage for pending and resolved Strategy Lab handoffs, or add durable option-contract history before promoting IV/Options handoffs from overlays to return-bearing legs.

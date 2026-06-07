@@ -57,6 +57,7 @@
     computeRisk,
     forceAccountSubscribe,
     ivSurface,
+    ivUnderlyingHistory,
     ivSession,
     lastError,
     loadDiagnostics,
@@ -2417,13 +2418,16 @@
             requestedSymbol={ivRequestedSymbol}
             result={$ivSurface}
             session={$ivSession}
+            underlyingHistory={$ivUnderlyingHistory}
             underlyingPricePoints={$researchResult?.primary_price_points ?? []}
+            researchPrimarySymbol={$researchResult?.primary_symbol ?? null}
             loading={$loading.iv}
             sessionLoading={$loading.ivSession}
             errorMessage={$lastError}
             onLoad={loadIvSurface}
             onStopSession={stopIvSession}
             onSendToCopilot={handleSendToCopilot}
+            onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {/if}
       </section>

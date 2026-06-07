@@ -26,7 +26,7 @@ Gamma currently lets a user:
 - screen and inspect crypto tokens with narrative baskets, DEX liquidity context, and comparative analytics
 - inspect company fundamentals, financial statements, peer context, and persistent DCF scenarios
 - research commodities across energy, metals, curves, spreads, inventories, events, and cross-domain handoffs
-- inspect implied-volatility surfaces through the IV explorer
+- inspect implied-volatility surfaces, implied probability slices, strategy payoffs, and Gamma-owned options Greeks through the Options / IV explorer
 - generate Copilot research cards, synthesis, operator plans, and memos from loaded Gamma state through both the shell shelf and the dedicated Copilot workspace
 - navigate the app as a desktop product with reorderable tabs and keyboard shortcuts
 
@@ -254,29 +254,40 @@ Important caveats:
 
 #### IV tab
 
-The IV explorer is a surface-inspection tool, not an options pricer.
+The IV explorer is a surface and scenario-inspection tool, not a broker pricer or execution surface.
 
 It provides:
 
 - max-depth IV surface snapshots as the primary UI workflow
 - a Python-owned session loop for explicit repeated refreshes
 - backend depth presets that trade expiry count and strike width against TWS market-data-line usage; the UI favors the `Max` preset so line budget goes toward strike breadth
+- registered modes for `Overview`, `Chain`, `Surface`, `Realized vs IV`, `Implied Probabilities`, and `Strategies`
 - expiry/strike heatmap
 - selected expiry slice
 - ATM term structure
 - selectable display-grid fitting for the 3D surface: line interpolation, spline interpolation, or SSVI
+- front-expiry IV smile, wing-skew rows, and term-structure rows derived from the current surface
+- local realized-volatility comparisons when underlying price history is available
+- local implied-probability density slices with selectable strike-range probability mass
+- a chain-driven strategy builder with selected long/short call/put legs, net premium, breakevens, max profit/loss, and payoff matrix by price and remaining DTE
+- Gamma-owned Black-Scholes Greeks for chain rows and aggregate selected strategies
 
 Under the hood:
 
 - live mode requests an IV surface snapshot from the backend IV engine over IBKR
 - `Compact`, `Standard`, `Deep`, `Front Deep`, and `Max` presets tune the backend's expiry count, strike band, contract cap, and line budget; the default max surface keeps expiries tight so calls and puts can cover more strikes
 - the backend preserves observed option-chain rows and applies the selected model only to the display IV grid, with fit/fallback metadata returned in the surface payload
+- provider-returned Greeks are preserved when IBKR supplies them, while Gamma can derive fallback Greeks from provider IV or solved IV using zero-rate/zero-dividend Black-Scholes assumptions
 - the frontend highlights the strike nearest to spot and uses that strike to derive ATM term structure
+- the implied-probability surface is a local lognormal density proxy derived from the fitted IV grid, not a vendor-grade risk-neutral-density feed
+- the strategy payoff matrix marks selected legs to model values across remaining DTE; it is research math only and does not imply order routing or broker valuation authority
 - in mock mode, Gamma generates a synthetic surface with a simple skew/term-structure shape so the UI remains testable
 
 Important caveats:
 
-- this tab shows the returned surface, contract rows, and display-grid fit; it does not run an options valuation or execution stack
+- this tab shows returned surface data, contract rows, display-grid fit, local Greeks, implied probability proxies, and payoff scenarios; it does not route orders or manage option positions
+- Gamma-owned Greeks and payoff matrices depend on the current fitted IV grid, selected chain rows, and simplified Black-Scholes assumptions
+- historical IV/skew persistence, deeper source inspection, richer expiry/strike controls, and durable Realized vs IV history remain Roadmap V2 hardening work
 - if IBKR is disconnected, the live surface path is unavailable
 
 ### Research Workspace
@@ -619,7 +630,7 @@ The likely V2 feature direction is:
 
 - `Equity Research` and `Strategy Lab`: deepen market overview / tree-map views, scope analysis, comparables, saved equity research, imported return-stream analytics, weighted Gamma object compositions, and comparison workflows
 - `Macro`: finish EU/global depth, official-event breadth, policy-path interpretation, and coherence / lead-lag refinement
-- `IV`: deepen into a volatility lab with 3D surfaces, skew / term views, Greeks context, realized-vs-implied overlays, and RND-style implied-distribution work
+- `IV`: harden the shipped volatility lab around selectable surface models, skew / term views, Gamma-owned Greeks, realized-vs-implied overlays, implied-probability slices, strategy payoff flow, source transparency, history, and cross-tab handoffs
 - `Crypto`: add real wallet analytics, stronger pool / transaction monitoring, richer peer and basket comparisons, and later derivatives overlays
 - `Fundamentals`: add reverse valuation, implied expectations, richer raw-vs-normalized inspection, better peer/reference depth, and eventually broader non-US coverage
 - `Copilot`: keep the shell shelf for quick context, but add a dedicated workspace for persistent sessions, saved memos, streaming, workflow handoffs, synthesis, and later voice interaction
@@ -640,7 +651,7 @@ The important boundary does not change: Gamma can study strategies, market data,
 - Crypto is currently strongest on token discovery, normalization, and liquidity-aware first-pass comparison, not deep wallet analytics or derivatives overlays
 - Fundamentals is strongest on US SEC-native coverage; broader international equities remain future work
 - Commodities has a practical first pass with sample curves, optional EIA fundamentals, and IBKR-built futures curves; deeper vendor-grade historical curve storage remains future work
-- IV is an exploration surface, not a full options analytics suite
+- IV is now a usable volatility-lab first pass, but it is not a full options analytics suite; historical IV/skew storage, richer source/Greek inspection, stronger Realized vs IV history, and broader handoffs remain V2 work
 
 ## Running Gamma
 

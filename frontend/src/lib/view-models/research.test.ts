@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { ResearchResult } from "../api/types";
+import type { IvSurface, ResearchResult } from "../api/types";
 import {
   buildCommodityStrategyHandoff,
   buildMacroStrategyLensHandoff,
+  buildOptionsStrategyHandoff,
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
   buildEquityStrategyHandoff,
@@ -496,6 +497,51 @@ describe("research view model helpers", () => {
     expect(handoff.warnings.join(" ")).toContain("not weighted portfolio legs");
   });
 
+  it("builds Options Strategy Lab overlays for selected chain rows", () => {
+    const surface = makeIvSurface();
+    const row = {
+      pair: surface.pairs[0]!,
+      expiry: "20260619",
+      strike: 500,
+      moneyness: 1,
+      distancePct: 0,
+      callMidpoint: 12.4,
+      putMidpoint: 11.8,
+      callPriceSource: "midpoint",
+      putPriceSource: "midpoint",
+      callIv: 0.22,
+      putIv: 0.24,
+      blendedIv: 0.23,
+      callDelta: 0.52,
+      putDelta: -0.48,
+      callOpenInterest: 1200,
+      putOpenInterest: 980,
+      callVolume: 210,
+      putVolume: 180,
+      straddleMidpoint: 24.2,
+      impliedMovePct: 0.048
+    };
+
+    const handoff = buildOptionsStrategyHandoff({ surface, row, optionType: "put", sourceMode: "chain" });
+
+    expect(handoff.source_tab).toBe("iv");
+    expect(handoff.source_mode).toBe("chain");
+    expect(handoff.intended_target_tab).toBe("strategy_lab");
+    expect(handoff.resolver_capability).toBe("overlay");
+    expect(handoff.asset_class).toBe("other");
+    expect(handoff.value_kind).toBe("context");
+    expect(handoff.default_side).toBe("none");
+    expect(handoff.default_weight).toBeNull();
+    expect(handoff.selected_entity.entity_type).toBe("option_contract");
+    expect(handoff.selected_entity.normalized_id).toBe("iv:SPY:20260619:P:500");
+    expect(handoff.selected_entity.metadata.right).toBe("P");
+    expect(handoff.selected_entity.metadata.premium).toBe(11.8);
+    expect(handoff.normalized_ids.option_contract_id).toBe("iv:SPY:20260619:P:500");
+    expect(handoff.normalized_ids.provider_contract_id).toBe("put-500");
+    expect(handoff.warnings.join(" ")).toContain("read-only volatility overlays");
+    expect(handoff.warnings.join(" ")).toContain("no durable option-contract price history");
+  });
+
   it("includes normalized weights in synthetic scope research object ids", () => {
     const first = makeResearchResult("synthetic_portfolio", [
       { symbol: "XLV", weight: 0.6 },
@@ -698,6 +744,96 @@ function makeResearchOverview() {
     history_source_label: "Mock sample-data daily history",
     metadata_source_label: "Local sample/watchlist metadata",
     coverage_label: "Sample watchlist, partial coverage"
+  };
+}
+
+function makeIvSurface(): IvSurface {
+  return {
+    symbol: "SPY",
+    timestamp: "2026-06-05T14:30:00Z",
+    retrieved_at: "2026-06-05T14:30:02Z",
+    snapshot_available: true,
+    spot: 500,
+    expiries: ["20260619"],
+    strikes: [495, 500, 505],
+    iv_grid: [[0.24, 0.23, 0.25]],
+    delayed: true,
+    points: 3,
+    warnings: ["Fixture IV warning."],
+    messages: [],
+    source_provider: "ibkr",
+    origin: "gamma.iv.surface.fixture",
+    transformation_note: "Fixture options surface.",
+    freshness_label: "delayed",
+    surface_model: "linear",
+    surface_model_label: "Line interpolation",
+    surface_model_status: "ready",
+    surface_model_notes: [],
+    collection: {
+      depth_preset: "standard",
+      market_data_mode: "delayed",
+      include_calls: true,
+      include_puts: true,
+      max_expiries: 1,
+      strike_band_pct: 0.1,
+      configured_max_contracts: 12,
+      configured_market_data_line_budget: 100,
+      reserved_market_data_lines: 5,
+      underlying_market_data_lines: 1,
+      option_market_data_line_budget: 94,
+      selected_expiry_count: 1,
+      selected_strike_count: 3,
+      requested_contract_count: 6,
+      subscribed_contract_count: 6,
+      estimated_total_market_data_lines: 7,
+      market_data_line_utilization: 0.07,
+      contract_selection_note: null
+    },
+    quality: {
+      expected_surface_cells: 3,
+      observed_surface_cells: 3,
+      interpolated_surface_cells: 0,
+      interpolation_ratio: 0,
+      contracts_with_bid_ask: 6,
+      contracts_with_volume: 6,
+      contracts_with_open_interest: 6,
+      contracts_with_provider_greeks: 2,
+      contracts_with_derived_greeks: 6,
+      call_contract_count: 3,
+      put_contract_count: 3,
+      pairs_with_both_sides: 3
+    },
+    pairs: [
+      {
+        pair_id: "20260619-500",
+        expiry: "20260619",
+        strike: 500,
+        days_to_expiry: 13,
+        call_contract_id: "call-500",
+        put_contract_id: "put-500",
+        call_midpoint: 12.4,
+        put_midpoint: 11.8,
+        call_mark_price: null,
+        put_mark_price: null,
+        call_price: 12.4,
+        put_price: 11.8,
+        call_price_source: "midpoint",
+        put_price_source: "midpoint",
+        call_implied_volatility: 0.22,
+        put_implied_volatility: 0.24,
+        blended_implied_volatility: 0.23,
+        call_delta: 0.52,
+        put_delta: -0.48,
+        call_open_interest: 1200,
+        put_open_interest: 980,
+        call_volume: 210,
+        put_volume: 180,
+        straddle_midpoint: 24.2,
+        synthetic_forward_price: null,
+        implied_move_pct: 0.048,
+        call_put_parity_gap: null
+      }
+    ]
   };
 }
 

@@ -535,6 +535,7 @@ class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
     leg_contributions: dict[str, float] = Field(default_factory=dict)
     lenses: list[GammaResearchObjectModel] = Field(default_factory=list)
     overlays: list[GammaResearchObjectModel] = Field(default_factory=list)
+    alignment_diagnostics: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_domain(cls, row: StrategyLabCompositionResult) -> "StrategyLabCompositionResponseModel":
@@ -544,6 +545,7 @@ class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
             leg_contributions=dict(row.leg_contributions),
             lenses=[GammaResearchObjectModel.from_domain(item) for item in row.lenses],
             overlays=[GammaResearchObjectModel.from_domain(item) for item in row.overlays],
+            alignment_diagnostics=dict(row.alignment_diagnostics),
         )
 
 

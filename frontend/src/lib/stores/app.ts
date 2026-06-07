@@ -38,6 +38,7 @@ import type {
   FundamentalsSearchResponse,
   IvSessionStatus,
   IvSurface,
+  IvUnderlyingHistoryResponse,
   MacroContextState,
   MacroDivergenceListResponse,
   MacroEventsResponse,
@@ -410,6 +411,7 @@ export const riskSnapshotBasis = writable<PortfolioSnapshot | null>(null);
 export const riskWorkspaceBasis = writable<WorkspaceMode | null>(null);
 export const riskWorkspaceMode = writable<string>("overview");
 export const ivSurface = writable<IvSurface | null>(null);
+export const ivUnderlyingHistory = writable<IvUnderlyingHistoryResponse | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
 export const lastError = writable<string>("");
 
@@ -1325,6 +1327,7 @@ export async function composeStrategyLab(options: StrategyLabComposeOptions) {
     lastError.set("");
     return result;
   } catch (error) {
+    strategyLabComposition.set(null);
     setError(error);
     return null;
   } finally {
@@ -1351,6 +1354,7 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     lastError.set("");
     return result;
   } catch (error) {
+    strategyLabComposition.set(null);
     setError(error);
     return null;
   } finally {
@@ -3148,20 +3152,59 @@ export async function exportCopilotResearchReport(options: {
   }
 }
 
+export async function loadIvUnderlyingHistory(options: { symbol: string; lookbackDays?: number; forceRefresh?: boolean }) {
+  const symbol = options.symbol.trim().toUpperCase();
+  if (!symbol) {
+    return null;
+  }
+  const current = get(ivUnderlyingHistory);
+  if (current && current.symbol.trim().toUpperCase() !== symbol) {
+    ivUnderlyingHistory.set(null);
+  }
+  try {
+    const params = new URLSearchParams({
+      symbol,
+      lookback_days: String(options.lookbackDays ?? 252),
+      force_refresh: options.forceRefresh ? "true" : "false"
+    });
+    const history = await getJson<IvUnderlyingHistoryResponse>(`/iv/underlying-history?${params.toString()}`);
+    ivUnderlyingHistory.set(history);
+    return history;
+  } catch (error) {
+    ivUnderlyingHistory.set({
+      symbol,
+      lookback_days: options.lookbackDays ?? 252,
+      points: [],
+      source_provider: "unavailable",
+      source_label: "Underlying history unavailable",
+      origin: "gamma.iv.underlying_history",
+      freshness_label: "unavailable",
+      retrieved_at: new Date().toISOString(),
+      warnings: [error instanceof Error ? error.message : "Underlying price history request failed."],
+      transformation_note: null
+    });
+    return null;
+  }
+}
+
 export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
   const request: IvLoadOptions =
     typeof options === "string"
       ? { symbol: options }
       : options;
+  const requestedSymbol = request.symbol.trim().toUpperCase();
   setLoading("iv", true);
   try {
+    if (requestedSymbol && get(ivUnderlyingHistory)?.symbol.trim().toUpperCase() !== requestedSymbol) {
+      ivUnderlyingHistory.set(null);
+    }
     const activeSession = get(ivSession);
     if (activeSession?.running) {
       const stoppedSession = await postJson<IvSessionStatus>("/iv/session/stop", {});
       ivSession.set(stoppedSession);
     }
     const params = new URLSearchParams({
-      symbol: request.symbol
+      symbol: requestedSymbol || request.symbol
     });
     if (request.marketDataMode) {
       params.set("market_data_mode", request.marketDataMode);
@@ -3180,6 +3223,7 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
     if (shouldReplaceSurface || request.preserveExisting === false) {
       ivSurface.set(surface);
       ivSession.update((current) => (current == null ? current : { ...current, surface }));
+      await loadIvUnderlyingHistory({ symbol: surface.symbol || requestedSymbol || request.symbol });
     } else {
       const message = surface.warnings[0] ?? surface.messages[0] ?? `No options surface snapshot available for ${request.symbol}.`;
       lastError.set(message);
@@ -3229,6 +3273,10 @@ export async function loadIvSession() {
       }
       return current;
     });
+    const sessionSymbol = session.surface?.symbol || session.active_symbol;
+    if (sessionSymbol) {
+      await loadIvUnderlyingHistory({ symbol: sessionSymbol });
+    }
     lastError.set("");
   } catch (error) {
     setError(error);
@@ -3248,6 +3296,10 @@ export async function startIvSession(options: IvLoadOptions) {
     });
     ivSession.set(session);
     ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
+    const sessionSymbol = session.surface?.symbol || session.active_symbol || options.symbol;
+    if (sessionSymbol) {
+      await loadIvUnderlyingHistory({ symbol: sessionSymbol });
+    }
     resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {
@@ -3263,6 +3315,10 @@ export async function stopIvSession() {
     const session = await postJson<IvSessionStatus>("/iv/session/stop", {});
     ivSession.set(session);
     ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
+    const sessionSymbol = session.surface?.symbol || session.active_symbol;
+    if (sessionSymbol) {
+      await loadIvUnderlyingHistory({ symbol: sessionSymbol });
+    }
     resetCopilotCard("iv");
     lastError.set("");
   } catch (error) {

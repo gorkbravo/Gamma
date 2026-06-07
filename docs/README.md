@@ -17,6 +17,8 @@ This directory is split into active documentation and archived project history.
 
 Current Commodities tab setup, EIA and IBKR provider switches, sample fallback behavior, futures-curve caveats, and read-only constraints are documented in [`../README.md`](../README.md).
 
+Current Options / IV behavior, including selectable surface models, implied-probability slices, strategy payoff flow, Gamma-owned Greeks, and live-provider caveats, is documented in [`../README.md`](../README.md) and tracked in Roadmap V2 Workstream 4.
+
 ## Archived Documents
 
 Historical migration logs, audit checklists, and handoff notes live under [`archive/`](./archive/README.md).

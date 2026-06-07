@@ -6,6 +6,7 @@ import type {
   CommodityPriceHistory,
   CommodityWorkspaceResponse,
   GammaResearchObject,
+  IvSurface,
   MacroContextState,
   MacroEventsResponse,
   MacroSnapshot,
@@ -28,6 +29,7 @@ import type {
   ResearchStructure,
   ResearchWeightPoint
 } from "../api/types";
+import type { ChainRow, StrategyOptionType } from "./iv";
 
 export type { EquityResearchMode, StrategyLabMode } from "../api/types";
 
@@ -455,6 +457,137 @@ export function buildMacroStrategyLensHandoff(
       timeframe: context.timeframe,
       theme: context.theme,
       mode: sourceMode
+    },
+    timestamp: new Date().toISOString()
+  };
+}
+
+export function buildOptionsStrategyHandoff(
+  option: {
+    surface: IvSurface;
+    row: ChainRow;
+    optionType: StrategyOptionType;
+    sourceMode?: string | null;
+  },
+  options: { sourceMode?: string | null } = {}
+): StrategyLabHandoffEnvelope {
+  const surface = option.surface;
+  const row = option.row;
+  const optionType = option.optionType;
+  const right = optionType === "call" ? "C" : "P";
+  const premium = optionType === "call" ? row.callMidpoint : row.putMidpoint;
+  const iv = optionType === "call" ? row.callIv : row.putIv;
+  const delta = optionType === "call" ? row.callDelta : row.putDelta;
+  const openInterest = optionType === "call" ? row.callOpenInterest : row.putOpenInterest;
+  const volume = optionType === "call" ? row.callVolume : row.putVolume;
+  const priceSource = optionType === "call" ? row.callPriceSource : row.putPriceSource;
+  const contractId = optionType === "call" ? row.pair.call_contract_id : row.pair.put_contract_id;
+  const normalizedId = [
+    "iv",
+    surface.symbol.trim().toUpperCase(),
+    row.expiry,
+    right,
+    Number(row.strike).toString()
+  ].join(":");
+  const label = `${surface.symbol.trim().toUpperCase()} ${row.expiry} ${row.strike} ${right}`;
+  const warnings = [
+    "Options handoffs enter Strategy Lab as read-only volatility overlays, not weighted return legs.",
+    "The current Options workspace has snapshot contract prices, IV, Greeks, and chain quality but no durable option-contract price history for return-stream composition.",
+    "This overlay does not create executable option orders, strategy signals, broker mutations, or rebalance behavior."
+  ];
+  if (premium == null || !Number.isFinite(premium) || premium <= 0) {
+    warnings.push("Selected option side has no usable premium; Strategy Lab will keep it as context only.");
+  }
+  if (iv == null || !Number.isFinite(iv) || iv <= 0) {
+    warnings.push("Selected option side has no usable implied volatility; review source quality before using this context.");
+  }
+  if (surface.delayed) {
+    warnings.push("Options surface is delayed; treat the overlay as historical/provider context.");
+  }
+  if (surface.quality?.interpolation_ratio != null && surface.quality.interpolation_ratio > 0.35) {
+    warnings.push("Options surface uses substantial interpolation; inspect source quality before relying on the overlay.");
+  }
+  if (surface.warnings.length) {
+    warnings.push(...surface.warnings.slice(0, 3));
+  }
+
+  return {
+    source_tab: "iv",
+    source_mode: options.sourceMode ?? option.sourceMode ?? "chain",
+    intended_target_tab: "strategy_lab",
+    intended_target_mode: "composer",
+    selected_entity: {
+      entity_type: "option_contract",
+      label,
+      normalized_id: normalizedId,
+      provider_id: contractId,
+      native_id: contractId ?? normalizedId,
+      metadata: {
+        symbol: surface.symbol.trim().toUpperCase(),
+        expiry: row.expiry,
+        right,
+        option_type: optionType,
+        strike: row.strike,
+        spot: surface.spot,
+        days_to_expiry: row.pair.days_to_expiry,
+        premium,
+        price_source: priceSource,
+        implied_volatility: iv,
+        blended_implied_volatility: row.blendedIv,
+        delta,
+        open_interest: openInterest,
+        volume,
+        moneyness: row.moneyness,
+        distance_pct: row.distancePct,
+        straddle_midpoint: row.straddleMidpoint,
+        implied_move_pct: row.impliedMovePct,
+        snapshot_timestamp: surface.timestamp,
+        freshness_label: surface.freshness_label,
+        delayed: surface.delayed,
+        surface_model: surface.surface_model ?? "linear",
+        quality: surface.quality
+          ? {
+              expected_surface_cells: surface.quality.expected_surface_cells,
+              observed_surface_cells: surface.quality.observed_surface_cells,
+              interpolated_surface_cells: surface.quality.interpolated_surface_cells,
+              interpolation_ratio: surface.quality.interpolation_ratio,
+              contracts_with_bid_ask: surface.quality.contracts_with_bid_ask,
+              contracts_with_provider_greeks: surface.quality.contracts_with_provider_greeks,
+              contracts_with_derived_greeks: surface.quality.contracts_with_derived_greeks
+            }
+          : null
+      }
+    },
+    resolver_capability: "overlay",
+    asset_class: "other",
+    value_kind: "context",
+    default_side: "none",
+    default_weight: null,
+    selected_timeframe: surface.timestamp
+      ? {
+          label: `Options snapshot ${surface.symbol.trim().toUpperCase()}`,
+          start: null,
+          end: surface.timestamp
+        }
+      : null,
+    provider: surface.source_provider,
+    source: {
+      origin: surface.origin,
+      retrieved_at: surface.retrieved_at,
+      source_provider: surface.source_provider,
+      freshness_label: surface.freshness_label,
+      transformation_note: surface.transformation_note,
+      market_data_mode: surface.collection?.market_data_mode ?? null,
+      depth_preset: surface.collection?.depth_preset ?? null
+    },
+    warnings,
+    normalized_ids: {
+      symbol: surface.symbol.trim().toUpperCase(),
+      option_contract_id: normalizedId,
+      provider_contract_id: contractId ?? "",
+      expiry: row.expiry,
+      right,
+      strike: Number(row.strike).toString()
     },
     timestamp: new Date().toISOString()
   };

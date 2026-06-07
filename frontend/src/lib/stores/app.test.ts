@@ -810,6 +810,48 @@ describe("app store orchestration", () => {
     expect(get(strategyLabComposition)?.lenses[0]?.object_id).toBe(lens.object_id);
   });
 
+  it("clears stale Strategy Lab composition after failed portfolio compose", async () => {
+    strategyLabComposition.set({
+      ...makeStrategyLabResult(),
+      name: "Previous Composition",
+      leg_contributions: { QQQ: 1 },
+      lenses: [],
+      overlays: [],
+      alignment_diagnostics: {}
+    } as any);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        notFound({
+          detail: [
+            "Strategy Lab composition needs at least 5 shared return observations; only 0 overlap after source alignment."
+          ]
+        })
+      )
+    );
+
+    const result = await composeStrategyLabPortfolio({
+      name: "Thin Book",
+      legs: [
+        {
+          label: "QQQ",
+          asset_class: "etf",
+          identifier: "QQQ",
+          weight: 1,
+          value_kind: "return",
+          return_points: []
+        }
+      ],
+      benchmarkSymbol: null,
+      lookbackDays: 252,
+      minObservations: 5
+    });
+
+    expect(result).toBeNull();
+    expect(get(strategyLabComposition)).toBeNull();
+    expect(get(lastError)).toContain("only 0 overlap");
+  });
+
   it("restores a normalized saved Strategy Lab result without an API call", () => {
     const strategy = makeStrategyLabResult();
     researchCompareResult.set(makeResearchCompareResult());

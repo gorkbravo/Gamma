@@ -4,7 +4,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from src.api.schemas.portfolio import TimeSeriesPoint, series_to_points
 from src.application.iv_service import IVSurfaceResult
+from src.services.research_market_data import ResearchHistoryResult
 from src.models.iv import (
     IVExpiryAnalyticsRecord,
     IVOptionContractRecord,
@@ -222,6 +224,40 @@ class IVPricingAssumptionsModel(BaseModel):
         if row is None:
             return None
         return cls(**row.__dict__)
+
+
+class IVUnderlyingHistoryResponseModel(BaseModel):
+    symbol: str
+    lookback_days: int
+    points: list[TimeSeriesPoint] = Field(default_factory=list)
+    source_provider: str = "unknown"
+    source_label: str = "Unknown history source"
+    origin: str = "gamma.iv.underlying_history"
+    freshness_label: str = "unknown"
+    retrieved_at: datetime
+    warnings: list[str] = Field(default_factory=list)
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_history_result(
+        cls,
+        *,
+        symbol: str,
+        lookback_days: int,
+        result: ResearchHistoryResult,
+    ) -> "IVUnderlyingHistoryResponseModel":
+        return cls(
+            symbol=symbol,
+            lookback_days=lookback_days,
+            points=series_to_points(result.series, result.ohlcv),
+            source_provider=result.source_provider,
+            source_label=result.source_label,
+            origin=result.origin,
+            freshness_label=result.freshness_label.value,
+            retrieved_at=result.retrieved_at,
+            warnings=list(result.warnings),
+            transformation_note=result.transformation_note,
+        )
 
 
 class IVSurfaceResponseModel(BaseModel):

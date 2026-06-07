@@ -57,6 +57,7 @@
     hasPopulatedStructure,
     normalizeSyntheticText,
     parseResearchCsvText,
+    parseStrategyPortfolioHistoryText,
     parseSyntheticText,
     summarizeStrategyPortfolioDraft,
     researchSortMetricLabel,
@@ -484,7 +485,60 @@
   }
 
   function removePortfolioDraftLeg(id: string) {
-    portfolioDraftLegs = portfolioDraftLegs.length <= 1 ? portfolioDraftLegs : portfolioDraftLegs.filter((leg) => leg.id !== id);
+    portfolioDraftLegs =
+      portfolioDraftLegs.length <= 1
+        ? portfolioDraftLegs.map((leg, index) => (leg.id === id ? defaultStrategyPortfolioDraftLeg(index + 1) : leg))
+        : portfolioDraftLegs.filter((leg) => leg.id !== id);
+  }
+
+  function resetPortfolioDraftLeg(id: string) {
+    portfolioDraftLegs = portfolioDraftLegs.map((leg, index) =>
+      leg.id === id ? defaultStrategyPortfolioDraftLeg(index + 1) : leg
+    );
+  }
+
+  function normalizePortfolioDraftLegSource(id: string, source: "object" | "identifier" | "history") {
+    portfolioDraftLegs = portfolioDraftLegs.map((leg) => {
+      if (leg.id !== id) {
+        return leg;
+      }
+      if (source === "object" && leg.objectOptionId) {
+        return { ...leg, identifier: "", historyText: "" };
+      }
+      if (source === "identifier" && leg.identifier.trim()) {
+        return { ...leg, objectOptionId: "", historyText: "" };
+      }
+      if (source === "history" && leg.historyText.trim()) {
+        return { ...leg, objectOptionId: "", identifier: "" };
+      }
+      return { ...leg };
+    });
+  }
+
+  function portfolioDraftSourceLabel(leg: StrategyPortfolioDraftLeg) {
+    if (leg.objectOptionId) return "Object";
+    if (leg.historyText.trim()) return "Inline";
+    if (leg.identifier.trim()) return "Provider";
+    return "Unset";
+  }
+
+  function portfolioDraftSourceDetail(leg: StrategyPortfolioDraftLeg) {
+    if (leg.objectOptionId) {
+      return composerOptions.find((option) => option.id === leg.objectOptionId)?.label ?? "Gamma object";
+    }
+    if (leg.historyText.trim()) {
+      const parsed = parseStrategyPortfolioHistoryText(leg.historyText);
+      return `${parsed.points.length} dated points`;
+    }
+    if (leg.identifier.trim()) {
+      return `${leg.assetClass} / ${leg.identifier.trim().toUpperCase()}`;
+    }
+    return "reset or fill source";
+  }
+
+  function diagnosticValue(item: Record<string, unknown>, key: string) {
+    const value = item[key];
+    return value == null || value === "" ? "N/A" : String(value);
   }
 
   function addComposerObjectToPortfolio(optionId: string) {
@@ -1317,6 +1371,10 @@
     .filter((leg) => Number.isFinite(leg.weight) && leg.weight !== 0);
   $: portfolioDraftSummary = summarizeStrategyPortfolioDraft(portfolioDraftLegs);
   $: portfolioDraftBuild = buildStrategyPortfolioLegInputs(portfolioDraftLegs, composerOptions);
+  $: compositionDiagnostics = (strategyComposition?.alignment_diagnostics ?? {}) as Record<string, unknown>;
+  $: compositionDiagnosticLegs = Array.isArray(compositionDiagnostics.legs)
+    ? (compositionDiagnostics.legs as Array<Record<string, unknown>>)
+    : [];
   $: visibleResearchModes =
     surface === "equity" ? equityResearchModes : surface === "strategy" ? strategyResearchModes : legacyResearchModes;
   $: surfaceTitle =
@@ -2410,6 +2468,7 @@
                   <tr>
                     <th>Label</th>
                     <th>Class</th>
+                    <th>Source</th>
                     <th>Identifier / Object</th>
                     <th class="num-cell">Weight</th>
                     <th>History</th>
@@ -2428,9 +2487,24 @@
                         </select>
                       </td>
                       <td>
+                        <div class="source-cell">
+                          <span class:warning={portfolioDraftSourceLabel(leg) === "Unset"}>{portfolioDraftSourceLabel(leg)}</span>
+                          <small>{portfolioDraftSourceDetail(leg)}</small>
+                        </div>
+                      </td>
+                      <td>
                         <div class="stack tight">
-                          <input class="compact-input wide" bind:value={leg.identifier} placeholder="Ticker / contract id" />
-                          <select class="compact-input" bind:value={leg.objectOptionId}>
+                          <input
+                            class="compact-input wide"
+                            bind:value={leg.identifier}
+                            placeholder="Ticker / contract id"
+                            on:input={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}
+                          />
+                          <select
+                            class="compact-input"
+                            bind:value={leg.objectOptionId}
+                            on:change={() => normalizePortfolioDraftLegSource(leg.id, "object")}
+                          >
                             <option value="">Provider / inline history</option>
                             {#each composerOptions as option}
                               <option value={option.id}>{option.label}</option>
@@ -2447,10 +2521,20 @@
                             <option value="return">Returns</option>
                             <option value="level">Level / probability</option>
                           </select>
-                          <textarea class="history-input" bind:value={leg.historyText} placeholder="date,value rows for contracts, commodities, custom streams"></textarea>
+                          <textarea
+                            class="history-input"
+                            bind:value={leg.historyText}
+                            placeholder="date,value rows for contracts, commodities, custom streams"
+                            on:input={() => normalizePortfolioDraftLegSource(leg.id, "history")}
+                          ></textarea>
                         </div>
                       </td>
-                      <td class="num-cell"><button type="button" class="ghost-button" on:click={() => removePortfolioDraftLeg(leg.id)}>Remove</button></td>
+                      <td class="num-cell">
+                        <div class="row-actions">
+                          <button type="button" class="ghost-button" on:click={() => resetPortfolioDraftLeg(leg.id)}>Reset</button>
+                          <button type="button" class="ghost-button" on:click={() => removePortfolioDraftLeg(leg.id)}>Remove</button>
+                        </div>
+                      </td>
                     </tr>
                   {/each}
                 </tbody>
@@ -2513,6 +2597,39 @@
                 </div>
                 <small>{strategyComposition.returns_points.length} return points</small>
               </div>
+              {#if compositionDiagnosticLegs.length}
+                <div class="alignment-diagnostics">
+                  <div class="row">
+                    <span>Shared Window</span>
+                    <strong>
+                      {diagnosticValue(compositionDiagnostics, "aligned_start").slice(0, 10)} -
+                      {diagnosticValue(compositionDiagnostics, "aligned_end").slice(0, 10)}
+                    </strong>
+                  </div>
+                  <div class="row">
+                    <span>Aligned Obs</span>
+                    <strong>{diagnosticValue(compositionDiagnostics, "aligned_observation_count")} / min {diagnosticValue(compositionDiagnostics, "min_observations")}</strong>
+                  </div>
+                  <div class="table-wrap compact-table">
+                    <table>
+                      <thead>
+                        <tr><th>Leg</th><th>Source</th><th>Window</th><th class="num-cell">Obs</th><th class="num-cell">Norm Wt</th></tr>
+                      </thead>
+                      <tbody>
+                        {#each compositionDiagnosticLegs as diagnostic}
+                          <tr>
+                            <td>{diagnosticValue(diagnostic, "label")}</td>
+                            <td>{diagnosticValue(diagnostic, "source_provider")}</td>
+                            <td>{diagnosticValue(diagnostic, "available_start").slice(0, 10)} - {diagnosticValue(diagnostic, "available_end").slice(0, 10)}</td>
+                            <td class="num-cell">{diagnosticValue(diagnostic, "observation_count")}</td>
+                            <td class="num-cell">{fmt(Number(diagnostic.normalized_weight ?? 0), 3)}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              {/if}
               <div class="kpi-grid">
                 <article class="metric"><span>Total Return</span><strong>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
                 <article class="metric"><span>Annual Vol</span><strong>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
@@ -3832,6 +3949,44 @@
     font-size: 0.74rem;
     line-height: 1.35;
     white-space: pre;
+  }
+
+  .source-cell {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 8rem;
+  }
+
+  .source-cell span {
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.66rem;
+  }
+
+  .source-cell span.warning {
+    color: var(--warning);
+  }
+
+  .source-cell small {
+    color: var(--text-2);
+    font-size: 0.68rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .row-actions {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .alignment-diagnostics {
+    display: grid;
+    gap: 0.45rem;
+    border-top: 1px solid var(--divider);
+    padding-top: 0.45rem;
   }
 
   .table-panel-header {
