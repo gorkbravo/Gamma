@@ -333,10 +333,21 @@ Progress update - 2026-06-07:
 
 Still left:
 
-- Add a dedicated "Validate book" pre-run step instead of relying on the Compose action to perform validation.
+- ~~Add a dedicated "Validate book" pre-run step instead of relying on the Compose action to perform validation.~~ Completed 2026-06-10 (see below).
 - Expand source badges into the shared provider/provenance badge contract once that P1 shared component exists.
 - Add stronger session expiry/grouping for old handoffs so stale handoff queues cannot reappear as current-session context.
 - Add end-to-end tests for the exact audited book, long XLP / long BRK-B / short SMH, when the local market-data test fixtures can support those listed histories deterministically.
+
+Progress update - 2026-06-10 (branch `claude/audit-completion-v2`):
+
+- Completed (P0 leftover): Strategy Lab now has a dedicated "Validate Book" pre-run action backed by a new read-only `/research/strategy-lab/portfolio-validate` endpoint. It resolves every leg (provider, inline, Gamma object), reports per-leg source/window/observation diagnostics with signed normalized weights, applies the same fail-closed alignment gate as Compose, and renders a VALID/INVALID report (with a STALE marker when the draft changes after validation) without computing performance metrics.
+- Completed (P1 signed books): the Equity Research scope builder no longer silently drops negative weights. A signed basket is rejected visibly ("Scope Analysis is long-only... Nothing was dropped or analyzed"), the parsed long/short legs are shown with short legs highlighted, and a "Send Signed Book to Strategy Lab" action hands every leg off with its sign preserved (`default_side: short`, negative `default_weight` flow through the existing resolver).
+- Completed (P1 cross-tab state): returning to Equity Research no longer clobbers an active synthetic basket with the focal single ticker. The basket is preserved and the builder shows "Focus <SYM> is available but not loaded; the active basket is preserved" with an explicit load action. Explicit Sitrep handoffs still override the basket because they express direct intent.
+- Completed (P2 options): the Strategies mode has one-click templates (call spread, put spread, straddle, collar, risk reversal) built from the nearest priced strikes with per-leg warnings, and the Overview Payoff Glance defaults to a neutral straddle instead of a call.
+- Completed (P2 Copilot synthesis): research-card generation (180s) and operator runs (300s) now have request timeouts that surface as recoverable failure cards instead of a silent hang, and the prompt draft is preserved unless generation returns `ready`.
+- Verified live in-browser on 2026-06-10 with yfinance-backed providers: the exact audited signed book (long XLP / long BRK-B / short SMH) was rejected in Scope, handed to Strategy Lab with signs intact, resolved against ~940-observation listed histories, and validated through the new pre-run check; Fundamentals auto-loaded the focal NVDA company; Copilot synthesis auto-suggested the session's loaded contexts and generated a READY card.
+- Not verified live: IBKR-backed paths (live options chain for the strategy templates, IBKR account/market data). TWS was not running during verification, so the connection was refused on port 7496; rerun the Options live checks with TWS open.
+- Also fixed while validating: two stale navigation-test expectations for the current Options mode registry, and a `loadIvSurface` crash when a cached underlying-history payload has no symbol.
 
 Success criteria:
 
