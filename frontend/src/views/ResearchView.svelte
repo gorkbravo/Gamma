@@ -9,6 +9,7 @@
     GammaResearchObject,
     ResearchConstituent,
     ResearchCoverage,
+    StrategyLabBookValidation,
     StrategyLabCompositionResult,
     ResearchOverviewMetricId,
     ResearchOverviewNode,
@@ -102,6 +103,7 @@
   export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
   export let onComposeStrategy: (options: StrategyLabComposeOptions) => Promise<StrategyLabCompositionResult | null> | void = async () => null;
   export let onComposePortfolioStrategy: (options: StrategyLabPortfolioComposeOptions) => Promise<StrategyLabCompositionResult | null> | void = async () => null;
+  export let onValidatePortfolioStrategy: (options: StrategyLabPortfolioComposeOptions) => Promise<StrategyLabBookValidation | null> | void = async () => null;
   export let onCompare: (options: ResearchCompareOptions) => Promise<ResearchCompareResult | null> | void;
   export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
   export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
@@ -225,6 +227,7 @@
   let timeframe: ResearchTimeframe = "1Y";
   let selectedPreset = initialDraft.selectedPreset;
   let inputWarning = "";
+  let signedBookRows: Array<{ symbol: string; weight: number }> = [];
   let overviewUniverseId = "broad_us_market";
   let overviewTimeframe = "DoD";
   let overviewSortBy: ResearchOverviewSortId = "market_cap_desc";
@@ -269,6 +272,9 @@
     }
   ];
   let showHandoffReview = true;
+  let bookValidation: StrategyLabBookValidation | null = null;
+  let bookValidationLoading = false;
+  let bookValidationFingerprint = "";
   let acceptedStrategyLenses: GammaResearchObject[] = [];
   let acceptedStrategyOverlays: GammaResearchObject[] = [];
   let acceptedHandoffWarnings: string[] = [];
@@ -740,6 +746,35 @@
     strategyComposition = result ?? null;
   }
 
+  async function validatePortfolioDraft() {
+    const built = buildStrategyPortfolioLegInputs(portfolioDraftLegs, composerOptions);
+    const summary = summarizeStrategyPortfolioDraft(portfolioDraftLegs);
+    const blockingWarnings = [...summary.warnings, ...built.warnings];
+    if (!built.legs.length) {
+      strategyInputWarning = blockingWarnings[0] ?? "Add at least one portfolio leg with usable history.";
+      bookValidation = null;
+      return;
+    }
+    strategyInputWarning = blockingWarnings.join(" ");
+    bookValidationLoading = true;
+    try {
+      const result = await onValidatePortfolioStrategy({
+        name: portfolioName.trim() || "Strategy Lab Portfolio",
+        legs: built.legs,
+        lenses: acceptedStrategyLenses,
+        overlays: acceptedStrategyOverlays,
+        benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
+        benchmarkObject: null,
+        lookbackDays: portfolioLookbackDays,
+        minObservations: 5
+      });
+      bookValidation = result ?? null;
+      bookValidationFingerprint = JSON.stringify(built.legs);
+    } finally {
+      bookValidationLoading = false;
+    }
+  }
+
   function compareLegForSource(sourceId: string) {
     const option = compareOptions.find((item) => item.id === sourceId);
     if (!option) {
@@ -925,7 +960,19 @@
       return;
     }
 
-    const syntheticPositions = parsedSynthetic.filter((item) => Number.isFinite(item.weight) && item.weight > 0);
+    const parsedRows = parsedSynthetic.filter((item) => item.symbol && Number.isFinite(item.weight) && item.weight !== 0);
+    const shortRows = parsedRows.filter((item) => item.weight < 0);
+    if (shortRows.length) {
+      signedBookRows = parsedRows;
+      inputWarning =
+        `Scope Analysis is long-only. ${shortRows.length} short leg(s) detected: ` +
+        `${shortRows.map((item) => item.symbol).join(", ")}. ` +
+        "Nothing was dropped or analyzed. Send the signed book to Strategy Lab to analyze long/short.";
+      return;
+    }
+    signedBookRows = [];
+
+    const syntheticPositions = parsedRows;
     if (!syntheticPositions.length) {
       inputWarning = "Synthetic portfolio needs valid positive weights.";
       return;
@@ -940,9 +987,33 @@
     });
   }
 
+  function sendSignedBookToStrategyLab(open = false) {
+    if (!signedBookRows.length) {
+      return;
+    }
+    if (!onSendToStrategyLab) {
+      onOpenStrategyLab?.();
+      return;
+    }
+    signedBookRows.forEach((row, index) => {
+      const handoff = buildEquityStrategyHandoff(
+        {
+          symbol: row.symbol,
+          label: row.symbol,
+          sourceProvider: result?.source_provider ?? null
+        },
+        { sourceMode: String(mode), defaultWeight: row.weight }
+      );
+      void onSendToStrategyLab?.(handoff, { open: open && index === signedBookRows.length - 1 });
+    });
+    inputWarning = `Sent ${signedBookRows.length} signed leg(s) to Strategy Lab with weights preserved.`;
+    signedBookRows = [];
+  }
+
   function normalizeSynthetic() {
     syntheticText = normalizeSyntheticText(syntheticText);
     inputWarning = "";
+    signedBookRows = [];
   }
 
   function applyPreset(presetId: string) {
@@ -952,6 +1023,7 @@
     }
     syntheticText = preset.text;
     inputWarning = "";
+    signedBookRows = [];
   }
 
   function resetBuilder() {
@@ -962,6 +1034,7 @@
     syntheticText = presetBaskets[0]?.text ?? defaultPresetText;
     selectedPreset = presetBaskets[0]?.id ?? "index-core";
     inputWarning = "";
+    signedBookRows = [];
   }
 
   function slicePoints(points: TimeSeriesPoint[]) {
@@ -1313,11 +1386,28 @@
   });
   $: {
     const normalizedSelectedEquity = selectedEquitySymbol?.trim().toUpperCase() ?? "";
-    if (normalizedSelectedEquity && normalizedSelectedEquity !== primarySymbol.trim().toUpperCase()) {
-      scopeType = "single_ticker";
+    if (
+      normalizedSelectedEquity &&
+      scopeType === "single_ticker" &&
+      normalizedSelectedEquity !== primarySymbol.trim().toUpperCase()
+    ) {
       primarySymbol = normalizedSelectedEquity;
       inputWarning = "";
     }
+  }
+  $: focalScopeSuggestion =
+    scopeType === "synthetic_portfolio" && selectedEquitySymbol?.trim()
+      ? selectedEquitySymbol.trim().toUpperCase()
+      : "";
+
+  function loadFocalSingleTickerScope() {
+    if (!focalScopeSuggestion) {
+      return;
+    }
+    scopeType = "single_ticker";
+    primarySymbol = focalScopeSuggestion;
+    inputWarning = "";
+    signedBookRows = [];
   }
   $: savedResearchList = Array.isArray(savedItems) ? savedItems : [];
   $: activeStrategyResult = strategyComposition ?? strategyResult;
@@ -1374,6 +1464,12 @@
   $: compositionDiagnostics = (strategyComposition?.alignment_diagnostics ?? {}) as Record<string, unknown>;
   $: compositionDiagnosticLegs = Array.isArray(compositionDiagnostics.legs)
     ? (compositionDiagnostics.legs as Array<Record<string, unknown>>)
+    : [];
+  $: bookValidationStale =
+    bookValidation != null && bookValidationFingerprint !== JSON.stringify(portfolioDraftBuild.legs);
+  $: bookValidationDiagnostics = (bookValidation?.alignment_diagnostics ?? {}) as Record<string, unknown>;
+  $: bookValidationLegs = Array.isArray(bookValidationDiagnostics.legs)
+    ? (bookValidationDiagnostics.legs as Array<Record<string, unknown>>)
     : [];
   $: visibleResearchModes =
     surface === "equity" ? equityResearchModes : surface === "strategy" ? strategyResearchModes : legacyResearchModes;
@@ -2199,6 +2295,31 @@
           <p class="warning">{inputWarning}</p>
         {/if}
 
+        {#if signedBookRows.length && scopeType === "synthetic_portfolio"}
+          <div class="signed-book">
+            <div class="section-head">
+              <h4>Signed Book Detected</h4>
+              <small>{signedBookRows.filter((row) => row.weight > 0).length} long / {signedBookRows.filter((row) => row.weight < 0).length} short</small>
+            </div>
+            <div class="pill-list">
+              {#each signedBookRows as row}
+                <span class={row.weight < 0 ? "short-pill" : ""}>{row.symbol} {fmt(row.weight, 2)}</span>
+              {/each}
+            </div>
+            <div class="builder-actions compact">
+              <button type="button" on:click={() => sendSignedBookToStrategyLab(false)}>Send Signed Book to Strategy Lab</button>
+              <button type="button" class="ghost-button" on:click={() => sendSignedBookToStrategyLab(true)}>Send &amp; Open</button>
+            </div>
+          </div>
+        {/if}
+
+        {#if focalScopeSuggestion}
+          <p class="muted focal-hint">
+            Focus {focalScopeSuggestion} is available but not loaded; the active basket is preserved.
+            <button type="button" class="ghost-button" on:click={loadFocalSingleTickerScope}>Load {focalScopeSuggestion} scope</button>
+          </p>
+        {/if}
+
         <div class="builder-actions">
           <button on:click={submit} disabled={loading}>{loading ? "Running..." : "Run Analysis"}</button>
           <button type="button" class="ghost-button" on:click={resetBuilder}>Reset Builder</button>
@@ -2422,6 +2543,9 @@
               </div>
               <div class="builder-actions compact">
                 <button type="button" class="ghost-button" on:click={addPortfolioDraftLeg}>Add Leg</button>
+                <button type="button" class="ghost-button" on:click={validatePortfolioDraft} disabled={bookValidationLoading || strategyLoading || !portfolioDraftBuild.legs.length}>
+                  {bookValidationLoading ? "Validating..." : "Validate Book"}
+                </button>
                 <button type="button" on:click={composePortfolioDraft} disabled={strategyLoading || !portfolioDraftBuild.legs.length}>
                   {strategyLoading ? "Composing..." : "Compose Portfolio"}
                 </button>
@@ -2552,6 +2676,59 @@
                 {#each acceptedHandoffWarnings.slice(0, 5) as warning}
                   <span>{warning}</span>
                 {/each}
+              </div>
+            {/if}
+
+            {#if bookValidation}
+              <div class="book-validation" class:invalid={!bookValidation.valid}>
+                <div class="row">
+                  <span>Book Validation</span>
+                  <strong class={bookValidation.valid ? "positive" : "negative"}>
+                    {bookValidation.valid ? "VALID" : "INVALID"}{bookValidationStale ? " (STALE - draft changed, revalidate)" : ""}
+                  </strong>
+                </div>
+                <div class="row">
+                  <span>Usable Legs</span>
+                  <strong>{bookValidation.usable_leg_count} / {bookValidation.requested_leg_count}</strong>
+                </div>
+                <div class="row">
+                  <span>Aligned Obs</span>
+                  <strong>{bookValidation.aligned_observation_count} / min {bookValidation.min_observations}</strong>
+                </div>
+                {#if bookValidationLegs.length}
+                  <div class="table-wrap compact-table">
+                    <table>
+                      <thead>
+                        <tr><th>Leg</th><th>Source</th><th>Window</th><th class="num-cell">Obs</th><th class="num-cell">Norm Wt</th></tr>
+                      </thead>
+                      <tbody>
+                        {#each bookValidationLegs as diagnostic}
+                          <tr>
+                            <td>{diagnosticValue(diagnostic, "label")}</td>
+                            <td>{diagnosticValue(diagnostic, "source_provider")}</td>
+                            <td>{diagnosticValue(diagnostic, "available_start").slice(0, 10)} - {diagnosticValue(diagnostic, "available_end").slice(0, 10)}</td>
+                            <td class="num-cell">{diagnosticValue(diagnostic, "observation_count")}</td>
+                            <td class="num-cell">{fmt(Number(diagnostic.normalized_weight ?? 0), 3)}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                {/if}
+                {#if bookValidation.errors.length}
+                  <div class="warning-list compact-warning-list">
+                    {#each bookValidation.errors.slice(0, 6) as error}
+                      <span>{error}</span>
+                    {/each}
+                  </div>
+                {/if}
+                {#if bookValidation.warnings.length}
+                  <div class="warning-list compact-warning-list muted-warnings">
+                    {#each bookValidation.warnings.slice(0, 4) as warning}
+                      <span>{warning}</span>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {/if}
           </article>
@@ -3989,6 +4166,29 @@
     padding-top: 0.45rem;
   }
 
+  .book-validation {
+    display: grid;
+    gap: 0.45rem;
+    border-top: 1px solid var(--divider);
+    padding: 0.45rem 0.65rem 0.55rem;
+  }
+
+  .book-validation.invalid {
+    border-left: 2px solid var(--negative);
+  }
+
+  .book-validation strong.positive {
+    color: var(--positive);
+  }
+
+  .book-validation strong.negative {
+    color: var(--negative);
+  }
+
+  .muted-warnings span {
+    color: var(--text-2);
+  }
+
   .table-panel-header {
     padding: 0.35rem 0.65rem;
     border-bottom: 1px solid var(--divider);
@@ -4141,6 +4341,27 @@
     font-size: 0.7rem;
     text-transform: none;
     letter-spacing: normal;
+  }
+
+  .pill-list span.short-pill {
+    border-color: var(--negative);
+    color: var(--negative);
+  }
+
+  .signed-book {
+    border: 1px solid var(--divider);
+    background: var(--surface-0);
+    padding: 0.5rem 0.6rem;
+    margin-top: 0.5rem;
+  }
+
+  .focal-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    font-size: 0.74rem;
+    margin-top: 0.45rem;
   }
 
   /* ── Notes ── */

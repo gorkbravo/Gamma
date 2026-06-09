@@ -199,6 +199,20 @@ class StrategyLabPortfolioCompositionRequest:
 
 
 @dataclass(frozen=True)
+class StrategyLabBookValidationResult:
+    valid: bool
+    errors: list[str]
+    warnings: list[str]
+    usable_leg_count: int
+    requested_leg_count: int
+    aligned_observation_count: int
+    min_observations: int
+    alignment_diagnostics: dict[str, Any]
+    retrieved_at: datetime
+    origin: str = "research_service.strategy_lab.validate_book"
+
+
+@dataclass(frozen=True)
 class ResearchComparisonLeg:
     label: str
     object_type: str

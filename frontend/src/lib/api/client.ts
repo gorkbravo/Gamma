@@ -16,15 +16,35 @@ export async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...sessionHeaders()
-    },
-    body: JSON.stringify(body)
-  });
+export async function postJson<T>(
+  path: string,
+  body: unknown,
+  options: { timeoutMs?: number } = {}
+): Promise<T> {
+  const timeoutMs = options.timeoutMs;
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...sessionHeaders()
+      },
+      body: JSON.stringify(body),
+      signal: controller?.signal
+    });
+  } catch (error) {
+    if (controller?.signal.aborted) {
+      throw new Error(`Request timed out after ${Math.round((timeoutMs ?? 0) / 1000)}s: ${path}`);
+    }
+    throw error;
+  } finally {
+    if (timer != null) {
+      clearTimeout(timer);
+    }
+  }
   if (!response.ok) {
     throw await httpError(response);
   }

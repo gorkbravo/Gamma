@@ -12,7 +12,9 @@
   import type { IvLoadOptions } from "../lib/stores/app";
   import { buildOptionsStrategyHandoff } from "../lib/view-models/research";
   import {
+    STRATEGY_TEMPLATES,
     buildStrategyLegFromChainRow,
+    buildStrategyTemplateLegs,
     daysToExpiry,
     deriveChainGreekRows,
     deriveChainRows,
@@ -43,7 +45,9 @@
     type ImpliedProbabilitySurface,
     type OptionPayoffMatrix,
     type OptionsMode,
+    type PayoffGlanceType,
     type StrategyLeg,
+    type StrategyTemplateId,
     type StrategyGreekSummary,
     type StrategyPayoffMatrix,
     type StrategyOptionType,
@@ -74,7 +78,9 @@
   let selectedExpiry: string | null = null;
   let selectedOptionType: StrategyOptionType = "call";
   let selectedSide: StrategySide = "long";
-  let payoffOptionType: StrategyOptionType = "call";
+  // Neutral default: a straddle glance does not imply a directional recommendation.
+  let payoffOptionType: PayoffGlanceType = "straddle";
+  let strategyTemplateNotice = "";
   let selectedGreekMetric: GreekMetric = "delta";
   let strategyLegs: StrategyLeg[] = [];
   let surfaceModel: SurfaceModel = "linear";
@@ -372,6 +378,17 @@
 
   function clearStrategy() {
     strategyLegs = [];
+    strategyTemplateNotice = "";
+  }
+
+  function applyStrategyTemplate(templateId: StrategyTemplateId) {
+    const template = STRATEGY_TEMPLATES.find((item) => item.id === templateId);
+    const built = buildStrategyTemplateLegs(templateId, chainRows, result?.spot);
+    strategyLegs = built.legs;
+    const summary = template ? `${template.label} (${template.stance})` : templateId;
+    strategyTemplateNotice = built.warnings.length
+      ? `${summary}: ${built.warnings.join(" ")}`
+      : `${summary} built from the nearest priced strikes on ${formatExpiry(activeExpiry)}.`;
   }
 
   function payoffHeatStyle(pct: number, maxGain: number) {
@@ -592,6 +609,7 @@
                 <span class="payoff-meta">ATM {fmt(payoffMatrix.strike, 0)} {payoffOptionType} · @ {money(payoffMatrix.premium)} · IV {pct(payoffMatrix.sigma)} · % of max risk</span>
               {/if}
               <select bind:value={payoffOptionType} aria-label="Payoff option type">
+                <option value="straddle">Straddle (neutral)</option>
                 <option value="call">Call</option>
                 <option value="put">Put</option>
               </select>
@@ -1061,6 +1079,24 @@
           </div>
         </div>
 
+        <div class="template-bar" role="group" aria-label="One-click strategy templates">
+          <span class="template-label">Templates</span>
+          {#each STRATEGY_TEMPLATES as template}
+            <button
+              type="button"
+              class="template-button"
+              title={template.stance}
+              on:click={() => applyStrategyTemplate(template.id)}
+              disabled={!chainRows.length}
+            >
+              {template.label}
+            </button>
+          {/each}
+        </div>
+        {#if strategyTemplateNotice}
+          <p class="muted template-notice">{strategyTemplateNotice}</p>
+        {/if}
+
         <div class="strategy-layout">
           <div class="compact-table chain-pick">
             <table>
@@ -1257,6 +1293,32 @@
   .builder-controls {
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .template-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .template-label {
+    color: var(--text-2);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .template-button {
+    font-size: 0.72rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  .template-notice {
+    font-size: 0.72rem;
+    padding: 0.3rem 0 0;
   }
 
   .mode-row {

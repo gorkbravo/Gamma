@@ -92,6 +92,25 @@ export interface OverviewSnapshot {
 
 export type StrategyOptionType = "call" | "put";
 export type StrategySide = "long" | "short";
+// Payoff Glance defaults to a neutral straddle so the view does not imply a
+// directional recommendation (usability audit P2).
+export type PayoffGlanceType = StrategyOptionType | "straddle";
+
+export type StrategyTemplateId = "call_spread" | "put_spread" | "straddle" | "collar" | "risk_reversal";
+
+export interface StrategyTemplateDefinition {
+  id: StrategyTemplateId;
+  label: string;
+  stance: string;
+}
+
+export const STRATEGY_TEMPLATES: StrategyTemplateDefinition[] = [
+  { id: "call_spread", label: "Call Spread", stance: "bullish / defined risk" },
+  { id: "put_spread", label: "Put Spread", stance: "bearish / defined risk" },
+  { id: "straddle", label: "Straddle", stance: "neutral / long vol" },
+  { id: "collar", label: "Collar", stance: "hedge overlay vs long stock" },
+  { id: "risk_reversal", label: "Risk Reversal", stance: "bullish skew expression" },
+];
 export type GreekMetric = "delta" | "gamma" | "vega" | "theta" | "rho";
 
 export interface OptionGreekSet {
@@ -214,7 +233,7 @@ export interface OptionPayoffRow {
 }
 
 export interface OptionPayoffMatrix {
-  optionType: StrategyOptionType;
+  optionType: PayoffGlanceType;
   strike: number;
   premium: number;
   sigma: number;
@@ -416,6 +435,105 @@ export function buildStrategyLegFromChainRow(
     premium,
     quantity,
   };
+}
+
+function pricedTemplateRows(rows: ChainRow[] | null | undefined, optionType: StrategyOptionType): ChainRow[] {
+  return (rows ?? []).filter((row) => {
+    const premium = optionType === "call" ? row.callMidpoint : row.putMidpoint;
+    return Number.isFinite(row.strike) && premium != null && Number.isFinite(premium) && premium > 0;
+  });
+}
+
+function nearestTemplateRow(rows: ChainRow[], targetStrike: number): ChainRow | null {
+  return rows.length ? minBy(rows, (row) => Math.abs(row.strike - targetStrike)) : null;
+}
+
+function templateWingRow(
+  rows: ChainRow[],
+  optionType: StrategyOptionType,
+  direction: "upper" | "lower",
+  spot: number,
+  wingPct: number
+): ChainRow | null {
+  const priced = pricedTemplateRows(rows, optionType);
+  const candidates =
+    direction === "upper"
+      ? priced.filter((row) => row.strike > spot)
+      : priced.filter((row) => row.strike < spot);
+  if (!candidates.length) {
+    return null;
+  }
+  const target = direction === "upper" ? spot * (1 + wingPct) : spot * (1 - wingPct);
+  return nearestTemplateRow(candidates, target);
+}
+
+/**
+ * One-click strategy templates built from the visible chain. Strikes resolve to
+ * the nearest priced contracts (ATM and ~5% wings); rows without usable mid
+ * premiums are skipped with a warning instead of failing silently.
+ */
+export function buildStrategyTemplateLegs(
+  templateId: StrategyTemplateId,
+  rows: ChainRow[] | null | undefined,
+  spot: number | null | undefined,
+  wingPct = 0.05
+): { legs: StrategyLeg[]; warnings: string[] } {
+  const warnings: string[] = [];
+  if (!rows?.length || !(spot != null && Number.isFinite(spot) && spot > 0)) {
+    return { legs: [], warnings: ["A priced chain and spot are required to build a strategy template."] };
+  }
+
+  const pushLeg = (
+    legs: StrategyLeg[],
+    row: ChainRow | null,
+    optionType: StrategyOptionType,
+    side: StrategySide,
+    role: string
+  ) => {
+    if (!row) {
+      warnings.push(`No priced ${optionType} strike available for the ${role} leg.`);
+      return;
+    }
+    const leg = buildStrategyLegFromChainRow(row, optionType, side);
+    if (!leg) {
+      warnings.push(`The ${role} ${optionType} at ${row.strike} has no usable mid premium.`);
+      return;
+    }
+    legs.push({ ...leg, id: `${leg.id}-${role}` });
+  };
+
+  const legs: StrategyLeg[] = [];
+  const atmCall = selectPricedAtmRow(rows, spot, "call");
+  const atmPut = selectPricedAtmRow(rows, spot, "put");
+
+  if (templateId === "call_spread") {
+    pushLeg(legs, atmCall, "call", "long", "body");
+    pushLeg(legs, templateWingRow(rows, "call", "upper", spot, wingPct), "call", "short", "wing");
+  } else if (templateId === "put_spread") {
+    pushLeg(legs, atmPut, "put", "long", "body");
+    pushLeg(legs, templateWingRow(rows, "put", "lower", spot, wingPct), "put", "short", "wing");
+  } else if (templateId === "straddle") {
+    const both = (rows ?? []).filter(
+      (row) =>
+        row.callMidpoint != null && row.callMidpoint > 0 && row.putMidpoint != null && row.putMidpoint > 0
+    );
+    const atmBoth = nearestTemplateRow(both, spot) ?? atmCall ?? atmPut;
+    pushLeg(legs, atmBoth, "call", "long", "straddle call");
+    pushLeg(legs, atmBoth, "put", "long", "straddle put");
+  } else if (templateId === "collar") {
+    pushLeg(legs, templateWingRow(rows, "put", "lower", spot, wingPct), "put", "long", "protective");
+    pushLeg(legs, templateWingRow(rows, "call", "upper", spot, wingPct), "call", "short", "covered");
+    warnings.push("Collar legs assume an existing long underlying position; only the option legs are modeled here.");
+  } else if (templateId === "risk_reversal") {
+    pushLeg(legs, templateWingRow(rows, "put", "lower", spot, wingPct), "put", "short", "funding");
+    pushLeg(legs, templateWingRow(rows, "call", "upper", spot, wingPct), "call", "long", "upside");
+    warnings.push("Risk reversal includes a short put; downside risk below the put strike is undefined-risk.");
+  }
+
+  if (legs.length < 2) {
+    warnings.push("Template is incomplete; review the chain for missing quotes before relying on the payoff.");
+  }
+  return { legs, warnings };
 }
 
 export function deriveStrategyPayoff(
@@ -1063,7 +1181,7 @@ export function selectPricedAtmRow(
 export function deriveOptionPayoffMatrix(
   rows: ChainRow[] | null | undefined,
   spot: number | null | undefined,
-  optionType: StrategyOptionType,
+  optionType: PayoffGlanceType,
   maxDte: number | null | undefined = null,
   priceSteps = 15,
   dteSteps = 9,
@@ -1071,6 +1189,9 @@ export function deriveOptionPayoffMatrix(
 ): OptionPayoffMatrix | null {
   if (!(spot != null && Number.isFinite(spot) && spot > 0)) {
     return null;
+  }
+  if (optionType === "straddle") {
+    return deriveStraddlePayoffMatrix(rows, spot, maxDte, priceSteps, dteSteps, rate);
   }
   const atmRow = selectPricedAtmRow(rows, spot, optionType);
   if (!atmRow) {
@@ -1123,6 +1244,93 @@ export function deriveOptionPayoffMatrix(
 
   return {
     optionType,
+    strike,
+    premium,
+    sigma,
+    spot,
+    maxDte: boundedMaxDte,
+    dteColumns,
+    rows: matrixRows,
+    maxGain,
+  };
+}
+
+/**
+ * Neutral payoff glance: long ATM straddle (call + put at the strike nearest
+ * spot priced on both sides), repriced with a shared sigma across price/DTE.
+ */
+function deriveStraddlePayoffMatrix(
+  rows: ChainRow[] | null | undefined,
+  spot: number,
+  maxDte: number | null | undefined,
+  priceSteps: number,
+  dteSteps: number,
+  rate: number
+): OptionPayoffMatrix | null {
+  const priced = (rows ?? []).filter(
+    (row) =>
+      Number.isFinite(row.strike) &&
+      row.callMidpoint != null &&
+      Number.isFinite(row.callMidpoint) &&
+      row.callMidpoint > 0 &&
+      row.putMidpoint != null &&
+      Number.isFinite(row.putMidpoint) &&
+      row.putMidpoint > 0 &&
+      ((row.blendedIv ?? row.callIv ?? row.putIv) ?? 0) > 0
+  );
+  if (!priced.length) {
+    return null;
+  }
+  const atmRow = minBy(priced, (row) => Math.abs(row.strike - spot));
+  if (!atmRow) {
+    return null;
+  }
+  const strike = atmRow.strike;
+  const premium = (atmRow.callMidpoint as number) + (atmRow.putMidpoint as number);
+  const sigma = (atmRow.blendedIv ?? atmRow.callIv ?? atmRow.putIv) as number;
+  const resolvedMaxDte = maxDte ?? daysToExpiry(atmRow.expiry);
+  const boundedMaxDte = Math.max(0, Math.round(resolvedMaxDte));
+
+  const columnCount = Math.max(2, dteSteps);
+  const dteColumns: number[] = [];
+  for (let index = 0; index < columnCount; index += 1) {
+    const dte = Math.round(boundedMaxDte * (1 - index / (columnCount - 1)));
+    if (!dteColumns.includes(dte)) {
+      dteColumns.push(dte);
+    }
+  }
+  if (dteColumns[dteColumns.length - 1] !== 0) {
+    dteColumns.push(0);
+  }
+
+  const horizonYears = Math.max(boundedMaxDte / 365, 1 / 365);
+  const span = Math.min(0.6, Math.max(0.2, 2.5 * sigma * Math.sqrt(horizonYears)));
+  const rowCount = Math.max(7, priceSteps | 1);
+  const upper = spot * (1 + span);
+  const lower = spot * (1 - span);
+  const priceStep = (upper - lower) / Math.max(1, rowCount - 1);
+
+  const matrixRows: OptionPayoffRow[] = [];
+  let maxGain = 0.01;
+  for (let index = 0; index < rowCount; index += 1) {
+    const price = upper - priceStep * index;
+    const cells: OptionPayoffCell[] = dteColumns.map((dte) => {
+      const years = dte / 365;
+      const value =
+        blackScholesPrice("call", price, strike, years, sigma, rate) +
+        blackScholesPrice("put", price, strike, years, sigma, rate);
+      const pl = value - premium;
+      const pct = pl / premium;
+      if (pct > maxGain) {
+        maxGain = pct;
+      }
+      return { dte, pct, pl, value };
+    });
+    matrixRows.push({ price, movePct: price / spot - 1, cells });
+  }
+
+  return {
+    optionType: "straddle",
     strike,
     premium,
     sigma,

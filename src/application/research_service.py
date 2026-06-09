@@ -45,6 +45,7 @@ from src.models.research_lab import (
     StrategyLabAnalysisResult,
     StrategyLabCompositionLeg,
     StrategyLabCompositionRequest,
+    StrategyLabBookValidationResult,
     StrategyLabCompositionResult,
     StrategyLabPortfolioCompositionRequest,
     StrategyLabPortfolioLeg,
@@ -1477,6 +1478,145 @@ class ResearchService:
             lenses=result.lenses,
             overlays=result.overlays,
             alignment_diagnostics=result.alignment_diagnostics,
+        )
+
+    def validate_strategy_lab_portfolio(
+        self,
+        request: StrategyLabPortfolioCompositionRequest,
+    ) -> StrategyLabBookValidationResult:
+        """Dry-run book validation: resolve every leg, report per-leg source/coverage
+        diagnostics and shared-window alignment without computing performance metrics.
+        Resolution failures are collected per leg instead of failing the whole check."""
+        warnings: list[str] = [
+            "Validate Book is a read-only pre-run check; it does not compose, persist, or execute anything.",
+        ]
+        errors: list[str] = []
+        retrieved_at = now_utc()
+        min_observations = max(int(request.min_observations), 2)
+        lookback_days = max(int(request.lookback_days), min_observations)
+
+        usable: list[tuple[str, float, pd.Series, GammaResearchObject]] = []
+        leg_diagnostics: list[dict[str, Any]] = []
+        emitted_labels: set[str] = set()
+        for index, leg in enumerate(request.legs, start=1):
+            label = str(leg.label or "").strip() or str(leg.identifier or "").strip() or f"Leg {index}"
+            try:
+                weight = float(leg.weight)
+            except (TypeError, ValueError):
+                errors.append(f"{label}: weight is not a number.")
+                continue
+            if not math.isfinite(weight):
+                errors.append(f"{label}: weight must be a finite signed value.")
+                continue
+            if weight == 0:
+                warnings.append(f"{label}: zero weight; the leg is excluded from the book.")
+                continue
+            try:
+                research_object = self._research_object_from_portfolio_leg(
+                    leg,
+                    index=index,
+                    lookback_days=lookback_days,
+                    min_observations=min_observations,
+                    warnings=warnings,
+                )
+            except ResearchValidationError as exc:
+                errors.extend(f"{label}: {message}" for message in exc.errors)
+                continue
+            display_label = self._unique_composition_label(
+                str(research_object.display_name or label), emitted_labels
+            )
+            returns = self._returns_from_research_object(research_object, label=display_label, warnings=warnings)
+            if returns.empty:
+                errors.append(f"{display_label}: return stream is empty after cleaning.")
+                continue
+            usable.append((display_label, weight, returns, research_object))
+
+        gross_weight = sum(abs(weight) for _, weight, _, _ in usable)
+        leg_series: dict[str, pd.Series] = {}
+        for position, (display_label, weight, returns, research_object) in enumerate(usable, start=1):
+            internal_key = f"{position}:{research_object.object_id or display_label}"
+            leg_series[internal_key] = returns
+            leg_diagnostics.append(
+                self._composition_leg_diagnostic(
+                    research_object,
+                    label=display_label,
+                    raw_weight=weight,
+                    normalized_weight=(weight / gross_weight) if gross_weight > 0 else 0.0,
+                    returns=returns,
+                )
+            )
+
+        aligned = pd.DataFrame(leg_series).dropna(how="any") if leg_series else pd.DataFrame()
+        aligned_count = int(len(aligned))
+        if not usable:
+            errors.append("The book has no usable return legs; add at least one non-zero resolvable leg.")
+        elif aligned_count < min_observations:
+            errors.extend(
+                self._composition_alignment_failure_errors(
+                    leg_diagnostics,
+                    aligned_observations=aligned_count,
+                    min_observations=min_observations,
+                )
+            )
+
+        alignment_diagnostics: dict[str, Any] = {
+            "min_observations": min_observations,
+            "aligned_observation_count": aligned_count,
+            "aligned_start": self._series_boundary(aligned.index, first=True) if aligned_count else None,
+            "aligned_end": self._series_boundary(aligned.index, first=False) if aligned_count else None,
+            "legs": leg_diagnostics,
+            "benchmark": None,
+            "fail_closed": True,
+        }
+
+        benchmark_object = request.benchmark_object
+        benchmark_symbol = str(request.benchmark_symbol or "").strip().upper()
+        if benchmark_object is None and benchmark_symbol:
+            try:
+                benchmark_object = self._listed_history_object(
+                    label=f"{benchmark_symbol} Benchmark",
+                    identifier=benchmark_symbol,
+                    asset_class="benchmark",
+                    lookback_days=lookback_days,
+                    min_observations=min_observations,
+                    warnings=warnings,
+                    capabilities=["benchmark", "return_leg"],
+                )
+            except ResearchValidationError as exc:
+                warnings.extend(f"Benchmark {benchmark_symbol}: {message}" for message in exc.errors)
+                benchmark_object = None
+        if benchmark_object is not None:
+            benchmark_returns = self._returns_from_research_object(
+                benchmark_object,
+                label=benchmark_object.display_name or "Benchmark",
+                warnings=warnings,
+            )
+            alignment_diagnostics["benchmark"] = self._composition_leg_diagnostic(
+                benchmark_object,
+                label=benchmark_object.display_name or "Benchmark",
+                raw_weight=0.0,
+                normalized_weight=0.0,
+                returns=benchmark_returns,
+            )
+            if aligned_count:
+                overlap = aligned.join(benchmark_returns.to_frame("__benchmark__"), how="inner").dropna()
+                alignment_diagnostics["benchmark_overlap_count"] = int(len(overlap))
+                if len(overlap) < min_observations:
+                    warnings.append(
+                        "Benchmark overlap with the aligned book window is too thin; "
+                        "benchmark-relative metrics would be unavailable."
+                    )
+
+        return StrategyLabBookValidationResult(
+            valid=not errors,
+            errors=list(dict.fromkeys(errors)),
+            warnings=list(dict.fromkeys(warnings)),
+            usable_leg_count=len(usable),
+            requested_leg_count=len(request.legs),
+            aligned_observation_count=aligned_count,
+            min_observations=min_observations,
+            alignment_diagnostics=alignment_diagnostics,
+            retrieved_at=retrieved_at,
         )
 
     @staticmethod

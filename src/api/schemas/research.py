@@ -549,6 +549,34 @@ class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
         )
 
 
+class StrategyLabBookValidationResponseModel(BaseModel):
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    usable_leg_count: int = 0
+    requested_leg_count: int = 0
+    aligned_observation_count: int = 0
+    min_observations: int = 2
+    alignment_diagnostics: dict[str, Any] = Field(default_factory=dict)
+    retrieved_at: datetime
+    origin: str = "research_service.strategy_lab.validate_book"
+
+    @classmethod
+    def from_domain(cls, row) -> "StrategyLabBookValidationResponseModel":
+        return cls(
+            valid=row.valid,
+            errors=list(row.errors),
+            warnings=list(row.warnings),
+            usable_leg_count=row.usable_leg_count,
+            requested_leg_count=row.requested_leg_count,
+            aligned_observation_count=row.aligned_observation_count,
+            min_observations=row.min_observations,
+            alignment_diagnostics=dict(row.alignment_diagnostics),
+            retrieved_at=row.retrieved_at,
+            origin=row.origin,
+        )
+
+
 class ResearchComparisonLegRequestModel(BaseModel):
     label: str = Field(default="", max_length=128)
     object_type: str = Field(default="research_object", min_length=1, max_length=64)

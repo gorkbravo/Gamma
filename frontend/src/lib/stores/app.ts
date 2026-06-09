@@ -65,6 +65,7 @@ import type {
   SavedResearchDeleteResponse,
   SavedResearchItem,
   SavedResearchListResponse,
+  StrategyLabBookValidation,
   StrategyLabCompositionLegInput,
   StrategyLabCompositionResult,
   StrategyLabHandoffEnvelope,
@@ -652,6 +653,12 @@ function serializePositionSignature(snapshot: PortfolioSnapshot | null | undefin
     baseMarketValue: position.base_market_value ?? null
   }));
 }
+
+// Synthesis calls can be slow with several contexts attached, but a hung provider
+// request must surface as a recoverable failure card, not a silent reset.
+const COPILOT_GENERATION_TIMEOUT_MS = 180_000;
+// Operator runs execute multi-step tool plans and can legitimately take longer.
+const COPILOT_OPERATOR_TIMEOUT_MS = 300_000;
 
 const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   portfolio: "Portfolio",
@@ -1355,6 +1362,29 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     return result;
   } catch (error) {
     strategyLabComposition.set(null);
+    setError(error);
+    return null;
+  } finally {
+    setLoading("strategyLab", false);
+  }
+}
+
+export async function validateStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
+  setLoading("strategyLab", true);
+  try {
+    const result = await postJson<StrategyLabBookValidation>("/research/strategy-lab/portfolio-validate", {
+      name: options.name,
+      legs: options.legs,
+      lenses: options.lenses ?? [],
+      overlays: options.overlays ?? [],
+      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+      benchmark_object: options.benchmarkObject ?? null,
+      lookback_days: options.lookbackDays ?? 756,
+      min_observations: options.minObservations ?? 5
+    });
+    lastError.set("");
+    return result;
+  } catch (error) {
     setError(error);
     return null;
   } finally {
@@ -2705,13 +2735,17 @@ export async function loadCopilotResearchCard(
       ...(synthesis ? { synthesis } : {})
     };
 
-    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
+    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload, {
+      timeoutMs: COPILOT_GENERATION_TIMEOUT_MS
+    });
     const result = normalizeCopilotResearchCardResult(domain, rawResult);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
     lastError.set(result.status === "ready" ? "" : result.message ?? "Copilot failed.");
     return result;
   } catch (error) {
-    const message = errorMessage(error);
+    const message = errorMessage(error).includes("timed out")
+      ? `${errorMessage(error)}. Your prompt draft is preserved; retry or reduce the synthesis scope.`
+      : errorMessage(error);
     lastError.set(message);
     const result = buildCopilotFailureResult(domain, message);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
@@ -2855,7 +2889,9 @@ export async function executeCopilotOperatorPlan(
       context,
       ...(synthesis ? { synthesis } : {})
     };
-    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/operator-plan/execute", payload);
+    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/operator-plan/execute", payload, {
+      timeoutMs: COPILOT_OPERATOR_TIMEOUT_MS
+    });
     const result = normalizeCopilotResearchCardResult(domain, rawResult);
     copilotOperatorResult.set(result);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
@@ -3195,7 +3231,8 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
   const requestedSymbol = request.symbol.trim().toUpperCase();
   setLoading("iv", true);
   try {
-    if (requestedSymbol && get(ivUnderlyingHistory)?.symbol.trim().toUpperCase() !== requestedSymbol) {
+    const cachedHistorySymbol = String(get(ivUnderlyingHistory)?.symbol ?? "").trim().toUpperCase();
+    if (requestedSymbol && cachedHistorySymbol !== requestedSymbol) {
       ivUnderlyingHistory.set(null);
     }
     const activeSession = get(ivSession);

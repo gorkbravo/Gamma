@@ -617,6 +617,19 @@ export interface StrategyLabCompositionResult extends StrategyLabResult {
   alignment_diagnostics: Record<string, unknown>;
 }
 
+export interface StrategyLabBookValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  usable_leg_count: number;
+  requested_leg_count: number;
+  aligned_observation_count: number;
+  min_observations: number;
+  alignment_diagnostics: Record<string, unknown>;
+  retrieved_at: string;
+  origin: string;
+}
+
 export interface ResearchComparisonLegResult {
   label: string;
   object_type: string;
