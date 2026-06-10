@@ -60,6 +60,8 @@
   export let onDismissStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
   export let onClearStrategyLabHandoffs: (() => void) | undefined = undefined;
   export let onAcceptStrategyLabHandoff: ((id: string) => StrategyLabResolvedHandoff | null | void) | undefined = undefined;
+  export let onReviveStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
+  export let onClearStaleStrategyLabHandoffs: (() => void) | undefined = undefined;
 </script>
 
 <ResearchView
@@ -99,4 +101,6 @@
   {onDismissStrategyLabHandoff}
   {onClearStrategyLabHandoffs}
   {onAcceptStrategyLabHandoff}
+  {onReviveStrategyLabHandoff}
+  {onClearStaleStrategyLabHandoffs}
 />

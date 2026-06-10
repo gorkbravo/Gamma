@@ -471,6 +471,14 @@ export const loading = writable<Record<string, boolean>>({
 });
 
 const STRATEGY_LAB_HANDOFF_STORAGE_KEY = "gamma.strategyLab.handoffQueue.v1";
+// Restored handoffs older than this are grouped as an earlier session instead of
+// silently reappearing as current research context (usability audit P0 leftover).
+const STRATEGY_LAB_HANDOFF_STALE_MS = 24 * 60 * 60 * 1000;
+
+function isStaleStrategyLabHandoff(enqueuedAt: string): boolean {
+  const enqueued = Date.parse(enqueuedAt);
+  return !Number.isFinite(enqueued) || Date.now() - enqueued > STRATEGY_LAB_HANDOFF_STALE_MS;
+}
 
 function loadPersistedStrategyLabHandoffQueue(): StrategyLabHandoffQueueItem[] {
   if (typeof localStorage === "undefined") {
@@ -485,7 +493,18 @@ function loadPersistedStrategyLabHandoffQueue(): StrategyLabHandoffQueueItem[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed.filter(isStrategyLabHandoffQueueItem).slice(0, 20);
+    return parsed
+      .filter(isStrategyLabHandoffQueueItem)
+      .slice(0, 20)
+      .map((item) => {
+        const stale = item.stale || isStaleStrategyLabHandoff(item.enqueued_at);
+        if (!stale) {
+          return { ...item, stale: false };
+        }
+        // Drop any previously resolved payload so day-old return streams cannot be
+        // accepted into the composer without an explicit revive + re-resolve.
+        return { ...item, stale: true, status: "pending" as const, resolved: null };
+      });
   } catch {
     return [];
   }
@@ -1423,7 +1442,11 @@ export function enqueueAndOpenStrategyLab(handoff: StrategyLabHandoffEnvelope) {
 }
 
 export async function resolvePendingStrategyLabHandoffs() {
-  const pending = get(strategyLabHandoffQueue).filter((item) => item.status === "pending" || item.status === "error");
+  // Stale earlier-session items stay out of auto-resolution; the user can dismiss
+  // them or re-send the handoff from the source tab for fresh data.
+  const pending = get(strategyLabHandoffQueue).filter(
+    (item) => !item.stale && (item.status === "pending" || item.status === "error")
+  );
   if (!pending.length) {
     return get(strategyLabHandoffQueue);
   }
@@ -1478,6 +1501,21 @@ export function dismissStrategyLabHandoff(id: string) {
 
 export function clearStrategyLabHandoffs() {
   strategyLabHandoffQueue.set([]);
+}
+
+export function clearStaleStrategyLabHandoffs() {
+  strategyLabHandoffQueue.update((current) => current.filter((item) => !item.stale));
+}
+
+export function reviveStrategyLabHandoff(id: string) {
+  const now = new Date().toISOString();
+  strategyLabHandoffQueue.update((current) =>
+    current.map((item) =>
+      item.id === id
+        ? { ...item, stale: false, status: "pending", resolved: null, error: null, updated_at: now }
+        : item
+    )
+  );
 }
 
 export function acceptResolvedStrategyLabHandoff(id: string) {

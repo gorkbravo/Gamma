@@ -581,11 +581,24 @@ export function deriveStrategyPayoff(
     };
   });
   const payoffs = points.map((point) => point.payoff);
+  // Boundedness comes from the structure, not from any single short leg: only a
+  // net-short/net-long call tail is open-ended (price has no upper bound), while
+  // the downside extreme is the finite payoff at an underlying price of zero.
+  // A put spread is defined-risk even though it contains a short put.
+  const rightTailSlope = cleanLegs.reduce(
+    (sum, leg) => sum + (leg.optionType === "call" ? (leg.side === "long" ? 1 : -1) * leg.quantity : 0),
+    0
+  );
+  const payoffAtZero = cleanLegs.reduce((sum, leg) => {
+    const intrinsic = leg.optionType === "put" ? leg.strike : 0;
+    const signedIntrinsic = leg.side === "long" ? intrinsic - leg.premium : leg.premium - intrinsic;
+    return sum + signedIntrinsic * leg.quantity;
+  }, 0);
   return {
     points,
     netPremium,
-    maxProfit: cleanLegs.some((leg) => leg.optionType === "call" && leg.side === "short") ? null : Math.max(...payoffs, 0),
-    maxLoss: cleanLegs.some((leg) => leg.optionType === "put" && leg.side === "short") ? null : Math.min(...payoffs, 0),
+    maxProfit: rightTailSlope > 0 ? null : Math.max(...payoffs, payoffAtZero),
+    maxLoss: rightTailSlope < 0 ? null : Math.min(...payoffs, payoffAtZero),
     breakevens: cleanLegs.length ? deriveBreakevens(points) : [],
   };
 }

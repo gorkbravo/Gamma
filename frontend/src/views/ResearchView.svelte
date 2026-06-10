@@ -121,6 +121,8 @@
   export let onDismissStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
   export let onClearStrategyLabHandoffs: (() => void) | undefined = undefined;
   export let onAcceptStrategyLabHandoff: ((id: string) => StrategyLabResolvedHandoff | null | void) | undefined = undefined;
+  export let onReviveStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
+  export let onClearStaleStrategyLabHandoffs: (() => void) | undefined = undefined;
 
   type ChartMode =
     | "performance"
@@ -714,7 +716,7 @@
   }
 
   function acceptResolvedStrategyHandoffs() {
-    const resolvedItems = strategyLabHandoffs.filter((item) => item.resolved?.status === "resolved");
+    const resolvedItems = strategyLabHandoffs.filter((item) => !item.stale && item.resolved?.status === "resolved");
     if (!resolvedItems.length) {
       strategyInputWarning = "Resolve pending Strategy Lab handoffs before accepting them.";
       return;
@@ -1467,6 +1469,8 @@
     : [];
   $: bookValidationStale =
     bookValidation != null && bookValidationFingerprint !== JSON.stringify(portfolioDraftBuild.legs);
+  $: currentStrategyHandoffs = strategyLabHandoffs.filter((item) => !item.stale);
+  $: staleStrategyHandoffs = strategyLabHandoffs.filter((item) => item.stale);
   $: bookValidationDiagnostics = (bookValidation?.alignment_diagnostics ?? {}) as Record<string, unknown>;
   $: bookValidationLegs = Array.isArray(bookValidationDiagnostics.legs)
     ? (bookValidationDiagnostics.legs as Array<Record<string, unknown>>)
@@ -2479,10 +2483,10 @@
               <div class="handoff-strip">
                 <div class="title-block">
                   <p class="eyebrow">Inbound Handoffs</p>
-                  <h3>{strategyLabHandoffs.length} pending object{strategyLabHandoffs.length === 1 ? "" : "s"}</h3>
+                  <h3>{currentStrategyHandoffs.length} pending object{currentStrategyHandoffs.length === 1 ? "" : "s"}</h3>
                   <p class="muted">
-                    {strategyLabHandoffs.filter((item) => item.status === "resolved").length} resolved /
-                    {strategyLabHandoffs.filter((item) => item.status === "pending" || item.status === "error").length} awaiting resolver
+                    {currentStrategyHandoffs.filter((item) => item.status === "resolved").length} resolved /
+                    {currentStrategyHandoffs.filter((item) => item.status === "pending" || item.status === "error").length} awaiting resolver{staleStrategyHandoffs.length ? ` / ${staleStrategyHandoffs.length} from earlier sessions` : ""}
                   </p>
                 </div>
                 <div class="builder-actions compact">
@@ -2503,7 +2507,7 @@
 
               {#if showHandoffReview}
                 <div class="handoff-list">
-                  {#each strategyLabHandoffs as item}
+                  {#each currentStrategyHandoffs as item}
                     <div class="handoff-row">
                       <div>
                         <strong>{item.handoff.selected_entity.label}</strong>
@@ -2529,6 +2533,36 @@
                       {/if}
                     </div>
                   {/each}
+
+                  {#if staleStrategyHandoffs.length}
+                    <div class="stale-handoff-head">
+                      <div>
+                        <strong>Earlier Sessions</strong>
+                        <small>Expired handoffs are excluded from Resolve and Accept All. Revive one to re-resolve it with fresh data, or re-send it from the source tab.</small>
+                      </div>
+                      <button type="button" class="ghost-button" on:click={() => onClearStaleStrategyLabHandoffs?.()}>
+                        Clear Earlier
+                      </button>
+                    </div>
+                    {#each staleStrategyHandoffs as item}
+                      <div class="handoff-row stale-handoff-row">
+                        <div>
+                          <strong>{item.handoff.selected_entity.label}</strong>
+                          <small>
+                            {item.handoff.source_tab} / {item.handoff.asset_class} / enqueued {item.enqueued_at.slice(0, 10)}
+                          </small>
+                        </div>
+                        <div class="handoff-actions">
+                          <button type="button" class="ghost-button" on:click={() => onReviveStrategyLabHandoff?.(item.id)}>
+                            Revive
+                          </button>
+                          <button type="button" class="ghost-button" on:click={() => onDismissStrategyLabHandoff?.(item.id)}>
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    {/each}
+                  {/if}
                 </div>
               {/if}
             </article>
@@ -4272,6 +4306,32 @@
 
   .handoff-row:first-child {
     border-top: 0;
+  }
+
+  .stale-handoff-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    align-items: start;
+    padding: 0.5rem 0 0.25rem;
+    border-top: 1px solid var(--divider);
+  }
+
+  .stale-handoff-head strong {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-2);
+  }
+
+  .stale-handoff-head small {
+    display: block;
+    color: var(--text-2);
+    overflow-wrap: anywhere;
+  }
+
+  .stale-handoff-row {
+    opacity: 0.75;
   }
 
   .handoff-row strong,

@@ -267,6 +267,40 @@ describe("options surface view models", () => {
     expect(payoff.breakevens[0]).toBeCloseTo(103, 0);
   });
 
+  it("reports defined risk for spreads and open-ended tails only for net call exposure", () => {
+    const rows = deriveChainRows(makeSurface(), "20260515");
+
+    // Put spread: long 100P @ 3, short 95P @ 1 → defined risk on both sides.
+    const longPut = buildStrategyLegFromChainRow(rows[1], "put", "long");
+    const shortPut = buildStrategyLegFromChainRow(rows[0], "put", "short");
+    const putSpread = deriveStrategyPayoff([longPut!, shortPut!], 100, 9);
+    expect(putSpread.netPremium).toBeCloseTo(-2, 8);
+    expect(putSpread.maxLoss).toBeCloseTo(-2, 8);
+    expect(putSpread.maxProfit).toBeCloseTo(3, 8);
+
+    // Call spread: long 100C @ 3, short 105C @ 1 → also defined on both sides.
+    const longCall = buildStrategyLegFromChainRow(rows[1], "call", "long");
+    const shortCall = buildStrategyLegFromChainRow(rows[2], "call", "short");
+    const callSpread = deriveStrategyPayoff([longCall!, shortCall!], 100, 9);
+    expect(callSpread.maxLoss).toBeCloseTo(-2, 8);
+    expect(callSpread.maxProfit).toBeCloseTo(3, 8);
+
+    // Long call alone: unbounded upside, loss capped at premium.
+    const longCallOnly = deriveStrategyPayoff([longCall!], 100, 9);
+    expect(longCallOnly.maxProfit).toBeNull();
+    expect(longCallOnly.maxLoss).toBeCloseTo(-3, 8);
+
+    // Short call alone: unbounded loss, profit capped at premium.
+    const shortCallOnly = deriveStrategyPayoff([shortCall!], 100, 9);
+    expect(shortCallOnly.maxLoss).toBeNull();
+    expect(shortCallOnly.maxProfit).toBeCloseTo(1, 8);
+
+    // Short put alone: loss is large but bounded at an underlying price of zero.
+    const shortPutOnly = deriveStrategyPayoff([shortPut!], 100, 9);
+    expect(shortPutOnly.maxLoss).toBeCloseTo(-(95 - 1), 8);
+    expect(shortPutOnly.maxProfit).toBeCloseTo(1, 8);
+  });
+
   it("builds one-click strategy templates from the priced chain", () => {
     const surface = makeSurface();
     const rows = deriveChainRows(surface, "20260515");

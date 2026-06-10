@@ -3168,6 +3168,8 @@ export interface StrategyLabHandoffQueueItem {
   error: string | null;
   enqueued_at: string;
   updated_at: string;
+  /** Restored from an earlier session past the expiry window; excluded from auto-resolve. */
+  stale?: boolean;
 }
 
 export interface IvSurfaceCollection {

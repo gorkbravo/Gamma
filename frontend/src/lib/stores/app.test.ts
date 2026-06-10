@@ -66,8 +66,10 @@ import {
   loadPortfolioSnapshot,
   loadPredictionMarketScreener,
   clearStrategyLabHandoffs,
+  clearStaleStrategyLabHandoffs,
   dismissStrategyLabHandoff,
   enqueueStrategyLabHandoff,
+  reviveStrategyLabHandoff,
   loadResearchOverview,
   loadSavedResearch,
   previewCopilotThreadFingerprint,
@@ -1594,6 +1596,54 @@ describe("app store orchestration", () => {
 
     enqueueStrategyLabHandoff(handoff);
     clearStrategyLabHandoffs();
+    expect(get(strategyLabHandoffQueue)).toHaveLength(0);
+  });
+
+  it("excludes stale earlier-session handoffs from auto-resolution until revived", async () => {
+    const queued = enqueueStrategyLabHandoff({
+      source_tab: "equity_research",
+      source_mode: "scope_analysis",
+      intended_target_tab: "strategy_lab",
+      intended_target_mode: "composer",
+      selected_entity: {
+        entity_type: "equity_symbol",
+        label: "SMH",
+        normalized_id: "SMH",
+        provider_id: "SMH",
+        native_id: "SMH",
+        metadata: {}
+      },
+      resolver_capability: "return_leg",
+      asset_class: "equity",
+      value_kind: "return",
+      default_side: "short",
+      default_weight: -0.4,
+      selected_timeframe: null,
+      provider: "fixture",
+      source: null,
+      warnings: [],
+      normalized_ids: { symbol: "SMH" },
+      timestamp: "2026-06-01T00:00:00Z"
+    });
+    strategyLabHandoffQueue.update((current) =>
+      current.map((item) => (item.id === queued.id ? { ...item, stale: true } : item))
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await resolvePendingStrategyLabHandoffs();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    reviveStrategyLabHandoff(queued.id);
+    const revived = get(strategyLabHandoffQueue).find((item) => item.id === queued.id);
+    expect(revived?.stale).toBe(false);
+    expect(revived?.status).toBe("pending");
+    expect(revived?.resolved).toBeNull();
+
+    strategyLabHandoffQueue.update((current) =>
+      current.map((item) => (item.id === queued.id ? { ...item, stale: true } : item))
+    );
+    clearStaleStrategyLabHandoffs();
     expect(get(strategyLabHandoffQueue)).toHaveLength(0);
   });
 

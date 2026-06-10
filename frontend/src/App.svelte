@@ -25,6 +25,8 @@
     composeStrategyLab,
     composeStrategyLabPortfolio,
     validateStrategyLabPortfolio,
+    reviveStrategyLabHandoff,
+    clearStaleStrategyLabHandoffs,
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
@@ -2305,6 +2307,8 @@
             onDismissStrategyLabHandoff={dismissStrategyLabHandoff}
             onClearStrategyLabHandoffs={clearStrategyLabHandoffs}
             onAcceptStrategyLabHandoff={acceptResolvedStrategyLabHandoff}
+            onReviveStrategyLabHandoff={reviveStrategyLabHandoff}
+            onClearStaleStrategyLabHandoffs={clearStaleStrategyLabHandoffs}
           />
         {:else if $activeTab === "macro"}
           <svelte:component
