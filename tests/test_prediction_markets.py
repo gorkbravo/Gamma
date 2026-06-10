@@ -887,6 +887,38 @@ def test_prediction_market_service_and_api_routes(tmp_path):
     related = service.get_related_markets("polymarket:fed-cut")
     assert any(row.relationship in {"same_event", "conditional_consistency", "adjacent_threshold"} for row in related)
     assert any(row.relationship == "cross_venue_analog" for row in related)
+    assert all(row.relationship != "weak_venue_link" for row in related)
+
+    unrelated_sibling = _build_market(
+        market_id="polymarket:argentina-dollarize",
+        venue="polymarket",
+        provider_market_id="argentina-dollarize",
+        title="Will Argentina dollarize by 2027?",
+        event_title="Venue catch-all grouping",
+        category="Economics",
+        current_probability=0.18,
+        retrieved_at=base_time,
+    )
+    # Venue-metadata-only siblings must not be presented as semantically related
+    # when real matches exist (the audited GTA VI failure mode).
+    contaminated_service = PredictionMarketService(
+        adapters={
+            "polymarket": FakeAdapter("polymarket", [polymarket_record, polymarket_sibling, unrelated_sibling]),
+            "kalshi": FakeAdapter("kalshi", [kalshi_match]),
+        }
+    )
+    contaminated_related = contaminated_service.get_related_markets("polymarket:fed-cut")
+    assert all(row.market_id != "polymarket:argentina-dollarize" for row in contaminated_related)
+    assert any(row.relationship == "cross_venue_analog" for row in contaminated_related)
+
+    # When nothing semantically related exists, the venue-only link is still shown
+    # but clearly labeled as a weak match instead of pretending to be same-event.
+    weak_only_service = PredictionMarketService(
+        adapters={"polymarket": FakeAdapter("polymarket", [polymarket_record, unrelated_sibling])}
+    )
+    weak_related = weak_only_service.get_related_markets("polymarket:fed-cut")
+    assert [row.relationship for row in weak_related] == ["weak_venue_link"]
+    assert "Likely unrelated" in weak_related[0].note
 
     runtime = build_runtime(
         mock_mode=True,
