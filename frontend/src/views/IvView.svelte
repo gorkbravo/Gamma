@@ -1,5 +1,7 @@
 <script lang="ts">
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import { toProvenanceBadge } from "../lib/provenance";
   import type {
     CrossTabHandoffEnvelope,
     IvSessionStatus,
@@ -184,6 +186,8 @@
   $: optionsHistoryMatches = Boolean(
     historySymbol && underlyingHistory?.symbol?.trim().toUpperCase() === historySymbol
   );
+  $: surfaceBadge = result ? toProvenanceBadge(result) : null;
+  $: historyBadge = optionsHistoryMatches && underlyingHistory ? toProvenanceBadge(underlyingHistory) : null;
   $: researchHistoryMatches = Boolean(
     historySymbol && researchPrimarySymbol?.trim().toUpperCase() === historySymbol && underlyingPricePoints.length
   );
@@ -527,7 +531,7 @@
         <div><span>Term</span><strong class={rowClass(surfaceStats.termSlope)}>{signedPct(surfaceStats.termSlope)}</strong></div>
         <div><span>Expiry</span><strong>{formatExpiry(activeExpiry)}</strong></div>
         <div><span>Depth</span><strong>{depthLabel(result?.collection?.depth_preset)}</strong></div>
-        <div><span>Source</span><strong>{result?.freshness_label ?? "unknown"}</strong></div>
+        <div><span>Source</span><ProvenanceBadge data={surfaceBadge} /></div>
       </div>
     </div>
   </article>
@@ -961,10 +965,10 @@
         <article class="panel">
           <h3>Boundary</h3>
           <div class="metric-list">
-            <div><span>Implied Source</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
+            <div><span>Implied Source</span><ProvenanceBadge data={surfaceBadge} /></div>
             <div><span>Realized Source</span><strong>{realizedSourceLabel}</strong></div>
             <div><span>Price Points</span><strong>{realizedPricePoints.length}</strong></div>
-            <div><span>History Freshness</span><strong>{optionsHistoryMatches ? (underlyingHistory?.freshness_label ?? "unknown") : "N/A"}</strong></div>
+            <div><span>History Freshness</span><ProvenanceBadge data={historyBadge} /></div>
             <div><span>Front ATM IV</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
           </div>
         </article>
@@ -1212,7 +1216,7 @@
   <article class="panel diagnostics-panel">
     <h3>Data & Source</h3>
     <div class="metric-list">
-      <div><span>Provider</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
+      <div><span>Provider</span><ProvenanceBadge data={result ? toProvenanceBadge(result) : null} showTime={false} /></div>
       <div><span>Backend Mode</span><strong>{status?.market_data_mode ?? result?.collection?.market_data_mode ?? "unknown"}</strong></div>
       <div><span>Session</span><strong>{sessionLoading ? "loading" : session?.running ? "running" : session?.status_text ?? "idle"}</strong></div>
       <div><span>Fit</span><strong>{result?.surface_model_label ?? "Line interpolation"}</strong></div>

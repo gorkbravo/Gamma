@@ -4,7 +4,9 @@
   import BarRankChart, { type RankBarItem } from "../components/BarRankChart.svelte";
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import { toProvenanceBadge } from "../lib/provenance";
   import type {
     GammaResearchObject,
     ResearchConstituent,
@@ -1517,6 +1519,9 @@
   $: coverageMetrics = hasPopulatedCoverage(result?.coverage)
     ? (result?.coverage ?? emptyCoverage)
     : deriveCoverageFromResearchResult(result);
+  $: scopeBadge = result ? toProvenanceBadge(result) : null;
+  $: overviewBadge = overview ? toProvenanceBadge(overview) : null;
+  $: strategyBadge = activeStrategyResult ? toProvenanceBadge(activeStrategyResult) : null;
   $: weightBars = (result?.weights ?? []).map((weight) => ({
     label: weight.display_symbol ?? weight.symbol,
     value: weight.weight,
@@ -2018,6 +2023,7 @@
             </div>
           </div>
           <div class="stack">
+            <div class="row"><span>Source</span><ProvenanceBadge data={overviewBadge} /></div>
             <div class="row"><span>Coverage Type</span><strong>{overview?.coverage_label ?? "N/A"}</strong></div>
             <div class="row"><span>Missing / Thin</span><strong>{overview?.coverage?.missing_count ?? 0} / {overview?.coverage?.thin_history_symbols?.length ?? 0}</strong></div>
             <div class="row"><span>Observation Range</span><strong>{overview?.coverage?.min_observation_count ?? 0}-{overview?.coverage?.max_observation_count ?? 0}</strong></div>
@@ -2418,6 +2424,7 @@
         </div>
 
         <div class="stack">
+          <div class="row"><span>Source</span><ProvenanceBadge data={scopeBadge} /></div>
           <div class="row"><span>Observations</span><strong>{result?.observations_count ?? 0}</strong></div>
           <div class="row"><span>Benchmark Overlap</span><strong>{coverageMetrics.benchmark_overlap_count}</strong></div>
           <div class="row"><span>Missing Symbols</span><strong>{coverageMetrics.missing_symbols.length}</strong></div>
@@ -2893,8 +2900,12 @@
 
           <TimeSeriesChart series={strategyChartSeries} height={360} emptyMessage="Import CSV returns to populate Strategy Lab." />
           <div class="chart-foot">
-            <span>{activeStrategyResult ? `Source ${activeStrategyResult.source_provider} / ${activeStrategyResult.freshness_label}` : "Paste CSV text or map parsed rows from a file outside Gamma."}</span>
-            <strong>{activeStrategyResult ? shortDate(activeStrategyResult.retrieved_at) : "No import analyzed"}</strong>
+            {#if activeStrategyResult}
+              <ProvenanceBadge data={strategyBadge} label="Source" />
+            {:else}
+              <span>Paste CSV text or map parsed rows from a file outside Gamma.</span>
+              <strong>No import analyzed</strong>
+            {/if}
           </div>
         </article>
 

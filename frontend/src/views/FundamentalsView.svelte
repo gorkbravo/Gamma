@@ -2,6 +2,8 @@
   import { onDestroy, onMount } from "svelte";
   import SearchDropdown from "../components/SearchDropdown.svelte";
   import HeroPriceChart from "../components/HeroPriceChart.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import { toProvenanceBadge } from "../lib/provenance";
   import type {
     CrossTabHandoffEnvelope,
     FundamentalsDcfModel,
@@ -539,6 +541,20 @@
   $: dilutedSharesMetric = headlineMetrics.find((metric) => metric.metric_id === "diluted_shares") ?? null;
   $: companyAbout = companySummary(overview, currentCompany);
   $: companySummarySource = overview?.company_summary ?? null;
+  $: companyBadge = currentCompany ? toProvenanceBadge(currentCompany, { state: "historical" }) : null;
+  $: summaryBadge = companySummarySource
+    ? toProvenanceBadge(companySummarySource, {
+        provider: companySummarySource.model_provider ?? companySummarySource.source_provider,
+        state: companySummarySource.model_provider ? "model" : "historical",
+        retrievedAt: companySummarySource.generated_at ?? companySummarySource.retrieved_at
+      })
+    : null;
+  $: priceContextMetric = overview?.headline_metrics.find((metric) => metric.metric_id === "current_price") ?? null;
+  $: priceContextBadge = priceContextMetric ? toProvenanceBadge(priceContextMetric) : null;
+  $: derivedAnalyticsBadge =
+    overview?.peer_heatmap || dcfModel
+      ? toProvenanceBadge(overview?.peer_heatmap ?? dcfModel, { provider: "gamma", state: "derived" })
+      : null;
   $: companyInfoRows = [
     { label: "Exchange", value: currentCompany?.exchange ?? "N/A" },
     { label: "SIC", value: currentCompany?.sic_description ?? currentCompany?.sic ?? "N/A" },
@@ -870,22 +886,22 @@
           <div class="focus-list">
             <div class="focus-row compact-focus">
               <span class="focus-label">Company</span>
-              <strong>{currentCompany?.source_provider ?? "N/A"}</strong>
+              <ProvenanceBadge data={companyBadge} />
               <p>{currentCompany?.origin ?? "N/A"}</p>
             </div>
             <div class="focus-row compact-focus">
               <span class="focus-label">Business Summary</span>
-              <strong>{companySummarySource?.model_provider ?? "N/A"}</strong>
+              <ProvenanceBadge data={summaryBadge} />
               <p>{companySummarySource?.origin ?? "N/A"}</p>
             </div>
             <div class="focus-row compact-focus">
               <span class="focus-label">Price Context</span>
-              <strong>{overview?.headline_metrics.find((metric) => metric.metric_id === "current_price")?.source_provider ?? "N/A"}</strong>
-              <p>{overview?.headline_metrics.find((metric) => metric.metric_id === "current_price")?.origin ?? "N/A"}</p>
+              <ProvenanceBadge data={priceContextBadge} />
+              <p>{priceContextMetric?.origin ?? "N/A"}</p>
             </div>
             <div class="focus-row compact-focus">
               <span class="focus-label">Derived Analytics</span>
-              <strong>Gamma-owned</strong>
+              <ProvenanceBadge data={derivedAnalyticsBadge} />
               <p>{overview?.peer_heatmap?.transformation_note ?? dcfModel?.transformation_note ?? "N/A"}</p>
             </div>
           </div>

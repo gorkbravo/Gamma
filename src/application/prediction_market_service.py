@@ -17,7 +17,7 @@ from src.models.prediction_markets import (
 from src.services.prediction_market_adapters import PredictionMarketAdapter
 from src.utils.time import ensure_utc, now_utc
 
-ALLOWED_RESEARCH_CATEGORIES = ("Politics", "Finance", "Geopolitics", "Crypto", "Economy")
+ALLOWED_RESEARCH_CATEGORIES = ("Politics", "Finance", "Geopolitics", "Crypto", "Economy", "Tech/AI")
 EXACT_CATEGORY_ALIASES = {
     "politics": "Politics",
     "political": "Politics",
@@ -41,6 +41,11 @@ EXACT_CATEGORY_ALIASES = {
     "world": "Geopolitics",
     "international": "Geopolitics",
     "global affairs": "Geopolitics",
+    "tech": "Tech/AI",
+    "technology": "Tech/AI",
+    "science and technology": "Tech/AI",
+    "ai": "Tech/AI",
+    "artificial intelligence": "Tech/AI",
 }
 CATEGORY_EXCLUSION_KEYWORDS = (
     "nba",
@@ -72,6 +77,36 @@ CATEGORY_KEYWORD_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     ("Politics", ("election", "vote", "voter", "ballot", "president", "prime minister", "governor", "senate", "congress", "parliament", "coalition")),
     ("Economy", ("inflation", "cpi", "gdp", "recession", "unemployment", "fomc", "fed", "rates", "rate cut", "rate hike", "macro")),
     ("Finance", ("stock", "stocks", "equity", "equities", "earnings", "nasdaq", "s&p", "dow", "bond", "bonds", "yield", "treasury", "etf")),
+    # Tech/AI is matched last so markets that already canonicalize to an
+    # existing research category (e.g. "China AI chip sanctions" -> Geopolitics)
+    # keep their current label; this only catches markets that previously fell
+    # through to category None.
+    (
+        "Tech/AI",
+        (
+            "ai",
+            "artificial intelligence",
+            "agi",
+            "ai model",
+            "openai",
+            "anthropic",
+            "chatgpt",
+            "gpt",
+            "grok",
+            "llm",
+            "machine learning",
+            "deepmind",
+            "nvidia",
+            "semiconductor",
+            "semiconductors",
+            "robotics",
+            "self driving",
+            "spacex",
+            "starship",
+            "tech",
+            "technology",
+        ),
+    ),
 ]
 QUERY_STOPWORDS = {
     "a",
