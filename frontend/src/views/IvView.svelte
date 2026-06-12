@@ -1,5 +1,7 @@
 <script lang="ts">
   import CompactContextMenu from "../components/CompactContextMenu.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import { toProvenanceBadge } from "../lib/provenance";
   import type {
     CrossTabHandoffEnvelope,
     IvSessionStatus,
@@ -12,7 +14,9 @@
   import type { IvLoadOptions } from "../lib/stores/app";
   import { buildOptionsStrategyHandoff } from "../lib/view-models/research";
   import {
+    STRATEGY_TEMPLATES,
     buildStrategyLegFromChainRow,
+    buildStrategyTemplateLegs,
     daysToExpiry,
     deriveChainGreekRows,
     deriveChainRows,
@@ -43,7 +47,9 @@
     type ImpliedProbabilitySurface,
     type OptionPayoffMatrix,
     type OptionsMode,
+    type PayoffGlanceType,
     type StrategyLeg,
+    type StrategyTemplateId,
     type StrategyGreekSummary,
     type StrategyPayoffMatrix,
     type StrategyOptionType,
@@ -74,7 +80,9 @@
   let selectedExpiry: string | null = null;
   let selectedOptionType: StrategyOptionType = "call";
   let selectedSide: StrategySide = "long";
-  let payoffOptionType: StrategyOptionType = "call";
+  // Neutral default: a straddle glance does not imply a directional recommendation.
+  let payoffOptionType: PayoffGlanceType = "straddle";
+  let strategyTemplateNotice = "";
   let selectedGreekMetric: GreekMetric = "delta";
   let strategyLegs: StrategyLeg[] = [];
   let surfaceModel: SurfaceModel = "linear";
@@ -178,6 +186,8 @@
   $: optionsHistoryMatches = Boolean(
     historySymbol && underlyingHistory?.symbol?.trim().toUpperCase() === historySymbol
   );
+  $: surfaceBadge = result ? toProvenanceBadge(result) : null;
+  $: historyBadge = optionsHistoryMatches && underlyingHistory ? toProvenanceBadge(underlyingHistory) : null;
   $: researchHistoryMatches = Boolean(
     historySymbol && researchPrimarySymbol?.trim().toUpperCase() === historySymbol && underlyingPricePoints.length
   );
@@ -372,6 +382,17 @@
 
   function clearStrategy() {
     strategyLegs = [];
+    strategyTemplateNotice = "";
+  }
+
+  function applyStrategyTemplate(templateId: StrategyTemplateId) {
+    const template = STRATEGY_TEMPLATES.find((item) => item.id === templateId);
+    const built = buildStrategyTemplateLegs(templateId, chainRows, result?.spot);
+    strategyLegs = built.legs;
+    const summary = template ? `${template.label} (${template.stance})` : templateId;
+    strategyTemplateNotice = built.warnings.length
+      ? `${summary}: ${built.warnings.join(" ")}`
+      : `${summary} built from the nearest priced strikes on ${formatExpiry(activeExpiry)}.`;
   }
 
   function payoffHeatStyle(pct: number, maxGain: number) {
@@ -510,7 +531,7 @@
         <div><span>Term</span><strong class={rowClass(surfaceStats.termSlope)}>{signedPct(surfaceStats.termSlope)}</strong></div>
         <div><span>Expiry</span><strong>{formatExpiry(activeExpiry)}</strong></div>
         <div><span>Depth</span><strong>{depthLabel(result?.collection?.depth_preset)}</strong></div>
-        <div><span>Source</span><strong>{result?.freshness_label ?? "unknown"}</strong></div>
+        <div><span>Source</span><ProvenanceBadge data={surfaceBadge} /></div>
       </div>
     </div>
   </article>
@@ -592,6 +613,7 @@
                 <span class="payoff-meta">ATM {fmt(payoffMatrix.strike, 0)} {payoffOptionType} · @ {money(payoffMatrix.premium)} · IV {pct(payoffMatrix.sigma)} · % of max risk</span>
               {/if}
               <select bind:value={payoffOptionType} aria-label="Payoff option type">
+                <option value="straddle">Straddle (neutral)</option>
                 <option value="call">Call</option>
                 <option value="put">Put</option>
               </select>
@@ -943,10 +965,10 @@
         <article class="panel">
           <h3>Boundary</h3>
           <div class="metric-list">
-            <div><span>Implied Source</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
+            <div><span>Implied Source</span><ProvenanceBadge data={surfaceBadge} /></div>
             <div><span>Realized Source</span><strong>{realizedSourceLabel}</strong></div>
             <div><span>Price Points</span><strong>{realizedPricePoints.length}</strong></div>
-            <div><span>History Freshness</span><strong>{optionsHistoryMatches ? (underlyingHistory?.freshness_label ?? "unknown") : "N/A"}</strong></div>
+            <div><span>History Freshness</span><ProvenanceBadge data={historyBadge} /></div>
             <div><span>Front ATM IV</span><strong>{pct(surfaceStats.frontAtmIv)}</strong></div>
           </div>
         </article>
@@ -1060,6 +1082,24 @@
             <button type="button" on:click={clearStrategy} disabled={!strategyLegs.length}>Clear</button>
           </div>
         </div>
+
+        <div class="template-bar" role="group" aria-label="One-click strategy templates">
+          <span class="template-label">Templates</span>
+          {#each STRATEGY_TEMPLATES as template}
+            <button
+              type="button"
+              class="template-button"
+              title={template.stance}
+              on:click={() => applyStrategyTemplate(template.id)}
+              disabled={!chainRows.length}
+            >
+              {template.label}
+            </button>
+          {/each}
+        </div>
+        {#if strategyTemplateNotice}
+          <p class="muted template-notice">{strategyTemplateNotice}</p>
+        {/if}
 
         <div class="strategy-layout">
           <div class="compact-table chain-pick">
@@ -1176,7 +1216,7 @@
   <article class="panel diagnostics-panel">
     <h3>Data & Source</h3>
     <div class="metric-list">
-      <div><span>Provider</span><strong>{result?.source_provider ?? "N/A"}</strong></div>
+      <div><span>Provider</span><ProvenanceBadge data={result ? toProvenanceBadge(result) : null} showTime={false} /></div>
       <div><span>Backend Mode</span><strong>{status?.market_data_mode ?? result?.collection?.market_data_mode ?? "unknown"}</strong></div>
       <div><span>Session</span><strong>{sessionLoading ? "loading" : session?.running ? "running" : session?.status_text ?? "idle"}</strong></div>
       <div><span>Fit</span><strong>{result?.surface_model_label ?? "Line interpolation"}</strong></div>
@@ -1257,6 +1297,32 @@
   .builder-controls {
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .template-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .template-label {
+    color: var(--text-2);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .template-button {
+    font-size: 0.72rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  .template-notice {
+    font-size: 0.72rem;
+    padding: 0.3rem 0 0;
   }
 
   .mode-row {

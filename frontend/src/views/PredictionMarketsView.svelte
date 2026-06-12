@@ -47,7 +47,7 @@
   let autoRunReady = false;
   let lastSubmittedKey = "";
   let currentScreenerKey = "";
-  const availableCategories = ["Politics", "Finance", "Geopolitics", "Crypto", "Economy"];
+  const availableCategories = ["Politics", "Finance", "Geopolitics", "Crypto", "Economy", "Tech/AI"];
   const fallbackVenueStatus = (venue: VenueKey): PredictionVenueStatus => ({
     venue,
     status: "unknown",

@@ -24,6 +24,9 @@
     acceptResolvedStrategyLabHandoff,
     composeStrategyLab,
     composeStrategyLabPortfolio,
+    validateStrategyLabPortfolio,
+    reviveStrategyLabHandoff,
+    clearStaleStrategyLabHandoffs,
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
@@ -1338,6 +1341,14 @@
     }
 
     if (tab === "equity_research") {
+      // Preserve an in-progress synthetic basket: returning to Equity Research must not
+      // replace the active scope with the focal single ticker (usability audit P1).
+      if (
+        $researchDraft.scopeType === "synthetic_portfolio" ||
+        $researchResult?.scope_type === "synthetic_portfolio"
+      ) {
+        return false;
+      }
       equityResearchMode = "scope_analysis";
       await ensureSingleEquityResearch(symbol);
       return true;
@@ -1967,6 +1978,16 @@
 
     await selectTab(targetTab);
 
+    if (targetTab === "equity_research" && handoff.symbol) {
+      // An explicit handoff overrides any preserved basket; passive tab returns do not.
+      equityResearchMode = "scope_analysis";
+      await ensureSingleEquityResearch(handoff.symbol);
+      if (handoff.targetMode) {
+        await selectModeById(targetTab, handoff.targetMode);
+      }
+      return;
+    }
+
     if (targetTab === "commodities") {
       const nextMode = (handoff.targetMode ?? "overview") as CommodityMode;
       commoditiesMode = nextMode;
@@ -2270,6 +2291,7 @@
             onAnalyzeStrategy={analyzeStrategyLab}
             onComposeStrategy={composeStrategyLab}
             onComposePortfolioStrategy={composeStrategyLabPortfolio}
+            onValidatePortfolioStrategy={validateStrategyLabPortfolio}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}
@@ -2285,6 +2307,8 @@
             onDismissStrategyLabHandoff={dismissStrategyLabHandoff}
             onClearStrategyLabHandoffs={clearStrategyLabHandoffs}
             onAcceptStrategyLabHandoff={acceptResolvedStrategyLabHandoff}
+            onReviveStrategyLabHandoff={reviveStrategyLabHandoff}
+            onClearStaleStrategyLabHandoffs={clearStaleStrategyLabHandoffs}
           />
         {:else if $activeTab === "macro"}
           <svelte:component

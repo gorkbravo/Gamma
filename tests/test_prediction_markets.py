@@ -887,6 +887,38 @@ def test_prediction_market_service_and_api_routes(tmp_path):
     related = service.get_related_markets("polymarket:fed-cut")
     assert any(row.relationship in {"same_event", "conditional_consistency", "adjacent_threshold"} for row in related)
     assert any(row.relationship == "cross_venue_analog" for row in related)
+    assert all(row.relationship != "weak_venue_link" for row in related)
+
+    unrelated_sibling = _build_market(
+        market_id="polymarket:argentina-dollarize",
+        venue="polymarket",
+        provider_market_id="argentina-dollarize",
+        title="Will Argentina dollarize by 2027?",
+        event_title="Venue catch-all grouping",
+        category="Economics",
+        current_probability=0.18,
+        retrieved_at=base_time,
+    )
+    # Venue-metadata-only siblings must not be presented as semantically related
+    # when real matches exist (the audited GTA VI failure mode).
+    contaminated_service = PredictionMarketService(
+        adapters={
+            "polymarket": FakeAdapter("polymarket", [polymarket_record, polymarket_sibling, unrelated_sibling]),
+            "kalshi": FakeAdapter("kalshi", [kalshi_match]),
+        }
+    )
+    contaminated_related = contaminated_service.get_related_markets("polymarket:fed-cut")
+    assert all(row.market_id != "polymarket:argentina-dollarize" for row in contaminated_related)
+    assert any(row.relationship == "cross_venue_analog" for row in contaminated_related)
+
+    # When nothing semantically related exists, the venue-only link is still shown
+    # but clearly labeled as a weak match instead of pretending to be same-event.
+    weak_only_service = PredictionMarketService(
+        adapters={"polymarket": FakeAdapter("polymarket", [polymarket_record, unrelated_sibling])}
+    )
+    weak_related = weak_only_service.get_related_markets("polymarket:fed-cut")
+    assert [row.relationship for row in weak_related] == ["weak_venue_link"]
+    assert "Likely unrelated" in weak_related[0].note
 
     runtime = build_runtime(
         mock_mode=True,
@@ -1161,6 +1193,98 @@ def test_prediction_market_service_prefers_macro_headline_over_generic_tags():
     rows = service.screener(PredictionMarketScreenerRequest(category="Economy", status="open", limit=10)).markets
 
     assert [row.category for row in rows] == ["Economy"]
+
+
+def test_prediction_market_service_canonicalizes_ai_markets_to_tech_ai_category():
+    base_time = datetime(2026, 6, 10, 20, 0, 0)
+    ai_record = _build_market(
+        market_id="polymarket:openai-top-model",
+        venue="polymarket",
+        provider_market_id="openai-top-model",
+        title="Will OpenAI have a #1 AI model by June 30?",
+        event_title="Which company has the top AI model?",
+        category="AI",
+        series_title="AI Models",
+        current_probability=0.62,
+        retrieved_at=base_time,
+    )
+    geopolitics_record = _build_market(
+        market_id="polymarket:china-ai-chips",
+        venue="polymarket",
+        provider_market_id="china-ai-chips",
+        title="Will China restrict AI chip exports this year?",
+        event_title="China AI chip export controls",
+        category="AI",
+        series_title="Export Controls",
+        current_probability=0.31,
+        retrieved_at=base_time,
+    )
+
+    class TechAdapter:
+        provider = "polymarket"
+
+        def list_markets(
+            self,
+            *,
+            status: str = "open",
+            limit: int = 50,
+            force_refresh: bool = False,
+            query: str = "",
+            category: str | None = None,
+        ):
+            return [ai_record, geopolitics_record][:limit]
+
+        def get_market(self, provider_market_id: str):
+            for record in (ai_record, geopolitics_record):
+                if record.provider_market_id == provider_market_id:
+                    return record
+            return None
+
+        def get_history(self, market: PredictionMarketRecord):
+            return []
+
+        def get_wallet_summary(self, market: PredictionMarketRecord):
+            return WalletSummary(
+                market_id=market.market_id,
+                venue=self.provider,
+                concentration_hhi=None,
+                top_participant_share=None,
+                total_trades=0,
+                total_notional=0.0,
+                source_provider=self.provider,
+                retrieved_at=base_time,
+                origin=f"{self.provider}.wallets",
+            )
+
+        def list_event_markets(self, market: PredictionMarketRecord, *, limit: int = 12):
+            return []
+
+        def build_calibration_summary(self, *, sample_size: int = 30):
+            return CalibrationSummary(
+                venue=self.provider,
+                sample_size=0,
+                source_provider=self.provider,
+                retrieved_at=base_time,
+                origin=f"{self.provider}.calibration",
+            )
+
+    service = PredictionMarketService(adapters={"polymarket": TechAdapter()})
+
+    # The AI-model market previously canonicalized to category None and was
+    # unreachable through the screener category filter.
+    tech_rows = service.screener(
+        PredictionMarketScreenerRequest(category="Tech/AI", status="open", limit=10)
+    ).markets
+    assert [row.market_id for row in tech_rows] == ["polymarket:openai-top-model"]
+    assert [row.category for row in tech_rows] == ["Tech/AI"]
+
+    # Markets that already canonicalize to an existing research category keep
+    # their label; Tech/AI keywords are matched last.
+    geo_rows = service.screener(
+        PredictionMarketScreenerRequest(category="Geopolitics", status="open", limit=10)
+    ).markets
+    assert [row.market_id for row in geo_rows] == ["polymarket:china-ai-chips"]
+    assert [row.category for row in geo_rows] == ["Geopolitics"]
 
 
 def test_prediction_market_service_filters_expired_open_markets_and_marks_detail_broken():

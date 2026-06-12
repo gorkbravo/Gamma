@@ -14,6 +14,7 @@ from src.api.schemas.research import (
     SavedResearchListResponseModel,
     StrategyLabAnalyzeRequestModel,
     StrategyLabAnalyzeResponseModel,
+    StrategyLabBookValidationResponseModel,
     StrategyLabCompositionRequestModel,
     StrategyLabCompositionResponseModel,
     StrategyLabHandoffResolveRequestModel,
@@ -108,6 +109,16 @@ def compose_strategy_lab_portfolio(
     except ResearchValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
     return StrategyLabCompositionResponseModel.from_domain(result)
+
+
+@router.post("/research/strategy-lab/portfolio-validate", response_model=StrategyLabBookValidationResponseModel)
+def validate_strategy_lab_portfolio(
+    payload: StrategyLabPortfolioCompositionRequestModel,
+    request: Request,
+) -> StrategyLabBookValidationResponseModel:
+    runtime = request.app.state.runtime
+    result = runtime.research_service.validate_strategy_lab_portfolio(payload.to_domain())
+    return StrategyLabBookValidationResponseModel.from_domain(result)
 
 
 @router.post("/research/strategy-lab/resolve-handoff", response_model=StrategyLabResolvedHandoffModel)

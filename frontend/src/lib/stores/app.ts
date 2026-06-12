@@ -65,6 +65,7 @@ import type {
   SavedResearchDeleteResponse,
   SavedResearchItem,
   SavedResearchListResponse,
+  StrategyLabBookValidation,
   StrategyLabCompositionLegInput,
   StrategyLabCompositionResult,
   StrategyLabHandoffEnvelope,
@@ -470,6 +471,14 @@ export const loading = writable<Record<string, boolean>>({
 });
 
 const STRATEGY_LAB_HANDOFF_STORAGE_KEY = "gamma.strategyLab.handoffQueue.v1";
+// Restored handoffs older than this are grouped as an earlier session instead of
+// silently reappearing as current research context (usability audit P0 leftover).
+const STRATEGY_LAB_HANDOFF_STALE_MS = 24 * 60 * 60 * 1000;
+
+function isStaleStrategyLabHandoff(enqueuedAt: string): boolean {
+  const enqueued = Date.parse(enqueuedAt);
+  return !Number.isFinite(enqueued) || Date.now() - enqueued > STRATEGY_LAB_HANDOFF_STALE_MS;
+}
 
 function loadPersistedStrategyLabHandoffQueue(): StrategyLabHandoffQueueItem[] {
   if (typeof localStorage === "undefined") {
@@ -484,7 +493,18 @@ function loadPersistedStrategyLabHandoffQueue(): StrategyLabHandoffQueueItem[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed.filter(isStrategyLabHandoffQueueItem).slice(0, 20);
+    return parsed
+      .filter(isStrategyLabHandoffQueueItem)
+      .slice(0, 20)
+      .map((item) => {
+        const stale = item.stale || isStaleStrategyLabHandoff(item.enqueued_at);
+        if (!stale) {
+          return { ...item, stale: false };
+        }
+        // Drop any previously resolved payload so day-old return streams cannot be
+        // accepted into the composer without an explicit revive + re-resolve.
+        return { ...item, stale: true, status: "pending" as const, resolved: null };
+      });
   } catch {
     return [];
   }
@@ -652,6 +672,12 @@ function serializePositionSignature(snapshot: PortfolioSnapshot | null | undefin
     baseMarketValue: position.base_market_value ?? null
   }));
 }
+
+// Synthesis calls can be slow with several contexts attached, but a hung provider
+// request must surface as a recoverable failure card, not a silent reset.
+const COPILOT_GENERATION_TIMEOUT_MS = 180_000;
+// Operator runs execute multi-step tool plans and can legitimately take longer.
+const COPILOT_OPERATOR_TIMEOUT_MS = 300_000;
 
 const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   portfolio: "Portfolio",
@@ -1362,6 +1388,29 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
   }
 }
 
+export async function validateStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
+  setLoading("strategyLab", true);
+  try {
+    const result = await postJson<StrategyLabBookValidation>("/research/strategy-lab/portfolio-validate", {
+      name: options.name,
+      legs: options.legs,
+      lenses: options.lenses ?? [],
+      overlays: options.overlays ?? [],
+      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+      benchmark_object: options.benchmarkObject ?? null,
+      lookback_days: options.lookbackDays ?? 756,
+      min_observations: options.minObservations ?? 5
+    });
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("strategyLab", false);
+  }
+}
+
 export function enqueueStrategyLabHandoff(handoff: StrategyLabHandoffEnvelope) {
   const now = new Date().toISOString();
   const entityId = handoff.selected_entity.normalized_id || handoff.selected_entity.native_id || handoff.selected_entity.label;
@@ -1393,7 +1442,11 @@ export function enqueueAndOpenStrategyLab(handoff: StrategyLabHandoffEnvelope) {
 }
 
 export async function resolvePendingStrategyLabHandoffs() {
-  const pending = get(strategyLabHandoffQueue).filter((item) => item.status === "pending" || item.status === "error");
+  // Stale earlier-session items stay out of auto-resolution; the user can dismiss
+  // them or re-send the handoff from the source tab for fresh data.
+  const pending = get(strategyLabHandoffQueue).filter(
+    (item) => !item.stale && (item.status === "pending" || item.status === "error")
+  );
   if (!pending.length) {
     return get(strategyLabHandoffQueue);
   }
@@ -1448,6 +1501,21 @@ export function dismissStrategyLabHandoff(id: string) {
 
 export function clearStrategyLabHandoffs() {
   strategyLabHandoffQueue.set([]);
+}
+
+export function clearStaleStrategyLabHandoffs() {
+  strategyLabHandoffQueue.update((current) => current.filter((item) => !item.stale));
+}
+
+export function reviveStrategyLabHandoff(id: string) {
+  const now = new Date().toISOString();
+  strategyLabHandoffQueue.update((current) =>
+    current.map((item) =>
+      item.id === id
+        ? { ...item, stale: false, status: "pending", resolved: null, error: null, updated_at: now }
+        : item
+    )
+  );
 }
 
 export function acceptResolvedStrategyLabHandoff(id: string) {
@@ -2705,13 +2773,17 @@ export async function loadCopilotResearchCard(
       ...(synthesis ? { synthesis } : {})
     };
 
-    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload);
+    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload, {
+      timeoutMs: COPILOT_GENERATION_TIMEOUT_MS
+    });
     const result = normalizeCopilotResearchCardResult(domain, rawResult);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
     lastError.set(result.status === "ready" ? "" : result.message ?? "Copilot failed.");
     return result;
   } catch (error) {
-    const message = errorMessage(error);
+    const message = errorMessage(error).includes("timed out")
+      ? `${errorMessage(error)}. Your prompt draft is preserved; retry or reduce the synthesis scope.`
+      : errorMessage(error);
     lastError.set(message);
     const result = buildCopilotFailureResult(domain, message);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
@@ -2855,7 +2927,9 @@ export async function executeCopilotOperatorPlan(
       context,
       ...(synthesis ? { synthesis } : {})
     };
-    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/operator-plan/execute", payload);
+    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/operator-plan/execute", payload, {
+      timeoutMs: COPILOT_OPERATOR_TIMEOUT_MS
+    });
     const result = normalizeCopilotResearchCardResult(domain, rawResult);
     copilotOperatorResult.set(result);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
@@ -3195,7 +3269,8 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
   const requestedSymbol = request.symbol.trim().toUpperCase();
   setLoading("iv", true);
   try {
-    if (requestedSymbol && get(ivUnderlyingHistory)?.symbol.trim().toUpperCase() !== requestedSymbol) {
+    const cachedHistorySymbol = String(get(ivUnderlyingHistory)?.symbol ?? "").trim().toUpperCase();
+    if (requestedSymbol && cachedHistorySymbol !== requestedSymbol) {
       ivUnderlyingHistory.set(null);
     }
     const activeSession = get(ivSession);

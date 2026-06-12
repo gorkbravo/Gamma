@@ -246,6 +246,17 @@ export function buildEquityStrategyHandoff(
   const symbol = equity.symbol.trim().toUpperCase();
   const label = (equity.label ?? symbol).trim() || symbol;
   const provider = equity.sourceProvider || equity.provider || null;
+  const defaultWeight = options.defaultWeight ?? 0.1;
+  const isShort = Number.isFinite(defaultWeight) && defaultWeight < 0;
+  const warnings = [
+    "Equity Research handoffs enter Strategy Lab as read-only research return streams, not execution instructions.",
+    "Resolver will load listed-market history and preserve provider coverage warnings before composing."
+  ];
+  if (isShort) {
+    warnings.push(
+      "Negative weight marks this as a short research leg; Strategy Lab normalizes signed exposures by gross exposure."
+    );
+  }
   return {
     source_tab: "equity_research",
     source_mode: options.sourceMode ?? "scope_analysis",
@@ -265,18 +276,15 @@ export function buildEquityStrategyHandoff(
     resolver_capability: "return_leg",
     asset_class: "equity",
     value_kind: "return",
-    default_side: "long",
-    default_weight: options.defaultWeight ?? 0.1,
+    default_side: isShort ? "short" : "long",
+    default_weight: defaultWeight,
     selected_timeframe: null,
     provider,
     source: {
       origin: equity.origin ?? null,
       retrieved_at: equity.retrievedAt ?? null
     },
-    warnings: [
-      "Equity Research handoffs enter Strategy Lab as read-only research return streams, not execution instructions.",
-      "Resolver will load listed-market history and preserve provider coverage warnings before composing."
-    ],
+    warnings,
     normalized_ids: {
       symbol
     },

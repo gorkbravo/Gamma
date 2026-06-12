@@ -4,6 +4,8 @@ __pycache__/
 *.py[cod]
 
 .env
+.env.local
+*.env.local
 
 cache/
 data/
@@ -16,6 +18,7 @@ data/
 dist/
 build/
 target/
+node_modules/
 *.egg-info/
 frontend/node_modules/
 frontend/.vite/

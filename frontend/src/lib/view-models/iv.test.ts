@@ -4,6 +4,7 @@ import {
   blackScholesPrice,
   blackScholesGreeks,
   buildStrategyLegFromChainRow,
+  buildStrategyTemplateLegs,
   deriveChainRows,
   daysToExpiry,
   deriveChainGreekRows,
@@ -264,6 +265,88 @@ describe("options surface view models", () => {
     expect(payoff.points[0].payoff).toBeCloseTo(-3, 8);
     expect(payoff.points.at(-1)?.payoff).toBeGreaterThan(0);
     expect(payoff.breakevens[0]).toBeCloseTo(103, 0);
+  });
+
+  it("reports defined risk for spreads and open-ended tails only for net call exposure", () => {
+    const rows = deriveChainRows(makeSurface(), "20260515");
+
+    // Put spread: long 100P @ 3, short 95P @ 1 → defined risk on both sides.
+    const longPut = buildStrategyLegFromChainRow(rows[1], "put", "long");
+    const shortPut = buildStrategyLegFromChainRow(rows[0], "put", "short");
+    const putSpread = deriveStrategyPayoff([longPut!, shortPut!], 100, 9);
+    expect(putSpread.netPremium).toBeCloseTo(-2, 8);
+    expect(putSpread.maxLoss).toBeCloseTo(-2, 8);
+    expect(putSpread.maxProfit).toBeCloseTo(3, 8);
+
+    // Call spread: long 100C @ 3, short 105C @ 1 → also defined on both sides.
+    const longCall = buildStrategyLegFromChainRow(rows[1], "call", "long");
+    const shortCall = buildStrategyLegFromChainRow(rows[2], "call", "short");
+    const callSpread = deriveStrategyPayoff([longCall!, shortCall!], 100, 9);
+    expect(callSpread.maxLoss).toBeCloseTo(-2, 8);
+    expect(callSpread.maxProfit).toBeCloseTo(3, 8);
+
+    // Long call alone: unbounded upside, loss capped at premium.
+    const longCallOnly = deriveStrategyPayoff([longCall!], 100, 9);
+    expect(longCallOnly.maxProfit).toBeNull();
+    expect(longCallOnly.maxLoss).toBeCloseTo(-3, 8);
+
+    // Short call alone: unbounded loss, profit capped at premium.
+    const shortCallOnly = deriveStrategyPayoff([shortCall!], 100, 9);
+    expect(shortCallOnly.maxLoss).toBeNull();
+    expect(shortCallOnly.maxProfit).toBeCloseTo(1, 8);
+
+    // Short put alone: loss is large but bounded at an underlying price of zero.
+    const shortPutOnly = deriveStrategyPayoff([shortPut!], 100, 9);
+    expect(shortPutOnly.maxLoss).toBeCloseTo(-(95 - 1), 8);
+    expect(shortPutOnly.maxProfit).toBeCloseTo(1, 8);
+  });
+
+  it("builds one-click strategy templates from the priced chain", () => {
+    const surface = makeSurface();
+    const rows = deriveChainRows(surface, "20260515");
+
+    const callSpread = buildStrategyTemplateLegs("call_spread", rows, surface.spot);
+    expect(callSpread.legs).toHaveLength(2);
+    expect(callSpread.legs[0]).toMatchObject({ optionType: "call", side: "long", strike: 100 });
+    expect(callSpread.legs[1]).toMatchObject({ optionType: "call", side: "short", strike: 105 });
+
+    const putSpread = buildStrategyTemplateLegs("put_spread", rows, surface.spot);
+    expect(putSpread.legs[0]).toMatchObject({ optionType: "put", side: "long", strike: 100 });
+    expect(putSpread.legs[1]).toMatchObject({ optionType: "put", side: "short", strike: 95 });
+
+    const straddle = buildStrategyTemplateLegs("straddle", rows, surface.spot);
+    expect(straddle.legs.map((leg) => leg.optionType).sort()).toEqual(["call", "put"]);
+    expect(new Set(straddle.legs.map((leg) => leg.strike)).size).toBe(1);
+    expect(straddle.legs.every((leg) => leg.side === "long")).toBe(true);
+
+    const collar = buildStrategyTemplateLegs("collar", rows, surface.spot);
+    expect(collar.legs[0]).toMatchObject({ optionType: "put", side: "long", strike: 95 });
+    expect(collar.legs[1]).toMatchObject({ optionType: "call", side: "short", strike: 105 });
+    expect(collar.warnings.some((warning) => warning.includes("long underlying"))).toBe(true);
+
+    const riskReversal = buildStrategyTemplateLegs("risk_reversal", rows, surface.spot);
+    expect(riskReversal.legs[0]).toMatchObject({ optionType: "put", side: "short", strike: 95 });
+    expect(riskReversal.legs[1]).toMatchObject({ optionType: "call", side: "long", strike: 105 });
+    expect(riskReversal.warnings.some((warning) => warning.includes("short put"))).toBe(true);
+
+    const empty = buildStrategyTemplateLegs("call_spread", [], surface.spot);
+    expect(empty.legs).toHaveLength(0);
+    expect(empty.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("derives a neutral straddle payoff glance", () => {
+    const surface = makeSurface();
+    const rows = deriveChainRows(surface, "20260515");
+    const matrix = deriveOptionPayoffMatrix(rows, surface.spot, "straddle", 24, 9, 5);
+
+    expect(matrix).not.toBeNull();
+    expect(matrix!.optionType).toBe("straddle");
+    expect(matrix!.strike).toBe(100);
+    expect(matrix!.premium).toBeCloseTo(6, 8);
+    const expiryColumnIndex = matrix!.dteColumns.indexOf(0);
+    const topRow = matrix!.rows[0];
+    const expiryValue = topRow.cells[expiryColumnIndex].value;
+    expect(expiryValue).toBeCloseTo(Math.abs(topRow.price - 100), 6);
   });
 
   it("builds a strategy payoff matrix from selected legs and chain IV", () => {

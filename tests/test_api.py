@@ -362,6 +362,118 @@ def test_strategy_lab_portfolio_compose_endpoint_accepts_signed_inline_legs(tmp_
         runtime.shutdown()
 
 
+def test_strategy_lab_portfolio_validate_endpoint_reports_valid_signed_book(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/research/strategy-lab/portfolio-validate",
+            json={
+                "name": "Signed Book Check",
+                "benchmark_symbol": None,
+                "lookback_days": 252,
+                "legs": [
+                    {
+                        "label": "Long stream",
+                        "asset_class": "custom_stream",
+                        "identifier": "LONG",
+                        "weight": 0.7,
+                        "value_kind": "return",
+                        "return_points": [
+                            {"timestamp": "2026-01-05T00:00:00Z", "value": 0.010},
+                            {"timestamp": "2026-01-06T00:00:00Z", "value": 0.004},
+                            {"timestamp": "2026-01-07T00:00:00Z", "value": -0.002},
+                            {"timestamp": "2026-01-08T00:00:00Z", "value": 0.006},
+                            {"timestamp": "2026-01-09T00:00:00Z", "value": 0.003},
+                        ],
+                    },
+                    {
+                        "label": "Short hedge stream",
+                        "asset_class": "custom_stream",
+                        "identifier": "HEDGE",
+                        "weight": -0.3,
+                        "value_kind": "return",
+                        "return_points": [
+                            {"timestamp": "2026-01-05T00:00:00Z", "value": 0.01},
+                            {"timestamp": "2026-01-06T00:00:00Z", "value": 0.01},
+                            {"timestamp": "2026-01-07T00:00:00Z", "value": -0.01},
+                            {"timestamp": "2026-01-08T00:00:00Z", "value": 0.00},
+                            {"timestamp": "2026-01-09T00:00:00Z", "value": 0.02},
+                        ],
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["valid"] is True
+        assert payload["origin"] == "research_service.strategy_lab.validate_book"
+        assert payload["usable_leg_count"] == 2
+        assert payload["requested_leg_count"] == 2
+        assert payload["aligned_observation_count"] == 5
+        assert payload["errors"] == []
+        legs = payload["alignment_diagnostics"]["legs"]
+        assert len(legs) == 2
+        assert legs[0]["raw_weight"] == 0.7
+        assert legs[1]["raw_weight"] == -0.3
+        assert legs[1]["normalized_weight"] < 0
+        assert "pre-run check" in " ".join(payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
+def test_strategy_lab_portfolio_validate_endpoint_fails_closed_on_thin_overlap(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/research/strategy-lab/portfolio-validate",
+            json={
+                "name": "Thin Overlap Book",
+                "benchmark_symbol": None,
+                "lookback_days": 252,
+                "legs": [
+                    {
+                        "label": "Long stream",
+                        "asset_class": "custom_stream",
+                        "identifier": "LONG",
+                        "weight": 0.5,
+                        "value_kind": "return",
+                        "return_points": [
+                            {"timestamp": "2026-01-05T00:00:00Z", "value": 0.010},
+                            {"timestamp": "2026-01-06T00:00:00Z", "value": 0.004},
+                            {"timestamp": "2026-01-07T00:00:00Z", "value": -0.002},
+                            {"timestamp": "2026-01-08T00:00:00Z", "value": 0.006},
+                            {"timestamp": "2026-01-09T00:00:00Z", "value": 0.003},
+                        ],
+                    },
+                    {
+                        "label": "Disjoint stream",
+                        "asset_class": "custom_stream",
+                        "identifier": "DISJOINT",
+                        "weight": -0.5,
+                        "value_kind": "return",
+                        "return_points": [
+                            {"timestamp": "2026-03-02T00:00:00Z", "value": 0.01},
+                            {"timestamp": "2026-03-03T00:00:00Z", "value": -0.01},
+                            {"timestamp": "2026-03-04T00:00:00Z", "value": 0.02},
+                            {"timestamp": "2026-03-05T00:00:00Z", "value": 0.00},
+                            {"timestamp": "2026-03-06T00:00:00Z", "value": 0.01},
+                        ],
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["valid"] is False
+        assert payload["aligned_observation_count"] == 0
+        assert any("shared return observations" in error for error in payload["errors"])
+        assert len(payload["alignment_diagnostics"]["legs"]) == 2
+    finally:
+        runtime.shutdown()
+
+
 def test_strategy_lab_resolve_handoff_endpoint_returns_prediction_market_draft(tmp_path):
     client, runtime = _build_test_client(tmp_path)
 

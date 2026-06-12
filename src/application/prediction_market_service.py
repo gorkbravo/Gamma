@@ -17,7 +17,7 @@ from src.models.prediction_markets import (
 from src.services.prediction_market_adapters import PredictionMarketAdapter
 from src.utils.time import ensure_utc, now_utc
 
-ALLOWED_RESEARCH_CATEGORIES = ("Politics", "Finance", "Geopolitics", "Crypto", "Economy")
+ALLOWED_RESEARCH_CATEGORIES = ("Politics", "Finance", "Geopolitics", "Crypto", "Economy", "Tech/AI")
 EXACT_CATEGORY_ALIASES = {
     "politics": "Politics",
     "political": "Politics",
@@ -41,6 +41,11 @@ EXACT_CATEGORY_ALIASES = {
     "world": "Geopolitics",
     "international": "Geopolitics",
     "global affairs": "Geopolitics",
+    "tech": "Tech/AI",
+    "technology": "Tech/AI",
+    "science and technology": "Tech/AI",
+    "ai": "Tech/AI",
+    "artificial intelligence": "Tech/AI",
 }
 CATEGORY_EXCLUSION_KEYWORDS = (
     "nba",
@@ -72,6 +77,36 @@ CATEGORY_KEYWORD_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     ("Politics", ("election", "vote", "voter", "ballot", "president", "prime minister", "governor", "senate", "congress", "parliament", "coalition")),
     ("Economy", ("inflation", "cpi", "gdp", "recession", "unemployment", "fomc", "fed", "rates", "rate cut", "rate hike", "macro")),
     ("Finance", ("stock", "stocks", "equity", "equities", "earnings", "nasdaq", "s&p", "dow", "bond", "bonds", "yield", "treasury", "etf")),
+    # Tech/AI is matched last so markets that already canonicalize to an
+    # existing research category (e.g. "China AI chip sanctions" -> Geopolitics)
+    # keep their current label; this only catches markets that previously fell
+    # through to category None.
+    (
+        "Tech/AI",
+        (
+            "ai",
+            "artificial intelligence",
+            "agi",
+            "ai model",
+            "openai",
+            "anthropic",
+            "chatgpt",
+            "gpt",
+            "grok",
+            "llm",
+            "machine learning",
+            "deepmind",
+            "nvidia",
+            "semiconductor",
+            "semiconductors",
+            "robotics",
+            "self driving",
+            "spacex",
+            "starship",
+            "tech",
+            "technology",
+        ),
+    ),
 ]
 QUERY_STOPWORDS = {
     "a",
@@ -102,7 +137,12 @@ RELATED_RELATIONSHIP_PRIORITY = {
     "conditional_consistency": 2,
     "same_event": 3,
     "topic_similarity": 4,
+    "weak_venue_link": 5,
 }
+# Same-event siblings need at least this much lexical overlap to be presented as
+# semantically related; below it they are venue-metadata artifacts (a venue can
+# group unrelated markets under one event/series id).
+RELATED_SAME_EVENT_MIN_SIMILARITY = 0.25
 
 
 @dataclass(frozen=True)
@@ -253,7 +293,14 @@ class PredictionMarketService:
 
         for sibling in adapter.list_event_markets(detail, limit=max(limit * 2, 8)):
             candidate = self._annotate_market_freshness(self._canonicalize_market(sibling))
-            if not self._is_research_relevant_market(candidate) or candidate.market_id in seen:
+            if candidate.market_id in seen:
+                continue
+            # Same-event siblings inherit the opened market's research relevance:
+            # venue event endpoints often omit category/tag metadata, and the viewed
+            # market already passed the screener gate. Deliberately excluded topics
+            # (sportsbook-style markets) are still dropped, and the similarity gate
+            # below demotes semantically unrelated venue artifacts.
+            if self._is_excluded_topic_market(candidate):
                 continue
             relationship, note, similarity = self._describe_related_market(detail, candidate, same_event=True)
             seen.add(candidate.market_id)
@@ -314,7 +361,14 @@ class PredictionMarketService:
                 )
 
         related_rows.sort(key=lambda item: item[0])
-        return [row for _, row in related_rows[:limit]]
+        ordered = [row for _, row in related_rows]
+        # Venue-metadata-only links are shown (clearly labeled) only when nothing
+        # semantically related exists, so an AI-policy market no longer surfaces
+        # unrelated venue-event artifacts ahead of or alongside real matches.
+        strong = [row for row in ordered if row.relationship != "weak_venue_link"]
+        if strong:
+            return strong[:limit]
+        return ordered[: min(limit, 3)]
 
     def get_calibration_summary(self, market_id: str, *, sample_size: int = 30) -> CalibrationSummary | None:
         adapter = self._resolve_adapter(market_id)
@@ -421,8 +475,18 @@ class PredictionMarketService:
                 "Same event cluster with overlapping event tokens; compare these contracts for internal consistency.",
                 similarity,
             )
+        if same_event and similarity >= RELATED_SAME_EVENT_MIN_SIMILARITY:
+            return (
+                "same_event",
+                f"Shares the venue event and overlapping topic tokens (similarity {similarity:.2f}).",
+                similarity,
+            )
         if same_event:
-            return "same_event", "Linked by shared venue event metadata.", similarity
+            return (
+                "weak_venue_link",
+                f"Shares venue event metadata only; no topical overlap detected (similarity {similarity:.2f}). Likely unrelated.",
+                similarity,
+            )
         return "topic_similarity", f"Cross-venue topical overlap score {similarity:.2f}.", similarity
 
     def _related_sort_key(self, relationship: str, similarity: float, candidate: PredictionMarketRecord) -> tuple[int, float, float, str]:
@@ -467,6 +531,12 @@ class PredictionMarketService:
 
     def _is_research_relevant_market(self, row: PredictionMarketRecord) -> bool:
         return row.category in ALLOWED_RESEARCH_CATEGORIES
+
+    def _is_excluded_topic_market(self, row: PredictionMarketRecord) -> bool:
+        headline_text = " ".join(
+            filter(None, [row.title, row.subtitle, row.event_title, row.series_title])
+        ).lower()
+        return self._contains_excluded_topic(_normalize_text(headline_text))
 
     def _canonicalize_rows(self, rows: list[PredictionMarketRecord]) -> list[PredictionMarketRecord]:
         return [self._canonicalize_market(row) for row in rows]

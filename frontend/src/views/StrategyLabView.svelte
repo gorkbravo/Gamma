@@ -5,6 +5,7 @@
     ResearchOverviewResponse,
     ResearchResult,
     SavedResearchItem,
+    StrategyLabBookValidation,
     StrategyLabCompositionResult,
     StrategyLabHandoffEnvelope,
     StrategyLabHandoffQueueItem,
@@ -41,6 +42,7 @@
   export let onAnalyzeStrategy: (options: StrategyLabAnalyzeOptions) => Promise<StrategyLabResult | null> | void;
   export let onComposeStrategy: (options: StrategyLabComposeOptions) => Promise<StrategyLabCompositionResult | null> | void;
   export let onComposePortfolioStrategy: (options: StrategyLabPortfolioComposeOptions) => Promise<StrategyLabCompositionResult | null> | void;
+  export let onValidatePortfolioStrategy: (options: StrategyLabPortfolioComposeOptions) => Promise<StrategyLabBookValidation | null> | void = async () => null;
   export let onCompare: (options: ResearchCompareOptions) => Promise<ResearchCompareResult | null> | void;
   export let onLoadSaved: () => Promise<SavedResearchItem[]> | void;
   export let onSaveResearch: (options: SavedResearchCreateOptions) => Promise<SavedResearchItem | null> | void;
@@ -58,6 +60,8 @@
   export let onDismissStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
   export let onClearStrategyLabHandoffs: (() => void) | undefined = undefined;
   export let onAcceptStrategyLabHandoff: ((id: string) => StrategyLabResolvedHandoff | null | void) | undefined = undefined;
+  export let onReviveStrategyLabHandoff: ((id: string) => void) | undefined = undefined;
+  export let onClearStaleStrategyLabHandoffs: (() => void) | undefined = undefined;
 </script>
 
 <ResearchView
@@ -81,6 +85,7 @@
   {onAnalyzeStrategy}
   {onComposeStrategy}
   {onComposePortfolioStrategy}
+  {onValidatePortfolioStrategy}
   {onCompare}
   {onLoadSaved}
   {onSaveResearch}
@@ -96,4 +101,6 @@
   {onDismissStrategyLabHandoff}
   {onClearStrategyLabHandoffs}
   {onAcceptStrategyLabHandoff}
+  {onReviveStrategyLabHandoff}
+  {onClearStaleStrategyLabHandoffs}
 />

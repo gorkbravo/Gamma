@@ -124,14 +124,15 @@ describe("navigation tab ordering", () => {
     expect(getModeByShortcutIndex("macro", 2)?.id).toBe("cross_asset");
     expect(getModeShortcutHint("crypto", "flows_liquidity")).toBe("Shift+3");
     expect(getTabModes("iv").map((mode) => mode.id)).toEqual([
+      "overview",
+      "chain",
       "surface",
-      "skew_term",
       "realized_implied",
       "distribution",
-      "source",
+      "strategies",
     ]);
-    expect(getModeByShortcutIndex("iv", 2)?.id).toBe("skew_term");
-    expect(getModeShortcutHint("iv", "distribution")).toBe("Shift+4");
+    expect(getModeByShortcutIndex("iv", 2)?.id).toBe("chain");
+    expect(getModeShortcutHint("iv", "distribution")).toBe("Shift+5");
     expect(getTabModes("risk").map((mode) => mode.id)).toEqual([
       "overview",
       "exposures",
@@ -218,11 +219,12 @@ describe("navigation tab ordering", () => {
       "event_replay",
     ]);
     expect(snapshot.iv?.map((mode) => mode.id)).toEqual([
+      "overview",
+      "chain",
       "surface",
-      "skew_term",
       "realized_implied",
       "distribution",
-      "source",
+      "strategies",
     ]);
     expect(snapshot.risk?.map((mode) => mode.id)).toEqual([
       "overview",

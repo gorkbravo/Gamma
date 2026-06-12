@@ -153,7 +153,11 @@
     }
     const result = await onGenerate(surface.domain, promptText.trim());
     if (result != null) {
-      promptText = "";
+      // Keep the prompt draft recoverable when generation fails or times out.
+      const status = (result as { status?: string }).status;
+      if (status === "ready") {
+        promptText = "";
+      }
       await onLoadSessions();
     }
   }
@@ -175,7 +179,10 @@
     }
     const result = await onRunOperator(surface.domain, promptText.trim());
     if (result != null) {
-      promptText = "";
+      const status = (result as { status?: string }).status;
+      if (status === "ready") {
+        promptText = "";
+      }
       await onLoadSessions();
     }
   }

@@ -21,4 +21,5 @@ Treat [`roadmap.md`](./roadmap.md) as the primary planning document for future G
 
 For repo setup and runtime details, see [`README.md`](./README.md).
 For the current documentation map, see [`docs/README.md`](./docs/README.md).
-For migration history, audits, and handoff records, see [`docs/archive/README.md`](./docs/archive/README.md).
+For dated audits, see [`docs/audits/README.md`](./docs/audits/README.md).
+For migration history and handoff records, see [`docs/archive/README.md`](./docs/archive/README.md).

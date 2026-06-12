@@ -367,6 +367,24 @@ describe("research view model helpers", () => {
     expect(handoff.warnings.join(" ")).toContain("read-only research return streams");
   });
 
+  it("marks negative-weight equity handoffs as short research legs", () => {
+    const handoff = buildEquityStrategyHandoff(
+      { symbol: "SMH", sourceProvider: "fixture" },
+      { defaultWeight: -0.4 }
+    );
+
+    expect(handoff.default_side).toBe("short");
+    expect(handoff.default_weight).toBe(-0.4);
+    expect(handoff.warnings.join(" ")).toContain("short research leg");
+
+    const longHandoff = buildEquityStrategyHandoff(
+      { symbol: "XLP", sourceProvider: "fixture" },
+      { defaultWeight: 0.3 }
+    );
+    expect(longHandoff.default_side).toBe("long");
+    expect(longHandoff.default_weight).toBe(0.3);
+  });
+
   it("builds commodity strategy handoffs for selected instruments", () => {
     const instrument = {
       instrument_id: "wti",
