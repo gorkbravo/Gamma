@@ -9,7 +9,7 @@ Gamma is a read-only market research application built as a FastAPI backend, a S
 
 The app is designed to help the user inspect data, compare signals, and understand the calculations behind the screens. It is not designed to place trades or to hide its analytics behind unexplained scores.
 
-For the documentation map, see [`docs/README.md`](./docs/README.md). Historical migration and audit material lives in [`docs/archive/`](./docs/archive/README.md).
+For the documentation map, see [`docs/README.md`](./docs/README.md). Dated audits live in [`docs/audits/`](./docs/audits/README.md), and historical migration/handoff material lives in [`docs/archive/`](./docs/archive/README.md).
 
 ## What Gamma Does
 
