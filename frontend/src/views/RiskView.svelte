@@ -12,6 +12,7 @@
     type ReturnFrequency,
     type RiskMode,
     type RiskKpi,
+    type RiskSourceScope,
     type RiskContributionRow,
     type RiskCorrelationMatrixView,
     type RiskTableRow,
@@ -19,17 +20,19 @@
     type ScenarioResult,
   } from "../lib/risk-workspace";
   import type { IndexedValuePoint, PortfolioSnapshot, RiskDependencyNetwork, RiskFrontierPoint, RiskResult, TimeSeriesPoint, WorkspaceMode } from "../lib/api/types";
-  import type { RiskComputeOptions } from "../lib/stores/app";
+  import type { RiskComputeOptions, StrategyLabResearchBook } from "../lib/stores/app";
 
   export let mode: WorkspaceMode | null = "portfolio";
   export let activeMode: RiskMode = "overview";
   export let snapshot: PortfolioSnapshot | null = null;
   export let researchSnapshot: PortfolioSnapshot | null = null;
+  export let strategyLabResearchBook: StrategyLabResearchBook | null = null;
   export let result: RiskResult | null = null;
   export let loading = false;
   export let onCompute: (options: RiskComputeOptions) => Promise<void> | void;
 
   type ComputeMethod = "core" | "monteCarlo";
+  type RiskSourceId = "portfolio" | "research" | "strategy_lab_book";
   type FrontierPlotPoint = {
     label: string;
     kind: string;
@@ -80,9 +83,12 @@
   let mcNumSimulations = 2000;
   let betaWindow = 126;
   let returnFrequency: ReturnFrequency = "daily";
+  let selectedSource: RiskSourceId = "portfolio";
   let activeComputeMethod: ComputeMethod | null = null;
 
   let activeSnapshot: PortfolioSnapshot | null = snapshot;
+  let activeRiskSourceScope: RiskSourceScope = "portfolio";
+  let activeRiskSourceLabel = "Live account portfolio";
   let workspace = buildRiskWorkspaceModel(null, null, {
     sourceScope: "portfolio",
     benchmarkSymbol,
@@ -160,9 +166,37 @@
   const toneClass = (tone: string | undefined | null) => tone ?? "";
   const cellValue = (value: string | number | null) => value == null ? "N/A" : String(value);
 
-  $: activeSnapshot = mode === "research" ? researchSnapshot : snapshot;
+  $: availableRiskSources = [
+    ...(snapshot ? [{ id: "portfolio" as const, label: "Live Account Portfolio" }] : []),
+    ...(researchSnapshot ? [{ id: "research" as const, label: "Research Scope Snapshot" }] : []),
+    ...(strategyLabResearchBook ? [{ id: "strategy_lab_book" as const, label: strategyLabResearchBook.sourceLabel }] : [])
+  ];
+  $: if (!availableRiskSources.some((source) => source.id === selectedSource)) {
+    selectedSource = strategyLabResearchBook
+      ? "strategy_lab_book"
+      : mode === "research" && researchSnapshot
+        ? "research"
+        : snapshot
+          ? "portfolio"
+          : availableRiskSources[0]?.id ?? "portfolio";
+  }
+  $: activeSnapshot =
+    selectedSource === "strategy_lab_book"
+      ? strategyLabResearchBook?.snapshot ?? null
+      : selectedSource === "research"
+        ? researchSnapshot
+        : snapshot;
+  $: activeRiskSourceScope =
+    selectedSource === "strategy_lab_book" ? "research_book" : selectedSource === "research" ? "research" : "portfolio";
+  $: activeRiskSourceLabel =
+    selectedSource === "strategy_lab_book"
+      ? strategyLabResearchBook?.sourceLabel ?? "Strategy Lab research book"
+      : selectedSource === "research"
+        ? "Research scope snapshot"
+        : "Live account portfolio";
   $: workspace = buildRiskWorkspaceModel(activeSnapshot, result, {
-    sourceScope: mode === "research" ? "research" : "portfolio",
+    sourceScope: activeRiskSourceScope,
+    sourceLabel: activeRiskSourceLabel,
     benchmarkSymbol: benchmarkSymbol.trim().toUpperCase() || "SPY",
     returnFrequency,
   });
@@ -196,6 +230,15 @@
     try {
       await onCompute({
         snapshot: activeSnapshot,
+        sourceScope: activeRiskSourceScope,
+        researchBookReturnPoints:
+          selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.return_points ?? [] : [],
+        riskSourceLabel: activeRiskSourceLabel,
+        riskSourceObjectId: selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.object_id ?? null : null,
+        riskSourceOrigin:
+          selectedSource === "strategy_lab_book"
+            ? String(strategyLabResearchBook?.object.provenance.origin ?? "strategy_lab")
+            : null,
         alpha: confidence,
         lookbackDays,
         horizonDays,
@@ -645,7 +688,7 @@
   <article class="panel header-panel">
     <div class="header-top">
       <span class="title">Risk Workspace</span>
-      <span class="subtitle">{workspace.context.sourceScope} · {workspace.context.baseCurrency}</span>
+      <span class="subtitle">{workspace.context.sourceLabel} · {workspace.context.baseCurrency}</span>
     </div>
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Risk modes">
@@ -674,6 +717,13 @@
 
   <article class="panel controls-card">
     <div class="controls-bar">
+      <label class="control source-control"><span>Source</span>
+        <select bind:value={selectedSource}>
+          {#each availableRiskSources as source}
+            <option value={source.id}>{source.label}</option>
+          {/each}
+        </select>
+      </label>
       <label class="control"><span>Benchmark</span><input bind:value={benchmarkSymbol} /></label>
       <label class="control"><span>Lookback</span>
         <select bind:value={lookbackDays}>
@@ -692,6 +742,11 @@
       <label class="control"><span>MC model</span><select bind:value={mcSimulationModel}><option value="Gaussian">Gaussian</option><option value="Bootstrap">Bootstrap</option></select></label>
       <label class="control"><span>Sims</span><select bind:value={mcNumSimulations}><option value={1000}>1k</option><option value={2000}>2k</option><option value={5000}>5k</option></select></label>
       <div class="actions">
+        {#if strategyLabResearchBook && selectedSource !== "strategy_lab_book"}
+          <button class="action-btn" on:click={() => (selectedSource = "strategy_lab_book")}>
+            Load Strategy Book
+          </button>
+        {/if}
         <button class="action-btn" on:click={() => submit("core")} disabled={loading || !activeSnapshot}>
           {loading && activeComputeMethod === "core" ? "Computing" : "Compute Core"}
         </button>
@@ -1449,6 +1504,7 @@
   }
 
   .control:has(input) { flex: 1 1 5rem; min-width: 5rem; }
+  .source-control { flex: 1 1 16rem; min-width: 14rem; }
 
   .control > span {
     color: var(--text-2);

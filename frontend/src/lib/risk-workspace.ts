@@ -2,9 +2,11 @@ import type { PortfolioSnapshot, Position, RiskContribution, RiskCorrelationMatr
 
 export type RiskMode = "overview" | "exposures" | "drawdowns" | "correlation" | "scenarios" | "optimization";
 export type ReturnFrequency = "daily" | "weekly" | "monthly";
+export type RiskSourceScope = "portfolio" | "research" | "research_book";
 
 export interface RiskContextState {
-  sourceScope: "portfolio" | "research";
+  sourceScope: RiskSourceScope;
+  sourceLabel: string;
   benchmarkSymbol: string;
   baseCurrency: string;
   lookbackDays: number;
@@ -140,7 +142,7 @@ const UNKNOWN = "N/A";
 export function buildRiskWorkspaceModel(
   snapshot: PortfolioSnapshot | null,
   result: RiskResult | null,
-  options: { sourceScope: "portfolio" | "research"; benchmarkSymbol: string; returnFrequency: ReturnFrequency }
+  options: { sourceScope: RiskSourceScope; sourceLabel?: string | null; benchmarkSymbol: string; returnFrequency: ReturnFrequency }
 ): RiskWorkspaceModel {
   const portfolioValue = result?.metrics.portfolio_value ?? snapshotValue(snapshot);
   const coverage = result?.metrics.risk_coverage_ratio ?? null;
@@ -174,6 +176,7 @@ export function buildRiskWorkspaceModel(
   return {
     context: {
       sourceScope: options.sourceScope,
+      sourceLabel: result?.source_label ?? options.sourceLabel ?? sourceScopeLabel(options.sourceScope),
       benchmarkSymbol: options.benchmarkSymbol,
       baseCurrency: snapshot?.base_currency ?? "USD",
       lookbackDays: result?.metrics.lookback_days ?? 252,
@@ -259,8 +262,14 @@ export function buildRiskWorkspaceModel(
     constraints: buildConstraints(),
     diagnostics: buildDiagnostics(result, holdings),
     alerts: buildAlerts(result, holdings, coverageWarnings),
-    provenance: buildProvenance(snapshot, result, options.benchmarkSymbol),
+    provenance: buildProvenance(snapshot, result, options.benchmarkSymbol, options.sourceScope),
   };
+}
+
+function sourceScopeLabel(sourceScope: RiskSourceScope) {
+  if (sourceScope === "research_book") return "Strategy Lab research book";
+  if (sourceScope === "research") return "Research scope";
+  return "Live account portfolio";
 }
 
 function buildHoldings(snapshot: PortfolioSnapshot | null, result: RiskResult | null): HoldingRiskRow[] {
@@ -761,9 +770,21 @@ function buildAlerts(result: RiskResult | null, holdings: HoldingRiskRow[], warn
   return alerts;
 }
 
-function buildProvenance(snapshot: PortfolioSnapshot | null, result: RiskResult | null, benchmarkSymbol: string) {
+function buildProvenance(
+  snapshot: PortfolioSnapshot | null,
+  result: RiskResult | null,
+  benchmarkSymbol: string,
+  sourceScope: RiskSourceScope
+) {
+  const priceSource =
+    sourceScope === "research_book"
+      ? "Strategy Lab validated aggregate return stream"
+      : snapshot?.positions.some((position) => position.provider)
+        ? "portfolio position providers / market-data adapter"
+        : "portfolio snapshot and configured market-data adapter";
   return [
-    `Price source: ${snapshot?.positions.some((position) => position.provider) ? "portfolio position providers / market-data adapter" : "portfolio snapshot and configured market-data adapter"}.`,
+    `Risk source: ${result?.source_label ?? sourceScopeLabel(sourceScope)}.`,
+    `Price source: ${priceSource}.`,
     `Return history length: ${result?.metrics.aligned_obs_count ?? 0} aligned observations over ${result?.metrics.lookback_days ?? 252} days.`,
     `Benchmark used: ${benchmarkSymbol}; overlap ${result?.metrics.benchmark_overlap_count ?? 0} observations.`,
     `Base currency: ${snapshot?.base_currency ?? "USD"}; conversion caveats are carried in warnings when present.`,

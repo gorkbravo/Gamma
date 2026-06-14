@@ -736,6 +736,10 @@
       strategyInputWarning = blockingWarnings[0] ?? "Add at least one portfolio leg with usable history.";
       return;
     }
+    if (!bookValidation?.valid || bookValidationStale) {
+      strategyInputWarning = "Validate the current signed book before composing it for Risk.";
+      return;
+    }
     strategyInputWarning = blockingWarnings.join(" ");
     const result = await onComposePortfolioStrategy({
       name: portfolioName.trim() || "Strategy Lab Portfolio",
@@ -745,7 +749,8 @@
       benchmarkSymbol: portfolioBenchmarkSymbol.trim().toUpperCase() || null,
       benchmarkObject: null,
       lookbackDays: portfolioLookbackDays,
-      minObservations: 5
+      minObservations: 5,
+      validation: bookValidation
     });
     strategyComposition = result ?? null;
   }
@@ -2587,7 +2592,7 @@
                 <button type="button" class="ghost-button" on:click={validatePortfolioDraft} disabled={bookValidationLoading || strategyLoading || !portfolioDraftBuild.legs.length}>
                   {bookValidationLoading ? "Validating..." : "Validate Book"}
                 </button>
-                <button type="button" on:click={composePortfolioDraft} disabled={strategyLoading || !portfolioDraftBuild.legs.length}>
+                <button type="button" on:click={composePortfolioDraft} disabled={strategyLoading || !portfolioDraftBuild.legs.length || !bookValidation?.valid || bookValidationStale}>
                   {strategyLoading ? "Composing..." : "Compose Portfolio"}
                 </button>
               </div>
@@ -2813,7 +2818,10 @@
                   <p class="eyebrow">Composition Result</p>
                   <h3>{strategyComposition.name}</h3>
                 </div>
-                <small>{strategyComposition.returns_points.length} return points</small>
+                <div class="builder-actions compact">
+                  <small>{strategyComposition.returns_points.length} return points</small>
+                  <button type="button" class="ghost-button" on:click={() => onOpenRisk?.()}>Open In Risk</button>
+                </div>
               </div>
               {#if compositionDiagnosticLegs.length}
                 <div class="alignment-diagnostics">

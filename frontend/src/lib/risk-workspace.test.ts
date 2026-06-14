@@ -75,6 +75,10 @@ const snapshot: PortfolioSnapshot = {
 };
 
 const riskResult: RiskResult = {
+  source_scope: "portfolio",
+  source_label: "Live account portfolio",
+  source_object_id: null,
+  source_origin: null,
   metrics: {
     alpha: 0.95,
     lookback_days: 252,
@@ -208,12 +212,32 @@ describe("risk workspace view-model", () => {
     });
 
     expect(model.context.baseCurrency).toBe("USD");
+    expect(model.context.sourceLabel).toBe("Live account portfolio");
     expect(model.context.coverageLabel).toContain("92.8%");
     expect(model.overviewKpis.map((kpi) => kpi.label)).toContain("VaR / expected shortfall");
     expect(model.exposureKpis.map((kpi) => kpi.label)).toContain("Effective positions");
     expect(model.drawdownEpisodes[0]?.contributors).toContain("AAPL");
     expect(model.alerts.some((alert) => alert.includes("Concentration breach"))).toBe(true);
     expect(model.alerts.some((alert) => alert.includes("Missing/stale data"))).toBe(true);
+  });
+
+  it("labels Strategy Lab research-book sources distinctly", () => {
+    const model = buildRiskWorkspaceModel(snapshot, {
+      ...riskResult,
+      source_scope: "research_book",
+      source_label: "Strategy Lab book: JETS / XLE",
+      source_object_id: "strategy_research_book:jets-xle",
+      source_origin: "research_service.strategy_lab.portfolio_compose"
+    }, {
+      sourceScope: "research_book",
+      sourceLabel: "Strategy Lab book: JETS / XLE",
+      benchmarkSymbol: "SPY",
+      returnFrequency: "daily",
+    });
+
+    expect(model.context.sourceScope).toBe("research_book");
+    expect(model.context.sourceLabel).toBe("Strategy Lab book: JETS / XLE");
+    expect(model.provenance.join(" ")).toContain("Strategy Lab validated aggregate return stream");
   });
 
   it("keeps optimization output as diagnostics-only candidate allocations", () => {

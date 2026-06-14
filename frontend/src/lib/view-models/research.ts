@@ -23,6 +23,8 @@ import type {
   StrategyLabHandoffEnvelope,
   StrategyLabResolvedHandoff,
   StrategyLabPortfolioLegInput,
+  StrategyLabBookValidation,
+  StrategyLabCompositionResult,
   StrategyLabMode,
   StrategyLabPortfolioLegAssetClass,
   StrategyLabResult,
@@ -1030,6 +1032,72 @@ export function buildResearchObjectFromStrategyResult(result: StrategyLabResult 
       freshness_label: result.freshness_label
     },
     warnings: result.warnings ?? [],
+    return_points: returnPoints
+  };
+}
+
+export function buildResearchBookObjectFromStrategyComposition(
+  result: StrategyLabCompositionResult | null,
+  validation: StrategyLabBookValidation | null
+): GammaResearchObject | null {
+  const returnPoints = normalizeResearchObjectReturnPoints(result?.returns_points);
+  if (!result || !validation?.valid || !returnPoints.length) {
+    return null;
+  }
+
+  const diagnostics = isPlainRecord(result.alignment_diagnostics) ? result.alignment_diagnostics : {};
+  const legs = Array.isArray(diagnostics.legs) ? diagnostics.legs.filter(isPlainRecord) : [];
+  const weights = legs.map((leg) => ({
+    symbol: String(leg.identifier ?? leg.label ?? leg.object_id ?? "BOOK_LEG"),
+    weight: Number(leg.normalized_weight ?? 0),
+    display_symbol: String(leg.label ?? leg.identifier ?? "Book Leg"),
+    instrument_id: String(leg.object_id ?? leg.identifier ?? leg.label ?? "strategy_lab:leg")
+  }));
+  const start = returnPoints[0]?.timestamp ?? null;
+  const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  const signature = buildDeterministicSignature({
+    name: result.name,
+    weights: weights.map((weight) => ({
+      symbol: weight.symbol,
+      weight: normalizeSignatureNumber(weight.weight)
+    })),
+    return_points: normalizeReturnPointSignature(returnPoints),
+    validation: {
+      aligned_observation_count: validation.aligned_observation_count,
+      retrieved_at: validation.retrieved_at
+    }
+  });
+
+  return {
+    object_id: ["strategy_research_book", result.name, start, end, signature].filter(Boolean).join(":"),
+    object_type: "strategy_research_book",
+    display_name: result.name || "Strategy Lab Research Book",
+    source_tab: "strategy_lab",
+    source_mode: "composer",
+    resolver_capabilities: ["return_leg", "benchmark"],
+    symbols: weights.map((weight) => weight.symbol).filter(Boolean),
+    constituents: copyRecords(legs),
+    weights,
+    available_start: start,
+    available_end: end,
+    provider_summary: "Validated Strategy Lab research book",
+    provenance: {
+      source_provider: result.source_provider,
+      retrieved_at: result.retrieved_at,
+      origin: result.origin,
+      validation_origin: validation.origin,
+      validation_retrieved_at: validation.retrieved_at,
+      aligned_observation_count: validation.aligned_observation_count,
+      transformation_note: result.transformation_note,
+      freshness_label: result.freshness_label
+    },
+    warnings: Array.from(
+      new Set([
+        ...(result.warnings ?? []),
+        ...(validation.warnings ?? []),
+        "Research book is durable Strategy Lab context for read-only Risk analysis, not a live account portfolio."
+      ])
+    ),
     return_points: returnPoints
   };
 }

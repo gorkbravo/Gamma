@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from statistics import NormalDist
-from typing import Dict, List, Tuple
+from typing import Dict, List, Literal, Tuple
 
 import numpy as np
 import pandas as pd
@@ -55,6 +55,11 @@ class RiskComputeRequest:
     base_currency: str
     include_monte_carlo: bool = True
     recommended_min_obs: int = 60
+    source_scope: Literal["portfolio", "research", "research_book"] = "portfolio"
+    source_label: str | None = None
+    source_object_id: str | None = None
+    source_origin: str | None = None
+    research_book_returns: pd.Series | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "alpha", min(max(float(self.alpha), 0.0001), 0.9999))
@@ -93,6 +98,10 @@ class RiskComputationPayload:
     frontier_points: list["RiskFrontierPoint"]
     correlation_matrix: pd.DataFrame
     dependency_network: "RiskDependencyNetwork"
+    source_scope: str = "portfolio"
+    source_label: str | None = None
+    source_object_id: str | None = None
+    source_origin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +225,9 @@ class RiskService:
         progress_cb=None,
         data_provider: AppDataProvider | None = None,
     ) -> RiskComputationPayload:
+        if request.source_scope == "research_book":
+            return self._compute_research_book(request, data_provider=data_provider)
+
         snapshot = request.snapshot
         warnings: List[str] = []
         excluded_assets: Dict[str, str] = {}
@@ -537,7 +549,213 @@ class RiskService:
             frontier_points=frontier_points,
             correlation_matrix=self._correlation_matrix(risk_returns_df, snapshot),
             dependency_network=dependency_network,
+            source_scope=request.source_scope,
+            source_label=request.source_label,
+            source_object_id=request.source_object_id,
+            source_origin=request.source_origin,
         )
+
+    def _compute_research_book(
+        self,
+        request: RiskComputeRequest,
+        data_provider: AppDataProvider | None = None,
+    ) -> RiskComputationPayload:
+        snapshot = request.snapshot
+        warnings: List[str] = [
+            "Risk source is a Strategy Lab research book; metrics use the validated aggregate return stream, not live account holdings."
+        ]
+        raw_returns = request.research_book_returns if request.research_book_returns is not None else pd.Series(dtype=float)
+        source_returns = pd.to_numeric(raw_returns, errors="coerce").dropna()
+        source_returns = source_returns[np.isfinite(source_returns)].sort_index()
+        if getattr(source_returns.index, "tz", None) is not None:
+            source_returns.index = source_returns.index.tz_convert(None)
+        source_returns = source_returns[~source_returns.index.duplicated(keep="last")]
+        if source_returns.empty:
+            warnings.append("No Strategy Lab research-book return history available")
+
+        total_portfolio_value = snapshot.net_liquidation
+        if total_portfolio_value is None:
+            total_portfolio_value = (snapshot.total_market_value or 0.0) + (snapshot.total_cash or 0.0)
+        total_portfolio_value = float(total_portfolio_value or 0.0)
+
+        instrument_id = self._research_book_instrument_id(snapshot, request)
+        returns_df = source_returns.to_frame(instrument_id) if not source_returns.empty else pd.DataFrame()
+        weights = pd.Series({instrument_id: 1.0}, dtype=float) if not returns_df.empty else pd.Series(dtype=float)
+        port_ret = source_returns.astype(float)
+        if len(port_ret) < 2 and not port_ret.empty:
+            warnings.append("Return series too short for stable risk metrics")
+        if 0 < len(port_ret) < request.recommended_min_obs:
+            warnings.append(
+                f"Only {len(port_ret)} observations available ({request.recommended_min_obs} recommended minimum); "
+                "interpret with care."
+            )
+
+        hist_var_r, hist_cvar_r = historical_var_cvar(port_ret, request.alpha)
+        cov = None
+        param_var_r = None
+        if not returns_df.empty and not weights.empty:
+            cov_df = returns_df.cov().reindex(index=weights.index, columns=weights.index)
+            cov_values = cov_df.to_numpy(dtype=float, copy=True)
+            if cov_values.size and np.isfinite(cov_values).all():
+                cov = cov_values
+                param_var_r = parametric_var(weights.values, cov, request.alpha)
+                if request.horizon_days > 1 and param_var_r is not None:
+                    param_var_r = param_var_r * (request.horizon_days ** 0.5)
+            else:
+                warnings.append("Parametric VaR unavailable: invalid Strategy Lab research-book covariance")
+
+        hist_var = hist_var_r * total_portfolio_value if hist_var_r is not None else None
+        hist_cvar = hist_cvar_r * total_portfolio_value if hist_cvar_r is not None else None
+        param_var = param_var_r * total_portfolio_value if param_var_r is not None else None
+
+        monte_carlo_result = None
+        if request.include_monte_carlo and not returns_df.empty and not weights.empty:
+            monte_carlo_result = monte_carlo_var_cvar(
+                asset_returns=returns_df,
+                weights=weights,
+                alpha=request.alpha,
+                horizon_days=request.mc_horizon_days,
+                model_name=request.mc_simulation_model,
+                num_simulations=request.mc_num_simulations,
+                random_seed=self._MC_RANDOM_SEED,
+            )
+            if monte_carlo_result is None:
+                warnings.append(
+                    f"Monte Carlo VaR unavailable for {request.mc_simulation_model}: invalid Strategy Lab research-book returns."
+                )
+
+        daily_vol, annual_vol = realized_vol(port_ret)
+        max_dd = max_drawdown(port_ret)
+        benchmark = self._beta_corr_alpha(
+            port_ret=port_ret,
+            lookback_days=request.lookback_days,
+            beta_window=request.beta_window,
+            base_currency=request.base_currency,
+            benchmark_symbol=request.benchmark_symbol,
+        )
+        warnings.extend(benchmark.warnings or [])
+        if benchmark.beta is None or benchmark.correlation is None:
+            warnings.append("Benchmark beta/correlation unavailable")
+
+        concentration_hhi, top5_weight, effective_bets = self._concentration_metrics(weights)
+        monte_carlo_var = (
+            monte_carlo_result.var_return * total_portfolio_value
+            if monte_carlo_result is not None and monte_carlo_result.var_return is not None
+            else None
+        )
+        monte_carlo_cvar = (
+            monte_carlo_result.cvar_return * total_portfolio_value
+            if monte_carlo_result is not None and monte_carlo_result.cvar_return is not None
+            else None
+        )
+
+        results = RiskResults(
+            alpha=request.alpha,
+            lookback_days=request.lookback_days,
+            horizon_days=request.horizon_days,
+            portfolio_value=total_portfolio_value,
+            historical_var=hist_var,
+            historical_cvar=hist_cvar,
+            parametric_var=param_var,
+            daily_vol=daily_vol,
+            annual_vol=annual_vol,
+            max_drawdown=max_dd,
+            beta=benchmark.beta,
+            correlation=benchmark.correlation,
+            alpha_annual=benchmark.alpha_annual,
+            covered_portfolio_value=total_portfolio_value,
+            covered_risk_basis_value=abs(total_portfolio_value),
+            risk_basis_value=abs(total_portfolio_value),
+            risk_coverage_ratio=1.0 if total_portfolio_value else None,
+            historical_var_total_estimate=hist_var,
+            historical_cvar_total_estimate=hist_cvar,
+            parametric_var_total_estimate=param_var,
+            monte_carlo_model=request.mc_simulation_model,
+            monte_carlo_horizon_days=request.mc_horizon_days,
+            monte_carlo_num_simulations=request.mc_num_simulations,
+            monte_carlo_var=monte_carlo_var,
+            monte_carlo_cvar=monte_carlo_cvar,
+            monte_carlo_var_total_estimate=monte_carlo_var,
+            monte_carlo_cvar_total_estimate=monte_carlo_cvar,
+            monte_carlo_terminal_returns=monte_carlo_result.terminal_returns if monte_carlo_result is not None else None,
+            monte_carlo_fan_percentiles=monte_carlo_result.fan_percentiles if monte_carlo_result is not None else None,
+            monte_carlo_sample_paths=monte_carlo_result.sample_paths if monte_carlo_result is not None else None,
+            aligned_obs_count=int(len(port_ret)) if not port_ret.empty else 0,
+            benchmark_overlap_count=benchmark.overlap_count,
+            concentration_hhi=concentration_hhi,
+            top5_weight=top5_weight,
+            effective_bets=effective_bets,
+            excluded_assets={},
+            warnings=list(dict.fromkeys(warnings)),
+        )
+
+        contributions = pd.Series(dtype=float)
+        marginal_contribution_to_risk = pd.Series(dtype=float)
+        component_var = pd.Series(dtype=float)
+        if cov is not None and not weights.empty:
+            contribution_values = risk_contributions(weights.values, cov)
+            if contribution_values.size == weights.size:
+                contributions = pd.Series(contribution_values, index=weights.index)
+            portfolio_sigma = float(np.sqrt(float(weights.values.T @ cov @ weights.values)))
+            if portfolio_sigma > 0:
+                mctr_values = (cov @ weights.values) / portfolio_sigma
+                marginal_contribution_to_risk = pd.Series(mctr_values, index=weights.index)
+                z_score = NormalDist().inv_cdf(request.alpha)
+                component_values = weights.values * mctr_values * z_score
+                if request.horizon_days > 1:
+                    component_values = component_values * (request.horizon_days ** 0.5)
+                component_var = pd.Series(component_values * total_portfolio_value, index=weights.index)
+
+        frontier_universe_returns = None
+        risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
+            request=request,
+            returns_df=returns_df,
+        )
+        warnings.extend(risk_free_warnings)
+        frontier_points, frontier_warnings = self._build_efficient_frontier(
+            snapshot=snapshot,
+            returns_df=returns_df,
+            weights=weights,
+            risk_free_rate_annual=risk_free_rate_annual,
+            reference_returns_df=frontier_universe_returns,
+        )
+        warnings.extend(frontier_warnings)
+        dependency_network = self._build_dependency_network(
+            snapshot=snapshot,
+            portfolio_returns_df=returns_df,
+            weights=weights,
+            contributions=contributions,
+            reference_returns_df=frontier_universe_returns,
+        )
+        if dependency_network.warnings:
+            warnings.extend(dependency_network.warnings)
+        results.warnings = list(dict.fromkeys(warnings))
+
+        return RiskComputationPayload(
+            snapshot=snapshot,
+            results=results,
+            portfolio_returns=port_ret,
+            benchmark_returns=benchmark.returns if benchmark.returns is not None else pd.Series(dtype=float),
+            returns_df=returns_df,
+            contributions=contributions,
+            weights=weights,
+            marginal_contribution_to_risk=marginal_contribution_to_risk,
+            component_var=component_var,
+            frontier_points=frontier_points,
+            correlation_matrix=self._correlation_matrix(returns_df, snapshot),
+            dependency_network=dependency_network,
+            source_scope=request.source_scope,
+            source_label=request.source_label,
+            source_object_id=request.source_object_id,
+            source_origin=request.source_origin,
+        )
+
+    @staticmethod
+    def _research_book_instrument_id(snapshot: PortfolioSnapshot, request: RiskComputeRequest) -> str:
+        for position in snapshot.positions:
+            if not position.symbol.startswith("CASH"):
+                return position.resolved_instrument_id()
+        return request.source_object_id or "strategy_lab:research_book"
 
     @staticmethod
     def _drain_provider_history_warnings(data_provider: AppDataProvider | None) -> list[str]:

@@ -172,6 +172,64 @@ def test_compute_aligns_covariance_to_weight_order():
     assert set(contrib.index) == {"A", "B"}
 
 
+def test_compute_research_book_uses_validated_strategy_lab_return_stream_directly():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    strategy_returns = pd.Series([0.01, -0.02, 0.015, -0.005, 0.012, 0.004], index=idx)
+    unrelated_prices = {
+        "STRATEGY_BOOK": pd.Series([100, 120, 80, 130, 90, 140], index=idx),
+    }
+    snapshot = _make_snapshot(
+        [
+            PositionItem(
+                "STRATEGY_BOOK",
+                "BOOK",
+                "USD",
+                1,
+                None,
+                100000,
+                100000,
+                None,
+                weight=1.0,
+                base_market_value=100000.0,
+                instrument_id="strategy_research_book:jets-xle",
+                provider="gamma_strategy_lab",
+                provider_id="strategy_research_book:jets-xle",
+            ),
+        ],
+        net_liq=100000.0,
+    )
+    service = _make_risk_service()
+    request = RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=3,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        include_monte_carlo=False,
+        recommended_min_obs=3,
+        source_scope="research_book",
+        source_label="Strategy Lab book: JETS / XLE",
+        source_object_id="strategy_research_book:jets-xle",
+        source_origin="research_service.strategy_lab.portfolio_compose",
+        research_book_returns=strategy_returns,
+    )
+
+    payload = service.compute(request, data_provider=_PriceProvider(unrelated_prices))
+
+    pd.testing.assert_series_equal(payload.portfolio_returns, strategy_returns, check_names=False)
+    assert payload.source_scope == "research_book"
+    assert payload.source_label == "Strategy Lab book: JETS / XLE"
+    assert payload.results.aligned_obs_count == len(strategy_returns)
+    assert payload.results.risk_coverage_ratio == 1.0
+    assert payload.returns_df.columns.tolist() == ["strategy_research_book:jets-xle"]
+    assert any("Strategy Lab research book" in warning for warning in payload.results.warnings)
+
+
 def test_portfolio_service_compute_performance_normalizes_mixed_currency_histories():
     idx = pd.date_range("2026-01-02", periods=6, freq="B")
     prices = {

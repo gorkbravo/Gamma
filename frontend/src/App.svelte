@@ -114,6 +114,7 @@
     researchCompareResult,
     researchResult,
     strategyLabComposition,
+    strategyLabResearchBook,
     riskResult,
     riskWorkspaceBasis,
     setRiskWorkspaceMode,
@@ -518,14 +519,16 @@
     return `Fundamentals | ${detail.company.ticker} | FY ${latestPeriod}`;
   }
 
-  function describeRiskCopilotContext(result: RiskResult | null, mode: WorkspaceMode | null) {
+  function describeRiskCopilotContext(result: RiskResult | null, mode: "portfolio" | "research" | "research_book" | null) {
     if (!result) {
       return "Risk | Run a risk pass to ground the Copilot";
     }
     const coverage = result.metrics.risk_coverage_ratio;
     const coverageLabel =
       coverage == null ? "coverage unknown" : `${(coverage * 100).toFixed(1)}% coverage`;
-    return `Risk | ${mode === "research" ? "Research" : "Portfolio"} | ${coverageLabel}`;
+    const sourceLabel =
+      result.source_label ?? (mode === "research_book" ? "Strategy Lab book" : mode === "research" ? "Research" : "Portfolio");
+    return `Risk | ${sourceLabel} | ${coverageLabel}`;
   }
 
   function resolveIvCopilotSurface(
@@ -616,7 +619,7 @@
     crypto: CryptoToken | null;
     fundamentals: FundamentalsOverview | null;
     risk: RiskResult | null;
-    riskWorkspace: WorkspaceMode | null;
+    riskWorkspace: "portfolio" | "research" | "research_book" | null;
     ivSurface: IvSurface | null;
     ivSession: IvSessionStatus | null;
   }): CopilotGroundingScopeOption[] {
@@ -839,7 +842,7 @@
     strategyComposition: typeof $strategyLabComposition;
     compareResult: typeof $researchCompareResult;
     risk: RiskResult | null;
-    riskWorkspace: WorkspaceMode | null;
+    riskWorkspace: "portfolio" | "research" | "research_book" | null;
     ivSurface: IvSurface | null;
     ivSession: IvSessionStatus | null;
     macro: MacroContextState;
@@ -1460,6 +1463,27 @@
   }
 
   async function openRiskFromResearch() {
+    if ($activeTab === "strategy_lab" && $strategyLabResearchBook) {
+      const book = $strategyLabResearchBook;
+      activeTab.set("risk");
+      await computeRisk({
+        snapshot: book.snapshot,
+        sourceScope: "research_book",
+        researchBookReturnPoints: book.object.return_points,
+        riskSourceLabel: book.sourceLabel,
+        riskSourceObjectId: book.object.object_id,
+        riskSourceOrigin: String(book.object.provenance.origin ?? "strategy_lab"),
+        alpha: 0.95,
+        lookbackDays: 252,
+        horizonDays: 1,
+        mcHorizonDays: 10,
+        mcSimulationModel: "Gaussian",
+        mcNumSimulations: 2000,
+        betaWindow: 126,
+        benchmarkSymbol: book.benchmarkSymbol || "SPY"
+      });
+      return;
+    }
     const request = buildRiskRequestFromResearch($researchResult);
     if (!request) {
       return;
@@ -2430,6 +2454,7 @@
             bind:activeMode={riskMode}
             snapshot={$portfolioSnapshot}
             researchSnapshot={$researchResult?.snapshot ?? null}
+            strategyLabResearchBook={$strategyLabResearchBook}
             result={$riskResult}
             loading={$loading.risk}
             onCompute={computeRisk}

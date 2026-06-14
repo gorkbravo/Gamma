@@ -6,6 +6,7 @@ import {
   buildOptionsStrategyHandoff,
   buildResearchObjectFromScopeResult,
   buildResearchObjectFromStrategyResult,
+  buildResearchBookObjectFromStrategyComposition,
   buildEquityStrategyHandoff,
   buildPredictionMarketStrategyHandoff,
   buildStrategyComposerObjects,
@@ -609,6 +610,66 @@ describe("research view model helpers", () => {
     expect(buildResearchObjectFromStrategyResult(first)?.object_id).not.toBe(
       buildResearchObjectFromStrategyResult(second)?.object_id
     );
+  });
+
+  it("builds a durable Strategy Lab research-book object from a validated composition", () => {
+    const composition = {
+      ...makeStrategyLabResult(),
+      name: "JETS / XLE Book",
+      origin: "research_service.strategy_lab.portfolio_compose",
+      source_provider: "gamma_strategy_lab",
+      alignment_diagnostics: {
+        aligned_observation_count: 2,
+        aligned_start: "2026-03-01T00:00:00Z",
+        aligned_end: "2026-03-02T00:00:00Z",
+        legs: [
+          {
+            label: "JETS",
+            object_id: "leg:jets",
+            identifier: "JETS",
+            normalized_weight: 0.7,
+            source_provider: "yfinance"
+          },
+          {
+            label: "XLE",
+            object_id: "leg:xle",
+            identifier: "XLE",
+            normalized_weight: -0.3,
+            source_provider: "yfinance"
+          }
+        ]
+      },
+      leg_contributions: { JETS: 0.01, XLE: -0.004 },
+      lenses: [],
+      overlays: []
+    };
+    const validation = {
+      valid: true,
+      errors: [],
+      warnings: ["Validated against aligned source window."],
+      usable_leg_count: 2,
+      requested_leg_count: 2,
+      aligned_observation_count: 2,
+      min_observations: 2,
+      alignment_diagnostics: composition.alignment_diagnostics,
+      retrieved_at: "2026-03-02T00:00:00Z",
+      origin: "research_service.strategy_lab.validate_book"
+    };
+
+    const object = buildResearchBookObjectFromStrategyComposition(composition, validation);
+
+    expect(object?.object_type).toBe("strategy_research_book");
+    expect(object?.source_mode).toBe("composer");
+    expect(object?.weights).toEqual([
+      expect.objectContaining({ symbol: "JETS", weight: 0.7 }),
+      expect.objectContaining({ symbol: "XLE", weight: -0.3 })
+    ]);
+    expect(object?.return_points).toEqual(composition.returns_points);
+    expect(object?.provenance).toMatchObject({
+      origin: "research_service.strategy_lab.portfolio_compose",
+      validation_origin: "research_service.strategy_lab.validate_book",
+      aligned_observation_count: 2
+    });
   });
 
   it("hydrates safe saved scope and strategy objects for reload", () => {

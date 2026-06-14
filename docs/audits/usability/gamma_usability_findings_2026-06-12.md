@@ -357,6 +357,21 @@ Acceptance criteria:
 - Risk clearly labels the source as research book, not live account portfolio.
 - Scenarios and core risk metrics run on the same aligned return set Strategy Lab validated.
 
+Status: Complete as of 2026-06-14.
+
+Implemented:
+
+- Strategy Lab portfolio composition now requires a current valid book validation before creating the composed signed book.
+- A successful validated composition is promoted into a persisted `strategy_research_book` object with signed normalized weights, validation provenance, aligned return points, and a Risk-ready synthetic snapshot.
+- Risk accepts `source_scope = research_book` with explicit source label/object/origin fields and computes core risk metrics from the supplied Strategy Lab aggregate return stream instead of reloading provider histories.
+- Risk shows the Strategy Lab book as a selectable source and labels the active source as `Strategy Lab book: ...`, separate from account portfolio and research-scope snapshots.
+- Focused backend/API/frontend tests cover the direct return-stream compute path, API contract, durable book object construction, and Risk source labeling.
+
+Still left:
+
+- Risk contribution detail for research books is aggregate-book level in this pass. Per-leg contribution decomposition can be added later by carrying aligned per-leg return columns from Strategy Lab, but the P0 acceptance criterion of using the validated aggregate aligned return set is complete.
+- Broader research-thread context continuity remains open under the P1 research-thread context contract item below.
+
 ### P0: Commodity value reconciliation
 
 Fix WTI header/curve/Sitrep inconsistency or make the basis explicit.

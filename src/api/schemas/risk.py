@@ -11,6 +11,7 @@ from src.application.request_limits import (
     MAX_RISK_LOOKBACK_DAYS,
     MAX_RISK_MC_HORIZON_DAYS,
     MAX_RISK_MC_SIMULATIONS,
+    MAX_STRATEGY_LAB_ROWS,
 )
 from src.application.risk_service import RiskComputationPayload
 from src.models.portfolio import RiskResults
@@ -18,7 +19,11 @@ from src.models.portfolio import RiskResults
 
 class RiskComputeRequestModel(BaseModel):
     snapshot: PortfolioSnapshotModel
-    source_scope: str = Field(default="portfolio", max_length=32, pattern="^(portfolio|research)$")
+    source_scope: str = Field(default="portfolio", max_length=32, pattern="^(portfolio|research|research_book)$")
+    source_label: str | None = Field(default=None, max_length=160)
+    source_object_id: str | None = Field(default=None, max_length=240)
+    source_origin: str | None = Field(default=None, max_length=160)
+    research_book_return_points: list[TimeSeriesPoint] = Field(default_factory=list, max_length=MAX_STRATEGY_LAB_ROWS)
     alpha: float = Field(default=0.95, gt=0.0, lt=1.0)
     lookback_days: int = Field(default=252, ge=20, le=MAX_RISK_LOOKBACK_DAYS)
     horizon_days: int = Field(default=1, ge=1, le=MAX_RISK_HORIZON_DAYS)
@@ -182,6 +187,10 @@ class RiskDependencyNetworkModel(BaseModel):
 
 
 class RiskComputeResponseModel(BaseModel):
+    source_scope: str = "portfolio"
+    source_label: str | None = None
+    source_object_id: str | None = None
+    source_origin: str | None = None
     metrics: RiskMetricsModel
     portfolio_return_points: list[TimeSeriesPoint]
     benchmark_return_points: list[TimeSeriesPoint] = Field(default_factory=list)
@@ -216,6 +225,10 @@ class RiskComputeResponseModel(BaseModel):
                 )
             )
         return cls(
+            source_scope=payload.source_scope,
+            source_label=payload.source_label,
+            source_object_id=payload.source_object_id,
+            source_origin=payload.source_origin,
             metrics=RiskMetricsModel.from_domain(results),
             portfolio_return_points=series_to_points(payload.portfolio_returns),
             benchmark_return_points=series_to_points(payload.benchmark_returns),

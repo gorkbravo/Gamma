@@ -944,6 +944,52 @@ def test_risk_compute_endpoint(tmp_path):
         runtime.shutdown()
 
 
+def test_risk_compute_endpoint_accepts_strategy_lab_research_book_source(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        research_returns = [
+            {"timestamp": "2026-01-02T00:00:00Z", "value": 0.010},
+            {"timestamp": "2026-01-05T00:00:00Z", "value": -0.004},
+            {"timestamp": "2026-01-06T00:00:00Z", "value": 0.006},
+            {"timestamp": "2026-01-07T00:00:00Z", "value": -0.002},
+            {"timestamp": "2026-01-08T00:00:00Z", "value": 0.003},
+        ]
+        response = client.post(
+            "/risk/compute",
+            json={
+                "snapshot": snapshot,
+                "source_scope": "research_book",
+                "source_label": "Strategy Lab book: Signed Audit Book",
+                "source_object_id": "strategy_research_book:audit",
+                "source_origin": "research_service.strategy_lab.portfolio_compose",
+                "research_book_return_points": research_returns,
+                "alpha": 0.95,
+                "lookback_days": 252,
+                "horizon_days": 1,
+                "mc_horizon_days": 10,
+                "mc_simulation_model": "Gaussian",
+                "mc_num_simulations": 500,
+                "beta_window": 63,
+                "benchmark_symbol": "AAPL",
+                "include_monte_carlo": False,
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source_scope"] == "research_book"
+        assert payload["source_label"] == "Strategy Lab book: Signed Audit Book"
+        assert payload["source_object_id"] == "strategy_research_book:audit"
+        assert payload["metrics"]["aligned_obs_count"] == len(research_returns)
+        assert [point["value"] for point in payload["portfolio_return_points"]] == [
+            point["value"] for point in research_returns
+        ]
+        assert any("Strategy Lab research book" in warning for warning in payload["warnings"])
+    finally:
+        runtime.shutdown()
+
+
 def test_expensive_request_models_reject_oversized_payloads(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:

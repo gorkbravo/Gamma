@@ -1,6 +1,7 @@
 import { get, writable } from "svelte/store";
 import { deleteJson, getJson, getText, patchJson, postJson, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
+import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
 import type {
   ActionResponse,
   BaseCurrencyResponse,
@@ -128,6 +129,7 @@ export interface StrategyLabPortfolioComposeOptions {
   benchmarkObject?: StrategyLabCompositionLegInput["object"] | null;
   lookbackDays?: number;
   minObservations?: number;
+  validation?: StrategyLabBookValidation | null;
 }
 
 export interface ResearchCompareLegInput {
@@ -180,7 +182,23 @@ export interface RiskComputeOptions {
   benchmarkSymbol: string;
   includeMonteCarlo?: boolean;
   snapshot?: PortfolioSnapshot | null;
-  sourceScope?: WorkspaceMode;
+  sourceScope?: "portfolio" | "research" | "research_book";
+  researchBookReturnPoints?: Array<{ timestamp: string; value: number }>;
+  riskSourceLabel?: string | null;
+  riskSourceObjectId?: string | null;
+  riskSourceOrigin?: string | null;
+}
+
+export interface StrategyLabResearchBook {
+  bookId: string;
+  sourceLabel: string;
+  object: GammaResearchObject;
+  snapshot: PortfolioSnapshot;
+  validation: StrategyLabBookValidation;
+  composition: StrategyLabCompositionResult;
+  benchmarkSymbol: string | null;
+  createdAt: string;
+  warnings: string[];
 }
 
 export interface IvLoadOptions {
@@ -409,8 +427,43 @@ export const researchDraft = writable<ResearchDraftState>({
 export const sharedEquitySelection = writable<SharedEquitySelection | null>(null);
 export const riskResult = writable<RiskResult | null>(null);
 export const riskSnapshotBasis = writable<PortfolioSnapshot | null>(null);
-export const riskWorkspaceBasis = writable<WorkspaceMode | null>(null);
+export const riskWorkspaceBasis = writable<"portfolio" | "research" | "research_book" | null>(null);
 export const riskWorkspaceMode = writable<string>("overview");
+const STRATEGY_LAB_RESEARCH_BOOK_STORAGE_KEY = "gamma.strategyLab.latestResearchBook";
+
+function loadPersistedStrategyLabResearchBook(): StrategyLabResearchBook | null {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+  try {
+    const raw = localStorage.getItem(STRATEGY_LAB_RESEARCH_BOOK_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as StrategyLabResearchBook;
+    return parsed?.object?.return_points?.length && parsed?.snapshot ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistStrategyLabResearchBook(book: StrategyLabResearchBook | null) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    if (book) {
+      localStorage.setItem(STRATEGY_LAB_RESEARCH_BOOK_STORAGE_KEY, JSON.stringify(book));
+    } else {
+      localStorage.removeItem(STRATEGY_LAB_RESEARCH_BOOK_STORAGE_KEY);
+    }
+  } catch {
+    // Persistence is best-effort; the active Svelte store remains authoritative.
+  }
+}
+
+export const strategyLabResearchBook = writable<StrategyLabResearchBook | null>(loadPersistedStrategyLabResearchBook());
+strategyLabResearchBook.subscribe(persistStrategyLabResearchBook);
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivUnderlyingHistory = writable<IvUnderlyingHistoryResponse | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
@@ -1375,6 +1428,10 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
       min_observations: options.minObservations ?? 5
     });
     strategyLabComposition.set(result);
+    if (options.validation?.valid) {
+      const book = buildStrategyLabResearchBook(result, options.validation, options.benchmarkSymbol ?? null);
+      strategyLabResearchBook.set(book);
+    }
     researchCompareResult.set(null);
     resetCopilotCard("research");
     lastError.set("");
@@ -1386,6 +1443,67 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
   } finally {
     setLoading("strategyLab", false);
   }
+}
+
+function buildStrategyLabResearchBook(
+  composition: StrategyLabCompositionResult,
+  validation: StrategyLabBookValidation,
+  benchmarkSymbol: string | null
+): StrategyLabResearchBook {
+  const object = buildResearchBookObjectFromStrategyComposition(composition, validation);
+  if (!object) {
+    throw new Error("Validated Strategy Lab composition did not produce a research-book object.");
+  }
+  const createdAt = new Date().toISOString();
+  const sourceLabel = `Strategy Lab book: ${composition.name}`;
+  const snapshot: PortfolioSnapshot = {
+    timestamp: createdAt,
+    base_currency: "USD",
+    account_summary: {
+      source: "strategy_lab_research_book",
+      source_label: sourceLabel,
+      source_object_id: object.object_id
+    },
+    positions: [
+      {
+        symbol: "STRATEGY_BOOK",
+        sec_type: "BOOK",
+        currency: "USD",
+        quantity: 1,
+        avg_cost: null,
+        market_price: 100000,
+        market_value: 100000,
+        unrealized_pnl: null,
+        weight: 1,
+        base_market_value: 100000,
+        fx_rate: 1,
+        instrument_id: object.object_id,
+        display_symbol: composition.name || "Strategy Lab Book",
+        exchange: null,
+        primary_exchange: null,
+        provider: "gamma_strategy_lab",
+        provider_id: object.object_id
+      }
+    ],
+    total_market_value: 100000,
+    total_cash: 0,
+    net_liquidation: 100000,
+    day_pnl: null,
+    day_pnl_pct: null,
+    day_pnl_source: "strategy_lab_validated_return_stream",
+    warnings: object.warnings
+  };
+  return {
+    bookId: object.object_id,
+    sourceLabel,
+    object,
+    snapshot,
+    validation,
+    composition,
+    benchmarkSymbol,
+    createdAt,
+    warnings: object.warnings
+  };
 }
 
 export async function validateStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
@@ -2365,16 +2483,18 @@ export async function computeRisk(options: RiskComputeOptions) {
     lastError.set("Load or build a snapshot before computing risk.");
     return;
   }
-  const snapshotWorkspace: WorkspaceMode =
-    snapshot === get(researchResult)?.snapshot
-      ? "research"
-      : "portfolio";
+  const snapshotWorkspace: "portfolio" | "research" | "research_book" =
+    options.sourceScope ?? (snapshot === get(researchResult)?.snapshot ? "research" : "portfolio");
   setLoading("risk", true);
   try {
     riskResult.set(
       await postJson<RiskResult>("/risk/compute", {
         snapshot,
-        source_scope: options.sourceScope ?? snapshotWorkspace,
+        source_scope: snapshotWorkspace,
+        source_label: options.riskSourceLabel ?? null,
+        source_object_id: options.riskSourceObjectId ?? null,
+        source_origin: options.riskSourceOrigin ?? null,
+        research_book_return_points: options.researchBookReturnPoints ?? [],
         alpha: options.alpha,
         lookback_days: options.lookbackDays,
         horizon_days: options.horizonDays,

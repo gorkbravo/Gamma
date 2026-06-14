@@ -848,6 +848,10 @@ export interface ExcludedAsset {
 }
 
 export interface RiskResult {
+  source_scope: "portfolio" | "research" | "research_book" | string;
+  source_label: string | null;
+  source_object_id: string | null;
+  source_origin: string | null;
   metrics: RiskMetrics;
   portfolio_return_points: TimeSeriesPoint[];
   benchmark_return_points: TimeSeriesPoint[];

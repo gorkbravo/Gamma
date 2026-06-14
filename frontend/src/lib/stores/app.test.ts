@@ -350,6 +350,10 @@ describe("app store orchestration", () => {
       warnings: []
     };
     const risk: RiskResult = {
+      source_scope: "research",
+      source_label: "Research scope snapshot",
+      source_object_id: null,
+      source_origin: null,
       metrics: {
         alpha: 0.95,
         lookback_days: 252,
