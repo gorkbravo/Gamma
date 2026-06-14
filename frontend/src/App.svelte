@@ -32,7 +32,6 @@
     clearPortfolioHistory,
     commoditiesWorkspace,
     activeCopilotSession,
-    copilotMemos,
     copilotActionDefinitions,
     copilotOperatorPlan,
     copilotOperatorResult,
@@ -40,7 +39,6 @@
     copilotSessions,
     copilotThreads,
     archiveCopilotSession,
-    createCopilotMemo,
     cryptoComparison,
     fundamentalsDcfSnapshots,
     fundamentalsDcfModel,
@@ -90,7 +88,6 @@
     loadCopilotSession,
     loadCopilotSessions,
     executeCopilotOperatorPlan,
-    exportCopilotMemo,
     macroDivergences,
     macroEvents,
     macroSeriesHistories,
@@ -154,7 +151,7 @@
     strategyLabResult,
     systemStatus,
     toggleConnection,
-    updateCopilotMemo
+    startNewCopilotSession
   } from "./lib/stores/app";
   import {
     reorderWorkspaceTab,
@@ -1888,20 +1885,13 @@
     });
   }
 
-  async function handleCreateCopilotMemo(title?: string, notes?: string) {
-    return createCopilotMemo({ title, notes });
-  }
-
-  async function handleUpdateCopilotMemo(memoId: string, title: string, body: string) {
-    return updateCopilotMemo(memoId, { title, body });
-  }
-
   async function handleArchiveCopilotSession(sessionId: string) {
     return archiveCopilotSession(sessionId);
   }
 
-  async function handleExportCopilotMemo(memoId: string) {
-    return exportCopilotMemo(memoId);
+  async function handleNewCopilotSession() {
+    startNewCopilotSession();
+    return handleLoadCopilotWorkspaceState();
   }
 
   async function handleLoadCopilotSessionsFiltered(options: { includeArchived?: boolean; search?: string } = {}) {
@@ -2513,7 +2503,6 @@
             synthesisSurface={synthesisCopilotSurface}
             sessions={$copilotSessions}
             activeSession={$activeCopilotSession}
-            memos={$copilotMemos}
             actionDefinitions={$copilotActionDefinitions}
             researchPlan={$copilotResearchPlan}
             operatorPlan={$copilotOperatorPlan}
@@ -2524,10 +2513,8 @@
             onPlan={handlePlanCopilotWorkspace}
             onOperatorPlan={handleOperatorPlanCopilotWorkspace}
             onRunOperator={handleRunOperatorCopilotWorkspace}
-            onCreateMemo={handleCreateCopilotMemo}
-            onUpdateMemo={handleUpdateCopilotMemo}
             onArchiveSession={handleArchiveCopilotSession}
-            onExportMemo={handleExportCopilotMemo}
+            onNewSession={handleNewCopilotSession}
             onLoadSessions={handleLoadCopilotWorkspaceState}
             onSelectSession={handleSelectCopilotSession}
             onSearchSessions={handleLoadCopilotSessionsFiltered}

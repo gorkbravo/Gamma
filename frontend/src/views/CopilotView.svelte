@@ -1,11 +1,11 @@
 <script lang="ts">
+  import { afterUpdate, onMount } from "svelte";
   import type {
     CopilotBaseDomain,
     CopilotDomain,
     CopilotReasoningEffort,
     CrossTabHandoffEnvelope,
     CopilotResearchActionDefinition,
-    CopilotMemo,
     CopilotOperatorPlan,
     CopilotResearchCardResult,
     CopilotResearchPlan,
@@ -40,10 +40,16 @@
     selectionMessage: string | null;
   };
 
+  type ChatTurn = {
+    id: string;
+    index: number;
+    prompt: string;
+    result: CopilotResearchCardResult;
+  };
+
   export let synthesisSurface: CopilotWorkspaceSurface;
   export let sessions: CopilotSessionSummary[] = [];
   export let activeSession: CopilotSessionDetail | null = null;
-  export let memos: CopilotMemo[] = [];
   export let actionDefinitions: CopilotResearchActionDefinition[] = [];
   export let researchPlan: CopilotResearchPlan | null = null;
   export let operatorPlan: CopilotOperatorPlan | null = null;
@@ -54,13 +60,11 @@
   export let onPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
   export let onOperatorPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
   export let onRunOperator: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
-  export let onCreateMemo: (title?: string, notes?: string) => Promise<unknown> | void = () => {};
-  export let onUpdateMemo: (memoId: string, title: string, body: string) => Promise<unknown> | void = () => {};
   export let onArchiveSession: (sessionId: string) => Promise<unknown> | void = () => {};
-  export let onExportMemo: (memoId: string) => Promise<string | null | unknown> | string | null | void = () => null;
   export let onLoadSessions: () => Promise<unknown> | void = () => {};
   export let onSelectSession: (sessionId: string) => Promise<unknown> | void = () => {};
   export let onSearchSessions: (options?: { includeArchived?: boolean; search?: string }) => Promise<unknown> | void = () => {};
+  export let onNewSession: () => Promise<unknown> | void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
 
   type CopilotRoleMode = "agent" | "operator";
@@ -70,23 +74,25 @@
   let promptText = "";
   let surface: CopilotWorkspaceSurface = synthesisSurface;
   let threadEntries: CopilotThreadEntry[] = [];
-  let selectedCount = 0;
-  let loadedCount = 0;
-  let displayedTurnCount = 0;
-  let memoTitle = "";
-  let memoNotes = "";
-  let memoEditId = "";
-  let memoEditTitle = "";
-  let memoEditBody = "";
   let sessionSearch = "";
   let includeArchivedSessions = false;
+  let contextMenuOpen = false;
+  let contextEl: HTMLDivElement | null = null;
+  let scrollEl: HTMLDivElement | null = null;
+  let shouldScroll = false;
+
+  const reduceMotion =
+    typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Typewriter reveal for the most recent assistant message.
+  let typewriterId = "";
+  let typewriterShown = "";
+  let typewriterTyping = false;
+  let typewriterTimer: ReturnType<typeof setInterval> | null = null;
+  let lastSeenTurnId: string | null = null;
 
   function activeTurns() {
     return activeSession?.turns ?? [];
-  }
-
-  function hasTurns() {
-    return activeTurns().length > 0 || threadEntries.length > 0;
   }
 
   function planEntities() {
@@ -146,13 +152,68 @@
     reasoningEffort = nextMode === "operator" ? "low" : "medium";
   }
 
+  function clearTypewriter() {
+    if (typewriterTimer) {
+      clearInterval(typewriterTimer);
+      typewriterTimer = null;
+    }
+    typewriterTyping = false;
+  }
+
+  function startTypewriter(turn: ChatTurn) {
+    clearTypewriter();
+    const full = turn.result.message ?? "";
+    typewriterId = turn.id;
+    if (reduceMotion || !full) {
+      typewriterShown = full;
+      return;
+    }
+    typewriterShown = "";
+    typewriterTyping = true;
+    const step = Math.max(1, Math.round(full.length / 140));
+    let cursor = 0;
+    typewriterTimer = setInterval(() => {
+      cursor += step;
+      typewriterShown = full.slice(0, cursor);
+      if (scrollEl) {
+        scrollEl.scrollTop = scrollEl.scrollHeight;
+      }
+      if (cursor >= full.length) {
+        typewriterShown = full;
+        clearTypewriter();
+      }
+    }, 16);
+  }
+
+  function maybeAnimate(turns: ChatTurn[], isLive: boolean) {
+    const last = turns[turns.length - 1];
+    const id = last?.id ?? null;
+    if (lastSeenTurnId === null && id !== null) {
+      // Skip animating content that was already present on first render.
+      lastSeenTurnId = id;
+      typewriterId = id;
+      typewriterShown = last?.result.message ?? "";
+      return;
+    }
+    if (id && id !== lastSeenTurnId && isLive && last?.result.message) {
+      startTypewriter(last);
+    }
+    lastSeenTurnId = id;
+  }
+
+  function messageText(turn: ChatTurn, isLast: boolean) {
+    if (isLast && turn.id === typewriterId) {
+      return typewriterShown;
+    }
+    return turn.result.message ?? "";
+  }
+
   async function handleGenerate() {
     if (!surface.supported || !surface.domain || loading) {
       return;
     }
     const result = await onGenerate(surface.domain, promptText.trim(), reasoningEffort);
     if (result != null) {
-      // Keep the prompt draft recoverable when generation fails or times out.
       const status = (result as { status?: string }).status;
       if (status === "ready") {
         promptText = "";
@@ -186,29 +247,24 @@
     }
   }
 
-  async function handleCreateMemo() {
-    if (loading || !hasTurns()) {
-      return;
-    }
-    const result = await onCreateMemo(memoTitle.trim(), memoNotes.trim());
-    if (result != null) {
-      memoTitle = "";
-      memoNotes = "";
-      await onLoadSessions();
+  async function handleSubmit() {
+    if (roleMode === "operator") {
+      await handleRunOperator();
+    } else {
+      await handleGenerate();
     }
   }
 
-  async function handleUpdateMemo() {
-    if (!memoEditId || loading) {
+  async function handleNewSession() {
+    if (loading) {
       return;
     }
-    const result = await onUpdateMemo(memoEditId, memoEditTitle.trim(), memoEditBody);
-    if (result != null) {
-      await onLoadSessions();
-    }
+    await onNewSession();
+    await onLoadSessions();
   }
 
-  async function handleArchiveSession(sessionId: string) {
+  async function handleArchiveSession(sessionId: string, event: MouseEvent) {
+    event.stopPropagation();
     if (!sessionId || loading) {
       return;
     }
@@ -229,59 +285,27 @@
     await onSelectSession(sessionId);
   }
 
-  async function handleExportMemo() {
-    if (!memoEditId) {
-      return;
-    }
-    const markdown = await onExportMemo(memoEditId);
-    if (typeof markdown !== "string" || !markdown.trim()) {
-      return;
-    }
-    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${slugify(memoEditTitle || "copilot-memo")}.md`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function selectMemo(memo: CopilotMemo) {
-    memoEditId = memo.memo_id;
-    memoEditTitle = memo.title;
-    memoEditBody = memo.body;
-  }
-
   function handleComposerKeydown(event: KeyboardEvent) {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void handleGenerate();
+      void handleSubmit();
     }
   }
 
-  function providerLabel(entry: CopilotThreadEntry) {
-    const result = entry.result;
+  function providerLabel(result: CopilotResearchCardResult) {
     return result.model ? `${result.provider} / ${result.model}` : result.provider;
   }
 
-  function sourceSummary(entry: CopilotThreadEntry) {
-    const sourceCount = entry.result.sources.length;
-    const toolCount = entry.result.tool_traces.length;
-    const warningCount = entry.result.warnings.length;
-    const parts = [];
-    if (sourceCount) parts.push(`${sourceCount} sources`);
-    if (toolCount) parts.push(`${toolCount} tools`);
-    if (warningCount) parts.push(`${warningCount} warnings`);
-    return parts.join(" / ") || "No source trace";
-  }
-
-  function slugify(value: string) {
-    const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-    return slug || "copilot-memo";
+  function sourceSummary(result: CopilotResearchCardResult) {
+    const parts: string[] = [];
+    if (result.sources.length) parts.push(`${result.sources.length} sources`);
+    if (result.tool_traces.length) parts.push(`${result.tool_traces.length} tools`);
+    if (result.warnings.length) parts.push(`${result.warnings.length} warnings`);
+    return parts.join(" / ");
   }
 
   function sessionStatusLabel(session: CopilotSessionSummary) {
-    return session.archived_at ? "ARCHIVED" : session.active_domain ?? "mixed";
+    return session.archived_at ? "archived" : session.active_domain ?? "mixed";
   }
 
   function formatMs(value: number) {
@@ -291,498 +315,696 @@
     return `${value}ms`;
   }
 
+  onMount(() => {
+    const onDocClick = (event: MouseEvent) => {
+      if (contextMenuOpen && contextEl && !contextEl.contains(event.target as Node)) {
+        contextMenuOpen = false;
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        contextMenuOpen = false;
+      }
+    };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKey);
+      clearTypewriter();
+    };
+  });
+
+  afterUpdate(() => {
+    if (shouldScroll && scrollEl) {
+      scrollEl.scrollTop = scrollEl.scrollHeight;
+      shouldScroll = false;
+    }
+  });
+
   $: surface = synthesisSurface;
   $: threadEntries = surface.thread?.entries ?? [];
-  $: selectedCount = synthesisSurface.selectedScopeDomains.length;
-  $: loadedCount = synthesisSurface.scopeOptions.filter((option) => option.supported).length;
-  $: displayedTurnCount = threadEntries.length || activeTurns().length || 0;
-  $: operatorStepCount = operatorSteps().length;
-  $: operatorCheckpointCount = operatorCheckpoints().length;
+  $: chatTurns = threadEntries.length
+    ? threadEntries.map((entry) => ({
+        id: entry.entryId,
+        index: entry.turnIndex,
+        prompt: entry.prompt,
+        result: entry.result
+      }))
+    : activeTurns().map((turn) => ({
+        id: turn.turn_id,
+        index: turn.turn_index,
+        prompt: turn.prompt,
+        result: turn.result
+      }));
+  $: maybeAnimate(chatTurns, threadEntries.length > 0);
+  $: selectedScopeOptions = synthesisSurface.scopeOptions.filter(
+    (option) =>
+      option.domain != null && option.supported && synthesisSurface.selectedScopeDomains.includes(option.domain)
+  );
+  $: contextSummary =
+    selectedScopeOptions.length === 0
+      ? "Select context"
+      : selectedScopeOptions.length <= 2
+        ? selectedScopeOptions.map((option) => option.label).join(", ")
+        : `${selectedScopeOptions[0].label} +${selectedScopeOptions.length - 1}`;
+  $: activeSessionId = activeSession?.session.session_id ?? null;
+  $: hasPlanMessage =
+    (roleMode === "agent" && researchPlan != null) ||
+    (roleMode === "operator" && (operatorPlan != null || operatorResult != null));
+  // Re-scroll to the bottom whenever the transcript or in-flight state changes.
+  $: if (chatTurns || loading || hasPlanMessage) {
+    shouldScroll = true;
+  }
 </script>
 
-<section class="view">
-  <article class="panel header-panel">
-    <div class="header-main">
-      <p class="eyebrow">COPILOT WORKSPACE</p>
-      <h2>Grounded Research Copilot</h2>
-      <p>{surface.contextLabel}</p>
+<section class="copilot">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <button type="button" class="new-chat" on:click={handleNewSession} disabled={loading}>
+        <span aria-hidden="true">+</span> New chat
+      </button>
     </div>
-    <div class="header-kpis" aria-label="Copilot workspace status">
-      <div>
-        <span>Primary</span>
-        <strong>{roleMode === "operator" ? "Research Operator" : "Research Agent"}</strong>
-      </div>
-      <div>
-        <span>Available Contexts</span>
-        <strong>{loadedCount}</strong>
-      </div>
-      <div>
-        <span>Selected Contexts</span>
-        <strong>{selectedCount}</strong>
-      </div>
-      <div>
-        <span>Operator Steps</span>
-        <strong>{operatorStepCount}</strong>
-      </div>
+    <div class="sidebar-filter">
+      <input
+        bind:value={sessionSearch}
+        placeholder="Search conversations"
+        on:keydown={(event) => event.key === "Enter" && handleSearchSessions()}
+      />
+      <label class="archived-toggle">
+        <input type="checkbox" bind:checked={includeArchivedSessions} on:change={handleSearchSessions} />
+        Archived
+      </label>
     </div>
-  </article>
+    <div class="session-list">
+      {#if sessions.length}
+        {#each sessions as session (session.session_id)}
+          <button
+            type="button"
+            class="session-row"
+            class:active={session.session_id === activeSessionId}
+            class:archived={session.archived_at != null}
+            on:click={() => handleSelectSession(session.session_id)}
+          >
+            <span class="session-title">{session.title}</span>
+            <span class="session-meta">
+              {session.turn_count} turn{session.turn_count === 1 ? "" : "s"} · {sessionStatusLabel(session)}
+            </span>
+            {#if session.archived_at == null}
+              <span
+                class="session-archive"
+                role="button"
+                tabindex="0"
+                title="Archive conversation"
+                on:click={(event) => handleArchiveSession(session.session_id, event)}
+                on:keydown={(event) => event.key === "Enter" && handleArchiveSession(session.session_id, event as unknown as MouseEvent)}
+              >Archive</span>
+            {/if}
+          </button>
+        {/each}
+      {:else}
+        <p class="sidebar-empty">No conversations yet.</p>
+      {/if}
+    </div>
+  </aside>
 
-  <div class="workspace-grid">
-    <div class="primary-column">
-      <article class="panel composer-panel">
-        <div class="control-row">
-          <div class="role-tabs" role="tablist" aria-label="Copilot role">
-            <button
-              type="button"
-              class:active={roleMode === "agent"}
-              on:click={() => setRoleMode("agent")}
-            >
-              Research Agent
-            </button>
-            <button
-              type="button"
-              class:active={roleMode === "operator"}
-              on:click={() => setRoleMode("operator")}
-            >
-              Research Operator
-            </button>
-          </div>
-          <label class="effort-select">
-            <span>Thinking</span>
-            <select bind:value={reasoningEffort} disabled={loading}>
-              <option value="minimal">minimal</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-              <option value="xhigh">xhigh</option>
-            </select>
-          </label>
-        </div>
-
-        <textarea
-          bind:value={promptText}
-          rows={5}
-          placeholder={surface.supported ? surface.placeholder : surface.guidance}
-          disabled={!surface.domain || loading}
-          on:keydown={handleComposerKeydown}
-        ></textarea>
-
-        <div class="composer-footer">
-          <span>{surface.selectionMessage ?? surface.guidance}</span>
-          <div class="composer-actions">
-            <button type="button" class="secondary" disabled={!surface.domain || loading} on:click={handlePlan}>
-              {roleMode === "operator" ? "Operator Plan" : "Plan"}
-            </button>
-            {#if roleMode === "operator"}
-              <button type="button" disabled={!surface.supported || loading} on:click={handleRunOperator}>
-                {loading ? "Running..." : "Run Operator"}
-              </button>
+  <main class="chat">
+    <header class="chat-head">
+      <div class="context-picker" bind:this={contextEl}>
+        <button
+          type="button"
+          class="context-trigger"
+          class:open={contextMenuOpen}
+          on:click={() => (contextMenuOpen = !contextMenuOpen)}
+        >
+          <span class="context-label">Context</span>
+          <span class="context-value">{contextSummary}</span>
+          <span class="caret" aria-hidden="true">▾</span>
+        </button>
+        {#if contextMenuOpen}
+          <div class="context-menu" role="listbox" aria-label="Context scope">
+            {#if synthesisSurface.scopeOptions.length}
+              {#each synthesisSurface.scopeOptions as option (option.tabId)}
+                <button
+                  type="button"
+                  class="context-option"
+                  class:selected={option.domain != null && synthesisSurface.selectedScopeDomains.includes(option.domain)}
+                  disabled={!option.supported || option.domain == null}
+                  title={option.disabledReason ?? option.contextLabel}
+                  on:click={() => option.domain != null && onToggleScope(option.domain)}
+                >
+                  <span class="checkbox" aria-hidden="true"></span>
+                  <span class="context-option-label">{option.label}</span>
+                  {#if option.warningLabel}
+                    <span class="dot warn" title={option.warningLabel}></span>
+                  {:else if option.freshnessLabel}
+                    <span class="dot ok" title={option.freshnessLabel}></span>
+                  {/if}
+                </button>
+              {/each}
             {:else}
-              <button type="button" disabled={!surface.supported || loading} on:click={handleGenerate}>
-                {loading ? "Generating..." : threadEntries.length ? "Follow Up" : "Generate"}
-              </button>
-            {/if}
-          </div>
-        </div>
-
-        {#if roleMode === "operator" && operatorPlan}
-          <div class="plan-preview operator-preview">
-            <div class="plan-preview-head">
-              <span>{operatorPlan.role.replaceAll("_", " ")}</span>
-              <strong>{operatorPlan.intent.replaceAll("_", " ")}</strong>
-            </div>
-            <div class="plan-budget">
-              <span>{operatorPlan.max_tool_calls} tools max</span>
-              <span>{operatorPlan.max_provider_calls} provider calls max</span>
-              <span>{formatMs(operatorPlan.max_elapsed_ms)} guard</span>
-              <span>{operatorCheckpointCount} checkpoints</span>
-            </div>
-            {#if operatorPlan.target_entities.length}
-              <div class="entity-row">
-                {#each operatorPlan.target_entities.slice(0, 4) as entity}
-                  <span>{entity.kind}: {entity.label ?? entity.id}</span>
-                {/each}
-              </div>
-            {/if}
-            <div class="operator-steps">
-              {#each operatorSteps() as step (step.step_id)}
-                <div class:checkpoint={step.requires_confirmation}>
-                  <span>{step.order}</span>
-                  <strong>{step.title}</strong>
-                  <small>{step.domain.replaceAll("_", " ")} / {step.action_type.replaceAll("_", " ")}</small>
-                  <small>{actionPermissionLabel(step.tool_id, step.permission_policy)}</small>
-                  <p>{step.rationale ?? "Operator step planned by Gamma."}</p>
-                  <em>{expectedArtifactsLabel(step.expected_artifacts)}</em>
-                </div>
-              {/each}
-            </div>
-            {#if operatorCheckpoints().length}
-              <div class="checkpoint-list">
-                {#each operatorCheckpoints() as checkpoint (checkpoint.checkpoint_id)}
-                  <div>
-                    <strong>{checkpoint.default_policy.replaceAll("_", " ")}</strong>
-                    <span>{checkpoint.required_for_tool_ids.join(" / ")}</span>
-                    <p>{checkpoint.reason}</p>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            {#if operatorWarnings().length}
-              <p class="plan-warning">{operatorWarnings()[0]}</p>
-            {/if}
-          </div>
-        {:else if roleMode === "agent" && researchPlan}
-          <div class="plan-preview">
-            <div class="plan-preview-head">
-              <span>{researchPlan.depth_profile}</span>
-              <strong>{researchPlan.intent.replaceAll("_", " ")}</strong>
-            </div>
-            <div class="plan-budget">
-              <span>{researchPlan.max_tool_calls} tools max</span>
-              <span>{researchPlan.max_provider_calls} provider calls max</span>
-              <span>{formatMs(researchPlan.max_elapsed_ms)} guard</span>
-            </div>
-            {#if planEntities().length}
-              <div class="entity-row">
-                {#each planEntities().slice(0, 4) as entity}
-                  <span>{entity.kind}: {entity.label ?? entity.id}</span>
-                {/each}
-              </div>
-            {/if}
-            <div class="domain-plan">
-              {#each planDomains().slice(0, 5) as item}
-                <div>
-                  <strong>{item.domain.replaceAll("_", " ")}</strong>
-                  <span>{item.depth} / {item.estimated_tool_calls}T / {item.estimated_provider_calls}P / {formatMs(item.estimated_latency_ms)}</span>
-                  <p>{item.reason}</p>
-                </div>
-              {/each}
-            </div>
-            {#if planDecisions().length}
-              <div class="domain-decisions">
-                {#each planDecisions().slice(0, 6) as decision}
-                  <div class:omitted={!decision.used}>
-                    <strong>{decision.used ? "USED" : "SKIP"}</strong>
-                    <span>{decision.domain.replaceAll("_", " ")}</span>
-                    <p>{decision.reason}</p>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            {#if planWarnings().length}
-              <p class="plan-warning">{planWarnings()[0]}</p>
+              <p class="context-empty">Load Gamma contexts from the workspace first.</p>
             {/if}
           </div>
         {/if}
+      </div>
 
-        {#if roleMode === "operator" && operatorResult}
-          <div class="operator-result">
-            <strong>{operatorResult.status}</strong>
-            <span>{operatorResult.message ?? "No operator execution message."}</span>
-            <small>{operatorResult.tool_traces.length} tool traces / {operatorResult.sources.length} sources / {operatorResult.warnings.length} warnings</small>
-          </div>
-          {#if operatorEvents().length}
-            <div class="operator-events">
-              {#each operatorEvents() as event (event.event_id)}
-                <div class:event-warning={event.event_type === "warning" || event.event_type === "confirmation-needed"}>
-                  <span>{event.sequence}</span>
-                  <strong>{operatorEventMeta(event.event_type)}</strong>
-                  <small>{event.tool_id ?? event.step_id ?? event.run_id}</small>
-                  <p>{event.message ?? event.title ?? "Operator event recorded."}</p>
-                  <em>{event.source_ids.length} src / {event.warnings.length} warn</em>
-                </div>
-              {/each}
-            </div>
-          {/if}
+      <div class="head-controls">
+        {#if latestHandoff}
+          <span class="handoff-chip" title="Opened from a cross-tab handoff">
+            {latestHandoff.source_tab} → {latestHandoff.intended_target_tab}
+          </span>
         {/if}
-      </article>
-
-      <article class="panel thread-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Session</p><h3>{surface.domainLabel}</h3></div>
-          <span>{surface.supported ? "READY" : "CONTEXT REQUIRED"}</span>
-        </div>
-
-        {#if threadEntries.length}
-          <div class="thread-list">
-            {#each threadEntries as entry (entry.entryId)}
-              <section class="turn-row">
-                <div class="turn-meta">
-                  <span>TURN {entry.turnIndex + 1}</span>
-                  <small>{providerLabel(entry)}</small>
-                  <small>{sourceSummary(entry)}</small>
-                </div>
-                <div class="turn-body">
-                  {#if entry.prompt}
-                    <p class="prompt">{entry.prompt}</p>
-                  {/if}
-                  {#if entry.result.message}
-                    <p class="message {entry.result.status}">{entry.result.message}</p>
-                  {/if}
-                  {#if entry.result.card}
-                    <h4>{entry.result.card.title}</h4>
-                    <p><strong>Hypothesis</strong>{entry.result.card.hypothesis}</p>
-                    <p><strong>Rationale</strong>{entry.result.card.rationale}</p>
-                    <p><strong>Proposed test</strong>{entry.result.card.proposed_test}</p>
-                  {/if}
-                </div>
-              </section>
-            {/each}
-          </div>
-        {:else if activeTurns().length}
-          <div class="thread-list">
-            {#each activeTurns() as turn (turn.turn_id)}
-              <section class="turn-row">
-                <div class="turn-meta">
-                  <span>TURN {turn.turn_index + 1}</span>
-                  <small>{turn.result.model ? `${turn.result.provider} / ${turn.result.model}` : turn.result.provider}</small>
-                  <small>{turn.result.sources.length} sources / {turn.result.tool_traces.length} tools</small>
-                </div>
-                <div class="turn-body">
-                  {#if turn.prompt}
-                    <p class="prompt">{turn.prompt}</p>
-                  {/if}
-                  {#if turn.result.message}
-                    <p class="message {turn.result.status}">{turn.result.message}</p>
-                  {/if}
-                  {#if turn.result.card}
-                    <h4>{turn.result.card.title}</h4>
-                    <p><strong>Hypothesis</strong>{turn.result.card.hypothesis}</p>
-                    <p><strong>Rationale</strong>{turn.result.card.rationale}</p>
-                    <p><strong>Proposed test</strong>{turn.result.card.proposed_test}</p>
-                  {/if}
-                </div>
-              </section>
-            {/each}
-          </div>
-        {:else}
-          <p class="empty-state">No dedicated Copilot workspace thread yet.</p>
-        {/if}
-      </article>
-    </div>
-
-    <aside class="support-column">
-      <article class="panel scope-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Grounding</p><h3>Context Scope</h3></div>
-          <span>{selectedCount}/{loadedCount}</span>
-        </div>
-        {#if synthesisSurface.scopeOptions.length}
-          <div class="scope-list">
-            {#each synthesisSurface.scopeOptions as option (option.tabId)}
-              <button
-                type="button"
-                class:selected={option.domain != null && synthesisSurface.selectedScopeDomains.includes(option.domain)}
-                class:unavailable={!option.supported}
-                disabled={!option.supported || option.domain == null}
-                on:click={() => option.domain != null && onToggleScope(option.domain)}
-              >
-                <strong>{option.label}</strong>
-                <span>{option.contextLabel}</span>
-                <small>
-                  {option.fingerprintLabel}
-                  {#if option.freshnessLabel} / {option.freshnessLabel}{/if}
-                  {#if option.warningLabel} / {option.warningLabel}{/if}
-                </small>
-              </button>
-            {/each}
-          </div>
-        {:else}
-          <p class="empty-state">Load Gamma contexts from the workspace before using Copilot.</p>
-        {/if}
-      </article>
-
-      <article class="panel plan-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Memos</p><h3>Session Memo</h3></div>
-        </div>
-        <div class="memo-form">
-          <input bind:value={memoTitle} placeholder="Memo title" disabled={loading} />
-          <textarea bind:value={memoNotes} rows={3} placeholder="Optional memo note" disabled={loading}></textarea>
-          <button type="button" disabled={loading || !hasTurns()} on:click={handleCreateMemo}>
-            Create Memo
+        <div class="role-tabs" role="tablist" aria-label="Copilot role">
+          <button type="button" class:active={roleMode === "agent"} on:click={() => setRoleMode("agent")}>
+            Agent
+          </button>
+          <button type="button" class:active={roleMode === "operator"} on:click={() => setRoleMode("operator")}>
+            Operator
           </button>
         </div>
-        <div class="memo-list">
-          {#if memos.length}
-            {#each memos.slice(0, 4) as memo}
-              <button type="button" class:selected={memo.memo_id === memoEditId} on:click={() => selectMemo(memo)}>
-                <strong>{memo.source_turn_ids.length}</strong><span>{memo.title}</span>
-              </button>
-            {/each}
-          {:else}
-            <div><strong>0</strong><span>No saved Copilot memos for the active session.</span></div>
-          {/if}
-        </div>
-        {#if memoEditId}
-          <div class="memo-editor">
-            <input bind:value={memoEditTitle} placeholder="Memo title" disabled={loading} />
-            <textarea bind:value={memoEditBody} rows={8} placeholder="Memo body" disabled={loading}></textarea>
-            <div class="button-row">
-              <button type="button" disabled={loading || !memoEditBody.trim()} on:click={handleUpdateMemo}>Save</button>
-              <button type="button" class="secondary" disabled={loading} on:click={handleExportMemo}>Export Md</button>
-            </div>
-          </div>
-        {/if}
-      </article>
+        <label class="effort-select">
+          <span>Thinking</span>
+          <select bind:value={reasoningEffort} disabled={loading}>
+            <option value="minimal">minimal</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+          </select>
+        </label>
+      </div>
+    </header>
 
-      <article class="panel plan-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Sessions</p><h3>Persisted Threads</h3></div>
-          <span>{sessions.length}</span>
+    <div class="transcript" bind:this={scrollEl}>
+      {#if !surface.supported && chatTurns.length === 0}
+        <div class="empty-chat">
+          <h2>Grounded Research Copilot</h2>
+          <p>Select a context to ground the conversation, then ask anything across your Gamma tabs.</p>
         </div>
-        <div class="session-filter">
-          <input bind:value={sessionSearch} placeholder="Search sessions" on:keydown={(event) => event.key === "Enter" && handleSearchSessions()} />
-          <label><input type="checkbox" bind:checked={includeArchivedSessions} on:change={handleSearchSessions} /> Archived</label>
-          <button type="button" on:click={handleSearchSessions} disabled={loading}>Filter</button>
+      {:else if chatTurns.length === 0 && !hasPlanMessage}
+        <div class="empty-chat">
+          <h2>Ask anything</h2>
+          <p>Grounded in {contextSummary}. Gamma stays read-only and Copilot preserves provenance and warnings.</p>
         </div>
-        <div class="session-list">
-          {#if sessions.length}
-            {#each sessions.slice(0, 6) as session}
-              <div>
-                <strong>{session.turn_count}</strong>
-                <span>{session.title} / {sessionStatusLabel(session)} / {session.memo_count} memos</span>
-                <div class="session-actions">
-                  <button type="button" disabled={loading} on:click={() => handleSelectSession(session.session_id)}>Open</button>
-                  <button type="button" disabled={loading || session.archived_at != null} on:click={() => handleArchiveSession(session.session_id)}>Archive</button>
+      {:else}
+        <div class="messages">
+          {#each chatTurns as turn, index (turn.id)}
+            {#if turn.prompt}
+              <div class="msg user">
+                <div class="bubble">{turn.prompt}</div>
+              </div>
+            {/if}
+            <div class="msg assistant">
+              <div class="role-tag">GAMMA</div>
+              <div class="assistant-body">
+                {#if turn.result.message}
+                  <p class="assistant-text {turn.result.status}">
+                    {messageText(turn, index === chatTurns.length - 1)}{#if typewriterTyping && index === chatTurns.length - 1 && turn.id === typewriterId}<span class="caret-blink">▍</span>{/if}
+                  </p>
+                {/if}
+                {#if turn.result.card}
+                  <div class="research-card">
+                    <h4>{turn.result.card.title}</h4>
+                    <div class="card-field"><span>Hypothesis</span><p>{turn.result.card.hypothesis}</p></div>
+                    <div class="card-field"><span>Rationale</span><p>{turn.result.card.rationale}</p></div>
+                    <div class="card-field"><span>Proposed test</span><p>{turn.result.card.proposed_test}</p></div>
+                  </div>
+                {/if}
+                <div class="assistant-meta">
+                  <span>{providerLabel(turn.result)}</span>
+                  {#if sourceSummary(turn.result)}<span>{sourceSummary(turn.result)}</span>{/if}
                 </div>
               </div>
-            {/each}
-          {:else}
-            <div><strong>0</strong><span>No persisted Copilot sessions yet.</span></div>
-          {/if}
-        </div>
-      </article>
+            </div>
+          {/each}
 
-      <article class="panel handoff-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Handoff</p><h3>Latest Context</h3></div>
-        </div>
-        {#if latestHandoff}
-          <div class="handoff-grid">
-            <div><span>Source</span><strong>{latestHandoff.source_tab}</strong></div>
-            <div><span>Target</span><strong>{latestHandoff.intended_target_tab}</strong></div>
-            <div><span>Entity</span><strong>{latestHandoff.selected_entity?.label ?? "N/A"}</strong></div>
-            <div><span>Mode</span><strong>{latestHandoff.source_mode ?? "N/A"}</strong></div>
-          </div>
-          {#if latestHandoff.warnings.length}
-            <p class="handoff-warning">{latestHandoff.warnings[0]}</p>
+          {#if roleMode === "agent" && researchPlan}
+            <div class="msg assistant">
+              <div class="role-tag">PLAN</div>
+              <div class="assistant-body">
+                <div class="plan-block">
+                  <div class="plan-head">
+                    <strong>{researchPlan.intent.replaceAll("_", " ")}</strong>
+                    <span>{researchPlan.depth_profile}</span>
+                  </div>
+                  <div class="plan-budget">
+                    <span>{researchPlan.max_tool_calls} tools</span>
+                    <span>{researchPlan.max_provider_calls} provider calls</span>
+                    <span>{formatMs(researchPlan.max_elapsed_ms)} guard</span>
+                  </div>
+                  {#if planEntities().length}
+                    <div class="chip-row">
+                      {#each planEntities().slice(0, 4) as entity}
+                        <span class="chip">{entity.kind}: {entity.label ?? entity.id}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if planDomains().length}
+                    <table class="plan-table">
+                      <thead><tr><th>Domain</th><th>Depth</th><th>Reason</th></tr></thead>
+                      <tbody>
+                        {#each planDomains().slice(0, 5) as item}
+                          <tr>
+                            <td>{item.domain.replaceAll("_", " ")}</td>
+                            <td class="muted">{item.depth} · {item.estimated_tool_calls}T/{item.estimated_provider_calls}P</td>
+                            <td>{item.reason}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  {/if}
+                  {#if planDecisions().length}
+                    <div class="decision-row">
+                      {#each planDecisions().slice(0, 6) as decision}
+                        <span class="chip" class:skip={!decision.used}>
+                          {decision.used ? "USE" : "SKIP"} {decision.domain.replaceAll("_", " ")}
+                        </span>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if planWarnings().length}
+                    <p class="plan-warning">{planWarnings()[0]}</p>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          {:else if roleMode === "operator" && operatorPlan}
+            <div class="msg assistant">
+              <div class="role-tag">OPERATOR PLAN</div>
+              <div class="assistant-body">
+                <div class="plan-block">
+                  <div class="plan-head">
+                    <strong>{operatorPlan.intent.replaceAll("_", " ")}</strong>
+                    <span>{operatorPlan.role.replaceAll("_", " ")}</span>
+                  </div>
+                  <div class="plan-budget">
+                    <span>{operatorPlan.max_tool_calls} tools</span>
+                    <span>{operatorPlan.max_provider_calls} provider calls</span>
+                    <span>{formatMs(operatorPlan.max_elapsed_ms)} guard</span>
+                    <span>{operatorCheckpoints().length} checkpoints</span>
+                  </div>
+                  {#if operatorSteps().length}
+                    <table class="plan-table">
+                      <thead><tr><th>#</th><th>Step</th><th>Action</th><th>Policy</th></tr></thead>
+                      <tbody>
+                        {#each operatorSteps() as step (step.step_id)}
+                          <tr class:checkpoint={step.requires_confirmation}>
+                            <td class="muted">{step.order}</td>
+                            <td>{step.title}</td>
+                            <td class="muted">{step.domain.replaceAll("_", " ")} / {step.action_type.replaceAll("_", " ")}</td>
+                            <td class="muted">{actionPermissionLabel(step.tool_id, step.permission_policy)}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  {/if}
+                  {#if operatorWarnings().length}
+                    <p class="plan-warning">{operatorWarnings()[0]}</p>
+                  {/if}
+                </div>
+              </div>
+            </div>
           {/if}
-        {:else}
-          <p class="empty-state">No explicit cross-tab handoff has opened this workspace yet.</p>
-        {/if}
-      </article>
-    </aside>
-  </div>
+
+          {#if roleMode === "operator" && operatorResult}
+            <div class="msg assistant">
+              <div class="role-tag">OPERATOR RUN</div>
+              <div class="assistant-body">
+                <p class="assistant-text {operatorResult.status}">{operatorResult.message ?? "No operator execution message."}</p>
+                {#if operatorEvents().length}
+                  <table class="plan-table">
+                    <thead><tr><th>#</th><th>Event</th><th>Detail</th></tr></thead>
+                    <tbody>
+                      {#each operatorEvents() as event (event.event_id)}
+                        <tr class:checkpoint={event.event_type === "warning" || event.event_type === "confirmation-needed"}>
+                          <td class="muted">{event.sequence}</td>
+                          <td>{operatorEventMeta(event.event_type)}</td>
+                          <td>{event.message ?? event.title ?? "Operator event recorded."}</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                {/if}
+                <div class="assistant-meta">
+                  <span>{operatorResult.tool_traces.length} tools · {operatorResult.sources.length} sources · {operatorResult.warnings.length} warnings</span>
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          {#if loading}
+            <div class="msg assistant">
+              <div class="role-tag">GAMMA</div>
+              <div class="assistant-body">
+                <div class="thinking" aria-label="Generating">
+                  <span></span><span></span><span></span>
+                </div>
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+
+    <footer class="composer">
+      <textarea
+        bind:value={promptText}
+        rows={1}
+        placeholder={surface.supported ? surface.placeholder : surface.guidance}
+        disabled={!surface.domain || loading}
+        on:keydown={handleComposerKeydown}
+      ></textarea>
+      <div class="composer-actions">
+        <span class="composer-hint">{surface.selectionMessage ?? surface.guidance}</span>
+        <div class="composer-buttons">
+          <button type="button" class="secondary" disabled={!surface.domain || loading} on:click={handlePlan}>
+            {roleMode === "operator" ? "Operator Plan" : "Plan"}
+          </button>
+          <button type="button" class="primary" disabled={!surface.supported || loading} on:click={handleSubmit}>
+            {#if loading}
+              {roleMode === "operator" ? "Running…" : "Generating…"}
+            {:else if roleMode === "operator"}
+              Run Operator
+            {:else}
+              {chatTurns.length ? "Follow Up" : "Send"}
+            {/if}
+          </button>
+        </div>
+      </div>
+    </footer>
+  </main>
 </section>
 
 <style>
-  .view,
-  .primary-column,
-  .support-column {
+  .copilot {
     display: grid;
+    grid-template-columns: 16rem minmax(0, 1fr);
     gap: 0.5rem;
-    align-content: start;
+    /* The Gamma shell scrolls naturally, so anchor the chat to the viewport to
+       get a fixed transcript scroll region with a pinned composer. Offset =
+       topbar + shell paddings (~63px top + ~18px bottom). */
+    height: calc(100vh - 5.5rem);
+    min-height: 32rem;
     min-width: 0;
   }
 
-  .panel {
+  /* ---- Sidebar ---- */
+  .sidebar {
     display: grid;
-    gap: 0.5rem;
-    align-content: start;
+    grid-template-rows: auto auto minmax(0, 1fr);
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    min-height: 0;
   }
 
-  .header-panel {
-    grid-template-columns: minmax(0, 1fr) minmax(24rem, 0.7fr);
-    align-items: stretch;
-    padding: 0;
-    gap: 0;
+  .sidebar-head {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--divider);
   }
 
-  .header-main {
+  .new-chat {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    height: 30px;
+    border: 1px solid var(--panel-strong);
+    border-radius: 2px;
+    background: var(--bg-1);
+    color: var(--text-0);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+
+  .new-chat span {
+    color: var(--accent);
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+
+  .new-chat:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .sidebar-filter {
     display: grid;
-    gap: 0.25rem;
-    padding: 0.85rem;
-    border-right: 1px solid var(--divider);
+    gap: 0.4rem;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--divider);
   }
 
-  .header-main p:last-child {
-    color: var(--text-1);
-  }
-
-  .header-kpis {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .header-kpis div {
-    display: grid;
-    gap: 0.2rem;
-    padding: 0.75rem;
-    border-right: 1px solid var(--divider);
-  }
-
-  .header-kpis div:last-child {
-    border-right: 0;
-  }
-
-  .header-kpis span,
-  .panel-head span,
-  .eyebrow,
-  .turn-meta span,
-  .turn-meta small {
+  .archived-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 0.64rem;
   }
 
-  .header-kpis strong {
-    color: var(--text-0);
-    font-size: 0.86rem;
+  .archived-toggle input {
+    width: 13px;
+    height: 13px;
+    padding: 0;
   }
 
-  .workspace-grid {
+  .session-list {
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .session-row {
+    position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(26rem, 0.42fr);
-    gap: 0.5rem;
+    gap: 0.15rem;
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    border: 0;
+    border-bottom: 1px solid var(--divider);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
   }
 
-  .panel-head,
-  .title-line,
-  .composer-footer {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.75rem;
+  .session-row:hover {
+    background: rgba(122, 166, 200, 0.06);
+  }
+
+  .session-row.active {
+    background: rgba(122, 166, 200, 0.12);
+  }
+
+  .session-row.active .session-title {
+    color: var(--accent);
+  }
+
+  .session-row.archived .session-title {
+    color: var(--text-2);
+  }
+
+  .session-title {
+    color: var(--text-0);
+    font-size: 0.82rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .session-meta {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.62rem;
+  }
+
+  .session-archive {
+    position: absolute;
+    top: 0.45rem;
+    right: 0.5rem;
+    display: none;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.6rem;
+    cursor: pointer;
+  }
+
+  .session-archive:hover {
+    color: var(--accent);
+  }
+
+  .session-row:hover .session-archive {
+    display: inline;
+  }
+
+  .sidebar-empty,
+  .context-empty {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.68rem;
+    padding: 0.6rem;
+    margin: 0;
+  }
+
+  /* ---- Chat pane ---- */
+  .chat {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    min-height: 0;
     min-width: 0;
   }
 
-  .composer-actions {
+  .chat-head {
     display: flex;
-    gap: 0.4rem;
     align-items: center;
-  }
-
-  .title-line {
-    justify-content: flex-start;
-    gap: 0.45rem;
-  }
-
-  .control-row {
-    display: flex;
+    justify-content: space-between;
     gap: 0.5rem;
-    align-items: center;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--divider);
     flex-wrap: wrap;
+  }
+
+  .context-picker {
+    position: relative;
+  }
+
+  .context-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    height: 28px;
+    padding: 0 0.6rem;
+    border: 1px solid var(--panel-strong);
+    border-radius: 2px;
+    background: var(--bg-1);
+    color: var(--text-0);
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+
+  .context-trigger:hover,
+  .context-trigger.open {
+    border-color: var(--accent);
+  }
+
+  .context-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.62rem;
+  }
+
+  .context-value {
+    color: var(--text-0);
+  }
+
+  .caret {
+    color: var(--text-2);
+    font-size: 0.6rem;
+  }
+
+  .context-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    min-width: 15rem;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+
+  .context-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 0;
+    border-bottom: 1px solid var(--divider);
+    background: transparent;
+    color: var(--text-1);
+    font: inherit;
+    font-size: 0.78rem;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .context-option:last-child {
+    border-bottom: 0;
+  }
+
+  .context-option:hover:not(:disabled) {
+    background: rgba(122, 166, 200, 0.06);
+  }
+
+  .context-option:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .checkbox {
+    width: 13px;
+    height: 13px;
+    border: 1px solid var(--panel-strong);
+    flex: none;
+  }
+
+  .context-option.selected .checkbox {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .context-option.selected .context-option-label {
+    color: var(--text-0);
+  }
+
+  .context-option-label {
+    flex: 1;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .dot.ok {
+    background: var(--positive);
+  }
+
+  .dot.warn {
+    background: var(--warning);
+  }
+
+  .head-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .handoff-chip {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.62rem;
+    border: 1px solid var(--divider);
+    padding: 0.15rem 0.4rem;
   }
 
   .role-tabs {
     display: inline-flex;
     border: 1px solid var(--panel-strong);
-    width: max-content;
   }
 
   .role-tabs button {
@@ -790,18 +1012,25 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.65rem;
+    padding: 0.28rem 0.7rem;
     font: inherit;
-    font-size: 0.79rem;
-    white-space: nowrap;
+    font-size: 0.76rem;
     cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
   }
 
-  .role-tabs button:last-child { border-right: 0; }
-  .role-tabs button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
-  .role-tabs button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .role-tabs button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+  .role-tabs button:last-child {
+    border-right: 0;
+  }
+
+  .role-tabs button:hover {
+    background: rgba(122, 166, 200, 0.06);
+    color: var(--text-0);
+  }
+
+  .role-tabs button.active {
+    background: rgba(122, 166, 200, 0.12);
+    color: var(--accent);
+  }
 
   .effort-select {
     display: inline-flex;
@@ -810,520 +1039,387 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.64rem;
+    font-size: 0.62rem;
   }
 
   .effort-select select {
-    height: 1.8rem;
+    height: 28px;
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-1);
     font: inherit;
     font-size: 0.74rem;
-    padding: 0.25rem 0.45rem;
+    padding: 0 0.4rem;
     text-transform: lowercase;
   }
 
-  textarea {
-    min-height: 8rem;
-    resize: vertical;
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: 0.65rem;
-    font: inherit;
-    font-size: 0.84rem;
+  /* ---- Transcript ---- */
+  .transcript {
+    overflow-y: auto;
+    min-height: 0;
+    padding: 0.85rem;
   }
 
-  input {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    padding: 0.45rem 0.55rem;
-    font: inherit;
-    font-size: 0.8rem;
-  }
-
-  button {
-    border: 1px solid var(--panel-strong);
-    background: var(--bg-1);
-    color: var(--text-0);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  button:hover:not(:disabled) {
-    border-color: var(--accent);
-  }
-
-  button:disabled {
-    cursor: default;
-    opacity: 0.45;
-  }
-
-  .composer-footer span {
-    color: var(--text-2);
-    line-height: 1.35;
-  }
-
-  .composer-footer button {
-    padding: 0.42rem 0.9rem;
-    color: var(--accent);
-    border-color: rgba(122, 166, 200, 0.34);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.74rem;
-    white-space: nowrap;
-  }
-
-  .composer-footer button.secondary {
-    color: var(--text-1);
-    border-color: var(--panel-strong);
-  }
-
-  .plan-preview {
+  .empty-chat {
+    height: 100%;
     display: grid;
-    gap: 0;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
+    align-content: center;
+    justify-items: center;
+    gap: 0.4rem;
+    text-align: center;
+    padding: 2rem;
   }
 
-  .plan-preview-head,
-  .plan-budget,
-  .entity-row,
-  .domain-plan div,
-  .domain-decisions div,
-  .plan-warning {
-    padding: 0.5rem 0.65rem;
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .plan-preview-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.75rem;
-    align-items: baseline;
-  }
-
-  .plan-preview-head span,
-  .plan-budget span,
-  .domain-plan span,
-  .domain-decisions strong,
-  .domain-decisions span,
-  .entity-row span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0;
-    font-size: 0.62rem;
-  }
-
-  .plan-preview-head strong,
-  .domain-plan strong,
-  .domain-decisions span {
-    color: var(--text-0);
-    text-transform: uppercase;
-    letter-spacing: 0;
-    font-size: 0.72rem;
-  }
-
-  .plan-budget {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
-  }
-
-  .entity-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-  }
-
-  .domain-plan {
-    display: grid;
-    gap: 0;
-  }
-
-  .operator-steps,
-  .checkpoint-list,
-  .operator-events {
-    display: grid;
-    gap: 0;
-  }
-
-  .operator-steps div,
-  .checkpoint-list div,
-  .operator-events div,
-  .operator-result {
-    display: grid;
-    grid-template-columns: 2rem minmax(9rem, 0.32fr) minmax(7rem, 0.2fr) minmax(7rem, 0.2fr) minmax(0, 1fr) minmax(6rem, 0.16fr);
-    gap: 0.55rem;
-    align-items: start;
-    padding: 0.5rem 0.65rem;
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .operator-steps div.checkpoint {
-    border-left: 1px solid var(--warning);
-    padding-left: 0.6rem;
-  }
-
-  .checkpoint-list div {
-    grid-template-columns: minmax(8rem, 0.3fr) minmax(10rem, 0.3fr) minmax(0, 1fr);
-  }
-
-  .operator-result {
-    grid-template-columns: minmax(7rem, 0.2fr) minmax(0, 1fr) auto;
-    border: 1px solid var(--divider);
-    background: var(--bg-0);
-  }
-
-  .operator-events {
-    border: 1px solid var(--divider);
-    border-top: 0;
-  }
-
-  .operator-events div {
-    grid-template-columns: 2rem minmax(8rem, 0.22fr) minmax(10rem, 0.26fr) minmax(0, 1fr) minmax(5rem, 0.12fr);
-  }
-
-  .operator-events div.event-warning {
-    border-left: 1px solid var(--warning);
-    padding-left: 0.6rem;
-  }
-
-  .operator-steps span,
-  .operator-steps small,
-  .operator-steps em,
-  .checkpoint-list strong,
-  .checkpoint-list span,
-  .operator-events span,
-  .operator-events small,
-  .operator-events em,
-  .operator-result strong,
-  .operator-result small {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0;
-    font-size: 0.62rem;
-    font-style: normal;
-  }
-
-  .operator-steps > div > span,
-  .operator-events > div > span,
-  .operator-result strong {
-    color: var(--accent);
-  }
-
-  .operator-steps strong,
-  .operator-events strong {
-    color: var(--text-0);
-    font-size: 0.74rem;
-  }
-
-  .operator-steps p,
-  .checkpoint-list p,
-  .operator-events p,
-  .operator-result span {
-    margin: 0;
-    color: var(--text-1);
-    line-height: 1.35;
-    font-size: 0.76rem;
-  }
-
-  .domain-plan div,
-  .domain-decisions div {
-    display: grid;
-    grid-template-columns: minmax(8rem, 0.35fr) minmax(7rem, 0.28fr) minmax(0, 1fr);
-    gap: 0.6rem;
-    align-items: start;
-  }
-
-  .domain-decisions div.omitted strong {
-    color: var(--text-2);
-  }
-
-  .domain-plan div:last-child,
-  .plan-warning {
-    border-bottom: 0;
-  }
-
-  .domain-plan p,
-  .domain-decisions p,
-  .plan-warning {
-    margin: 0;
-    color: var(--text-1);
-    line-height: 1.35;
-    font-size: 0.76rem;
-  }
-
-  .plan-warning {
-    color: var(--warning);
-  }
-
-  .thread-list,
-  .scope-list,
-  .plan-list,
-  .memo-list,
-  .session-list {
-    display: grid;
-    gap: 0;
-    border-top: 1px solid var(--divider);
-  }
-
-  .turn-row {
-    display: grid;
-    grid-template-columns: 9rem minmax(0, 1fr);
-    gap: 0.75rem;
-    padding: 0.7rem 0;
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .turn-meta,
-  .turn-body {
-    display: grid;
-    gap: 0.3rem;
-    min-width: 0;
-  }
-
-  .turn-body h4 {
+  .empty-chat h2 {
     margin: 0;
     color: var(--text-0);
-    font-size: 0.9rem;
+    font-size: 1.05rem;
   }
 
-  .turn-body p {
-    color: var(--text-1);
-    line-height: 1.45;
-  }
-
-  .turn-body p strong {
-    display: block;
+  .empty-chat p {
+    margin: 0;
     color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 0.62rem;
-    margin-bottom: 0.16rem;
+    font-size: 0.82rem;
+    max-width: 28rem;
+    line-height: 1.5;
   }
 
-  .prompt {
-    color: var(--accent) !important;
-  }
-
-  .message.error {
-    color: var(--negative);
-  }
-
-  .scope-list button {
+  .messages {
     display: grid;
-    gap: 0.2rem;
-    padding: 0.6rem 0;
-    border: 0;
-    border-bottom: 1px solid var(--divider);
-    background: transparent;
-    text-align: left;
+    gap: 1rem;
+    max-width: 52rem;
+    margin: 0 auto;
   }
 
-  .scope-list button.selected strong,
-  .memo-list button.selected span {
-    color: var(--accent);
-  }
-
-  .scope-list button.unavailable {
-    opacity: 0.55;
-  }
-
-  .scope-list button.unavailable strong {
-    color: var(--text-2);
-  }
-
-  .scope-list strong {
-    color: var(--text-0);
-  }
-
-  .scope-list span,
-  .scope-list small,
-  .memo-list span,
-  .session-list span,
-  .session-filter label,
-  .handoff-grid span {
-    color: var(--text-2);
-    line-height: 1.35;
-  }
-
-  .memo-list button,
-  .memo-list > div,
-  .session-list > div {
-    display: grid;
-    grid-template-columns: 2rem minmax(0, 1fr);
-    gap: 0.5rem;
-    padding: 0.55rem 0;
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .memo-list button {
-    border: 0;
-    background: transparent;
-    text-align: left;
-  }
-
-  .session-list > div {
-    grid-template-columns: 2rem minmax(0, 1fr) auto;
-    align-items: center;
-  }
-
-  .session-actions {
+  .msg.user {
     display: flex;
+    justify-content: flex-end;
+  }
+
+  .msg.user .bubble {
+    max-width: 80%;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid rgba(122, 166, 200, 0.34);
+    border-radius: 6px;
+    background: rgba(122, 166, 200, 0.1);
+    color: var(--text-0);
+    font-size: 0.86rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .msg.assistant {
+    display: grid;
     gap: 0.35rem;
   }
 
-  .session-list button,
-  .session-filter button {
-    padding: 0.32rem 0.55rem;
-    color: var(--text-1);
+  .role-tag {
+    color: var(--text-2);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    font-size: 0.6rem;
   }
 
-  .memo-form,
-  .memo-editor,
-  .session-filter {
+  .assistant-body {
     display: grid;
-    gap: 0.4rem;
+    gap: 0.55rem;
   }
 
-  .memo-form textarea {
-    min-height: 4.5rem;
-  }
-
-  .memo-editor textarea {
-    min-height: 11rem;
-  }
-
-  .session-filter {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-  }
-
-  .session-filter label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.68rem;
-  }
-
-  .session-filter input[type="checkbox"] {
-    width: 13px;
-    height: 13px;
-    padding: 0;
-  }
-
-  .button-row {
-    display: flex;
-    gap: 0.4rem;
-  }
-
-  .memo-form button,
-  .memo-editor button {
-    padding: 0.42rem 0.65rem;
-    color: var(--accent);
-    border-color: rgba(122, 166, 200, 0.34);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: 0.72rem;
-  }
-
-  .memo-editor button.secondary {
-    color: var(--text-1);
-    border-color: var(--panel-strong);
-  }
-
-  .memo-list strong,
-  .session-list strong,
-  .handoff-grid strong {
-    color: var(--accent);
-  }
-
-  .handoff-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    border-top: 1px solid var(--divider);
-  }
-
-  .handoff-grid div {
-    display: grid;
-    gap: 0.2rem;
-    padding: 0.55rem 0;
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .handoff-warning {
+  .assistant-text {
     margin: 0;
-    color: var(--warning);
-    font-size: 0.74rem;
-    line-height: 1.35;
+    color: var(--text-0);
+    font-size: 0.88rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
-  .empty-state {
+  .assistant-text.error {
+    color: var(--negative);
+  }
+
+  .caret-blink {
+    color: var(--accent);
+    animation: caret 1s steps(1) infinite;
+  }
+
+  @keyframes caret {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .research-card {
+    display: grid;
+    gap: 0.4rem;
+    border: 1px solid var(--panel-border);
+    border-left: 2px solid var(--accent);
+    padding: 0.6rem 0.7rem;
+  }
+
+  .research-card h4 {
+    margin: 0;
+    color: var(--text-0);
+    font-size: 0.86rem;
+  }
+
+  .card-field {
+    display: grid;
+    gap: 0.15rem;
+  }
+
+  .card-field span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6rem;
+  }
+
+  .card-field p {
+    margin: 0;
+    color: var(--text-1);
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  .assistant-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.72rem;
+    font-size: 0.6rem;
+  }
+
+  /* ---- Plan / operator chat blocks ---- */
+  .plan-block {
+    display: grid;
+    gap: 0.5rem;
+    border: 1px solid var(--panel-border);
+    border-left: 2px solid var(--accent);
+    padding: 0.6rem 0.7rem;
+  }
+
+  .plan-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .plan-head strong {
+    color: var(--text-0);
+    text-transform: uppercase;
+    font-size: 0.78rem;
+  }
+
+  .plan-head span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.62rem;
+  }
+
+  .plan-budget,
+  .chip-row,
+  .decision-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .plan-budget span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.62rem;
+  }
+
+  .chip {
+    border: 1px solid var(--divider);
+    padding: 0.1rem 0.4rem;
+    color: var(--text-1);
+    font-size: 0.66rem;
+  }
+
+  .chip.skip {
+    color: var(--text-2);
+  }
+
+  .plan-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.74rem;
+  }
+
+  .plan-table th {
+    text-align: left;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6rem;
+    font-weight: 500;
+    padding: 0.25rem 0.45rem;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .plan-table td {
+    color: var(--text-1);
+    padding: 0.3rem 0.45rem;
+    border-bottom: 1px solid var(--divider);
+    vertical-align: top;
+    line-height: 1.4;
+  }
+
+  .plan-table td.muted {
+    color: var(--text-2);
+  }
+
+  .plan-table tr.checkpoint td:first-child {
+    border-left: 2px solid var(--warning);
+  }
+
+  .plan-warning {
     margin: 0;
+    color: var(--warning);
+    font-size: 0.74rem;
+    line-height: 1.4;
   }
 
-  h2,
-  h3,
-  p {
-    margin: 0;
+  /* ---- Thinking ---- */
+  .thinking {
+    display: inline-flex;
+    gap: 0.3rem;
+    padding: 0.3rem 0;
   }
 
-  h2 {
-    font-size: 1.08rem;
+  .thinking span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-2);
+    animation: thinking 1.2s ease-in-out infinite;
   }
 
-  h3 {
-    font-size: 0.92rem;
+  .thinking span:nth-child(2) {
+    animation-delay: 0.15s;
   }
 
-  @media (max-width: 1180px) {
-    .header-panel,
-    .workspace-grid {
+  .thinking span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes thinking {
+    0%, 60%, 100% {
+      opacity: 0.25;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-3px);
+    }
+  }
+
+  /* ---- Composer ---- */
+  .composer {
+    display: grid;
+    gap: 0.4rem;
+    padding: 0.6rem;
+    border-top: 1px solid var(--divider);
+  }
+
+  .composer textarea {
+    width: 100%;
+    min-height: 2.4rem;
+    max-height: 12rem;
+    resize: vertical;
+    border: 1px solid var(--panel-strong);
+    border-radius: 2px;
+    background: var(--bg-1);
+    color: var(--text-0);
+    padding: 0.55rem 0.65rem;
+    font: inherit;
+    font-size: 0.86rem;
+    line-height: 1.5;
+  }
+
+  .composer textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .composer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .composer-hint {
+    color: var(--text-2);
+    font-size: 0.7rem;
+    line-height: 1.3;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .composer-buttons {
+    display: flex;
+    gap: 0.4rem;
+    flex: none;
+  }
+
+  .composer-buttons button {
+    height: 30px;
+    padding: 0 0.85rem;
+    border: 1px solid var(--panel-strong);
+    border-radius: 2px;
+    background: var(--bg-1);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .composer-buttons button:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .composer-buttons button.primary {
+    color: var(--accent);
+    border-color: rgba(122, 166, 200, 0.34);
+  }
+
+  .composer-buttons button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  @media (max-width: 820px) {
+    .copilot {
       grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
     }
 
-    .header-main {
-      border-right: 0;
-      border-bottom: 1px solid var(--divider);
-    }
-  }
-
-  @media (max-width: 780px) {
-    .header-kpis {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .sidebar {
+      grid-template-rows: auto;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
     }
 
-    .turn-row {
-      grid-template-columns: minmax(0, 1fr);
+    .session-list {
+      display: none;
     }
 
-    .panel-head,
-    .composer-footer {
-      display: grid;
-      justify-content: stretch;
-    }
-
-    .composer-actions,
-    .domain-plan div,
-    .domain-decisions div,
-    .operator-steps div,
-    .checkpoint-list div,
-    .operator-events div,
-    .operator-result {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
+    .composer-hint {
+      display: none;
     }
   }
 </style>

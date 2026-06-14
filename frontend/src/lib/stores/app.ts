@@ -3223,6 +3223,18 @@ export async function loadCopilotSession(sessionId: string, options: { makeActiv
   }
 }
 
+export function startNewCopilotSession() {
+  const nextId =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `gamma-${Date.now()}`;
+  setCopilotSessionId(nextId);
+  activeCopilotSession.set(null);
+  copilotMemos.set([]);
+  resetCopilotCard("synthesis");
+  return nextId;
+}
+
 export async function loadCopilotMemos(sessionId?: string | null) {
   try {
     const suffix = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
