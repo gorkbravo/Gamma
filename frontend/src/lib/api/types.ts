@@ -2861,6 +2861,7 @@ export interface CopilotOperatorProgressEvent {
   source_ids: string[];
   warnings: string[];
 }
+export type CopilotReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ResearchClaim {
   claim: string;

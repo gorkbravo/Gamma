@@ -1838,7 +1838,8 @@ describe("app store orchestration", () => {
     await loadCopilotResearchCard("synthesis", "Connect the loaded portfolio and macro context.", {
       workspaceMode: "research",
       synthesisDomains: ["portfolio", "macro"],
-      activeTabId: "macro"
+      activeTabId: "macro",
+      reasoningEffort: "high"
     });
     await loadCopilotResearchCard("synthesis", "Pressure-test the cross-context disagreement.", {
       workspaceMode: "research",
@@ -1850,6 +1851,7 @@ describe("app store orchestration", () => {
     const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body ?? "{}"));
 
     expect(firstBody.context.current_tab).toBe("synthesis");
+    expect(firstBody.reasoning_effort).toBe("high");
     expect(firstBody.synthesis.active_tab).toBe("macro");
     expect(firstBody.synthesis.included_scopes.map((item: { domain: string }) => item.domain)).toEqual([
       "portfolio",

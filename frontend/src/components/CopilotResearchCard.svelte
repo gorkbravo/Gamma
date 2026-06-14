@@ -1,24 +1,27 @@
 <script lang="ts">
   import type {
     CopilotBaseDomain,
+    CopilotReasoningEffort,
     CopilotResearchCardResult,
     CopilotThreadEntry,
     CopilotThreadState
   } from "../lib/api/types";
 
-  type CopilotDrawerMode = "active_tab" | "synthesis";
+  type CopilotRoleMode = "agent" | "operator";
   type CopilotGroundingScopeOption = {
-    domain: CopilotBaseDomain;
+    tabId: string;
+    domain: CopilotBaseDomain | null;
     label: string;
     contextLabel: string;
     fingerprintLabel: string;
     freshnessLabel: string | null;
     warningLabel: string | null;
+    supported: boolean;
+    disabledReason: string | null;
   };
 
   export let open = false;
   export let available = false;
-  export let mode: CopilotDrawerMode = "active_tab";
   export let contextLabel = "Macro";
   export let domainLabel = "Copilot";
   export let guidance = "Grounded in the current Gamma context.";
@@ -29,23 +32,32 @@
   export let selectedScopeDomains: CopilotBaseDomain[] = [];
   export let selectionMessage: string | null = null;
   export let onClose: () => void = () => {};
-  export let onSetMode: (mode: CopilotDrawerMode) => void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
-  export let onGenerate: (prompt?: string) => Promise<unknown> | void;
+  export let onGenerate: (prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void;
+  export let onRunOperator: (prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
 
   let promptText = "";
+  let roleMode: CopilotRoleMode = "agent";
+  let reasoningEffort: CopilotReasoningEffort = "medium";
   let threadEntries: CopilotThreadEntry[] = [];
   let hasThread = false;
-  let isSynthesisMode = false;
   let composerHint = "";
   let composerPlaceholder = "";
   let composerButtonLabel = "Generate";
+
+  function setRoleMode(nextMode: CopilotRoleMode) {
+    roleMode = nextMode;
+    reasoningEffort = nextMode === "operator" ? "low" : "medium";
+  }
 
   async function handleGenerate() {
     if (!available || loading) {
       return;
     }
-    const result = await onGenerate(promptText.trim());
+    const result =
+      roleMode === "operator"
+        ? await onRunOperator(promptText.trim(), reasoningEffort)
+        : await onGenerate(promptText.trim(), reasoningEffort);
     if (result != null) {
       promptText = "";
     }
@@ -58,44 +70,45 @@
     }
   }
 
-  function handleModeChange(event: Event) {
-    const value = (event.target as HTMLSelectElement).value as CopilotDrawerMode;
-    onSetMode(value);
-  }
-
   function providerLabelFor(result: CopilotResearchCardResult) {
     return result.model ? `${result.provider} · ${result.model}` : result.provider ?? null;
   }
 
   function cardLabelFor(entry: CopilotThreadEntry) {
-    return entry.result.domain === "synthesis" ? "Research Synthesis" : "Research Card";
+    return entry.result.domain === "synthesis" ? "Grounded Research" : "Research Card";
   }
 
   function scopeTooltip(option: CopilotGroundingScopeOption) {
     const parts = [option.contextLabel, option.fingerprintLabel];
     if (option.freshnessLabel) parts.push(option.freshnessLabel);
     if (option.warningLabel) parts.push(option.warningLabel);
+    if (option.disabledReason) parts.push(option.disabledReason);
     return parts.join(" · ");
   }
 
   $: threadEntries = thread?.entries ?? [];
   $: hasThread = threadEntries.length > 0;
-  $: isSynthesisMode = mode === "synthesis";
   $: composerHint = !available
     ? ""
     : hasThread
       ? "Ctrl+Enter to follow up"
-      : isSynthesisMode
-        ? "Ctrl+Enter to start a synthesis"
+      : roleMode === "operator"
+        ? "Ctrl+Enter to run operator"
         : "Ctrl+Enter to start a thread";
   $: composerPlaceholder = available
     ? hasThread
-      ? isSynthesisMode
-        ? "Ask a follow-up grounded in this synthesis scope..."
-        : "Ask a follow-up grounded in this thread..."
+      ? "Ask a follow-up grounded in this context scope..."
       : placeholder
     : guidance;
-  $: composerButtonLabel = loading ? "Generating..." : hasThread ? "Follow up" : "Generate";
+  $: composerButtonLabel = loading
+    ? roleMode === "operator"
+      ? "Running..."
+      : "Generating..."
+    : roleMode === "operator"
+      ? "Run Operator"
+      : hasThread
+        ? "Follow up"
+        : "Generate";
 </script>
 
 {#if open}
@@ -127,13 +140,7 @@
         </section>
       {:else if !hasThread}
         <section class="message-card neutral empty-state">
-          <p>
-            {#if isSynthesisMode}
-              Select contexts below and generate a synthesis card. Follow-ups stay in this scope until it changes.
-            {:else}
-              Generate a research card from the current context. Follow-ups stay inside this tab until the grounding changes.
-            {/if}
-          </p>
+          <p>Select one or more context tabs below. Follow-ups stay inside this context scope until it changes.</p>
         </section>
       {:else}
         {#each threadEntries as entry, index (entry.entryId)}
@@ -272,28 +279,37 @@
   </div>
 
   <footer class="composer">
-    {#if isSynthesisMode}
-      <div class="scope-row">
-        <span class="scope-row-label">Scope</span>
-        {#if scopeOptions.length}
-          <div class="scope-chips">
-            {#each scopeOptions as option (option.domain)}
-              <button
-                class="scope-chip"
-                class:selected={selectedScopeDomains.includes(option.domain)}
-                type="button"
-                title={scopeTooltip(option)}
-                on:click={() => onToggleScope(option.domain)}
-              >
-                {option.label}
-              </button>
-            {/each}
-          </div>
-        {:else}
-          <small class="scope-empty">{selectionMessage ?? "Load two or more contexts to synthesize."}</small>
-        {/if}
-      </div>
-    {/if}
+    <div class="role-row" role="tablist" aria-label="Copilot role">
+      <button type="button" class:active={roleMode === "agent"} on:click={() => setRoleMode("agent")}>
+        Research Agent
+      </button>
+      <button type="button" class:active={roleMode === "operator"} on:click={() => setRoleMode("operator")}>
+        Research Operator
+      </button>
+    </div>
+
+    <div class="scope-row">
+      <span class="scope-row-label">Context</span>
+      {#if scopeOptions.length}
+        <div class="scope-chips">
+          {#each scopeOptions as option (option.tabId)}
+            <button
+              class="scope-chip"
+              class:selected={option.domain != null && selectedScopeDomains.includes(option.domain)}
+              class:unavailable={!option.supported}
+              type="button"
+              title={scopeTooltip(option)}
+              disabled={!option.supported || option.domain == null}
+              on:click={() => option.domain != null && onToggleScope(option.domain)}
+            >
+              {option.label}
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <small class="scope-empty">{selectionMessage ?? "Load a context to use Copilot."}</small>
+      {/if}
+    </div>
 
     <textarea
       bind:value={promptText}
@@ -306,15 +322,14 @@
     <div class="composer-footer">
       <small>{composerHint}</small>
       <div class="composer-actions">
-        <label class="mode-select">
-          <span class="visually-hidden">Copilot mode</span>
-          <select
-            value={mode}
-            on:change={handleModeChange}
-            disabled={!available || loading}
-          >
-            <option value="active_tab">Active tab</option>
-            <option value="synthesis">Synthesis</option>
+        <label class="effort-select">
+          <span>Thinking</span>
+          <select bind:value={reasoningEffort} disabled={!available || loading}>
+            <option value="minimal">minimal</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
           </select>
         </label>
         <button class="generate-btn" type="button" disabled={!available || loading} on:click={handleGenerate}>
@@ -663,12 +678,47 @@
     gap: 0.4rem;
   }
 
-  .mode-select select {
+  .role-row {
+    display: inline-flex;
+    width: max-content;
+    border: 1px solid var(--panel-strong);
+  }
+
+  .role-row button {
+    border: 0;
+    border-right: 1px solid var(--panel-strong);
+    background: transparent;
+    color: var(--text-1);
+    padding: 0.28rem 0.55rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  .role-row button:last-child {
+    border-right: 0;
+  }
+
+  .role-row button.active {
+    color: var(--accent);
+    background: rgba(122, 166, 200, 0.1);
+  }
+
+  .effort-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.62rem;
+  }
+
+  .effort-select select {
     padding: 0.32rem 0.5rem;
     padding-right: 1.4rem;
     font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    text-transform: lowercase;
+    letter-spacing: 0;
     color: var(--text-2);
     background-color: #0d0f12;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%237a8a99' stroke-width='1.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
@@ -678,12 +728,12 @@
     cursor: pointer;
   }
 
-  .mode-select select:hover:not(:disabled) {
+  .effort-select select:hover:not(:disabled) {
     border-color: rgba(122, 166, 200, 0.32);
     color: var(--text-1);
   }
 
-  .mode-select select:disabled {
+  .effort-select select:disabled {
     opacity: 0.4;
     cursor: default;
   }
@@ -740,6 +790,10 @@
     color: var(--accent);
     border-color: rgba(122, 166, 200, 0.42);
     background: rgba(122, 166, 200, 0.08);
+  }
+
+  .scope-chip.unavailable {
+    opacity: 0.48;
   }
 
   .scope-empty {

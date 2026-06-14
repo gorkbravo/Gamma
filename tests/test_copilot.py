@@ -3801,6 +3801,59 @@ def test_openai_provider_omits_previous_response_id_when_response_storage_is_dis
     assert "previous_response_id" not in provider.payloads[0]
 
 
+def test_openai_provider_uses_request_reasoning_effort_override():
+    class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test",
+                reasoning_effort="medium",
+                store_responses=False,
+            )
+            self.payloads: list[dict] = []
+
+        def _post_json(self, payload):
+            self.payloads.append(payload)
+            return {
+                "id": "resp_test",
+                "model": "gpt-test",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "title": "Test",
+                                        "hypothesis": "H",
+                                        "rationale": "R",
+                                        "required_data": [],
+                                        "proposed_test": "T",
+                                        "confounders": [],
+                                        "next_steps": [],
+                                        "caveats": [],
+                                        "source_backed_claims": [],
+                                        "inferred_claims": [],
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    provider = CaptureOpenAIProvider()
+    provider.generate_research_card(
+        request=CopilotResearchCardRequest(domain="macro", reasoning_effort="high"),
+        context=CopilotContextBundle(domain="macro", current_tab="macro", summary_data={}),
+        tool_specs=[],
+        execute_tool=lambda *_args: None,
+    )
+
+    assert provider.payloads[0]["reasoning"] == {"effort": "high"}
+
+
 def test_openai_provider_omits_reasoning_items_when_response_storage_is_disabled():
     class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
         def __init__(self):

@@ -11,6 +11,7 @@ import type {
   CopilotDomain,
   CopilotMemo,
   CopilotOperatorPlan,
+  CopilotReasoningEffort,
   CopilotResearchCardResult,
   CopilotResearchActionDefinition,
   CopilotResearchPlan,
@@ -2543,6 +2544,7 @@ type CopilotLoadOptions = {
   workspaceMode?: WorkspaceMode | null;
   synthesisDomains?: CopilotBaseDomain[];
   activeTabId?: TabId | "research";
+  reasoningEffort?: CopilotReasoningEffort;
 };
 
 function normalizeSynthesisDomains(domains: CopilotBaseDomain[] | undefined) {
@@ -2556,6 +2558,12 @@ function normalizeSynthesisDomains(domains: CopilotBaseDomain[] | undefined) {
     ordered.push(domain);
   }
   return ordered;
+}
+
+function normalizeReasoningEffort(effort: CopilotReasoningEffort | undefined) {
+  return effort && ["minimal", "low", "medium", "high", "xhigh"].includes(effort)
+    ? effort
+    : undefined;
 }
 
 function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode | null | undefined) {
@@ -2761,8 +2769,8 @@ function validateSynthesisScopeDomain(
 function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptions = {}) {
   if (domain === "synthesis") {
     const synthesisDomains = normalizeSynthesisDomains(options.synthesisDomains);
-    if (synthesisDomains.length < 2) {
-      return "Select at least two loaded Gamma contexts before generating a synthesis card.";
+    if (!synthesisDomains.length) {
+      return "Select at least one loaded Gamma context before using Copilot.";
     }
     for (const synthesisDomain of synthesisDomains) {
       const validationError = validateSynthesisScopeDomain(synthesisDomain, options.workspaceMode);
@@ -2888,6 +2896,9 @@ export async function loadCopilotResearchCard(
       prompt,
       user_session_id: getCopilotSessionId(),
       context_fingerprint: contextFingerprint,
+      ...(normalizeReasoningEffort(options.reasoningEffort)
+        ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
+        : {}),
       ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
       context,
       ...(synthesis ? { synthesis } : {})
@@ -2934,6 +2945,9 @@ export async function loadCopilotResearchPlan(
     const payload = {
       domain,
       prompt,
+      ...(normalizeReasoningEffort(options.reasoningEffort)
+        ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
+        : {}),
       context_fingerprint: buildCopilotContextFingerprint(domain, options.workspaceMode, {
         synthesisDomains: options.synthesisDomains,
         activeTabId: options.activeTabId
@@ -2989,6 +3003,9 @@ export async function loadCopilotOperatorPlan(
       domain,
       prompt,
       user_session_id: getCopilotSessionId(),
+      ...(normalizeReasoningEffort(options.reasoningEffort)
+        ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
+        : {}),
       context_fingerprint: buildCopilotContextFingerprint(domain, options.workspaceMode, {
         synthesisDomains: options.synthesisDomains,
         activeTabId: options.activeTabId
@@ -3044,6 +3061,9 @@ export async function executeCopilotOperatorPlan(
       prompt,
       user_session_id: getCopilotSessionId(),
       context_fingerprint: contextFingerprint,
+      ...(normalizeReasoningEffort(options.reasoningEffort)
+        ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
+        : {}),
       context,
       ...(synthesis ? { synthesis } : {})
     };

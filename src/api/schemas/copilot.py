@@ -150,6 +150,7 @@ class CopilotResearchCardRequestModel(BaseModel):
     user_session_id: str | None = None
     context_fingerprint: str | None = None
     session_title: str | None = None
+    reasoning_effort: str | None = None
     context: CopilotRequestContextModel = Field(default_factory=CopilotRequestContextModel)
     synthesis: CopilotSynthesisRequestModel | None = None
 
@@ -161,6 +162,7 @@ class CopilotResearchCardRequestModel(BaseModel):
             user_session_id=self.user_session_id,
             context_fingerprint=self.context_fingerprint,
             session_title=self.session_title,
+            reasoning_effort=self.reasoning_effort,
             context=self.context.to_domain(),
             synthesis=self.synthesis.to_domain() if self.synthesis is not None else None,
         )

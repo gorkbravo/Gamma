@@ -2,6 +2,7 @@
   import type {
     CopilotBaseDomain,
     CopilotDomain,
+    CopilotReasoningEffort,
     CrossTabHandoffEnvelope,
     CopilotResearchActionDefinition,
     CopilotMemo,
@@ -15,12 +16,15 @@
   } from "../lib/api/types";
 
   type CopilotGroundingScopeOption = {
-    domain: CopilotBaseDomain;
+    tabId: string;
+    domain: CopilotBaseDomain | null;
     label: string;
     contextLabel: string;
     fingerprintLabel: string;
     freshnessLabel: string | null;
     warningLabel: string | null;
+    supported: boolean;
+    disabledReason: string | null;
   };
 
   type CopilotWorkspaceSurface = {
@@ -36,7 +40,6 @@
     selectionMessage: string | null;
   };
 
-  export let activeSurface: CopilotWorkspaceSurface;
   export let synthesisSurface: CopilotWorkspaceSurface;
   export let sessions: CopilotSessionSummary[] = [];
   export let activeSession: CopilotSessionDetail | null = null;
@@ -47,10 +50,10 @@
   export let operatorResult: CopilotResearchCardResult | null = null;
   export let latestHandoff: CrossTabHandoffEnvelope | null = null;
   export let loading = false;
-  export let onGenerate: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void;
-  export let onPlan: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void = () => {};
-  export let onOperatorPlan: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void = () => {};
-  export let onRunOperator: (domain: CopilotDomain, prompt?: string) => Promise<unknown> | void = () => {};
+  export let onGenerate: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void;
+  export let onPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
+  export let onOperatorPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
+  export let onRunOperator: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
   export let onCreateMemo: (title?: string, notes?: string) => Promise<unknown> | void = () => {};
   export let onUpdateMemo: (memoId: string, title: string, body: string) => Promise<unknown> | void = () => {};
   export let onArchiveSession: (sessionId: string) => Promise<unknown> | void = () => {};
@@ -60,11 +63,10 @@
   export let onSearchSessions: (options?: { includeArchived?: boolean; search?: string }) => Promise<unknown> | void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
 
-  type FocusMode = "synthesis" | "active_tab";
   type CopilotRoleMode = "agent" | "operator";
 
-  let focusMode: FocusMode = "synthesis";
   let roleMode: CopilotRoleMode = "agent";
+  let reasoningEffort: CopilotReasoningEffort = "medium";
   let promptText = "";
   let surface: CopilotWorkspaceSurface = synthesisSurface;
   let threadEntries: CopilotThreadEntry[] = [];
@@ -139,19 +141,16 @@
     return items.length ? items.slice(0, 3).join(" / ") : "trace";
   }
 
-  function setFocusMode(nextMode: FocusMode) {
-    focusMode = nextMode;
-  }
-
   function setRoleMode(nextMode: CopilotRoleMode) {
     roleMode = nextMode;
+    reasoningEffort = nextMode === "operator" ? "low" : "medium";
   }
 
   async function handleGenerate() {
     if (!surface.supported || !surface.domain || loading) {
       return;
     }
-    const result = await onGenerate(surface.domain, promptText.trim());
+    const result = await onGenerate(surface.domain, promptText.trim(), reasoningEffort);
     if (result != null) {
       // Keep the prompt draft recoverable when generation fails or times out.
       const status = (result as { status?: string }).status;
@@ -167,17 +166,17 @@
       return;
     }
     if (roleMode === "operator") {
-      await onOperatorPlan(surface.domain, promptText.trim());
+      await onOperatorPlan(surface.domain, promptText.trim(), reasoningEffort);
       return;
     }
-    await onPlan(surface.domain, promptText.trim());
+    await onPlan(surface.domain, promptText.trim(), reasoningEffort);
   }
 
   async function handleRunOperator() {
     if (!surface.supported || !surface.domain || loading) {
       return;
     }
-    const result = await onRunOperator(surface.domain, promptText.trim());
+    const result = await onRunOperator(surface.domain, promptText.trim(), reasoningEffort);
     if (result != null) {
       const status = (result as { status?: string }).status;
       if (status === "ready") {
@@ -292,10 +291,10 @@
     return `${value}ms`;
   }
 
-  $: surface = focusMode === "synthesis" ? synthesisSurface : activeSurface;
+  $: surface = synthesisSurface;
   $: threadEntries = surface.thread?.entries ?? [];
   $: selectedCount = synthesisSurface.selectedScopeDomains.length;
-  $: loadedCount = synthesisSurface.scopeOptions.length;
+  $: loadedCount = synthesisSurface.scopeOptions.filter((option) => option.supported).length;
   $: displayedTurnCount = threadEntries.length || activeTurns().length || 0;
   $: operatorStepCount = operatorSteps().length;
   $: operatorCheckpointCount = operatorCheckpoints().length;
@@ -311,14 +310,14 @@
     <div class="header-kpis" aria-label="Copilot workspace status">
       <div>
         <span>Primary</span>
-        <strong>{roleMode === "operator" ? "Operator" : focusMode === "synthesis" ? "Synthesis" : "Active Tab"}</strong>
+        <strong>{roleMode === "operator" ? "Research Operator" : "Research Agent"}</strong>
       </div>
       <div>
-        <span>Loaded Contexts</span>
+        <span>Available Contexts</span>
         <strong>{loadedCount}</strong>
       </div>
       <div>
-        <span>Selected Scope</span>
+        <span>Selected Contexts</span>
         <strong>{selectedCount}</strong>
       </div>
       <div>
@@ -331,38 +330,33 @@
   <div class="workspace-grid">
     <div class="primary-column">
       <article class="panel composer-panel">
-        <div class="mode-tabs" role="tablist" aria-label="Copilot focus">
-          <button
-            type="button"
-            class:active={focusMode === "synthesis"}
-            on:click={() => setFocusMode("synthesis")}
-          >
-            Synthesis
-          </button>
-          <button
-            type="button"
-            class:active={focusMode === "active_tab"}
-            on:click={() => setFocusMode("active_tab")}
-          >
-            Active Tab
-          </button>
-        </div>
-
-        <div class="role-tabs" role="tablist" aria-label="Copilot role">
-          <button
-            type="button"
-            class:active={roleMode === "agent"}
-            on:click={() => setRoleMode("agent")}
-          >
-            Research Agent
-          </button>
-          <button
-            type="button"
-            class:active={roleMode === "operator"}
-            on:click={() => setRoleMode("operator")}
-          >
-            Research Operator
-          </button>
+        <div class="control-row">
+          <div class="role-tabs" role="tablist" aria-label="Copilot role">
+            <button
+              type="button"
+              class:active={roleMode === "agent"}
+              on:click={() => setRoleMode("agent")}
+            >
+              Research Agent
+            </button>
+            <button
+              type="button"
+              class:active={roleMode === "operator"}
+              on:click={() => setRoleMode("operator")}
+            >
+              Research Operator
+            </button>
+          </div>
+          <label class="effort-select">
+            <span>Thinking</span>
+            <select bind:value={reasoningEffort} disabled={loading}>
+              <option value="minimal">minimal</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="xhigh">xhigh</option>
+            </select>
+          </label>
         </div>
 
         <textarea
@@ -570,16 +564,18 @@
     <aside class="support-column">
       <article class="panel scope-panel">
         <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Grounding</p><h3>Synthesis Scope</h3></div>
+          <div class="title-line"><p class="eyebrow">Grounding</p><h3>Context Scope</h3></div>
           <span>{selectedCount}/{loadedCount}</span>
         </div>
         {#if synthesisSurface.scopeOptions.length}
           <div class="scope-list">
-            {#each synthesisSurface.scopeOptions as option (option.domain)}
+            {#each synthesisSurface.scopeOptions as option (option.tabId)}
               <button
                 type="button"
-                class:selected={synthesisSurface.selectedScopeDomains.includes(option.domain)}
-                on:click={() => onToggleScope(option.domain)}
+                class:selected={option.domain != null && synthesisSurface.selectedScopeDomains.includes(option.domain)}
+                class:unavailable={!option.supported}
+                disabled={!option.supported || option.domain == null}
+                on:click={() => option.domain != null && onToggleScope(option.domain)}
               >
                 <strong>{option.label}</strong>
                 <span>{option.contextLabel}</span>
@@ -592,7 +588,7 @@
             {/each}
           </div>
         {:else}
-          <p class="empty-state">Load Gamma contexts from the research workspace before synthesis.</p>
+          <p class="empty-state">Load Gamma contexts from the workspace before using Copilot.</p>
         {/if}
       </article>
 
@@ -776,14 +772,19 @@
     gap: 0.45rem;
   }
 
-  .mode-tabs,
+  .control-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
   .role-tabs {
     display: inline-flex;
     border: 1px solid var(--panel-strong);
     width: max-content;
   }
 
-  .mode-tabs button,
   .role-tabs button {
     border: 0;
     border-right: 1px solid var(--panel-strong);
@@ -797,14 +798,31 @@
     transition: background 120ms ease, color 120ms ease;
   }
 
-  .mode-tabs button:last-child { border-right: 0; }
   .role-tabs button:last-child { border-right: 0; }
-  .mode-tabs button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
   .role-tabs button:hover { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
-  .mode-tabs button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   .role-tabs button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .mode-tabs button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
   .role-tabs button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+
+  .effort-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.64rem;
+  }
+
+  .effort-select select {
+    height: 1.8rem;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 0.74rem;
+    padding: 0.25rem 0.45rem;
+    text-transform: lowercase;
+  }
 
   textarea {
     min-height: 8rem;
@@ -1108,6 +1126,14 @@
   .scope-list button.selected strong,
   .memo-list button.selected span {
     color: var(--accent);
+  }
+
+  .scope-list button.unavailable {
+    opacity: 0.55;
+  }
+
+  .scope-list button.unavailable strong {
+    color: var(--text-2);
   }
 
   .scope-list strong {

@@ -57,6 +57,7 @@ class CopilotResearchCardRequest:
     user_session_id: str | None = None
     context_fingerprint: str | None = None
     session_title: str | None = None
+    reasoning_effort: str | None = None
     context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
     synthesis: CopilotSynthesisRequest | None = None
 

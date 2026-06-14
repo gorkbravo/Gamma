@@ -165,6 +165,7 @@
   import type {
     CopilotBaseDomain,
     CopilotDomain,
+    CopilotReasoningEffort,
     CopilotThreadState,
     CrossTabHandoffEnvelope,
     CommodityMode,
@@ -251,8 +252,8 @@
   let diagnosticsOpen = false;
   let sidebarOpen = false;
   let copilotOpen = false;
-  let copilotMode: CopilotDrawerMode = "active_tab";
   let selectedSynthesisDomains: CopilotBaseDomain[] = [];
+  let lastDefaultCopilotDomain: CopilotBaseDomain | null | undefined = undefined;
   let latestCopilotHandoff: CrossTabHandoffEnvelope | null = null;
   let settingsOpen = false;
   let orderedTabs: ReturnType<typeof getOrderedWorkspaceTabs> = [];
@@ -304,16 +305,29 @@
     ivSession: $ivSession,
   });
   $: {
-    const availableDomains = synthesisScopeOptions.map((option) => option.domain);
+    const availableDomains = synthesisScopeOptions
+      .filter((option) => option.supported && option.domain != null)
+      .map((option) => option.domain as CopilotBaseDomain);
+    const activeDefaultDomain = resolveDefaultCopilotDomain(
+      $activeTab === "copilot" ? copilotContextTab : $activeTab,
+      synthesisScopeOptions
+    );
     const filteredSelection = selectedSynthesisDomains.filter((domain) =>
       availableDomains.includes(domain)
     );
-    const nextSelection = filteredSelection.length ? filteredSelection : availableDomains;
+    const nextSelection =
+      activeDefaultDomain !== lastDefaultCopilotDomain
+        ? activeDefaultDomain
+          ? [activeDefaultDomain]
+          : []
+        : filteredSelection;
     const changed =
+      activeDefaultDomain !== lastDefaultCopilotDomain ||
       nextSelection.length !== selectedSynthesisDomains.length ||
       nextSelection.some((domain, index) => domain !== selectedSynthesisDomains[index]);
     if (changed) {
       selectedSynthesisDomains = nextSelection;
+      lastDefaultCopilotDomain = activeDefaultDomain;
     }
   }
   $: activeTabCopilotSurface = buildActiveTabCopilotSurface({
@@ -347,19 +361,21 @@
     scopeOptions: synthesisScopeOptions,
     selectedDomains: selectedSynthesisDomains,
   });
-  $: copilotSurface = copilotMode === "synthesis" ? synthesisCopilotSurface : activeTabCopilotSurface;
+  $: copilotSurface = synthesisCopilotSurface;
   $: if (workspaceMode != null && activeViewTab !== $activeTab) {
     void loadActiveView($activeTab);
   }
 
-  type CopilotDrawerMode = "active_tab" | "synthesis";
   type CopilotGroundingScopeOption = {
-    domain: CopilotBaseDomain;
+    tabId: TabId;
+    domain: CopilotBaseDomain | null;
     label: string;
     contextLabel: string;
     fingerprintLabel: string;
     freshnessLabel: string | null;
     warningLabel: string | null;
+    supported: boolean;
+    disabledReason: string | null;
   };
   type CopilotSurfaceState = {
     supported: boolean;
@@ -580,6 +596,38 @@
     return `FP ${(hash >>> 0).toString(16).padStart(8, "0")}`;
   }
 
+  const COPILOT_CONTEXT_DEFINITIONS: Array<{
+    tabId: TabId;
+    domain: CopilotBaseDomain | null;
+    label: string;
+    unavailableLabel: string;
+  }> = [
+    { tabId: "portfolio", domain: "portfolio", label: "Portfolio", unavailableLabel: "Load a portfolio snapshot" },
+    { tabId: "sitrep", domain: null, label: "SITREP", unavailableLabel: "SITREP is not a standalone Copilot context" },
+    { tabId: "equity_research", domain: "equity_research", label: "Equity Research", unavailableLabel: "Load Equity Research overview or run Scope Analysis" },
+    { tabId: "strategy_lab", domain: "strategy_lab", label: "Strategy Lab", unavailableLabel: "Run a Strategy Lab import, composition, or comparison" },
+    { tabId: "macro", domain: "macro", label: "Macro", unavailableLabel: "Load the Macro workspace" },
+    { tabId: "prediction_markets", domain: "prediction_markets", label: "Prediction Markets", unavailableLabel: "Select and load a prediction market" },
+    { tabId: "crypto", domain: "crypto", label: "Crypto", unavailableLabel: "Select and load a crypto token" },
+    { tabId: "fundamentals", domain: "fundamentals", label: "Fundamentals", unavailableLabel: "Select and load a Fundamentals company" },
+    { tabId: "commodities", domain: "commodities", label: "Commodities", unavailableLabel: "Load the Commodities workspace" },
+    { tabId: "maritime", domain: null, label: "Sealanes", unavailableLabel: "Sealanes Copilot grounding is not implemented yet" },
+    { tabId: "risk", domain: "risk", label: "Risk", unavailableLabel: "Run a Risk computation" },
+    { tabId: "iv", domain: "iv", label: "Options", unavailableLabel: "Load an options surface" },
+  ];
+
+  function contextDefinitionForDomain(domain: CopilotBaseDomain) {
+    return COPILOT_CONTEXT_DEFINITIONS.find((definition) => definition.domain === domain);
+  }
+
+  function resolveDefaultCopilotDomain(
+    tabId: TabId,
+    options: CopilotGroundingScopeOption[]
+  ): CopilotBaseDomain | null {
+    const match = options.find((option) => option.tabId === tabId && option.supported && option.domain != null);
+    return match?.domain ?? null;
+  }
+
   function buildSynthesisScopeOptions({
     activeTab,
     workspaceMode,
@@ -624,6 +672,7 @@
     ivSession: IvSessionStatus | null;
   }): CopilotGroundingScopeOption[] {
     const options: CopilotGroundingScopeOption[] = [];
+    const pushedDomains = new Set<CopilotBaseDomain>();
     const pushOption = (
       domain: CopilotBaseDomain,
       contextLabel: string,
@@ -631,24 +680,18 @@
       warningLabel: string | null
     ) => {
       const fingerprint = previewCopilotContextFingerprint(domain, { workspaceMode });
+      const definition = contextDefinitionForDomain(domain);
+      pushedDomains.add(domain);
       options.push({
+        tabId: definition?.tabId ?? activeTab,
         domain,
-        label:
-          domain === "equity_research"
-            ? "Equity Research"
-            : domain === "strategy_lab"
-              ? "Strategy Lab"
-              : domain === "prediction_markets"
-            ? "Prediction Markets"
-            : domain === "macro"
-              ? "Macro"
-              : domain === "iv"
-                ? "Options"
-                : domain.charAt(0).toUpperCase() + domain.slice(1),
+        label: definition?.label ?? domain.charAt(0).toUpperCase() + domain.slice(1),
         contextLabel,
         fingerprintLabel: shortFingerprint(fingerprint),
         freshnessLabel,
-        warningLabel
+        warningLabel,
+        supported: true,
+        disabledReason: null
       });
     };
 
@@ -796,14 +839,33 @@
       );
     }
 
+    for (const definition of COPILOT_CONTEXT_DEFINITIONS) {
+      if (definition.domain != null && pushedDomains.has(definition.domain)) {
+        continue;
+      }
+      options.push({
+        tabId: definition.tabId,
+        domain: definition.domain,
+        label: definition.label,
+        contextLabel: definition.unavailableLabel,
+        fingerprintLabel: "UNAVAILABLE",
+        freshnessLabel: null,
+        warningLabel: definition.domain == null ? "Not wired" : "Context required",
+        supported: false,
+        disabledReason: definition.unavailableLabel
+      });
+    }
+
     return [...options].sort((left, right) => {
-      if (left.domain === activeTab) {
+      if (left.tabId === activeTab) {
         return -1;
       }
-      if (right.domain === activeTab) {
+      if (right.tabId === activeTab) {
         return 1;
       }
-      return left.label.localeCompare(right.label);
+      const leftIndex = COPILOT_CONTEXT_DEFINITIONS.findIndex((definition) => definition.tabId === left.tabId);
+      const rightIndex = COPILOT_CONTEXT_DEFINITIONS.findIndex((definition) => definition.tabId === right.tabId);
+      return leftIndex - rightIndex;
     });
   }
 
@@ -1083,11 +1145,11 @@
     selectedDomains: CopilotBaseDomain[];
   }): CopilotSurfaceState {
     const selectedScopeOptions = scopeOptions.filter((option) =>
-      selectedDomains.includes(option.domain)
+      option.domain != null && option.supported && selectedDomains.includes(option.domain)
     );
     const selectionFingerprint = previewCopilotThreadFingerprint("synthesis", {
       workspaceMode,
-      synthesisDomains: selectedScopeOptions.map((option) => option.domain),
+      synthesisDomains: selectedScopeOptions.map((option) => option.domain as CopilotBaseDomain),
       activeTabId: activeTab,
     });
     const storedThread = threads.synthesis;
@@ -1101,33 +1163,31 @@
         ? storedThread
         : null;
     const selectedLabels = selectedScopeOptions.map((option) => option.label);
-    const supported = selectedScopeOptions.length >= 2;
+    const supported = selectedScopeOptions.length >= 1;
     const scopeSummary =
       selectedLabels.length > 0
         ? selectedLabels.length <= 3
           ? selectedLabels.join(" + ")
           : `${selectedLabels.slice(0, 3).join(" + ")} + ${selectedLabels.length - 3} more`
-        : "Select loaded Gamma contexts";
+        : "Select a Gamma context";
     const selectionMessage =
       scopeChanged
-        ? "The synthesis scope changed. Generating starts a new synthesis thread."
+        ? "The context scope changed. Generating starts a new Copilot thread."
         : supported
-          ? `${selectedScopeOptions.length} loaded contexts included in this synthesis.`
-          : scopeOptions.length < 2
-            ? "Load at least two Gamma contexts before generating a cross-context synthesis."
-            : "Select at least two loaded Gamma contexts for synthesis.";
+          ? `${selectedScopeOptions.length} Gamma context${selectedScopeOptions.length === 1 ? "" : "s"} selected.`
+          : "Select at least one available Gamma context.";
 
     return {
       supported,
       domain: "synthesis",
-      triggerLabel: supported ? "Cross-context synthesis" : "Select scope",
-      contextLabel: `Synthesis | ${scopeSummary}`,
-      domainLabel: "Cross-Context Synthesis",
+      triggerLabel: supported ? "Context-grounded Copilot" : "Select context",
+      contextLabel: `Context | ${scopeSummary}`,
+      domainLabel: "Copilot Context",
       guidance: supported
-        ? "Grounded only in the selected Gamma contexts. Gamma remains read-only, and synthesis should preserve provenance, warnings, and domain-specific caveats."
+        ? "Grounded only in the selected Gamma context tabs. Gamma remains read-only, and Copilot should preserve provenance, warnings, and domain-specific caveats."
         : selectionMessage,
       placeholder:
-        "Synthesize the strongest agreement, contradiction, or next research test across the selected Gamma contexts.",
+        "Ask for a grounded thesis, contradiction, operator run, or next research test across the selected context tabs.",
       thread: visibleThread,
       scopeOptions,
       selectedScopeDomains: selectedDomains,
@@ -1270,7 +1330,6 @@
 
   async function enterWorkspace(mode: WorkspaceMode) {
     workspaceMode = mode;
-    copilotMode = "active_tab";
     sidebarOpen = false;
     copilotOpen = false;
     settingsOpen = false;
@@ -1647,7 +1706,6 @@
 
   async function handleChangeView() {
     workspaceMode = null;
-    copilotMode = "active_tab";
     diagnosticsOpen = false;
     sidebarOpen = false;
     copilotOpen = false;
@@ -1734,10 +1792,6 @@
     }
   }
 
-  function handleSetCopilotMode(nextMode: CopilotDrawerMode) {
-    copilotMode = nextMode;
-  }
-
   function handleToggleSynthesisScope(domain: CopilotBaseDomain) {
     if (selectedSynthesisDomains.includes(domain)) {
       selectedSynthesisDomains = selectedSynthesisDomains.filter((item) => item !== domain);
@@ -1756,7 +1810,7 @@
     navigationSearchResetToken += 1;
   }
 
-  async function handleGenerateCopilot(prompt = "") {
+  async function handleGenerateCopilot(prompt = "", reasoningEffort?: CopilotReasoningEffort) {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
@@ -1765,38 +1819,72 @@
       synthesisDomains:
         copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
+      reasoningEffort,
     });
   }
 
-  async function handleGenerateCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+  async function handleRunOperatorCopilot(prompt = "", reasoningEffort?: CopilotReasoningEffort) {
+    if (!copilotSurface.supported || !copilotSurface.domain) {
+      return null;
+    }
+    return executeCopilotOperatorPlan(copilotSurface.domain, prompt, {
+      workspaceMode,
+      synthesisDomains:
+        copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
+      activeTabId: $activeTab,
+      reasoningEffort,
+    });
+  }
+
+  async function handleGenerateCopilotWorkspace(
+    domain: CopilotDomain,
+    prompt = "",
+    reasoningEffort?: CopilotReasoningEffort
+  ) {
     return loadCopilotResearchCard(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
+      reasoningEffort,
     });
   }
 
-  async function handlePlanCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+  async function handlePlanCopilotWorkspace(
+    domain: CopilotDomain,
+    prompt = "",
+    reasoningEffort?: CopilotReasoningEffort
+  ) {
     return loadCopilotResearchPlan(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
+      reasoningEffort,
     });
   }
 
-  async function handleOperatorPlanCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+  async function handleOperatorPlanCopilotWorkspace(
+    domain: CopilotDomain,
+    prompt = "",
+    reasoningEffort?: CopilotReasoningEffort
+  ) {
     return loadCopilotOperatorPlan(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
+      reasoningEffort,
     });
   }
 
-  async function handleRunOperatorCopilotWorkspace(domain: CopilotDomain, prompt = "") {
+  async function handleRunOperatorCopilotWorkspace(
+    domain: CopilotDomain,
+    prompt = "",
+    reasoningEffort?: CopilotReasoningEffort
+  ) {
     return executeCopilotOperatorPlan(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
+      reasoningEffort,
     });
   }
 
@@ -1832,7 +1920,6 @@
     }
     workspaceMode = "research";
     activeTab.set("copilot");
-    copilotMode = "active_tab";
     copilotOpen = false;
     sidebarOpen = false;
     settingsOpen = false;
@@ -2423,7 +2510,6 @@
         {:else if $activeTab === "copilot"}
           <svelte:component
             this={activeViewComponent}
-            activeSurface={activeTabCopilotSurface}
             synthesisSurface={synthesisCopilotSurface}
             sessions={$copilotSessions}
             activeSession={$activeCopilotSession}
@@ -2485,7 +2571,6 @@
     <CopilotResearchCard
       open={copilotOpen}
       available={copilotSurface.supported}
-      mode={copilotMode}
       contextLabel={copilotSurface.contextLabel}
       domainLabel={copilotSurface.domainLabel}
       guidance={copilotSurface.guidance}
@@ -2496,7 +2581,7 @@
       selectedScopeDomains={copilotSurface.selectedScopeDomains}
       selectionMessage={copilotSurface.selectionMessage}
       onGenerate={handleGenerateCopilot}
-      onSetMode={handleSetCopilotMode}
+      onRunOperator={handleRunOperatorCopilot}
       onToggleScope={handleToggleSynthesisScope}
       onClose={() => copilotOpen = false}
     />

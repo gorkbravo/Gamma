@@ -60,6 +60,8 @@ RESEARCH_CARD_SCHEMA: dict[str, Any] = {
     ],
 }
 
+SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
+
 
 @dataclass
 class OpenAIResponsesCopilotProvider(CopilotProvider):
@@ -93,6 +95,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         tool_traces: list[CopilotToolTrace] = []
         tool_sources: dict[str, CopilotSourceRef] = {source.source_id: source for source in context.sources}
         warnings = list(context.warnings)
+        reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
 
         for turn in range(5):
             payload: dict[str, Any] = {
@@ -103,7 +106,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 "tool_choice": "auto",
                 "parallel_tool_calls": False,
                 "max_output_tokens": 1400,
-                "reasoning": {"effort": self.reasoning_effort},
+                "reasoning": {"effort": reasoning_effort},
                 "text": {
                     "verbosity": "low",
                     "format": {
@@ -258,6 +261,13 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 }
             ],
         }
+
+    def _resolve_reasoning_effort(self, request_effort: str | None) -> str:
+        normalized = str(request_effort or "").strip().lower()
+        if normalized in SUPPORTED_REASONING_EFFORTS:
+            return normalized
+        configured = str(self.reasoning_effort or "").strip().lower()
+        return configured if configured in SUPPORTED_REASONING_EFFORTS else "medium"
 
     def _build_instructions(self, context: CopilotContextBundle) -> str:
         source_ids = ", ".join(source.source_id for source in context.sources) or "none"

@@ -26,6 +26,7 @@ from src.models.copilot import (
 from src.utils.time import now_utc
 
 MAX_OPERATOR_FINAL_OUTPUT_BYTES = 50_000
+SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
 
 
 ContextBuilder = Callable[[str], CopilotContextBundle]
@@ -179,6 +180,7 @@ class CopilotAgentsOperatorService:
             and not step.requires_confirmation
             and step.permission_policy != "confirmation_required"
         ]
+        reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
 
         record_event(
             "plan",
@@ -195,7 +197,7 @@ class CopilotAgentsOperatorService:
                 "max_elapsed_ms": plan.max_elapsed_ms,
                 "orchestrator": self.provider_name,
                 "model": self.config.model,
-                "reasoning_effort": self.config.reasoning_effort,
+                "reasoning_effort": reasoning_effort,
                 "allowed_tool_ids": list(allowed_tool_ids),
             },
         )
@@ -216,8 +218,10 @@ class CopilotAgentsOperatorService:
                 warnings=warnings,
                 executed_steps=executed_steps,
                 skipped_steps=skipped_steps,
+                failed_steps=failed_steps,
                 build_card=build_card,
                 status="error",
+                reasoning_effort=reasoning_effort,
             )
 
         try:
@@ -234,8 +238,10 @@ class CopilotAgentsOperatorService:
                 warnings=warnings,
                 executed_steps=executed_steps,
                 skipped_steps=skipped_steps,
+                failed_steps=failed_steps,
                 build_card=build_card,
                 status="error",
+                reasoning_effort=reasoning_effort,
             )
 
         def execute_registered_action(tool_id: str, arguments_json: str = "{}") -> str:
@@ -380,7 +386,9 @@ class CopilotAgentsOperatorService:
             "tools": [execute_gamma_action],
         }
         if sdk.ModelSettings is not None:
-            agent_kwargs["model_settings"] = sdk.ModelSettings(**self._model_settings_kwargs())
+            agent_kwargs["model_settings"] = sdk.ModelSettings(
+                **self._model_settings_kwargs(reasoning_effort=reasoning_effort)
+            )
         agent = sdk.Agent(**agent_kwargs)
         prompt = self._operator_prompt(request, plan, allowed_tool_ids)
 
@@ -426,6 +434,7 @@ class CopilotAgentsOperatorService:
             output_summaries=output_summaries,
             sdk_duration_ms=sdk_duration_ms,
             model_usage=model_usage,
+            reasoning_effort=reasoning_effort,
         )
 
     def _finalize_result(
@@ -447,6 +456,7 @@ class CopilotAgentsOperatorService:
         output_summaries: dict[str, Any] | None = None,
         sdk_duration_ms: int | None = None,
         model_usage: dict[str, Any] | None = None,
+        reasoning_effort: str | None = None,
     ) -> CopilotResearchCardResult:
         warnings = dedupe_warnings(warnings)
         run_id = events[0].run_id if events else new_copilot_id("oprun")
@@ -494,7 +504,7 @@ class CopilotAgentsOperatorService:
                     "source_count": len(sources),
                     "tool_trace_count": len(tool_traces),
                     "model": self.config.model,
-                    "reasoning_effort": self.config.reasoning_effort,
+                    "reasoning_effort": reasoning_effort,
                     "verbosity": self.config.verbosity,
                     "sdk_duration_ms": sdk_duration_ms,
                     "model_usage": model_usage or {},
@@ -579,16 +589,24 @@ class CopilotAgentsOperatorService:
         }
         return cls._json_dumps(payload)
 
-    def _model_settings_kwargs(self) -> dict[str, Any]:
+    def _model_settings_kwargs(self, *, reasoning_effort: str | None = None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "parallel_tool_calls": False,
             "include_usage": self.config.include_usage,
         }
-        if self.config.reasoning_effort:
-            kwargs["reasoning"] = {"effort": self.config.reasoning_effort}
+        resolved_effort = self._resolve_reasoning_effort(reasoning_effort)
+        if resolved_effort:
+            kwargs["reasoning"] = {"effort": resolved_effort}
         if self.config.verbosity:
             kwargs["verbosity"] = self.config.verbosity
         return kwargs
+
+    def _resolve_reasoning_effort(self, request_effort: str | None) -> str | None:
+        normalized = str(request_effort or "").strip().lower()
+        if normalized in SUPPORTED_REASONING_EFFORTS:
+            return normalized
+        configured = str(self.config.reasoning_effort or "").strip().lower()
+        return configured if configured in SUPPORTED_REASONING_EFFORTS else None
 
     @staticmethod
     def _parse_json_object(value: Any) -> dict[str, Any]:

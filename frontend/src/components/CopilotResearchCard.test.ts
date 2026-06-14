@@ -63,20 +63,26 @@ describe("CopilotResearchCard", () => {
         selectedScopeDomains: ["portfolio", "macro"],
         scopeOptions: [
           {
+            tabId: "portfolio",
             domain: "portfolio",
             label: "Portfolio",
             contextLabel: "Portfolio | 110 USD | SPY",
             fingerprintLabel: "FP a1b2c3d4",
             freshnessLabel: "Snapshot 2026-03-01 00:00",
-            warningLabel: null
+            warningLabel: null,
+            supported: true,
+            disabledReason: null
           },
           {
+            tabId: "macro",
             domain: "macro",
             label: "Macro",
             contextLabel: "Macro | US | 3M | Snapshot",
             fingerprintLabel: "FP d4c3b2a1",
             freshnessLabel: "Snapshot 2026-03-01 00:00",
-            warningLabel: "1 warning"
+            warningLabel: "1 warning",
+            supported: true,
+            disabledReason: null
           }
         ],
         thread: {
@@ -100,15 +106,16 @@ describe("CopilotResearchCard", () => {
       }
     });
 
-    expect(body).toContain("Synthesis");
-    expect(body).toContain("Scope");
+    expect(body).toContain("Research Agent");
+    expect(body).toContain("Research Operator");
+    expect(body).toContain("Context");
     expect(body).toContain("Portfolio");
     expect(body).toContain("Macro");
     // Fingerprint and warning details are surfaced via the chip tooltip.
     expect(body).toContain("FP a1b2c3d4");
     expect(body).toContain("1 warning");
-    expect(body).toContain("Research Synthesis");
-    expect(body).toContain("Ask a follow-up grounded in this synthesis scope...");
+    expect(body).toContain("Grounded Research");
+    expect(body).toContain("Ask a follow-up grounded in this context scope...");
   });
 });
 
