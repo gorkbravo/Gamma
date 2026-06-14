@@ -327,6 +327,8 @@
     value == null ? "N/A" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
   const shortDate = (value: string | null | undefined) =>
     value ? new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "N/A";
+  const signClass = (value: number | null | undefined) =>
+    value == null || !Number.isFinite(value) || value === 0 ? "" : value > 0 ? "positive" : "negative";
 
   const overviewMetricLabels: Record<ResearchOverviewMetricId, string> = {
     return: "Return",
@@ -1232,13 +1234,14 @@
   let chartSeries: ChartSeries[] = [];
   let researchHeroPricePoints: HeroPricePoint[] = [];
   let strategyChartSeries: ChartSeries[] = [];
+  let strategyDrawdownSeries: ChartSeries[] = [];
+  let rollingRiskSeries: ChartSeries[] = [];
   let compareChartSeries: ChartSeries[] = [];
   let compareRelativeDrawdownSeries: ChartSeries[] = [];
   let stressDrawdownRows: TimeSeriesPoint[] = [];
   let rollingStressRows: StrategyLabResult["rolling_points"] = [];
   let strategyModeTitle = "Imported Return Stream";
   let strategyModeEyebrow = "Strategy Lab";
-  let strategyModeSummary = "CSV rows are normalized into returns for analysis only. Gamma does not run strategy code or connect this stream to execution.";
   let compareModeTitle = "Return Stream Comparison";
   let compareModeEyebrow = "Compare / Scenario";
   let compareModeSummary = "Scenario output is normalized historical analytics only. It does not change broker portfolios or rebalance anything.";
@@ -1721,7 +1724,7 @@
               {
                 id: "strategy",
                 label: activeStrategyResult.name,
-                color: "#7aa6c8",
+                color: "var(--chart-primary)",
                 type: "area" as const,
                 data: activeStrategyResult.equity_curve_points.map(toChartPoint)
               }
@@ -1732,7 +1735,7 @@
               {
                 id: "benchmark",
                 label: activeStrategyResult.benchmark_column ?? "Benchmark",
-                color: "#c49a5a",
+                color: "var(--chart-secondary)",
                 type: "line" as const,
                 lineStyle: "dashed" as const,
                 data: activeStrategyResult.benchmark_equity_curve_points.map(toChartPoint)
@@ -1746,6 +1749,37 @@
     .sort((left, right) => left.value - right.value)
     .slice(0, 8);
   $: rollingStressRows = [...(activeStrategyResult?.rolling_points ?? [])].slice(-12);
+  $: strategyDrawdownSeries = activeStrategyResult?.drawdown_points?.length
+    ? [
+        {
+          id: "drawdown",
+          label: "Drawdown",
+          color: "var(--chart-negative)",
+          type: "area" as const,
+          invertFilledArea: true,
+          data: activeStrategyResult.drawdown_points
+            .filter((point) => Number.isFinite(point.value))
+            .map(toChartPoint)
+        }
+      ]
+    : [];
+  $: rollingRiskSeries = (() => {
+    const points = activeStrategyResult?.rolling_points ?? [];
+    const betaData = points
+      .filter((point) => point.rolling_beta != null && Number.isFinite(point.rolling_beta))
+      .map((point) => ({ time: Math.floor(new Date(point.timestamp).getTime() / 1000), value: point.rolling_beta as number }));
+    const corrData = points
+      .filter((point) => point.rolling_correlation != null && Number.isFinite(point.rolling_correlation))
+      .map((point) => ({ time: Math.floor(new Date(point.timestamp).getTime() / 1000), value: point.rolling_correlation as number }));
+    const series: ChartSeries[] = [];
+    if (betaData.length) {
+      series.push({ id: "rolling_beta", label: "Rolling Beta", color: "var(--chart-primary)", type: "line" as const, data: betaData });
+    }
+    if (corrData.length) {
+      series.push({ id: "rolling_corr", label: "Rolling Corr", color: "var(--chart-secondary)", type: "line" as const, lineStyle: "dashed" as const, data: corrData });
+    }
+    return series;
+  })();
   $: strategyModeTitle =
     surfaceModeKind === "strategy_composer"
       ? "Gamma Object Composer"
@@ -1762,27 +1796,19 @@
         : surfaceModeKind === "strategy_regime"
           ? "Strategy Stress"
           : "Strategy Analytics";
-  $: strategyModeSummary =
-    surfaceModeKind === "strategy_composer"
-      ? "Compose return-bearing Gamma objects into a read-only strategy result. Weights are normalized by the backend."
-      : surfaceModeKind === "strategy_imports" || surfaceModeKind === "legacy_strategy"
-        ? "Paste or map an external return stream. Gamma validates and normalizes the data without executing strategy code."
-        : surfaceModeKind === "strategy_regime"
-          ? "Inspect drawdown windows, rolling beta, and rolling correlation to identify where the imported stream is fragile."
-          : "Review normalized performance, benchmark-relative behavior, rolling risk, and period returns for the active strategy stream.";
   $: compareChartSeries = compareResult
     ? [
         {
           id: "left",
           label: compareResult.left.label,
-          color: "#7aa6c8",
+          color: "var(--chart-primary)",
           type: "area" as const,
           data: compareResult.left.normalized_nav_points.map(toChartPoint)
         },
         {
           id: "right",
           label: compareResult.right.label,
-          color: "#c49a5a",
+          color: "var(--chart-secondary)",
           type: "line" as const,
           lineStyle: "dashed" as const,
           data: compareResult.right.normalized_nav_points.map(toChartPoint)
@@ -1794,7 +1820,7 @@
         {
           id: "relative_drawdown",
           label: "Relative Drawdown",
-          color: "#c66b61",
+          color: "var(--chart-negative)",
           type: "area" as const,
           invertFilledArea: true,
           data: compareResult.relative_drawdown_points.map(toChartPoint)
@@ -2585,7 +2611,6 @@
               <div class="title-block">
                 <p class="eyebrow">Strategy Composer</p>
                 <h2>Mixed Portfolio Engine</h2>
-                <p class="muted">Build signed research books from listed histories, inline contract/commodity histories, and reusable Gamma objects. Gross exposure is normalized by the backend.</p>
               </div>
               <div class="builder-actions compact">
                 <button type="button" class="ghost-button" on:click={addPortfolioDraftLeg}>Add Leg</button>
@@ -2606,7 +2631,7 @@
 
             <div class="kpi-grid compact-kpis">
               <article class="metric"><span>Gross</span><strong>{fmt(portfolioDraftSummary.grossExposure, 2)}x</strong><small>{portfolioDraftSummary.legCount} active legs</small></article>
-              <article class="metric"><span>Net</span><strong class:negative={portfolioDraftSummary.netExposure < 0}>{fmt(portfolioDraftSummary.netExposure, 2)}x</strong><small>{fmt(portfolioDraftSummary.longExposure, 2)} long / {fmt(portfolioDraftSummary.shortExposure, 2)} short</small></article>
+              <article class="metric"><span>Net</span><strong class={signClass(portfolioDraftSummary.netExposure)}>{fmt(portfolioDraftSummary.netExposure, 2)}x</strong><small>{fmt(portfolioDraftSummary.longExposure, 2)} long / {fmt(portfolioDraftSummary.shortExposure, 2)} short</small></article>
               <article class="metric"><span>Listed</span><strong>{portfolioDraftSummary.listedIdentifierLegs}</strong><small>provider-resolved</small></article>
               <article class="metric"><span>Inline</span><strong>{portfolioDraftSummary.inlineHistoryLegs}</strong><small>dated histories</small></article>
               <article class="metric"><span>Objects</span><strong>{portfolioDraftSummary.objectLegs}</strong><small>Gamma streams</small></article>
@@ -2857,7 +2882,7 @@
                 </div>
               {/if}
               <div class="kpi-grid">
-                <article class="metric"><span>Total Return</span><strong>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
+                <article class="metric"><span>Total Return</span><strong class={signClass(strategyComposition.metrics.total_return)}>{pct(strategyComposition.metrics.total_return)}</strong><small>{strategyComposition.metrics.observation_count} observations</small></article>
                 <article class="metric"><span>Annual Vol</span><strong>{pct(strategyComposition.metrics.annual_volatility)}</strong><small>{strategyComposition.metrics.frequency}</small></article>
                 <article class="metric"><span>Max Drawdown</span><strong class:negative={(strategyComposition.metrics.max_drawdown ?? 0) < 0}>{pct(strategyComposition.metrics.max_drawdown)}</strong><small>{strategyComposition.metrics.max_drawdown_duration} periods</small></article>
                 <article class="metric"><span>Contributions</span><strong>{Object.keys(strategyComposition.leg_contributions).length}</strong><small>weighted legs</small></article>
@@ -2890,7 +2915,6 @@
             <div class="title-block">
               <p class="eyebrow">{strategyModeEyebrow}</p>
               <h2>{activeStrategyResult?.name ?? strategyModeTitle}</h2>
-              <p class="muted">{strategyModeSummary}</p>
             </div>
             <div class="builder-actions compact">
               <button type="button" on:click={saveStrategyRun} disabled={!activeStrategyResult || savedLoading}>Save Strategy</button>
@@ -2898,33 +2922,30 @@
           </div>
 
           <div class="kpi-grid">
-            <article class="metric"><span>Total Return</span><strong>{pct(activeStrategyResult?.metrics.total_return)}</strong><small>{activeStrategyResult?.metrics.observation_count ?? 0} observations</small></article>
-            <article class="metric"><span>Annual Return</span><strong>{pct(activeStrategyResult?.metrics.annual_return)}</strong><small>{activeStrategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
+            <article class="metric"><span>Total Return</span><strong class={signClass(activeStrategyResult?.metrics.total_return)}>{pct(activeStrategyResult?.metrics.total_return)}</strong><small>{activeStrategyResult?.metrics.observation_count ?? 0} observations</small></article>
+            <article class="metric"><span>Annual Return</span><strong class={signClass(activeStrategyResult?.metrics.annual_return)}>{pct(activeStrategyResult?.metrics.annual_return)}</strong><small>{activeStrategyResult?.metrics.frequency ?? "unknown"} frequency</small></article>
             <article class="metric"><span>Annual Vol</span><strong>{pct(activeStrategyResult?.metrics.annual_volatility)}</strong><small>Inferred periods {fmt(activeStrategyResult?.metrics.periods_per_year, 0)}</small></article>
-            <article class="metric"><span>Sharpe</span><strong>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
-            <article class="metric"><span>Sortino</span><strong>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
+            <article class="metric"><span>Sharpe</span><strong class={signClass(activeStrategyResult?.metrics.sharpe_ratio)}>{fmt(activeStrategyResult?.metrics.sharpe_ratio, 2)}</strong><small>Zero risk-free assumption</small></article>
+            <article class="metric"><span>Sortino</span><strong class={signClass(activeStrategyResult?.metrics.sortino_ratio)}>{fmt(activeStrategyResult?.metrics.sortino_ratio, 2)}</strong><small>Downside deviation</small></article>
             <article class="metric"><span>Max Drawdown</span><strong class:negative={(activeStrategyResult?.metrics.max_drawdown ?? 0) < 0}>{pct(activeStrategyResult?.metrics.max_drawdown)}</strong><small>{activeStrategyResult?.metrics.max_drawdown_duration ?? 0} periods</small></article>
           </div>
 
-          <TimeSeriesChart series={strategyChartSeries} height={360} emptyMessage="Import CSV returns to populate Strategy Lab." />
-          <div class="chart-foot">
-            {#if activeStrategyResult}
+          <TimeSeriesChart series={strategyChartSeries} height={320} emptyMessage="Import CSV returns to populate Strategy Lab." />
+          {#if strategyDrawdownSeries.length}
+            <div class="subchart-label">Underwater Drawdown</div>
+            <TimeSeriesChart series={strategyDrawdownSeries} height={140} />
+          {/if}
+          {#if activeStrategyResult}
+            <div class="chart-foot">
               <ProvenanceBadge data={strategyBadge} label="Source" />
-            {:else}
-              <span>Paste CSV text or map parsed rows from a file outside Gamma.</span>
-              <strong>No import analyzed</strong>
-            {/if}
-          </div>
+            </div>
+          {/if}
         </article>
 
         {#if surfaceModeKind === "strategy_imports" || surfaceModeKind === "legacy_strategy"}
           <article class="panel table-panel">
-            <div class="panel-header top-line">
-              <div class="title-block">
-                <p class="eyebrow">Import Preview</p>
-                <h3>Parsed CSV Rows</h3>
-                <p class="muted">Map the date, value, and optional benchmark columns before analysis. Raw uploaded rows are not persisted by default.</p>
-              </div>
+            <div class="panel-header tight-head">
+              <h3>Parsed CSV Rows</h3>
               <small>{parsedStrategyCsv.rows.length} rows / {parsedStrategyCsv.columns.length} columns</small>
             </div>
             <div class="table-wrap compact-table">
@@ -2945,16 +2966,22 @@
         {/if}
 
         {#if surfaceModeKind === "strategy_regime"}
+          {#if rollingRiskSeries.length}
+            <article class="panel">
+              <div class="table-panel-header">Rolling Beta &amp; Correlation</div>
+              <TimeSeriesChart series={rollingRiskSeries} height={200} showLegend emptyMessage="Analyze a benchmarked stream to populate rolling regime risk." />
+            </article>
+          {/if}
           <div class="detail-split">
             <article class="panel table-panel">
-              <div class="panel-header"><div><p class="eyebrow">Stress Windows</p><h3>Worst Drawdowns</h3></div><small>{stressDrawdownRows.length} points</small></div>
+              <div class="panel-header tight-head"><h3>Worst Drawdowns</h3><small>{stressDrawdownRows.length} points</small></div>
               <div class="table-wrap compact-table">
                 <table>
-                  <thead><tr><th>Date</th><th>Drawdown</th></tr></thead>
+                  <thead><tr><th>Date</th><th class="num-cell">Drawdown</th></tr></thead>
                   <tbody>
                     {#if stressDrawdownRows.length}
                       {#each stressDrawdownRows as point}
-                        <tr><td>{shortDate(point.timestamp)}</td><td>{pct(point.value)}</td></tr>
+                        <tr><td>{shortDate(point.timestamp)}</td><td class="num-cell {signClass(point.value)}">{pct(point.value)}</td></tr>
                       {/each}
                     {:else}
                       <tr><td colspan="2">No drawdown series yet.</td></tr>
@@ -2965,19 +2992,19 @@
             </article>
 
             <article class="panel table-panel">
-              <div class="panel-header"><div><p class="eyebrow">Rolling Risk</p><h3>Recent Regime Read</h3></div><small>{rollingStressRows.length} windows</small></div>
+              <div class="panel-header tight-head"><h3>Recent Regime Read</h3><small>{rollingStressRows.length} windows</small></div>
               <div class="table-wrap compact-table">
                 <table>
-                  <thead><tr><th>Date</th><th>Roll Ret</th><th>Vol</th><th>Beta</th><th>Corr</th></tr></thead>
+                  <thead><tr><th>Date</th><th class="num-cell">Roll Ret</th><th class="num-cell">Vol</th><th class="num-cell">Beta</th><th class="num-cell">Corr</th></tr></thead>
                   <tbody>
                     {#if rollingStressRows.length}
                       {#each rollingStressRows as row}
                         <tr>
                           <td>{shortDate(row.timestamp)}</td>
-                          <td>{pct(row.rolling_return)}</td>
-                          <td>{pct(row.rolling_volatility)}</td>
-                          <td>{fmt(row.rolling_beta, 2)}</td>
-                          <td>{fmt(row.rolling_correlation, 2)}</td>
+                          <td class="num-cell {signClass(row.rolling_return)}">{pct(row.rolling_return)}</td>
+                          <td class="num-cell">{pct(row.rolling_volatility)}</td>
+                          <td class="num-cell">{fmt(row.rolling_beta, 2)}</td>
+                          <td class="num-cell">{fmt(row.rolling_correlation, 2)}</td>
                         </tr>
                       {/each}
                     {:else}
@@ -2991,14 +3018,14 @@
         {:else}
         <div class="detail-split">
           <article class="panel table-panel">
-            <div class="panel-header"><div><p class="eyebrow">Monthly</p><h3>Monthly Returns</h3></div><small>{activeStrategyResult?.monthly_returns.length ?? 0} periods</small></div>
+            <div class="panel-header tight-head"><h3>Monthly Returns</h3><small>{activeStrategyResult?.monthly_returns.length ?? 0} periods</small></div>
             <div class="table-wrap compact-table">
               <table>
-                <thead><tr><th>Period</th><th>Return</th></tr></thead>
+                <thead><tr><th>Period</th><th class="num-cell">Return</th></tr></thead>
                 <tbody>
                   {#if activeStrategyResult?.monthly_returns.length}
                     {#each activeStrategyResult.monthly_returns.slice(-18) as row}
-                      <tr><td>{row.period}</td><td>{pct(row.value)}</td></tr>
+                      <tr><td>{row.period}</td><td class="num-cell {signClass(row.value)}">{pct(row.value)}</td></tr>
                     {/each}
                   {:else}
                     <tr><td colspan="2">No monthly table yet.</td></tr>
@@ -3009,14 +3036,14 @@
           </article>
 
           <article class="panel table-panel">
-            <div class="panel-header"><div><p class="eyebrow">Annual</p><h3>Annual Returns</h3></div><small>{activeStrategyResult?.annual_returns.length ?? 0} periods</small></div>
+            <div class="panel-header tight-head"><h3>Annual Returns</h3><small>{activeStrategyResult?.annual_returns.length ?? 0} periods</small></div>
             <div class="table-wrap compact-table">
               <table>
-                <thead><tr><th>Period</th><th>Return</th></tr></thead>
+                <thead><tr><th>Period</th><th class="num-cell">Return</th></tr></thead>
                 <tbody>
                   {#if activeStrategyResult?.annual_returns.length}
                     {#each activeStrategyResult.annual_returns as row}
-                      <tr><td>{row.period}</td><td>{pct(row.value)}</td></tr>
+                      <tr><td>{row.period}</td><td class="num-cell {signClass(row.value)}">{pct(row.value)}</td></tr>
                     {/each}
                   {:else}
                     <tr><td colspan="2">No annual table yet.</td></tr>
@@ -3071,13 +3098,6 @@
             <div class="row"><span>Rolling Windows</span><strong>{activeStrategyResult?.rolling_points.length ?? 0}</strong></div>
             <div class="row"><span>Saved Runs</span><strong>{visibleSavedItems.length}</strong></div>
           </div>
-          {#if surfaceModeKind === "strategy_composer"}
-            <p class="muted">Composer can combine the latest scope, latest imported stream, and saved return streams into a normalized read-only object.</p>
-          {:else if surfaceModeKind === "strategy_regime"}
-            <p class="muted">Regime/stress uses the current return stream only; macro-aware regime joins can be layered later without changing the import contract.</p>
-          {:else}
-            <p class="muted">Backtest/analyze uses the latest imported or composed stream and preserves uploaded-source provenance.</p>
-          {/if}
         </article>
         {/if}
 
@@ -3225,13 +3245,9 @@
     <div class="workspace-grid">
       <div class="primary-column">
         <article class="panel table-panel">
-          <div class="panel-header top-line">
-            <div class="title-block">
-              <p class="eyebrow">Saved Research</p>
-              <h2>Reusable Research Objects</h2>
-              <p class="muted">Saved items store normalized results and metadata. Uploaded raw files are not persisted by default.</p>
-            </div>
-            <div class="builder-actions compact"><button type="button" class="ghost-button" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button></div>
+          <div class="panel-header tight-head">
+            <h3>Saved Research Objects</h3>
+            <button type="button" class="ghost-button inline-refresh" on:click={() => void onLoadSaved()} disabled={savedLoading}>{savedLoading ? "Loading..." : "Refresh"}</button>
           </div>
           <div class="table-wrap">
             <table>
@@ -3283,7 +3299,6 @@
             <div class="row"><span>Items</span><strong>{visibleSavedItems.length}</strong></div>
             <div class="row"><span>Reusable Streams</span><strong>{visibleSavedItems.filter(savedResearchHasReturnStream).length}</strong></div>
           </div>
-          <p class="muted">Saved Research is a first-pass structured layer, not a notebook. It preserves normalized outputs, warnings, timestamps, and provenance fields for reuse.</p>
         </article>
       </aside>
     </div>
@@ -3846,6 +3861,30 @@
 
   .top-line {
     align-items: flex-start;
+  }
+
+  .tight-head {
+    align-items: center;
+  }
+
+  .tight-head small {
+    color: var(--text-2);
+    font-size: 0.66rem;
+    white-space: nowrap;
+  }
+
+  .inline-refresh {
+    width: auto;
+    min-height: 1.65rem;
+    padding: 0.25rem 0.6rem;
+  }
+
+  .subchart-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.6rem;
+    margin-top: 0.15rem;
   }
 
   .title-block {
