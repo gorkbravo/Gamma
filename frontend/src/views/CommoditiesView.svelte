@@ -8,6 +8,7 @@
     CommodityMarketSummary,
     CommodityMode,
     CommodityOverviewRankingItem,
+    CommodityPriceBasis,
     CommodityPriceHistory,
     CommoditySpreadSnapshot,
     MacroSeriesHistory,
@@ -52,6 +53,8 @@
   $: selectedSummary = findSelectedSummary(workspace, selectedInstrumentId);
   $: selectedHistory = findSelectedHistory(workspace, selectedInstrumentId);
   $: selectedCurve = findSelectedCurve(workspace, selectedInstrumentId);
+  $: selectedReconciliation = findSelectedReconciliation(workspace, selectedInstrumentId);
+  $: selectedBasis = selectedSummary?.quote_basis ?? selectedReconciliation?.headline ?? null;
   $: selectedInventories = filterInventoriesForInstrument(workspace?.inventories ?? [], selectedInstrumentId);
   $: selectedInventory = selectedInventories[0] ?? findSelectedInventory(workspace, selectedInstrumentId);
   $: selectedInstrument = selectedSummary?.instrument ?? findSelectedInstrument(workspace, selectedInstrumentId);
@@ -96,6 +99,8 @@
     : buildSpreadZRows(workspace?.spreads ?? []);
   $: historyPointCount = selectedHistory?.points.length ?? 0;
   $: latestHistoryDate = selectedHistory?.points.at(-1)?.timestamp ?? selectedSummary?.retrieved_at ?? workspace?.retrieved_at ?? null;
+  $: providerMixLabel = formatProviderMix(workspace);
+  $: basisConflictRows = (workspace?.price_reconciliations ?? []).filter((row) => row.status === "conflict");
   $: termSpreadHeatmapRows = buildTermSpreadHeatmap(selectedCurve);
   $: crackMatrixRows = buildCrackMatrix(workspace?.spreads ?? []);
   $: inventoryCloudRows = buildInventoryCloudRows(visibleInventories);
@@ -261,6 +266,10 @@
 
   function findSelectedCurve(data: CommodityWorkspaceResponse | null, instrumentId: string) {
     return (data?.curves ?? []).find((curve) => curve.instrument_id === instrumentId) ?? null;
+  }
+
+  function findSelectedReconciliation(data: CommodityWorkspaceResponse | null, instrumentId: string) {
+    return (data?.price_reconciliations ?? []).find((row) => row.instrument_id === instrumentId) ?? null;
   }
 
   function findSelectedInventory(data: CommodityWorkspaceResponse | null, instrumentId: string) {
@@ -907,6 +916,7 @@
         quoteUnit: row.quote_unit,
         latestPrice: row.latest_price,
         latestChangePct: row.latest_change_pct,
+        quoteBasisLabel: compactBasisLabel(row.quote_basis),
         curveState: row.curve_state,
         frontSpread: row.front_spread,
         inventoryDisplay:
@@ -934,6 +944,7 @@
         quoteUnit: summary.instrument.quote_unit,
         latestPrice: summary.latest_price,
         latestChangePct: summary.latest_change_pct,
+        quoteBasisLabel: compactBasisLabel(summary.quote_basis),
         curveState: summary.curve_state,
         frontSpread: curveByInstrument.get(summary.instrument.instrument_id)?.front_spread ?? summary.front_spread,
         inventoryDisplay: inventoryByInstrument.get(summary.instrument.instrument_id)
@@ -1231,6 +1242,52 @@
     return "warning";
   }
 
+  function compactBasisLabel(
+    basis:
+      | {
+          display_label?: string | null;
+          basis_type?: string | null;
+          provider?: string | null;
+        }
+      | null
+      | undefined
+  ) {
+    if (!basis) return "Basis N/A";
+    const label = (basis.display_label ?? "").trim();
+    if (label) return label;
+    return `${providerLabel(basis.provider)} ${humanize(basis.basis_type ?? "basis")}`.trim();
+  }
+
+  function providerLabel(value: string | null | undefined) {
+    const normalized = (value ?? "").trim().toLowerCase();
+    if (normalized === "ibkr" || normalized === "ibkr_cached") return "IBKR";
+    if (normalized === "fred") return "FRED";
+    if (normalized === "eia") return "EIA";
+    if (normalized === "sample_data") return "Sample";
+    if (normalized === "gamma") return "Gamma";
+    return (value ?? "").trim().toUpperCase() || "N/A";
+  }
+
+  function formatProviderMix(data: CommodityWorkspaceResponse | null) {
+    if (!data) return "Provider N/A";
+    const providers = new Set<string>();
+    for (const reconciliation of data.price_reconciliations ?? []) {
+      if (reconciliation.headline?.provider) providers.add(providerLabel(reconciliation.headline.provider));
+      for (const observation of reconciliation.observations ?? []) {
+        if (observation.provider) providers.add(providerLabel(observation.provider));
+      }
+    }
+    if (!providers.size) {
+      providers.add(providerLabel(data.coverage.source_provider || data.coverage.provider_id));
+    }
+    const ordered = [...providers].filter(Boolean).sort();
+    return ordered.length <= 1 ? ordered[0] ?? "Provider N/A" : `Mixed: ${ordered.join(" + ")}`;
+  }
+
+  function basisTimeLabel(basis: CommodityPriceBasis | null | undefined) {
+    return formatDate(basis?.source_timestamp ?? basis?.timestamp ?? basis?.retrieved_at ?? null);
+  }
+
 </script>
 
 <section class="view">
@@ -1238,7 +1295,7 @@
     <div class="header-top">
       <span class="title">Commodities</span>
       {#if workspace}
-        <span class="subtitle">{workspace.coverage.provider_label} · as of {formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)}</span>
+        <span class="subtitle">{workspace.coverage.provider_label} | {providerMixLabel} | as of {formatDate(workspace.coverage.as_of ?? workspace.retrieved_at)}</span>
       {/if}
       {#if loading}<span class="loading-pill">Refreshing</span>{/if}
       {#if workspace && selectedInstrument}
@@ -1264,6 +1321,18 @@
         {loading ? "LOADING..." : "Refresh"}
       </button>
     </div>
+
+    {#if workspace && selectedBasis}
+      <div class="basis-strip" aria-label="Selected commodity source and basis">
+        <span><em>Headline</em> {compactBasisLabel(selectedBasis)}</span>
+        <span><em>Provider</em> {providerLabel(selectedBasis.provider)}</span>
+        {#if selectedBasis.contract_symbol}
+          <span><em>Contract</em> {selectedBasis.contract_symbol}{selectedBasis.contract_month ? ` / ${selectedBasis.contract_month}` : ""}</span>
+        {/if}
+        <span><em>Time</em> {basisTimeLabel(selectedBasis)}</span>
+        {#if selectedReconciliation?.status === "conflict"}<strong>Basis conflict</strong>{/if}
+      </div>
+    {/if}
 
     <div class="mode-kpi-row">
       <div class="mode-bar" role="tablist" aria-label="Commodities modes">
@@ -1353,7 +1422,7 @@
                       {/if}
                       <td>
                         <strong>{row.name}</strong>
-                        <span>{row.symbol} | {row.quoteUnit}</span>
+                        <span>{row.symbol} | {row.quoteUnit} | {row.quoteBasisLabel}</span>
                       </td>
                       <td>{formatNumber(row.latestPrice, 2)}</td>
                       <td class={valueClass(row.latestChangePct)}>{formatPct(row.latestChangePct)}</td>
@@ -1638,6 +1707,10 @@
               <span>Last</span>
               <strong>{formatNumber(selectedSummary?.latest_price, 2)}</strong>
             </div>
+            <div class="ctx-kpi wide">
+              <span>Basis</span>
+              <strong>{compactBasisLabel(selectedBasis)}</strong>
+            </div>
             <div class="ctx-kpi">
               <span>Chg</span>
               <strong class={valueClass(selectedSummary?.latest_change)}>{formatPct(selectedSummary?.latest_change_pct)}</strong>
@@ -1663,6 +1736,31 @@
               <strong>{selectedSummary?.instrument.quote_unit ?? "N/A"}</strong>
             </div>
           </div>
+        </div>
+      </article>
+    {/if}
+
+    {#if selectedReconciliation?.status === "conflict"}
+      <article class="panel reconciliation-panel">
+        <header class="panel-title">
+          <span>Basis Reconciliation</span>
+          <span class="header-meta">{selectedReconciliation.observations.length} quote references</span>
+        </header>
+        <div class="reconciliation-line">
+          <strong>{selectedReconciliation.summary}</strong>
+          <span>{selectedReconciliation.warnings[0]}</span>
+        </div>
+      </article>
+    {:else if basisConflictRows.length && mode === "overview"}
+      <article class="panel reconciliation-panel">
+        <header class="panel-title">
+          <span>Basis Reconciliation</span>
+          <span class="header-meta">{basisConflictRows.length} conflicts</span>
+        </header>
+        <div class="reconciliation-list">
+          {#each basisConflictRows.slice(0, 3) as row}
+            <span>{row.warnings[0] ?? row.summary}</span>
+          {/each}
         </div>
       </article>
     {/if}
@@ -2415,6 +2513,32 @@
     letter-spacing: 0.1em;
   }
 
+  .basis-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.8rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid var(--divider);
+    color: var(--text-1);
+    font-size: 10.5px;
+    line-height: 1.25;
+  }
+
+  .basis-strip em {
+    color: var(--text-2);
+    font-style: normal;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-right: 0.25rem;
+  }
+
+  .basis-strip strong {
+    color: var(--warning);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+  }
+
   .handoff-actions {
     display: inline-flex;
     align-items: center;
@@ -2551,6 +2675,10 @@
     min-width: 4.5rem;
   }
 
+  .ctx-kpi.wide {
+    min-width: 11rem;
+  }
+
   .ctx-kpi span {
     color: var(--text-2);
     font-size: 9.5px;
@@ -2565,6 +2693,12 @@
     font-weight: 600;
     line-height: 1.15;
     white-space: nowrap;
+  }
+
+  .ctx-kpi.wide strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 13rem;
   }
 
   .ctx-kpi strong.positive { color: var(--positive); }
@@ -2883,6 +3017,30 @@
   .tag.negative { border-color: color-mix(in srgb, var(--negative) 55%, var(--divider)); color: var(--negative); }
   .tag.warning { border-color: color-mix(in srgb, var(--warning) 55%, var(--divider)); color: var(--warning); }
   .tag.neutral { border-color: var(--divider); color: var(--text-2); background: rgba(122, 166, 200, 0.05); }
+
+  .reconciliation-panel {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .reconciliation-line,
+  .reconciliation-list {
+    display: grid;
+    gap: 0.25rem;
+    color: var(--text-1);
+    font-size: 11px;
+  }
+
+  .reconciliation-line strong {
+    color: var(--warning);
+    font-size: 11px;
+  }
+
+  .reconciliation-line span,
+  .reconciliation-list span {
+    color: var(--text-2);
+  }
 
   .scatter-shell {
     position: relative;

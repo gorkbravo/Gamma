@@ -22,6 +22,24 @@ COMMODITY_COVERAGE_STATUSES = {
     "unavailable",
 }
 
+COMMODITY_BASIS_TYPES = {
+    "spot_proxy",
+    "front_future",
+    "selected_future",
+    "continuous_proxy",
+    "curve_node",
+    "eia_reference",
+    "fred_reference",
+    "sample_generated",
+    "unavailable",
+}
+
+COMMODITY_RECONCILIATION_STATUSES = {
+    "aligned",
+    "conflict",
+    "insufficient",
+}
+
 
 @dataclass(frozen=True)
 class CommodityCoverageMetadata:
@@ -139,6 +157,53 @@ class CommodityCurveSnapshot:
 
 
 @dataclass(frozen=True)
+class CommodityPriceBasis:
+    basis_id: str
+    instrument_id: str
+    role: str
+    basis_type: str
+    display_label: str
+    provider: str
+    value: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    unit: str | None = None
+    timestamp: datetime | None = None
+    source_timestamp: datetime | None = None
+    contract_month: str | None = None
+    contract_symbol: str | None = None
+    provider_symbol: str | None = None
+    freshness_label: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.basis_type not in COMMODITY_BASIS_TYPES:
+            raise ValueError(f"Unsupported commodity basis type: {self.basis_type}")
+
+
+@dataclass(frozen=True)
+class CommodityPriceReconciliation:
+    instrument_id: str
+    status: str
+    headline: CommodityPriceBasis | None = None
+    observations: list[CommodityPriceBasis] = field(default_factory=list)
+    summary: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in COMMODITY_RECONCILIATION_STATUSES:
+            raise ValueError(f"Unsupported commodity reconciliation status: {self.status}")
+
+
+@dataclass(frozen=True)
 class CommoditySpreadDefinition:
     spread_id: str
     label: str
@@ -231,6 +296,7 @@ class CommodityMarketSummary:
     latest_price: float | None
     latest_change: float | None = None
     latest_change_pct: float | None = None
+    quote_basis: CommodityPriceBasis | None = None
     curve_state: str = "unavailable"
     front_spread: float | None = None
     inventory_signal: str | None = None
@@ -267,6 +333,7 @@ class CommodityOverviewMatrixRow:
     latest_price: float | None = None
     latest_change: float | None = None
     latest_change_pct: float | None = None
+    quote_basis: CommodityPriceBasis | None = None
     curve_state: str = "unavailable"
     front_spread: float | None = None
     front_basis: float | None = None
@@ -428,6 +495,7 @@ class CommodityWorkspaceResult:
     coverage: CommodityCoverageMetadata
     instruments: list[CommodityInstrument] = field(default_factory=list)
     market_summaries: list[CommodityMarketSummary] = field(default_factory=list)
+    price_reconciliations: list[CommodityPriceReconciliation] = field(default_factory=list)
     price_histories: list[CommodityPriceHistory] = field(default_factory=list)
     curves: list[CommodityCurveSnapshot] = field(default_factory=list)
     spreads: list[CommoditySpreadSnapshot] = field(default_factory=list)

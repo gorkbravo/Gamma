@@ -336,6 +336,7 @@ def summarize_commodities_workspace(
     curves = [row for row in workspace.get("curves", []) if isinstance(row, dict)]
     events = [row for row in workspace.get("events", []) if isinstance(row, dict)]
     cross_domain_links = [row for row in workspace.get("cross_domain_links", []) if isinstance(row, dict)]
+    reconciliations = [row for row in workspace.get("price_reconciliations", []) if isinstance(row, dict)]
 
     selected_id = str(workspace.get("selected_instrument_id") or "")
     selected_summary = next(
@@ -373,7 +374,20 @@ def summarize_commodities_workspace(
         },
         "selected_market": selected_summary,
         "selected_curve": selected_curve,
+        "selected_reconciliation": next(
+            (
+                _commodity_reconciliation_summary(row)
+                for row in reconciliations
+                if str(row.get("instrument_id") or "") == selected_id
+            ),
+            None,
+        ),
         "market_summaries": [_commodity_market_summary(row) for row in market_summaries[:summary_limit]],
+        "price_reconciliations": [
+            _commodity_reconciliation_summary(row)
+            for row in reconciliations
+            if str(row.get("status") or "") == "conflict"
+        ][:6],
         "spreads": [_commodity_spread_summary(row) for row in spreads[:spread_limit]],
         "inventories": [_commodity_inventory_summary(row) for row in inventories[:inventory_limit]],
         "events": [
@@ -398,7 +412,11 @@ def summarize_commodities_workspace(
             }
             for row in cross_domain_links[:6]
         ],
-        "warnings": dedupe_warnings(workspace.get("warnings", []), coverage.get("caveats", [])),
+        "warnings": dedupe_warnings(
+            workspace.get("warnings", []),
+            coverage.get("caveats", []),
+            *(row.get("warnings", []) for row in reconciliations),
+        ),
     }
 
 
@@ -499,10 +517,45 @@ def _commodity_market_summary(row: dict[str, Any] | None) -> dict[str, Any] | No
         "latest_price": _as_float(row.get("latest_price")),
         "latest_change": _as_float(row.get("latest_change")),
         "latest_change_pct": _as_float(row.get("latest_change_pct")),
+        "quote_basis": _commodity_basis_summary(_as_dict(row.get("quote_basis"))),
         "curve_state": row.get("curve_state"),
         "front_spread": _as_float(row.get("front_spread")),
         "inventory_signal": row.get("inventory_signal"),
         "summary": row.get("summary"),
+        "warnings": list(row.get("warnings", []) or []),
+    }
+
+
+def _commodity_basis_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    return {
+        "basis_type": row.get("basis_type"),
+        "display_label": row.get("display_label"),
+        "provider": row.get("provider"),
+        "value": _as_float(row.get("value")),
+        "change": _as_float(row.get("change")),
+        "change_pct": _as_float(row.get("change_pct")),
+        "unit": row.get("unit"),
+        "timestamp": _isoformat(row.get("timestamp")),
+        "source_timestamp": _isoformat(row.get("source_timestamp")),
+        "contract_month": row.get("contract_month"),
+        "contract_symbol": row.get("contract_symbol"),
+        "freshness_label": row.get("freshness_label"),
+        "warnings": list(row.get("warnings", []) or []),
+    }
+
+
+def _commodity_reconciliation_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    observations = [item for item in row.get("observations", []) if isinstance(item, dict)]
+    return {
+        "instrument_id": row.get("instrument_id"),
+        "status": row.get("status"),
+        "summary": row.get("summary"),
+        "headline": _commodity_basis_summary(_as_dict(row.get("headline"))),
+        "observations": [_commodity_basis_summary(item) for item in observations[:4]],
         "warnings": list(row.get("warnings", []) or []),
     }
 

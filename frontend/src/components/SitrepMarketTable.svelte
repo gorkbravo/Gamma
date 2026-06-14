@@ -224,29 +224,33 @@
     width: 34%;
   }
 
-  .profile-commodities .context-cell {
-    font-weight: 700;
-  }
-
   .profile-commodities {
-    min-width: 34rem;
+    min-width: 38rem;
   }
 
   .profile-commodities .market-cell {
-    width: 34%;
+    width: 30%;
   }
 
   .profile-commodities .group-cell {
-    width: 18%;
+    width: 16%;
   }
 
   .profile-commodities .last-cell {
-    width: 18%;
+    width: 15%;
   }
 
   .profile-commodities .move-cell,
   .profile-commodities .pct-cell {
+    width: 12%;
+  }
+
+  .profile-commodities .context-cell {
     width: 15%;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .empty-cell {

@@ -29,8 +29,55 @@ describe("CommoditiesView", () => {
     expect(body).toContain("EIA Weekly Petroleum Status Report");
     expect(body).toContain("Macro Inflation");
     expect(body).toContain("Sample Commodities Dataset");
+    expect(body).toContain("Sample generated");
+    expect(body).toContain("Headline");
     expect(body).toContain('aria-label="Strategy actions for CL"');
     expect(body).toContain('tabindex="0"');
+  });
+
+  it("shows reconciliation detail only when basis conflict exists", () => {
+    const workspace = makeWorkspace();
+    const conflictBasis = {
+      ...workspace.market_summaries[0].quote_basis!,
+      basis_id: "wti:curve_front",
+      basis_type: "front_future",
+      display_label: "IBKR front future May 2026",
+      provider: "ibkr",
+      value: 84,
+      change: -2,
+      change_pct: -0.023256,
+      contract_month: "May 2026",
+      contract_symbol: "CLK26",
+      source_provider: "ibkr"
+    };
+    workspace.market_summaries[0] = {
+      ...workspace.market_summaries[0],
+      latest_price: 84,
+      latest_change: -2,
+      latest_change_pct: -0.023256,
+      quote_basis: conflictBasis
+    };
+    workspace.price_reconciliations[0] = {
+      ...workspace.price_reconciliations[0],
+      status: "conflict",
+      headline: conflictBasis,
+      observations: [conflictBasis, workspace.price_reconciliations[0].observations[0]],
+      summary: "WTI Crude Oil has a material basis mismatch across 2 loaded quote references.",
+      warnings: ["Commodity basis conflict for WTI Crude Oil: headline IBKR front future May 2026 84.00 differs from FRED spot proxy 95.00 by 13.1%."]
+    };
+
+    const { body } = render(CommoditiesView, {
+      props: {
+        workspace,
+        loading: false,
+        mode: "energy",
+        onLoadWorkspace: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Basis Reconciliation");
+    expect(body).toContain("IBKR front future May 2026");
+    expect(body).toContain("FRED spot proxy");
   });
 
   it("surfaces degraded provider notices without requiring inventory data", () => {
@@ -176,6 +223,39 @@ function makeWorkspace(): CommodityWorkspaceResponse {
     origin: "sample_commodities.contracts",
     transformation_note: "Sample contract."
   };
+  const wtiBasis = {
+    basis_id: "wti:history_latest",
+    instrument_id: "wti",
+    role: "history_latest",
+    basis_type: "sample_generated",
+    display_label: "Sample generated",
+    provider: "sample_data",
+    value: 79.2,
+    change: 0.4,
+    change_pct: 0.005,
+    unit: "USD/bbl",
+    timestamp: retrievedAt,
+    source_timestamp: retrievedAt,
+    contract_month: null,
+    contract_symbol: null,
+    provider_symbol: "CL",
+    freshness_label: "mocked",
+    warnings: ["Headline commodity quote is sample-generated fallback data."],
+    source_provider: "sample_data",
+    retrieved_at: retrievedAt,
+    origin: "sample_commodities.price_history",
+    transformation_note: "Synthetic offline price path."
+  };
+  const goldBasis = {
+    ...wtiBasis,
+    basis_id: "gold:history_latest",
+    instrument_id: "gold",
+    value: 2392,
+    change: -3,
+    change_pct: -0.001,
+    unit: "USD/oz",
+    provider_symbol: "GC"
+  };
   return {
     mode: "overview",
     selected_instrument_id: "wti",
@@ -207,6 +287,7 @@ function makeWorkspace(): CommodityWorkspaceResponse {
         latest_price: 79.2,
         latest_change: 0.4,
         latest_change_pct: 0.005,
+        quote_basis: wtiBasis,
         curve_state: "backwardation",
         front_spread: 0.75,
         inventory_signal: "draw | low versus available history",
@@ -222,6 +303,7 @@ function makeWorkspace(): CommodityWorkspaceResponse {
         latest_price: 2392,
         latest_change: -3,
         latest_change_pct: -0.001,
+        quote_basis: goldBasis,
         curve_state: "contango",
         front_spread: -5,
         inventory_signal: null,
@@ -231,6 +313,32 @@ function makeWorkspace(): CommodityWorkspaceResponse {
         retrieved_at: retrievedAt,
         origin: "gamma.commodities.market_summary",
         transformation_note: "Gamma summary."
+      }
+    ],
+    price_reconciliations: [
+      {
+        instrument_id: "wti",
+        status: "aligned",
+        headline: wtiBasis,
+        observations: [wtiBasis],
+        summary: "WTI Crude Oil quote bases are aligned within the materiality threshold.",
+        warnings: [],
+        source_provider: "gamma",
+        retrieved_at: retrievedAt,
+        origin: "gamma.commodities.price_reconciliation",
+        transformation_note: "Gamma compares loaded quote references."
+      },
+      {
+        instrument_id: "gold",
+        status: "aligned",
+        headline: goldBasis,
+        observations: [goldBasis],
+        summary: "Gold quote bases are aligned within the materiality threshold.",
+        warnings: [],
+        source_provider: "gamma",
+        retrieved_at: retrievedAt,
+        origin: "gamma.commodities.price_reconciliation",
+        transformation_note: "Gamma compares loaded quote references."
       }
     ],
     price_histories: [

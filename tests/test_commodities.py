@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -61,6 +62,11 @@ def test_sample_commodities_workspace_contains_research_analytics():
     assert workspace.overview.market_breadth.backwardation_count >= 1
     assert workspace.overview.market_breadth.contango_count >= 1
     assert len(workspace.overview.matrix_rows) == 16
+    assert workspace.price_reconciliations
+    sample_wti_reconciliation = next(row for row in workspace.price_reconciliations if row.instrument_id == "wti")
+    assert sample_wti_reconciliation.status == "aligned"
+    assert sample_wti_reconciliation.headline is not None
+    assert sample_wti_reconciliation.headline.basis_type == "sample_generated"
     nickel_row = next(row for row in workspace.overview.matrix_rows if row.instrument_id == "nickel")
     assert nickel_row.curve_state == "unavailable"
     assert nickel_row.latest_price is not None
@@ -108,6 +114,84 @@ def test_sample_commodities_workspace_contains_research_analytics():
     copper_aluminum = next(spread for spread in workspace.spreads if spread.definition.spread_id == "copper-aluminum-spread")
     assert copper_aluminum.value is not None
     assert copper_aluminum.definition.unit == "USD/mt"
+
+
+def test_commodity_reconciliation_flags_material_basis_conflict():
+    class ConflictingProvider:
+        provider_id = "fixture"
+        provider_label = "Fixture Conflicting Commodities"
+
+        def get_snapshot(self, *, force_refresh=False, selected_instrument_id=None):
+            del force_refresh
+            del selected_instrument_id
+            snapshot = SampleCommoditiesDataProvider().get_snapshot()
+            wti_history = next(history for history in snapshot.price_histories if history.instrument_id == "wti")
+            fred_points = [
+                replace(point, value=value, source_provider="fred", origin="fred.series.observations:DCOILWTICO")
+                for point, value in zip(wti_history.points[-2:], [94.0, 95.0])
+            ]
+            price_histories = [
+                replace(
+                    history,
+                    label="WTI FRED spot proxy",
+                    source_provider="fred",
+                    origin="fred.series.observations:DCOILWTICO",
+                    transformation_note="FRED spot/proxy series for conflict testing.",
+                    points=fred_points,
+                )
+                if history.instrument_id == "wti"
+                else history
+                for history in snapshot.price_histories
+            ]
+            wti_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "wti")
+            front_contract = replace(wti_curve.nodes[0].contract, source_provider="ibkr")
+            curve_nodes = [
+                replace(
+                    wti_curve.nodes[0],
+                    contract=front_contract,
+                    price=84.0,
+                    previous_price=86.0,
+                    change=-2.0,
+                    source_provider="ibkr",
+                    origin="ibkr.reqMktData:fixture",
+                ),
+                *wti_curve.nodes[1:],
+            ]
+            curve_snapshots = [
+                replace(
+                    curve,
+                    nodes=curve_nodes,
+                    source_provider="ibkr",
+                    origin="ibkr.commodities.curve:CL:NYMEX",
+                )
+                if curve.instrument_id == "wti"
+                else curve
+                for curve in snapshot.curve_snapshots
+            ]
+            return replace(
+                snapshot,
+                price_histories=price_histories,
+                curve_snapshots=curve_snapshots,
+                source_provider="ibkr",
+                transformation_note="Fixture mixes FRED spot proxy history with IBKR front futures curve.",
+            )
+
+    workspace = CommoditiesService(provider=ConflictingProvider()).get_workspace(
+        CommodityWorkspaceRequest(mode="energy", selected_instrument_id="wti")
+    )
+
+    wti_summary = next(summary for summary in workspace.market_summaries if summary.instrument.instrument_id == "wti")
+    assert wti_summary.latest_price == 84.0
+    assert wti_summary.latest_change_pct == pytest.approx(-0.023256, abs=0.000001)
+    assert wti_summary.quote_basis is not None
+    assert wti_summary.quote_basis.basis_type == "front_future"
+    assert wti_summary.quote_basis.provider == "ibkr"
+    reconciliation = next(row for row in workspace.price_reconciliations if row.instrument_id == "wti")
+    assert reconciliation.status == "conflict"
+    assert reconciliation.headline is not None
+    assert reconciliation.headline.contract_month
+    assert any("basis conflict" in warning.lower() for warning in reconciliation.warnings)
+    assert any("basis conflict" in warning.lower() for warning in workspace.warnings)
 
 
 def test_ibkr_default_roots_cover_curve_capable_sample_commodities():

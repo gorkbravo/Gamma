@@ -460,6 +460,10 @@ describe("app store orchestration", () => {
     const synthetic = makeResearchResult("synthetic_portfolio", syntheticSnapshot);
 
     riskResult.set({
+      source_scope: "research",
+      source_label: "Research scope snapshot",
+      source_object_id: null,
+      source_origin: null,
       metrics: {
         alpha: 0.95,
         lookback_days: 252,
@@ -529,6 +533,10 @@ describe("app store orchestration", () => {
     expect(get(riskResult)).toBeNull();
 
     riskResult.set({
+      source_scope: "research",
+      source_label: "Research scope snapshot",
+      source_object_id: null,
+      source_origin: null,
       metrics: {
         alpha: 0.95,
         lookback_days: 252,
@@ -1294,6 +1302,10 @@ describe("app store orchestration", () => {
     });
     researchResult.set(makeResearchResult("single_ticker", snapshot));
     riskResult.set({
+      source_scope: "research",
+      source_label: "Research scope snapshot",
+      source_object_id: null,
+      source_origin: null,
       metrics: {
         alpha: 0.95,
         lookback_days: 252,

@@ -3,6 +3,7 @@
   import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
   import type {
+    CommodityPriceBasis,
     CommodityWorkspaceResponse,
     MacroMetric,
     MacroSnapshot,
@@ -44,7 +45,7 @@
   export let onOpenHandoff: ((handoff: SitrepHandoffRequest) => Promise<unknown> | void) | null = null;
 
   const bloombergLiveVideoId = "iEpJwprxDdk";
-  const bloombergEmbedUrl = `https://www.youtube-nocookie.com/embed/${bloombergLiveVideoId}?autoplay=0&mute=1&playsinline=1&rel=0`;
+  const bloombergEmbedUrl = `https://www.youtube.com/embed/${bloombergLiveVideoId}?feature=oembed&autoplay=0&mute=1&playsinline=1&rel=0`;
   const bloombergWatchUrl = `https://www.youtube.com/watch?v=${bloombergLiveVideoId}`;
 
   type TapeRow = {
@@ -560,10 +561,10 @@
         change: formatSignedNumber(row.latest_change, 2),
         changePct: formatPct(row.latest_change_pct),
         changePctTone: toneFromValue(row.latest_change_pct ?? row.latest_change),
-        secondary: formatCommodityContext(row.curve_state, row.price_source_provider, row.latest_price),
+        secondary: formatCommodityBasis(row.quote_basis, row.curve_state, row.price_source_provider, row.latest_price),
         secondaryTone: hasCommodityCurveSignal(row.curve_state) ? toneFromCommodityState(row.curve_state) : "",
         tone: toneFromValue(row.latest_change_pct ?? row.latest_change),
-        source: row.price_source_provider ?? row.source_provider
+        source: row.quote_basis?.provider ?? row.price_source_provider ?? row.source_provider
       }));
     }
     return (data?.market_summaries ?? [])
@@ -577,10 +578,10 @@
       change: formatSignedNumber(summary.latest_change, 2),
       changePct: formatPct(summary.latest_change_pct),
       changePctTone: toneFromValue(summary.latest_change_pct ?? summary.latest_change),
-      secondary: formatCommodityContext(summary.curve_state, summary.source_provider, summary.latest_price),
+      secondary: formatCommodityBasis(summary.quote_basis, summary.curve_state, summary.source_provider, summary.latest_price),
       secondaryTone: hasCommodityCurveSignal(summary.curve_state) ? toneFromCommodityState(summary.curve_state) : "",
       tone: toneFromValue(summary.latest_change_pct ?? summary.latest_change),
-      source: summary.source_provider
+      source: summary.quote_basis?.provider ?? summary.source_provider
     }));
   }
 
@@ -611,6 +612,42 @@
     return formatCommodityState(curveState);
   }
 
+  function formatCommodityBasis(
+    basis: CommodityPriceBasis | null | undefined,
+    curveState: string | null | undefined,
+    priceSource: string | null | undefined,
+    latestPrice: number | null | undefined
+  ) {
+    if (basis) {
+      const provider = formatCommodityProvider(basis.provider);
+      const reference = compactCommodityReference(basis);
+      return `${provider} ${reference}`.trim();
+    }
+    return formatCommodityContext(curveState, priceSource, latestPrice);
+  }
+
+  function compactCommodityReference(basis: CommodityPriceBasis) {
+    const contractSymbol = normalizeCommoditySymbol(basis.contract_symbol);
+    if (contractSymbol) return contractSymbol;
+
+    const providerSymbol = normalizeCommoditySymbol(basis.provider_symbol);
+    if (providerSymbol) return providerSymbol;
+
+    const basisType = (basis.basis_type ?? "").trim().toLowerCase();
+    if (basisType.includes("future")) return "Fut";
+    if (basisType.includes("spot")) return "Spot";
+    if (basisType.includes("fred")) return "FRED";
+    if (basisType.includes("eia")) return "EIA";
+    if (basisType.includes("sample")) return "Sample";
+    if (basisType.includes("continuous")) return "Cont";
+    if (basisType.includes("curve")) return "Curve";
+    return "Ref";
+  }
+
+  function normalizeCommoditySymbol(value: string | null | undefined) {
+    return (value ?? "").trim().replace(/\s+/g, "").toUpperCase();
+  }
+
   function formatCommodityPriceSource(value: string | null | undefined) {
     const normalized = (value ?? "").trim().toLowerCase();
     if (normalized === "eia") {
@@ -623,6 +660,32 @@
       return "IBKR front";
     }
     return "Price proxy";
+  }
+
+  function formatCommodityProviderMix(data: CommodityWorkspaceResponse | null) {
+    if (!data) return "not loaded";
+    const providers = new Set<string>();
+    for (const row of data.price_reconciliations ?? []) {
+      if (row.headline?.provider) providers.add(formatCommodityProvider(row.headline.provider));
+      for (const observation of row.observations ?? []) {
+        if (observation.provider) providers.add(formatCommodityProvider(observation.provider));
+      }
+    }
+    if (!providers.size) {
+      providers.add(formatCommodityProvider(data.coverage.source_provider || data.coverage.provider_id));
+    }
+    const ordered = [...providers].filter(Boolean).sort();
+    return ordered.length <= 1 ? ordered[0] ?? "not loaded" : `Mixed: ${ordered.join(" + ")}`;
+  }
+
+  function formatCommodityProvider(value: string | null | undefined) {
+    const normalized = (value ?? "").trim().toLowerCase();
+    if (normalized === "ibkr" || normalized === "ibkr_cached") return "IBKR";
+    if (normalized === "fred") return "FRED";
+    if (normalized === "eia") return "EIA";
+    if (normalized === "sample_data") return "Sample";
+    if (normalized === "gamma") return "Gamma";
+    return (value ?? "").trim().toUpperCase() || "Provider N/A";
   }
 
   function formatCommodityState(value: string | null | undefined) {
@@ -780,14 +843,50 @@
     commodityData: CommodityWorkspaceResponse | null,
     predictionData: PredictionMarketListResponse | null
   ) {
+    const commodityBasisWarnings = (commodityData?.price_reconciliations ?? []).flatMap((row) => row.warnings ?? []);
     return [
-      ...(newsData?.warnings ?? []),
       ...(overviewData?.warnings ?? []),
       ...(macroData?.warnings ?? []),
+      ...commodityBasisWarnings,
       ...(commodityData?.warnings ?? []),
       ...(commodityData?.coverage.caveats ?? []),
-      ...(predictionData?.warnings ?? [])
-    ].slice(0, 6);
+      ...(predictionData?.warnings ?? []),
+      ...(newsData?.warnings ?? [])
+    ]
+      .filter(isActionableSitrepWarning)
+      .slice(0, 6);
+  }
+
+  function isActionableSitrepWarning(value: string | null | undefined) {
+    const text = (value ?? "").trim();
+    if (!text) return false;
+    const normalized = text.toLowerCase();
+    if (
+      normalized.includes("read-only") ||
+      normalized.includes("heuristic") ||
+      normalized.includes("sample news") ||
+      normalized.includes("news provider") ||
+      normalized.includes("using sample data") ||
+      normalized.includes("sample prices") ||
+      normalized.includes("not an execution") ||
+      normalized.includes("does not place orders")
+    ) {
+      return false;
+    }
+    return [
+      "basis conflict",
+      "unavailable",
+      "failed",
+      "missing",
+      "stale",
+      "cached",
+      "entitlement",
+      "fallback",
+      "not configured",
+      "delayed",
+      "broken",
+      "timeout"
+    ].some((keyword) => normalized.includes(keyword));
   }
 
   $: equityRows = buildEquityRows(overview);
@@ -891,13 +990,13 @@
           <div class="table-header">
             <div class="table-title">
               <span>Commodities</span>
-              <small>{commodities?.coverage.coverage_status ?? "not loaded"}</small>
+              <small>{formatCommodityProviderMix(commodities)}</small>
             </div>
             <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")} aria-label={refreshTitle("commodities")} title={refreshTitle("commodities")}>
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
+          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
       </div>
 
@@ -941,6 +1040,7 @@
             title="Bloomberg Television live stream"
             src={bloombergEmbedUrl}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerpolicy="strict-origin-when-cross-origin"
             allowfullscreen
           ></iframe>
         </div>

@@ -25,8 +25,10 @@ from src.models.commodities import (
     CommodityOverviewScatter,
     CommodityOverviewScatterPoint,
     CommodityOverviewTermStructure,
+    CommodityPriceBasis,
     CommodityPriceHistory,
     CommodityPricePoint,
+    CommodityPriceReconciliation,
     CommoditySpreadDefinition,
     CommoditySpreadPoint,
     CommoditySpreadSnapshot,
@@ -192,6 +194,57 @@ class CommodityCurveSnapshotModel(BaseModel):
                 **row.__dict__,
                 "nodes": [CommodityCurveNodeModel.from_domain(node) for node in row.nodes],
             }
+    )
+
+
+class CommodityPriceBasisModel(BaseModel):
+    basis_id: str
+    instrument_id: str
+    role: str
+    basis_type: str
+    display_label: str
+    provider: str
+    value: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    unit: str | None = None
+    timestamp: datetime | None = None
+    source_timestamp: datetime | None = None
+    contract_month: str | None = None
+    contract_symbol: str | None = None
+    provider_symbol: str | None = None
+    freshness_label: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityPriceBasis) -> "CommodityPriceBasisModel":
+        return cls(**row.__dict__)
+
+
+class CommodityPriceReconciliationModel(BaseModel):
+    instrument_id: str
+    status: str
+    headline: CommodityPriceBasisModel | None = None
+    observations: list[CommodityPriceBasisModel] = Field(default_factory=list)
+    summary: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CommodityPriceReconciliation) -> "CommodityPriceReconciliationModel":
+        return cls(
+            **{
+                **row.__dict__,
+                "headline": CommodityPriceBasisModel.from_domain(row.headline) if row.headline is not None else None,
+                "observations": [CommodityPriceBasisModel.from_domain(item) for item in row.observations],
+            }
         )
 
 
@@ -317,6 +370,7 @@ class CommodityMarketSummaryModel(BaseModel):
     latest_price: float | None = None
     latest_change: float | None = None
     latest_change_pct: float | None = None
+    quote_basis: CommodityPriceBasisModel | None = None
     curve_state: str
     front_spread: float | None = None
     inventory_signal: str | None = None
@@ -334,6 +388,9 @@ class CommodityMarketSummaryModel(BaseModel):
                 **row.__dict__,
                 "warnings": [warning for warning in row.warnings if warning],
                 "instrument": CommodityInstrumentModel.from_domain(row.instrument),
+                "quote_basis": CommodityPriceBasisModel.from_domain(row.quote_basis)
+                if row.quote_basis is not None
+                else None,
             }
         )
 
@@ -365,6 +422,7 @@ class CommodityOverviewMatrixRowModel(BaseModel):
     latest_price: float | None = None
     latest_change: float | None = None
     latest_change_pct: float | None = None
+    quote_basis: CommodityPriceBasisModel | None = None
     curve_state: str = "unavailable"
     front_spread: float | None = None
     front_basis: float | None = None
@@ -383,7 +441,14 @@ class CommodityOverviewMatrixRowModel(BaseModel):
 
     @classmethod
     def from_domain(cls, row: CommodityOverviewMatrixRow) -> "CommodityOverviewMatrixRowModel":
-        return cls(**row.__dict__)
+        return cls(
+            **{
+                **row.__dict__,
+                "quote_basis": CommodityPriceBasisModel.from_domain(row.quote_basis)
+                if row.quote_basis is not None
+                else None,
+            }
+        )
 
 
 class CommodityOverviewScatterPointModel(BaseModel):
@@ -587,6 +652,7 @@ class CommodityWorkspaceResponseModel(BaseModel):
     coverage: CommodityCoverageMetadataModel
     instruments: list[CommodityInstrumentModel] = Field(default_factory=list)
     market_summaries: list[CommodityMarketSummaryModel] = Field(default_factory=list)
+    price_reconciliations: list[CommodityPriceReconciliationModel] = Field(default_factory=list)
     price_histories: list[CommodityPriceHistoryModel] = Field(default_factory=list)
     curves: list[CommodityCurveSnapshotModel] = Field(default_factory=list)
     spreads: list[CommoditySpreadSnapshotModel] = Field(default_factory=list)
@@ -608,6 +674,9 @@ class CommodityWorkspaceResponseModel(BaseModel):
                 "coverage": CommodityCoverageMetadataModel.from_domain(row.coverage),
                 "instruments": [CommodityInstrumentModel.from_domain(item) for item in row.instruments],
                 "market_summaries": [CommodityMarketSummaryModel.from_domain(item) for item in row.market_summaries],
+                "price_reconciliations": [
+                    CommodityPriceReconciliationModel.from_domain(item) for item in row.price_reconciliations
+                ],
                 "price_histories": [CommodityPriceHistoryModel.from_domain(item) for item in row.price_histories],
                 "curves": [CommodityCurveSnapshotModel.from_domain(item) for item in row.curves],
                 "spreads": [CommoditySpreadSnapshotModel.from_domain(item) for item in row.spreads],

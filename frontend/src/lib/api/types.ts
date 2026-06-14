@@ -2327,6 +2327,43 @@ export interface CommodityCurveSnapshot {
   transformation_note: string | null;
 }
 
+export interface CommodityPriceBasis {
+  basis_id: string;
+  instrument_id: string;
+  role: string;
+  basis_type: string;
+  display_label: string;
+  provider: string;
+  value: number | null;
+  change: number | null;
+  change_pct: number | null;
+  unit: string | null;
+  timestamp: string | null;
+  source_timestamp: string | null;
+  contract_month: string | null;
+  contract_symbol: string | null;
+  provider_symbol: string | null;
+  freshness_label: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CommodityPriceReconciliation {
+  instrument_id: string;
+  status: string;
+  headline: CommodityPriceBasis | null;
+  observations: CommodityPriceBasis[];
+  summary: string | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface CommoditySpreadDefinition {
   spread_id: string;
   label: string;
@@ -2413,6 +2450,7 @@ export interface CommodityMarketSummary {
   latest_price: number | null;
   latest_change: number | null;
   latest_change_pct: number | null;
+  quote_basis: CommodityPriceBasis | null;
   curve_state: string;
   front_spread: number | null;
   inventory_signal: string | null;
@@ -2447,6 +2485,7 @@ export interface CommodityOverviewMatrixRow {
   latest_price: number | null;
   latest_change: number | null;
   latest_change_pct: number | null;
+  quote_basis: CommodityPriceBasis | null;
   curve_state: string;
   front_spread: number | null;
   front_basis: number | null;
@@ -2584,6 +2623,7 @@ export interface CommodityWorkspaceResponse {
   coverage: CommodityCoverageMetadata;
   instruments: CommodityInstrument[];
   market_summaries: CommodityMarketSummary[];
+  price_reconciliations: CommodityPriceReconciliation[];
   price_histories: CommodityPriceHistory[];
   curves: CommodityCurveSnapshot[];
   spreads: CommoditySpreadSnapshot[];
@@ -2821,6 +2861,7 @@ export type CopilotBaseDomain =
   | "risk"
   | "iv";
 export type CopilotDomain = CopilotBaseDomain | "synthesis";
+export type CopilotReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface CopilotSourceRef {
   source_id: string;
@@ -2861,7 +2902,6 @@ export interface CopilotOperatorProgressEvent {
   source_ids: string[];
   warnings: string[];
 }
-export type CopilotReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ResearchClaim {
   claim: string;

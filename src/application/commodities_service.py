@@ -19,7 +19,9 @@ from src.models.commodities import (
     CommodityOverviewScatter,
     CommodityOverviewScatterPoint,
     CommodityOverviewTermStructure,
+    CommodityPriceBasis,
     CommodityPriceHistory,
+    CommodityPriceReconciliation,
     CommodityProviderSnapshot,
     CommoditySpreadDefinition,
     CommoditySpreadPoint,
@@ -52,11 +54,13 @@ class CommoditiesService:
         inventories = [self._enrich_inventory(series) for series in snapshot.inventory_series]
         spreads = self._build_spreads(snapshot, curves)
         summaries = self._build_market_summaries(snapshot, curves, inventories)
+        reconciliations = self._build_price_reconciliations(snapshot, summaries, curves)
         links = self._build_cross_domain_links(snapshot)
         overview = self._build_overview(snapshot, selected, summaries, curves, inventories, spreads)
         warnings = _dedupe(
             [
                 *snapshot.warnings,
+                *(warning for reconciliation in reconciliations for warning in reconciliation.warnings),
                 *snapshot.coverage.caveats,
                 "Commodities is read-only research context. It does not place orders, rebalance portfolios, or automate futures trading.",
                 "Curve and roll-yield analytics are simple first-pass heuristics; inspect source coverage before treating them as market conclusions.",
@@ -69,6 +73,7 @@ class CommoditiesService:
             coverage=snapshot.coverage,
             instruments=snapshot.instruments,
             market_summaries=summaries,
+            price_reconciliations=reconciliations,
             price_histories=snapshot.price_histories,
             curves=curves,
             spreads=spreads,
@@ -202,33 +207,98 @@ class CommoditiesService:
         summaries: list[CommodityMarketSummary] = []
         for instrument in snapshot.instruments:
             history = history_by_id.get(instrument.instrument_id)
-            latest = history.points[-1].value if history and history.points else None
-            previous = history.points[-2].value if history and len(history.points) >= 2 else None
-            change = latest - previous if latest is not None and previous is not None else None
-            change_pct = change / previous if change is not None and previous else None
             curve = curve_by_id.get(instrument.instrument_id)
+            headline = _headline_basis(instrument, history, curve, snapshot.coverage)
             inventory = inventory_by_id.get(instrument.instrument_id)
             inventory_signal = inventory.interpretation if inventory is not None else None
             summaries.append(
                 CommodityMarketSummary(
                     instrument=instrument,
-                    latest_price=round(latest, 4) if latest is not None else None,
-                    latest_change=round(change, 4) if change is not None else None,
-                    latest_change_pct=round(change_pct, 6) if change_pct is not None else None,
+                    latest_price=round(headline.value, 4) if headline and headline.value is not None else None,
+                    latest_change=round(headline.change, 4) if headline and headline.change is not None else None,
+                    latest_change_pct=(
+                        round(headline.change_pct, 6) if headline and headline.change_pct is not None else None
+                    ),
+                    quote_basis=headline,
                     curve_state=curve.shape_label if curve is not None else "unavailable",
                     front_spread=curve.front_spread if curve is not None else None,
                     inventory_signal=inventory_signal,
                     summary=_market_summary_text(instrument.name, curve, inventory),
-                    warnings=[
-                        "Price is sample/proxy data." if history and history.source_provider in {"sample_data", "fred"} else "",
-                    ],
+                    warnings=_summary_basis_warnings(headline, history, curve),
                     source_provider="gamma",
-                    retrieved_at=_max_datetime(instrument.retrieved_at, history.retrieved_at if history else None),
+                    retrieved_at=_max_datetime(
+                        instrument.retrieved_at,
+                        headline.retrieved_at if headline is not None else None,
+                        history.retrieved_at if history else None,
+                        curve.retrieved_at if curve else None,
+                    ),
                     origin="gamma.commodities.market_summary",
-                    transformation_note="Gamma combines latest price, curve state, and first available inventory/fundamental signal.",
+                    transformation_note=(
+                        "Gamma selects a headline commodity quote from the preferred available basis, then combines it with curve state and the first available inventory/fundamental signal."
+                    ),
                 )
             )
         return summaries
+
+    def _build_price_reconciliations(
+        self,
+        snapshot: CommodityProviderSnapshot,
+        summaries: list[CommodityMarketSummary],
+        curves: list[CommodityCurveSnapshot],
+    ) -> list[CommodityPriceReconciliation]:
+        history_by_id = {history.instrument_id: history for history in snapshot.price_histories}
+        curve_by_id = {curve.instrument_id: curve for curve in curves}
+        instrument_by_id = {instrument.instrument_id: instrument for instrument in snapshot.instruments}
+        summary_by_id = {summary.instrument.instrument_id: summary for summary in summaries}
+        ids = [
+            instrument_id
+            for instrument_id in _dedupe(
+                [
+                    *(instrument.instrument_id for instrument in snapshot.instruments),
+                    *(history.instrument_id for history in snapshot.price_histories),
+                    *(curve.instrument_id for curve in curves),
+                ]
+            )
+            if _is_priority_reconciliation_instrument(instrument_id)
+        ]
+        rows: list[CommodityPriceReconciliation] = []
+        for instrument_id in ids:
+            instrument = instrument_by_id.get(instrument_id)
+            if instrument is None:
+                continue
+            history = history_by_id.get(instrument_id)
+            curve = curve_by_id.get(instrument_id)
+            summary = summary_by_id.get(instrument_id)
+            headline = summary.quote_basis if summary is not None else _headline_basis(instrument, history, curve, snapshot.coverage)
+            observations = _dedupe_basis_records(
+                [
+                    headline,
+                    _history_basis(instrument, history, snapshot.coverage),
+                    _curve_front_basis(instrument, curve, snapshot.coverage),
+                ]
+            )
+            warnings = _reconciliation_warnings(instrument, headline, observations)
+            status = "conflict" if warnings else ("aligned" if len([row for row in observations if row.value is not None]) >= 2 else "insufficient")
+            rows.append(
+                CommodityPriceReconciliation(
+                    instrument_id=instrument_id,
+                    status=status,
+                    headline=headline,
+                    observations=observations,
+                    summary=_reconciliation_summary(instrument, status, headline, observations),
+                    warnings=warnings,
+                    source_provider="gamma",
+                    retrieved_at=_max_datetime(
+                        snapshot.retrieved_at,
+                        *(row.retrieved_at for row in observations),
+                    ),
+                    origin="gamma.commodities.price_reconciliation",
+                    transformation_note=(
+                        "Gamma compares the selected headline commodity quote against loaded price history and the front futures curve node, preserving basis and provider differences."
+                    ),
+                )
+            )
+        return rows
 
     def _build_spreads(
         self,
@@ -513,6 +583,7 @@ class CommoditiesService:
                     latest_price=summary.latest_price,
                     latest_change=summary.latest_change,
                     latest_change_pct=summary.latest_change_pct,
+                    quote_basis=summary.quote_basis,
                     curve_state=curve.shape_label if curve is not None else summary.curve_state,
                     front_spread=curve.front_spread if curve is not None else summary.front_spread,
                     front_basis=curve.front_spread_pct if curve is not None else None,
@@ -740,6 +811,276 @@ def _first_inventory_by_instrument(
         if series.metadata.category in preferred_categories and existing.metadata.category not in preferred_categories:
             rows[instrument_id] = series
     return rows
+
+
+PRIORITY_RECONCILIATION_INSTRUMENTS = {
+    "wti",
+    "brent",
+    "henry_hub",
+    "gasoline",
+    "heating_oil",
+    "gold",
+    "silver",
+    "copper",
+    "aluminum",
+}
+
+
+def _is_priority_reconciliation_instrument(instrument_id: str) -> bool:
+    return instrument_id in PRIORITY_RECONCILIATION_INSTRUMENTS
+
+
+def _headline_basis(
+    instrument,
+    history: CommodityPriceHistory | None,
+    curve: CommodityCurveSnapshot | None,
+    coverage,
+) -> CommodityPriceBasis | None:
+    front = _curve_front_basis(instrument, curve, coverage)
+    history_basis = _history_basis(instrument, history, coverage)
+    if front is not None and front.value is not None and front.provider in {"ibkr", "ibkr_cached"}:
+        return front
+    if history_basis is not None and history_basis.value is not None:
+        return history_basis
+    if front is not None and front.value is not None:
+        return front
+    return None
+
+
+def _history_basis(
+    instrument,
+    history: CommodityPriceHistory | None,
+    coverage,
+) -> CommodityPriceBasis | None:
+    if history is None or not history.points:
+        return None
+    points = sorted(history.points, key=lambda point: point.timestamp)
+    latest = points[-1]
+    previous = points[-2] if len(points) >= 2 else None
+    change = latest.value - previous.value if previous is not None else None
+    change_pct = change / previous.value if previous is not None and previous.value else None
+    basis_type = _history_basis_type(history)
+    display = _basis_display_label(
+        basis_type,
+        history.source_provider,
+        fallback=history.label or f"{instrument.name} price history",
+    )
+    warnings = []
+    if basis_type == "sample_generated":
+        warnings.append("Headline price uses sample-generated commodity history.")
+    elif basis_type in {"spot_proxy", "fred_reference", "eia_reference", "continuous_proxy"}:
+        warnings.append(f"History basis is {display}; it is not the futures curve front contract.")
+    return CommodityPriceBasis(
+        basis_id=f"{instrument.instrument_id}:history_latest",
+        instrument_id=instrument.instrument_id,
+        role="history_latest",
+        basis_type=basis_type,
+        display_label=display,
+        provider=history.source_provider or coverage.source_provider or "unknown",
+        value=latest.value,
+        change=change,
+        change_pct=change_pct,
+        unit=history.unit,
+        timestamp=latest.timestamp,
+        source_timestamp=latest.timestamp,
+        provider_symbol=_provider_symbol(instrument, history.source_provider),
+        freshness_label=getattr(coverage, "freshness_label", None),
+        warnings=warnings,
+        source_provider=history.source_provider,
+        retrieved_at=_max_datetime(history.retrieved_at, latest.retrieved_at),
+        origin=history.origin,
+        transformation_note=history.transformation_note,
+    )
+
+
+def _curve_front_basis(
+    instrument,
+    curve: CommodityCurveSnapshot | None,
+    coverage,
+) -> CommodityPriceBasis | None:
+    if curve is None or not curve.nodes:
+        return None
+    front_node = next((node for node in curve.nodes if node.contract.is_front_month and node.price is not None), None)
+    if front_node is None:
+        front_node = next((node for node in curve.nodes if node.price is not None), None)
+    if front_node is None:
+        return None
+    contract = front_node.contract
+    change_pct = (
+        front_node.change / front_node.previous_price
+        if front_node.change is not None and front_node.previous_price
+        else None
+    )
+    provider = front_node.source_provider or curve.source_provider or contract.source_provider
+    basis_type = "sample_generated" if provider == "sample_data" else "front_future"
+    display = _basis_display_label(basis_type, provider, contract_month=contract.contract_month)
+    warnings = []
+    if provider == "ibkr_cached":
+        warnings.append("Front futures quote uses a cached IBKR curve node.")
+    if provider == "sample_data":
+        warnings.append("Front futures quote is sample-generated and not live market data.")
+    return CommodityPriceBasis(
+        basis_id=f"{instrument.instrument_id}:curve_front",
+        instrument_id=instrument.instrument_id,
+        role="curve_front",
+        basis_type=basis_type,
+        display_label=display,
+        provider=provider or getattr(coverage, "source_provider", "") or "unknown",
+        value=front_node.price,
+        change=front_node.change,
+        change_pct=change_pct,
+        unit=instrument.quote_unit,
+        timestamp=curve.as_of,
+        source_timestamp=curve.as_of,
+        contract_month=contract.contract_month,
+        contract_symbol=contract.symbol,
+        provider_symbol=contract.symbol,
+        freshness_label=getattr(coverage, "freshness_label", None),
+        warnings=warnings,
+        source_provider=provider,
+        retrieved_at=_max_datetime(curve.retrieved_at, front_node.retrieved_at, contract.retrieved_at),
+        origin=front_node.origin or curve.origin,
+        transformation_note=front_node.transformation_note or curve.transformation_note,
+    )
+
+
+def _history_basis_type(history: CommodityPriceHistory) -> str:
+    provider = str(history.source_provider or "").lower()
+    note = str(history.transformation_note or "").lower()
+    label = str(history.label or "").lower()
+    if provider == "fred":
+        return "fred_reference"
+    if provider == "eia":
+        return "eia_reference"
+    if provider == "ibkr":
+        return "front_future"
+    if provider == "sample_data":
+        return "sample_generated"
+    if "continuous" in note or "continuous" in label:
+        return "continuous_proxy"
+    if "proxy" in note or "proxy" in label or "spot" in note or "spot" in label:
+        return "spot_proxy"
+    return "spot_proxy"
+
+
+def _basis_display_label(
+    basis_type: str,
+    provider: str | None,
+    *,
+    contract_month: str | None = None,
+    fallback: str | None = None,
+) -> str:
+    normalized_provider = str(provider or "").strip().lower()
+    if basis_type == "front_future":
+        suffix = f" {contract_month}" if contract_month else ""
+        if normalized_provider == "ibkr_cached":
+            return f"IBKR cached front future{suffix}"
+        return f"{_provider_label(provider)} front future{suffix}"
+    if basis_type == "eia_reference":
+        return "EIA spot reference"
+    if basis_type == "fred_reference":
+        return "FRED spot proxy"
+    if basis_type == "sample_generated":
+        return "Sample generated"
+    if basis_type == "continuous_proxy":
+        return "Continuous proxy"
+    if basis_type == "curve_node":
+        return f"{_provider_label(provider)} curve node"
+    if fallback:
+        return fallback
+    return f"{_provider_label(provider)} spot/proxy"
+
+
+def _provider_label(provider: str | None) -> str:
+    text = str(provider or "").strip()
+    mapping = {
+        "ibkr": "IBKR",
+        "ibkr_cached": "IBKR",
+        "fred": "FRED",
+        "eia": "EIA",
+        "sample_data": "Sample",
+        "gamma": "Gamma",
+    }
+    return mapping.get(text.lower(), text.upper() if text else "Unknown")
+
+
+def _provider_symbol(instrument, provider: str | None) -> str | None:
+    normalized = str(provider or "").strip().lower()
+    if normalized and normalized in instrument.provider_symbols:
+        return instrument.provider_symbols.get(normalized) or None
+    return instrument.front_symbol or instrument.symbol
+
+
+def _summary_basis_warnings(
+    headline: CommodityPriceBasis | None,
+    history: CommodityPriceHistory | None,
+    curve: CommodityCurveSnapshot | None,
+) -> list[str]:
+    del history
+    del curve
+    if headline is None:
+        return ["No usable headline commodity quote basis is available."]
+    warnings = list(headline.warnings)
+    if headline.basis_type == "sample_generated":
+        warnings.append("Headline commodity quote is sample-generated fallback data.")
+    return _dedupe(warnings)
+
+
+def _dedupe_basis_records(records: list[CommodityPriceBasis | None]) -> list[CommodityPriceBasis]:
+    seen: set[tuple[str, str]] = set()
+    result: list[CommodityPriceBasis] = []
+    for record in records:
+        if record is None:
+            continue
+        key = (record.role, record.basis_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(record)
+    return result
+
+
+def _reconciliation_warnings(
+    instrument,
+    headline: CommodityPriceBasis | None,
+    observations: list[CommodityPriceBasis],
+) -> list[str]:
+    if headline is None or headline.value is None:
+        return []
+    warnings: list[str] = []
+    for observation in observations:
+        if observation.basis_id == headline.basis_id or observation.value is None:
+            continue
+        if observation.basis_type == headline.basis_type and observation.provider == headline.provider:
+            continue
+        denominator = abs(headline.value) if headline.value else abs(observation.value)
+        diff_pct = abs(observation.value - headline.value) / denominator if denominator else 0.0
+        if diff_pct < 0.015:
+            continue
+        warnings.append(
+            (
+                f"Commodity basis conflict for {instrument.name}: headline {headline.display_label} "
+                f"{_format_number(headline.value, 2)} differs from {observation.display_label} "
+                f"{_format_number(observation.value, 2)} by {diff_pct * 100:.1f}%."
+            )
+        )
+    return _dedupe(warnings)
+
+
+def _reconciliation_summary(
+    instrument,
+    status: str,
+    headline: CommodityPriceBasis | None,
+    observations: list[CommodityPriceBasis],
+) -> str:
+    if headline is None:
+        return f"{instrument.name} has no usable headline quote basis."
+    compared = len([row for row in observations if row.value is not None])
+    if status == "conflict":
+        return f"{instrument.name} has a material basis mismatch across {compared} loaded quote references."
+    if status == "aligned":
+        return f"{instrument.name} quote bases are aligned within the materiality threshold."
+    return f"{instrument.name} has only one usable quote basis loaded."
 
 
 def _family_rank(family: str | None) -> int:
