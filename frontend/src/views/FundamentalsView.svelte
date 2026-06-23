@@ -285,6 +285,23 @@
     return editableValue(row?.values[index], row?.unit ?? "currency");
   }
 
+  function dcfScalarInputLabel(label: string) {
+    const scenarioLabel = activeScenario?.label?.trim();
+    return scenarioLabel ? `${label} (${scenarioLabel} scenario)` : label;
+  }
+
+  function dcfYearInputLabel(rowLabel: string, year: number) {
+    return `${rowLabel} ${year}`;
+  }
+
+  function dcfProjectionInputLabel(rowLabel: string, year: number) {
+    return `${rowLabel} projection ${year}`;
+  }
+
+  function markDcfEdited() {
+    dcfDirty = true;
+  }
+
   function assumptionSeriesValue(scenarioId: string, key: string, index: number) {
     const raw = dcfDraft.scenarios[scenarioId]?.assumptions[key];
     return Array.isArray(raw) ? (raw[index] as number | null | undefined) : null;
@@ -1468,11 +1485,25 @@
         <div class="scalar-grid">
           <label>
             <span>WACC %</span>
-            <input value={editableValue(scalarAssumptionValue(dcfDraft.activeScenarioId, "wacc_pct"), "percent")} on:change={(event) => handleScalarChange("wacc_pct", event)} />
+            <input
+              class="editable-input"
+              value={editableValue(scalarAssumptionValue(dcfDraft.activeScenarioId, "wacc_pct"), "percent")}
+              aria-label={dcfScalarInputLabel("WACC")}
+              title={`Editable DCF assumption: ${dcfScalarInputLabel("WACC")}`}
+              on:input={markDcfEdited}
+              on:change={(event) => handleScalarChange("wacc_pct", event)}
+            />
           </label>
           <label>
             <span>Terminal Growth %</span>
-            <input value={editableValue(scalarAssumptionValue(dcfDraft.activeScenarioId, "terminal_growth_pct"), "percent")} on:change={(event) => handleScalarChange("terminal_growth_pct", event)} />
+            <input
+              class="editable-input"
+              value={editableValue(scalarAssumptionValue(dcfDraft.activeScenarioId, "terminal_growth_pct"), "percent")}
+              aria-label={dcfScalarInputLabel("Terminal growth")}
+              title={`Editable DCF assumption: ${dcfScalarInputLabel("Terminal growth")}`}
+              on:input={markDcfEdited}
+              on:change={(event) => handleScalarChange("terminal_growth_pct", event)}
+            />
           </label>
         </div>
 
@@ -1491,9 +1522,16 @@
                 {#each activeScenario.assumption_rows as row}
                   <tr>
                     <td class="sheet-label">{row.label}</td>
-                    {#each dcfModel?.projection_years ?? [] as _year, index}
+                    {#each dcfModel?.projection_years ?? [] as year, index}
                       <td class="sheet-cell sheet-cell-edit">
-                        <input class="sheet-input" value={editableValue(assumptionSeriesValue(dcfDraft.activeScenarioId, row.line_key, index), row.unit)} on:change={(event) => handleAssumptionChange(row.line_key, row.unit, index, event)} />
+                        <input
+                          class="sheet-input"
+                          value={editableValue(assumptionSeriesValue(dcfDraft.activeScenarioId, row.line_key, index), row.unit)}
+                          aria-label={dcfYearInputLabel(row.label, year)}
+                          title={`Editable DCF assumption: ${dcfYearInputLabel(row.label, year)}`}
+                          on:input={markDcfEdited}
+                          on:change={(event) => handleAssumptionChange(row.line_key, row.unit, index, event)}
+                        />
                       </td>
                     {/each}
                   </tr>
@@ -1530,10 +1568,17 @@
                 {#each activeScenario.projection_rows as row}
                   <tr>
                     <td class="sheet-label">{row.label}</td>
-                    {#each dcfModel?.projection_years ?? [] as _year, index}
+                    {#each dcfModel?.projection_years ?? [] as year, index}
                       <td class="sheet-cell" class:sheet-cell-edit={row.editable} class:sheet-cell-fixed={!row.editable} class:overridden-cell={row.overridden[index]}>
                         {#if row.editable}
-                          <input class="sheet-input" value={projectionEditableValue(activeScenario, row.line_key, index)} on:change={(event) => handleProjectionOverrideChange(row.line_key, index, event)} />
+                          <input
+                            class="sheet-input"
+                            value={projectionEditableValue(activeScenario, row.line_key, index)}
+                            aria-label={dcfProjectionInputLabel(row.label, year)}
+                            title={`Editable DCF projection override: ${dcfProjectionInputLabel(row.label, year)}`}
+                            on:input={markDcfEdited}
+                            on:change={(event) => handleProjectionOverrideChange(row.line_key, index, event)}
+                          />
                         {:else}
                           <span class="sheet-fixed">{row.display_values[index] ?? "N/A"}</span>
                         {/if}
@@ -2339,7 +2384,29 @@
   }
 
   .sheet-table .sheet-cell-edit {
-    background: var(--bg-1);
+    position: relative;
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-1));
+  }
+
+  .sheet-table .sheet-cell-edit::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: color-mix(in srgb, var(--accent) 65%, transparent);
+    pointer-events: none;
+  }
+
+  .sheet-table .sheet-cell-edit:hover {
+    background: color-mix(in srgb, var(--accent) 11%, var(--bg-1));
+  }
+
+  .sheet-table .sheet-cell-edit .sheet-input {
+    color: var(--text-0);
+  }
+
+  .sheet-table .sheet-cell-edit .sheet-input:focus {
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-1));
   }
 
   .sheet-table .sheet-cell-fixed {
@@ -2388,6 +2455,21 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 12rem));
     gap: 0.5rem;
+  }
+
+  .scalar-grid label {
+    border-left: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+    padding-left: 0.5rem;
+  }
+
+  .scalar-grid .editable-input {
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-1));
+  }
+
+  .scalar-grid .editable-input:hover,
+  .scalar-grid .editable-input:focus {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-strong));
+    background: color-mix(in srgb, var(--accent) 11%, var(--bg-1));
   }
 
   .eyebrow,

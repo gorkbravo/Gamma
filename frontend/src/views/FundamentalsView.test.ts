@@ -1,0 +1,138 @@
+import { render } from "svelte/server";
+import { describe, expect, it, vi } from "vitest";
+import type { FundamentalsDcfModel } from "../lib/api/types";
+import FundamentalsView from "./FundamentalsView.svelte";
+
+describe("FundamentalsView", () => {
+  it("renders DCF editable cells with visible affordances and descriptive labels", () => {
+    const { body } = render(FundamentalsView, {
+      props: {
+        search: null,
+        selectedTicker: "MSFT",
+        overview: null,
+        financials: null,
+        dcfModel: makeDcfModel(),
+        peers: null,
+        reverseValuation: null,
+        reference: null,
+        dcfSnapshots: { snapshots: [] },
+        loading: false,
+        saving: false,
+        mode: "dcf",
+        onSearch: vi.fn(),
+        onSelectCompany: vi.fn(),
+        onSavePeerBasket: vi.fn(),
+        onSaveDcfModel: vi.fn(),
+        onSaveDcfSnapshot: vi.fn(),
+        onLoadDcfSnapshot: vi.fn()
+      }
+    });
+
+    expect(body).toMatch(/class="editable-input [^"]*"/);
+    expect(body).toMatch(/class="sheet-cell sheet-cell-edit [^"]*"/);
+    expect(body).toContain('aria-label="WACC (base scenario)"');
+    expect(body).toContain('aria-label="Terminal growth (base scenario)"');
+    expect(body).toContain('aria-label="Revenue growth 2026"');
+    expect(body).toContain('aria-label="Revenue projection 2026"');
+    expect(body).toContain('title="Editable DCF assumption: Revenue growth 2026"');
+    expect(body).toContain('title="Editable DCF projection override: Revenue projection 2026"');
+    expect(body).toMatch(/<button type="button"[^>]*disabled[^>]*>Recalculate \+ Save<\/button>/);
+  });
+});
+
+function makeDcfModel(): FundamentalsDcfModel {
+  return {
+    ticker: "MSFT",
+    company_name: "Microsoft Corp.",
+    active_scenario_id: "base",
+    historical_year_labels: ["FY 2024", "FY 2025"],
+    projection_years: [2026, 2027],
+    actual_rows: [
+      {
+        line_key: "revenue",
+        label: "Revenue",
+        unit: "currency",
+        values: [245_000_000_000, 270_000_000_000],
+        display_values: ["245,000,000,000", "270,000,000,000"],
+        editable: false,
+        overridden: [false, false],
+        source_provider: "sec",
+        retrieved_at: "2026-06-15T10:00:00Z",
+        origin: "fundamentals.test.actuals",
+        transformation_note: null
+      }
+    ],
+    scenarios: [
+      {
+        scenario_id: "base",
+        label: "base",
+        assumptions: {
+          revenue_growth_pct: [0.12, 0.1],
+          wacc_pct: 0.09,
+          terminal_growth_pct: 0.03
+        },
+        overrides: {},
+        assumption_rows: [
+          {
+            line_key: "revenue_growth_pct",
+            label: "Revenue growth",
+            unit: "percent",
+            values: [0.12, 0.1],
+            display_values: ["12.0%", "10.0%"],
+            editable: true,
+            overridden: [false, false],
+            source_provider: "manual",
+            retrieved_at: "2026-06-15T10:00:00Z",
+            origin: "fundamentals.test.assumptions",
+            transformation_note: null
+          }
+        ],
+        projection_rows: [
+          {
+            line_key: "revenue",
+            label: "Revenue",
+            unit: "currency",
+            values: [302_400_000_000, 332_640_000_000],
+            display_values: ["302,400,000,000", "332,640,000,000"],
+            editable: true,
+            overridden: [false, false],
+            source_provider: "manual",
+            retrieved_at: "2026-06-15T10:00:00Z",
+            origin: "fundamentals.test.projection",
+            transformation_note: null
+          }
+        ],
+        cost_of_capital_rows: [],
+        valuation_bridge_rows: [],
+        summary: {
+          scenario_id: "base",
+          label: "base",
+          enterprise_value: 4_000_000_000_000,
+          equity_value: 4_050_000_000_000,
+          implied_value_per_share: 540,
+          implied_value_low: 500,
+          implied_value_high: 580,
+          upside_downside_pct: 0.12,
+          terminal_value: 5_000_000_000_000,
+          discounted_terminal_value: 3_500_000_000_000,
+          discounted_cash_flow_value: 500_000_000_000,
+          current_price: 480,
+          source_provider: "gamma",
+          retrieved_at: "2026-06-15T10:00:00Z",
+          origin: "fundamentals.test.summary",
+          transformation_note: null
+        },
+        source_provider: "manual",
+        retrieved_at: "2026-06-15T10:00:00Z",
+        origin: "fundamentals.test.scenario",
+        transformation_note: null
+      }
+    ],
+    sensitivity_matrix: null,
+    warnings: [],
+    source_provider: "gamma",
+    retrieved_at: "2026-06-15T10:00:00Z",
+    origin: "fundamentals.test.dcf",
+    transformation_note: "Test DCF model."
+  };
+}
