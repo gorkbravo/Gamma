@@ -231,11 +231,13 @@ function makeWorkspace(): CommodityWorkspaceResponse {
     display_label: "Sample generated",
     provider: "sample_data",
     value: 79.2,
+    previous_value: 78.8,
     change: 0.4,
     change_pct: 0.005,
     unit: "USD/bbl",
     timestamp: retrievedAt,
     source_timestamp: retrievedAt,
+    previous_source_timestamp: "2026-04-18T00:00:00Z",
     contract_month: null,
     contract_symbol: null,
     provider_symbol: "CL",
@@ -378,6 +380,7 @@ function makeWorkspace(): CommodityWorkspaceResponse {
       {
         instrument_id: "wti",
         as_of: retrievedAt,
+        previous_as_of: "2026-04-19T00:00:00Z",
         nodes: [
           {
             contract,

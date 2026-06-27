@@ -1100,7 +1100,6 @@ class IbkrCommoditiesDataProvider:
         quotes: dict[str, QuoteSnapshot],
         retrieved_at: datetime,
     ) -> CommodityCurveSnapshot:
-        previous_prices = self._previous_curve_prices(config.instrument_id, retrieved_at)
         nodes: list[CommodityCurveNode] = []
         warnings: list[str] = []
         for index, (contract, detail) in enumerate(contracts):
@@ -1109,8 +1108,6 @@ class IbkrCommoditiesDataProvider:
             expiry = _ibkr_contract_expiry(contract, detail)
             contract_id = _ibkr_contract_id(contract, config)
             month_label = _ibkr_contract_month_label(contract, detail)
-            previous_price = previous_prices.get(contract_id) or previous_prices.get(month_label)
-            change = price - previous_price if price is not None and previous_price is not None else None
             if price is None:
                 warnings.append(f"No IBKR quote for {config.label} {month_label}.")
             if quote.delayed:
@@ -1131,14 +1128,15 @@ class IbkrCommoditiesDataProvider:
                 CommodityCurveNode(
                     contract=contract_meta,
                     price=round(float(price), 6) if price is not None else None,
-                    previous_price=round(previous_price, 6) if previous_price is not None else None,
-                    change=round(change, 6) if change is not None else None,
+                    previous_price=None,
+                    change=None,
                     days_to_expiry=(expiry.date() - retrieved_at.date()).days if expiry is not None else None,
                     source_provider="ibkr",
                     retrieved_at=retrieved_at,
                     origin=f"ibkr.reqMktData:{getattr(contract, 'conId', '') or _ibkr_contract_symbol(contract, config)}",
                     transformation_note=(
-                        f"Gamma requested a read-only IBKR futures snapshot and selected {quote.field or 'no usable'} price field."
+                        f"Gamma requested a read-only IBKR futures snapshot and selected {quote.field or 'no usable'} price field. "
+                        "Node changes are not computed from Gamma's local curve-history cache."
                     ),
                 )
             )
@@ -1149,6 +1147,7 @@ class IbkrCommoditiesDataProvider:
             warnings=_dedupe(
                 [
                     *warnings,
+                    "IBKR curve-node changes are N/A unless a provider supplies a dated prior settlement/close; Gamma does not diff local cached curve snapshots of unknown market vintage.",
                     "Curve nodes are individual IBKR FUT contracts; this is not a synthetic tradable instrument or order ticket.",
                 ]
             ),
@@ -1156,7 +1155,7 @@ class IbkrCommoditiesDataProvider:
             retrieved_at=retrieved_at,
             origin=f"ibkr.commodities.curve:{config.symbol}:{config.exchange}",
             transformation_note=(
-                "Gamma constructs the futures curve from IBKR contract details and market-data snapshots, then the application service computes term-structure analytics."
+                "Gamma constructs the futures curve from IBKR contract details and market-data snapshots, then the application service computes term-structure analytics. Local curve-history cache rows are not used as prior settlements."
             ),
         )
 
@@ -1321,29 +1320,6 @@ class IbkrCommoditiesDataProvider:
             ),
         )
 
-    def _previous_curve_prices(self, instrument_id: str, retrieved_at: datetime) -> dict[str, float]:
-        history = self._load_curve_history(instrument_id)
-        today = retrieved_at.date().isoformat()
-        previous_rows = [row for row in history if str(row.get("date") or "") < today]
-        if not previous_rows:
-            return {}
-        previous = sorted(previous_rows, key=lambda row: str(row.get("date") or ""))[-1]
-        prices: dict[str, float] = {}
-        for node in previous.get("nodes") or []:
-            if not isinstance(node, dict):
-                continue
-            price = _float_value(node.get("price"))
-            if price is None:
-                continue
-            contract_id = str(node.get("contract_id") or "").strip()
-            month = str(node.get("contract_month") or "").strip()
-            if contract_id:
-                prices[contract_id] = price
-            if month:
-                prices[month] = price
-        return prices
-
-
 def _sample_instruments(retrieved_at: datetime) -> list[CommodityInstrument]:
     return [
         CommodityInstrument(
@@ -1472,6 +1448,7 @@ def _sample_curves(
                 instrument_id=instrument.instrument_id,
                 as_of=retrieved_at,
                 nodes=nodes,
+                previous_as_of=(retrieved_at - timedelta(days=1)).replace(microsecond=0),
                 source_provider="sample_data",
                 retrieved_at=retrieved_at,
                 origin="sample_commodities.curve_snapshot",

@@ -21,6 +21,7 @@ from src.models.commodities import (
     CommodityOverviewTermStructure,
     CommodityPriceBasis,
     CommodityPriceHistory,
+    CommodityPricePoint,
     CommodityPriceReconciliation,
     CommodityProviderSnapshot,
     CommoditySpreadDefinition,
@@ -57,9 +58,11 @@ class CommoditiesService:
         reconciliations = self._build_price_reconciliations(snapshot, summaries, curves)
         links = self._build_cross_domain_links(snapshot)
         overview = self._build_overview(snapshot, selected, summaries, curves, inventories, spreads)
+        provider_split_warnings = _provider_sign_split_warnings(summaries)
         warnings = _dedupe(
             [
                 *snapshot.warnings,
+                *provider_split_warnings,
                 *(warning for reconciliation in reconciliations for warning in reconciliation.warnings),
                 *snapshot.coverage.caveats,
                 "Commodities is read-only research context. It does not place orders, rebalance portfolios, or automate futures trading.",
@@ -274,7 +277,7 @@ class CommoditiesService:
                 [
                     headline,
                     _history_basis(instrument, history, snapshot.coverage),
-                    _curve_front_basis(instrument, curve, snapshot.coverage),
+                    _curve_front_basis(instrument, curve, snapshot.coverage, history),
                 ]
             )
             warnings = _reconciliation_warnings(instrument, headline, observations)
@@ -836,7 +839,7 @@ def _headline_basis(
     curve: CommodityCurveSnapshot | None,
     coverage,
 ) -> CommodityPriceBasis | None:
-    front = _curve_front_basis(instrument, curve, coverage)
+    front = _curve_front_basis(instrument, curve, coverage, history)
     history_basis = _history_basis(instrument, history, coverage)
     if front is not None and front.value is not None and front.provider in {"ibkr", "ibkr_cached"}:
         return front
@@ -878,11 +881,13 @@ def _history_basis(
         display_label=display,
         provider=history.source_provider or coverage.source_provider or "unknown",
         value=latest.value,
+        previous_value=previous.value if previous is not None else None,
         change=change,
         change_pct=change_pct,
         unit=history.unit,
         timestamp=latest.timestamp,
         source_timestamp=latest.timestamp,
+        previous_source_timestamp=previous.timestamp if previous is not None else None,
         provider_symbol=_provider_symbol(instrument, history.source_provider),
         freshness_label=getattr(coverage, "freshness_label", None),
         warnings=warnings,
@@ -897,6 +902,7 @@ def _curve_front_basis(
     instrument,
     curve: CommodityCurveSnapshot | None,
     coverage,
+    history: CommodityPriceHistory | None = None,
 ) -> CommodityPriceBasis | None:
     if curve is None or not curve.nodes:
         return None
@@ -906,17 +912,28 @@ def _curve_front_basis(
     if front_node is None:
         return None
     contract = front_node.contract
-    change_pct = (
-        front_node.change / front_node.previous_price
-        if front_node.change is not None and front_node.previous_price
-        else None
-    )
     provider = front_node.source_provider or curve.source_provider or contract.source_provider
+    previous_value = front_node.previous_price
+    previous_timestamp = curve.previous_as_of
+    change = front_node.change
+    if provider == "ibkr":
+        prior_close = _prior_close_point(history, curve.as_of)
+        previous_value = prior_close.value if prior_close is not None else None
+        previous_timestamp = prior_close.timestamp if prior_close is not None else None
+        change = front_node.price - previous_value if front_node.price is not None and previous_value is not None else None
+    elif provider == "ibkr_cached":
+        previous_value = None
+        previous_timestamp = None
+        change = None
+    change_pct = change / previous_value if change is not None and previous_value else None
     basis_type = "sample_generated" if provider == "sample_data" else "front_future"
     display = _basis_display_label(basis_type, provider, contract_month=contract.contract_month)
     warnings = []
     if provider == "ibkr_cached":
         warnings.append("Front futures quote uses a cached IBKR curve node.")
+        warnings.append("Headline % CHG is N/A because cached IBKR curve nodes are not prior-close observations.")
+    elif provider == "ibkr" and previous_value is None:
+        warnings.append("Headline % CHG is N/A because no dated IBKR front-contract prior close was loaded.")
     if provider == "sample_data":
         warnings.append("Front futures quote is sample-generated and not live market data.")
     return CommodityPriceBasis(
@@ -927,11 +944,13 @@ def _curve_front_basis(
         display_label=display,
         provider=provider or getattr(coverage, "source_provider", "") or "unknown",
         value=front_node.price,
-        change=front_node.change,
+        previous_value=previous_value,
+        change=change,
         change_pct=change_pct,
         unit=instrument.quote_unit,
         timestamp=curve.as_of,
         source_timestamp=curve.as_of,
+        previous_source_timestamp=previous_timestamp,
         contract_month=contract.contract_month,
         contract_symbol=contract.symbol,
         provider_symbol=contract.symbol,
@@ -1024,6 +1043,58 @@ def _summary_basis_warnings(
     if headline.basis_type == "sample_generated":
         warnings.append("Headline commodity quote is sample-generated fallback data.")
     return _dedupe(warnings)
+
+
+def _prior_close_point(
+    history: CommodityPriceHistory | None,
+    as_of: datetime | None,
+) -> CommodityPricePoint | None:
+    if history is None or not history.points or str(history.source_provider or "").lower() != "ibkr":
+        return None
+    points = [
+        point
+        for point in sorted(history.points, key=lambda item: item.timestamp)
+        if _finite(point.value) and point.value != 0 and (as_of is None or point.timestamp.date() < as_of.date())
+    ]
+    return points[-1] if points else None
+
+
+def _provider_sign_split_warnings(summaries: list[CommodityMarketSummary]) -> list[str]:
+    def _sign(value: float | None) -> int:
+        if value is None or not _finite(value) or abs(value) < 1e-12:
+            return 0
+        return 1 if value > 0 else -1
+
+    ibkr_rows = [
+        summary
+        for summary in summaries
+        if summary.quote_basis is not None
+        and summary.quote_basis.provider == "ibkr"
+        and summary.quote_basis.basis_type == "front_future"
+        and _sign(summary.latest_change_pct) != 0
+    ]
+    fred_rows = [
+        summary
+        for summary in summaries
+        if summary.quote_basis is not None
+        and summary.quote_basis.provider == "fred"
+        and _sign(summary.latest_change_pct) != 0
+    ]
+    if len(ibkr_rows) < 2 or len(fred_rows) < 2:
+        return []
+    ibkr_signs = {_sign(row.latest_change_pct) for row in ibkr_rows}
+    fred_signs = {_sign(row.latest_change_pct) for row in fred_rows}
+    if len(ibkr_signs) == 1 and len(fred_signs) == 1 and next(iter(ibkr_signs)) == -next(iter(fred_signs)):
+        ibkr_labels = ", ".join(row.instrument.symbol for row in ibkr_rows[:6])
+        fred_labels = ", ".join(row.instrument.symbol for row in fred_rows[:6])
+        return [
+            (
+                "Provider split warning: all IBKR front-futures headline moves point one way "
+                f"({ibkr_labels}) while all FRED proxy moves point the other ({fred_labels}). "
+                "Verify prior-close timestamps and provider basis before interpreting the cross-market move."
+            )
+        ]
+    return []
 
 
 def _dedupe_basis_records(records: list[CommodityPriceBasis | None]) -> list[CommodityPriceBasis]:

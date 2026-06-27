@@ -2313,6 +2313,7 @@ export interface CommodityCurveSnapshot {
   instrument_id: string;
   as_of: string;
   nodes: CommodityCurveNode[];
+  previous_as_of: string | null;
   shape_label: string;
   front_spread: number | null;
   front_spread_pct: number | null;
@@ -2335,11 +2336,13 @@ export interface CommodityPriceBasis {
   display_label: string;
   provider: string;
   value: number | null;
+  previous_value: number | null;
   change: number | null;
   change_pct: number | null;
   unit: string | null;
   timestamp: string | null;
   source_timestamp: string | null;
+  previous_source_timestamp: string | null;
   contract_month: string | null;
   contract_symbol: string | null;
   provider_symbol: string | null;

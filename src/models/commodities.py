@@ -142,6 +142,7 @@ class CommodityCurveSnapshot:
     instrument_id: str
     as_of: datetime
     nodes: list[CommodityCurveNode] = field(default_factory=list)
+    previous_as_of: datetime | None = None
     shape_label: str = "unavailable"
     front_spread: float | None = None
     front_spread_pct: float | None = None
@@ -165,11 +166,13 @@ class CommodityPriceBasis:
     display_label: str
     provider: str
     value: float | None = None
+    previous_value: float | None = None
     change: float | None = None
     change_pct: float | None = None
     unit: str | None = None
     timestamp: datetime | None = None
     source_timestamp: datetime | None = None
+    previous_source_timestamp: datetime | None = None
     contract_month: str | None = None
     contract_symbol: str | None = None
     provider_symbol: str | None = None

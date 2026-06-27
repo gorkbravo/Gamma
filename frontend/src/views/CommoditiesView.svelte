@@ -328,7 +328,7 @@
         ? [
             {
               id: `${curve.instrument_id}-curve-previous`,
-              label: "Previous curve",
+              label: curve.previous_as_of ? `Previous curve (${formatDate(curve.previous_as_of)})` : "Previous curve",
               color: "var(--chart-secondary)",
               type: "line" as const,
               lineStyle: "dashed" as const,
@@ -756,6 +756,23 @@
       month: "short",
       day: "numeric",
       year: "numeric"
+    });
+  }
+
+  function formatDateTime(value: string | null | undefined) {
+    if (!value) {
+      return "N/A";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "N/A";
+    }
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
     });
   }
 
@@ -1285,7 +1302,11 @@
   }
 
   function basisTimeLabel(basis: CommodityPriceBasis | null | undefined) {
-    return formatDate(basis?.source_timestamp ?? basis?.timestamp ?? basis?.retrieved_at ?? null);
+    return formatDateTime(basis?.source_timestamp ?? basis?.timestamp ?? basis?.retrieved_at ?? null);
+  }
+
+  function basisPriorTimeLabel(basis: CommodityPriceBasis | null | undefined) {
+    return formatDateTime(basis?.previous_source_timestamp ?? null);
   }
 
 </script>
@@ -1330,6 +1351,7 @@
           <span><em>Contract</em> {selectedBasis.contract_symbol}{selectedBasis.contract_month ? ` / ${selectedBasis.contract_month}` : ""}</span>
         {/if}
         <span><em>Time</em> {basisTimeLabel(selectedBasis)}</span>
+        <span><em>Prior</em> {basisPriorTimeLabel(selectedBasis)}</span>
         {#if selectedReconciliation?.status === "conflict"}<strong>Basis conflict</strong>{/if}
       </div>
     {/if}

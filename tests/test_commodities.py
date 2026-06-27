@@ -10,9 +10,18 @@ from fastapi.testclient import TestClient
 from ib_insync import Contract
 
 from src.api.main import create_app
-from src.application.commodities_service import CommoditiesService, CommodityWorkspaceRequest
+from src.application.commodities_service import (
+    CommoditiesService,
+    CommodityWorkspaceRequest,
+    _provider_sign_split_warnings,
+)
 from src.application.runtime import build_runtime
-from src.models.commodities import CommodityCoverageMetadata
+from src.models.commodities import (
+    CommodityCoverageMetadata,
+    CommodityInstrument,
+    CommodityMarketSummary,
+    CommodityPriceBasis,
+)
 from src.services.cache import CacheService
 from src.services.commodities_adapters import (
     EIA_INVENTORY_SERIES,
@@ -182,16 +191,65 @@ def test_commodity_reconciliation_flags_material_basis_conflict():
 
     wti_summary = next(summary for summary in workspace.market_summaries if summary.instrument.instrument_id == "wti")
     assert wti_summary.latest_price == 84.0
-    assert wti_summary.latest_change_pct == pytest.approx(-0.023256, abs=0.000001)
+    assert wti_summary.latest_change_pct is None
     assert wti_summary.quote_basis is not None
     assert wti_summary.quote_basis.basis_type == "front_future"
     assert wti_summary.quote_basis.provider == "ibkr"
+    assert any("prior close" in warning.lower() for warning in wti_summary.warnings)
     reconciliation = next(row for row in workspace.price_reconciliations if row.instrument_id == "wti")
     assert reconciliation.status == "conflict"
     assert reconciliation.headline is not None
     assert reconciliation.headline.contract_month
     assert any("basis conflict" in warning.lower() for warning in reconciliation.warnings)
     assert any("basis conflict" in warning.lower() for warning in workspace.warnings)
+
+
+def test_commodity_provider_sign_split_guard_flags_uniform_ibkr_vs_fred_moves():
+    def summary(
+        instrument_id: str,
+        symbol: str,
+        provider: str,
+        basis_type: str,
+        change_pct: float,
+    ) -> CommodityMarketSummary:
+        instrument = CommodityInstrument(
+            instrument_id=instrument_id,
+            symbol=symbol,
+            name=symbol,
+            family="energy" if provider == "ibkr" else "metals",
+            subgroup="fixture",
+            quote_unit="USD",
+        )
+        basis = CommodityPriceBasis(
+            basis_id=f"{instrument_id}:fixture",
+            instrument_id=instrument_id,
+            role="fixture",
+            basis_type=basis_type,
+            display_label=f"{provider} fixture",
+            provider=provider,
+            value=100.0,
+            previous_value=100.0 / (1.0 + change_pct),
+            change=100.0 - (100.0 / (1.0 + change_pct)),
+            change_pct=change_pct,
+        )
+        return CommodityMarketSummary(
+            instrument=instrument,
+            latest_price=basis.value,
+            latest_change=basis.change,
+            latest_change_pct=basis.change_pct,
+            quote_basis=basis,
+        )
+
+    warnings = _provider_sign_split_warnings(
+        [
+            summary("wti", "CL", "ibkr", "front_future", -0.012),
+            summary("brent", "BZ", "ibkr", "front_future", -0.009),
+            summary("gold", "GC", "fred", "fred_reference", 0.004),
+            summary("silver", "SI", "fred", "fred_reference", 0.006),
+        ]
+    )
+
+    assert any("Provider split warning" in warning for warning in warnings)
 
 
 def test_ibkr_default_roots_cover_curve_capable_sample_commodities():
@@ -355,9 +413,9 @@ def _future_detail(con_id: int, month: str, local_symbol: str, symbol: str = "CL
 
 def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp_path):
     details = [
-        _future_detail(1003, "202608", "CLQ6"),
-        _future_detail(1001, "202606", "CLM6"),
-        _future_detail(1002, "202607", "CLN6"),
+        _future_detail(1003, "202610", "CLV6"),
+        _future_detail(1001, "202608", "CLQ6"),
+        _future_detail(1002, "202609", "CLU6"),
     ]
     provider = IbkrCommoditiesDataProvider(
         client=_FakeIbkrClient(details),
@@ -378,10 +436,12 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
 
     wti_curve = next(curve for curve in snapshot.curve_snapshots if curve.instrument_id == "wti")
     assert wti_curve.source_provider == "ibkr"
-    assert [node.contract.symbol for node in wti_curve.nodes] == ["CLM6", "CLN6", "CLQ6"]
+    assert [node.contract.symbol for node in wti_curve.nodes] == ["CLQ6", "CLU6", "CLV6"]
     assert [node.price for node in wti_curve.nodes] == [80.0, 79.2, 78.7]
+    assert [node.previous_price for node in wti_curve.nodes] == [None, None, None]
+    assert [node.change for node in wti_curve.nodes] == [None, None, None]
     assert wti_curve.nodes[0].contract.contract_id == "ibkr:1001"
-    assert wti_curve.nodes[0].contract.contract_month == "Jun 2026"
+    assert wti_curve.nodes[0].contract.contract_month == "Aug 2026"
     assert any("Delayed IBKR quote" in warning for warning in wti_curve.warnings)
 
     wti_history = next(history for history in snapshot.price_histories if history.instrument_id == "wti")
@@ -393,25 +453,34 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
     assert cached_history[-1]["nodes"][0]["contract_id"] == "ibkr:1001"
 
     service = CommoditiesService(provider=provider)
-    workspace = service.get_workspace(CommodityWorkspaceRequest(mode="curves_spreads", selected_instrument_id="wti"))
+    workspace = service.get_workspace(
+        CommodityWorkspaceRequest(mode="curves_spreads", selected_instrument_id="wti", force_refresh=True)
+    )
     enriched_curve = next(curve for curve in workspace.curves if curve.instrument_id == "wti")
     assert enriched_curve.shape_label == "backwardation"
     assert enriched_curve.front_spread == 0.8
+    wti_summary = next(summary for summary in workspace.market_summaries if summary.instrument.instrument_id == "wti")
+    assert wti_summary.latest_price == 80.0
+    assert wti_summary.latest_change == pytest.approx(0.75, abs=0.000001)
+    assert wti_summary.latest_change_pct == pytest.approx(0.009464, abs=0.000001)
+    assert wti_summary.quote_basis is not None
+    assert wti_summary.quote_basis.previous_value == 79.25
+    assert wti_summary.quote_basis.previous_source_timestamp is not None
 
 
 def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_path):
     details = {
         "CL": [
-            _future_detail(2001, "202606", "CLM6"),
-            _future_detail(2002, "202607", "CLN6"),
-            _future_detail(2003, "202608", "CLQ6"),
-            _future_detail(2004, "202609", "CLU6"),
+            _future_detail(2001, "202608", "CLQ6"),
+            _future_detail(2002, "202609", "CLU6"),
+            _future_detail(2003, "202610", "CLV6"),
+            _future_detail(2004, "202611", "CLX6"),
         ],
         "GC": [
-            _future_detail(3001, "202606", "GCM6", symbol="GC", exchange="COMEX"),
-            _future_detail(3002, "202607", "GCN6", symbol="GC", exchange="COMEX"),
-            _future_detail(3003, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
-            _future_detail(3004, "202609", "GCU6", symbol="GC", exchange="COMEX"),
+            _future_detail(3001, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
+            _future_detail(3002, "202609", "GCU6", symbol="GC", exchange="COMEX"),
+            _future_detail(3003, "202610", "GCV6", symbol="GC", exchange="COMEX"),
+            _future_detail(3004, "202611", "GCX6", symbol="GC", exchange="COMEX"),
         ],
     }
     fake_client = _FakeIbkrClient(details)
@@ -463,6 +532,8 @@ def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_pat
     cached_gold_curve = next(curve for curve in cached_snapshot.curve_snapshots if curve.instrument_id == "gold")
     assert selected_wti_curve.source_provider == "ibkr_cached"
     assert [node.price for node in selected_wti_curve.nodes] == [80.0, 79.0, 78.5, 78.1]
+    assert [node.previous_price for node in selected_wti_curve.nodes] == [None, None, None, None]
+    assert [node.change for node in selected_wti_curve.nodes] == [None, None, None, None]
     assert cached_gold_curve.source_provider == "ibkr_cached"
     assert any("Using cached IBKR curve for Gold" in warning for warning in cached_snapshot.warnings)
 
@@ -473,14 +544,14 @@ def test_ibkr_provider_defaults_to_shallow_breadth_for_all_configured_roots(tmp_
     monkeypatch.delenv("IBKR_COMMODITIES_STARTUP_ENABLED", raising=False)
     details = {
         "CL": [
-            _future_detail(4001, "202606", "CLM6"),
-            _future_detail(4002, "202607", "CLN6"),
-            _future_detail(4003, "202608", "CLQ6"),
+            _future_detail(4001, "202608", "CLQ6"),
+            _future_detail(4002, "202609", "CLU6"),
+            _future_detail(4003, "202610", "CLV6"),
         ],
         "GC": [
-            _future_detail(5001, "202606", "GCM6", symbol="GC", exchange="COMEX"),
-            _future_detail(5002, "202607", "GCN6", symbol="GC", exchange="COMEX"),
-            _future_detail(5003, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
+            _future_detail(5001, "202608", "GCQ6", symbol="GC", exchange="COMEX"),
+            _future_detail(5002, "202609", "GCU6", symbol="GC", exchange="COMEX"),
+            _future_detail(5003, "202610", "GCV6", symbol="GC", exchange="COMEX"),
         ],
     }
     fake_client = _FakeIbkrClient(details)
@@ -541,7 +612,7 @@ def test_commodities_api_routes_return_workspace_and_slices(tmp_path, monkeypatc
         history_dir=tmp_path / "data",
         sample_data_dir="sample_data",
     )
-    client = TestClient(create_app(runtime))
+    client = TestClient(create_app(runtime, session_token="test-gamma-session"))
     try:
         workspace_response = client.post(
             "/commodities/workspace",
@@ -595,7 +666,7 @@ def test_commodities_copilot_context_uses_loaded_workspace(tmp_path, monkeypatch
         history_dir=tmp_path / "data",
         sample_data_dir="sample_data",
     )
-    client = TestClient(create_app(runtime))
+    client = TestClient(create_app(runtime, session_token="test-gamma-session"))
     try:
         workspace = client.post(
             "/commodities/workspace",
