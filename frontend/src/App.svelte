@@ -48,6 +48,7 @@
     fundamentalsReference,
     fundamentalsReverseValuation,
     fundamentalsSearch,
+    fundamentalsSearchState,
     cryptoFlowSummary,
     cryptoLiquidity,
     cryptoPriceHistory,
@@ -2480,6 +2481,7 @@
             reference={$fundamentalsReference}
             dcfSnapshots={$fundamentalsDcfSnapshots}
             loading={$loading.fundamentals}
+            searchState={$fundamentalsSearchState}
             saving={$loading.fundamentalsSave}
             onSearch={loadFundamentalsSearch}
             onSelectCompany={selectFundamentalsCompanyFromView}

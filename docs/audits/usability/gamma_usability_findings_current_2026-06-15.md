@@ -253,11 +253,13 @@ Required improvement:
 
 During the `MSFT` retest, search briefly showed "No SEC matches" while results were still refreshing. Exact `MSFT` also appeared below noisy large-cap matches.
 
+Updated 2026-06-27: the search state issue is fixed. Fundamentals search now has a dedicated frontend search-state object separate from the company payload loading flag. While a search request is pending, the view shows `Searching`; if previous rows are still displayed during refresh, the header and dropdown mark them as `Stale results` / `Search Refresh` instead of clearing the list or showing `No SEC matches`. `No SEC matches` is now reserved for a completed search response with zero rows. Backend SEC search ranking now sorts exact ticker matches first, followed by exact CIK, ticker prefix, CIK prefix, and name matches; popular tickers only break ties inside a match bucket or shape the empty-query default list, so an exact `MSFT` ticker result cannot be pushed below noisy large-cap/name matches.
+
 Required improvement:
 
-- Distinguish loading/refreshing from no-result state.
-- Rank exact ticker matches first.
-- Keep stale results visibly separate from refreshed results.
+- Distinguish loading/refreshing from no-result state. Status: implemented 2026-06-27.
+- Rank exact ticker matches first. Status: implemented 2026-06-27.
+- Keep stale results visibly separate from refreshed results. Status: implemented 2026-06-27.
 
 ### Fundamentals price-context wording is slightly confusing
 

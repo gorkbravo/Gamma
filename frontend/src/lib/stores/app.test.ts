@@ -53,6 +53,7 @@ import {
   cryptoWorkspace,
   diagnostics,
   fundamentalsSearch,
+  fundamentalsSearchState,
   ivSession,
   ivSurface,
   lastError,
@@ -135,6 +136,16 @@ describe("app store orchestration", () => {
     selectedPredictionMarketId.set(null);
     selectedCryptoTokenId.set(null);
     selectedFundamentalsTicker.set(null);
+    fundamentalsSearch.set(null);
+    fundamentalsSearchState.set({
+      query: "",
+      loading: false,
+      refreshing: false,
+      stale: false,
+      error: null,
+      requestedAt: null,
+      completedAt: null
+    });
     predictionMarketScreener.set(null);
     predictionMarketDetail.set(null);
     predictionMarketHistory.set(null);
@@ -220,6 +231,54 @@ describe("app store orchestration", () => {
     expect(get(selectedFundamentalsTicker)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/fundamentals/search?");
+  });
+
+  it("keeps stale fundamentals search results distinct while a refresh is pending", async () => {
+    fundamentalsSearch.set({
+      results: [
+        {
+          ticker: "AAPL",
+          name: "Apple Inc.",
+          cik: "0000320193",
+          exchange: "Nasdaq",
+          source_provider: "sec",
+          retrieved_at: "2026-04-30T00:00:00Z",
+          origin: "fixture",
+          transformation_note: null
+        }
+      ]
+    });
+    let resolveFetch!: (value: ReturnType<typeof ok>) => void;
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = loadFundamentalsSearch({ query: "missing-company" });
+
+    expect(get(fundamentalsSearchState)).toMatchObject({
+      query: "missing-company",
+      loading: true,
+      refreshing: true,
+      stale: true,
+      error: null
+    });
+    expect(get(fundamentalsSearch)?.results[0]?.ticker).toBe("AAPL");
+
+    resolveFetch(ok({ results: [] }));
+    await pending;
+
+    expect(get(fundamentalsSearchState)).toMatchObject({
+      query: "missing-company",
+      loading: false,
+      refreshing: false,
+      stale: false,
+      error: null
+    });
+    expect(get(fundamentalsSearch)?.results).toEqual([]);
   });
 
   it("selects the first fundamentals result for an explicit search", async () => {

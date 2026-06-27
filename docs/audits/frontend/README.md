@@ -5,4 +5,4 @@ Frontend-specific audits should live here when the scope is primarily visual qua
 No dedicated frontend-only audit is currently filed here. Frontend findings are currently embedded in the codebase and usability audits:
 
 - [`../codebase/full_codebase_audit_2026-05-25.md`](../codebase/full_codebase_audit_2026-05-25.md)
-- [`../usability/gamma_usability_findings_2026-06-12.md`](../usability/gamma_usability_findings_2026-06-12.md)
+- [`../usability/gamma_usability_findings_current_2026-06-15.md`](../usability/gamma_usability_findings_current_2026-06-15.md)

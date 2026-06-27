@@ -19,6 +19,7 @@
   import type {
     FundamentalsDcfSavePayload,
     FundamentalsSearchOptions,
+    FundamentalsSearchState,
     FundamentalsSelectOptions
   } from "../lib/stores/app";
   import { heroPricePointFromApiPoint, type HeroPricePoint } from "../lib/view-models/hero-price-chart";
@@ -54,6 +55,15 @@
   export let reference: FundamentalsReference | null = null;
   export let dcfSnapshots: FundamentalsDcfSnapshotList | null = null;
   export let loading = false;
+  export let searchState: FundamentalsSearchState = {
+    query: "",
+    loading: false,
+    refreshing: false,
+    stale: false,
+    error: null,
+    requestedAt: null,
+    completedAt: null
+  };
   export let saving = false;
   export let onSearch: (options?: FundamentalsSearchOptions) => Promise<unknown> | void;
   export let onSelectCompany: (ticker: string, options?: FundamentalsSelectOptions) => Promise<unknown> | void;
@@ -490,6 +500,9 @@
   $: headlineMetrics = overview?.headline_metrics ?? [];
   $: headlineStripMetrics = headlineMetrics.slice(0, 5);
   $: searchResults = search?.results ?? [];
+  $: searchLoading = searchState.loading;
+  $: searchHasStaleResults = searchState.loading && searchResults.length > 0;
+  $: searchEmptyLabel = searchState.error ? "Search unavailable" : "No SEC matches";
   $: searchDropdownResults = searchResults.map((result) => ({
     id: result.ticker,
     primary: `${result.ticker}${result.exchange ? ` | ${result.exchange}` : ""}`,
@@ -618,6 +631,9 @@
         <span class="subtitle">{currentCompany.name} ({currentCompany.ticker}){currentCompany.exchange ? ` · ${currentCompany.exchange}` : ""}</span>
       {/if}
       {#if loading}<span class="loading-pill">Refreshing</span>{/if}
+      {#if searchLoading}
+        <span class:secondary-pill={searchHasStaleResults} class="loading-pill">{searchHasStaleResults ? "Search Refresh" : "Searching"}</span>
+      {/if}
       {#if saving}<span class="loading-pill secondary-pill">Saving</span>{/if}
     </div>
 
@@ -642,20 +658,27 @@
     <div class="search-strip">
       <div class="search-actions">
         <div class="search-control filter-wide">
-          <span class="search-label">Company Search</span>
+          <div class="search-heading">
+            <span class="search-label">Company Search</span>
+            {#if searchHasStaleResults}
+              <span class="search-state">Stale results</span>
+            {/if}
+          </div>
           <SearchDropdown
             bind:value={searchQuery}
             placeholder="AAPL, Microsoft, NVDA..."
             ariaLabel="Company search"
-            emptyLabel="No SEC matches"
+            emptyLabel={searchEmptyLabel}
+            loading={searchLoading}
+            stale={searchHasStaleResults}
             results={searchDropdownResults}
             enterBehavior="submit"
             on:submit={() => runSearch(false)}
             on:select={(event) => chooseCompany(String(event.detail.id))}
           />
         </div>
-        <button type="button" on:click={() => runSearch(false)} disabled={loading}>{loading ? "Loading..." : "Run Search"}</button>
-        <button type="button" class="secondary" on:click={() => runSearch(true)} disabled={loading}>Refresh Search</button>
+        <button type="button" on:click={() => runSearch(false)} disabled={loading || searchLoading}>{searchLoading ? "Searching..." : "Run Search"}</button>
+        <button type="button" class="secondary" on:click={() => runSearch(true)} disabled={loading || searchLoading}>Refresh Search</button>
         {#if currentCompany}
           <button type="button" class="secondary" on:click={() => chooseCompany(currentCompany.ticker, { forceRefresh: true, resetThread: false })} disabled={loading}>
             Refresh {currentCompany.ticker}
@@ -2241,6 +2264,21 @@
     text-transform: uppercase;
     letter-spacing: 0.12em;
     font-size: 0.62rem;
+  }
+
+  .search-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem;
+  }
+
+  .search-state {
+    color: var(--warning);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
   }
 
   .header-note {

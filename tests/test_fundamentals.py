@@ -54,6 +54,38 @@ def test_fundamentals_overview_builds_company_context_and_peer_heatmap(tmp_path)
     assert overview.peer_heatmap.transformation_note is not None
 
 
+def test_sec_search_ranks_exact_ticker_before_popular_name_matches(tmp_path):
+    adapter = SecFundamentalsAdapter(CacheService(tmp_path / "cache"))
+    adapter._reference_retrieved_at = NOW
+    adapter._load_reference_rows = lambda *, force_refresh: [
+        {
+            "ticker": "AAPL",
+            "name": "Apple MSFT Supplier Trust",
+            "name_upper": "APPLE MSFT SUPPLIER TRUST",
+            "exchange": "Nasdaq",
+            "cik": "0000320193",
+        },
+        {
+            "ticker": "MSFT",
+            "name": "Microsoft Corporation",
+            "name_upper": "MICROSOFT CORPORATION",
+            "exchange": "Nasdaq",
+            "cik": "0000789019",
+        },
+        {
+            "ticker": "NVDA",
+            "name": "Nvidia MSFT AI Infrastructure",
+            "name_upper": "NVIDIA MSFT AI INFRASTRUCTURE",
+            "exchange": "Nasdaq",
+            "cik": "0001045810",
+        },
+    ]
+
+    results = adapter.search_companies("msft", limit=3)
+
+    assert [row.ticker for row in results] == ["MSFT", "AAPL", "NVDA"]
+
+
 def test_fundamentals_overview_preserves_price_ohlcv_for_hero_chart(tmp_path):
     service = _build_service(tmp_path)
 

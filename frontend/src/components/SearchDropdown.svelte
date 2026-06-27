@@ -13,6 +13,10 @@
   export let placeholder = "Search";
   export let ariaLabel = "Search";
   export let emptyLabel = "No matches";
+  export let loading = false;
+  export let loadingLabel = "LOADING...";
+  export let stale = false;
+  export let staleLabel = "STALE RESULTS | REFRESHING";
   export let results: SearchDropdownItem[] = [];
   export let enterBehavior: "select-first" | "submit" = "submit";
   export let clearOnEscape = false;
@@ -84,12 +88,16 @@
   </label>
 
   {#if showResults}
-    <div class="search-results" role="listbox" aria-label="Search results">
+    <div class="search-results" class:stale role="listbox" aria-label="Search results">
+      {#if stale && results.length > 0}
+        <div class="search-status">{staleLabel}</div>
+      {/if}
       {#if results.length > 0}
         {#each results as item}
           <button
             class="search-result"
             class:selected={item.selected}
+            class:stale-result={stale}
             type="button"
             on:mousedown|preventDefault={() => selectResult(item)}
           >
@@ -104,6 +112,8 @@
             {/if}
           </button>
         {/each}
+      {:else if loading}
+        <div class="search-empty loading-state">{loadingLabel}</div>
       {:else}
         <div class="search-empty">{emptyLabel}</div>
       {/if}
@@ -170,6 +180,19 @@
     background: var(--surface-0);
   }
 
+  .search-results.stale {
+    border-color: color-mix(in srgb, var(--warning) 34%, var(--panel-border));
+  }
+
+  .search-status {
+    padding: 0.22rem 0.4rem;
+    color: var(--warning);
+    border-bottom: 1px solid var(--divider);
+    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
   .search-result,
   .search-empty {
     display: flex;
@@ -195,6 +218,14 @@
     border-color: color-mix(in srgb, var(--accent) 28%, transparent);
     background: color-mix(in srgb, var(--accent) 8%, transparent);
     color: var(--text-0);
+  }
+
+  .search-result.stale-result {
+    color: var(--text-2);
+  }
+
+  .loading-state {
+    color: var(--accent);
   }
 
   .result-copy {

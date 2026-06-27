@@ -57,6 +57,9 @@ _CURRENCY_UNIT_PREFIXES = (
 )
 
 _POPULAR_FUNDAMENTALS_TICKERS = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "ORCL", "SAP")
+_POPULAR_FUNDAMENTALS_TICKER_RANK = {
+    ticker: index for index, ticker in enumerate(_POPULAR_FUNDAMENTALS_TICKERS)
+}
 
 _STATEMENT_PERIOD_ANCHORS: dict[str, tuple[str, ...]] = {
     "income": ("revenue", "operating_income", "net_income"),
@@ -360,6 +363,32 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _company_search_rank(
+    row: dict[str, str | None],
+    query_text: str,
+    original_index: int,
+) -> tuple[int, int, int] | None:
+    ticker = str(row.get("ticker") or "").strip().upper()
+    cik = str(row.get("cik") or "").strip()
+    name = str(row.get("name_upper") or "").strip().upper()
+    padded_query_cik = query_text.zfill(10)
+    popularity_rank = _POPULAR_FUNDAMENTALS_TICKER_RANK.get(
+        ticker,
+        len(_POPULAR_FUNDAMENTALS_TICKERS),
+    )
+    if ticker == query_text:
+        return (0, popularity_rank, original_index)
+    if cik == padded_query_cik:
+        return (1, popularity_rank, original_index)
+    if ticker.startswith(query_text):
+        return (2, popularity_rank, original_index)
+    if cik.startswith(query_text):
+        return (3, popularity_rank, original_index)
+    if query_text in name:
+        return (4, popularity_rank, original_index)
+    return None
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -559,24 +588,12 @@ class SecFundamentalsAdapter:
         rows = list(self._load_reference_rows(force_refresh=force_refresh))
         query_text = str(query or "").strip().upper()
         if query_text:
-            exact_ticker = [row for row in rows if row["ticker"] == query_text]
-            exact_cik = [row for row in rows if row["cik"] == query_text.zfill(10)]
-            prefix_matches = [
-                row for row in rows if row["ticker"].startswith(query_text) and row["ticker"] != query_text
+            ranked_rows = [
+                (rank, row)
+                for index, row in enumerate(rows)
+                if (rank := _company_search_rank(row, query_text, index)) is not None
             ]
-            name_matches = [
-                row
-                for row in rows
-                if query_text in row["name_upper"]
-                and row["ticker"] not in {item["ticker"] for item in [*exact_ticker, *exact_cik]}
-            ]
-            cik_prefix_matches = [
-                row
-                for row in rows
-                if row["cik"].startswith(query_text)
-                and row["ticker"] not in {item["ticker"] for item in [*exact_ticker, *exact_cik, *prefix_matches]}
-            ]
-            rows = exact_ticker + exact_cik + prefix_matches + cik_prefix_matches + name_matches
+            rows = [row for _rank, row in sorted(ranked_rows, key=lambda item: item[0])]
             if not rows:
                 company = self._load_company(query_text)
                 if company is not None:

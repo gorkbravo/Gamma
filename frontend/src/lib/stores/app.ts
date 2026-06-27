@@ -287,6 +287,16 @@ export interface FundamentalsSearchOptions {
   forceRefresh?: boolean;
 }
 
+export interface FundamentalsSearchState {
+  query: string;
+  loading: boolean;
+  refreshing: boolean;
+  stale: boolean;
+  error: string | null;
+  requestedAt: string | null;
+  completedAt: string | null;
+}
+
 export interface FundamentalsSelectOptions {
   resetThread?: boolean;
   forceRefresh?: boolean;
@@ -374,6 +384,15 @@ export const cryptoFlowSummary = writable<CryptoFlowSummary | null>(null);
 export const cryptoComparison = writable<CryptoComparison | null>(null);
 export const cryptoSyntheticPortfolio = writable<CryptoSyntheticPortfolio | null>(null);
 export const fundamentalsSearch = writable<FundamentalsSearchResponse | null>(null);
+export const fundamentalsSearchState = writable<FundamentalsSearchState>({
+  query: "",
+  loading: false,
+  refreshing: false,
+  stale: false,
+  error: null,
+  requestedAt: null,
+  completedAt: null
+});
 export const selectedFundamentalsTicker = writable<string | null>(null);
 export const fundamentalsOverview = writable<FundamentalsOverview | null>(null);
 export const fundamentalsFinancials = writable<FundamentalsFinancials | null>(null);
@@ -2225,16 +2244,35 @@ export async function runCryptoSyntheticPortfolio(
 }
 
 export async function loadFundamentalsSearch(options: FundamentalsSearchOptions = {}) {
-  setLoading("fundamentals", true);
+  const query = String(options.query ?? "").trim();
+  const previousResults = get(fundamentalsSearch)?.results ?? [];
+  fundamentalsSearchState.set({
+    query,
+    loading: true,
+    refreshing: previousResults.length > 0,
+    stale: previousResults.length > 0,
+    error: null,
+    requestedAt: new Date().toISOString(),
+    completedAt: null
+  });
   try {
     const params = new URLSearchParams({
-      query: options.query ?? "",
+      query,
       limit: String(options.limit ?? 12),
       force_refresh: options.forceRefresh ? "true" : "false"
     });
     const response = await getJson<FundamentalsSearchResponse>(`/fundamentals/search?${params.toString()}`);
     fundamentalsSearch.set(response);
-    const explicitQuery = Boolean(options.query?.trim());
+    fundamentalsSearchState.set({
+      query,
+      loading: false,
+      refreshing: false,
+      stale: false,
+      error: null,
+      requestedAt: null,
+      completedAt: new Date().toISOString()
+    });
+    const explicitQuery = Boolean(query);
     const currentSelection = get(selectedFundamentalsTicker);
     const selectedStillVisible = response.results.some((result) => result.ticker === currentSelection);
     const nextSelection = selectedStillVisible
@@ -2261,10 +2299,16 @@ export async function loadFundamentalsSearch(options: FundamentalsSearchOptions 
     lastError.set("");
     return response;
   } catch (error) {
+    fundamentalsSearchState.update((current) => ({
+      ...current,
+      loading: false,
+      refreshing: false,
+      stale: false,
+      error: errorMessage(error),
+      completedAt: new Date().toISOString()
+    }));
     setError(error);
     return null;
-  } finally {
-    setLoading("fundamentals", false);
   }
 }
 

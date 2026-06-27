@@ -4,6 +4,56 @@ import type { FundamentalsDcfModel } from "../lib/api/types";
 import FundamentalsView from "./FundamentalsView.svelte";
 
 describe("FundamentalsView", () => {
+  it("renders stale search state separately from company refresh state", () => {
+    const { body } = render(FundamentalsView, {
+      props: {
+        search: {
+          results: [
+            {
+              ticker: "AAPL",
+              name: "Apple Inc.",
+              cik: "0000320193",
+              exchange: "Nasdaq",
+              source_provider: "sec",
+              retrieved_at: "2026-04-30T00:00:00Z",
+              origin: "fixture",
+              transformation_note: null
+            }
+          ]
+        },
+        selectedTicker: null,
+        overview: null,
+        financials: null,
+        dcfModel: null,
+        peers: null,
+        reverseValuation: null,
+        reference: null,
+        dcfSnapshots: null,
+        loading: false,
+        searchState: {
+          query: "MSFT",
+          loading: true,
+          refreshing: true,
+          stale: true,
+          error: null,
+          requestedAt: "2026-06-15T10:00:00Z",
+          completedAt: null
+        },
+        saving: false,
+        onSearch: vi.fn(),
+        onSelectCompany: vi.fn(),
+        onSavePeerBasket: vi.fn(),
+        onSaveDcfModel: vi.fn(),
+        onSaveDcfSnapshot: vi.fn(),
+        onLoadDcfSnapshot: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Search Refresh");
+    expect(body).toContain("Stale results");
+    expect(body).not.toContain("Refreshing</span><span");
+  });
+
   it("renders DCF editable cells with visible affordances and descriptive labels", () => {
     const { body } = render(FundamentalsView, {
       props: {
