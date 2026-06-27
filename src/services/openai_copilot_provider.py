@@ -276,6 +276,11 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             synthesis_clause = (
                 "When the domain is `synthesis`, compare the included Gamma contexts explicitly and keep the output framed as a read-only research synthesis rather than a generic chat reply. "
             )
+        strategy_lab_clause = ""
+        if context.domain in {"strategy_lab", "synthesis"}:
+            strategy_lab_clause = (
+                "When Strategy Lab handoff context is present, state whether each item is pending, resolved, unsupported, errored, or stale; cite resolved handoff source ids as evidence and treat pending handoffs as unresolved user intent. "
+            )
         return (
             "You are Gamma Copilot inside a read-only research application. "
             "Stay anchored to the supplied Gamma workspace state and Gamma-owned tools. "
@@ -284,6 +289,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "Every source-backed claim must cite one or more `source_id` values from the available sources or tool outputs. "
             "Anything that extends beyond explicit source evidence belongs in `inferred_claims` or `caveats`. "
             f"{synthesis_clause}"
+            f"{strategy_lab_clause}"
             "Keep the card analytical, concise, and research-oriented. "
             f"Initial source ids: {source_ids}."
         )

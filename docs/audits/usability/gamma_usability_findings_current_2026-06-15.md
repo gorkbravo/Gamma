@@ -76,7 +76,7 @@ Steps taken:
 2. **Fundamentals Search:** Searched `MSFT`. During refresh the UI briefly showed "No SEC matches"; after waiting, results populated. Exact `MSFT` appeared, though not at the top of the result list.
 3. **Fundamentals Overview:** Loaded `MICROSOFT CORP (MSFT)`. The page displayed profile, CIK, recent filings, revenue, EBIT, FCF, price, market cap, peer heatmap, and provenance badges.
 4. **Fundamentals DCF:** Opened DCF. The model loaded actuals, WACC bridge, driver bridge, scenario assumptions, working projection sheet, sensitivity, and bear/base/bull outputs. The surface was usable and analytically dense.
-5. **DCF Editing:** Tried editing WACC and revenue growth cells. The values changed visually/DOM-side, but `Recalculate + Save` stayed disabled in browser automation. This may be an automation/event-dispatch issue rather than a human-blocking bug, but the cells are not clearly labeled as editable and lack descriptive labels such as "Revenue growth 2026." Updated 2026-06-23: editable DCF assumption cells and editable projection overrides now have explicit `aria-label` and `title` text, scalar assumptions are labeled by active scenario, editable cells use an accent-tinted background plus a left edit rail, and input events mark the DCF draft dirty immediately so human typing enables `Recalculate + Save` before blur.
+5. **DCF Editing:** Tried editing WACC and revenue growth cells. The values changed visually/DOM-side, but `Recalculate + Save` stayed disabled in browser automation. This may be an automation/event-dispatch issue rather than a human-blocking bug, but the cells are not clearly labeled as editable and lack descriptive labels such as "Revenue growth 2026." Updated 2026-06-23: editable DCF assumption cells and editable projection overrides now have explicit `aria-label` and `title` text, scalar assumptions are labeled by active scenario, editable cells use an accent-tinted background plus a left edit rail, and input events mark the DCF draft dirty immediately so human typing enables `Recalculate + Save` before blur. Updated 2026-06-27: `frontend/e2e/fundamentals-dcf-edit.spec.ts` adds real Chromium coverage for an MSFT-style DCF fixture. It targets WACC, terminal growth, revenue growth, EBIT margin, and revenue projection cells by accessible label/title, verifies an editable projection cell is structurally marked editable, proves typing enables `Pending recalculation` and `Recalculate + Save` before blur, saves parsed WACC/revenue-growth/projection override values, verifies the dirty/save state resets after save, verifies a later terminal-growth edit can re-enable save, and proves the saved snapshot `Load` action remains callable.
 6. **Provenance/Market Context:** Price and market cap loaded, but the wording around market data availability/provider/fallback was slightly confusing: the UI mixed IBKR context with fallback/availability language.
 
 Outcome: confirmed that Fundamentals is one of Gamma's stronger deep-analysis tabs. The MSFT DCF workflow did not show the same reliability problem as the DAL airline case. The main Fundamentals issue is not model depth; it is editability clarity, accessibility/testability of editable cells, occasional noisy search state, and provenance wording.
@@ -130,7 +130,7 @@ Improve:
 
 - Label editable cells clearly. Updated 2026-06-23: DCF assumption/projection inputs now expose names such as `Revenue growth 2026`, `Revenue projection 2026`, `WACC (base scenario)`, and `Terminal growth (base scenario)`.
 - Add descriptive input labels for row/year cells. Updated 2026-06-23: row/year inputs also include matching title text for hover inspection.
-- Make dirty/recalculate state robust to both human input and automated tests. Updated 2026-06-23: the DCF view now marks dirty state on `input` as well as committing parsed values on `change`; focused frontend SSR tests cover the rendered labels and edit affordances.
+- Make dirty/recalculate state robust to both human input and automated tests. Updated 2026-06-23: the DCF view now marks dirty state on `input` as well as committing parsed values on `change`; focused frontend SSR tests cover the rendered labels and edit affordances. Updated 2026-06-27: Chromium Playwright coverage now exercises the live Svelte component through browser input, click, save, re-edit, and snapshot-load interactions.
 - Clean up provider/fallback wording around market price context.
 
 ### Strategy Lab validation
@@ -211,7 +211,7 @@ Observed:
 - `DAL` still had to be typed manually into Fundamentals in the original workflow.
 - `XLE` still had to be typed manually into Options in the original workflow.
 - Prediction Markets did not preserve the actual "Iran oil" event intent.
-- `docs/strategy_lab_cross_tab_handoffs.md` still lists several handoff directions as planned or not started, including broader Copilot context builder coverage and some non-Strategy-Lab source participation.
+- `docs/strategy_lab_cross_tab_handoffs.md` still lists several handoff directions as planned or not started, especially non-Strategy-Lab source participation. Updated 2026-06-27: SLH-014 is implemented for Strategy Lab inbound handoff context, so Copilot now receives pending/resolved/unsupported Strategy Lab handoff queue state and can cite `strategy_lab.handoff.*` source refs for user-created handoffs.
 
 Required improvement:
 
@@ -225,29 +225,37 @@ In the original audit, Copilot selected contexts correctly but did not return an
 Current state:
 
 - The original failure should no longer be treated as the latest Copilot verdict.
-- The remaining question is whether the new Copilot can synthesize validated objects from the same research thread the UI uses.
+- Updated 2026-06-27: Strategy Lab handoff context builder coverage is implemented. Frontend Copilot context now includes compact pending/resolved handoff queue summaries, resolved object identities, coverage, provenance, and warnings. Backend Copilot now accepts handoff-only Strategy Lab context, exposes a `get_strategy_lab_handoff_context` read-only tool, and returns `strategy_lab.handoffs` / `strategy_lab.handoff.*` source refs.
+- The remaining question is whether the rebuilt Copilot can synthesize the broader validated research thread end to end in the browser with live/model output, beyond the now-tested Strategy Lab handoff context slice.
 
 Required improvement:
 
 - Retest a complete multi-context prompt after the Copilot rebuild.
 - Ensure timeout/failure states produce explicit recoverable cards.
 - Show which context objects were actually used, not merely detected.
+- Preserve the distinction between pending handoff intent and resolved handoff evidence in Copilot cards.
 
 ### Fundamentals editable cells are under-labeled
 
-The MSFT DCF retest did not expose a major valuation failure, but it did show an interaction clarity issue. Updated 2026-06-23: the core editability clarity issue is implemented; remaining work is browser-level workflow coverage and any additional polish found in live retest.
+The MSFT DCF retest did not expose a major valuation failure, but it did show an interaction clarity issue. Updated 2026-06-23: the core editability clarity issue is implemented. Updated 2026-06-27: the browser-level edit/save smoke gap is covered by a Playwright Chromium regression against an MSFT-style DCF fixture; remaining work is live-data retest/polish rather than proving basic browser editability.
 
 Observed:
 
 - Many DCF assumptions are editable inputs, but this is not visually explicit. Updated 2026-06-23: editable cells now use an accent-tinted input surface and a left edit rail; scalar assumption inputs use the same editable tint.
 - Row/year cells lack descriptive accessible names. Updated 2026-06-23: assumption and projection inputs now include descriptive accessible names and titles.
-- Browser automation could change values, but `Recalculate + Save` did not become enabled. Updated 2026-06-23: typing into DCF inputs now marks the draft dirty on `input`, which enables the action immediately; parsed draft values still commit through the existing `change` path.
+- Browser automation could change values, but `Recalculate + Save` did not become enabled. Updated 2026-06-23: typing into DCF inputs now marks the draft dirty on `input`, which enables the action immediately; parsed draft values still commit through the existing `change` path. Updated 2026-06-27: `npm run test:e2e -- e2e/fundamentals-dcf-edit.spec.ts` proves the browser flow on an MSFT-style fixture.
 
 Required improvement:
 
 - Add visible or structural edit affordances for editable DCF cells. Status: implemented 2026-06-23.
 - Add `aria-label`/title text such as `Revenue growth 2026`, `EBIT margin 2028`, `WACC`, and `Terminal growth`. Status: implemented 2026-06-23.
-- Consider marking dirty state on `input` as well as `change`, or otherwise add a regression test that proves human edits enable recalculation. Status: implemented in the component on 2026-06-23; remaining gap is a true browser-level edit/save smoke test because the current frontend test harness is SSR-focused.
+- Consider marking dirty state on `input` as well as `change`, or otherwise add a regression test that proves human edits enable recalculation. Status: implemented in the component on 2026-06-23; browser-level Playwright coverage added on 2026-06-27.
+
+Still cannot be proven automatically by the current regression:
+
+- SEC/IBKR live-data availability, delayed/live provider wording, and real MSFT payload freshness.
+- Visual quality beyond structural affordances, labels, titles, and editable-cell classes.
+- A full user journey from `Ctrl+7` through live company search/selection into DCF, because the regression intentionally mounts a deterministic DCF fixture to avoid provider/network flake.
 
 ### Fundamentals search state is briefly misleading
 
@@ -340,7 +348,7 @@ DCF editability should be clear to both humans and automation:
 - exact row/year labels. Updated 2026-06-23: yearly assumption and projection override inputs now expose row/year accessible labels and titles.
 - dirty-state feedback. Updated 2026-06-23: `input` events set dirty state so `Pending recalculation` and `Recalculate + Save` appear immediately after typing.
 - keyboard-friendly edit flow
-- regression coverage for recalculate enablement. Remaining gap: focused SSR frontend tests cover rendered labels/affordances and the disabled initial state, but not a live browser input/click flow.
+- regression coverage for recalculate enablement. Updated 2026-06-27: `frontend/e2e/fundamentals-dcf-edit.spec.ts` covers live browser input/click behavior for the MSFT-style DCF edit flow, including accessible targeting, dirty-state enablement, save reset, re-edit recovery, and snapshot-load callability.
 
 ### Thesis-horizon-aware options
 
@@ -383,7 +391,7 @@ Still incomplete:
 - Thesis/instrument context to Fundamentals.
 - Sitrep news/event intent to Prediction Markets.
 - Commodity selection to Macro/Risk shock templates.
-- Copilot synthesis over the same durable objects used by analytical tabs.
+- Copilot synthesis over the same durable objects used by analytical tabs. Updated 2026-06-27: Copilot can now consume the same pending/resolved Strategy Lab handoff queue objects used by the UI, but full browser synthesis over the whole research thread still needs retest.
 
 Navigation update:
 
@@ -457,10 +465,10 @@ Acceptance criteria:
 
 - Tabs declare context status.
 - Instruments, books, option structures, DCF scenarios, commodity shocks, and prediction markets can attach to one research thread.
-- Copilot uses the same validated context records the UI uses.
+- Copilot uses the same validated context records the UI uses. Status for Strategy Lab inbound handoffs: implemented 2026-06-27 for pending/resolved/unsupported queue state and source refs.
 - Destination tabs show whether context was loaded exactly, transformed, partially supported, or unavailable.
 
-Status: Open.
+Status: Open overall; partially implemented for Strategy Lab inbound handoff context as of 2026-06-27.
 
 ### P0: Retest Copilot synthesis after rebuild
 
@@ -471,9 +479,9 @@ Acceptance criteria:
 - A timeout guard never leaves the UI indefinitely on `GENERATING...`.
 - The user sees whether the issue was planner-only, provider timeout, route timeout, or model error.
 - The prompt and selected contexts remain recoverable.
-- The answer cites the validated context objects used.
+- The answer cites the validated context objects used. Status for Strategy Lab inbound handoffs: backend/frontend tests now prove `strategy_lab.handoffs` and `strategy_lab.handoff.*` source refs are available to Copilot responses.
 
-Status: Needs current retest.
+Status: Needs current browser/live synthesis retest; Strategy Lab handoff context-builder coverage is implemented with tests as of 2026-06-27.
 
 ### P1: Fundamentals editable-cell clarity
 
@@ -483,10 +491,10 @@ Acceptance criteria:
 
 - Editable assumption/projection cells have descriptive labels. Status: implemented 2026-06-23.
 - Visual treatment distinguishes editable cells from read-only outputs. Status: implemented 2026-06-23.
-- Editing a cell enables `Recalculate + Save` in a human/browser regression test. Status: component behavior implemented 2026-06-23 via `input` dirty-state handling; browser-level regression coverage remains open.
+- Editing a cell enables `Recalculate + Save` in a human/browser regression test. Status: covered 2026-06-27 by the Playwright Chromium MSFT-style DCF edit-flow regression.
 - Dirty state is visible and recoverable. Status: implemented for typed edits and existing save/reset flow.
 
-Status: Implemented in part on 2026-06-23; needs live/browser retest.
+Status: Implemented for deterministic browser regression coverage as of 2026-06-27; needs live-data retest for provider wording, payload freshness, and end-to-end search/navigation polish.
 
 ### P1: Fundamentals DCF sanity checks
 
@@ -583,9 +591,9 @@ The remaining issue is search intent and event matching, not generic related-lin
 
 ### Copilot surface and grounding
 
-Status: Improved by commits `99cde79` and `ccc7eb4`.
+Status: Improved by commits `99cde79` and `ccc7eb4`; further improved for Strategy Lab handoff grounding on 2026-06-27.
 
-The original `GENERATING...` failure should be retested against the rebuilt Copilot tab before being repeated as current truth.
+The original `GENERATING...` failure should be retested against the rebuilt Copilot tab before being repeated as current truth. The 2026-06-27 SLH-014 work did not perform a browser/live model retest; it added tested context-builder/source coverage for pending and resolved Strategy Lab handoffs.
 
 ## Guidance For Future Agents
 
@@ -594,7 +602,7 @@ Use keyboard navigation in audits where a human power user would use it. Log sid
 Do not add another research tab to solve these findings. The app already has enough surfaces. The next improvement should make the existing research path trustworthy:
 
 1. Make research-thread context durable across tabs.
-2. Make Copilot consume the same validated objects the UI uses.
+2. Make Copilot consume the same validated objects the UI uses. Strategy Lab inbound handoffs are now covered; broaden this to the rest of the research-thread object model and retest live synthesis.
 3. Make editable DCF cells obvious, labeled, and testable.
 4. Retest commodity basis reconciliation across Sitrep, Commodities, Risk, and Copilot.
 5. Add sector/model sanity checks before showing valuation conclusions.

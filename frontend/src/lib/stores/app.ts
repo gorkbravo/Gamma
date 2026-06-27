@@ -746,6 +746,155 @@ function serializePositionSignature(snapshot: PortfolioSnapshot | null | undefin
   }));
 }
 
+function summarizeStrategyLabDraftLegForCopilot(leg: StrategyLabPortfolioLegInput | null | undefined) {
+  if (!leg) {
+    return null;
+  }
+  const points = Array.isArray(leg.return_points) ? leg.return_points : [];
+  return {
+    label: leg.label,
+    identifier: leg.identifier,
+    asset_class: leg.asset_class,
+    value_kind: leg.value_kind,
+    weight: leg.weight,
+    return_point_count: points.length,
+    coverage_start: points[0]?.timestamp ?? null,
+    coverage_end: points[points.length - 1]?.timestamp ?? null,
+    object_id: leg.object?.object_id ?? null,
+    object_type: leg.object?.object_type ?? null,
+    source_tab: leg.object?.source_tab ?? null,
+    provenance: leg.object?.provenance ?? null,
+    warnings: leg.object?.warnings ?? []
+  };
+}
+
+function summarizeStrategyLabResearchObjectForCopilot(object: GammaResearchObject | null | undefined) {
+  if (!object) {
+    return null;
+  }
+  return {
+    object_id: object.object_id,
+    object_type: object.object_type,
+    display_name: object.display_name,
+    resolver_capabilities: object.resolver_capabilities,
+    source_tab: object.source_tab,
+    source_mode: object.source_mode,
+    symbols: object.symbols,
+    available_start: object.available_start,
+    available_end: object.available_end,
+    provider_summary: object.provider_summary,
+    provenance: object.provenance,
+    warnings: object.warnings,
+    return_point_count: object.return_points.length
+  };
+}
+
+function summarizeStrategyLabResolvedHandoffForCopilot(resolved: StrategyLabResolvedHandoff | null | undefined) {
+  if (!resolved) {
+    return null;
+  }
+  return {
+    handoff_id: resolved.handoff_id,
+    status: resolved.status,
+    resolved_capability: resolved.resolved_capability,
+    date_coverage: resolved.date_coverage,
+    provider_summary: resolved.provider_summary,
+    provenance: resolved.provenance,
+    warnings: resolved.warnings,
+    unsupported_reason: resolved.unsupported_reason,
+    resolved_objects: {
+      composer_draft_leg: summarizeStrategyLabDraftLegForCopilot(resolved.composer_draft_leg),
+      benchmark_draft: summarizeStrategyLabResearchObjectForCopilot(resolved.benchmark_draft),
+      lens: summarizeStrategyLabResearchObjectForCopilot(resolved.lens),
+      overlay: summarizeStrategyLabResearchObjectForCopilot(resolved.overlay)
+    }
+  };
+}
+
+function strategyLabHandoffContextState(item: StrategyLabHandoffQueueItem) {
+  if (item.stale) {
+    return "stale_earlier_session";
+  }
+  if (item.status === "resolved") {
+    const capability = item.resolved?.resolved_capability ?? item.handoff.resolver_capability;
+    return `resolved_${capability}`;
+  }
+  if (item.status === "unsupported") {
+    return "unsupported_reference_only";
+  }
+  if (item.status === "error") {
+    return "resolution_error";
+  }
+  if (item.status === "resolving") {
+    return "resolving";
+  }
+  return "pending_resolution";
+}
+
+function buildStrategyLabHandoffContextForCopilot() {
+  const queue = get(strategyLabHandoffQueue);
+  const statusCounts = queue.reduce<Record<string, number>>((counts, item) => {
+    const key = item.stale ? "stale" : item.status;
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
+  const currentItems = queue.filter((item) => !item.stale);
+  const resolvedItems = currentItems.filter((item) => item.status === "resolved");
+  const pendingItems = currentItems.filter((item) => item.status === "pending" || item.status === "resolving");
+  const unsupportedItems = currentItems.filter((item) => item.status === "unsupported");
+  const errorItems = currentItems.filter((item) => item.status === "error");
+  const contextState =
+    currentItems.length === 0
+      ? "no_current_handoffs"
+      : resolvedItems.length === currentItems.length
+        ? "resolved_handoffs"
+        : pendingItems.length === currentItems.length
+          ? "pending_handoffs"
+          : "mixed_handoff_states";
+
+  return {
+    context_state: contextState,
+    current_count: currentItems.length,
+    stale_count: queue.length - currentItems.length,
+    status_counts: statusCounts,
+    has_pending: pendingItems.length > 0,
+    has_resolved: resolvedItems.length > 0,
+    has_unsupported: unsupportedItems.length > 0,
+    has_errors: errorItems.length > 0,
+    items: queue.map((item) => ({
+      id: item.id,
+      status: item.status,
+      context_state: strategyLabHandoffContextState(item),
+      stale: Boolean(item.stale),
+      enqueued_at: item.enqueued_at,
+      updated_at: item.updated_at,
+      source_tab: item.handoff.source_tab,
+      source_mode: item.handoff.source_mode,
+      resolver_capability: item.handoff.resolver_capability,
+      asset_class: item.handoff.asset_class,
+      value_kind: item.handoff.value_kind,
+      default_side: item.handoff.default_side,
+      default_weight: item.handoff.default_weight,
+      provider: item.handoff.provider,
+      selected_timeframe: item.handoff.selected_timeframe,
+      selected_entity: item.handoff.selected_entity,
+      normalized_ids: item.handoff.normalized_ids,
+      warnings: item.handoff.warnings,
+      error: item.error,
+      resolved: summarizeStrategyLabResolvedHandoffForCopilot(item.resolved)
+    }))
+  };
+}
+
+function hasActiveStrategyLabCopilotContext() {
+  return (
+    Boolean(get(strategyLabResult)) ||
+    Boolean(get(strategyLabComposition)) ||
+    Boolean(get(researchCompareResult)) ||
+    get(strategyLabHandoffQueue).some((item) => !item.stale)
+  );
+}
+
 // Synthesis calls can be slow with several contexts attached, but a hung provider
 // request must surface as a recoverable failure card, not a silent reset.
 const COPILOT_GENERATION_TIMEOUT_MS = 180_000;
@@ -804,6 +953,7 @@ function buildCopilotContextFingerprint(
     const result = get(researchResult);
     const strategyResult = get(strategyLabResult);
     const composition = get(strategyLabComposition);
+    const strategyLabHandoffs = buildStrategyLabHandoffContextForCopilot();
     return JSON.stringify({
       domain,
       workspaceMode,
@@ -830,7 +980,8 @@ function buildCopilotContextFingerprint(
             lenses: composition.lenses,
             overlays: composition.overlays
           }
-        : null
+        : null,
+      strategyLabHandoffs
     });
   }
 
@@ -858,6 +1009,7 @@ function buildCopilotContextFingerprint(
     const strategyResult = get(strategyLabResult);
     const composition = get(strategyLabComposition);
     const compareResult = get(researchCompareResult);
+    const handoffContext = buildStrategyLabHandoffContextForCopilot();
     return JSON.stringify({
       domain,
       workspaceMode,
@@ -878,6 +1030,7 @@ function buildCopilotContextFingerprint(
             overlays: composition.overlays.map((overlay) => overlay.object_id)
           }
         : null,
+      handoffContext,
       compareResult: compareResult
         ? {
             left: compareResult.left.label,
@@ -2629,7 +2782,8 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         research_state: {
           result: get(researchResult),
           strategy_result: get(strategyLabResult),
-          strategy_composition: get(strategyLabComposition)
+          strategy_composition: get(strategyLabComposition),
+          strategy_lab_handoffs: buildStrategyLabHandoffContextForCopilot()
         }
       };
     case "equity_research":
@@ -2648,7 +2802,8 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
         strategy_lab_state: {
           imported_result: get(strategyLabResult),
           composition: get(strategyLabComposition),
-          compare_result: get(researchCompareResult)
+          compare_result: get(researchCompareResult),
+          handoff_context: buildStrategyLabHandoffContextForCopilot()
         }
       };
     case "macro":
@@ -2782,8 +2937,8 @@ function validateSynthesisScopeDomain(
   if (domain === "equity_research" && !get(researchOverview) && !get(researchResult)) {
     return "Load Equity Research overview or run Scope Analysis before including it in a synthesis card.";
   }
-  if (domain === "strategy_lab" && !get(strategyLabResult) && !get(strategyLabComposition) && !get(researchCompareResult)) {
-    return "Run a Strategy Lab import, composition, or comparison before including it in a synthesis card.";
+  if (domain === "strategy_lab" && !hasActiveStrategyLabCopilotContext()) {
+    return "Run a Strategy Lab import, composition, comparison, or queue a current Strategy Lab handoff before including it in a synthesis card.";
   }
   if (domain === "macro" && !get(macroSnapshot)) {
     return "Load the Macro workspace before including it in a synthesis card.";
@@ -2836,8 +2991,8 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "equity_research" && !get(researchOverview) && !get(researchResult)) {
     return "Load Equity Research overview or run Scope Analysis before generating a research card.";
   }
-  if (domain === "strategy_lab" && !get(strategyLabResult) && !get(strategyLabComposition) && !get(researchCompareResult)) {
-    return "Run a Strategy Lab import, composition, or comparison before generating a research card.";
+  if (domain === "strategy_lab" && !hasActiveStrategyLabCopilotContext()) {
+    return "Run a Strategy Lab import, composition, comparison, or queue a current Strategy Lab handoff before generating a research card.";
   }
   if (domain === "commodities" && !get(commoditiesWorkspace)) {
     return "Load the Commodities workspace before generating a research card.";

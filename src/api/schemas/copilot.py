@@ -72,6 +72,7 @@ class CopilotResearchStateModel(BaseModel):
     result: ResearchAnalyzeResponseModel | None = None
     strategy_result: dict[str, object] | None = None
     strategy_composition: dict[str, object] | None = None
+    strategy_lab_handoffs: dict[str, object] | None = None
 
 
 class CopilotRiskStateModel(BaseModel):

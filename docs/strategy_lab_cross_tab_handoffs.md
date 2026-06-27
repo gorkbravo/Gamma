@@ -27,7 +27,8 @@ Current snapshot:
 | Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts, Equity Research tickers, Commodities instruments, and Macro lens context into Strategy Lab-ready objects. |
 | Composer draft ingestion from handoff | Verified | Accepted resolved return-leg handoffs become editable composer rows; accepted Macro lenses attach as read-only context and pass through composition results. |
 | Tab-by-tab capability matrix | In progress | Prediction Markets, Equity Research, Commodities, Macro, and IV/Options are wired; remaining tabs still need concrete handoff implementations. |
-| Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-011 validation. |
+| Copilot context builder for Strategy Lab handoffs | Implemented | Copilot context now includes current pending, resolved, unsupported, errored, and stale Strategy Lab handoff state; backend Copilot exposes `strategy_lab.handoff.*` sources and a read-only handoff drilldown tool. Live browser/model synthesis retest remains open. |
+| Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-014 validation. |
 
 ## Product Boundary
 
@@ -269,7 +270,7 @@ Warnings should be explicit when:
 | Fundamentals | Right-click company/security row or attach company case | `overlay` or `reference_only` | Planned | Ticker history may become a separate equity leg. |
 | Risk | Attach scenario/stress result | `lens` or `overlay` | Planned | Useful after Strategy Lab has saved runs. |
 | IV/Options | Right-click option-chain contract row, then choose call/put context or call/put and open | `overlay` | Implemented with provider caveat | First pass emits selected option-chain call/put rows as read-only Strategy Lab overlays. The resolver preserves contract id, premium, IV, Greek, surface-quality, provider, and snapshot provenance. Option contracts are not weighted return legs until Gamma has durable option-contract price history. |
-| Copilot | Summarize or explain active handoff | `reference_only` | Planned | Copilot can later propose handoffs, but user should confirm. |
+| Copilot | Summarize or explain active handoff | `reference_only` | Implemented for inbound handoff context | Copilot can cite pending/resolved Strategy Lab handoff queue objects through explicit context state and `strategy_lab.handoff.*` source refs. It does not propose or enqueue handoffs automatically; user-created handoffs remain the boundary. |
 
 ## Implementation Board
 
@@ -290,7 +291,7 @@ Update this board as work lands.
 | SLH-011 | Add Macro lens handoff. | Codex | Verified | Backend/API/frontend tests cover Macro lens resolution and reference-only downgrade behavior; browser flow sent active Macro context with `Lens & Open`, accepted the resolved lens, and composed a portfolio with the lens attached. |
 | SLH-012 | Add shared right-click Strategy handoff menu for instrument rows. | Codex | Implemented | `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`; `npm run test -- src/lib/stores/app.test.ts`; `npm run test -- src/components/CompactContextMenu.test.ts src/views/CommoditiesView.test.ts`; browser verified row menus on Prediction Markets, Equity Research, and Commodities with provider caveats noted below. |
 | SLH-013 | Add IV/Options option-chain row overlay handoff. | Codex | Implemented | `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q`; `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`; `npm run test -- src/components/CompactContextMenu.test.ts`; browser verified live option-chain row menu and Strategy Lab open/warning path, with full accept blocked by local provider/session split noted below. |
-| SLH-014 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | TBD | Not started | Copilot context tests. |
+| SLH-014 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | Codex | Implemented | `.venv\Scripts\python.exe -m pytest tests\test_copilot.py -q`; `npm run typecheck`; `npm run test -- src/lib/stores/app.test.ts`; `npm run test -- src/lib/view-models/research.test.ts`. |
 
 ## Inspection Workflow
 
@@ -349,6 +350,16 @@ Browser:
 - Confirm no page-level horizontal overflow occurs at desktop and narrow viewport widths; horizontally scrollable dense tables are acceptable.
 
 ## Latest Validation Results
+
+Validated for SLH-014 on 2026-06-27:
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| `.venv\Scripts\python.exe -m pytest tests\test_copilot.py -q` | Passed | 66 tests passed, including backend Copilot coverage for handoff-only Strategy Lab context, pending/resolved queue state, `get_strategy_lab_handoff_context`, and `strategy_lab.handoffs` / `strategy_lab.handoff.*` source refs with resolver warnings. |
+| `npm run typecheck` | Passed | Frontend typecheck passed after adding compact Strategy Lab handoff context summaries to Copilot payloads and fingerprints. |
+| `npm run test -- src/lib/stores/app.test.ts` | Passed | 36 tests passed, including pending-only Strategy Lab Copilot context, resolved handoff object summaries, fingerprint changes, and legacy Research Copilot context coverage. |
+| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 24 tests passed; existing handoff envelope builders and draft-row conversion coverage remain green. |
+| Browser/live Copilot synthesis retest | Not run | No visual UI changed beyond existing Copilot source/warning display paths. A live browser/model synthesis retest remains the remaining validation gap before marking SLH-014 `Verified`. |
 
 Validated for SLH-013 on 2026-06-06:
 
@@ -414,6 +425,11 @@ Validated on 2026-06-02:
 - Strategy Lab portfolio math remains driven by return-bearing legs; accepted lenses and overlays annotate interpretation and are carried through composition results for future regime/stress slicing.
 - IV/Options first pass emits selected option-chain call/put rows as Strategy Lab overlays only. The handoff preserves contract id, symbol, expiry, right, strike, premium, IV, delta, open interest, volume, surface quality, provider/source, and snapshot timestamp when present.
 - IV/Options overlays are read-only context. They do not become weighted return legs, executable option orders, strategy signals, broker mutations, or rebalance behavior because the current Options workspace has snapshot contract data but no durable option-contract return stream.
+- Copilot Strategy Lab context now includes a compact handoff-context summary derived from the same frontend queue items shown in the Strategy Lab inbound strip. Pending/resolving items are labeled as unresolved user intent; resolved items carry resolved capability, coverage, provider summary, provenance, warnings, and compact resolved object identities.
+- Backend Copilot exposes Strategy Lab handoffs as read-only context sources: `strategy_lab.handoffs` plus one `strategy_lab.handoff.*` source per queue item. The drilldown tool is `get_strategy_lab_handoff_context`.
+- Stale earlier-session handoffs remain visible as stale context if present in the queue summary, but they are not treated as current resolved evidence or auto-resolution candidates.
+- Accepted composer rows, lenses, and overlays still leave the inbound queue and continue through existing Strategy Lab composition/import context rather than through the handoff queue context.
+- Copilot does not propose, enqueue, accept, or dismiss Strategy Lab handoffs automatically. SLH-014 only lets Copilot explain and cite user-created handoffs and resolver output.
 
 ## Open Questions
 
@@ -429,4 +445,4 @@ Validated on 2026-06-02:
 
 ## Recommended Next Step
 
-Continue with `SLH-014` Copilot context builder coverage for pending and resolved Strategy Lab handoffs, or add durable option-contract history before promoting IV/Options handoffs from overlays to return-bearing legs.
+Retest a live/browser Copilot synthesis over pending and resolved Strategy Lab handoffs, then continue with either durable option-contract history before promoting IV/Options handoffs from overlays to return-bearing legs, or the next non-Strategy-Lab tab participation item such as Crypto token row handoffs.

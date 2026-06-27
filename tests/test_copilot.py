@@ -192,6 +192,37 @@ class _StubCopilotProvider:
                 warnings=list(context.warnings),
             )
 
+        if request.domain == "strategy_lab":
+            handoff_execution = execute_tool("get_strategy_lab_handoff_context", {}, context)
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="ready",
+                provider=self.provider_name,
+                model="stub-model",
+                response_id="resp_stub_strategy_lab",
+                card=ResearchCard(
+                    title="Strategy Lab test card",
+                    hypothesis="Strategy Lab handoff context should separate pending intent from resolved research objects.",
+                    rationale="The active Gamma Strategy Lab context exposes explicit handoff queue state for Copilot.",
+                    required_data=["Handoff queue state", "Resolved object provenance"],
+                    proposed_test="Resolve pending objects before treating them as evidence, and cite only resolved source refs.",
+                    confounders=["Pending handoffs may resolve as unsupported.", "Warnings can differ by source object."],
+                    next_steps=["Inspect handoff sources", "Review resolver warnings"],
+                    caveats=["This is a test fixture."],
+                    source_backed_claims=[
+                        ResearchClaim(
+                            claim="Strategy Lab handoff context was available to the copilot.",
+                            evidence_refs=handoff_execution.trace.source_ids,
+                        )
+                    ],
+                    inferred_claims=["The next interpretation depends on resolver coverage."],
+                ),
+                sources=[*context.sources, *handoff_execution.sources],
+                tool_traces=[handoff_execution.trace],
+                warnings=list(context.warnings),
+            )
+
         if request.domain == "macro":
             series_execution = execute_tool(
                 "get_macro_series_history_summary",
@@ -1480,6 +1511,119 @@ def test_synthesis_copilot_route_returns_cross_context_research_card(tmp_path):
         assert any(source["source_id"] == "synthesis.scope" for source in payload["sources"])
         assert any(source["source_id"] == "portfolio.snapshot" for source in payload["sources"])
         assert any(source["source_id"] == "macro.snapshot" for source in payload["sources"])
+    finally:
+        runtime.shutdown()
+
+
+def test_strategy_lab_copilot_route_uses_pending_and_resolved_handoff_context(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "strategy_lab",
+                "prompt": "Explain the Strategy Lab handoff state.",
+                "context": {
+                    "current_tab": "strategy_lab",
+                    "workspace_mode": "research",
+                    "strategy_lab_state": {
+                        "handoff_context": {
+                            "context_state": "mixed_handoff_states",
+                            "items": [
+                                {
+                                    "id": "prediction_markets:oil:2026-06-27T00:00:00Z",
+                                    "status": "pending",
+                                    "context_state": "pending_resolution",
+                                    "stale": False,
+                                    "enqueued_at": "2026-06-27T00:00:00Z",
+                                    "updated_at": "2026-06-27T00:00:00Z",
+                                    "source_tab": "prediction_markets",
+                                    "source_mode": "detail",
+                                    "resolver_capability": "return_leg",
+                                    "asset_class": "prediction_market",
+                                    "value_kind": "probability",
+                                    "default_side": "long_yes",
+                                    "default_weight": 0.1,
+                                    "provider": "polymarket",
+                                    "selected_entity": {
+                                        "entity_type": "prediction_market_contract",
+                                        "label": "Oil threshold market",
+                                        "normalized_id": "polymarket:oil",
+                                        "provider_id": "oil",
+                                        "native_id": "0xabc",
+                                    },
+                                    "normalized_ids": {"market_id": "polymarket:oil"},
+                                    "warnings": ["Pending handoff still needs resolver coverage."],
+                                },
+                                {
+                                    "id": "equity_research:AAPL:2026-06-27T00:01:00Z",
+                                    "status": "resolved",
+                                    "context_state": "resolved_return_leg",
+                                    "stale": False,
+                                    "enqueued_at": "2026-06-27T00:01:00Z",
+                                    "updated_at": "2026-06-27T00:02:00Z",
+                                    "source_tab": "equity_research",
+                                    "source_mode": "scope_analysis",
+                                    "resolver_capability": "return_leg",
+                                    "asset_class": "equity",
+                                    "value_kind": "return",
+                                    "default_side": "long",
+                                    "default_weight": 0.5,
+                                    "provider": "fixture",
+                                    "selected_entity": {
+                                        "entity_type": "equity_symbol",
+                                        "label": "AAPL",
+                                        "normalized_id": "AAPL",
+                                        "provider_id": "AAPL",
+                                        "native_id": "AAPL",
+                                    },
+                                    "normalized_ids": {"symbol": "AAPL"},
+                                    "warnings": [],
+                                    "resolved": {
+                                        "handoff_id": "equity_research:AAPL:2026-06-27T00:01:00Z",
+                                        "status": "resolved",
+                                        "resolved_capability": "return_leg",
+                                        "date_coverage": {
+                                            "label": "Price history",
+                                            "start": "2026-06-01T00:00:00Z",
+                                            "end": "2026-06-26T00:00:00Z",
+                                        },
+                                        "provider_summary": "fixture",
+                                        "provenance": {"transformation": "equity_history_to_return_leg"},
+                                        "warnings": ["Fixture coverage warning."],
+                                        "resolved_objects": {
+                                            "composer_draft_leg": {
+                                                "label": "AAPL equity return stream",
+                                                "identifier": "AAPL",
+                                                "asset_class": "equity",
+                                                "value_kind": "return",
+                                                "return_point_count": 18,
+                                                "coverage_start": "2026-06-01T00:00:00Z",
+                                                "coverage_end": "2026-06-26T00:00:00Z",
+                                            }
+                                        },
+                                    },
+                                },
+                            ],
+                        }
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["domain"] == "strategy_lab"
+        assert payload["card"]["title"] == "Strategy Lab test card"
+        assert {trace["tool_name"] for trace in payload["tool_traces"]} == {"get_strategy_lab_handoff_context"}
+        handoff_trace = payload["tool_traces"][0]
+        assert handoff_trace["summary"] == "Expanded Strategy Lab handoff context: 2 current, 0 stale."
+        assert any(source["source_id"] == "strategy_lab.handoffs" for source in payload["sources"])
+        assert any(source["source_id"].startswith("strategy_lab.handoff.prediction_markets_oil") for source in payload["sources"])
+        assert any(source["source_id"].startswith("strategy_lab.handoff.equity_research_aapl") for source in payload["sources"])
+        assert any("Pending handoff still needs resolver coverage." in warning for warning in payload["warnings"])
+        assert any("Fixture coverage warning." in warning for warning in payload["warnings"])
+        assert any("strategy_lab.handoffs" in claim["evidence_refs"] for claim in payload["card"]["source_backed_claims"])
     finally:
         runtime.shutdown()
 

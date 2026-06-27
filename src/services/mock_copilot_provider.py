@@ -91,6 +91,11 @@ class MockCopilotProvider(CopilotProvider):
                 ("get_research_scope_summary", {}),
                 ("get_research_coverage_context", {}),
             ]
+        if domain == "strategy_lab":
+            calls: list[tuple[str, dict[str, Any]]] = [("get_strategy_lab_handoff_context", {})]
+            if any(context.tool_state.get(key) for key in ("composition", "imported_result", "compare_result")):
+                calls.append(("run_strategy_lab_backtest", {"result_kind": "auto"}))
+            return calls
         if domain == "macro":
             calls: list[tuple[str, dict[str, Any]]] = [("get_macro_workspace_drilldown", {})]
             series_id = self._infer_macro_series_id(context.summary_data)
@@ -164,6 +169,8 @@ class MockCopilotProvider(CopilotProvider):
             return self._build_risk_card(request, context, tool_outputs, tool_traces)
         if domain == "iv":
             return self._build_iv_card(request, context, tool_outputs, tool_traces)
+        if domain == "strategy_lab":
+            return self._build_strategy_lab_card(request, context, tool_outputs, tool_traces)
         if domain == "synthesis":
             return self._build_synthesis_card(request, context, tool_outputs, tool_traces)
         return self._fallback_card(request, context, tool_traces)
@@ -815,6 +822,82 @@ class MockCopilotProvider(CopilotProvider):
             ],
             inferred_claims=[
                 "Any options trade conclusion still requires external pricing, liquidity, and execution judgment.",
+            ],
+        )
+
+    def _build_strategy_lab_card(
+        self,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        tool_outputs: dict[str, Any],
+        tool_traces: list[CopilotToolTrace],
+    ) -> ResearchCard:
+        handoffs = self._as_dict(tool_outputs.get("get_strategy_lab_handoff_context")) or self._as_dict(
+            context.summary_data.get("handoff_context")
+        )
+        backtest = self._as_dict(tool_outputs.get("run_strategy_lab_backtest"))
+        current_count = int(self._as_float(handoffs.get("current_count")) or 0)
+        status_counts = self._as_dict(handoffs.get("status_counts"))
+        resolved_count = int(self._as_float(status_counts.get("resolved")) or 0)
+        pending_count = int(self._as_float(status_counts.get("pending")) or 0) + int(
+            self._as_float(status_counts.get("resolving")) or 0
+        )
+        unsupported_count = int(self._as_float(status_counts.get("unsupported")) or 0)
+        context_state = handoffs.get("context_state") or "no_current_handoffs"
+        if resolved_count and pending_count:
+            hypothesis = "Strategy Lab has mixed handoff context: resolved objects can be cited, while pending items still need resolver confirmation."
+        elif resolved_count:
+            hypothesis = "Strategy Lab has resolved handoff context that Copilot can cite as Gamma-validated research objects."
+        elif pending_count:
+            hypothesis = "Strategy Lab has pending handoff intent, but Copilot should treat it as unresolved until the resolver runs."
+        elif backtest:
+            hypothesis = "Strategy Lab has an active analysis result that can be reviewed as a read-only backtest."
+        else:
+            hypothesis = "Strategy Lab context is available, but no resolved handoff or active backtest is loaded."
+
+        rationale = (
+            f"Gamma reports Strategy Lab handoff context state `{context_state}` with {current_count} current item(s), "
+            f"{resolved_count} resolved, {pending_count} pending, and {unsupported_count} unsupported."
+        )
+        required_data = [
+            "Strategy Lab handoff queue state",
+            "Resolved handoff object identities, coverage, provenance, and warnings",
+            "Active import/composition/compare result when available",
+        ]
+        if not resolved_count:
+            required_data[1] = "Resolver output before treating any pending handoff as a validated object"
+        return ResearchCard(
+            title=self._title("Strategy Lab", request.prompt),
+            hypothesis=hypothesis,
+            rationale=rationale,
+            required_data=required_data,
+            proposed_test=(
+                "Separate pending intent from resolved objects, then cite only resolved handoff sources or active Strategy Lab analytics "
+                "when drawing conclusions."
+            ),
+            confounders=[
+                "Pending handoffs may resolve to unsupported context or include resolver warnings.",
+                "Unsupported handoffs are reference-only and should not become weighted return legs.",
+                "Accepted composer rows are separate from the inbound queue once the user accepts them.",
+            ],
+            next_steps=[
+                "Resolve pending Strategy Lab handoffs before using them as research evidence.",
+                "Inspect resolved object coverage and warnings before composing a book.",
+                "Use active composition/backtest results separately from unresolved inbound queue state.",
+            ],
+            caveats=[
+                "This card was generated by Gamma's deterministic mock Copilot.",
+                "Strategy Lab handoff context is read-only and does not create orders, broker mutations, or execution instructions.",
+            ],
+            source_backed_claims=[
+                self._claim(
+                    "Gamma exposed explicit Strategy Lab handoff queue state and source references for this card.",
+                    context,
+                    tool_traces,
+                )
+            ],
+            inferred_claims=[
+                "The strongest Strategy Lab conclusion depends on whether the resolved objects have enough coverage for the thesis.",
             ],
         )
 

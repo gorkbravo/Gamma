@@ -315,6 +315,29 @@ class CopilotService:
                     ),
                 ),
                 _CopilotToolDefinition(
+                    name="get_strategy_lab_handoff_context",
+                    description="Return the current read-only Strategy Lab inbound handoff queue, including pending, resolved, unsupported, and stale context state.",
+                    domains=("strategy_lab",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_strategy_lab_handoff_context,
+                    output_schema={"type": "object"},
+                    timeout_seconds=5.0,
+                    provenance_behavior=(
+                        "Returns compact Strategy Lab handoff queue state, resolved object identities, coverage, provenance, and warnings "
+                        "from the same frontend handoff records shown in the Strategy Lab inbound strip."
+                    ),
+                    failure_modes=(
+                        "Pending handoffs are user intent only until resolved by the Strategy Lab resolver.",
+                        "Unsupported handoffs are context/reference records and must not be treated as weighted return legs.",
+                        "Stale earlier-session handoffs are reported separately and excluded from current auto-resolution.",
+                    ),
+                ),
+                _CopilotToolDefinition(
                     name="run_strategy_lab_backtest",
                     description="Return an operator-grade read-only Strategy Lab backtest summary from the active imported strategy, composition, or comparison result.",
                     domains=("strategy_lab",),
@@ -3190,7 +3213,10 @@ class CopilotService:
             "prompt": request.prompt,
             "research": summarize_research_result(result),
         }
-        warnings = dedupe_warnings(result.get("warnings", []))
+        strategy_lab_handoffs = self._summarize_strategy_lab_handoff_context(state.get("strategy_lab_handoffs"))
+        if strategy_lab_handoffs.get("current_count"):
+            summary_data["strategy_lab_handoffs"] = strategy_lab_handoffs
+        warnings = dedupe_warnings(result.get("warnings", []), strategy_lab_handoffs.get("warnings", []))
         performance_points = result.get("performance_points", [])
         sources = [
             CopilotSourceRef(
@@ -3215,11 +3241,13 @@ class CopilotService:
                     retrieved_at=result["snapshot"].get("timestamp"),
                 )
             )
+        if strategy_lab_handoffs.get("current_count"):
+            sources.extend(self._strategy_lab_handoff_sources(strategy_lab_handoffs))
         return CopilotContextBundle(
             domain="research",
             current_tab=request.context.current_tab or "research",
             summary_data=summary_data,
-            tool_state={"result": result},
+            tool_state={"result": result, "strategy_lab_handoffs": strategy_lab_handoffs},
             sources=sources,
             warnings=warnings,
         )
@@ -3285,32 +3313,39 @@ class CopilotService:
         imported_result = state.get("imported_result")
         composition = state.get("composition")
         compare_result = state.get("compare_result")
-        if not any(isinstance(item, dict) for item in (imported_result, composition, compare_result)):
-            raise ValueError("Strategy Lab copilot requires an active import, composition, or comparison.")
+        handoff_context = self._summarize_strategy_lab_handoff_context(state.get("handoff_context"))
+        if not any(isinstance(item, dict) for item in (imported_result, composition, compare_result)) and not handoff_context.get("current_count"):
+            raise ValueError("Strategy Lab copilot requires an active import, composition, comparison, or current handoff.")
         summary_data = {
             "workspace_mode": request.context.workspace_mode or "research",
             "imported_result": imported_result if isinstance(imported_result, dict) else None,
             "composition": composition if isinstance(composition, dict) else None,
             "compare_result": compare_result if isinstance(compare_result, dict) else None,
+            "handoff_context": handoff_context,
         }
         warnings = dedupe_warnings(
             (imported_result or {}).get("warnings", []) if isinstance(imported_result, dict) else [],
             (composition or {}).get("warnings", []) if isinstance(composition, dict) else [],
             (compare_result or {}).get("warnings", []) if isinstance(compare_result, dict) else [],
+            handoff_context.get("warnings", []),
         )
-        sources = [
-            CopilotSourceRef(
-                source_id="strategy_lab.context",
-                label="Strategy Lab context",
-                kind="workspace",
-                provider="gamma",
-                origin="gamma.strategy_lab",
-                description="Active Strategy Lab import, composition, or comparison context.",
-                retrieved_at=(composition or imported_result or {}).get("retrieved_at")
-                if isinstance(composition or imported_result, dict)
-                else None,
+        sources = []
+        if any(isinstance(item, dict) for item in (imported_result, composition, compare_result)):
+            sources.append(
+                CopilotSourceRef(
+                    source_id="strategy_lab.context",
+                    label="Strategy Lab context",
+                    kind="workspace",
+                    provider="gamma",
+                    origin="gamma.strategy_lab",
+                    description="Active Strategy Lab import, composition, or comparison context.",
+                    retrieved_at=(composition or imported_result or {}).get("retrieved_at")
+                    if isinstance(composition or imported_result, dict)
+                    else None,
+                )
             )
-        ]
+        if handoff_context.get("items"):
+            sources.extend(self._strategy_lab_handoff_sources(handoff_context))
         return CopilotContextBundle(
             domain="strategy_lab",
             current_tab=request.context.current_tab or "strategy_lab",
@@ -3319,6 +3354,181 @@ class CopilotService:
             sources=sources,
             warnings=warnings,
         )
+
+    @classmethod
+    def _summarize_strategy_lab_handoff_context(cls, handoff_context: Any) -> dict[str, Any]:
+        if not isinstance(handoff_context, dict):
+            return {
+                "context_state": "no_current_handoffs",
+                "current_count": 0,
+                "stale_count": 0,
+                "status_counts": {},
+                "has_pending": False,
+                "has_resolved": False,
+                "has_unsupported": False,
+                "has_errors": False,
+                "items": [],
+                "warnings": [],
+            }
+        raw_items = handoff_context.get("items")
+        items = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+        summarized_items = [cls._summarize_strategy_lab_handoff_item(item) for item in items]
+        current_items = [item for item in summarized_items if not item.get("stale")]
+        status_counts: dict[str, int] = {}
+        for item in summarized_items:
+            key = "stale" if item.get("stale") else str(item.get("status") or "unknown")
+            status_counts[key] = status_counts.get(key, 0) + 1
+        warnings = dedupe_warnings(
+            handoff_context.get("warnings", []) if isinstance(handoff_context.get("warnings"), list) else [],
+            *(item.get("warnings", []) for item in summarized_items),
+            *(item.get("resolved", {}).get("warnings", []) for item in summarized_items if isinstance(item.get("resolved"), dict)),
+        )
+        has_pending = any(item.get("status") in {"pending", "resolving"} and not item.get("stale") for item in summarized_items)
+        has_resolved = any(item.get("status") == "resolved" and not item.get("stale") for item in summarized_items)
+        has_unsupported = any(item.get("status") == "unsupported" and not item.get("stale") for item in summarized_items)
+        has_errors = any(item.get("status") == "error" and not item.get("stale") for item in summarized_items)
+        if not current_items:
+            context_state = "no_current_handoffs"
+        elif has_resolved and not (has_pending or has_unsupported or has_errors):
+            context_state = "resolved_handoffs"
+        elif has_pending and not (has_resolved or has_unsupported or has_errors):
+            context_state = "pending_handoffs"
+        else:
+            context_state = "mixed_handoff_states"
+        return {
+            "context_state": str(handoff_context.get("context_state") or context_state),
+            "computed_context_state": context_state,
+            "current_count": len(current_items),
+            "stale_count": len(summarized_items) - len(current_items),
+            "status_counts": status_counts,
+            "has_pending": has_pending,
+            "has_resolved": has_resolved,
+            "has_unsupported": has_unsupported,
+            "has_errors": has_errors,
+            "items": summarized_items[:20],
+            "warnings": warnings,
+        }
+
+    @classmethod
+    def _summarize_strategy_lab_handoff_item(cls, item: dict[str, Any]) -> dict[str, Any]:
+        entity = item.get("selected_entity") if isinstance(item.get("selected_entity"), dict) else {}
+        resolved = item.get("resolved") if isinstance(item.get("resolved"), dict) else None
+        return {
+            "id": str(item.get("id") or ""),
+            "source_id": f"strategy_lab.handoff.{cls._safe_source_id(str(item.get('id') or entity.get('normalized_id') or entity.get('label') or 'unknown')).lower()}",
+            "status": str(item.get("status") or "pending"),
+            "context_state": str(item.get("context_state") or ""),
+            "stale": bool(item.get("stale")),
+            "enqueued_at": item.get("enqueued_at"),
+            "updated_at": item.get("updated_at"),
+            "source_tab": item.get("source_tab"),
+            "source_mode": item.get("source_mode"),
+            "resolver_capability": item.get("resolver_capability"),
+            "asset_class": item.get("asset_class"),
+            "value_kind": item.get("value_kind"),
+            "default_side": item.get("default_side"),
+            "default_weight": item.get("default_weight"),
+            "provider": item.get("provider"),
+            "selected_timeframe": item.get("selected_timeframe") if isinstance(item.get("selected_timeframe"), dict) else None,
+            "selected_entity": {
+                "entity_type": entity.get("entity_type"),
+                "label": entity.get("label"),
+                "normalized_id": entity.get("normalized_id"),
+                "provider_id": entity.get("provider_id"),
+                "native_id": entity.get("native_id"),
+            },
+            "normalized_ids": item.get("normalized_ids") if isinstance(item.get("normalized_ids"), dict) else {},
+            "warnings": [str(warning) for warning in item.get("warnings", []) if str(warning).strip()]
+            if isinstance(item.get("warnings"), list)
+            else [],
+            "error": item.get("error"),
+            "resolved": cls._summarize_strategy_lab_resolved_handoff(resolved),
+        }
+
+    @classmethod
+    def _summarize_strategy_lab_resolved_handoff(cls, resolved: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(resolved, dict):
+            return None
+        resolved_objects = resolved.get("resolved_objects") if isinstance(resolved.get("resolved_objects"), dict) else {}
+        return {
+            "handoff_id": resolved.get("handoff_id"),
+            "status": resolved.get("status"),
+            "resolved_capability": resolved.get("resolved_capability"),
+            "date_coverage": resolved.get("date_coverage") if isinstance(resolved.get("date_coverage"), dict) else None,
+            "provider_summary": resolved.get("provider_summary"),
+            "provenance": resolved.get("provenance") if isinstance(resolved.get("provenance"), dict) else {},
+            "warnings": [str(warning) for warning in resolved.get("warnings", []) if str(warning).strip()]
+            if isinstance(resolved.get("warnings"), list)
+            else [],
+            "unsupported_reason": resolved.get("unsupported_reason"),
+            "resolved_objects": {
+                "composer_draft_leg": cls._compact_nested_mapping(resolved_objects.get("composer_draft_leg")),
+                "benchmark_draft": cls._compact_nested_mapping(resolved_objects.get("benchmark_draft")),
+                "lens": cls._compact_nested_mapping(resolved_objects.get("lens")),
+                "overlay": cls._compact_nested_mapping(resolved_objects.get("overlay")),
+            },
+        }
+
+    @staticmethod
+    def _compact_nested_mapping(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        allowed = {
+            "label",
+            "display_name",
+            "identifier",
+            "object_id",
+            "object_type",
+            "source_tab",
+            "source_mode",
+            "asset_class",
+            "value_kind",
+            "resolver_capability",
+            "resolver_capabilities",
+            "return_point_count",
+            "coverage_start",
+            "coverage_end",
+            "available_start",
+            "available_end",
+            "provider_summary",
+            "date_coverage",
+            "provenance",
+            "warnings",
+        }
+        return {key: value.get(key) for key in sorted(allowed) if key in value}
+
+    @staticmethod
+    def _strategy_lab_handoff_sources(handoff_context: dict[str, Any]) -> list[CopilotSourceRef]:
+        sources = [
+            CopilotSourceRef(
+                source_id="strategy_lab.handoffs",
+                label="Strategy Lab handoff queue",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.strategy_lab.handoff_queue",
+                description="Current Strategy Lab inbound handoff queue state, including pending, resolved, unsupported, and stale items.",
+                retrieved_at=now_utc(),
+            )
+        ]
+        for item in handoff_context.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            entity = item.get("selected_entity") if isinstance(item.get("selected_entity"), dict) else {}
+            sources.append(
+                CopilotSourceRef(
+                    source_id=str(item.get("source_id") or "strategy_lab.handoff.unknown"),
+                    label=str(entity.get("label") or item.get("id") or "Strategy Lab handoff"),
+                    kind="handoff",
+                    provider=str(item.get("provider") or "gamma"),
+                    origin="gamma.strategy_lab.handoff_queue",
+                    description=(
+                        f"Strategy Lab handoff state `{item.get('context_state') or item.get('status')}` "
+                        f"from {item.get('source_tab') or 'unknown source'}; capability `{item.get('resolver_capability')}`."
+                    ),
+                    retrieved_at=item.get("updated_at") or item.get("enqueued_at") or now_utc(),
+                )
+            )
+        return sources
 
     def _build_risk_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
         state = request.context.risk_state or {}
@@ -4261,6 +4471,44 @@ class CopilotService:
                 source_ids=[source.source_id],
             ),
             sources=[source],
+        )
+
+    def _tool_get_strategy_lab_handoff_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        del arguments
+        handoff_context = context.tool_state.get("handoff_context")
+        if not isinstance(handoff_context, dict):
+            handoff_context = self._summarize_strategy_lab_handoff_context(None)
+        sources = self._strategy_lab_handoff_sources(handoff_context)
+        source_ids = [source.source_id for source in sources]
+        return CopilotToolExecution(
+            output={
+                "context_state": handoff_context.get("context_state"),
+                "computed_context_state": handoff_context.get("computed_context_state"),
+                "current_count": handoff_context.get("current_count"),
+                "stale_count": handoff_context.get("stale_count"),
+                "status_counts": dict(handoff_context.get("status_counts") or {}),
+                "has_pending": bool(handoff_context.get("has_pending")),
+                "has_resolved": bool(handoff_context.get("has_resolved")),
+                "has_unsupported": bool(handoff_context.get("has_unsupported")),
+                "has_errors": bool(handoff_context.get("has_errors")),
+                "items": list(handoff_context.get("items", []) or []),
+                "warnings": list(handoff_context.get("warnings", []) or []),
+            },
+            trace=CopilotToolTrace(
+                tool_name="get_strategy_lab_handoff_context",
+                summary=(
+                    "Expanded Strategy Lab handoff context: "
+                    f"{handoff_context.get('current_count', 0)} current, "
+                    f"{handoff_context.get('stale_count', 0)} stale."
+                ),
+                arguments={},
+                source_ids=source_ids,
+            ),
+            sources=sources,
         )
 
     def _tool_run_hypothetical_portfolio_comparison(
@@ -5725,7 +5973,10 @@ class CopilotService:
                 "get_research_scope_summary",
                 "get_research_coverage_context",
             ),
-            "strategy_lab": ("run_strategy_lab_backtest",),
+            "strategy_lab": (
+                "get_strategy_lab_handoff_context",
+                "run_strategy_lab_backtest",
+            ),
             "macro": ("get_macro_workspace_drilldown",),
             "commodities": ("get_commodities_workspace_summary",),
             "prediction_markets": (

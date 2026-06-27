@@ -1798,6 +1798,31 @@ describe("app store orchestration", () => {
   it("includes Strategy Lab state in the legacy research copilot context and fingerprint", async () => {
     const snapshot = makeSnapshot();
     researchResult.set(makeResearchResult("single_ticker", snapshot));
+    const queued = enqueueStrategyLabHandoff({
+      source_tab: "prediction_markets",
+      source_mode: "detail",
+      intended_target_tab: "strategy_lab",
+      intended_target_mode: "composer",
+      selected_entity: {
+        entity_type: "prediction_market_contract",
+        label: "Oil threshold market",
+        normalized_id: "polymarket:oil",
+        provider_id: "oil",
+        native_id: "0xabc",
+        metadata: {}
+      },
+      resolver_capability: "return_leg",
+      asset_class: "prediction_market",
+      value_kind: "probability",
+      default_side: "long_yes",
+      default_weight: 0.1,
+      selected_timeframe: null,
+      provider: "polymarket",
+      source: null,
+      warnings: ["Pending handoff still needs resolver coverage."],
+      normalized_ids: { market_id: "polymarket:oil" },
+      timestamp: "2026-06-27T00:00:00Z"
+    });
     const baseFingerprint = previewCopilotThreadFingerprint("research", { workspaceMode: "research" });
     const composition = {
       ...makeStrategyLabResult(),
@@ -1822,6 +1847,117 @@ describe("app store orchestration", () => {
     expect(body.context.research_state.result?.scope_type).toBe("single_ticker");
     expect(body.context.research_state.strategy_result?.name).toBe("CSV Strategy");
     expect(body.context.research_state.strategy_composition?.name).toBe("Composite Strategy");
+    expect(body.context.research_state.strategy_lab_handoffs.context_state).toBe("pending_handoffs");
+    expect(body.context.research_state.strategy_lab_handoffs.items[0]?.id).toBe(queued.id);
+  });
+
+  it("builds explicit strategy lab copilot context for pending and resolved handoffs", async () => {
+    const market = makePredictionMarket("polymarket:oil");
+    const handoff: StrategyLabHandoffEnvelope = {
+      source_tab: "prediction_markets",
+      source_mode: "detail",
+      intended_target_tab: "strategy_lab",
+      intended_target_mode: "composer",
+      selected_entity: {
+        entity_type: "prediction_market_contract",
+        label: market.title,
+        normalized_id: market.market_id,
+        provider_id: market.provider_market_id,
+        native_id: market.provider_condition_id,
+        metadata: {}
+      },
+      resolver_capability: "return_leg",
+      asset_class: "prediction_market",
+      value_kind: "probability",
+      default_side: "long_yes",
+      default_weight: 0.1,
+      selected_timeframe: null,
+      provider: market.source_provider,
+      source: null,
+      warnings: ["Pending handoff still needs resolver coverage."],
+      normalized_ids: { market_id: market.market_id },
+      timestamp: "2026-06-27T00:00:00Z"
+    };
+    const resolved = {
+      handoff_id: "prediction_markets:polymarket:oil:2026-06-27T00:00:00Z",
+      envelope: handoff,
+      status: "resolved",
+      resolved_capability: "return_leg",
+      composer_draft_leg: {
+        label: "Oil threshold market | YES probability",
+        asset_class: "prediction_contract",
+        identifier: market.market_id,
+        weight: 0.1,
+        value_kind: "level",
+        return_points: [
+          { timestamp: "2026-06-01T00:00:00Z", value: 0.3 },
+          { timestamp: "2026-06-02T00:00:00Z", value: 0.34 }
+        ],
+        object: {
+          object_id: "strategy_lab:prediction:oil",
+          object_type: "prediction_market_probability",
+          display_name: "Oil threshold market YES probability",
+          source_tab: "prediction_markets",
+          source_mode: "detail",
+          resolver_capabilities: ["return_leg"],
+          symbols: [],
+          constituents: [],
+          weights: [],
+          available_start: "2026-06-01T00:00:00Z",
+          available_end: "2026-06-02T00:00:00Z",
+          provider_summary: "polymarket",
+          provenance: { transformation: "long_yes_probability_return" },
+          warnings: ["Probability history is a research proxy."],
+          return_points: [
+            { timestamp: "2026-06-01T00:00:00Z", value: 0.3 },
+            { timestamp: "2026-06-02T00:00:00Z", value: 0.34 }
+          ]
+        }
+      },
+      benchmark_draft: null,
+      lens: null,
+      overlay: null,
+      date_coverage: { label: "Probability history", start: "2026-06-01T00:00:00Z", end: "2026-06-02T00:00:00Z" },
+      provider_summary: "polymarket",
+      provenance: { transformation: "long_yes_probability_return" },
+      warnings: ["Probability history is a research proxy."],
+      unsupported_reason: null
+    };
+    enqueueStrategyLabHandoff(handoff);
+    const pendingFingerprint = previewCopilotThreadFingerprint("strategy_lab", { workspaceMode: "research" });
+    const pendingFetch = vi.fn().mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_pending", "Pending Strategy Card")));
+    vi.stubGlobal("fetch", pendingFetch);
+
+    await loadCopilotResearchCard("strategy_lab", "Explain pending handoff state.", {
+      workspaceMode: "research"
+    });
+
+    const pendingBody = JSON.parse(String(pendingFetch.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(pendingBody.context.strategy_lab_state.handoff_context.context_state).toBe("pending_handoffs");
+    expect(pendingBody.context.strategy_lab_state.handoff_context.has_pending).toBe(true);
+    expect(pendingBody.context.strategy_lab_state.handoff_context.items[0]?.context_state).toBe("pending_resolution");
+    expect(pendingBody.context.strategy_lab_state.handoff_context.items[0]?.resolved).toBeNull();
+
+    const resolvedFetch = vi
+      .fn()
+      .mockResolvedValueOnce(ok(resolved))
+      .mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_resolved", "Resolved Strategy Card")));
+    vi.stubGlobal("fetch", resolvedFetch);
+
+    await resolvePendingStrategyLabHandoffs();
+    const resolvedFingerprint = previewCopilotThreadFingerprint("strategy_lab", { workspaceMode: "research" });
+    await loadCopilotResearchCard("strategy_lab", "Explain resolved handoff state.", {
+      workspaceMode: "research"
+    });
+
+    const resolvedBody = JSON.parse(String(resolvedFetch.mock.calls[1]?.[1]?.body ?? "{}"));
+    const handoffContext = resolvedBody.context.strategy_lab_state.handoff_context;
+    expect(resolvedFingerprint).not.toBe(pendingFingerprint);
+    expect(handoffContext.context_state).toBe("resolved_handoffs");
+    expect(handoffContext.has_resolved).toBe(true);
+    expect(handoffContext.items[0]?.resolved.resolved_objects.composer_draft_leg.return_point_count).toBe(2);
+    expect(handoffContext.items[0]?.resolved.resolved_objects.composer_draft_leg.object_id).toBe("strategy_lab:prediction:oil");
+    expect(get(copilotCards).strategy_lab?.response_id).toBe("resp_strategy_resolved");
   });
 
   it("builds distinct copilot contexts for equity research and strategy lab", async () => {
