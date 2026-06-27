@@ -847,6 +847,13 @@ class IbkrCommoditiesDataProvider:
                 if history.points:
                     history_by_id[config.instrument_id] = history
 
+        history_by_id = self._ensure_ibkr_daily_references(
+            reference.instruments,
+            history_by_id,
+            set([*ibkr_curve_ids, *cached_curve_ids]),
+            retrieved_at,
+        )
+
         if not ibkr_curve_ids and not cached_curve_ids:
             return _with_provider_warning(
                 reference,
@@ -906,6 +913,7 @@ class IbkrCommoditiesDataProvider:
                     f"Cached IBKR curves reused for {len(cached_curve_ids)} commodity instruments." if cached_curve_ids else "",
                     f"Delayed quote nodes detected: {delayed_nodes}." if delayed_nodes else "",
                     "Gamma remains read-only; IBKR is used here for futures market data only.",
+                    "Each IBKR futures row carries either a dated daily reference history or an explicit no-daily-reference placeholder.",
                     "Front-contract histories use IBKR historical bars when available; calendar-spread history still depends on saved curve snapshots and provider limits.",
                 ]
             ),
@@ -916,6 +924,26 @@ class IbkrCommoditiesDataProvider:
                 "IBKR futures curves replace fallback curves where at least two priced contracts are available; other commodities fields retain explicit fallback provenance."
             ),
         )
+
+    def _ensure_ibkr_daily_references(
+        self,
+        instruments: list[CommodityInstrument],
+        history_by_id: dict[str, CommodityPriceHistory],
+        ibkr_curve_ids: set[str],
+        retrieved_at: datetime,
+    ) -> dict[str, CommodityPriceHistory]:
+        next_histories = dict(history_by_id)
+        instrument_by_id = {instrument.instrument_id: instrument for instrument in instruments}
+        for instrument_id in sorted(ibkr_curve_ids):
+            existing = next_histories.get(instrument_id)
+            if _usable_daily_reference_history(existing):
+                continue
+            instrument = instrument_by_id.get(instrument_id)
+            config = self.root_configs.get(instrument_id)
+            label = config.label if config is not None else (instrument.name if instrument is not None else instrument_id.upper())
+            unit = config.quote_unit if config is not None else (instrument.quote_unit if instrument is not None else "")
+            next_histories[instrument_id] = _missing_ibkr_daily_reference_history(label, instrument_id, unit, retrieved_at)
+        return next_histories
 
     def _is_connected(self) -> bool:
         try:
@@ -1868,6 +1896,44 @@ def _fred_symbol_for(instrument_id: str) -> str:
         if config.instrument_id == instrument_id:
             return config.series_id
     return ""
+
+
+def _usable_daily_reference_history(history: CommodityPriceHistory | None) -> bool:
+    if history is None or not history.points:
+        return False
+    provider = str(history.source_provider or "").strip().lower()
+    if provider in {"ibkr", "fred", "eia"}:
+        return True
+    note = str(history.transformation_note or "").lower()
+    label = str(history.label or "").lower()
+    return provider != "sample_data" and ("continuous" in note or "continuous" in label or "spot" in note or "spot" in label)
+
+
+def _missing_ibkr_daily_reference_history(
+    label: str,
+    instrument_id: str,
+    unit: str,
+    retrieved_at: datetime,
+) -> CommodityPriceHistory:
+    return CommodityPriceHistory(
+        instrument_id=instrument_id,
+        label=f"{label} daily reference unavailable",
+        unit=unit,
+        points=[],
+        warnings=[
+            (
+                f"No daily reference history is available for {label}. "
+                "Gamma loaded an IBKR futures curve, but could not attach IBKR front-contract historical bars, "
+                "a FRED/EIA spot proxy, or a continuous-front reference series."
+            )
+        ],
+        source_provider="unavailable",
+        retrieved_at=retrieved_at,
+        origin=f"ibkr.commodities.daily_reference_unavailable:{instrument_id}",
+        transformation_note=(
+            "Explicit no-daily-reference placeholder for an IBKR futures row; Gamma avoids validating curve-derived numbers with sample or cached curve data."
+        ),
+    )
 
 
 def _max_datetime(*values: datetime | None) -> datetime | None:

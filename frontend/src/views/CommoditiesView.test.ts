@@ -370,6 +370,7 @@ function makeWorkspace(): CommodityWorkspaceResponse {
             transformation_note: "Sample price."
           }
         ],
+        warnings: [],
         source_provider: "sample_data",
         retrieved_at: retrievedAt,
         origin: "sample_commodities.price_history",

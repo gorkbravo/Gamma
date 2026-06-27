@@ -104,6 +104,7 @@ class CommodityPriceHistory:
     label: str
     unit: str
     points: list[CommodityPricePoint] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     source_provider: str = ""
     retrieved_at: datetime | None = None
     origin: str = ""

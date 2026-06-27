@@ -456,11 +456,13 @@ Provider behavior:
 - `COMMODITIES_PROVIDER=ibkr` builds read-only futures curves from individual IBKR/TWS `FUT` contract details and market-data snapshots when TWS is connected and the account has the needed futures market-data entitlements
 - IBKR futures curves use `IBKR_COMMODITIES_ENABLED`, `IBKR_COMMODITIES_STARTUP_ENABLED`, `IBKR_COMMODITIES_BREADTH_ENABLED`, `IBKR_COMMODITIES_ON_DEMAND`, `IBKR_COMMODITIES_SELECTED_CACHE_SECONDS`, `IBKR_COMMODITIES_CONTRACT_DEPTH`, `IBKR_COMMODITIES_BREADTH_CONTRACT_DEPTH`, `IBKR_COMMODITIES_HISTORY_DAYS`, `IBKR_COMMODITIES_QUOTE_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_CONTRACT_TIMEOUT_SECONDS`, `IBKR_COMMODITIES_QUOTE_BATCH_SIZE`, and optional `IBKR_COMMODITIES_ROOT_OVERRIDES` to tune roots, depth, and request behavior
 - when `COMMODITIES_PROVIDER=ibkr` and `EIA_API_KEY` is present, Gamma uses EIA/FRED as the low-cost SITREP reference layer and overlays shallow IBKR breadth curves plus deeper selected-root coverage; EIA product spot defaults cover RBOB gasoline and heating oil via `EIA_RBOB_GASOLINE_PRICE_SERIES_ID` and `EIA_HEATING_OIL_PRICE_SERIES_ID`
+- IBKR futures rows carry either a usable daily reference history (`IBKR` front-contract bars, `FRED`/`EIA` spot proxies, or another continuous/spot proxy) or an explicit no-daily-reference placeholder with a warning; Gamma does not silently validate futures rows with sample histories
 - if IBKR contract discovery, quotes, or entitlements are unavailable, Gamma keeps the sample or EIA/FRED fallback payload and returns explicit coverage warnings
 
 What Gamma computes:
 
 - contango / backwardation / flat curve labels
+- headline price change from a dated prior close/reference when available; otherwise `N/A`
 - front spread, M1-M6 spread, curve slope, and a simple front-spread roll-yield proxy
 - spread change, z-score, and percentile when enough history exists
 - latest inventory change and simple percentile context
@@ -472,7 +474,8 @@ Important caveats:
 - EIA coverage is official but partial, US-energy-focused, and release-lagged
 - FRED price histories are spot or proxy series, not futures chains
 - IBKR curves are constructed by Gamma from discovered futures contracts; live, delayed, cached, or missing quote status depends on TWS connectivity, exchange subscriptions, and market-data mode
-- IBKR front-contract histories are not back-adjusted continuous futures, and local daily curve snapshots accumulate only after Gamma observes the curve
+- IBKR front-contract histories are not back-adjusted continuous futures; cached local curve snapshots are never used as prior settlements for headline `% CHG`
+- local daily curve snapshots accumulate only after Gamma observes the curve and are treated as curve-history context, not as unknown-vintage daily closes
 - roll-yield, spread z-scores, seasonal inventory context, and cross-domain links are Gamma heuristics
 - Commodities remains read-only and does not expose order placement, strategy execution, or trading automation
 

@@ -296,6 +296,10 @@
     ];
   }
 
+  function priceHistoryEmptyMessage(history: CommodityPriceHistory | null) {
+    return history?.warnings?.[0] ?? "CHART UNAVAILABLE";
+  }
+
   function buildCurveSeries(curve: CommodityCurveSnapshot | null): ChartSeries[] {
     if (!curve?.nodes.length) {
       return [];
@@ -1794,7 +1798,10 @@
             <span>{selectedInstrument?.name ?? "Price"} · Price History</span>
             <span class="header-meta">{historyPointCount ? `${historyPointCount} obs · ${formatDate(latestHistoryDate)}` : "—"}</span>
           </header>
-          <TimeSeriesChart series={priceSeries} height={260} emptyMessage="CHART UNAVAILABLE" />
+          <TimeSeriesChart series={priceSeries} height={260} emptyMessage={priceHistoryEmptyMessage(selectedHistory)} />
+          {#if !historyPointCount && selectedHistory?.warnings?.length}
+            <p class="empty-hint">{selectedHistory.warnings[0]}</p>
+          {/if}
         </article>
 
         <article class="panel table-panel snapshot-panel">

@@ -2278,6 +2278,7 @@ export interface CommodityPriceHistory {
   label: string;
   unit: string;
   points: CommodityPricePoint[];
+  warnings: string[];
   source_provider: string;
   retrieved_at: string | null;
   origin: string;
