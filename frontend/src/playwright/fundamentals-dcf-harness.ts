@@ -137,6 +137,7 @@ function makeMsftDcfModel(): FundamentalsDcfModel {
         ],
         cost_of_capital_rows: [],
         valuation_bridge_rows: [],
+        sanity_checks: [],
         summary: {
           scenario_id: id,
           label: id,

@@ -204,18 +204,26 @@
     return toneClass(value);
   }
 
+  function sanitySeverityClass(severity: string | null | undefined) {
+    const normalized = String(severity ?? "").toLowerCase();
+    if (normalized === "error") return "negative";
+    if (normalized === "warning") return "warning";
+    if (normalized === "ok") return "positive";
+    return "";
+  }
+
   function isGammaDerivedStatementCell(sourceProvider: string | null | undefined) {
     return statementKind !== "ratios" && sourceProvider === "gamma";
   }
 
-  function sensitivityHeatClass(value: number | null | undefined, range: { min: number; max: number }) {
+  function sensitivityHeatClass(value: number | null | undefined, currentPrice: number | null | undefined) {
     if (value == null || !Number.isFinite(value)) return "";
-    if (range.max === range.min) return "sens-heat-mid";
-    const t = (value - range.min) / (range.max - range.min);
-    if (t >= 0.85) return "sens-heat-pos-strong";
-    if (t >= 0.6) return "sens-heat-pos";
-    if (t >= 0.4) return "sens-heat-mid";
-    if (t >= 0.15) return "sens-heat-neg";
+    if (currentPrice == null || !Number.isFinite(currentPrice) || currentPrice <= 0) return "sens-heat-mid";
+    const upside = (value - currentPrice) / currentPrice;
+    if (upside >= 0.2) return "sens-heat-pos-strong";
+    if (upside >= 0.05) return "sens-heat-pos";
+    if (upside >= -0.05) return "sens-heat-mid";
+    if (upside >= -0.2) return "sens-heat-neg";
     return "sens-heat-neg-strong";
   }
 
@@ -531,18 +539,7 @@
   $: activeScenarioSummary = activeScenario?.summary ?? null;
   $: activeCostOfCapitalRows = activeScenario?.cost_of_capital_rows ?? [];
   $: activeValuationBridgeRows = activeScenario?.valuation_bridge_rows ?? [];
-  $: sensitivityRange = (() => {
-    const rows = dcfModel?.sensitivity_matrix?.rows ?? [];
-    const values: number[] = [];
-    for (const row of rows) {
-      for (const cell of row) {
-        const value = cell?.implied_value_per_share;
-        if (typeof value === "number" && Number.isFinite(value)) values.push(value);
-      }
-    }
-    if (!values.length) return { min: 0, max: 0 };
-    return { min: Math.min(...values), max: Math.max(...values) };
-  })();
+  $: activeSanityChecks = activeScenario?.sanity_checks ?? [];
   $: dcfSummaryRows = dcfModel?.scenarios.filter((scenario) => scenario.summary != null) ?? [];
   $: dcfScenarioValueScale = (() => {
     const values: number[] = [];
@@ -617,6 +614,7 @@
   );
   $: peerComparisons = peers?.comparisons ?? [];
   $: reverseDrivers = reverseValuation?.drivers ?? [];
+  $: reverseDcfAidDrivers = reverseDrivers.slice(0, 3);
   $: reverseGapMetrics = reverseValuation?.scenario_gap_metrics ?? [];
   $: referenceFilings = reference?.filings ?? overview?.filings ?? financials?.filings ?? [];
   $: referenceInspection = reference?.inspection ?? null;
@@ -1420,6 +1418,71 @@
             </table>
           </div>
         </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Model Quality</p>
+              <h3>Sanity Checks</h3>
+            </div>
+            <small>{activeScenario?.label ?? "No scenario"}</small>
+          </div>
+
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead>
+                <tr><th>Check</th><th>Severity</th><th>Value</th><th>Benchmark</th><th>Read</th></tr>
+              </thead>
+              <tbody>
+                {#if activeSanityChecks.length}
+                  {#each activeSanityChecks as check}
+                    <tr>
+                      <td>{check.label}</td>
+                      <td class={sanitySeverityClass(check.severity)}>{check.severity.toUpperCase()}</td>
+                      <td class="numeric-cell">{check.display_value ?? "N/A"}</td>
+                      <td><small>{check.benchmark ?? "N/A"}</small></td>
+                      <td><small>{check.message ?? check.transformation_note ?? "N/A"}</small></td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="5">No DCF sanity checks</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Implied Expectations</p>
+              <h3>Reverse Valuation Aid</h3>
+            </div>
+            <small>{reverseDcfAidDrivers.length} drivers</small>
+          </div>
+
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead>
+                <tr><th>Driver</th><th>Market-Implied</th><th>Base</th><th>Gap</th></tr>
+              </thead>
+              <tbody>
+                {#if reverseDcfAidDrivers.length}
+                  {#each reverseDcfAidDrivers as driver}
+                    <tr>
+                      <td>{driver.label}</td>
+                      <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.display_value ?? "N/A"}</td>
+                      <td>{driver.base_display_value ?? "N/A"}</td>
+                      <td class={dcfDecisionGate.blocked ? "" : driverTone(driver)}>{dcfDecisionGate.blocked ? "N/A" : driver.gap_display_value ?? "N/A"}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="4">Reverse valuation drivers appear when market price, shares, net debt, and normalized DCF inputs are available.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
       </div>
 
       <article class="panel">
@@ -1642,7 +1705,7 @@
                   <tr>
                     <td class="sheet-label">{pct(dcfModel.sensitivity_matrix.terminal_growth_values[rowIndex])}</td>
                     {#each row as cell}
-                      <td class={`sheet-cell sens-cell ${dcfDecisionGate.blocked ? "" : sensitivityHeatClass(cell.implied_value_per_share, sensitivityRange)}`}>{dcfDecisionGate.blocked ? "N/A" : currency(cell.implied_value_per_share, 2)}</td>
+                      <td class={`sheet-cell sens-cell ${dcfDecisionGate.blocked ? "" : sensitivityHeatClass(cell.implied_value_per_share, activeScenarioSummary?.current_price)}`}>{dcfDecisionGate.blocked ? "N/A" : currency(cell.implied_value_per_share, 2)}</td>
                     {/each}
                   </tr>
                 {/each}

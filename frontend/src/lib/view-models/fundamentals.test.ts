@@ -265,6 +265,7 @@ function makeScenario(scenarioId: string, growth: number, wacc: number) {
     projection_rows: [],
     cost_of_capital_rows: [],
     valuation_bridge_rows: [],
+    sanity_checks: [],
     summary: null,
     source_provider: "manual",
     retrieved_at: "2026-04-09T10:00:00Z",

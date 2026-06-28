@@ -28,6 +28,13 @@ Original 2026-06-12 audit:
 - Ticker tested: `MSFT`.
 - Review inputs: recent git commits, this audit file, `docs/audits/usability/README.md`, and `docs/strategy_lab_cross_tab_handoffs.md`.
 
+2026-06-28 sector-aware DCF live retest:
+
+- Backend: FastAPI on `127.0.0.1:8000`, restarted from `.venv`.
+- Frontend: Vite on `127.0.0.1:5173`.
+- IBKR: disconnected; SEC/company fundamentals loaded through the running app, with market context carrying the explicit `Market data unavailable: not connected` warning.
+- Tickers tested in the live UI: `DAL` as the capital-intensive warning case and `MSFT` as the software/control case.
+
 Tabs exercised across the combined audit:
 
 - Sitrep
@@ -282,9 +289,14 @@ Required improvement:
 
 The MSFT DCF looked credible enough for workflow testing. The original DAL DCF still exposed a real limitation: capital-intensive and sector-specific models can produce implausible assumptions without enough warning.
 
+Updated 2026-06-28: first-pass sector-aware DCF sanity checks are implemented in the Fundamentals DCF model and UI. Each DCF scenario now carries model-owned sanity rows for capex / revenue, D&A / revenue, growth runway, terminal assumptions, and a capital-intensive model-break warning for DAL-like airline cases where low capex versus D&A can make FCF, terminal value, or equity value misleading. The DCF view shows these checks before the projection sheet/valuation work, and the DCF diagnostics grid now includes a compact reverse-valuation aid with the first implied-expectation drivers when market price, shares, net debt, and normalized inputs are available. Focused backend coverage saves a stressed DAL scenario and verifies the capex, growth, terminal, model-break, warning rollup, and API schema payload; focused frontend coverage verifies the sanity-check table renders in the DCF view.
+
+Live retest 2026-06-28: in the running app, `DAL` loaded in Fundamentals via `Ctrl+7` and manual company search. Its DCF tab showed the new `Sanity Checks` table and `Reverse Valuation Aid`. The base scenario showed `Capex / Revenue` OK, `D&A / Revenue` warning, `Growth Runway` warning, `Terminal Assumption` OK, and a `Capital-Intensive Model Break` warning explaining that airline-like cases need maintenance capex, lease/debt, cyclicality, and fleet replacement checks before treating a generic DCF output as an intrinsic-value estimate. The reverse aid showed implied revenue CAGR, implied terminal EBIT margin, and implied terminal growth gaps. The `MSFT` control case loaded in the same live UI and showed the sanity table and reverse aid without capital-intensive warnings; capex, D&A, growth, and terminal rows were all OK. Remaining caveat: IBKR was not connected during this retest, so market-price context displayed the explicit disconnected warning and a connected-IBKR price/provenance retest is still required.
+
 Required improvement:
 
-- Keep the sector-aware DCF sanity-check item open.
+- Retest live DAL and other capital-intensive issuers against real SEC/IBKR payloads to tune thresholds.
+- Broaden from first-pass SIC/description guardrails into richer sector-specific modeling where needed, especially airlines, utilities, energy, industrials, and financials.
 - Do not generalize the DAL problem to all Fundamentals workflows.
 
 ## Gaps
@@ -333,12 +345,12 @@ The recent basis reconciliation work appears directionally correct, but it shoul
 
 Fundamentals needs model sanity checks before users trust DCF output:
 
-- D&A plausibility by sector
-- capex/revenue plausibility
-- terminal value share of enterprise value
-- negative FCF warnings
-- implied revenue scale warnings
-- "current price requires X" reverse-valuation view
+- D&A plausibility by sector. Updated 2026-06-28: first-pass D&A / revenue sanity rows are implemented for every scenario, with tighter warnings for capital-intensive companies.
+- capex/revenue plausibility. Updated 2026-06-28: first-pass capex / revenue sanity rows are implemented and compare projected capex with historical capex and D&A-linked replacement needs.
+- terminal value share of enterprise value. Updated 2026-06-28: terminal growth, WACC spread, and terminal EV weight are sanity checked per scenario.
+- negative FCF warnings. Status: still open as a dedicated row; current implementation catches negative/fragile terminal/equity behavior indirectly, but should add explicit projected FCF margin and negative FCF path checks.
+- implied revenue scale warnings. Status: still open; current implementation flags aggressive growth but not absolute implied revenue scale versus market/peer addressable context.
+- "current price requires X" reverse-valuation view. Updated 2026-06-28: reverse valuation already existed as a dedicated mode; the DCF mode now surfaces a compact implied-expectations aid using the existing reverse drivers where available.
 
 ### Editable-cell discoverability and accessibility
 
@@ -506,7 +518,7 @@ Acceptance criteria:
 - DAL-like airline cases explain why defaults produce negative value.
 - User can compare current price to implied growth/margin/capex assumptions.
 
-Status: Open.
+Status: Implemented first pass on 2026-06-28. Scenario-level sanity checks now flag D&A, capex, growth, terminal assumptions, and DAL-like capital-intensive model-break cases; the DCF diagnostics grid includes a compact reverse-valuation aid sourced from existing implied-expectation drivers. Live app retest confirmed the DAL warning case and MSFT control case. Remaining open: connected-IBKR price/provenance retest, explicit negative-FCF and implied-scale rows, and deeper sector-specific model families beyond SIC/description guardrails.
 
 ### P1: Commodity value reconciliation retest
 

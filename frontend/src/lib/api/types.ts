@@ -1577,6 +1577,20 @@ export interface FundamentalsDcfBridgeRow {
   transformation_note: string | null;
 }
 
+export interface FundamentalsDcfSanityCheck {
+  check_id: string;
+  label: string;
+  severity: "ok" | "warning" | "error" | string;
+  value: number | null;
+  display_value: string | null;
+  benchmark: string | null;
+  message: string | null;
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface FundamentalsDcfSensitivityCell {
   wacc_pct: number;
   terminal_growth_pct: number;
@@ -1606,6 +1620,7 @@ export interface FundamentalsDcfScenario {
   projection_rows: FundamentalsDcfRow[];
   cost_of_capital_rows: FundamentalsDcfBridgeRow[];
   valuation_bridge_rows: FundamentalsDcfBridgeRow[];
+  sanity_checks: FundamentalsDcfSanityCheck[];
   summary: FundamentalsDcfValuationSummary | null;
   source_provider: string;
   retrieved_at: string | null;

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from src.application.fundamentals_service import FundamentalsService, _limit_company_summary_words
+from src.api.schemas.fundamentals import FundamentalsDcfModelModel
 from src.models.fundamentals import (
     FundamentalsCompanyRecord,
     FundamentalsFilingRecord,
@@ -329,6 +330,49 @@ def test_fundamentals_reverse_valuation_solves_implied_expectations(tmp_path):
     assert fcf_driver.solved_enterprise_value is not None
     assert reverse.sensitivity_matrix is not None
     assert reverse.sensitivity_matrix.rows[0][0].transformation_note is not None
+
+
+def test_fundamentals_dcf_flags_sector_aware_airline_sanity_checks(tmp_path):
+    service = _build_service(tmp_path)
+
+    initial = service.get_dcf_model("DAL")
+    assert initial is not None
+    payload = {
+        "active_scenario_id": "base",
+        "projection_years": list(initial.projection_years),
+        "scenarios": {
+            scenario.scenario_id: {
+                "assumptions": deepcopy(scenario.assumptions),
+                "overrides": deepcopy(scenario.overrides),
+            }
+            for scenario in initial.scenarios
+        },
+    }
+    payload["scenarios"]["base"]["assumptions"]["revenue_growth_pct"] = [0.15 for _ in initial.projection_years]
+    payload["scenarios"]["base"]["assumptions"]["da_pct_revenue"] = [0.045 for _ in initial.projection_years]
+    payload["scenarios"]["base"]["assumptions"]["capex_pct_revenue"] = [0.005 for _ in initial.projection_years]
+    payload["scenarios"]["base"]["assumptions"]["terminal_growth_pct"] = 0.045
+    payload["scenarios"]["base"]["assumptions"]["wacc_pct"] = 0.08
+
+    model = service.save_dcf_model("DAL", payload)
+
+    assert model is not None
+    base = next(scenario for scenario in model.scenarios if scenario.scenario_id == "base")
+    sanity_by_id = {check.check_id: check for check in base.sanity_checks}
+
+    assert sanity_by_id["capex_revenue"].severity == "warning"
+    assert "maintenance capex" in (sanity_by_id["capex_revenue"].message or "").lower()
+    assert sanity_by_id["growth_runway"].severity == "warning"
+    assert "capacity" in (sanity_by_id["growth_runway"].message or "").lower()
+    assert sanity_by_id["terminal_assumption"].severity == "warning"
+    assert "terminal" in (sanity_by_id["terminal_assumption"].message or "").lower()
+    assert sanity_by_id["capital_intensive_model_break"].severity == "warning"
+    assert "DAL-like" in (sanity_by_id["capital_intensive_model_break"].message or "")
+    assert any("Base DCF sanity check" in warning for warning in model.warnings)
+
+    response_payload = FundamentalsDcfModelModel.from_domain(model).model_dump()
+    response_base = next(scenario for scenario in response_payload["scenarios"] if scenario["scenario_id"] == "base")
+    assert response_base["sanity_checks"][0]["check_id"]
 
 
 def test_fundamentals_dcf_snapshots_save_list_and_load_model(tmp_path):
