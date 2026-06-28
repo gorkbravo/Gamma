@@ -335,7 +335,7 @@
   }
 
   .content {
-    margin-top: 0.8rem;
+    margin-top: 0.5rem;
   }
 
   @media (max-width: 960px) {
