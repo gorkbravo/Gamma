@@ -373,6 +373,7 @@
     position: relative;
     width: 100%;
     border: 1px solid var(--divider);
+    border-radius: var(--radius-md);
     background: var(--bg-0);
     overflow: hidden;
   }

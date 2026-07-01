@@ -1,7 +1,12 @@
 :root {
   color-scheme: dark;
   --app-font: "Consolas";
+  --display-font: "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
   font-family: var(--app-font), monospace;
+
+  /* ── Radius scale (small, consistent — not consumer-app rounding) ── */
+  --radius-sm: 3px;
+  --radius-md: 6px;
 
   /* ── Background layers (shifted to true neutral) ── */
   --bg-0: #070809;
@@ -88,10 +93,23 @@ body {
   letter-spacing: 0.01em;
 }
 
-button,
 input,
 select {
   font: inherit;
+}
+
+button {
+  font: inherit;
+  font-family: var(--display-font);
+}
+
+.panel {
+  border-radius: var(--radius-md);
+}
+
+.brand,
+.panel-header {
+  font-family: var(--display-font);
 }
 
 * {

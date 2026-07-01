@@ -117,7 +117,7 @@ In a plane model (the right approach), the entire interface is one flat surface.
 - **Panel backgrounds: `var(--panel-bg)` (transparent).** The panel's background is the root's background. What makes a panel a panel is its `1px solid var(--panel-border)` border. Never its fill.
 - **Chart containers: `var(--bg-0)`.** Charts match root exactly.
 - **No `box-shadow` on cards or panels.** None. Shadows imply elevation, which contradicts the plane model.
-- **No `border-radius` > `4px` on data containers.** Panels and cards use `0px`. Buttons may use `2px`. Nothing uses large radii (no pills, no rounded cards).
+- **No `border-radius` > `6px` on data containers.** Panels, cards, and chart shells use `var(--radius-md)` (`6px`). Buttons and inputs use `var(--radius-sm)` (`3px`). Nothing uses large radii (no pills, no fully rounded cards) — the goal is to soften the plane model's edges just enough to read as deliberate rather than to introduce object-model elevation.
 - **No nested cards.** If content can be separated by a divider line, a card was not necessary.
 - **Gaps between panels: `0.5rem` (8px).** This is tight enough that the gap reads as a seam, not as empty space between objects. Larger gaps (>10px) between adjacent panels are not permitted — they create visible "channels" of background that undermine the plane model.
 
@@ -136,7 +136,9 @@ In a plane model (the right approach), the entire interface is one flat surface.
 ## 5. Typography
 
 ### Font
-The app uses a monospace stack: `"JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace`. This is set globally and inherited by all elements. Do not override it.
+The app uses two font stacks:
+- `--app-font` (monospace: `"JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace`) — the default, set globally on `body`. Use for anything numeric or tabular: prices, tickers, deltas, tables, data cells. Alignment depends on it; do not switch these to the display font.
+- `--display-font` (system sans: `"Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif`) — for chrome and labels, not data. Applied globally to `button`, `.brand` (app branding), and `.panel-header` (panel titles). Use it for any new nav/label/heading element so the split stays consistent; never apply it to a data value or table cell.
 
 ### Size Hierarchy
 The base font size is `13.5px` on the body. All sizes below are actual computed values currently in use or targets for convergence.
