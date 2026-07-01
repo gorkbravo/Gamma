@@ -1,6 +1,6 @@
 # Gamma
 
-For future product expansion work, start with [`roadmap.md`](./roadmap.md) and [`roadmap_v2.md`](./roadmap_v2.md). The original roadmap is the source of truth for the first roadmap's completed and paused phase scope; Roadmap V2 is the detailed planning document for the next hardening, extension, and new-domain work.
+For future product expansion work, start with [`roadmap.md`](./roadmap.md). It is the single active source of truth for current product direction, historical phase checkpoints, next hardening work, extension work, and new-domain planning.
 
 Gamma is a read-only market research application built as a FastAPI backend, a Svelte frontend, and a Tauri desktop shell. Tauri is the primary desktop path today, while the older PySide client still exists as an explicit fallback. In practice, the product currently combines two things:
 
@@ -147,9 +147,9 @@ The backend exposes shared Workstream 1 metadata through `/system/*` routes:
 - `/system/provider-capabilities`: read-only provider capability metadata so future services, UI surfaces, and Copilot context builders can distinguish active, optional, sample, and planned providers without making provider calls
 - `/system/read-only-boundary`: Gamma's platform-level read-only contract, including the TWS API read-only operator lock note and the app-side no-execution boundary
 
-Shared backend primitives now cover provenance, freshness labels, cache freshness policy assessment, generic cross-tab handoff envelopes, and future Copilot context contracts. These are foundation contracts for new providers and V2 builders, not a big-bang retrofit requirement for every legacy response.
+Shared backend primitives now cover provenance, freshness labels, cache freshness policy assessment, generic cross-tab handoff envelopes, and future Copilot context contracts. These are foundation contracts for new providers and roadmap builders, not a big-bang retrofit requirement for every legacy response.
 
-For Roadmap V2 planning, the intended provider stance is:
+For current roadmap planning, the intended provider stance is:
 
 - keep `IBKR / TWS` first-class for Portfolio, IV/options, FX, fundamentals price context, selected commodity futures curves, and explicit high-fidelity research workflows
 - keep Research Overview and SITREP listed-market boards behind provider policy so they can prefer public providers such as `yfinance` first, with IBKR fallback only when configured
@@ -287,7 +287,7 @@ Important caveats:
 
 - this tab shows returned surface data, contract rows, display-grid fit, local Greeks, implied probability proxies, and payoff scenarios; it does not route orders or manage option positions
 - Gamma-owned Greeks and payoff matrices depend on the current fitted IV grid, selected chain rows, and simplified Black-Scholes assumptions
-- historical IV/skew persistence, deeper source inspection, richer expiry/strike controls, and durable Realized vs IV history remain Roadmap V2 hardening work
+- historical IV/skew persistence, deeper source inspection, richer expiry/strike controls, and durable Realized vs IV history remain current-roadmap hardening work
 - if IBKR is disconnected, the live surface path is unavailable
 
 ### Research Workspace
@@ -426,7 +426,7 @@ Important caveats:
 
 #### Commodities tab
 
-Commodities is a Roadmap V2 Workstream 8 first pass. It is a research workspace, not a trading terminal.
+Commodities is a current-roadmap Workstream 8 first pass. It is a research workspace, not a trading terminal.
 
 Modes:
 
@@ -582,7 +582,7 @@ Important caveats:
 
 - Fundamentals is currently strongest for US SEC filers
 - market-price-aware fields depend on available market context
-- raw-vs-normalized inspection, reverse valuation, deeper restatement handling, and broader regional coverage are V2 work
+- raw-vs-normalized inspection, reverse valuation, deeper restatement handling, and broader regional coverage are current-roadmap work
 
 #### Copilot layer
 
@@ -601,35 +601,35 @@ Current behavior:
 Important caveats:
 
 - Copilot is read-only and should remain grounded in Gamma state, not external execution
-- provider-level streaming, richer archive/search/title handling, memo editing/export, stricter source-backed/inferred labeling, and voice interaction remain V2 work
+- provider-level streaming, richer archive/search/title handling, memo editing/export, stricter source-backed/inferred labeling, and voice interaction remain current-roadmap work
 
 ## Current Roadmap Position
 
 Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 
 - `Phase 1 - Prediction Markets`: complete at a first-pass level
-- `Phase 2 - Macro`: paused around 84% in the original roadmap, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes as the first-pass checkpoint; Roadmap V2 has since expanded the live tab to include Trade Partners and Country Compare
+- `Phase 2 - Macro`: paused around 84% in the archived phase roadmap, with Snapshot, Cross-Asset, Rates & Policy, and Events / Regimes as the first-pass checkpoint; the current roadmap has since expanded the live tab to include Trade Partners and Country Compare
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
-- `Phase 4 - AI Copilot`: paused around 70% in the original roadmap; Roadmap V2 has since added a dedicated Copilot workspace alongside the shell shelf, with local sessions, synthesis, memos, and bounded read-only operator actions
+- `Phase 4 - AI Copilot`: paused around 70% in the archived phase roadmap; the current roadmap has since added a dedicated Copilot workspace alongside the shell shelf, with local sessions, synthesis, memos, and bounded read-only operator actions
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
 - `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
-- `Roadmap V2 Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
-- `Roadmap V2 Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
+- `Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
+- `Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 
-That means the app already has meaningful portfolio/risk/IV capabilities, a first-pass SITREP entry surface, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus a live Copilot workspace and shell layer. Remaining deepening work is tracked as Roadmap V2 scope rather than active current-roadmap implementation.
+That means the app already has meaningful portfolio/risk/IV capabilities, a first-pass SITREP entry surface, first-pass research surfaces across Prediction Markets, Macro, Crypto, Fundamentals, and Commodities, plus a live Copilot workspace and shell layer. Remaining deepening work is tracked as current-roadmap scope.
 
-## Roadmap V2 Direction
+## Current Roadmap Direction
 
-For the detailed V2 plan, see [`roadmap_v2.md`](./roadmap_v2.md). Roadmap V2 is organized as parallel workstreams rather than a strict sequence. The intent is to distinguish real dependencies from work that can proceed independently.
+The current roadmap is organized as parallel workstreams rather than a strict sequence. The intent is to distinguish real dependencies from work that can proceed independently.
 
-The main V2 buckets are:
+The main roadmap buckets are:
 
 - cross-cutting platform work: provider adapters, read-only market-data boundaries, mode-level keybindings, shared cache/provenance behavior, and stronger cross-tab handoffs
-- existing-tab V2 passes: Equity Research, Strategy Lab, Macro, IV, Crypto, Fundamentals, and Copilot hardening / extension work
+- existing-tab hardening passes: Equity Research, Strategy Lab, Macro, IV, Crypto, Fundamentals, and Copilot hardening / extension work
 - new research surfaces: a deep Commodities workspace and a Maritime Intelligence workspace if the data-provider path is viable
 - beta readiness: installer, tutorial, first-run setup, mock/demo flows, diagnostics, and friend/family testing polish
 
-The likely V2 feature direction is:
+The likely feature direction is:
 
 - `Equity Research` and `Strategy Lab`: deepen market overview / tree-map views, scope analysis, comparables, saved equity research, imported return-stream analytics, weighted Gamma object compositions, and comparison workflows
 - `Macro`: finish EU/global depth, official-event breadth, policy-path interpretation, and coherence / lead-lag refinement
@@ -654,7 +654,7 @@ The important boundary does not change: Gamma can study strategies, market data,
 - Crypto is currently strongest on token discovery, normalization, and liquidity-aware first-pass comparison, not deep wallet analytics or derivatives overlays
 - Fundamentals is strongest on US SEC-native coverage; broader international equities remain future work
 - Commodities has a practical first pass with sample curves, optional EIA fundamentals, and IBKR-built futures curves; deeper vendor-grade historical curve storage remains future work
-- IV is now a usable volatility-lab first pass, but it is not a full options analytics suite; historical IV/skew storage, richer source/Greek inspection, stronger Realized vs IV history, and broader handoffs remain V2 work
+- IV is now a usable volatility-lab first pass, but it is not a full options analytics suite; historical IV/skew storage, richer source/Greek inspection, stronger Realized vs IV history, and broader handoffs remain current-roadmap work
 
 ## Running Gamma
 

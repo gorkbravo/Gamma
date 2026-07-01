@@ -4,9 +4,9 @@
 
 For any task involving product direction, feature expansion, architecture planning, or "what to build next", read [`roadmap.md`](./roadmap.md) first.
 
-Treat [`roadmap.md`](./roadmap.md) as the primary planning document for future Gamma expansion. It defines:
+Treat [`roadmap.md`](./roadmap.md) as the single active planning document for future Gamma expansion. It defines:
 - the product scope,
-- the intended development order,
+- the historical phase checkpoints and current workstreams,
 - the constraints that keep Gamma read-only and research-focused,
 - the cross-phase technical priorities that new work should align with.
 

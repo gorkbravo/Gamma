@@ -1,6 +1,6 @@
-# Agent Prompt: Roadmap V2 Workstream 9 - Maritime Intelligence
+# Agent Prompt: Workstream 9 - Maritime Intelligence
 
-You are working in the Gamma repository. Your task is to start Roadmap V2 Workstream 9 and do as much useful implementation work as possible in the current session.
+You are working in the Gamma repository. Your task is to start current-roadmap Workstream 9 and do as much useful implementation work as possible in the current session.
 
 ## First, Read The Correct Documentation
 
@@ -10,12 +10,11 @@ Before making code changes, read these files in this order:
 2. `README.md`
 3. `docs/README.md`
 4. `roadmap.md`
-5. `roadmap_v2.md`, especially `## Workstream 9 - Maritime Intelligence Tab`
-6. `docs/provenance_expectations.md`
+5. `docs/provenance_expectations.md`
 
 If you touch frontend UI, components, layouts, CSS, navigation, or browser-visible behavior, you must also read:
 
-7. `docs/design_principles.md`
+6. `docs/design_principles.md`
 
 Do not skip the design principles for frontend work. Gamma has a strict dense, flat, read-only research UI style.
 
@@ -41,7 +40,7 @@ It should eventually answer:
 - Is there a market or geopolitical event connected to this movement?
 - Which signals should be handed to Commodities, Macro, or Copilot?
 
-Suggested modes from `roadmap_v2.md`:
+Suggested modes from `roadmap.md` Workstream 9:
 
 - `Live Map`
 - `Chokepoints`
