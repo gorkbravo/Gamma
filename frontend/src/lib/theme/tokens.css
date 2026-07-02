@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
-  --app-font: "Consolas";
-  --display-font: "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
+  --app-font: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
+  --display-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
   font-family: var(--app-font), monospace;
 
   /* ── Radius scale (small, consistent — not consumer-app rounding) ── */
@@ -61,6 +61,11 @@
 
   /* ── Table stripe ── */
   --table-stripe: rgba(122, 166, 200, 0.018);
+
+  /* ── Interaction states ── */
+  --hover-bg: rgba(122, 166, 200, 0.06);
+  --active-bg: rgba(122, 166, 200, 0.12);
+  --focus-ring: rgba(122, 166, 200, 0.55);
 }
 
 /* ── Theme: Amber phosphor ── */
@@ -91,22 +96,52 @@ body,
 body {
   font-size: 13.5px;
   letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(122, 166, 200, 0.28);
+  color: var(--text-0);
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
+  border-radius: var(--radius-sm);
+  accent-color: var(--accent);
 }
 
 button {
   font: inherit;
   font-family: var(--display-font);
+  border-radius: var(--radius-sm);
+}
+
+:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .panel {
   border-radius: var(--radius-md);
 }
 
+.mode-bar,
+.canvas-toggle {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.chart-shell {
+  border-radius: var(--radius-md);
+}
+
+h1,
+h2,
+h3,
+h4,
 .brand,
 .panel-header {
   font-family: var(--display-font);
@@ -127,6 +162,7 @@ button {
 
 ::-webkit-scrollbar-thumb {
   background: var(--panel-strong);
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -168,4 +204,9 @@ button {
 /* ── Table striping (global) ── */
 tbody tr:nth-child(even) {
   background: var(--table-stripe);
+}
+
+/* ── Table row hover (global, subtle) ── */
+tbody tr:hover {
+  background: rgba(122, 166, 200, 0.045);
 }

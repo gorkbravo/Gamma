@@ -756,6 +756,22 @@
     border-bottom: 1px solid var(--divider);
   }
 
+  .sidebar-filter > input {
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-0);
+    padding: 0.28rem 0.5rem;
+    font: inherit;
+    font-size: 0.76rem;
+    min-height: 1.75rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .sidebar-filter > input:focus-visible {
+    outline: none;
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-strong));
+  }
+
   .archived-toggle {
     display: inline-flex;
     align-items: center;

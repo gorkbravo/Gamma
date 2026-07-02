@@ -134,7 +134,8 @@
     width: 100%;
     padding: 0.28rem 0.55rem;
     border: 1px solid var(--panel-border);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
+    transition: border-color 120ms ease;
     background: color-mix(in srgb, var(--bg-0) 70%, transparent);
     color: var(--text-1);
   }
@@ -175,9 +176,10 @@
     display: grid;
     gap: 0.2rem;
     padding: 0.35rem;
-    border: 1px solid var(--panel-border);
-    border-radius: 2px;
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-md);
     background: var(--surface-0);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   }
 
   .search-results.stale {

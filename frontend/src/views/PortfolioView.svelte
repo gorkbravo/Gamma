@@ -378,7 +378,7 @@
           <span>
             {performance?.missing_symbols?.length
               ? `Missing history: ${performance.missing_symbols.join(", ")}`
-              : "Chart uses the shared portfolio_service output."}
+              : ""}
           </span>
           <strong>{historyStats.latestValue == null ? "No latest value" : `${fmt(historyStats.latestValue)} ${currency}`}</strong>
         </div>

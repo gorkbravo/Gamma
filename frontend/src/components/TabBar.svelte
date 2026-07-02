@@ -180,6 +180,7 @@
     inset: 0;
     z-index: 40;
     background: color-mix(in srgb, var(--bg-0) 45%, transparent);
+    backdrop-filter: blur(1.5px);
   }
 
   .sidebar {
@@ -190,7 +191,8 @@
     width: 248px;
     height: 100vh;
     background: color-mix(in srgb, var(--bg-0) 98%, var(--accent) 2%);
-    border-right: 1px solid var(--panel-border);
+    border-right: 1px solid var(--panel-strong);
+    box-shadow: 16px 0 48px rgba(0, 0, 0, 0.4);
     transform: translateX(-100%);
     transition: transform 180ms ease;
     display: flex;
@@ -328,14 +330,16 @@
     cursor: pointer;
     text-align: left;
     font-size: 0.82rem;
-    border-radius: 2px;
+    font-family: var(--display-font);
+    border-radius: var(--radius-sm);
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
   }
 
   .tab-button.selected,
   .tab-row.selected .tab-button {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 36%, transparent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+    box-shadow: inset 2px 0 0 var(--accent);
     color: var(--text-0);
   }
 

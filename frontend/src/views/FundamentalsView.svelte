@@ -2234,7 +2234,7 @@
     padding: 0.3rem 0.62rem;
     font: inherit;
     font-size: 0.74rem;
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     cursor: pointer;
   }
 
@@ -2245,7 +2245,9 @@
     color: var(--text-1);
     padding: 0.28rem 0.65rem;
     font: inherit;
+    font-family: var(--display-font);
     font-size: 0.79rem;
+    font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
@@ -2385,7 +2387,7 @@
     font: inherit;
     font-size: 0.78rem;
     min-height: 1.75rem;
-    border-radius: 0;
+    border-radius: var(--radius-sm);
   }
 
   .search-strip {

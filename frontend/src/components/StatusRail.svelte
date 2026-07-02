@@ -34,7 +34,7 @@
   $: workspaceLabel = getWorkspaceLabel(workspaceMode);
 
   let selectedChartTheme: string = "blue";
-  let selectedFontFamily: string = "Consolas";
+  let selectedFontFamily: string = "Cascadia Mono";
 
   $: topProviderRows = providerUsage?.providers.slice(0, 4) ?? [];
   $: providerHealthRows = providerUsage?.health.slice(0, 4) ?? [];
@@ -182,9 +182,9 @@
             bind:value={selectedFontFamily}
             on:change={() => setFontFamily(selectedFontFamily as FontFamily)}
           >
-            <option value="Consolas">Consolas (Default)</option>
+            <option value="Cascadia Mono">Cascadia Mono (Default)</option>
+            <option value="Consolas">Consolas</option>
             <option value="JetBrains Mono">JetBrains Mono</option>
-            <option value="Cascadia Mono">Cascadia Mono</option>
             <option value="IBM Plex Mono">IBM Plex Mono</option>
             <option value="Courier New">Courier New</option>
           </select>
@@ -243,13 +243,19 @@
   select,
   button,
   .settings-toggle {
-    background: #0d0f12;
+    background: var(--bg-1);
     border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
     color: var(--text-0);
     padding: 0.28rem 0.58rem;
     font: inherit;
     font-size: 0.74rem;
     cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--panel-strong));
   }
 
   .actions {
@@ -307,8 +313,9 @@
     gap: 0.8rem;
     padding: 0.9rem;
     border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-md);
     background: rgba(8, 13, 18, 0.98);
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   }
 
   .settings-section {

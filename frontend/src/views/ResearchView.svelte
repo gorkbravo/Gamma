@@ -3433,7 +3433,9 @@
     color: var(--text-1);
     padding: 0.28rem 0.65rem;
     font: inherit;
+    font-family: var(--display-font);
     font-size: 0.79rem;
+    font-weight: 500;
     line-height: 1.2;
     display: inline-flex;
     align-items: baseline;
@@ -4073,7 +4075,7 @@
     display: block;
     width: 100%;
     box-sizing: border-box;
-    border-radius: 0;
+    border-radius: var(--radius-sm);
   }
 
   textarea {

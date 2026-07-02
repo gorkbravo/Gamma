@@ -78,6 +78,13 @@ All styling must use the token system defined in `frontend/src/lib/theme/tokens.
 | `--negative` | `#c66b61` | Negative signals in data contexts only (P&L down, bearish). |
 | `--warning` | `#c49a5a` | Warnings, amber signals. Data contexts only. |
 
+### Interaction States
+| Token | Value | Usage |
+|---|---|---|
+| `--hover-bg` | `rgba(122, 166, 200, 0.06)` | Hover tint on interactive rows and buttons. |
+| `--active-bg` | `rgba(122, 166, 200, 0.12)` | Active/selected state tint (mode bars, toggles). |
+| `--focus-ring` | `rgba(122, 166, 200, 0.55)` | Global `:focus-visible` outline color. |
+
 ### Chart Colors
 | Token | Value | Usage |
 |---|---|---|
@@ -137,8 +144,8 @@ In a plane model (the right approach), the entire interface is one flat surface.
 
 ### Font
 The app uses two font stacks:
-- `--app-font` (monospace: `"JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace`) — the default, set globally on `body`. Use for anything numeric or tabular: prices, tickers, deltas, tables, data cells. Alignment depends on it; do not switch these to the display font.
-- `--display-font` (system sans: `"Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif`) — for chrome and labels, not data. Applied globally to `button`, `.brand` (app branding), and `.panel-header` (panel titles). Use it for any new nav/label/heading element so the split stays consistent; never apply it to a data value or table cell.
+- `--app-font` (monospace: `"Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas", monospace`) — the default, set globally on `body`. Use for anything numeric or tabular: prices, tickers, deltas, tables, data cells. Alignment depends on it; do not switch these to the display font.
+- `--display-font` (system sans: `"Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif`) — for chrome and labels, not data. Applied globally to `button`, headings (`h1`–`h4`), `.brand` (app branding), and `.panel-header` (panel titles), and explicitly to `.mode-bar button` in each view (their `font: inherit` reset would otherwise revert it). Use it for any new nav/label/heading element so the split stays consistent; never apply it to a data value or table cell.
 
 ### Size Hierarchy
 The base font size is `13.5px` on the body. All sizes below are actual computed values currently in use or targets for convergence.
@@ -223,7 +230,8 @@ Modes share state where it makes sense (selected region, timeframe, theme) and d
 - Height: `~27px`
 - Active state: `rgba(--accent, 0.12)` background tint
 - Inactive: transparent, text only
-- No border-radius on individual buttons; the bar itself may have a subtle border
+- No border-radius on individual buttons; the bar itself carries `1px solid var(--panel-strong)` plus `border-radius: var(--radius-sm)` with `overflow: hidden` (applied globally via tokens.css)
+- Mode labels use `var(--display-font)`, weight 500 — they are navigation chrome, not data
 
 ### Navigation
 - The **sidebar** (hideable, left) is the primary tab navigation. Tabs are listed vertically, can be reordered via drag-and-drop, and pinned.
@@ -281,13 +289,13 @@ Horizontal row of key metrics. Used in tab headers and summary sections.
 - Height: `~25px`
 - Border: `1px solid var(--panel-strong)`
 - Background: transparent or `var(--bg-1)` for emphasis
-- Border-radius: `0px`
+- Border-radius: `var(--radius-sm)` (3px)
 
 **Sidebar tab buttons**:
 - Font: `~13px`
 - Padding: `~9px 11px`
 - Height: `~35px`
-- Border-radius: `2px`
+- Border-radius: `var(--radius-sm)` (3px)
 - Active: `rgba(--accent, 0.08)` background, `1px solid rgba(--accent, 0.36)` border
 
 **In-panel action buttons** (Run Analysis, Compute, etc.):
@@ -309,7 +317,7 @@ Current state across most tabs:
 - Padding: `~9px 12px`
 - Background: `var(--bg-1)` (`#0b0d10`)
 - Border: `1px solid var(--panel-strong)`
-- Border-radius: `0px`
+- Border-radius: `var(--radius-sm)` (3px)
 
 For dense data contexts (screeners, filter bars, parameter inputs), inputs should be more compact:
 - Target height: `28–32px`
@@ -473,7 +481,7 @@ When building a new tab, follow this exact checklist:
 | Using warm-tinted colors (`rgba(18, 17, 12, ...)`) | Color temperature mismatch with cool root | Use tokens from `--bg-*` scale |
 | Gaps > 10px between adjacent panels | Creates visible channels, feels like separate objects | Use `0.5rem` (8px) |
 | Introducing a new accent color for a tab's "identity" | Breaks system coherence | Blue is the accent. Signal colors for data only. |
-| `border-radius` > 4px on containers | Consumer-app aesthetic, not terminal | `0px` on panels, `2px` on buttons max |
+| `border-radius` > 6px on containers, or hand-picked radii | Consumer-app aesthetic, not terminal | `var(--radius-md)` (6px) on panels/cards, `var(--radius-sm)` (3px) on buttons/inputs |
 | Large headings (>20px) inside tab content | Marketing-page feel | Keep titles `15–20px`, use weight for emphasis |
 | Spinner or shimmer loading states | Over-engineered, distracting | Static placeholder text in final layout position |
 | Opacity-based panel backgrounds | Ambiguous depth, glassy feel | Solid token or transparent |

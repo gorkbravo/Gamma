@@ -83,6 +83,8 @@
     max-width: min(16rem, calc(100vw - 0.75rem));
     background: var(--surface-0);
     border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-md);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
     padding: 0.15rem;
     display: grid;
     gap: 0.1rem;
@@ -93,7 +95,7 @@
     min-height: 1.7rem;
     padding: 0.25rem 0.5rem;
     border: 0;
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-1);
     text-align: left;

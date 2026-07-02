@@ -1425,6 +1425,8 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
+    font-family: var(--display-font);
+    font-weight: 500;
     white-space: nowrap;
   }
 
