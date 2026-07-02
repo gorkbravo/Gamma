@@ -51,7 +51,7 @@ All styling must use the token system defined in `frontend/src/lib/theme/tokens.
 | Token | Value | Usage |
 |---|---|---|
 | `--panel-bg` | `transparent` | **All panel/card backgrounds.** Panels inherit root. |
-| `--surface-0` | `#0a0c0f` | Solid sub-section backgrounds within panels. |
+| `--surface-0` | `#0a0b0c` | Solid sub-section backgrounds within panels, overlay surfaces. Tint-neutral — matches `--bg-0` temperature. |
 | `--surface-1` | `#0b0d10` | Chrome surfaces (topbar fallback). |
 | `--surface-2` | `#141719` | Rarely used. |
 | `--surface-soft` | `rgba(10, 12, 14, 0.62)` | Subtle section tints within panels (e.g. code blocks, callouts). |
@@ -124,7 +124,7 @@ In a plane model (the right approach), the entire interface is one flat surface.
 - **Panel backgrounds: `var(--panel-bg)` (transparent).** The panel's background is the root's background. What makes a panel a panel is its `1px solid var(--panel-border)` border. Never its fill.
 - **Chart containers: `var(--bg-0)`.** Charts match root exactly.
 - **No `box-shadow` on cards or panels.** None. Shadows imply elevation, which contradicts the plane model.
-- **No `border-radius` > `6px` on data containers.** Panels, cards, and chart shells use `var(--radius-md)` (`6px`). Buttons and inputs use `var(--radius-sm)` (`3px`). Nothing uses large radii (no pills, no fully rounded cards) — the goal is to soften the plane model's edges just enough to read as deliberate rather than to introduce object-model elevation.
+- **Radius belongs to outer surface edges only.** Top-level panels and cards use `var(--radius-md)` (`4px`); buttons, inputs, and segmented controls use `var(--radius-sm)` (`2px`). Anything nested inside a bordered surface — chart shells, inner tables, sub-boxes — is square (`border-radius: 0`, enforced globally in tokens.css). Nothing uses large radii (no pills, no fully rounded cards).
 - **No nested cards.** If content can be separated by a divider line, a card was not necessary.
 - **Gaps between panels: `0.5rem` (8px).** This is tight enough that the gap reads as a seam, not as empty space between objects. Larger gaps (>10px) between adjacent panels are not permitted — they create visible "channels" of background that undermine the plane model.
 
@@ -289,13 +289,13 @@ Horizontal row of key metrics. Used in tab headers and summary sections.
 - Height: `~25px`
 - Border: `1px solid var(--panel-strong)`
 - Background: transparent or `var(--bg-1)` for emphasis
-- Border-radius: `var(--radius-sm)` (3px)
+- Border-radius: `var(--radius-sm)` (2px)
 
 **Sidebar tab buttons**:
 - Font: `~13px`
 - Padding: `~9px 11px`
 - Height: `~35px`
-- Border-radius: `var(--radius-sm)` (3px)
+- Border-radius: `var(--radius-sm)` (2px)
 - Active: `rgba(--accent, 0.08)` background, `1px solid rgba(--accent, 0.36)` border
 
 **In-panel action buttons** (Run Analysis, Compute, etc.):
@@ -317,7 +317,7 @@ Current state across most tabs:
 - Padding: `~9px 12px`
 - Background: `var(--bg-1)` (`#0b0d10`)
 - Border: `1px solid var(--panel-strong)`
-- Border-radius: `var(--radius-sm)` (3px)
+- Border-radius: `var(--radius-sm)` (2px)
 
 For dense data contexts (screeners, filter bars, parameter inputs), inputs should be more compact:
 - Target height: `28–32px`
@@ -388,6 +388,7 @@ Only when content is genuinely self-contained (a watchlist item, a single-asset 
 .chart-shell {
   background: var(--bg-0);
   border: 1px solid var(--divider);
+  border-radius: 0; /* nested inside a panel — square */
   overflow: hidden;
 }
 ```
@@ -481,7 +482,7 @@ When building a new tab, follow this exact checklist:
 | Using warm-tinted colors (`rgba(18, 17, 12, ...)`) | Color temperature mismatch with cool root | Use tokens from `--bg-*` scale |
 | Gaps > 10px between adjacent panels | Creates visible channels, feels like separate objects | Use `0.5rem` (8px) |
 | Introducing a new accent color for a tab's "identity" | Breaks system coherence | Blue is the accent. Signal colors for data only. |
-| `border-radius` > 6px on containers, or hand-picked radii | Consumer-app aesthetic, not terminal | `var(--radius-md)` (6px) on panels/cards, `var(--radius-sm)` (3px) on buttons/inputs |
+| `border-radius` > 4px on containers, hand-picked radii, or radius on nested containers | Consumer-app aesthetic, not terminal | `var(--radius-md)` (4px) on top-level panels/cards, `var(--radius-sm)` (2px) on buttons/inputs, `0` on anything inside a bordered surface |
 | Large headings (>20px) inside tab content | Marketing-page feel | Keep titles `15–20px`, use weight for emphasis |
 | Spinner or shimmer loading states | Over-engineered, distracting | Static placeholder text in final layout position |
 | Opacity-based panel backgrounds | Ambiguous depth, glassy feel | Solid token or transparent |

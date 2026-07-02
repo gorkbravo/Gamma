@@ -192,7 +192,7 @@
     padding: 0.4rem 0.75rem;
     border: 1px solid var(--panel-border);
     border-radius: var(--radius-md);
-    background: var(--surface-0);
+    background: var(--bg-0);
   }
 
   .brand-mark {
@@ -204,7 +204,7 @@
     flex-shrink: 0;
     border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
     border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent) 12%, var(--surface-0));
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-0));
     color: var(--accent);
     font-family: var(--display-font);
     font-size: 0.72rem;
@@ -241,7 +241,7 @@
     padding: 0.12rem 0.18rem 0.12rem 0.46rem;
     border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--panel-border));
     border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent) 7%, var(--surface-0));
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-0));
     color: var(--text-1);
   }
 

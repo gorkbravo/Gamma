@@ -67,6 +67,10 @@
 
 <section class="rail">
   <div class="actions">
+    <div class="conn-chip" title={status?.connection.status_text ?? "Waiting for backend status"}>
+      <span class="conn-dot" class:on={status?.connection.connected}></span>
+      <span class="conn-label" class:mock={status?.mock_mode}>{status?.mock_mode ? "Mock" : "Live"}</span>
+    </div>
     <button class="ghost" on:click={onChangeView}>Change View</button>
     <button class="accent" on:click={onRefresh} disabled={busy}>{busy ? "Refreshing..." : "Refresh"}</button>
     <div class="settings-menu">
@@ -265,6 +269,39 @@
     min-width: 0;
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .conn-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0 0.5rem;
+    white-space: nowrap;
+  }
+
+  .conn-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-2);
+    flex-shrink: 0;
+  }
+
+  .conn-dot.on {
+    background: var(--positive);
+  }
+
+  .conn-label {
+    color: var(--text-2);
+    font-family: var(--display-font);
+    font-size: 0.66rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .conn-label.mock {
+    color: var(--warning);
   }
 
   .actions button,

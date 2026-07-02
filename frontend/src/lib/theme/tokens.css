@@ -4,9 +4,12 @@
   --display-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
   font-family: var(--app-font), monospace;
 
-  /* ── Radius scale (small, consistent — not consumer-app rounding) ── */
-  --radius-sm: 3px;
-  --radius-md: 6px;
+  /* ── Radius scale (small, consistent — not consumer-app rounding) ──
+     Applies to top-level surfaces and controls only. Anything nested
+     inside a bordered surface (chart shells, sub-tables, inner boxes)
+     is square — radius belongs to the outer edge, not the inside. */
+  --radius-sm: 2px;
+  --radius-md: 4px;
 
   /* ── Background layers (shifted to true neutral) ── */
   --bg-0: #070809;
@@ -15,7 +18,7 @@
   --bg-3: #131618;
 
   /* ── Surfaces (solid, same-temperature as bg-0 — plane model) ── */
-  --surface-0: #0a0c0f;
+  --surface-0: #0a0b0c;
   --surface-1: #0b0d10;
   --surface-2: #141719;
   --surface-soft: rgba(10, 12, 14, 0.62);
@@ -134,8 +137,12 @@ button {
   overflow: hidden;
 }
 
-.chart-shell {
-  border-radius: var(--radius-md);
+/* Nested containers are square — radius is for outer surface edges only */
+.chart-shell,
+.panel .panel,
+.panel .chart-shell,
+.panel table {
+  border-radius: 0;
 }
 
 h1,
@@ -143,7 +150,13 @@ h2,
 h3,
 h4,
 .brand,
-.panel-header {
+.panel-header,
+.eyebrow {
+  font-family: var(--display-font);
+}
+
+/* Column headers are labels (chrome), not data — sans over mono data */
+thead th {
   font-family: var(--display-font);
 }
 
