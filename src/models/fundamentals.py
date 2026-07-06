@@ -318,6 +318,21 @@ class FundamentalsDcfBridgeRowRecord:
 
 
 @dataclass(frozen=True)
+class FundamentalsDcfSanityCheckRecord:
+    check_id: str
+    label: str
+    severity: str
+    value: float | None = None
+    display_value: str | None = None
+    benchmark: str | None = None
+    message: str | None = None
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+
+@dataclass(frozen=True)
 class FundamentalsDcfSensitivityCell:
     wacc_pct: float
     terminal_growth_pct: float
@@ -349,6 +364,7 @@ class FundamentalsDcfScenarioRecord:
     projection_rows: list[FundamentalsDcfRowRecord] = field(default_factory=list)
     cost_of_capital_rows: list[FundamentalsDcfBridgeRowRecord] = field(default_factory=list)
     valuation_bridge_rows: list[FundamentalsDcfBridgeRowRecord] = field(default_factory=list)
+    sanity_checks: list[FundamentalsDcfSanityCheckRecord] = field(default_factory=list)
     summary: FundamentalsDcfValuationSummary | None = None
     source_provider: str = ""
     retrieved_at: datetime | None = None

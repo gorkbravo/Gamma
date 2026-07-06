@@ -29,13 +29,21 @@
 
 <section class="landing">
   <article class="card">
-    <p class="eyebrow">Welcome</p>
-    <h2>Welcome to Gamma</h2>
-    <p class="copy">Connect to IBKR or open the workspace you want to use.</p>
+    <div class="identity">
+      <span class="mark" aria-hidden="true">Γ</span>
+      <div class="wordmark">
+        <h2>Gamma</h2>
+        <p class="descriptor">Research Terminal</p>
+      </div>
+    </div>
+    <p class="copy">Connect to IBKR or open a workspace.</p>
 
     <div class="meta">
+      <span class="status-dot" class:connected={status?.connection.connected} aria-hidden="true"></span>
       <strong>{connectedLabel(status)}</strong>
-      <small>{status?.connection.status_text ?? "Waiting for backend status"}</small>
+      {#if status?.connection.status_text && status.connection.status_text !== `Status: ${connectedLabel(status)}`}
+        <small>{status.connection.status_text}</small>
+      {/if}
     </div>
 
     <div class="actions">
@@ -64,25 +72,51 @@
     width: min(28rem, calc(100vw - 2rem));
     display: grid;
     gap: 1rem;
-    padding: 1.5rem;
-    border: 1px solid rgba(90, 128, 162, 0.24);
-    background:
-      radial-gradient(circle at top, rgba(138, 145, 154, 0.12), transparent 48%),
-      rgba(8, 10, 12, 0.92);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+    padding: 1.6rem;
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-0);
+    box-shadow: 0 24px 56px rgba(0, 0, 0, 0.45);
   }
 
-  .eyebrow,
+  .identity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    flex-shrink: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-0));
+    color: var(--accent);
+    font-family: var(--display-font);
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .wordmark {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  .descriptor {
+    color: var(--text-2);
+    font-family: var(--display-font);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+  }
+
   .copy,
   small {
     color: var(--text-2);
-  }
-
-  .eyebrow {
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
-    font-size: 0.72rem;
-    color: #87b7ff;
   }
 
   h2,
@@ -91,14 +125,29 @@
   }
 
   h2 {
-    margin-top: -0.35rem;
-    font-size: 1.45rem;
-    line-height: 1.15;
+    font-size: 1.3rem;
+    line-height: 1.1;
+    letter-spacing: 0.02em;
   }
 
   .meta {
     display: grid;
-    gap: 0.3rem;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    column-gap: 0.45rem;
+    row-gap: 0.3rem;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-2);
+    align-self: center;
+  }
+
+  .status-dot.connected {
+    background: var(--positive);
   }
 
   strong {
@@ -107,6 +156,7 @@
   }
 
   small {
+    grid-column: 2;
     line-height: 1.45;
   }
 
@@ -119,19 +169,22 @@
 
   button {
     width: 100%;
-    min-height: 3rem;
-    background: #0d0f12;
+    min-height: 2.5rem;
+    background: var(--bg-1);
     border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
     color: var(--text-0);
-    padding: 0.85rem 0.95rem;
+    padding: 0.6rem 0.95rem;
     font: inherit;
+    font-family: var(--display-font);
+    font-weight: 500;
     cursor: pointer;
-    transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+    transition: border-color 0.12s ease, background 0.12s ease;
   }
 
   button:hover:enabled {
-    border-color: rgba(122, 166, 200, 0.55);
-    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-strong));
+    background: var(--hover-bg);
   }
 
   button:disabled {
@@ -145,8 +198,8 @@
   }
 
   .primary {
-    border-color: rgba(106, 168, 255, 0.45);
-    background: rgba(106, 168, 255, 0.14);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
 
   .secondary {

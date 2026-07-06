@@ -1,7 +1,15 @@
 :root {
   color-scheme: dark;
-  --app-font: "Consolas";
+  --app-font: "Cascadia Mono", "JetBrains Mono", "IBM Plex Mono", "Consolas";
+  --display-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif;
   font-family: var(--app-font), monospace;
+
+  /* ── Radius scale (small, consistent — not consumer-app rounding) ──
+     Applies to top-level surfaces and controls only. Anything nested
+     inside a bordered surface (chart shells, sub-tables, inner boxes)
+     is square — radius belongs to the outer edge, not the inside. */
+  --radius-sm: 2px;
+  --radius-md: 4px;
 
   /* ── Background layers (shifted to true neutral) ── */
   --bg-0: #070809;
@@ -10,11 +18,11 @@
   --bg-3: #131618;
 
   /* ── Surfaces (solid, same-temperature as bg-0 — plane model) ── */
-  --surface-0: #0a0c0f;
+  --surface-0: #0a0b0c;
   --surface-1: #0b0d10;
   --surface-2: #141719;
   --surface-soft: rgba(10, 12, 14, 0.62);
-  --panel-bg: transparent;
+  --panel-bg: var(--bg-0);
 
   /* ── Borders & dividers ── */
   --panel-border: #1e2228;
@@ -56,6 +64,11 @@
 
   /* ── Table stripe ── */
   --table-stripe: rgba(122, 166, 200, 0.018);
+
+  /* ── Interaction states ── */
+  --hover-bg: rgba(122, 166, 200, 0.06);
+  --active-bg: rgba(122, 166, 200, 0.12);
+  --focus-ring: rgba(122, 166, 200, 0.55);
 }
 
 /* ── Theme: Amber phosphor ── */
@@ -77,19 +90,74 @@ body,
 #app {
   margin: 0;
   min-height: 100%;
-  background: var(--bg-0);
+  background-color: var(--bg-0);
+  background-image: radial-gradient(circle, rgba(122, 166, 200, 0.15) 1px, transparent 1px);
+  background-size: 22px 22px;
   color: var(--text-0);
 }
 
 body {
   font-size: 13.5px;
   letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
-button,
+::selection {
+  background: rgba(122, 166, 200, 0.28);
+  color: var(--text-0);
+}
+
 input,
-select {
+select,
+textarea {
   font: inherit;
+  border-radius: var(--radius-sm);
+  accent-color: var(--accent);
+}
+
+button {
+  font: inherit;
+  font-family: var(--display-font);
+  border-radius: var(--radius-sm);
+}
+
+:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.panel {
+  border-radius: var(--radius-md);
+}
+
+.mode-bar,
+.canvas-toggle {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* Nested containers are square — radius is for outer surface edges only */
+.chart-shell,
+.panel .panel,
+.panel .chart-shell,
+.panel table {
+  border-radius: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+.brand,
+.panel-header,
+.eyebrow {
+  font-family: var(--display-font);
+}
+
+/* Column headers are labels (chrome), not data — sans over mono data */
+thead th {
+  font-family: var(--display-font);
 }
 
 * {
@@ -107,6 +175,7 @@ select {
 
 ::-webkit-scrollbar-thumb {
   background: var(--panel-strong);
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -148,4 +217,9 @@ select {
 /* ── Table striping (global) ── */
 tbody tr:nth-child(even) {
   background: var(--table-stripe);
+}
+
+/* ── Table row hover (global, subtle) ── */
+tbody tr:hover {
+  background: rgba(122, 166, 200, 0.045);
 }

@@ -129,7 +129,8 @@
           <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
         </svg>
       </button>
-      <h1><strong>Gamma</strong><span>Research and Analysis Platform</span></h1>
+      <span class="brand-mark" aria-hidden="true">Γ</span>
+      <h1><strong>Gamma</strong><span>Research Terminal</span></h1>
       <span class="topbar-divider" aria-hidden="true"></span>
       <div class="tab-search">
         <SearchDropdown
@@ -190,8 +191,25 @@
     gap: 0.6rem;
     padding: 0.4rem 0.75rem;
     border: 1px solid var(--panel-border);
-    border-radius: 0;
-    background: var(--surface-0);
+    border-radius: var(--radius-md);
+    background: var(--bg-0);
+  }
+
+  .brand-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    flex-shrink: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--panel-border));
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-0));
+    color: var(--accent);
+    font-family: var(--display-font);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
   }
 
   .brand {
@@ -222,7 +240,8 @@
     height: 1.75rem;
     padding: 0.12rem 0.18rem 0.12rem 0.46rem;
     border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--panel-border));
-    background: color-mix(in srgb, var(--accent) 7%, var(--surface-0));
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-0));
     color: var(--text-1);
   }
 
@@ -299,20 +318,24 @@
     font-size: 0.72rem;
     font-weight: 400;
     letter-spacing: 0.02em;
-    color: var(--warning);
+    color: var(--text-2);
   }
 
   .copilot-trigger {
     background: transparent;
-    border: 1px solid transparent;
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--panel-border));
     color: var(--accent);
     font-size: 0.74rem;
     font-weight: 500;
     letter-spacing: 0.04em;
-    padding: 0.12rem 0.35rem;
+    padding: 0.12rem 0.5rem;
     cursor: pointer;
-    border-radius: 2px;
-    transition: border-color 120ms ease, color 120ms ease;
+    border-radius: var(--radius-sm);
+    transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  }
+
+  .copilot-trigger:hover {
+    background: var(--hover-bg);
   }
 
   .copilot-trigger:hover {
@@ -335,7 +358,7 @@
   }
 
   .content {
-    margin-top: 0.8rem;
+    margin-top: 0.5rem;
   }
 
   @media (max-width: 960px) {

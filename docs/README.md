@@ -4,9 +4,8 @@ This directory is split into active documentation, audits, and archived project 
 
 ## Active Documents
 
-- [`../README.md`](../README.md): setup, run commands, validation commands, current product status, Roadmap V2 direction, and provider stance
-- [`../roadmap.md`](../roadmap.md): source of truth for current roadmap-era product direction, completed/paused phase scope, and constraints
-- [`../roadmap_v2.md`](../roadmap_v2.md): detailed Roadmap V2 workstreams for existing-tab hardening, new research surfaces, platform foundation, provider strategy, and beta readiness
+- [`../README.md`](../README.md): setup, run commands, validation commands, current product status, current roadmap direction, and provider stance
+- [`../roadmap.md`](../roadmap.md): single active source of truth for product direction, historical phase checkpoints, workstreams, provider strategy, beta readiness, and constraints
 - [`design_principles.md`](./design_principles.md): UI and interaction principles for roadmap-era product work
 - [`provenance_expectations.md`](./provenance_expectations.md): active provenance contract for new roadmap-era entities
 - [`copilot_v2_tab_plan.md`](./copilot_v2_tab_plan.md): dedicated Copilot workspace and agentic research harness plan, including OpenAI references, action taxonomy, safety boundary, and editable progression checklist
@@ -17,7 +16,7 @@ This directory is split into active documentation, audits, and archived project 
 
 Current Commodities tab setup, EIA and IBKR provider switches, sample fallback behavior, futures-curve caveats, and read-only constraints are documented in [`../README.md`](../README.md).
 
-Current Options / IV behavior, including selectable surface models, implied-probability slices, strategy payoff flow, Gamma-owned Greeks, and live-provider caveats, is documented in [`../README.md`](../README.md) and tracked in Roadmap V2 Workstream 4.
+Current Options / IV behavior, including selectable surface models, implied-probability slices, strategy payoff flow, Gamma-owned Greeks, and live-provider caveats, is documented in [`../README.md`](../README.md) and tracked in `roadmap.md` Workstream 4.
 
 ## Audit Documents
 
@@ -36,8 +35,8 @@ These files are kept for traceability, not as current operating guidance.
 ## Documentation Rules
 
 - Keep `README.md` operational, current, and concise about near-future planning context.
-- Keep `roadmap.md` focused on future direction, not audit history.
-- Keep `roadmap_v2.md` as the detailed V2 planning document and keep the README as the short summary.
+- Keep `roadmap.md` as the single active roadmap, focused on future direction and only the historical checkpoints needed to understand current scope.
+- Keep the README as the short operational and product-status summary.
 - Put dated audit logs in `docs/audits/`.
 - Put handoff notes, migration logs, old prompts, and completed transition records in `docs/archive/`.
 - Prefer updating an existing live document over creating a new one for one-off status notes.

@@ -12,6 +12,7 @@ from src.models.fundamentals import (
     FundamentalsDcfBridgeRowRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
+    FundamentalsDcfSanityCheckRecord,
     FundamentalsDcfScenarioRecord,
     FundamentalsDcfSensitivityCell,
     FundamentalsDcfSensitivityMatrix,
@@ -462,6 +463,24 @@ class FundamentalsDcfBridgeRowModel(BaseModel):
         return cls(**row.__dict__)
 
 
+class FundamentalsDcfSanityCheckModel(BaseModel):
+    check_id: str
+    label: str
+    severity: str
+    value: float | None = None
+    display_value: str | None = None
+    benchmark: str | None = None
+    message: str | None = None
+    source_provider: str
+    retrieved_at: datetime | None = None
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: FundamentalsDcfSanityCheckRecord) -> "FundamentalsDcfSanityCheckModel":
+        return cls(**row.__dict__)
+
+
 class FundamentalsDcfSensitivityCellModel(BaseModel):
     wacc_pct: float
     terminal_growth_pct: float
@@ -507,6 +526,7 @@ class FundamentalsDcfScenarioModel(BaseModel):
     projection_rows: list[FundamentalsDcfRowModel] = Field(default_factory=list)
     cost_of_capital_rows: list[FundamentalsDcfBridgeRowModel] = Field(default_factory=list)
     valuation_bridge_rows: list[FundamentalsDcfBridgeRowModel] = Field(default_factory=list)
+    sanity_checks: list[FundamentalsDcfSanityCheckModel] = Field(default_factory=list)
     summary: FundamentalsDcfValuationSummaryModel | None = None
     source_provider: str
     retrieved_at: datetime | None = None
@@ -525,6 +545,9 @@ class FundamentalsDcfScenarioModel(BaseModel):
                 ],
                 "valuation_bridge_rows": [
                     FundamentalsDcfBridgeRowModel.from_domain(item) for item in row.valuation_bridge_rows
+                ],
+                "sanity_checks": [
+                    FundamentalsDcfSanityCheckModel.from_domain(item) for item in row.sanity_checks
                 ],
                 "summary": FundamentalsDcfValuationSummaryModel.from_domain(row.summary) if row.summary else None,
             }

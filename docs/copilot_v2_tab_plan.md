@@ -10,8 +10,7 @@ Gamma's Copilot should become a broad **agentic research assistant** that can us
 
 Before implementing changes, read:
 
-- [`../roadmap.md`](../roadmap.md) for the core product boundary: Gamma is a read-only research environment, not an execution platform.
-- [`../roadmap_v2.md`](../roadmap_v2.md), especially Workstream 1 and Workstream 7.
+- [`../roadmap.md`](../roadmap.md) for the core product boundary and current Workstream 1 / Workstream 7 direction.
 - [`provenance_expectations.md`](./provenance_expectations.md) for source, freshness, and transformation expectations.
 - [`design_principles.md`](./design_principles.md) before changing the Copilot UI.
 
@@ -530,7 +529,7 @@ Future agents should update this checklist in place.
 ### Phase 0 - Documentation And Boundary
 
 - [x] Create living agentic harness spec.
-- [ ] Reconcile this document with `roadmap_v2.md` if the roadmap changes.
+- [ ] Reconcile this document with `roadmap.md` if the roadmap changes.
 - [ ] Add any new OpenAI docs references used during implementation.
 
 ### Phase 1 - Planner-Only Prototype

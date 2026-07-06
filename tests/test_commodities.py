@@ -513,10 +513,17 @@ def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_pat
     assert fake_client.requests == ["CL", "GC"]
     startup_wti_curve = next(curve for curve in startup_snapshot.curve_snapshots if curve.instrument_id == "wti")
     startup_gold_curve = next(curve for curve in startup_snapshot.curve_snapshots if curve.instrument_id == "gold")
+    startup_wti_history = next(history for history in startup_snapshot.price_histories if history.instrument_id == "wti")
+    startup_gold_history = next(history for history in startup_snapshot.price_histories if history.instrument_id == "gold")
     assert startup_wti_curve.source_provider == "ibkr"
     assert startup_gold_curve.source_provider == "ibkr"
     assert [node.price for node in startup_wti_curve.nodes] == [80.0, 79.0, 78.5, 78.1]
     assert [node.price for node in startup_gold_curve.nodes] == [2400.0, 2404.0]
+    assert startup_wti_history.source_provider == "unavailable"
+    assert startup_wti_history.points == []
+    assert any("No daily reference history" in warning for warning in startup_wti_history.warnings)
+    assert startup_gold_history.source_provider == "unavailable"
+    assert startup_gold_history.points == []
 
     selected_snapshot = provider.get_snapshot(selected_instrument_id="gold")
 
@@ -534,6 +541,9 @@ def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_pat
     assert [node.price for node in selected_wti_curve.nodes] == [80.0, 79.0, 78.5, 78.1]
     assert [node.previous_price for node in selected_wti_curve.nodes] == [None, None, None, None]
     assert [node.change for node in selected_wti_curve.nodes] == [None, None, None, None]
+    selected_wti_history = next(history for history in cached_snapshot.price_histories if history.instrument_id == "wti")
+    assert selected_wti_history.source_provider == "unavailable"
+    assert any("No daily reference history" in warning for warning in selected_wti_history.warnings)
     assert cached_gold_curve.source_provider == "ibkr_cached"
     assert any("Using cached IBKR curve for Gold" in warning for warning in cached_snapshot.warnings)
 

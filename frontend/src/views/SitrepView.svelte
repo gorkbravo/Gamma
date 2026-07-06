@@ -1157,7 +1157,7 @@
     height: 20px;
     padding: 0;
     border: 1px solid var(--panel-strong);
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-2);
     font-size: 0.78rem;

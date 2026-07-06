@@ -7,7 +7,7 @@ You are continuing work in C:\Users\User\Desktop\Gamma.
 
 Read first:
 - AGENTS.md instructions in the repo root.
-- roadmap.md and roadmap_v2.md.
+- roadmap.md.
 - docs/copilot_v2_tab_plan.md, especially "Two Copilot Roles", Phase 7, and Open Decisions.
 - docs/design_principles.md if touching frontend UI.
 

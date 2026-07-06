@@ -7,7 +7,7 @@ Gamma's current `Research` tab mixes two distinct workflows:
 - equity-oriented market and scope research, including the market treemap, single-name analysis, basket/scope construction, and handoffs to Fundamentals, Risk, and Options;
 - lab-oriented strategy experimentation, including imported return streams, comparison, saved runs, and future backtesting.
 
-Roadmap V2 cautions against tab sprawl, but it also defines when a top-level tab is justified: a durable research domain with a distinct data model, a distinct workflow, enough internal modes, and valuable cross-tab relationships. The current `Research` tab now contains two such domains. Splitting them clarifies the product without changing Gamma's read-only research boundary.
+The current roadmap cautions against tab sprawl, but it also defines when a top-level tab is justified: a durable research domain with a distinct data model, a distinct workflow, enough internal modes, and valuable cross-tab relationships. The current `Research` tab now contains two such domains. Splitting them clarifies the product without changing Gamma's read-only research boundary.
 
 The generic `Research` label is also weak because it sits inside the Research workspace. Replacing it with `Equity Research` and `Strategy Lab` makes navigation reflect user intent.
 

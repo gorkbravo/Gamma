@@ -18,6 +18,7 @@ from src.models.fundamentals import (
     FundamentalsDcfBridgeRowRecord,
     FundamentalsDcfModelRecord,
     FundamentalsDcfRowRecord,
+    FundamentalsDcfSanityCheckRecord,
     FundamentalsDcfScenarioRecord,
     FundamentalsDcfSensitivityCell,
     FundamentalsDcfSensitivityMatrix,
@@ -216,6 +217,38 @@ _DCF_PROJECTION_LINE_ORDER: tuple[tuple[str, str, str], ...] = (
     ("shares_outstanding", "Shares Outstanding", "shares"),
     ("discount_factor", "Discount Factor", "ratio"),
     ("present_value_of_fcf", "PV of FCF", "currency"),
+)
+
+_CAPITAL_INTENSIVE_SIC_PREFIXES = {
+    "13",  # Oil and gas extraction
+    "29",  # Petroleum refining
+    "32",  # Stone, clay, glass, concrete
+    "33",  # Primary metals
+    "37",  # Transportation equipment
+    "40",  # Railroad transportation
+    "44",  # Water transportation
+    "45",  # Air transportation
+    "46",  # Pipelines
+    "48",  # Communications infrastructure
+    "49",  # Utilities
+}
+
+_CAPITAL_INTENSIVE_DESCRIPTION_NEEDLES = (
+    "air transportation",
+    "airline",
+    "airlines",
+    "railroad",
+    "railway",
+    "water transportation",
+    "pipeline",
+    "electric",
+    "utility",
+    "utilities",
+    "petroleum",
+    "mining",
+    "metals",
+    "steel",
+    "transportation equipment",
 )
 
 _COMPANY_SUMMARY_SCHEMA: dict[str, Any] = {
@@ -2256,6 +2289,13 @@ class FundamentalsService:
                 market_context=market_context,
                 computed=computed,
             )
+            sanity_checks = self._build_dcf_sanity_checks(
+                sec_data=sec_data,
+                scenario_id=scenario_id,
+                assumptions=assumptions,
+                actuals=actuals,
+                computed=computed,
+            )
             scenario_sensitivity_cells = self._sweep_scenario_sensitivity_cells(
                 assumptions=assumptions,
                 overrides=overrides,
@@ -2344,6 +2384,7 @@ class FundamentalsService:
                     projection_rows=projection_rows,
                     cost_of_capital_rows=cost_of_capital_rows,
                     valuation_bridge_rows=valuation_bridge_rows,
+                    sanity_checks=sanity_checks,
                     summary=summary,
                     source_provider="manual",
                     retrieved_at=datetime.now(timezone.utc),
@@ -2360,6 +2401,10 @@ class FundamentalsService:
             warnings.append("Shares outstanding are unavailable, so DCF per-share values are not computed.")
         if market_context.get("net_debt") is None:
             warnings.append("Net debt bridge is unavailable, so DCF equity value and per-share outputs are incomplete.")
+        for scenario in scenarios:
+            for check in scenario.sanity_checks:
+                if check.severity in {"warning", "error"} and check.message:
+                    warnings.append(f"{scenario.label} DCF sanity check: {check.message}")
         return FundamentalsDcfModelRecord(
             ticker=sec_data.company.ticker,
             company_name=sec_data.company.name,
@@ -2374,6 +2419,141 @@ class FundamentalsService:
             retrieved_at=datetime.now(timezone.utc),
             origin="fundamentals.dcf.model",
             transformation_note="Gamma builds the DCF model from normalized annual fundamentals, current market context, and locally persisted scenario inputs.",
+        )
+
+    def _build_dcf_sanity_checks(
+        self,
+        *,
+        sec_data: SecCompanyData,
+        scenario_id: str,
+        assumptions: dict[str, Any],
+        actuals: dict[str, list[float | None] | list[str]],
+        computed: dict[str, Any],
+    ) -> list[FundamentalsDcfSanityCheckRecord]:
+        retrieved_at = datetime.now(timezone.utc)
+        capital_intensive = self._is_capital_intensive_company(sec_data.company)
+        sector_label = "capital-intensive" if capital_intensive else "general industrial"
+        revenue_growth = _ensure_list_length(assumptions.get("revenue_growth_pct"), len(computed["projection_values"].get("revenue", [])), 0.0)
+        da_pct = _ensure_list_length(assumptions.get("da_pct_revenue"), len(revenue_growth), 0.0)
+        capex_pct = _ensure_list_length(assumptions.get("capex_pct_revenue"), len(revenue_growth), 0.0)
+        avg_growth = _average(revenue_growth)
+        avg_da = _average(da_pct)
+        avg_capex = _average(capex_pct)
+        terminal_growth = _optional_float(assumptions.get("terminal_growth_pct"))
+        wacc = _optional_float(assumptions.get("wacc_pct"))
+        historical_growth = _projected_cagr(actuals["revenue"])
+        historical_da = _average(
+            _recent_numeric(
+                [
+                    _safe_ratio(da, revenue)
+                    for da, revenue in zip(actuals["depreciation_and_amortization"], actuals["revenue"], strict=False)
+                ],
+                5,
+            )
+        )
+        historical_capex = _average(
+            _recent_numeric(
+                [
+                    _safe_ratio(abs(capex) if capex is not None else None, revenue)
+                    for capex, revenue in zip(actuals["capital_expenditures"], actuals["revenue"], strict=False)
+                ],
+                5,
+            )
+        )
+        summary = computed["summary"]
+        terminal_weight = _safe_ratio(summary.get("discounted_terminal_value"), summary.get("enterprise_value"))
+        checks = [
+            self._dcf_sanity_check(
+                "capex_revenue",
+                "Capex / Revenue",
+                avg_capex,
+                "percent",
+                self._capex_sanity_severity(avg_capex, avg_da, historical_capex, historical_da, capital_intensive),
+                self._capex_sanity_message(avg_capex, avg_da, historical_capex, historical_da, capital_intensive, sector_label),
+                self._capex_sanity_benchmark(historical_capex, historical_da, capital_intensive),
+                scenario_id,
+                retrieved_at,
+            ),
+            self._dcf_sanity_check(
+                "da_revenue",
+                "D&A / Revenue",
+                avg_da,
+                "percent",
+                self._da_sanity_severity(avg_da, historical_da, capital_intensive),
+                self._da_sanity_message(avg_da, historical_da, capital_intensive, sector_label),
+                _benchmark_range("History", historical_da),
+                scenario_id,
+                retrieved_at,
+            ),
+            self._dcf_sanity_check(
+                "growth_runway",
+                "Growth Runway",
+                avg_growth,
+                "percent",
+                self._growth_sanity_severity(avg_growth, historical_growth, avg_capex, avg_da, capital_intensive),
+                self._growth_sanity_message(avg_growth, historical_growth, avg_capex, avg_da, capital_intensive, sector_label),
+                _benchmark_range("Historical CAGR", historical_growth),
+                scenario_id,
+                retrieved_at,
+            ),
+            self._dcf_sanity_check(
+                "terminal_assumption",
+                "Terminal Assumption",
+                terminal_growth,
+                "percent",
+                self._terminal_sanity_severity(terminal_growth, wacc, terminal_weight, capital_intensive),
+                self._terminal_sanity_message(terminal_growth, wacc, terminal_weight, capital_intensive, sector_label),
+                f"WACC { _format_metric(wacc, 'percent') }; terminal EV weight { _format_metric(terminal_weight, 'percent') }",
+                scenario_id,
+                retrieved_at,
+            ),
+        ]
+        dal_message = self._capital_intensive_break_message(
+            avg_capex=avg_capex,
+            avg_da=avg_da,
+            equity_value=summary.get("equity_value"),
+            capital_intensive=capital_intensive,
+        )
+        if dal_message:
+            checks.append(
+                self._dcf_sanity_check(
+                    "capital_intensive_model_break",
+                    "Capital-Intensive Model Break",
+                    avg_capex,
+                    "percent",
+                    "warning",
+                    dal_message,
+                    "Airline-like cases need maintenance capex, lease/debt, cyclicality, and fleet replacement checks.",
+                    scenario_id,
+                    retrieved_at,
+                )
+            )
+        return checks
+
+    def _dcf_sanity_check(
+        self,
+        check_id: str,
+        label: str,
+        value: float | None,
+        unit: str,
+        severity: str,
+        message: str | None,
+        benchmark: str | None,
+        scenario_id: str,
+        retrieved_at: datetime,
+    ) -> FundamentalsDcfSanityCheckRecord:
+        return FundamentalsDcfSanityCheckRecord(
+            check_id=check_id,
+            label=label,
+            severity=severity,
+            value=value,
+            display_value=_format_metric(value, unit) if value is not None else "N/A",
+            benchmark=benchmark,
+            message=message,
+            source_provider="gamma",
+            retrieved_at=retrieved_at,
+            origin=f"fundamentals.dcf.sanity.{scenario_id}.{check_id}",
+            transformation_note="Gamma compares DCF scenario assumptions with normalized historical ratios and sector-aware guardrails before the valuation summary is interpreted.",
         )
 
     def _build_cost_of_capital_rows(
@@ -2755,6 +2935,214 @@ class FundamentalsService:
         )
         return any(needle in description for needle in needles)
 
+    def _is_capital_intensive_company(self, company: FundamentalsCompanyRecord) -> bool:
+        sic = str(company.sic or "").strip()
+        if len(sic) >= 2 and sic[:2] in _CAPITAL_INTENSIVE_SIC_PREFIXES:
+            return True
+        haystack = " ".join(
+            [
+                str(company.sic_description or ""),
+                str(company.description or ""),
+                " ".join(company.classification_labels),
+            ]
+        ).lower()
+        return any(needle in haystack for needle in _CAPITAL_INTENSIVE_DESCRIPTION_NEEDLES)
+
+    def _capex_sanity_severity(
+        self,
+        avg_capex: float | None,
+        avg_da: float | None,
+        historical_capex: float | None,
+        historical_da: float | None,
+        capital_intensive: bool,
+    ) -> str:
+        if avg_capex is None:
+            return "warning"
+        floor = _capex_floor(avg_da, historical_capex, historical_da, capital_intensive)
+        if floor is not None and avg_capex < floor:
+            return "warning"
+        if capital_intensive and avg_capex < 0.025:
+            return "warning"
+        return "ok"
+
+    def _capex_sanity_message(
+        self,
+        avg_capex: float | None,
+        avg_da: float | None,
+        historical_capex: float | None,
+        historical_da: float | None,
+        capital_intensive: bool,
+        sector_label: str,
+    ) -> str | None:
+        if avg_capex is None:
+            return "Projected capex / revenue is unavailable, so reinvestment needs cannot be sanity checked."
+        floor = _capex_floor(avg_da, historical_capex, historical_da, capital_intensive)
+        if floor is not None and avg_capex < floor:
+            return (
+                f"Projected capex / revenue is low for a {sector_label} business relative to D&A/history; "
+                "FCF and terminal value may be overstated if maintenance capex is understated."
+            )
+        if capital_intensive and avg_capex < 0.025:
+            return "Projected capex / revenue is below a first-pass capital-intensive floor; verify maintenance capex and lease/fleet replacement needs."
+        return "Capex intensity is inside the first-pass sanity band."
+
+    def _capex_sanity_benchmark(
+        self,
+        historical_capex: float | None,
+        historical_da: float | None,
+        capital_intensive: bool,
+    ) -> str:
+        parts = [
+            _benchmark_range("Historical capex/revenue", historical_capex),
+            _benchmark_range("Historical D&A/revenue", historical_da),
+        ]
+        if capital_intensive:
+            parts.append("Capital-intensive floor uses the larger of history and D&A-linked replacement needs.")
+        return "; ".join(part for part in parts if part)
+
+    def _da_sanity_severity(
+        self,
+        avg_da: float | None,
+        historical_da: float | None,
+        capital_intensive: bool,
+    ) -> str:
+        if avg_da is None:
+            return "warning"
+        if historical_da is not None and avg_da < historical_da * 0.50:
+            return "warning"
+        if capital_intensive and avg_da < 0.015:
+            return "warning"
+        return "ok"
+
+    def _da_sanity_message(
+        self,
+        avg_da: float | None,
+        historical_da: float | None,
+        capital_intensive: bool,
+        sector_label: str,
+    ) -> str:
+        if avg_da is None:
+            return "Projected D&A / revenue is unavailable, so depreciation intensity cannot be sanity checked."
+        if historical_da is not None and avg_da < historical_da * 0.50:
+            return f"Projected D&A / revenue is much lower than recent history for this {sector_label} business; asset-base normalization may be wrong."
+        if capital_intensive and avg_da < 0.015:
+            return "Projected D&A / revenue is unusually low for a capital-intensive business; verify aircraft, fleet, plant, or network depreciation mapping."
+        return "D&A intensity is inside the first-pass sanity band."
+
+    def _growth_sanity_severity(
+        self,
+        avg_growth: float | None,
+        historical_growth: float | None,
+        avg_capex: float | None,
+        avg_da: float | None,
+        capital_intensive: bool,
+    ) -> str:
+        if avg_growth is None:
+            return "warning"
+        high_growth_threshold = 0.12 if capital_intensive else 0.20
+        if avg_growth > high_growth_threshold:
+            return "warning"
+        if (
+            capital_intensive
+            and historical_growth is not None
+            and avg_growth > historical_growth + 0.06
+            and avg_capex is not None
+            and avg_da is not None
+            and avg_capex < avg_da
+        ):
+            return "warning"
+        return "ok"
+
+    def _growth_sanity_message(
+        self,
+        avg_growth: float | None,
+        historical_growth: float | None,
+        avg_capex: float | None,
+        avg_da: float | None,
+        capital_intensive: bool,
+        sector_label: str,
+    ) -> str:
+        if avg_growth is None:
+            return "Projected revenue growth is unavailable."
+        high_growth_threshold = 0.12 if capital_intensive else 0.20
+        if avg_growth > high_growth_threshold:
+            return f"Projected growth is aggressive for a {sector_label} business; verify capacity, fleet, load factor, pricing, or cycle assumptions."
+        if (
+            capital_intensive
+            and historical_growth is not None
+            and avg_growth > historical_growth + 0.06
+            and avg_capex is not None
+            and avg_da is not None
+            and avg_capex < avg_da
+        ):
+            return "Growth is above historical run-rate while capex is below D&A; the model may assume expansion without enough reinvestment."
+        return "Growth is inside the first-pass sanity band."
+
+    def _terminal_sanity_severity(
+        self,
+        terminal_growth: float | None,
+        wacc: float | None,
+        terminal_weight: float | None,
+        capital_intensive: bool,
+    ) -> str:
+        if terminal_growth is None:
+            return "warning"
+        if wacc is not None and terminal_growth >= wacc:
+            return "error"
+        if wacc is not None and terminal_growth > wacc - 0.01:
+            return "warning"
+        if terminal_weight is not None and (terminal_weight > 0.90 or terminal_weight < 0):
+            return "warning"
+        if capital_intensive and terminal_growth > 0.035:
+            return "warning"
+        return "ok"
+
+    def _terminal_sanity_message(
+        self,
+        terminal_growth: float | None,
+        wacc: float | None,
+        terminal_weight: float | None,
+        capital_intensive: bool,
+        sector_label: str,
+    ) -> str:
+        if terminal_growth is None:
+            return "Terminal growth is unavailable."
+        if wacc is not None and terminal_growth >= wacc:
+            return "Terminal growth is at or above WACC, so the perpetuity math is invalid."
+        if wacc is not None and terminal_growth > wacc - 0.01:
+            return "Terminal growth is too close to WACC; small changes can dominate the DCF."
+        if terminal_weight is not None and terminal_weight > 0.90:
+            return "More than 90% of enterprise value comes from the discounted terminal value; near-term projections contribute little to the valuation."
+        if terminal_weight is not None and terminal_weight < 0:
+            return "Terminal value or enterprise value is negative; inspect FCF, net debt, and reinvestment assumptions before interpreting the summary."
+        if capital_intensive and terminal_growth > 0.035:
+            return f"Terminal growth is high for a {sector_label} business; check long-run GDP, capacity, and reinvestment constraints."
+        return "Terminal growth and terminal-value share are inside the first-pass sanity band."
+
+    def _capital_intensive_break_message(
+        self,
+        *,
+        avg_capex: float | None,
+        avg_da: float | None,
+        equity_value: float | None,
+        capital_intensive: bool,
+    ) -> str | None:
+        if not capital_intensive:
+            return None
+        capex_below_da = avg_capex is not None and avg_da is not None and avg_capex < avg_da * 0.85
+        negative_equity = equity_value is not None and equity_value < 0
+        if capex_below_da:
+            return (
+                "DAL-like capital-intensive cases can break a generic industrial DCF: small changes to maintenance capex, D&A mapping, leases/debt, "
+                "and terminal FCF can flip equity value negative or make the model look cheap for the wrong reason."
+            )
+        if negative_equity:
+            return (
+                "The DCF produces negative equity value for a capital-intensive business; inspect net debt/lease obligations, maintenance capex, "
+                "and normalized cycle margins before treating the output as an intrinsic-value estimate."
+            )
+        return None
+
 
 def _metric(
     metric_id: str,
@@ -2857,6 +3245,28 @@ def _safe_ratio(numerator: float | None, denominator: float | None) -> float | N
     if numerator is None or denominator is None or denominator == 0:
         return None
     return numerator / denominator
+
+
+def _benchmark_range(label: str, value: float | None) -> str:
+    return f"{label} {_format_metric(value, 'percent') if value is not None else 'N/A'}"
+
+
+def _capex_floor(
+    avg_da: float | None,
+    historical_capex: float | None,
+    historical_da: float | None,
+    capital_intensive: bool,
+) -> float | None:
+    candidates: list[float] = []
+    if historical_capex is not None:
+        candidates.append(historical_capex * (0.70 if capital_intensive else 0.45))
+    if historical_da is not None:
+        candidates.append(historical_da * (0.80 if capital_intensive else 0.50))
+    if avg_da is not None:
+        candidates.append(avg_da * (0.80 if capital_intensive else 0.45))
+    if capital_intensive:
+        candidates.append(0.025)
+    return max(candidates) if candidates else None
 
 
 def _sum_nullable(*values: float | None) -> float | None:

@@ -1722,13 +1722,13 @@ git commit -m "Update equity and strategy handoffs"
 ### Task 9: Final Verification And Documentation
 
 **Files:**
-- Modify: `roadmap_v2.md`
+- Modify: `roadmap.md`
 - Modify: `docs/README.md` only if it lists the old Research tab explicitly.
 - Modify: `README.md` only if the visible tab list is documented there.
 
 - [ ] **Step 1: Update docs wording**
 
-In `roadmap_v2.md`, update the Current App State Snapshot language from:
+In `roadmap.md`, update the Current App State Snapshot language from:
 
 ```md
 `Research` is a full multi-mode hub with Overview, Scope Analysis, Strategy Lab, Compare / Scenario, and Saved Research.
@@ -1786,7 +1786,7 @@ Stop the dev server after the smoke check.
 - [ ] **Step 5: Commit docs and final polish**
 
 ```powershell
-git add roadmap_v2.md docs/README.md README.md
+git add roadmap.md docs/README.md README.md
 git commit -m "Document equity research and strategy lab split"
 ```
 

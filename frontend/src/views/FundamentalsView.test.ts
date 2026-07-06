@@ -87,6 +87,12 @@ describe("FundamentalsView", () => {
     expect(body).toContain('title="Editable DCF assumption: Revenue growth 2026"');
     expect(body).toContain('title="Editable DCF projection override: Revenue projection 2026"');
     expect(body).toMatch(/<button type="button"[^>]*disabled[^>]*>Recalculate \+ Save<\/button>/);
+    expect(body).toContain("Sanity Checks");
+    expect(body).toContain("Capex / Revenue");
+    expect(body).toContain("Projected capex / revenue is low for a capital-intensive business.");
+    expect(body).toMatch(/sens-heat-neg-strong[^"]*">\$100\.00<\/td>/);
+    expect(body).toMatch(/sens-heat-neg[^"]*">\$400\.00<\/td>/);
+    expect(body).not.toMatch(/sens-heat-pos[^"]*">\$400\.00<\/td>/);
   });
 });
 
@@ -154,6 +160,21 @@ function makeDcfModel(): FundamentalsDcfModel {
         ],
         cost_of_capital_rows: [],
         valuation_bridge_rows: [],
+        sanity_checks: [
+          {
+            check_id: "capex_revenue",
+            label: "Capex / Revenue",
+            severity: "warning",
+            value: 0.025,
+            display_value: "2.5%",
+            benchmark: "Historical capex/revenue 4.1%",
+            message: "Projected capex / revenue is low for a capital-intensive business.",
+            source_provider: "gamma",
+            retrieved_at: "2026-06-15T10:00:00Z",
+            origin: "fundamentals.test.sanity",
+            transformation_note: null
+          }
+        ],
         summary: {
           scenario_id: "base",
           label: "base",
@@ -178,7 +199,45 @@ function makeDcfModel(): FundamentalsDcfModel {
         transformation_note: null
       }
     ],
-    sensitivity_matrix: null,
+    sensitivity_matrix: {
+      wacc_values: [0.08, 0.09, 0.1],
+      terminal_growth_values: [0.025],
+      rows: [
+        [
+          {
+            wacc_pct: 0.08,
+            terminal_growth_pct: 0.025,
+            implied_value_per_share: 100,
+            source_provider: "gamma",
+            retrieved_at: "2026-06-15T10:00:00Z",
+            origin: "fundamentals.test.sensitivity",
+            transformation_note: null
+          },
+          {
+            wacc_pct: 0.09,
+            terminal_growth_pct: 0.025,
+            implied_value_per_share: 300,
+            source_provider: "gamma",
+            retrieved_at: "2026-06-15T10:00:00Z",
+            origin: "fundamentals.test.sensitivity",
+            transformation_note: null
+          },
+          {
+            wacc_pct: 0.1,
+            terminal_growth_pct: 0.025,
+            implied_value_per_share: 400,
+            source_provider: "gamma",
+            retrieved_at: "2026-06-15T10:00:00Z",
+            origin: "fundamentals.test.sensitivity",
+            transformation_note: null
+          }
+        ]
+      ],
+      source_provider: "gamma",
+      retrieved_at: "2026-06-15T10:00:00Z",
+      origin: "fundamentals.test.sensitivity",
+      transformation_note: "Test DCF sensitivity matrix."
+    },
     warnings: [],
     source_provider: "gamma",
     retrieved_at: "2026-06-15T10:00:00Z",

@@ -117,6 +117,7 @@ class CommodityPriceHistoryModel(BaseModel):
     label: str
     unit: str
     points: list[CommodityPricePointModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     source_provider: str
     retrieved_at: datetime | None = None
     origin: str

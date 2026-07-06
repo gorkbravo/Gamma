@@ -66,17 +66,17 @@ No trade taken. Both candidate trades were killed not by market logic but by **d
 
 ### Friction points (ranked)
 
-1. **GUA-20260627-1 (P0) — Commodities "% CHG" is computed against a stale cached curve and presents cross-session drift as a daily move.** Blocked Thesis 2 step 1–3. The Overview matrix showed Silver −16.70%, Brent −10.30%, WTI −9.86%, Gold −6.07%, Platinum −8.99%, Copper −6.78% — none reproducible from the backend without `force_refresh:true`, at which point they match exactly. The "previous curve" is a prior-run cached snapshot of unknown vintage, not a prior settlement; on a weekend both curves are `ibkr_cached`. Acceptance criteria: (a) % CHG must reference a real prior settlement/close with a visible timestamp, or render `N/A`; (b) never difference two cached snapshots of unknown/mismatched vintage; (c) when the IBKR-futures rows move uniformly opposite to FRED-proxy rows, suppress or warn rather than display; (d) the term-structure "Previous curve" overlay must label its as-of date.
-2. **GUA-20260627-3 (P1) — No fast in-app corroboration path for a single-day index dislocation.** Blocked Thesis 1 step 4. To sanity-check Nikkei −4.15% I needed (a) the yen on the same screen (Sitrep FX strip was N/A), (b) a US-listed proxy's *latest daily* move (Equity Research Scope shows only lookback aggregates), and (c) a relevant headline (none). Acceptance criteria: surface a latest-day return alongside lookback metrics in Scope; let a Sitrep tile pivot to a quick proxy/daily view; keep the FX strip populated from the same live source Macro uses.
-3. **GUA-20260627-2 (P1) — IBKR-futures commodities have no daily spot/history series to validate curve-derived numbers.** Contributed to Thesis 2 step 4. `price_histories` covers EIA energy + FRED base metals but not gold/silver/platinum/copper. Acceptance criteria: attach a spot or front-continuous daily history (or a clear "no daily reference available") to each IBKR-futures row so the headline change can be cross-checked.
+1. **GUA-20260627-1 (P0) — Commodities "% CHG" is computed against a stale cached curve and presents cross-session drift as a daily move. Status: Addressed in code; live IBKR retest recommended.** Blocked Thesis 2 step 1–3. The Overview matrix showed Silver −16.70%, Brent −10.30%, WTI −9.86%, Gold −6.07%, Platinum −8.99%, Copper −6.78% — none reproducible from the backend without `force_refresh:true`, at which point they match exactly. The "previous curve" is a prior-run cached snapshot of unknown vintage, not a prior settlement; on a weekend both curves are `ibkr_cached`. Acceptance criteria: (a) % CHG must reference a real prior settlement/close with a visible timestamp, or render `N/A`; (b) never difference two cached snapshots of unknown/mismatched vintage; (c) when the IBKR-futures rows move uniformly opposite to FRED-proxy rows, suppress or warn rather than display; (d) the term-structure "Previous curve" overlay must label its as-of date.
+2. **GUA-20260627-3 (P1) — No fast in-app corroboration path for a single-day index dislocation. Status: Open.** Blocked Thesis 1 step 4. To sanity-check Nikkei −4.15% I needed (a) the yen on the same screen (Sitrep FX strip was N/A), (b) a US-listed proxy's *latest daily* move (Equity Research Scope shows only lookback aggregates), and (c) a relevant headline (none). Acceptance criteria: surface a latest-day return alongside lookback metrics in Scope; let a Sitrep tile pivot to a quick proxy/daily view; keep the FX strip populated from the same live source Macro uses.
+3. **GUA-20260627-2 (P1) — IBKR-futures commodities have no daily spot/history series to validate curve-derived numbers. Status: Addressed in code; live/provider retest recommended.** Contributed to Thesis 2 step 4. `price_histories` covers EIA energy + FRED base metals but not gold/silver/platinum/copper. Acceptance criteria: attach a spot or front-continuous daily history (or a clear "no daily reference available") to each IBKR-futures row so the headline change can be cross-checked.
 4. **GUA-20260627-4 (P2, needs confirmation) — Sitrep FX strip shows N/A while Macro FX (IBKR) returns live values.** Sitrep `FX PAIRS` (labeled "Macro / IBKR") rendered `N/A` for all pairs, yet `GET /macro/series/fx-usdjpy/history` (source `ibkr`) returned 161.7-handle values. Likely the Sitrep FX strip pulls from the weekend-empty yfinance provider (`SITREP_MARKET_DATA_PROVIDERS=yfinance`) while Macro uses IBKR — a provider-wiring inconsistency rather than missing data. Confirm on a weekday before treating as a hard defect. Acceptance: Sitrep FX should fall back to the IBKR series Macro already has, or label the source/staleness.
 5. **GUA-20260627-5 (P2) — Sitrep stays in a perpetual "REFRESHING" / "US EQUITY TAPE UNAVAILABLE" state after data has loaded.** The indices/news populated but the header spinner never cleared; `preview_screenshot` timed out only on Sitrep (worked on every other tab), consistent with a never-idle animation/retry loop on the unavailable US equity tape. Acceptance: clear the loading indicator once data is present; bound retries; show "tape unavailable (market closed)" as a terminal state, not a permanent spinner.
 6. **GUA-20260627-6 (P2, accessibility/automation) — several controls aren't drivable by synthetic events.** The `COPILOT` nav tab didn't switch views under dispatched pointer/click events; the Fundamentals search dropdown didn't open under programmatic value-set; tab keybindings exist for `Ctrl+1..9` but tab 10 (Copilot) has no `Ctrl+0`. A human with a mouse/keyboard sidesteps all of these, so this is an agent/a11y bucket, not a human blocker. (Net positive: the prior duplicate-`COPILOT`-name collision now resolves to a single button.)
 
 ### Gaps
-- A commodity headline change needs a **first-class prior-settlement reference** (contract, settlement date, prior close) instead of an opportunistic curve diff. This is the same class of problem the basis work (`e032af9`) targeted, one level up: the *time reference* of the change, not the *instrument* basis.
+- A commodity headline change needs a **first-class prior-settlement reference** (contract, settlement date, prior close) instead of an opportunistic curve diff. Status update: addressed in code after this audit; IBKR headline changes now require a dated prior close/reference or render `N/A`.
 - Sitrep tiles need a **"this is stale because the market is closed" state** distinct from "unavailable" and distinct from a live spinner.
-- Single-day vs lookback is a recurring blind spot: Equity Research, Sitrep, and Commodities each express change on a different time basis with no unifying "as-of / period" label the analyst can trust at a glance.
+- Single-day vs lookback is a recurring blind spot: Equity Research, Sitrep, and historical audit-time Commodities each expressed change on a different time basis with no unifying "as-of / period" label the analyst could trust at a glance. Status update: the Commodities time-basis defect is addressed; Equity Research/Sitrep corroboration remains open under GUA-20260627-3.
 
 ### Cross-tab coherence
 - Worked: focal-ticker chip (EWJ) → Fundamentals auto-load.
@@ -109,37 +109,42 @@ No trade taken. Both candidate trades were killed not by market logic but by **d
 
 ## Prioritized Follow-Up
 
+Status legend:
+- **Open**: no known implementation yet.
+- **Addressed in code**: implementation and targeted tests exist after this audit, but a fresh live workflow retest may still be useful.
+- **Needs confirmation**: evidence was collected in a weekend or automation-limited run and should be reproduced before deeper work.
+
 ### P0 — GUA-20260627-1: Fix Commodities headline "% CHG"
 - Problem: % CHG (and the term-structure "Previous curve") is computed by differencing the current curve against a stale cached prior-run curve; it only materializes on `force_refresh`, is null otherwise, and produced impossible uniform moves (Silver −16.70%, Brent −10.30%, …) split exactly along IBKR-vs-FRED source lines.
 - Acceptance criteria: change references a real prior settlement/close with a visible as-of timestamp, or renders `N/A`; never diff two cached snapshots of unknown vintage; term-structure overlay labels the previous curve's date; add a guard/warning when all IBKR-futures rows move uniformly opposite the FRED-proxy rows.
-- Status: Open (new).
+- Status: **Addressed in code; live IBKR retest recommended.** Gamma no longer computes IBKR node/headline changes from local curve-history cache snapshots. Headline `% CHG` uses a dated IBKR front-contract prior close when available, otherwise renders `N/A`; term-structure previous overlays carry `previous_as_of`; provider split warnings are emitted for uniform IBKR-vs-FRED sign splits.
 
 ### P1 — GUA-20260627-2: Daily reference for IBKR-futures commodities
 - Problem: no spot/daily history for gold/silver/platinum/copper to validate curve-derived numbers.
 - Acceptance: attach a spot or front-continuous daily series (or an explicit "no daily reference") to each IBKR-futures row.
-- Status: Open (new).
+- Status: **Addressed in code; live/provider retest recommended.** IBKR futures rows now carry either a usable daily reference history (`IBKR`, `FRED`, `EIA`, or continuous/spot proxy) or an explicit no-daily-reference placeholder with a visible warning in the price-history panel.
 
 ### P1 — GUA-20260627-3: Single-day corroboration path
 - Problem: reacting to a one-day index dislocation has no fast in-app cross-check (FX strip N/A, Scope shows lookback only, no event search from a tile).
 - Acceptance: latest-day return shown beside lookback metrics in Scope; Sitrep tile → quick proxy/daily view; consistent "as-of / period" labeling across Sitrep/Equity Research/Commodities.
-- Status: Open (new).
+- Status: **Open.**
 
 ### P2 — GUA-20260627-4: Sitrep FX strip source
 - Problem: Sitrep FX `N/A` while Macro FX (IBKR) has live values.
 - Acceptance: Sitrep FX falls back to the IBKR series Macro uses, or labels provider/staleness; confirm on a weekday.
-- Status: Open (needs confirmation).
+- Status: **Needs confirmation.**
 
 ### P2 — GUA-20260627-5: Sitrep perpetual REFRESHING / unavailable-tape state
 - Problem: spinner never clears after data loads; US equity tape stuck "UNAVAILABLE" with ongoing retries (also blocks screenshots).
 - Acceptance: clear indicator once data present; bound retries; terminal "market closed" state.
-- Status: Open (new).
+- Status: **Open.**
 
 ### P2 — GUA-20260627-6: Agent/a11y-unfriendly controls
 - Problem: COPILOT tab + Fundamentals search dropdown not drivable by synthetic events; no `Ctrl+0` for tab 10.
 - Acceptance: nav/search controls respond to standard events and expose stable roles; add a keybinding for the Copilot tab.
-- Status: Open (carryover bucket; duplicate-COPILOT-name sub-issue appears fixed).
+- Status: **Open; duplicate-COPILOT-name sub-issue appears fixed.**
 
 ## Guidance For Future Agents
-- The single highest-value fix is GUA-20260627-1: a research terminal that silently shows a −16.7% silver "day" that never happened is worse than one that shows `N/A`. Provenance saved this run — the change number was wrong but the `ibkr_cached`/null fields let me prove it. Keep that discipline and extend it to the *time basis* of every change.
+- The highest-value remaining open fix from this audit is now GUA-20260627-3: a fast single-day corroboration path for index dislocations. The Commodities `% CHG` and daily-reference findings are addressed in code, but should still be rechecked against a live IBKR weekday session.
 - Run weekday if possible. A weekend session makes "stale-by-design" and "broken" hard to separate; several findings here are explicitly marked needs-confirmation for that reason.
 - To drive Copilot/Fundamentals reliably, prefer real user-event simulation over `dispatchEvent`; the synthetic path doesn't open the search dropdown or switch the Copilot tab.
