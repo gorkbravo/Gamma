@@ -412,6 +412,8 @@ export interface ResearchOverviewSortOption {
 
 export interface ResearchOverviewMetrics {
   total_return: number | null;
+  latest_daily_return?: number | null;
+  latest_daily_return_at?: string | null;
   annual_volatility: number | null;
   beta: number | null;
   max_drawdown: number | null;

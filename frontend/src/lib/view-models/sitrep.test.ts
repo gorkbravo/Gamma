@@ -12,8 +12,18 @@ describe("sitrep handoff view model", () => {
   it.each<[SitrepMarketHandoffProfile, SitrepMarketHandoffRow, Partial<SitrepHandoffRequest>]>([
     [
       "indices",
-      { id: "idx-spx", label: "S&P 500", group: "US", last: "5000", change: "+1", secondary: "SPX" },
-      { targetTab: "equity_research", targetMode: "overview" },
+      {
+        id: "idx-n225",
+        symbol: "^N225",
+        proxySymbol: "EWJ",
+        proxyLabel: "Japan ETF proxy",
+        label: "Nikkei 225",
+        group: "Japan",
+        last: "69360.88",
+        change: "-3000.00",
+        secondary: "EWJ / Jun 26",
+      },
+      { targetTab: "equity_research", targetMode: "scope_analysis", symbol: "EWJ", label: "Japan ETF proxy" },
     ],
     [
       "fx",
@@ -37,6 +47,23 @@ describe("sitrep handoff view model", () => {
     ],
   ])("maps %s market rows to the correct tab and mode", (profile, row, expected) => {
     expect(resolveSitrepMarketHandoff(profile, row)).toMatchObject(expected);
+  });
+
+  it("falls back to Equity Research overview when an index row has no proxy", () => {
+    expect(
+      resolveSitrepMarketHandoff("indices", {
+        id: "idx-custom",
+        symbol: "^CUSTOM",
+        label: "Custom Index",
+        group: "Global",
+        last: "1000",
+        change: "N/A",
+        secondary: "N/A",
+      })
+    ).toMatchObject({
+      targetTab: "equity_research",
+      targetMode: "overview",
+    });
   });
 
   it("maps equity rows to Research Scope Analysis with the selected symbol", () => {

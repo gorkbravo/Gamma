@@ -805,6 +805,8 @@ class ResearchOverviewSortOptionModel(BaseModel):
 
 class ResearchOverviewMetricsModel(BaseModel):
     total_return: float | None = None
+    latest_daily_return: float | None = None
+    latest_daily_return_at: datetime | None = None
     annual_volatility: float | None = None
     beta: float | None = None
     max_drawdown: float | None = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import math
 
 import pandas as pd
@@ -60,6 +61,11 @@ def compute_overview_metrics(
     if clean.empty:
         return ResearchOverviewMetrics(latest_price=latest)
 
+    latest_return_at = clean.index[-1]
+    if hasattr(latest_return_at, "to_pydatetime"):
+        latest_return_at = latest_return_at.to_pydatetime()
+    if not isinstance(latest_return_at, datetime):
+        latest_return_at = None
     total_return = total_return_from_returns(clean)
     _daily_vol, annual_vol = realized_vol(clean)
     max_dd = max_drawdown(clean)
@@ -71,6 +77,8 @@ def compute_overview_metrics(
     )
     return ResearchOverviewMetrics(
         total_return=total_return,
+        latest_daily_return=float(clean.iloc[-1]),
+        latest_daily_return_at=latest_return_at,
         annual_volatility=annual_vol,
         beta=beta,
         max_drawdown=max_dd,
@@ -103,4 +111,3 @@ def weighted_group_returns(
         return pd.Series(dtype=float)
     weights = weights / total_weight
     return returns_df.mul(weights, axis=1).sum(axis=1).astype(float)
-

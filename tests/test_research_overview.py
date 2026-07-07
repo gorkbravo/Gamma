@@ -133,6 +133,10 @@ def test_research_overview_builds_nodes_rankings_and_provenance():
     group_nodes = [node for node in result.nodes if node.level == "group"]
     assert {node.symbol for node in instrument_nodes} == {"AAPL", "MSFT", "SAP"}
     assert {node.label for node in group_nodes} == {"US Mega-Cap Tech", "International Software"}
+    msft_node = next(node for node in instrument_nodes if node.symbol == "MSFT")
+    assert msft_node.metrics.total_return != msft_node.metrics.latest_daily_return
+    assert msft_node.metrics.latest_daily_return == 120 / 116 - 1
+    assert msft_node.metrics.latest_daily_return_at == idx[-1].to_pydatetime()
     assert result.rankings.leaders[0].symbol == "MSFT"
     assert result.rankings.laggards[0].symbol == "SAP"
     assert result.rankings.highest_beta
@@ -144,6 +148,9 @@ def test_research_overview_builds_nodes_rankings_and_provenance():
     assert response.coverage.thin_history_symbols == ["AAPL", "MSFT", "SAP"]
     assert response.history_source_label == "Mock sample-data daily history"
     assert response.sort_options[0].sort_id == "market_cap_desc"
+    response_msft = next(node for node in response.nodes if node.symbol == "MSFT")
+    assert response_msft.metrics.latest_daily_return == 120 / 116 - 1
+    assert response_msft.metrics.latest_daily_return_at == idx[-1].to_pydatetime()
     assert response.transformation_note is not None
 
 

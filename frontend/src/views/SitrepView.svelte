@@ -61,6 +61,8 @@
   type SitrepMarketRow = {
     id: string;
     symbol?: string | null;
+    proxySymbol?: string | null;
+    proxyLabel?: string | null;
     label: string;
     selectionLabel?: string | null;
     group: string;
@@ -383,6 +385,21 @@
     "fx-usdcad", "fx-audusd", "fx-nzdusd"
   ];
 
+  const INDEX_PROXY_BY_SYMBOL: Record<string, { symbol: string; label: string }> = {
+    "^GSPC": { symbol: "SPY", label: "S&P 500 ETF proxy" },
+    "^DJI": { symbol: "DIA", label: "DJIA ETF proxy" },
+    "^IXIC": { symbol: "QQQ", label: "Nasdaq 100 ETF proxy" },
+    "^RUT": { symbol: "IWM", label: "Russell 2000 ETF proxy" },
+    "^GSPTSE": { symbol: "EWC", label: "Canada ETF proxy" },
+    "^STOXX50E": { symbol: "FEZ", label: "Euro Stoxx 50 ETF proxy" },
+    "^FTSE": { symbol: "EWU", label: "UK ETF proxy" },
+    "^GDAXI": { symbol: "EWG", label: "Germany ETF proxy" },
+    "^FCHI": { symbol: "EWQ", label: "France ETF proxy" },
+    "^IBEX": { symbol: "EWP", label: "Spain ETF proxy" },
+    "^N225": { symbol: "EWJ", label: "Japan ETF proxy" },
+    "^HSI": { symbol: "EWH", label: "Hong Kong ETF proxy" }
+  };
+
   function buildFxRows(data: MacroSnapshot | null): SitrepMarketRow[] {
     const allFx = uniqueMetrics(
       allMacroMetrics(data).filter((m) =>
@@ -488,18 +505,21 @@
       .filter((node): node is ResearchOverviewNode => node.level === "instrument")
       .sort((left, right) => (right.size ?? 0) - (left.size ?? 0))
       .slice(0, 12);
-    return nodes.map((node) => ({
-      id: node.node_id,
-      symbol: node.symbol,
-      label: node.symbol ?? node.label,
-      selectionLabel: node.label,
-      group: abbreviateSector(node.group ?? node.sector ?? ""),
-      last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
-      change: formatPct(node.metrics.total_return),
-      secondary: node.metrics.annual_volatility == null ? "" : formatPct(node.metrics.annual_volatility),
-      tone: toneFromValue(node.metrics.total_return),
-      source: ""
-    }));
+    return nodes.map((node) => {
+      const latestDailyReturn = node.metrics.latest_daily_return ?? node.metrics.total_return;
+      return {
+        id: node.node_id,
+        symbol: node.symbol,
+        label: node.symbol ?? node.label,
+        selectionLabel: node.label,
+        group: abbreviateSector(node.group ?? node.sector ?? ""),
+        last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
+        change: formatPct(latestDailyReturn),
+        secondary: node.metrics.annual_volatility == null ? "" : formatPct(node.metrics.annual_volatility),
+        tone: toneFromValue(latestDailyReturn),
+        source: ""
+      };
+    });
   }
 
   function selectEquityRow(row: SitrepMarketRow) {
@@ -544,18 +564,40 @@
       .filter((node): node is ResearchOverviewNode => node.level === "instrument")
       .sort((left, right) => (left.sort_rank ?? 999) - (right.sort_rank ?? 999))
       .slice(0, 12);
-    return nodes.map((node) => ({
-      id: node.node_id,
-      label: node.label,
-      group: node.group ?? "Global",
-      last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
-      change: formatSignedNumber(absoluteChangeFromReturn(node.metrics.latest_price, node.metrics.total_return), 2),
-      changePct: formatPct(node.metrics.total_return),
-      changePctTone: toneFromValue(node.metrics.total_return),
-      secondary: node.symbol ?? "",
-      tone: toneFromValue(node.metrics.total_return),
-      source: node.source_provider
-    }));
+    return nodes.map((node) => {
+      const latestDailyReturn = node.metrics.latest_daily_return;
+      const proxy = indexProxyForNode(node);
+      return {
+        id: node.node_id,
+        symbol: node.symbol,
+        proxySymbol: proxy?.symbol ?? null,
+        proxyLabel: proxy?.label ?? null,
+        label: node.label,
+        group: node.group ?? "Global",
+        last: node.metrics.latest_price == null ? "N/A" : formatNumber(node.metrics.latest_price, 2),
+        change: formatSignedNumber(absoluteChangeFromReturn(node.metrics.latest_price, latestDailyReturn), 2),
+        changePct: formatPct(latestDailyReturn),
+        changePctTone: toneFromValue(latestDailyReturn),
+        secondary: proxy ? `${proxy.symbol} / ${shortDate(node.metrics.latest_daily_return_at)}` : shortDate(node.metrics.latest_daily_return_at),
+        tone: toneFromValue(latestDailyReturn),
+        source: node.source_provider
+      };
+    });
+  }
+
+  function indexProxyForNode(node: ResearchOverviewNode) {
+    const symbol = (node.symbol ?? "").trim().toUpperCase();
+    return INDEX_PROXY_BY_SYMBOL[symbol] ?? null;
+  }
+
+  function formatIndexPeriodLabel(data: ResearchOverviewResponse | null) {
+    const asOf = (data?.nodes ?? [])
+      .filter((node) => node.level === "instrument")
+      .map((node) => node.metrics.latest_daily_return_at)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+    return `Latest daily close / ${shortDate(asOf)}`;
   }
 
   function buildCommodityRows(data: CommodityWorkspaceResponse | null): SitrepMarketRow[] {
@@ -971,13 +1013,13 @@
           <div class="table-header">
             <div class="table-title">
               <span>Worldwide Indices</span>
-              <small>{indicesOverview?.universe_label ?? "Global Indices"}</small>
+              <small>{formatIndexPeriodLabel(indicesOverview)}</small>
             </div>
             <button type="button" class="reload-button" on:click={refreshIndices} disabled={refreshing.indices || isCoolingDown("indices")} aria-label={refreshTitle("indices")} title={refreshTitle("indices")}>
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={indexRows} profile="indices" hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
+          <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
 
         <article class="panel table-panel">

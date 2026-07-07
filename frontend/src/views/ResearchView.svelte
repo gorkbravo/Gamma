@@ -362,6 +362,15 @@
   };
   const hiddenOverviewUniverseIds = new Set<string>(["sample_equities"]);
 
+  function overviewReturnPeriodLabel(currentOverview: ResearchOverviewResponse | null) {
+    const timeframe = currentOverview?.timeframe ?? overviewTimeframe;
+    return timeframe === "DoD" ? "Latest Day" : `${timeframe} Return`;
+  }
+
+  function overviewMetricLabel(metricId: ResearchOverviewMetricId, currentOverview: ResearchOverviewResponse | null = overview) {
+    return metricId === "return" ? overviewReturnPeriodLabel(currentOverview) : overviewMetricLabels[metricId];
+  }
+
   function overviewSortOptions(currentOverview: ResearchOverviewResponse | null) {
     const options = currentOverview?.sort_options?.length
       ? currentOverview.sort_options
@@ -1940,7 +1949,7 @@
             </div>
           </div>
 
-          <div class="treemap-canvas" aria-label={`Research overview treemap sized by ${researchSortMetricLabel(overviewSortBy)} and colored by ${overviewMetricLabels[overviewMetric]}`}>
+          <div class="treemap-canvas" aria-label={`Research overview treemap sized by ${researchSortMetricLabel(overviewSortBy)} and colored by ${overviewMetricLabel(overviewMetric)}`}>
             {#if overviewTreemapSections.length}
               {#each overviewTreemapSections as section}
                 <section class="treemap-section" style={treemapRectStyle(section.rect)}>
@@ -1956,7 +1965,7 @@
                         class={`treemap-tile ${density}`}
                         class:selected={selectedOverviewNode?.node_id === tile.node.node_id}
                         style={overviewTileStyle(tile, overviewMetric, overviewMetricMaxAbs)}
-                        aria-label={`${section.label}. ${tile.node.label}. ${overviewMetricLabels[overviewMetric]} ${formatResearchOverviewMetricValue(tile.colorValue, overviewMetric)}. ${researchSortMetricLabel(overviewSortBy)} ${formatResearchOverviewSortValue(tile.metricValue, overviewSortBy)}`}
+                        aria-label={`${section.label}. ${tile.node.label}. ${overviewMetricLabel(overviewMetric)} ${formatResearchOverviewMetricValue(tile.colorValue, overviewMetric)}. ${researchSortMetricLabel(overviewSortBy)} ${formatResearchOverviewSortValue(tile.metricValue, overviewSortBy)}`}
                         on:click={() => selectOverviewNode(tile.node.node_id)}
                         on:mouseenter={(event) => handleTileHover(event, section, tile)}
                         on:mousemove={(event) => handleTileHover(event, section, tile)}
@@ -2010,7 +2019,7 @@
                 <div class="treemap-tooltip-sector">{treemapTooltip.section}</div>
                 <dl class="treemap-tooltip-metrics">
                   <div>
-                    <dt>{overviewMetricLabels[overviewMetric]}</dt>
+                    <dt>{overviewMetricLabel(overviewMetric)}</dt>
                     <dd>{formatResearchOverviewMetricValue(tipColorValue, overviewMetric)}</dd>
                   </div>
                   <div>
@@ -2028,11 +2037,11 @@
 
       <div class="ranking-grid">
         <article class="panel">
-          <div class="panel-header"><div><p class="eyebrow">Leaders</p><h3>Leading Names</h3></div></div>
+          <div class="panel-header"><div><p class="eyebrow">Leaders</p><h3>{overviewReturnPeriodLabel(overview)} Leaders</h3></div></div>
           <BarRankChart items={overviewRankingBars.leaders ?? []} emptyMessage="No leader data." formatValue={(value) => formatResearchOverviewMetricValue(value, "return")} />
         </article>
         <article class="panel">
-          <div class="panel-header"><div><p class="eyebrow">Laggards</p><h3>Lagging Names</h3></div></div>
+          <div class="panel-header"><div><p class="eyebrow">Laggards</p><h3>{overviewReturnPeriodLabel(overview)} Laggards</h3></div></div>
           <BarRankChart items={overviewRankingBars.laggards ?? []} emptyMessage="No laggard data." formatValue={(value) => formatResearchOverviewMetricValue(value, "return")} />
         </article>
         <article class="panel">
@@ -2057,7 +2066,7 @@
             <div class="row"><span>Group</span><strong>{selectedOverviewNode?.group ?? "N/A"}</strong></div>
             <div class="row"><span>Market Cap</span><strong>{formatResearchOverviewSortValue(selectedOverviewNode?.market_cap_usd, "market_cap_desc")}</strong></div>
             <div class="row"><span>History Obs</span><strong>{selectedOverviewNode?.metrics.observation_count ?? 0}</strong></div>
-            <div class="row"><span>Return</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "return") : null, "return")}</strong></div>
+            <div class="row"><span>{overviewReturnPeriodLabel(overview)}</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "return") : null, "return")}</strong></div>
             <div class="row"><span>Volatility</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "volatility") : null, "volatility")}</strong></div>
             <div class="row"><span>Beta</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "beta") : null, "beta")}</strong></div>
             <div class="row"><span>Drawdown</span><strong>{formatResearchOverviewMetricValue(selectedOverviewNode ? getResearchOverviewMetricValue(selectedOverviewNode, "drawdown") : null, "drawdown")}</strong></div>

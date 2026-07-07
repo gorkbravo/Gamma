@@ -20,6 +20,8 @@ export interface SitrepHandoffRequest {
 export interface SitrepMarketHandoffRow {
   id: string;
   symbol?: string | null;
+  proxySymbol?: string | null;
+  proxyLabel?: string | null;
   label: string;
   selectionLabel?: string | null;
   group: string;
@@ -55,7 +57,15 @@ export function resolveSitrepMarketHandoff(
   }
 
   if (profile === "indices") {
-    return { targetTab: "equity_research", targetMode: "overview" };
+    const symbol = (row.proxySymbol ?? "").trim().toUpperCase();
+    return symbol
+      ? {
+          targetTab: "equity_research",
+          targetMode: "scope_analysis",
+          symbol,
+          label: row.proxyLabel ?? `${row.label} proxy`,
+        }
+      : { targetTab: "equity_research", targetMode: "overview" };
   }
 
   if (profile === "fx") {
