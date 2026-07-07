@@ -3515,7 +3515,7 @@
     font-size: var(--text-sm);
     padding: var(--space-2) var(--space-7) var(--space-2) var(--space-5);
     cursor: pointer;
-    min-width: 0;
+    min-width: 8rem;
     white-space: nowrap;
   }
 
@@ -3542,6 +3542,7 @@
 
   .ctrl-select--short {
     width: 7rem;
+    min-width: 7rem;
     flex-shrink: 0;
   }
 
@@ -3551,8 +3552,18 @@
     align-items: start;
   }
 
+  /* minmax(0,1fr) instead of the implicit auto track: the canvas's
+     aspect-ratio + min-height would otherwise floor the track width */
+  .treemap-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .treemap-canvas {
     position: relative;
+    /* explicit width + min-width: 0 keep aspect-ratio from transferring
+       min-height into a forced inline size that overflows narrow panels */
+    width: 100%;
+    min-width: 0;
     min-height: 42rem;
     aspect-ratio: 16 / 9;
     border: 1px solid var(--divider);
