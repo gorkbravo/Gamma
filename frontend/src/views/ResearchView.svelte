@@ -402,6 +402,7 @@
               label: "Drawdown",
               color: "#d1645d",
               type: "area",
+              invertFilledArea: true,
               data: perf.map((point) => {
                 cumulative *= 1 + point.value;
                 peak = Math.max(peak, cumulative);
@@ -531,7 +532,7 @@
         <div class="kpi-grid">
           <article class="metric">
             <span>Total Return</span>
-            <strong>{pct(result?.summary.total_return)}</strong>
+            <strong class:positive={(result?.summary.total_return ?? 0) > 0} class:negative={(result?.summary.total_return ?? 0) < 0}>{pct(result?.summary.total_return)}</strong>
             <small>{result?.observations_count ?? 0} aligned observations</small>
           </article>
           <article class="metric">
@@ -546,12 +547,12 @@
           </article>
           <article class="metric">
             <span>Max Drawdown</span>
-            <strong>{pct(result?.summary.max_drawdown)}</strong>
+            <strong class:negative={(result?.summary.max_drawdown ?? 0) < 0}>{pct(result?.summary.max_drawdown)}</strong>
             <small>{pct(structureMetrics.top_weight)} top weight</small>
           </article>
           <article class="metric">
             <span>Beta</span>
-            <strong>{fmt(result?.summary.beta, 3)}</strong>
+            <strong class:elevated={(result?.summary.beta ?? 0) > 1.2}>{fmt(result?.summary.beta, 3)}</strong>
             <small>{coverageMetrics.benchmark_overlap_count} overlap obs</small>
           </article>
           <article class="metric">
@@ -901,7 +902,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(9, 14, 20, 0.97), rgba(6, 10, 15, 0.95));
+    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
     padding: 1.05rem;
   }
 
@@ -964,6 +965,7 @@
     padding: 0.2rem 1rem;
     border-left: 1px solid rgba(46, 60, 74, 0.52);
     background: none;
+    text-align: center;
   }
 
   .metric:first-child {
@@ -1041,7 +1043,7 @@
   textarea,
   button {
     border: 1px solid var(--panel-strong);
-    background: #0b1219;
+    background: #0d0f12;
     color: var(--text-0);
     padding: 0.56rem 0.72rem;
     font: inherit;
@@ -1165,6 +1167,10 @@
   .note-row.info p {
     color: var(--accent);
   }
+
+  .positive { color: var(--positive); }
+  .negative { color: var(--negative); }
+  .elevated { color: var(--data-warm); }
 
   .warning {
     color: var(--warning);

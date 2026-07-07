@@ -11,7 +11,7 @@
       <div class="copy">
         <div class="title-row">
           <h1>{title}</h1>
-          <span class="eyebrow">Quant Research Desk</span>
+          <span class="eyebrow">Research & Analysis Platform</span>
         </div>
       </div>
     </div>

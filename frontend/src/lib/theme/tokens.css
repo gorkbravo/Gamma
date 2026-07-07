@@ -1,26 +1,73 @@
 :root {
   color-scheme: dark;
   font-family: "JetBrains Mono", "Cascadia Mono", "IBM Plex Mono", "Consolas", monospace;
-  --bg-0: #05080c;
-  --bg-1: #081019;
-  --bg-2: #0c141d;
-  --bg-3: #101a25;
-  --surface-0: rgba(11, 17, 24, 0.95);
-  --surface-1: rgba(9, 14, 20, 0.97);
-  --surface-2: #121c27;
-  --surface-soft: rgba(8, 13, 18, 0.62);
-  --panel-border: #1a2734;
-  --panel-strong: #294050;
-  --divider: rgba(46, 60, 74, 0.58);
-  --text-0: #f4f7fb;
-  --text-1: #c7d2dc;
-  --text-2: #8c9dad;
+
+  /* ── Background layers (shifted to true neutral) ── */
+  --bg-0: #070809;
+  --bg-1: #0b0d10;
+  --bg-2: #0f1114;
+  --bg-3: #131618;
+
+  /* ── Surfaces ── */
+  --surface-0: rgba(10, 12, 15, 0.95);
+  --surface-1: rgba(9, 11, 13, 0.97);
+  --surface-2: #141719;
+  --surface-soft: rgba(10, 12, 14, 0.62);
+
+  /* ── Borders & dividers ── */
+  --panel-border: #1e2228;
+  --panel-strong: #2e353e;
+  --divider: rgba(50, 56, 64, 0.55);
+
+  /* ── Text ── */
+  --text-0: #f0f2f5;
+  --text-1: #c2c8d0;
+  --text-2: #8a919a;
+
+  /* ── Interactive accent (blue stays for interactive elements) ── */
   --accent: #7aa6c8;
   --accent-2: #c49a5a;
+
+  /* ── Semantic: status ── */
   --positive: #4bb474;
   --negative: #c66b61;
   --warning: #c49a5a;
-  --shadow: rgba(0, 0, 0, 0.2);
+
+  /* ── Semantic: data intensity ── */
+  --data-hot: #4bb474;
+  --data-warm: #c49a5a;
+  --data-cool: #6ba3c4;
+  --data-cold: #8a919a;
+  --data-elevated: #d4a054;
+  --data-extreme: #d66868;
+
+  /* ── Shadows ── */
+  --shadow: rgba(0, 0, 0, 0.24);
+
+  /* ── Chart themes ── */
+  --chart-primary: #7aa6c8;
+  --chart-secondary: #c49a5a;
+  --chart-negative: #b65d54;
+
+  /* ── Flash animation durations ── */
+  --flash-duration: 800ms;
+
+  /* ── Table stripe ── */
+  --table-stripe: rgba(122, 166, 200, 0.018);
+}
+
+/* ── Theme: Amber phosphor ── */
+:root[data-chart-theme="amber"] {
+  --chart-primary: #d4a054;
+  --chart-secondary: #8a919a;
+  --chart-negative: #c66b61;
+}
+
+/* ── Theme: Green phosphor ── */
+:root[data-chart-theme="green"] {
+  --chart-primary: #4bb474;
+  --chart-secondary: #8a919a;
+  --chart-negative: #c66b61;
 }
 
 html,
@@ -29,8 +76,8 @@ body,
   margin: 0;
   min-height: 100%;
   background:
-    radial-gradient(circle at top right, rgba(122, 166, 200, 0.08), transparent 24rem),
-    linear-gradient(180deg, #06090d 0%, #05070a 100%);
+    radial-gradient(circle at top right, rgba(255, 252, 248, 0.03), transparent 24rem),
+    linear-gradient(180deg, #070809 0%, #060708 100%);
   color: var(--text-0);
 }
 
@@ -47,4 +94,37 @@ select {
 
 * {
   box-sizing: border-box;
+}
+
+/* ── Bloomberg-style value flash ── */
+@keyframes flash-up {
+  0%   { background-color: rgba(75, 180, 116, 0.22); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash-down {
+  0%   { background-color: rgba(198, 107, 97, 0.22); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash-neutral {
+  0%   { background-color: rgba(196, 154, 90, 0.18); }
+  100% { background-color: transparent; }
+}
+
+.flash-up {
+  animation: flash-up var(--flash-duration) ease-out;
+}
+
+.flash-down {
+  animation: flash-down var(--flash-duration) ease-out;
+}
+
+.flash-neutral {
+  animation: flash-neutral var(--flash-duration) ease-out;
+}
+
+/* ── Table striping (global) ── */
+tbody tr:nth-child(even) {
+  background: var(--table-stripe);
 }

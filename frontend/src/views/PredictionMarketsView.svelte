@@ -23,7 +23,7 @@
 
   let query = "";
   let status: "open" | "closed" | "all" = "open";
-  let sortBy: "research_rank" | "volume_desc" | "liquidity_desc" | "repricing_desc" | "resolution_soon" = "research_rank";
+  let sortBy: "research_rank" | "volume_desc" | "liquidity_desc" | "repricing_desc" | "resolution_soon" = "volume_desc";
   let category = "";
   let venueSelection: Array<"polymarket" | "kalshi"> = ["polymarket", "kalshi"];
   let autoRunHandle: ReturnType<typeof setTimeout> | null = null;
@@ -47,6 +47,12 @@
       return text;
     }
     return `${text.slice(0, 12)}...${text.slice(-10)}`;
+  };
+  const truncName = (value: string | null | undefined, max = 18) => {
+    const text = String(value ?? "").trim();
+    if (!text) return "N/A";
+    if (text.length <= max) return text;
+    return `${text.slice(0, max - 1)}…`;
   };
   const ageLabel = (seconds: number | null | undefined) => {
     if (seconds == null) {
@@ -338,14 +344,9 @@
       body: describeTime(daysToResolution)
     },
     {
-      label: "Liquidity check",
-      value: detail?.research_score == null ? "N/A" : `${detail.research_score.toFixed(0)}`,
+      label: "Liquidity",
+      value: (detail?.volume_24h ?? 0) > 0 ? fmt(detail?.volume_24h) : "N/A",
       body: describeLiquidity(detail)
-    },
-    {
-      label: "Freshness",
-      value: detail?.freshness?.status?.toUpperCase() ?? "N/A",
-      body: describeFreshness(detail)
     },
     {
       label: "Participation",
@@ -374,13 +375,9 @@
           <div class="title-block">
             <p class="eyebrow">Prediction Markets</p>
             <h2>{detail?.title ?? "Select a market"}</h2>
-            <p class="muted">
-              {#if detail}
-                The left side stays focused on probability behavior and flow, while normalized ids and provenance stay attached in the research rail for reuse later.
-              {:else}
-                Load the screener and select a contract to inspect history, flow, consistency, and calibration.
-              {/if}
-            </p>
+            {#if !detail}
+              <p class="muted">Load the screener and select a contract.</p>
+            {/if}
           </div>
           {#if detail}
             <div class="badge-stack">
@@ -394,34 +391,24 @@
 
         <div class="kpi-grid">
           <article class="metric">
-            <span>Probability</span>
-            <strong>{pct(detail?.current_probability)}</strong>
+            <span>Prob.</span>
+            <strong class={marketTone(detail?.current_probability)}>{pct(detail?.current_probability)}</strong>
             <small>{detail?.probability_label ?? "Primary outcome"}</small>
           </article>
           <article class="metric">
-            <span>24H Volume</span>
+            <span>24H Vol</span>
             <strong>{fmt(detail?.volume_24h)}</strong>
             <small>Total {fmt(detail?.volume)}</small>
           </article>
           <article class="metric">
             <span>Liquidity</span>
             <strong>{fmt(detail?.liquidity)}</strong>
-            <small>{(detail?.open_interest ?? 0) > 0 ? `Open interest ${fmt(detail?.open_interest)}` : "Open interest unavailable"}</small>
-          </article>
-          <article class="metric">
-            <span>Freshness</span>
-            <strong class={freshnessTone(detail?.freshness?.status)}>{detail?.freshness?.status ?? "N/A"}</strong>
-            <small>{ageLabel(detail?.freshness?.retrieval_age_seconds)}</small>
+            <small>{(detail?.open_interest ?? 0) > 0 ? `OI ${fmt(detail?.open_interest)}` : ""}</small>
           </article>
           <article class="metric">
             <span>Top Flow</span>
-            <strong>{topWallet ? topWallet.display_name : "N/A"}</strong>
-            <small>{topWallet ? fmt(topWallet.total_size, 2) : "Waiting for flow"}</small>
-          </article>
-          <article class="metric">
-            <span>Research Score</span>
-            <strong>{detail?.research_score?.toFixed(0) ?? "N/A"}</strong>
-            <small>{detail?.research_rationale ?? "Ranking signal will appear in the screener."}</small>
+            <strong>{topWallet ? truncName(topWallet.display_name) : "N/A"}</strong>
+            <small>{topWallet ? fmt(topWallet.total_size, 2) : ""}</small>
           </article>
         </div>
 
@@ -447,22 +434,22 @@
         </div>
 
         {#if hasWalletRows}
-          <div class="summary-strip">
-            <article class="summary-chip">
-              <span>Recent trades</span>
+          <div class="kpi-grid">
+            <article class="metric">
+              <span>Trades</span>
               <strong>{wallet?.total_trades ?? 0}</strong>
             </article>
-            <article class="summary-chip">
-              <span>Total notional</span>
+            <article class="metric">
+              <span>Notional</span>
               <strong>{fmt(wallet?.total_notional, 2)}</strong>
             </article>
-            <article class="summary-chip">
-              <span>Top share</span>
-              <strong>{pct(wallet?.top_participant_share)}</strong>
+            <article class="metric">
+              <span>Top Share</span>
+              <strong class={(wallet?.top_participant_share ?? 0) >= 0.45 ? 'elevated' : ''}>{pct(wallet?.top_participant_share)}</strong>
             </article>
-            <article class="summary-chip">
+            <article class="metric">
               <span>HHI</span>
-              <strong>{wallet?.concentration_hhi?.toFixed(2) ?? "N/A"}</strong>
+              <strong class={(wallet?.concentration_hhi ?? 0) >= 0.25 ? 'elevated' : ''}>{wallet?.concentration_hhi?.toFixed(2) ?? "N/A"}</strong>
             </article>
           </div>
 
@@ -482,14 +469,14 @@
                 {#each wallet?.participants ?? [] as participant}
                   <tr>
                     <td class="wrap-cell">
-                      <strong>{participant.display_name}</strong>
+                      <strong title={participant.display_name}>{truncName(participant.display_name, 22)}</strong>
                       <small>{participant.outcome_label ?? participant.side}</small>
                     </td>
-                    <td>{participant.side}</td>
+                    <td class={participant.side === 'buy' ? 'positive' : participant.side === 'sell' ? 'negative' : ''}>{participant.side}</td>
                     <td>{participant.trade_count}</td>
                     <td>{fmt(participant.total_size, 2)}</td>
                     <td>{pct(participant.average_price)}</td>
-                    <td>{pct(participant.current_edge)}</td>
+                    <td class={(participant.current_edge ?? 0) > 0 ? 'positive' : (participant.current_edge ?? 0) < 0 ? 'negative' : ''}>{pct(participant.current_edge)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -514,7 +501,7 @@
         {/if}
       </article>
 
-      <div class="detail-split">
+      <div class="detail-stack">
         <article class="panel composition-panel">
           <div class="panel-header">
             <div>
@@ -523,62 +510,45 @@
             </div>
           </div>
 
-          <div class="meta-grid">
-            <div class="meta-card span-2">
-              <span>Title</span>
-              <strong>{detail?.title ?? "No market selected"}</strong>
-              <small>{detail?.event_title ?? detail?.series_title ?? "Event context will appear once a contract is selected."}</small>
-            </div>
-            <div class="meta-card">
-              <span>Normalized Market ID</span>
+          <div class="meta-flat">
+            <div class="meta-row">
+              <span>Market ID</span>
               <code>{compactId(detail?.market_id)}</code>
             </div>
-            <div class="meta-card">
-              <span>Venue Market ID</span>
+            <div class="meta-row">
+              <span>Venue ID</span>
               <code>{compactId(detail?.provider_market_id)}</code>
             </div>
-            <div class="meta-card">
-              <span>Venue Contract ID</span>
-              <code>{compactId(detail?.provider_condition_id)}</code>
-            </div>
-            <div class="meta-card">
-              <span>Event / Series</span>
+            <div class="meta-row">
+              <span>Event</span>
               <strong>{detail ? `${detail.event_title ?? "N/A"} / ${detail.series_title ?? "N/A"}` : "N/A"}</strong>
             </div>
-            <div class="meta-card">
-              <span>Resolution Time</span>
+            <div class="meta-row">
+              <span>Resolution</span>
               <strong>{shortDate(detail?.end_time)}</strong>
             </div>
-            <div class="meta-card">
+            <div class="meta-row">
               <span>Freshness</span>
               <strong class={freshnessTone(detail?.freshness?.status)}>{detail?.freshness?.status ?? "N/A"}</strong>
-              <small>{detail?.freshness?.reason ?? "No integrity note."}</small>
             </div>
-            <div class="meta-card">
+            <div class="meta-row">
               <span>Retrieved</span>
               <strong>{shortDate(detail?.retrieved_at)}</strong>
             </div>
-            <div class="meta-card">
-              <span>Last History Point</span>
-              <strong>{shortDate(detail?.freshness?.last_history_point_at ?? latestHistoryPoint?.timestamp)}</strong>
-              <small>Lag {ageLabel(detail?.freshness?.history_lag_seconds)}</small>
-            </div>
-            <div class="meta-card">
+            <div class="meta-row">
               <span>Origin</span>
               <small>{detail?.source_provider ?? "N/A"} | {detail?.origin ?? "N/A"}</small>
             </div>
-            <div class="meta-card span-2">
-              <span>Tags</span>
-              <div class="tag-list">
-                {#if detail?.tags?.length}
+            {#if detail?.tags?.length}
+              <div class="meta-row">
+                <span>Tags</span>
+                <div class="tag-list">
                   {#each detail.tags as tag}
                     <span class="tag-chip">{tag}</span>
                   {/each}
-                {:else}
-                  <small>No tags attached.</small>
-                {/if}
+                </div>
               </div>
-            </div>
+            {/if}
           </div>
 
           {#if detail?.outcomes?.length}
@@ -609,13 +579,13 @@
             </div>
           </div>
 
-          <div class="dynamics-grid">
+          <div class="dynamics-flat">
             {#each eventDynamics as item}
-              <article class="dynamic-card">
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-                <p>{item.body}</p>
-              </article>
+              <div class="dynamics-row">
+                <span class="dyn-label">{item.label}</span>
+                <strong class="dyn-value">{item.value}</strong>
+                <p class="dyn-body">{item.body}</p>
+              </div>
             {/each}
           </div>
 
@@ -745,41 +715,10 @@
           <strong>{screener?.markets.length ?? 0} rows</strong>
         </div>
 
-        {#if screener?.venues?.length}
-          <div class="venue-status-grid">
-            {#each screener.venues as venue}
-              <article class={`summary-chip venue-chip ${venueTone(venue.status)}`}>
-                <span>{venue.venue}</span>
-                <strong>{venue.status}</strong>
-                <small>{venue.visible_markets} visible / {venue.matched_markets} matched</small>
-                <small>{venue.message ?? "No venue note."}</small>
-              </article>
-            {/each}
-          </div>
-        {/if}
-
-        {#if screener?.warnings?.length}
-          <div class="notes-list">
-            {#each screener.warnings as warning}
-              <div class="note-row">
-                <span class="note-tag">Venue</span>
-                <p>{warning}</p>
-              </div>
-            {/each}
-          </div>
-        {/if}
-
         <label>
           <span>Search</span>
           <input bind:value={query} placeholder="Fed, election, inflation, semis..." on:keydown={handleSearchKeydown} />
         </label>
-
-        <p class="muted">
-          Filters auto-apply. Press Enter for an immediate rerun.
-          {#if loading}
-            Searching current venue data...
-          {/if}
-        </p>
 
         <div class="field-grid">
           <label>
@@ -793,8 +732,8 @@
           <label>
             <span>Sort</span>
             <select bind:value={sortBy}>
-              <option value="research_rank">Research Rank</option>
               <option value="volume_desc">Volume</option>
+              <option value="research_rank">Research Rank</option>
               <option value="liquidity_desc">Liquidity</option>
               <option value="repricing_desc">Repricing</option>
               <option value="resolution_soon">Resolution</option>
@@ -805,7 +744,7 @@
         <label>
           <span>Category</span>
           <select bind:value={category}>
-            <option value="">All research categories</option>
+            <option value="">All categories</option>
             {#each availableCategories as option}
               <option value={option}>{option}</option>
             {/each}
@@ -813,17 +752,32 @@
         </label>
 
         <div class="venue-picker">
-          <button type="button" class:selected={venueSelection.includes("polymarket")} on:click={() => toggleVenue("polymarket")}>
-            Polymarket
-          </button>
-          <button type="button" class:selected={venueSelection.includes("kalshi")} on:click={() => toggleVenue("kalshi")}>
-            Kalshi
-          </button>
+          {#each (screener?.venues ?? [{ venue: "polymarket", status: "unknown", visible_markets: 0, matched_markets: 0 }, { venue: "kalshi", status: "unknown", visible_markets: 0, matched_markets: 0 }]) as venue}
+            <button
+              type="button"
+              class="{venueSelection.includes(venue.venue as 'polymarket' | 'kalshi') ? 'selected' : ''} {venueSelection.includes(venue.venue as 'polymarket' | 'kalshi') ? venueTone(venue.status) : ''}"
+              on:click={() => toggleVenue(venue.venue as 'polymarket' | 'kalshi')}
+            >
+              <strong>{venue.venue === 'polymarket' ? 'PM' : 'KL'}</strong>
+              <small>{venue.visible_markets ?? 0} mkts</small>
+            </button>
+          {/each}
         </div>
+
+        {#if screener?.warnings?.length}
+          <div class="notes-list">
+            {#each screener.warnings as warning}
+              <div class="note-row">
+                <span class="note-tag">Note</span>
+                <p>{warning}</p>
+              </div>
+            {/each}
+          </div>
+        {/if}
 
         <div class="builder-actions">
           <button type="button" on:click={() => runScreener(true)} disabled={loading}>
-            {loading ? "Loading..." : "Refresh Screener"}
+            {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
       </article>
@@ -842,11 +796,11 @@
             <thead>
               <tr>
                 <th>Market</th>
+                <th>Prob.</th>
+                <th>Δ24H</th>
+                <th>Vol</th>
                 <th>Venue</th>
                 <th>State</th>
-                <th>Prob</th>
-                <th>24H Vol</th>
-                <th>End</th>
               </tr>
             </thead>
             <tbody>
@@ -864,11 +818,11 @@
                         </small>
                       </div>
                     </td>
-                    <td>{market.venue}</td>
-                    <td><span class={`tag-chip compact-chip ${freshnessTone(market.freshness?.status)}`}>{market.freshness?.status ?? "N/A"}</span></td>
                     <td><span class={marketTone(market.current_probability)}>{pct(market.current_probability)}</span></td>
+                    <td class={((market.recent_price_change ?? 0) > 0 ? 'positive' : (market.recent_price_change ?? 0) < 0 ? 'negative' : '')}>{pct(market.recent_price_change)}</td>
                     <td>{fmt(market.volume_24h)}</td>
-                    <td>{shortDate(market.end_time)}</td>
+                    <td><span class="venue-label">{market.venue === 'polymarket' ? 'PM' : 'KL'}</span></td>
+                    <td><span class={`tag-chip compact-chip ${freshnessTone(market.freshness?.status)}`}>{market.freshness?.status ?? "N/A"}</span></td>
                   </tr>
                 {/each}
               {:else}
@@ -915,7 +869,7 @@
 
   .panel {
     border: 1px solid var(--panel-border);
-    background: linear-gradient(180deg, rgba(9, 14, 20, 0.97), rgba(6, 10, 15, 0.95));
+    background: linear-gradient(180deg, rgba(12, 14, 16, 0.97), rgba(9, 10, 12, 0.95));
     padding: 1.05rem;
   }
 
@@ -942,8 +896,6 @@
   }
 
   .title-block,
-  .meta-card,
-  .dynamic-card,
   .wrap-cell {
     min-width: 0;
   }
@@ -954,26 +906,35 @@
 
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    padding-block: 0.15rem;
   }
 
-  .metric,
   .summary-chip,
-  .meta-card,
-  .outcome-card,
-  .dynamic-card {
+  .outcome-card {
     min-width: 0;
     border: 1px solid rgba(46, 60, 74, 0.52);
     background: rgba(8, 13, 18, 0.62);
     padding: 0.9rem;
   }
 
+  .metric {
+    border: 0;
+    border-left: 1px solid rgba(50, 56, 64, 0.52);
+    background: none;
+    padding: 0.2rem 1rem;
+    text-align: center;
+  }
+
+  .metric:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+
   .metric strong,
   .summary-chip strong,
-  .meta-card strong,
-  .outcome-card strong,
-  .dynamic-card strong {
+  .outcome-card strong {
     display: block;
     margin: 0.22rem 0;
     font-size: 1rem;
@@ -984,10 +945,7 @@
   .group-label,
   label > span,
   .metric span,
-  .summary-chip span,
-  .meta-card span,
-  .outcome-card span,
-  .dynamic-card span {
+  .outcome-card span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
@@ -1008,8 +966,6 @@
   small,
   .muted,
   .note-row p,
-  .dynamic-card p,
-  .meta-card small,
   .wrap-cell small {
     color: var(--text-2);
     overflow-wrap: anywhere;
@@ -1024,7 +980,7 @@
   select,
   button {
     border: 1px solid var(--panel-strong);
-    background: #0b1219;
+    background: #0d0f12;
     color: var(--text-0);
     padding: 0.56rem 0.72rem;
     font: inherit;
@@ -1053,9 +1009,50 @@
     gap: 0.6rem;
   }
 
+  .venue-picker button {
+    display: grid;
+    gap: 0.15rem;
+    text-align: center;
+    padding: 0.5rem 0.6rem;
+    min-height: 2.8rem;
+  }
+
+  .venue-picker button strong {
+    font-size: 0.78rem;
+    color: var(--text-1);
+  }
+
+  .venue-picker button small {
+    color: var(--text-2);
+    font-size: 0.62rem;
+  }
+
   .venue-picker button.selected {
     border-color: rgba(122, 166, 200, 0.36);
     background: rgba(122, 166, 200, 0.08);
+  }
+
+  .venue-picker button.selected.fresh {
+    border-color: rgba(103, 189, 120, 0.35);
+    background: rgba(103, 189, 120, 0.08);
+  }
+
+  .venue-picker button.selected.fresh strong {
+    color: var(--positive);
+  }
+
+  .venue-picker button.selected.stale {
+    border-color: rgba(214, 168, 83, 0.35);
+    background: rgba(214, 168, 83, 0.08);
+  }
+
+  .venue-picker button.selected.stale strong {
+    color: var(--warning);
+  }
+
+  .venue-picker button.selected.delayed {
+    border-color: rgba(122, 166, 200, 0.36);
+    background: rgba(122, 166, 200, 0.12);
   }
 
   .badge-stack {
@@ -1075,22 +1072,8 @@
     font-size: 0.68rem;
   }
 
-  .summary-strip {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
   .venue-status-grid {
     grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  }
-
-  .meta-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
-  }
-
-  .dynamics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .outcome-grid {
@@ -1165,8 +1148,6 @@
 
   .wrap-cell strong,
   .market-title strong,
-  .meta-card strong,
-  .dynamic-card strong,
   .description-box p,
   code,
   .code-text {
@@ -1292,6 +1273,101 @@
     background: rgba(214, 104, 104, 0.12);
   }
 
+  .detail-stack {
+    display: grid;
+    gap: 0.95rem;
+  }
+
+  .meta-flat {
+    display: grid;
+    gap: 0;
+  }
+
+  .meta-row {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    border-top: 1px solid rgba(46, 60, 74, 0.3);
+    align-items: baseline;
+  }
+
+  .meta-row:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .meta-row span {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.64rem;
+    padding-top: 0.1rem;
+  }
+
+  .meta-row strong,
+  .meta-row code,
+  .meta-row small {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .dynamics-flat {
+    display: grid;
+    gap: 0;
+  }
+
+  .dynamics-row {
+    display: grid;
+    grid-template-columns: 8rem 4rem minmax(0, 1fr);
+    gap: 0.6rem;
+    padding: 0.55rem 0;
+    border-top: 1px solid rgba(46, 60, 74, 0.3);
+    align-items: baseline;
+  }
+
+  .dynamics-row:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .dyn-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.64rem;
+  }
+
+  .dyn-value {
+    color: var(--text-0);
+    font-size: 0.82rem;
+  }
+
+  .dyn-body {
+    color: var(--text-2);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+  }
+
+  .elevated {
+    color: var(--data-elevated, #d4a054);
+  }
+
+  .venue-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+  }
+
+  .positive {
+    color: var(--positive);
+  }
+
+  .negative {
+    color: var(--negative);
+  }
+
   @media (max-width: 1320px) {
     .workspace-grid {
       grid-template-columns: 1fr;
@@ -1300,15 +1376,13 @@
 
   @media (max-width: 1080px) {
     .detail-split,
-    .meta-grid,
-    .dynamics-grid,
-    .summary-strip,
     .kpi-grid {
       grid-template-columns: 1fr;
     }
 
-    .span-2 {
-      grid-column: span 1;
+    .dynamics-row {
+      grid-template-columns: 1fr;
+      gap: 0.25rem;
     }
   }
 
