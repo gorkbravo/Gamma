@@ -389,10 +389,10 @@
     z-index: 2;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem 0.65rem;
+    gap: var(--space-3) var(--space-5);
     max-width: calc(100% - 1.1rem);
     color: var(--text-1);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     line-height: 1.2;
     pointer-events: none;
   }
@@ -400,7 +400,7 @@
   .legend-item {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-2);
     min-width: 0;
     white-space: nowrap;
   }
@@ -423,6 +423,6 @@
     background: var(--bg-0);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
   }
 </style>

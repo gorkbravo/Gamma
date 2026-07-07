@@ -234,7 +234,7 @@
     border-radius: 2px;
     background: var(--bg-1);
     color: var(--text-1);
-    font-size: 12px;
+    font-size: var(--text-sm);
     line-height: 1;
     cursor: pointer;
     list-style: none;
@@ -256,8 +256,8 @@
     right: 0;
     display: grid;
     min-width: 174px;
-    gap: 6px;
-    padding: 8px;
+    gap: var(--space-3);
+    padding: var(--space-4);
     border: 1px solid var(--panel-strong);
     border-radius: 2px;
     background: var(--surface-0);
@@ -265,7 +265,7 @@
 
   .settings-title {
     color: var(--text-2);
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 600;
     line-height: 1.2;
     text-transform: uppercase;
@@ -275,7 +275,7 @@
   .settings-group {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--space-2);
   }
 
   button {
@@ -284,8 +284,8 @@
     border-radius: 2px;
     background: var(--bg-1);
     color: var(--text-1);
-    padding: 3px 7px;
-    font-size: 11px;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-xs);
     line-height: 1.1;
     cursor: pointer;
   }

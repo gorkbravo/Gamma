@@ -181,15 +181,15 @@
   .shell {
     width: min(1600px, calc(100vw - 1.5rem));
     margin: 0 auto;
-    padding: 0.5rem 0 1.1rem;
+    padding: var(--space-4) 0 var(--space-6);
   }
 
   .topbar {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.4rem 0.75rem;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-5);
     border: 1px solid var(--panel-border);
     border-radius: var(--radius-md);
     background: var(--bg-0);
@@ -207,7 +207,7 @@
     background: color-mix(in srgb, var(--accent) 12%, var(--bg-0));
     color: var(--accent);
     font-family: var(--display-font);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     font-weight: 700;
     line-height: 1;
   }
@@ -215,7 +215,7 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: var(--space-4);
     min-width: 0;
   }
 
@@ -234,11 +234,11 @@
   .asset-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.32rem;
+    gap: var(--space-3);
     flex-shrink: 0;
     white-space: nowrap;
     height: 1.75rem;
-    padding: 0.12rem 0.18rem 0.12rem 0.46rem;
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4);
     border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--panel-border));
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent) 7%, var(--bg-0));
@@ -247,7 +247,7 @@
 
   .asset-chip span {
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;
@@ -255,7 +255,7 @@
 
   .asset-chip strong {
     color: var(--text-0);
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
     line-height: 1;
   }
 
@@ -269,7 +269,7 @@
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-2);
-    font-size: 0.9rem;
+    font-size: var(--text-md);
     line-height: 1;
     padding: 0;
     cursor: pointer;
@@ -287,7 +287,7 @@
     background: transparent;
     border: 1px solid transparent;
     color: var(--text-1);
-    padding: 0.2rem;
+    padding: var(--space-2);
     cursor: pointer;
     border-radius: 2px;
     transition: color 120ms ease, border-color 120ms ease;
@@ -301,13 +301,13 @@
   h1 {
     display: flex;
     align-items: baseline;
-    gap: 0.4rem;
+    gap: var(--space-3);
     margin: 0;
     white-space: nowrap;
   }
 
   h1 strong {
-    font-size: 0.88rem;
+    font-size: var(--text-base);
     font-weight: 600;
     letter-spacing: 0.05em;
     color: var(--text-0);
@@ -315,7 +315,7 @@
   }
 
   h1 span {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     font-weight: 400;
     letter-spacing: 0.02em;
     color: var(--text-2);
@@ -325,10 +325,10 @@
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--panel-border));
     color: var(--accent);
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     letter-spacing: 0.04em;
-    padding: 0.12rem 0.5rem;
+    padding: var(--space-1) var(--space-4);
     cursor: pointer;
     border-radius: var(--radius-sm);
     transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
@@ -353,12 +353,12 @@
     justify-content: flex-end;
     align-items: center;
     min-width: 0;
-    padding-left: 0.6rem;
+    padding-left: var(--space-4);
     border-left: 1px solid var(--divider);
   }
 
   .content {
-    margin-top: 0.5rem;
+    margin-top: var(--space-4);
   }
 
   @media (max-width: 960px) {
@@ -370,7 +370,7 @@
     .topbar {
       display: flex;
       flex-direction: column;
-      padding: 0.4rem 0.75rem;
+      padding: var(--space-3) var(--space-5);
     }
 
     .brand {
@@ -399,7 +399,7 @@
       padding-left: 0;
       border-left: 0;
       border-top: 1px solid var(--divider);
-      padding-top: 0.5rem;
+      padding-top: var(--space-4);
     }
   }
 </style>

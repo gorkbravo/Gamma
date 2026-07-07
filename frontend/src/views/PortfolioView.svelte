@@ -586,7 +586,7 @@
   .mini-groups,
   .message-list {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .workspace-grid {
@@ -602,7 +602,7 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 1.05rem;
+    padding: var(--space-6);
   }
 
   .performance-panel,
@@ -610,7 +610,7 @@
   .rail-panel,
   .messages-panel {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .panel-header,
@@ -620,7 +620,7 @@
   .diagnostics-toggle-panel {
     display: flex;
     justify-content: space-between;
-    gap: 0.85rem;
+    gap: var(--space-5);
   }
 
   .top-line {
@@ -630,12 +630,12 @@
   .kpi-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0;
-    padding-block: 0.15rem;
+    padding-block: var(--space-1);
   }
 
   .metric {
     min-width: 0;
-    padding: 0.2rem 1rem;
+    padding: var(--space-2) var(--space-6);
     border-left: 1px solid rgba(46, 60, 74, 0.52);
     background: none;
     text-align: center;
@@ -643,8 +643,8 @@
 
   .metric strong {
     display: block;
-    margin: 0.22rem 0 0.26rem;
-    font-size: 1.02rem;
+    margin: var(--space-2) 0 var(--space-2);
+    font-size: var(--text-lg);
     line-height: 1.2;
   }
 
@@ -664,7 +664,7 @@
   .group-label {
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   h2,
@@ -690,7 +690,7 @@
   .control-group,
   .checkbox {
     display: grid;
-    gap: 0.38rem;
+    gap: var(--space-3);
   }
 
   .benchmark-field input {
@@ -702,7 +702,7 @@
   .control-group > span,
   .chart-controls label > span {
     color: var(--text-2);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -716,10 +716,10 @@
   .checkbox {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-4);
     border: 1px solid rgba(46, 60, 74, 0.52);
     background: var(--surface-soft);
-    padding: 0.6rem 0.72rem;
+    padding: var(--space-4) var(--space-5);
   }
 
   .checkbox input {
@@ -733,7 +733,7 @@
     border: 1px solid var(--panel-strong);
     background: #0d0f12;
     color: var(--text-0);
-    padding: 0.68rem 0.78rem;
+    padding: var(--space-5) var(--space-5);
     font: inherit;
   }
 
@@ -756,9 +756,9 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.65rem;
+    padding: var(--space-2) var(--space-5);
     font: inherit;
-    font-size: 0.79rem;
+    font-size: var(--text-sm);
     white-space: nowrap;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
@@ -773,7 +773,7 @@
   .row {
     align-items: center;
     border-top: 1px solid rgba(46, 60, 74, 0.56);
-    padding-top: 0.72rem;
+    padding-top: var(--space-5);
   }
 
   .row:first-child {
@@ -794,15 +794,15 @@
   .pill-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.45rem;
-    margin-top: 0.55rem;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
   }
 
   .pill-list span {
     border: 1px solid rgba(122, 166, 200, 0.14);
     background: rgba(122, 166, 200, 0.05);
     color: var(--text-1);
-    padding: 0.34rem 0.46rem;
+    padding: var(--space-3) var(--space-4);
   }
 
   .table-wrap {
@@ -820,8 +820,8 @@
   .message-row {
     display: grid;
     grid-template-columns: 6rem minmax(0, 1fr);
-    gap: 0.8rem;
-    padding: 0.72rem 0.85rem;
+    gap: var(--space-5);
+    padding: var(--space-5) var(--space-5);
     border-bottom: 1px solid rgba(46, 60, 74, 0.52);
   }
 
@@ -834,7 +834,7 @@
     color: var(--warning);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
   }
 
   .message-row.error p,
@@ -858,7 +858,7 @@
 
   th,
   td {
-    padding: 0.72rem 0.55rem;
+    padding: var(--space-5) var(--space-4);
     border-bottom: 1px solid rgba(46, 60, 74, 0.52);
     text-align: left;
     white-space: nowrap;
@@ -866,7 +866,7 @@
 
   th {
     color: var(--text-2);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     background: var(--surface-0);
@@ -906,7 +906,7 @@
     }
 
     .metric {
-      padding: 0.7rem 0;
+      padding: var(--space-5) 0;
       border-left: 0;
     }
 

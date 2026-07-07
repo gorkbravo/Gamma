@@ -1249,7 +1249,7 @@
   .strategy-layout,
   .legs-panel {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .workspace-grid {
@@ -1264,12 +1264,12 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     min-width: 0;
   }
 
   .header-panel {
-    padding: 0.55rem 0.65rem;
+    padding: var(--space-4) var(--space-5);
   }
 
   .header-top,
@@ -1285,12 +1285,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.65rem;
+    gap: var(--space-5);
   }
 
   .header-top {
     align-items: end;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-4);
   }
 
   .header-actions,
@@ -1302,27 +1302,27 @@
   .template-bar {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-3);
     flex-wrap: wrap;
-    padding: 0.35rem 0;
+    padding: var(--space-3) 0;
     border-bottom: 1px solid var(--divider);
   }
 
   .template-label {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
 
   .template-button {
-    font-size: 0.72rem;
-    padding: 0.2rem 0.5rem;
+    font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-4);
   }
 
   .template-notice {
-    font-size: 0.72rem;
-    padding: 0.3rem 0 0;
+    font-size: var(--text-sm);
+    padding: var(--space-2) 0 0;
   }
 
   .mode-row {
@@ -1340,7 +1340,7 @@
 
   .eyebrow,
   th {
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -1353,16 +1353,16 @@
   }
 
   h2 {
-    font-size: 1.05rem;
+    font-size: var(--text-lg);
     line-height: 1.2;
   }
 
   h3 {
-    font-size: 0.88rem;
+    font-size: var(--text-base);
   }
 
   h4 {
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -1379,9 +1379,9 @@
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
     min-height: 28px;
-    padding: 0.24rem 0.52rem;
+    padding: var(--space-2) var(--space-4);
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     border-radius: 2px;
   }
 
@@ -1401,11 +1401,11 @@
 
   .symbol-control {
     display: grid;
-    gap: 0.18rem;
+    gap: var(--space-1);
   }
 
   .symbol-control span {
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
   }
 
@@ -1454,7 +1454,7 @@
 
   .source-strip span,
   .metric span {
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
   }
 
@@ -1469,10 +1469,10 @@
 
   .metric {
     min-width: 0;
-    padding: 0.55rem 0.7rem;
+    padding: var(--space-4) var(--space-5);
     border-right: 1px solid var(--divider);
     display: grid;
-    gap: 0.16rem;
+    gap: var(--space-1);
   }
 
   .metric:last-child {
@@ -1480,7 +1480,7 @@
   }
 
   .metric small {
-    font-size: 0.69rem;
+    font-size: var(--text-xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1493,12 +1493,12 @@
 
   .table-header {
     min-height: 30px;
-    padding: 0.28rem 0.7rem;
+    padding: var(--space-2) var(--space-5);
     border-bottom: 1px solid var(--divider);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   table {
@@ -1508,7 +1508,7 @@
 
   th,
   td {
-    padding: 0.32rem 0.5rem;
+    padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
@@ -1562,7 +1562,7 @@
   th small {
     display: block;
     margin-top: 0.08rem;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0;
   }
 
@@ -1572,15 +1572,15 @@
   }
 
   .surface-hero {
-    padding: 0.5rem 0.6rem 0.55rem;
+    padding: var(--space-4) var(--space-4) var(--space-4);
   }
 
   .surface-hero .panel-head {
-    margin-bottom: 0.1rem;
+    margin-bottom: var(--space-1);
   }
 
   .surface-readout {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     font-weight: 600;
     color: var(--accent);
     letter-spacing: 0.02em;
@@ -1629,7 +1629,7 @@
 
   .compact-table th,
   .compact-table td {
-    padding: 0.28rem 0.42rem;
+    padding: var(--space-2) var(--space-3);
   }
 
   .probability-slice-panel {
@@ -1639,13 +1639,13 @@
 
   .probability-slice-panel .panel-head {
     min-height: 32px;
-    padding: 0.35rem 0.7rem;
+    padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
   }
 
   .probability-chart {
     height: 260px;
-    padding: 0.5rem 0.6rem 0.35rem;
+    padding: var(--space-4) var(--space-4) var(--space-3);
   }
 
   .probability-chart svg {
@@ -1681,11 +1681,11 @@
 
   .action-cell {
     display: flex;
-    gap: 0.25rem;
+    gap: var(--space-2);
   }
 
   .pad {
-    padding: 0.6rem 0.75rem;
+    padding: var(--space-4) var(--space-5);
   }
 
   .bar {
@@ -1705,7 +1705,7 @@
   .metric-list > div,
   .warning-list > div {
     border-top: 1px solid var(--divider);
-    padding-top: 0.3rem;
+    padding-top: var(--space-2);
   }
 
   .split-panel {
@@ -1714,18 +1714,18 @@
   }
 
   .split-panel .panel-head {
-    padding: 0.3rem 0.75rem;
+    padding: var(--space-2) var(--space-5);
     border-bottom: 1px solid var(--divider);
   }
 
   .payoff-controls {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .payoff-meta {
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.03em;
     color: var(--text-2);
@@ -1733,8 +1733,8 @@
 
   .payoff-controls select {
     min-height: 24px;
-    padding: 0.1rem 0.42rem;
-    font-size: 0.74rem;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-sm);
   }
 
   .payoff-heatmap-wrap {
@@ -1745,12 +1745,12 @@
   .payoff-heatmap {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .payoff-heatmap th,
   .payoff-heatmap td {
-    padding: 0.16rem 0.32rem;
+    padding: var(--space-1) var(--space-3);
     text-align: right;
     border-bottom: 1px solid var(--divider);
     border-right: 1px solid var(--divider);
@@ -1764,7 +1764,7 @@
     z-index: 1;
     background: var(--bg-1);
     color: var(--text-2);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -1795,7 +1795,7 @@
   }
 
   .strategy-payoff-table {
-    margin-top: 0.55rem;
+    margin-top: var(--space-4);
     border-top: 1px solid var(--divider);
   }
 
@@ -1868,16 +1868,16 @@
   }
 
   .smile-readout {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     font-weight: 600;
     color: var(--accent);
     letter-spacing: 0.02em;
-    margin-left: 0.4rem;
+    margin-left: var(--space-3);
   }
 
   .smile-label {
     fill: var(--text-2);
-    font-size: 8px;
+    font-size: var(--text-2xs);
   }
 
   .smile-label.strike-max {
@@ -1895,7 +1895,7 @@
 
   .legs-panel {
     border-left: 1px solid var(--divider);
-    padding-left: 0.75rem;
+    padding-left: var(--space-5);
   }
 
   .alert-panel {
@@ -1909,18 +1909,18 @@
 
   .leg-row {
     border-top: 1px solid var(--divider);
-    padding-top: 0.35rem;
+    padding-top: var(--space-3);
   }
 
   .leg-row strong {
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
 
   .diagnostics-panel .note {
     color: var(--text-1);
     line-height: 1.45;
     border-top: 1px solid var(--divider);
-    padding-top: 0.45rem;
+    padding-top: var(--space-4);
   }
 
   .warning-list > div {

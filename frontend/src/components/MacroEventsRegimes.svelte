@@ -243,22 +243,22 @@
   .events-layout {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   /* ── Panel ── */
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .panel-header {
     display: flex;
     justify-content: space-between;
-    gap: 0.8rem;
+    gap: var(--space-5);
     align-items: start;
   }
 
@@ -269,7 +269,7 @@
   .card-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   /* ── Study rows ── */
@@ -280,8 +280,8 @@
 
   .study-row {
     display: grid;
-    gap: 0.25rem;
-    padding: 0.55rem 0;
+    gap: var(--space-2);
+    padding: var(--space-4) 0;
     border-bottom: 1px solid rgba(46, 60, 74, 0.25);
   }
 
@@ -292,21 +292,21 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.4rem;
+    gap: var(--space-3);
   }
 
   .study-meta {
     display: flex;
-    gap: 0.3rem;
+    gap: var(--space-2);
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     align-items: center;
   }
 
   .study-summary {
     color: var(--text-2);
     margin: 0;
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -318,13 +318,13 @@
   .coherence-inline {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem;
+    gap: var(--space-2);
     align-items: center;
   }
 
   .coherence-stat {
     color: var(--text-2);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
@@ -333,31 +333,31 @@
   .reaction-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.25rem;
+    gap: var(--space-2);
   }
 
   .reaction-brief {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
-    padding: 0.2rem 0;
+    padding: var(--space-2) 0;
   }
 
   .reaction-role {
-    font-size: 0.58rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-2);
   }
 
   .reaction-brief strong {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.3;
   }
 
   .reaction-score {
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
     color: var(--text-1);
     margin-left: auto;
@@ -371,7 +371,7 @@
     display: grid;
     gap: 0;
     border-top: 1px solid rgba(46, 60, 74, 0.18);
-    padding-top: 0.15rem;
+    padding-top: var(--space-1);
   }
 
   /* ── Tags ── */
@@ -380,15 +380,15 @@
     border: 1px solid rgba(122, 166, 200, 0.24);
     background: rgba(122, 166, 200, 0.06);
     color: var(--accent);
-    padding: 0.12rem 0.38rem;
-    font-size: 0.56rem;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;
     flex-shrink: 0;
   }
 
-  .tag.sm { font-size: 0.54rem; padding: 0.1rem 0.3rem; }
+  .tag.sm { font-size: var(--text-2xs); padding: var(--space-1) var(--space-2); }
 
   .tag.positive {
     border-color: rgba(75, 180, 116, 0.25);
@@ -418,8 +418,8 @@
 
   .list-row {
     display: grid;
-    gap: 0.1rem;
-    padding: 0.55rem 0.65rem;
+    gap: var(--space-1);
+    padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid rgba(46, 60, 74, 0.3);
   }
 
@@ -428,9 +428,9 @@
 
   .list-detail {
     display: flex;
-    gap: 0.3rem;
+    gap: var(--space-2);
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     line-height: 1.35;
     align-items: center;
   }
@@ -441,10 +441,10 @@
 
   .date-group-header {
     color: var(--text-2);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    padding: 0.45rem 0.65rem 0.2rem;
+    padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
     border-bottom: 1px solid rgba(46, 60, 74, 0.2);
     position: sticky;
@@ -454,9 +454,9 @@
 
   .empty-hint {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     margin: 0;
-    padding: 0.4rem 0;
+    padding: var(--space-3) 0;
   }
 
   /* ── Typography ── */
@@ -464,7 +464,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     margin: 0;
   }
 

@@ -362,30 +362,30 @@
 <style>
   .view {
     display: grid;
-    gap: 0.6rem;
+    gap: var(--space-4);
   }
 
   /* ── Header panel ── */
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
-  .header-panel { gap: 0.35rem; padding: 0.5rem 0.65rem; }
+  .header-panel { gap: var(--space-3); padding: var(--space-4) var(--space-5); }
 
   .header-top {
     display: flex;
     align-items: baseline;
-    gap: 0.5rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
   .title {
     color: var(--text-0);
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -393,26 +393,52 @@
 
   .subtitle {
     color: var(--text-2);
-    font-size: 10.5px;
+    font-size: var(--text-xs);
     letter-spacing: 0.04em;
   }
 
   .handoff-actions {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
     flex: 0 0 auto;
   }
 
   .handoff-actions button {
     min-height: 25px;
-    padding: 4px 8px;
-    font-size: 11px;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-1);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--text-sm);
     white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+
+  .handoff-actions button:hover:not(:disabled) {
+    background: var(--hover-bg);
+    color: var(--text-0);
+  }
+
+  .handoff-actions button:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .handoff-actions button:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .handoff-actions .ghost-action {
     background: transparent;
+  }
+
+  .handoff-actions .ghost-action:hover:not(:disabled) {
+    border-color: var(--accent);
   }
 
   /* ── Headline KPI strip ── */
@@ -421,7 +447,7 @@
   .headline-kpi {
     display: grid;
     gap: 0.05rem;
-    padding: 0.1rem 0.7rem;
+    padding: var(--space-1) var(--space-5);
     border-right: 1px solid var(--divider);
     min-width: 5.5rem;
     text-align: left;
@@ -432,7 +458,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 9.5px;
+    font-size: var(--text-2xs);
     line-height: 1.1;
     white-space: nowrap;
   }
@@ -440,7 +466,7 @@
   .headline-kpi-value {
     display: block;
     color: var(--text-0);
-    font-size: 12.5px;
+    font-size: var(--text-sm);
     font-weight: 600;
     line-height: 1.15;
     white-space: nowrap;
@@ -448,9 +474,9 @@
 
   .headline-kpi-delta {
     color: var(--text-2);
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: 400;
-    margin-left: 0.2rem;
+    margin-left: var(--space-2);
     white-space: nowrap;
   }
 
@@ -461,10 +487,10 @@
   .next-event {
     display: inline-flex;
     align-items: baseline;
-    gap: 0.35rem;
+    gap: var(--space-3);
     white-space: nowrap;
     margin-left: auto;
-    padding-left: 0.6rem;
+    padding-left: var(--space-4);
     border-left: 1px solid var(--divider);
     color: var(--text-2);
   }
@@ -472,25 +498,25 @@
   .next-event-label {
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 9.5px;
+    font-size: var(--text-2xs);
     color: var(--text-2);
   }
 
-  .next-event-title { color: var(--text-1); font-size: 11px; }
+  .next-event-title { color: var(--text-1); font-size: var(--text-xs); }
 
-  .next-event-date { color: var(--text-2); font-size: 10.5px; }
+  .next-event-date { color: var(--text-2); font-size: var(--text-xs); }
 
-  .next-event-date::before { content: "·"; margin-right: 0.35rem; opacity: 0.5; }
+  .next-event-date::before { content: "·"; margin-right: var(--space-3); opacity: 0.5; }
 
   /* ── Loading pill ── */
   .loading-pill {
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--accent);
     border: 1px solid rgba(122, 166, 200, 0.28);
     background: rgba(122, 166, 200, 0.06);
-    padding: 0.2rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     white-space: nowrap;
     animation: pulse-opacity 1.6s ease-in-out infinite;
   }
@@ -505,7 +531,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
     position: relative;
   }
 
@@ -520,10 +546,10 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.65rem;
+    padding: var(--space-2) var(--space-5);
     font: inherit;
     font-family: var(--display-font);
-    font-size: 0.79rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
@@ -536,15 +562,15 @@
   .mode-bar button.selected { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
 
   /* ── Context bar ── */
-  .context-bar { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-  .context-group { display: flex; gap: 0.4rem; }
-  .context-bar label { display: grid; gap: 0.15rem; }
+  .context-bar { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+  .context-group { display: flex; gap: var(--space-3); }
+  .context-bar label { display: grid; gap: var(--space-1); }
 
   .context-bar label > span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 10px;
+    font-size: var(--text-2xs);
     font-weight: 500;
   }
 
@@ -553,9 +579,9 @@
     background: var(--bg-1);
     color: var(--text-0);
     height: 24px;
-    padding: 2px 6px;
+    padding: var(--space-1) var(--space-3);
     font: inherit;
-    font-size: 12px;
+    font-size: var(--text-sm);
     border-radius: 2px;
     min-width: 5rem;
     cursor: pointer;
@@ -567,7 +593,7 @@
 
   .coverage-note {
     color: var(--text-2);
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     margin: 0;
     line-height: 1.35;
   }
@@ -577,7 +603,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     margin: 0;
   }
 
@@ -600,7 +626,7 @@
     .context-group { flex-direction: column; width: 100%; }
     .context-bar select { width: 100%; }
 
-    .header-top { flex-direction: column; gap: 0.4rem; }
+    .header-top { flex-direction: column; gap: var(--space-3); }
     .headline-strip, .next-event { display: none; }
   }
 </style>

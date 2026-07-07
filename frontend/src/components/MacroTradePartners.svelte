@@ -266,49 +266,49 @@
   .workspace-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.7fr) minmax(18rem, 0.8fr);
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .primary-column,
   .support-column {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-content: start;
   }
 
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .viz-panel {
-    padding: 0.75rem;
+    padding: var(--space-5);
   }
 
   .viz-header {
     display: flex;
     align-items: start;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
     min-height: 34px;
   }
 
   .legend {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--space-5);
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     white-space: nowrap;
   }
 
   .legend span {
     display: inline-flex;
     align-items: center;
-    gap: 0.28rem;
+    gap: var(--space-2);
   }
 
   .legend i {
@@ -381,24 +381,24 @@
 
   svg text {
     fill: var(--text-0);
-    font-size: 17px;
+    font-size: var(--text-lg);
     font-weight: 700;
     letter-spacing: 0;
   }
 
   .partner-label {
-    font-size: 15px;
+    font-size: var(--text-md);
   }
 
   .partner-share {
     fill: var(--text-2);
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 500;
   }
 
   .center-label {
     fill: var(--warning);
-    font-size: 15px;
+    font-size: var(--text-md);
   }
 
   .table-panel {
@@ -408,10 +408,10 @@
 
   .table-panel-header {
     min-height: 26px;
-    padding: 0.3rem 0.75rem;
+    padding: var(--space-2) var(--space-5);
     border-bottom: 1px solid var(--divider);
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -425,14 +425,14 @@
   th,
   td {
     border-bottom: 1px solid var(--divider);
-    padding: 0.4rem 0.55rem;
+    padding: var(--space-3) var(--space-4);
     text-align: left;
     vertical-align: top;
   }
 
   th {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -440,7 +440,7 @@
 
   td {
     color: var(--text-1);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
 
   td strong,
@@ -452,7 +452,7 @@
     display: block;
     margin-top: 0.08rem;
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
   }
 
   .positive {
@@ -466,7 +466,7 @@
   .eyebrow {
     margin: 0;
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -482,12 +482,12 @@
   .empty,
   li {
     color: var(--text-1);
-    font-size: 0.8rem;
+    font-size: var(--text-base);
     line-height: 1.45;
   }
 
   ul {
-    padding-left: 1rem;
+    padding-left: var(--space-6);
   }
 
   @media (max-width: 980px) {

@@ -11,6 +11,39 @@
   --radius-sm: 2px;
   --radius-md: 4px;
 
+  /* ── Type scale (7 steps — every font-size in the app resolves here) ──
+     Do not introduce sizes outside this ramp. Hierarchy is weight-first,
+     size-second; these steps exist so unrelated views share one rhythm. */
+  --text-2xs: 10px;   /* category labels, eyebrows, table column headers */
+  --text-xs: 11px;    /* secondary labels, metadata, timestamps */
+  --text-sm: 12px;    /* compact data, dense controls, sub-labels */
+  --text-base: 13.5px;/* body / data text — matches the global body size */
+  --text-md: 15px;    /* section headers (H3), panel titles */
+  --text-lg: 16px;    /* tab-level titles (H2) */
+  --text-xl: 18px;    /* hero identifiers — the ceiling inside tab content */
+
+  /* ── Line-height scale ── */
+  --leading-tight: 1.2;   /* single-line labels, values, table cells */
+  --leading-snug: 1.4;    /* dense data lists */
+  --leading-normal: 1.5;  /* multi-line prose (notes, tooltips) */
+
+  /* ── Space scale (every padding / gap / margin snaps here) ──
+     Panel gaps are --space-4 (8px). Panel padding is --space-5 (12px) to
+     --space-6 (16px). The 6px step exists because terminal-density
+     controls live between 4 and 8. Nothing off-ramp. */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+
+  /* ── Motion (functional only — one easing, two speeds) ── */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
   /* ── Background layers (shifted to true neutral) ── */
   --bg-0: #070809;
   --bg-1: #0b0d10;

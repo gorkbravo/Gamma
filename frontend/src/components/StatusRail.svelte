@@ -214,7 +214,7 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     align-items: center;
-    gap: 0.55rem;
+    gap: var(--space-4);
     min-width: 0;
     width: 100%;
   }
@@ -222,22 +222,22 @@
   .label {
     display: block;
     color: var(--text-2);
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.12em;
   }
 
   strong {
     color: var(--text-0);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     font-weight: 600;
   }
 
   small {
     display: block;
-    margin-top: 0.12rem;
+    margin-top: var(--space-1);
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
   }
 
   .positive {
@@ -251,9 +251,9 @@
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-sm);
     color: var(--text-0);
-    padding: 0.28rem 0.58rem;
+    padding: var(--space-2) var(--space-4);
     font: inherit;
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     cursor: pointer;
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
   }
@@ -265,7 +265,7 @@
   .actions {
     display: flex;
     align-items: stretch;
-    gap: 0.45rem;
+    gap: var(--space-4);
     min-width: 0;
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -274,8 +274,8 @@
   .conn-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0 0.5rem;
+    gap: var(--space-3);
+    padding: 0 var(--space-4);
     white-space: nowrap;
   }
 
@@ -294,7 +294,7 @@
   .conn-label {
     color: var(--text-2);
     font-family: var(--display-font);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -347,8 +347,8 @@
     z-index: 20;
     width: min(21rem, calc(100vw - 2rem));
     display: grid;
-    gap: 0.8rem;
-    padding: 0.9rem;
+    gap: var(--space-5);
+    padding: var(--space-6);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
     background: rgba(8, 13, 18, 0.98);
@@ -357,12 +357,12 @@
 
   .settings-section {
     display: grid;
-    gap: 0.38rem;
+    gap: var(--space-3);
   }
 
   .settings-section + .settings-section {
     border-top: 1px solid rgba(46, 60, 74, 0.52);
-    padding-top: 0.75rem;
+    padding-top: var(--space-5);
   }
 
   .settings-head,
@@ -370,11 +370,11 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.8rem;
+    gap: var(--space-5);
   }
 
   .field {
-    gap: 0.3rem;
+    gap: var(--space-2);
   }
 
   .wide {
@@ -383,15 +383,15 @@
 
   .usage-list {
     display: grid;
-    gap: 0.35rem;
+    gap: var(--space-3);
   }
 
   .usage-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.2rem 0.55rem;
+    gap: var(--space-2) var(--space-4);
     align-items: baseline;
-    padding: 0.42rem 0;
+    padding: var(--space-3) 0;
     border-top: 1px solid rgba(46, 60, 74, 0.36);
   }
 
@@ -408,7 +408,7 @@
 
   .usage-row span {
     color: var(--text-1);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .usage-row small {
@@ -418,15 +418,15 @@
 
   .health-list {
     display: grid;
-    gap: 0.35rem;
-    padding-top: 0.35rem;
+    gap: var(--space-3);
+    padding-top: var(--space-3);
     border-top: 1px dashed rgba(46, 60, 74, 0.42);
   }
 
   .health-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.2rem 0.55rem;
+    gap: var(--space-2) var(--space-4);
     align-items: baseline;
   }
 
@@ -437,7 +437,7 @@
   }
 
   .health-row span {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }

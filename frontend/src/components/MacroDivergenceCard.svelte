@@ -91,27 +91,27 @@
 <style>
   .divergence-card {
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-3);
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.75rem;
+    padding: var(--space-5);
   }
 
   .divergence-card.compact {
-    padding: 0.55rem 0.65rem;
-    gap: 0.3rem;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-2);
   }
 
   .card-head {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .head-left {
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-1);
     min-width: 0;
   }
 
@@ -119,23 +119,23 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     margin: 0;
   }
 
-  h3 { margin: 0; font-size: 0.88rem; }
+  h3 { margin: 0; font-size: var(--text-base); }
 
   .card-badges {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-2);
     flex-shrink: 0;
   }
 
   .card-summary {
     color: var(--text-2);
     margin: 0;
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
   }
 
@@ -150,13 +150,13 @@
   .coherence-inline {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem;
+    gap: var(--space-2);
     align-items: center;
   }
 
   .coherence-stat {
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
@@ -165,24 +165,24 @@
   .signal-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-    gap: 0.25rem;
+    gap: var(--space-2);
   }
 
   .signal-brief {
     display: grid;
-    gap: 0.15rem;
-    padding: 0.35rem 0;
+    gap: var(--space-1);
+    padding: var(--space-3) 0;
   }
 
   .signal-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.4rem;
+    gap: var(--space-3);
   }
 
   .signal-role {
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-2);
@@ -193,12 +193,12 @@
     align-items: center;
     justify-content: center;
     min-width: 2.8rem;
-    padding: 0.12rem 0.35rem;
+    padding: var(--space-1) var(--space-3);
     border-radius: 999px;
     border: 1px solid rgba(46, 60, 74, 0.42);
     background: rgba(122, 166, 200, 0.06);
     color: var(--text-1);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     font-weight: 600;
   }
 
@@ -215,14 +215,14 @@
   }
 
   .signal-name {
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
     line-height: 1.3;
   }
 
   .signal-interp {
     margin: 0;
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -232,10 +232,10 @@
 
   .research-focus {
     margin: 0;
-    padding: 0.1rem 0 0.1rem 0.5rem;
+    padding: var(--space-1) 0 var(--space-1) var(--space-4);
     border-left: 2px solid rgba(46, 60, 74, 0.35);
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -249,8 +249,8 @@
     border: 1px solid rgba(122, 166, 200, 0.24);
     background: rgba(122, 166, 200, 0.06);
     color: var(--accent);
-    padding: 0.12rem 0.38rem;
-    font-size: 0.56rem;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;
@@ -285,8 +285,8 @@
     align-items: center;
     justify-content: center;
     min-width: 2rem;
-    padding: 0.1rem 0.3rem;
-    font-size: 0.64rem;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-2xs);
     font-weight: 600;
     border-radius: 2px;
     border: 1px solid rgba(122, 166, 200, 0.2);

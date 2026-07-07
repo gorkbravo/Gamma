@@ -88,25 +88,25 @@
 <style>
   .console {
     display: grid;
-    gap: 0.9rem;
+    gap: var(--space-6);
     grid-template-rows: auto auto minmax(0, 1fr);
     height: 17.5rem;
     border: 1px solid var(--panel-border);
     background: var(--surface-1);
-    padding: 0.95rem 1rem 1rem;
+    padding: var(--space-6) var(--space-6) var(--space-6);
   }
 
   .header {
     display: flex;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: start;
   }
 
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.55rem;
+    gap: var(--space-4);
     justify-content: flex-end;
   }
 
@@ -117,10 +117,10 @@
   }
 
   .eyebrow {
-    margin: 0 0 0.35rem;
+    margin: 0 0 var(--space-3);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   h2,
@@ -135,19 +135,19 @@
   .summary {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .summary article {
     border: 1px solid var(--divider);
     background: var(--surface-soft);
-    padding: 0.72rem 0.8rem;
+    padding: var(--space-5) var(--space-5);
   }
 
   strong {
     color: var(--text-0);
     display: block;
-    margin-top: 0.3rem;
+    margin-top: var(--space-2);
   }
 
   .console-body {
@@ -159,9 +159,9 @@
   .line {
     display: grid;
     grid-template-columns: 7.5rem minmax(0, 1fr);
-    gap: 0.8rem;
+    gap: var(--space-5);
     align-items: start;
-    padding: 0.72rem 0.9rem;
+    padding: var(--space-5) var(--space-6);
     border-bottom: 1px solid rgba(46, 60, 74, 0.58);
   }
 
@@ -169,7 +169,7 @@
     color: var(--text-1);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
   }
 
   .warning .tag,
@@ -194,14 +194,14 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
   }
 
   button {
     background: #0b1219;
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
-    padding: 0.6rem 0.78rem;
+    padding: var(--space-4) var(--space-5);
     font: inherit;
     cursor: pointer;
   }

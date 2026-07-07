@@ -41,7 +41,7 @@
   }
 
   .metric {
-    padding: 0.4rem 0.5rem;
+    padding: var(--space-3) var(--space-4);
     border-left: 1px solid rgba(46, 60, 74, 0.42);
     min-width: 0;
     flex: 1 1 4.5rem;
@@ -57,7 +57,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.58rem;
+    font-size: var(--text-2xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -65,8 +65,8 @@
 
   .metric-value {
     display: block;
-    margin-top: 0.12rem;
-    font-size: 1rem;
+    margin-top: var(--space-1);
+    font-size: var(--text-lg);
     line-height: 1.25;
   }
 
@@ -74,7 +74,7 @@
     display: block;
     margin-top: 0.08rem;
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .metric-delta.positive { color: var(--positive); }
@@ -84,13 +84,13 @@
     display: block;
     margin-top: 0.08rem;
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     line-height: 1.35;
   }
 
   @media (max-width: 640px) {
     .metric {
-      padding: 0.4rem 0;
+      padding: var(--space-3) 0;
       border-left: 0;
       flex: 1 1 45%;
     }

@@ -102,7 +102,7 @@
 
   th,
   td {
-    padding: 0.38rem 0.45rem;
+    padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--divider);
     text-align: left;
     vertical-align: top;
@@ -113,7 +113,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
   }
 
   td strong,
@@ -123,7 +123,7 @@
 
   td span {
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .num-cell {
@@ -141,12 +141,12 @@
 
   .profile-equities .group-cell {
     width: 24%;
-    padding-right: 0.2rem;
+    padding-right: var(--space-2);
   }
 
   .profile-equities .last-cell {
     width: 16%;
-    padding-left: 0.2rem;
+    padding-left: var(--space-2);
   }
 
   .profile-equities .move-cell,
@@ -164,12 +164,12 @@
 
   .profile-indices .group-cell {
     width: 18%;
-    padding-right: 0.24rem;
+    padding-right: var(--space-2);
   }
 
   .profile-indices .last-cell {
     width: 17%;
-    padding-left: 0.24rem;
+    padding-left: var(--space-2);
   }
 
   .profile-indices .move-cell,
@@ -187,8 +187,8 @@
 
   .profile-fx th,
   .profile-fx td {
-    padding-left: 0.28rem;
-    padding-right: 0.28rem;
+    padding-left: var(--space-2);
+    padding-right: var(--space-2);
   }
 
   .profile-fx .market-cell {
@@ -208,12 +208,12 @@
 
   .profile-yields .market-cell {
     width: 24%;
-    padding-right: 0.2rem;
+    padding-right: var(--space-2);
   }
 
   .profile-yields .last-cell {
     width: 20%;
-    padding-left: 0.2rem;
+    padding-left: var(--space-2);
   }
 
   .profile-yields .move-cell {
@@ -257,7 +257,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   tr.clickable {

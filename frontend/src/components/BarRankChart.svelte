@@ -42,19 +42,19 @@ function barWidth(value: number, maxAbs: number) {
 <style>
   .chart {
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-3);
   }
 
   .row {
     display: grid;
-    gap: 0.2rem;
+    gap: var(--space-2);
   }
 
   .head {
     display: flex;
     justify-content: space-between;
-    gap: 0.75rem;
-    font-size: 12px;
+    gap: var(--space-5);
+    font-size: var(--text-sm);
   }
 
   .track {
@@ -83,7 +83,7 @@ function barWidth(value: number, maxAbs: number) {
   }
 
   small {
-    font-size: 10.5px;
+    font-size: var(--text-xs);
   }
 
   strong {
@@ -93,7 +93,7 @@ function barWidth(value: number, maxAbs: number) {
   .empty {
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 11px;
-    padding: 0.5rem 0.75rem;
+    font-size: var(--text-xs);
+    padding: var(--space-4) var(--space-5);
   }
 </style>

@@ -836,7 +836,7 @@
   .outcome-grid,
   .tag-list {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .workspace-grid {
@@ -855,7 +855,7 @@
 
   .detail-stack {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   /* ── Panels ──────────────────────────────────────────────── */
@@ -863,7 +863,7 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 1.05rem;
+    padding: var(--space-6);
   }
 
   .performance-panel,
@@ -872,7 +872,7 @@
   .control-panel,
   .rail-panel {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   /* table-panel: padding-free, table fills edge-to-edge */
@@ -893,7 +893,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 0.85rem;
+    gap: var(--space-5);
   }
 
   .top-line {
@@ -905,20 +905,20 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.28rem 0.6rem;
+    padding: var(--space-2) var(--space-4);
     border-bottom: 1px solid var(--divider);
     min-height: 1.65rem;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-2);
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .table-header small,
   .table-header .code-text {
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
     color: var(--text-2);
     text-transform: none;
     letter-spacing: 0;
@@ -934,7 +934,7 @@
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
-    padding-block: 0.15rem;
+    padding-block: var(--space-1);
   }
 
   /* kpi-strip inside a zero-padded table-panel */
@@ -943,14 +943,14 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
     border-bottom: 1px solid var(--divider);
-    padding-block: 0.2rem;
+    padding-block: var(--space-2);
   }
 
   .metric {
     border: 0;
     border-left: 1px solid var(--divider);
     background: none;
-    padding: 0.2rem 1rem;
+    padding: var(--space-2) var(--space-6);
     text-align: center;
   }
 
@@ -960,19 +960,19 @@
   }
 
   .kpi-strip .metric:first-child {
-    padding-left: 0.6rem;
+    padding-left: var(--space-4);
     border-left: 0;
   }
 
   .kpi-strip .metric {
-    padding-inline: 0.6rem;
+    padding-inline: var(--space-4);
   }
 
   .metric strong,
   .outcome-card strong {
     display: block;
-    margin: 0.22rem 0;
-    font-size: 1rem;
+    margin: var(--space-2) 0;
+    font-size: var(--text-lg);
     color: var(--text-0);
   }
 
@@ -986,7 +986,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   h2,
@@ -1020,7 +1020,7 @@
 
   label {
     display: grid;
-    gap: 0.3rem;
+    gap: var(--space-2);
   }
 
   input,
@@ -1028,7 +1028,7 @@
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.22rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     font: inherit;
     width: 100%;
     min-height: 1.875rem;
@@ -1038,7 +1038,7 @@
     border: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-0);
-    padding: 0.22rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     font: inherit;
     width: 100%;
     cursor: pointer;
@@ -1048,31 +1048,31 @@
   .field-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .venue-picker {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.4rem;
+    gap: var(--space-3);
   }
 
   .venue-picker button {
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-1);
     text-align: center;
-    padding: 0.28rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     min-height: 2.2rem;
   }
 
   .venue-picker button strong {
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
     color: var(--text-1);
   }
 
   .venue-picker button small {
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .venue-picker button.selected {
@@ -1107,14 +1107,14 @@
 
   .badge-stack {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-3);
     flex-wrap: wrap;
     justify-content: flex-end;
   }
 
   .strategy-actions {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-3);
     justify-content: flex-end;
     align-items: center;
     flex-wrap: wrap;
@@ -1123,7 +1123,7 @@
   .strategy-actions button {
     width: auto;
     min-height: 1.75rem;
-    padding: 0.24rem 0.55rem;
+    padding: var(--space-2) var(--space-4);
   }
 
   .side-toggle {
@@ -1139,7 +1139,7 @@
     border-right: 1px solid var(--divider);
     background: transparent;
     color: var(--text-2);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     letter-spacing: 0.08em;
   }
 
@@ -1156,10 +1156,10 @@
     border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
     background: color-mix(in srgb, var(--accent) 5%, transparent);
     color: var(--text-1);
-    padding: 0.22rem 0.44rem;
+    padding: var(--space-2) var(--space-4);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   /* ── Outcome grid ────────────────────────────────────────── */
@@ -1172,7 +1172,7 @@
     min-width: 0;
     border: 1px solid var(--divider);
     background: var(--panel-bg);
-    padding: 0.7rem 0.8rem;
+    padding: var(--space-5) var(--space-5);
   }
 
   /* ── Tags ────────────────────────────────────────────────── */
@@ -1186,10 +1186,10 @@
     border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
     background: color-mix(in srgb, var(--accent) 5%, transparent);
     color: var(--text-1);
-    padding: 0.22rem 0.44rem;
+    padding: var(--space-2) var(--space-4);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .compact-chip {
@@ -1202,7 +1202,7 @@
 
   .chart-foot {
     border-top: 1px solid var(--divider);
-    padding-top: 0.5rem;
+    padding-top: var(--space-4);
   }
 
   /* ── Tables ──────────────────────────────────────────────── */
@@ -1214,7 +1214,7 @@
 
   th,
   td {
-    padding: 0.42rem 0.55rem;
+    padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
@@ -1222,7 +1222,7 @@
 
   th {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     background: var(--surface-0);
@@ -1234,7 +1234,7 @@
 
   .wrap-cell small {
     display: block;
-    margin-top: 0.15rem;
+    margin-top: var(--space-1);
   }
 
   .wrap-cell strong,
@@ -1250,7 +1250,7 @@
   .code-text {
     color: var(--text-1);
     font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
   }
 
   .screener-table tbody tr {
@@ -1267,18 +1267,18 @@
 
   .market-title {
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-1);
     min-width: 16rem;
   }
 
   .empty-row,
   .empty-state {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
 
   .empty-state {
-    padding: 0.6rem 0.75rem;
+    padding: var(--space-4) var(--space-5);
   }
 
   /* ── Description box ─────────────────────────────────────── */
@@ -1286,9 +1286,9 @@
   .description-box {
     border: 1px solid var(--divider);
     background: var(--surface-soft);
-    padding: 0.65rem 0.8rem;
+    padding: var(--space-5) var(--space-5);
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-3);
   }
 
   /* ── Notes ───────────────────────────────────────────────── */
@@ -1296,8 +1296,8 @@
   .note-row {
     display: grid;
     grid-template-columns: 6rem minmax(0, 1fr);
-    gap: 0.8rem;
-    padding: 0.55rem 0;
+    gap: var(--space-5);
+    padding: var(--space-4) 0;
     border-top: 1px solid var(--divider);
   }
 
@@ -1308,7 +1308,7 @@
 
   /* panel-notes: padded notes section inside a zero-padded table-panel */
   .panel-notes {
-    padding: 0.5rem 0.6rem;
+    padding: var(--space-4) var(--space-4);
     border-top: 1px solid var(--divider);
     display: grid;
     gap: 0;
@@ -1328,7 +1328,7 @@
     color: var(--warning);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
   }
 
   .compact-list .note-row {
@@ -1391,8 +1391,8 @@
   .meta-row {
     display: grid;
     grid-template-columns: 7rem minmax(0, 1fr);
-    gap: 0.6rem;
-    padding: 0.42rem 0;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
     border-top: 1px solid var(--divider);
     align-items: baseline;
   }
@@ -1406,8 +1406,8 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.62rem;
-    padding-top: 0.1rem;
+    font-size: var(--text-2xs);
+    padding-top: var(--space-1);
   }
 
   .meta-row strong,
@@ -1427,8 +1427,8 @@
   .dynamics-row {
     display: grid;
     grid-template-columns: 8rem minmax(0, 1fr);
-    gap: 0.6rem;
-    padding: 0.42rem 0;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
     border-top: 1px solid var(--divider);
     align-items: baseline;
   }
@@ -1442,12 +1442,12 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .dyn-value {
     color: var(--text-0);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
   }
 
   /* ── Semantic colors ─────────────────────────────────────── */
@@ -1475,13 +1475,13 @@
   .venue-label {
     color: var(--text-2);
     text-transform: uppercase;
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     letter-spacing: 0.06em;
   }
 
   .row-count {
     color: var(--text-2);
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
     font-weight: 400;
   }
 
@@ -1520,7 +1520,7 @@
     .note-row,
     .compact-list .note-row {
       grid-template-columns: 1fr;
-      gap: 0.3rem;
+      gap: var(--space-2);
     }
   }
 </style>

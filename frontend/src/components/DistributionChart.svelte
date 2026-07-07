@@ -178,7 +178,7 @@
   .marker-label,
   .tick,
   .empty {
-    font-size: 12px;
+    font-size: var(--text-sm);
     fill: var(--text-2);
     color: var(--text-2);
   }
@@ -199,6 +199,6 @@
 
   .tooltip text {
     fill: #f4f7fb;
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
 </style>

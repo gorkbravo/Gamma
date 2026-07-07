@@ -271,15 +271,15 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .panel-header {
     display: flex;
     justify-content: space-between;
-    gap: 0.8rem;
+    gap: var(--space-5);
     align-items: start;
   }
 
@@ -289,7 +289,7 @@
   .focus-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .focus-card {
@@ -297,9 +297,9 @@
     background: var(--surface-soft);
     color: inherit;
     font: inherit;
-    padding: 0.65rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.25rem;
+    gap: var(--space-2);
     text-align: left;
     cursor: pointer;
     transition: background 120ms ease, border-color 120ms ease;
@@ -318,19 +318,19 @@
   .focus-card-head {
     display: flex;
     justify-content: space-between;
-    gap: 0.4rem;
+    gap: var(--space-3);
     align-items: center;
   }
 
   .focus-card-head strong {
-    font-size: 0.8rem;
+    font-size: var(--text-base);
     line-height: 1.3;
   }
 
   .focus-summary {
     margin: 0;
     color: var(--text-1);
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -341,7 +341,7 @@
   .focus-target {
     margin: 0;
     color: var(--text-2);
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -361,10 +361,10 @@
   }
 
   .snapshot-table thead th {
-    padding: 0.4rem 0.55rem;
+    padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid rgba(46, 60, 74, 0.4);
     color: var(--text-2);
-    font-size: 0.58rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     background: var(--surface-0);
@@ -392,7 +392,7 @@
   }
 
   .snapshot-row td {
-    padding: 0.45rem 0.55rem;
+    padding: var(--space-4) var(--space-4);
     border-bottom: 1px solid rgba(46, 60, 74, 0.25);
     vertical-align: top;
   }
@@ -401,23 +401,23 @@
 
   .row-theme {
     display: block;
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     font-weight: 600;
     color: var(--text-0);
     line-height: 1.3;
   }
 
   .inline-tag {
-    margin-left: 0.35rem;
+    margin-left: var(--space-3);
     vertical-align: middle;
   }
 
   .row-summary {
     display: block;
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     line-height: 1.3;
-    margin-top: 0.15rem;
+    margin-top: var(--space-1);
     display: -webkit-box;
     -webkit-line-clamp: 1;
     -webkit-box-orient: vertical;
@@ -430,10 +430,10 @@
   .linked-hint {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    margin-top: 0.2rem;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .linked-dot {
@@ -454,7 +454,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.54rem;
+    font-size: var(--text-2xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -462,14 +462,14 @@
 
   .metric-value {
     display: block;
-    font-size: 0.88rem;
+    font-size: var(--text-base);
     line-height: 1.2;
     margin-top: 0.08rem;
   }
 
   .metric-delta {
     display: inline-block;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     margin-top: 0.04rem;
     color: var(--text-2);
   }
@@ -481,7 +481,7 @@
   .fx-strip {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .fx-panel {
@@ -493,8 +493,8 @@
   .fx-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.28rem 0.55rem;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-4);
     border-bottom: 1px solid var(--divider);
     min-height: 28px;
     box-sizing: border-box;
@@ -506,7 +506,7 @@
 
   .fx-last-price {
     margin-left: auto;
-    font-size: 0.88rem;
+    font-size: var(--text-base);
     color: var(--text-0);
     letter-spacing: 0.02em;
   }
@@ -515,9 +515,9 @@
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.2rem 0.4rem;
+    padding: var(--space-2) var(--space-3);
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     cursor: pointer;
     transition: border-color 120ms ease;
   }
@@ -529,7 +529,7 @@
   .detail-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   /* ── Lists ── */
@@ -544,9 +544,9 @@
 
   .list-row {
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-1);
     text-align: left;
-    padding: 0.55rem 0.65rem;
+    padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid rgba(46, 60, 74, 0.3);
     cursor: default;
   }
@@ -562,7 +562,7 @@
     color: inherit;
     font: inherit;
     width: 100%;
-    padding: 0.35rem 0;
+    padding: var(--space-3) 0;
   }
 
   .list-row.interactive:hover { background: rgba(122, 166, 200, 0.04); }
@@ -571,7 +571,7 @@
 
   .list-detail {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     line-height: 1.35;
   }
 
@@ -579,21 +579,21 @@
 
   .event-category {
     color: var(--text-2);
-    margin-left: 0.4rem;
+    margin-left: var(--space-3);
   }
 
   .event-category::before {
     content: "·";
-    margin-right: 0.4rem;
+    margin-right: var(--space-3);
     opacity: 0.5;
   }
 
   .date-group-header {
     color: var(--text-2);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    padding: 0.45rem 0.65rem 0.2rem;
+    padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
     border-bottom: 1px solid rgba(46, 60, 74, 0.2);
     position: sticky;
@@ -607,8 +607,8 @@
     border: 1px solid rgba(122, 166, 200, 0.24);
     background: rgba(122, 166, 200, 0.06);
     color: var(--accent);
-    padding: 0.15rem 0.42rem;
-    font-size: 0.58rem;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;
@@ -638,7 +638,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2rem;
+    padding: var(--space-7);
     color: var(--text-2);
   }
 
@@ -646,9 +646,9 @@
 
   .empty-hint {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     margin: 0;
-    padding: 0.4rem 0;
+    padding: var(--space-3) 0;
   }
 
   /* ── Typography ── */
@@ -656,7 +656,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     margin: 0;
   }
 

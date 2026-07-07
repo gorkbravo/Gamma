@@ -2580,7 +2580,7 @@
 <style>
   .workspace-shell {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .workspace-main {
@@ -2589,10 +2589,10 @@
 
   .view-load-state {
     display: grid;
-    gap: 0.25rem;
+    gap: var(--space-2);
     min-height: 12rem;
     align-content: center;
-    padding: 1rem;
+    padding: var(--space-6);
     border: 1px solid var(--panel-border);
     background: var(--surface-0);
     color: var(--text-2);
@@ -2600,11 +2600,11 @@
 
   .view-load-state strong {
     color: var(--text-0);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     font-weight: 600;
   }
 
   .view-load-state span {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 </style>

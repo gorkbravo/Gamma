@@ -217,13 +217,13 @@
 <style>
   .donut-shell {
     display: grid;
-    gap: 0.9rem;
+    gap: var(--space-6);
   }
 
   .chart-wrap {
     display: grid;
     justify-items: center;
-    gap: 0.85rem;
+    gap: var(--space-5);
   }
 
   .chart-frame {
@@ -263,9 +263,9 @@
     z-index: 2;
     width: 216px;
     display: grid;
-    gap: 0.55rem;
+    gap: var(--space-4);
     pointer-events: none;
-    padding: 0.8rem 0.9rem;
+    padding: var(--space-5) var(--space-6);
     border: 1px solid var(--panel-border);
     background: var(--surface-0);
   }
@@ -301,19 +301,19 @@
   .hover-label {
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
   }
 
   .hover-header,
   .hover-grid {
     display: grid;
-    gap: 0.45rem;
+    gap: var(--space-4);
   }
 
   .hover-header {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
-    gap: 0.8rem;
+    gap: var(--space-5);
   }
 
   .hover-header strong,
@@ -327,7 +327,7 @@
 
   .hover-share {
     color: var(--accent);
-    font-size: 0.88rem;
+    font-size: var(--text-base);
   }
 
   .hover-grid {
@@ -336,18 +336,18 @@
 
   .hover-grid div {
     display: grid;
-    gap: 0.12rem;
+    gap: var(--space-1);
   }
 
   .hover-grid span {
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
 
   .legend {
     display: grid;
-    gap: 0.55rem;
+    gap: var(--space-4);
   }
 
   .legend-row,
@@ -355,12 +355,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.7rem;
+    gap: var(--space-5);
   }
 
   .legend-row {
     border-top: 1px solid var(--divider);
-    padding-top: 0.55rem;
+    padding-top: var(--space-4);
     transition: opacity 120ms ease, background 120ms ease;
     width: 100%;
     border-left: 0;
@@ -391,8 +391,8 @@
 
   .legend-row small {
     display: block;
-    margin-top: 0.14rem;
-    font-size: 0.72rem;
+    margin-top: var(--space-1);
+    font-size: var(--text-sm);
     overflow-wrap: anywhere;
   }
 
@@ -421,6 +421,6 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
   }
 </style>

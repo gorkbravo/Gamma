@@ -229,22 +229,22 @@
   .rates-layout {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   /* ── Panel ── */
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .panel-header {
     display: flex;
     justify-content: space-between;
-    gap: 0.8rem;
+    gap: var(--space-5);
     align-items: start;
   }
 
@@ -255,31 +255,31 @@
   .section-summary {
     color: var(--text-2);
     margin: 0;
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
   }
 
   .research-focus {
     margin: 0;
-    padding: 0.1rem 0 0.1rem 0.5rem;
+    padding: var(--space-1) 0 var(--space-1) var(--space-4);
     border-left: 2px solid rgba(46, 60, 74, 0.35);
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
   }
 
   /* ── Subsections ── */
   .subsection {
     display: grid;
-    gap: 0.35rem;
-    padding-top: 0.35rem;
+    gap: var(--space-3);
+    padding-top: var(--space-3);
     border-top: 1px solid rgba(46, 60, 74, 0.26);
   }
 
   .subsection-head {
     display: flex;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: center;
     flex-wrap: wrap;
   }
@@ -296,8 +296,8 @@
     border: 1px solid rgba(122, 166, 200, 0.24);
     background: rgba(122, 166, 200, 0.06);
     color: var(--accent);
-    padding: 0.12rem 0.38rem;
-    font-size: 0.56rem;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;
@@ -343,14 +343,14 @@
   }
 
   th, td {
-    padding: 0.55rem 0.5rem;
+    padding: var(--space-4) var(--space-4);
     border-bottom: 1px solid rgba(46, 60, 74, 0.3);
     text-align: left;
   }
 
   th {
     color: var(--text-2);
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     background: var(--surface-0);
@@ -374,8 +374,8 @@
 
   .list-row {
     display: grid;
-    gap: 0.1rem;
-    padding: 0.55rem 0.65rem;
+    gap: var(--space-1);
+    padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid rgba(46, 60, 74, 0.3);
   }
 
@@ -384,7 +384,7 @@
 
   .list-detail {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     line-height: 1.35;
   }
 
@@ -392,21 +392,21 @@
 
   .event-category {
     color: var(--text-2);
-    margin-left: 0.4rem;
+    margin-left: var(--space-3);
   }
 
   .event-category::before {
     content: "·";
-    margin-right: 0.4rem;
+    margin-right: var(--space-3);
     opacity: 0.5;
   }
 
   .date-group-header {
     color: var(--text-2);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    padding: 0.45rem 0.65rem 0.2rem;
+    padding: var(--space-4) var(--space-5) var(--space-2);
     background: var(--surface-soft);
     border-bottom: 1px solid rgba(46, 60, 74, 0.2);
     position: sticky;
@@ -416,9 +416,9 @@
 
   .empty-hint {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     margin: 0;
-    padding: 0.4rem 0;
+    padding: var(--space-3) 0;
   }
 
   /* ── Typography ── */
@@ -426,7 +426,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     margin: 0;
   }
 

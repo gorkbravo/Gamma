@@ -377,26 +377,26 @@
 
   .drawer-header,
   .composer {
-    padding: 0.9rem 1rem;
+    padding: var(--space-6) var(--space-6);
     background: var(--surface-0);
   }
 
   .drawer-header {
     display: flex;
     justify-content: space-between;
-    gap: 0.9rem;
+    gap: var(--space-6);
     border-bottom: 1px solid rgba(46, 60, 74, 0.52);
   }
 
   .composer {
     border-top: 1px solid rgba(46, 60, 74, 0.52);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .header-copy {
     display: grid;
-    gap: 0.35rem;
+    gap: var(--space-3);
     min-width: 0;
   }
 
@@ -405,31 +405,31 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .drawer-body {
     min-height: 0;
     overflow-y: auto;
-    padding: 1rem;
+    padding: var(--space-6);
   }
 
   .thread {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .turn {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .bubble {
     border: 1px solid rgba(46, 60, 74, 0.52);
     background: var(--surface-soft);
-    padding: 0.7rem 0.85rem;
+    padding: var(--space-5) var(--space-5);
     display: grid;
-    gap: 0.55rem;
+    gap: var(--space-4);
     max-width: 92%;
   }
 
@@ -442,7 +442,7 @@
 
   .user-bubble p {
     color: var(--text-0);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
   }
 
   .assistant-bubble {
@@ -452,7 +452,7 @@
 
   .status-bubble p {
     color: var(--text-2);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
   }
 
   .status-bubble.error {
@@ -467,27 +467,27 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .field {
     display: grid;
-    gap: 0.25rem;
+    gap: var(--space-2);
   }
 
   .field + .field {
-    padding-top: 0.55rem;
+    padding-top: var(--space-4);
     border-top: 1px solid rgba(46, 60, 74, 0.42);
   }
 
   .bubble .field p.emphasis {
     color: var(--text-0);
-    font-size: 0.85rem;
+    font-size: var(--text-base);
   }
 
   .meta-details {
-    margin-top: 0.4rem;
-    padding-top: 0.55rem;
+    margin-top: var(--space-3);
+    padding-top: var(--space-4);
     border-top: 1px solid rgba(46, 60, 74, 0.42);
   }
 
@@ -496,11 +496,11 @@
     list-style: none;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-4);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .meta-details summary::-webkit-details-marker {
@@ -529,34 +529,34 @@
 
   .meta-body {
     display: grid;
-    gap: 0.6rem;
-    margin-top: 0.55rem;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
   }
 
   .meta-group {
     display: grid;
-    gap: 0.3rem;
+    gap: var(--space-2);
   }
 
   .claim-row {
     display: grid;
-    gap: 0.2rem;
+    gap: var(--space-2);
   }
 
   .claim-row + .claim-row {
-    padding-top: 0.45rem;
-    margin-top: 0.25rem;
+    padding-top: var(--space-4);
+    margin-top: var(--space-2);
     border-top: 1px solid rgba(46, 60, 74, 0.3);
   }
 
   .meta-row {
     display: grid;
-    gap: 0.2rem;
+    gap: var(--space-2);
   }
 
   .meta-row strong {
     color: var(--text-1);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
 
   .section-label,
@@ -564,28 +564,28 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .message-card {
     border: 1px solid rgba(122, 166, 200, 0.18);
     background: var(--surface-soft);
-    padding: 0.85rem;
+    padding: var(--space-5);
   }
 
   .empty-state p {
     color: var(--text-2);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
   }
 
   .context-pill {
     border: 1px solid rgba(46, 60, 74, 0.52);
     background: var(--surface-soft);
     color: var(--text-2);
-    padding: 0.28rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     white-space: nowrap;
   }
 
@@ -598,7 +598,7 @@
   .context-summary {
     margin: 0;
     color: var(--text-0);
-    font-size: 0.88rem;
+    font-size: var(--text-base);
     overflow-wrap: anywhere;
   }
 
@@ -611,14 +611,14 @@
 
   .bubble h3 {
     color: var(--text-0);
-    font-size: 0.92rem;
+    font-size: var(--text-md);
     font-weight: 600;
   }
 
   .bubble .field p,
   .bubble .field li {
     color: var(--text-1);
-    font-size: 0.81rem;
+    font-size: var(--text-base);
     line-height: 1.45;
   }
 
@@ -632,7 +632,7 @@
   }
 
   ul {
-    padding-left: 1.05rem;
+    padding-left: var(--space-6);
   }
 
   textarea,
@@ -648,8 +648,8 @@
   textarea {
     resize: vertical;
     min-height: 3.2rem;
-    padding: 0.55rem 0.7rem;
-    font-size: 0.82rem;
+    padding: var(--space-4) var(--space-5);
+    font-size: var(--text-base);
   }
 
   button {
@@ -675,7 +675,7 @@
   .composer-actions {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-3);
   }
 
   .role-row {
@@ -689,8 +689,8 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.55rem;
-    font-size: 0.72rem;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
     white-space: nowrap;
   }
 
@@ -706,17 +706,17 @@
   .effort-select {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-2);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .effort-select select {
-    padding: 0.32rem 0.5rem;
-    padding-right: 1.4rem;
-    font-size: 0.72rem;
+    padding: var(--space-3) var(--space-4);
+    padding-right: var(--space-7);
+    font-size: var(--text-sm);
     text-transform: lowercase;
     letter-spacing: 0;
     color: var(--text-2);
@@ -739,8 +739,8 @@
   }
 
   .generate-btn {
-    padding: 0.35rem 0.85rem;
-    font-size: 0.74rem;
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     border-color: rgba(122, 166, 200, 0.28);
@@ -761,7 +761,7 @@
   .scope-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
@@ -769,18 +769,18 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .scope-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: var(--space-3);
   }
 
   .scope-chip {
-    padding: 0.25rem 0.55rem;
-    font-size: 0.72rem;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
     color: var(--text-2);
     background: var(--surface-0);
     border: 1px solid rgba(46, 60, 74, 0.52);
@@ -798,7 +798,7 @@
 
   .scope-empty {
     color: var(--text-2);
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
   }
 
   .visually-hidden {

@@ -65,14 +65,14 @@
     min-height: 100vh;
     display: grid;
     place-items: center;
-    padding: 1rem;
+    padding: var(--space-6);
   }
 
   .card {
     width: min(28rem, calc(100vw - 2rem));
     display: grid;
-    gap: 1rem;
-    padding: 1.6rem;
+    gap: var(--space-6);
+    padding: var(--space-7);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
     background: var(--surface-0);
@@ -82,7 +82,7 @@
   .identity {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .mark {
@@ -104,13 +104,13 @@
 
   .wordmark {
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-1);
   }
 
   .descriptor {
     color: var(--text-2);
     font-family: var(--display-font);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     letter-spacing: 0.04em;
   }
 
@@ -134,8 +134,8 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: baseline;
-    column-gap: 0.45rem;
-    row-gap: 0.3rem;
+    column-gap: var(--space-4);
+    row-gap: var(--space-2);
   }
 
   .status-dot {
@@ -152,7 +152,7 @@
 
   strong {
     color: var(--text-0);
-    font-size: 0.95rem;
+    font-size: var(--text-md);
   }
 
   small {
@@ -163,7 +163,7 @@
   .actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-5);
     justify-items: center;
   }
 
@@ -174,7 +174,7 @@
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-sm);
     color: var(--text-0);
-    padding: 0.6rem 0.95rem;
+    padding: var(--space-4) var(--space-6);
     font: inherit;
     font-family: var(--display-font);
     font-weight: 500;
@@ -213,7 +213,7 @@
 
     .card {
       width: min(28rem, 100%);
-      padding: 1.2rem;
+      padding: var(--space-6);
     }
 
     .actions {

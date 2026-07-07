@@ -700,7 +700,7 @@
   .copilot {
     display: grid;
     grid-template-columns: 16rem minmax(0, 1fr);
-    gap: 0.5rem;
+    gap: var(--space-4);
     /* The Gamma shell scrolls naturally, so anchor the chat to the viewport to
        get a fixed transcript scroll region with a pinned composer. Offset =
        topbar + shell paddings (~63px top + ~18px bottom). */
@@ -719,7 +719,7 @@
   }
 
   .sidebar-head {
-    padding: 0.5rem;
+    padding: var(--space-4);
     border-bottom: 1px solid var(--divider);
   }
 
@@ -728,20 +728,20 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
     height: 30px;
     border: 1px solid var(--panel-strong);
     border-radius: 2px;
     background: var(--bg-1);
     color: var(--text-0);
     font: inherit;
-    font-size: 0.8rem;
+    font-size: var(--text-base);
     cursor: pointer;
   }
 
   .new-chat span {
     color: var(--accent);
-    font-size: 0.95rem;
+    font-size: var(--text-md);
     line-height: 1;
   }
 
@@ -751,8 +751,8 @@
 
   .sidebar-filter {
     display: grid;
-    gap: 0.4rem;
-    padding: 0.5rem;
+    gap: var(--space-3);
+    padding: var(--space-4);
     border-bottom: 1px solid var(--divider);
   }
 
@@ -760,9 +760,9 @@
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.28rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     font: inherit;
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
     min-height: 1.75rem;
     border-radius: var(--radius-sm);
   }
@@ -775,11 +775,11 @@
   .archived-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
   }
 
   .archived-toggle input {
@@ -796,9 +796,9 @@
   .session-row {
     position: relative;
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-1);
     width: 100%;
-    padding: 0.5rem 0.6rem;
+    padding: var(--space-4) var(--space-4);
     border: 0;
     border-bottom: 1px solid var(--divider);
     background: transparent;
@@ -824,7 +824,7 @@
 
   .session-title {
     color: var(--text-0);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -834,7 +834,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .session-archive {
@@ -845,7 +845,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     cursor: pointer;
   }
 
@@ -862,8 +862,8 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.68rem;
-    padding: 0.6rem;
+    font-size: var(--text-xs);
+    padding: var(--space-4);
     margin: 0;
   }
 
@@ -881,8 +881,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.4rem 0.6rem;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--divider);
     flex-wrap: wrap;
   }
@@ -894,15 +894,15 @@
   .context-trigger {
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--space-4);
     height: 28px;
-    padding: 0 0.6rem;
+    padding: 0 var(--space-4);
     border: 1px solid var(--panel-strong);
     border-radius: 2px;
     background: var(--bg-1);
     color: var(--text-0);
     font: inherit;
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     cursor: pointer;
   }
 
@@ -915,7 +915,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .context-value {
@@ -924,7 +924,7 @@
 
   .caret {
     color: var(--text-2);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .context-menu {
@@ -941,15 +941,15 @@
   .context-option {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-4);
     width: 100%;
-    padding: 0.4rem 0.6rem;
+    padding: var(--space-3) var(--space-4);
     border: 0;
     border-bottom: 1px solid var(--divider);
     background: transparent;
     color: var(--text-1);
     font: inherit;
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     text-align: left;
     cursor: pointer;
   }
@@ -1005,7 +1005,7 @@
   .head-controls {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
@@ -1013,9 +1013,9 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     border: 1px solid var(--divider);
-    padding: 0.15rem 0.4rem;
+    padding: var(--space-1) var(--space-3);
   }
 
   .role-tabs {
@@ -1028,9 +1028,9 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.7rem;
+    padding: var(--space-2) var(--space-5);
     font: inherit;
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
     cursor: pointer;
   }
 
@@ -1051,11 +1051,11 @@
   .effort-select {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-3);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .effort-select select {
@@ -1064,8 +1064,8 @@
     background: var(--bg-1);
     color: var(--text-1);
     font: inherit;
-    font-size: 0.74rem;
-    padding: 0 0.4rem;
+    font-size: var(--text-sm);
+    padding: 0 var(--space-3);
     text-transform: lowercase;
   }
 
@@ -1073,7 +1073,7 @@
   .transcript {
     overflow-y: auto;
     min-height: 0;
-    padding: 0.85rem;
+    padding: var(--space-5);
   }
 
   .empty-chat {
@@ -1081,28 +1081,28 @@
     display: grid;
     align-content: center;
     justify-items: center;
-    gap: 0.4rem;
+    gap: var(--space-3);
     text-align: center;
-    padding: 2rem;
+    padding: var(--space-7);
   }
 
   .empty-chat h2 {
     margin: 0;
     color: var(--text-0);
-    font-size: 1.05rem;
+    font-size: var(--text-lg);
   }
 
   .empty-chat p {
     margin: 0;
     color: var(--text-2);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     max-width: 28rem;
     line-height: 1.5;
   }
 
   .messages {
     display: grid;
-    gap: 1rem;
+    gap: var(--space-6);
     max-width: 52rem;
     margin: 0 auto;
   }
@@ -1114,12 +1114,12 @@
 
   .msg.user .bubble {
     max-width: 80%;
-    padding: 0.55rem 0.75rem;
+    padding: var(--space-4) var(--space-5);
     border: 1px solid rgba(122, 166, 200, 0.34);
     border-radius: 6px;
     background: rgba(122, 166, 200, 0.1);
     color: var(--text-0);
-    font-size: 0.86rem;
+    font-size: var(--text-base);
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -1127,25 +1127,25 @@
 
   .msg.assistant {
     display: grid;
-    gap: 0.35rem;
+    gap: var(--space-3);
   }
 
   .role-tag {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .assistant-body {
     display: grid;
-    gap: 0.55rem;
+    gap: var(--space-4);
   }
 
   .assistant-text {
     margin: 0;
     color: var(--text-0);
-    font-size: 0.88rem;
+    font-size: var(--text-base);
     line-height: 1.6;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -1168,74 +1168,74 @@
 
   .research-card {
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-3);
     border: 1px solid var(--panel-border);
     border-left: 2px solid var(--accent);
-    padding: 0.6rem 0.7rem;
+    padding: var(--space-4) var(--space-5);
   }
 
   .research-card h4 {
     margin: 0;
     color: var(--text-0);
-    font-size: 0.86rem;
+    font-size: var(--text-base);
   }
 
   .card-field {
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-1);
   }
 
   .card-field span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .card-field p {
     margin: 0;
     color: var(--text-1);
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     line-height: 1.5;
   }
 
   .assistant-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.6rem;
+    gap: var(--space-4);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   /* ---- Plan / operator chat blocks ---- */
   .plan-block {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
     border: 1px solid var(--panel-border);
     border-left: 2px solid var(--accent);
-    padding: 0.6rem 0.7rem;
+    padding: var(--space-4) var(--space-5);
   }
 
   .plan-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .plan-head strong {
     color: var(--text-0);
     text-transform: uppercase;
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
 
   .plan-head span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .plan-budget,
@@ -1243,21 +1243,21 @@
   .decision-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .plan-budget span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .chip {
     border: 1px solid var(--divider);
-    padding: 0.1rem 0.4rem;
+    padding: var(--space-1) var(--space-3);
     color: var(--text-1);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .chip.skip {
@@ -1267,7 +1267,7 @@
   .plan-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
   }
 
   .plan-table th {
@@ -1275,15 +1275,15 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     font-weight: 500;
-    padding: 0.25rem 0.45rem;
+    padding: var(--space-2) var(--space-4);
     border-bottom: 1px solid var(--divider);
   }
 
   .plan-table td {
     color: var(--text-1);
-    padding: 0.3rem 0.45rem;
+    padding: var(--space-2) var(--space-4);
     border-bottom: 1px solid var(--divider);
     vertical-align: top;
     line-height: 1.4;
@@ -1300,15 +1300,15 @@
   .plan-warning {
     margin: 0;
     color: var(--warning);
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
   }
 
   /* ---- Thinking ---- */
   .thinking {
     display: inline-flex;
-    gap: 0.3rem;
-    padding: 0.3rem 0;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
   }
 
   .thinking span {
@@ -1341,8 +1341,8 @@
   /* ---- Composer ---- */
   .composer {
     display: grid;
-    gap: 0.4rem;
-    padding: 0.6rem;
+    gap: var(--space-3);
+    padding: var(--space-4);
     border-top: 1px solid var(--divider);
   }
 
@@ -1355,9 +1355,9 @@
     border-radius: 2px;
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.55rem 0.65rem;
+    padding: var(--space-4) var(--space-5);
     font: inherit;
-    font-size: 0.86rem;
+    font-size: var(--text-base);
     line-height: 1.5;
   }
 
@@ -1370,12 +1370,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .composer-hint {
     color: var(--text-2);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     line-height: 1.3;
     min-width: 0;
     overflow: hidden;
@@ -1385,19 +1385,19 @@
 
   .composer-buttons {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-3);
     flex: none;
   }
 
   .composer-buttons button {
     height: 30px;
-    padding: 0 0.85rem;
+    padding: 0 var(--space-5);
     border: 1px solid var(--panel-strong);
     border-radius: 2px;
     background: var(--bg-1);
     color: var(--text-1);
     font: inherit;
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     cursor: pointer;

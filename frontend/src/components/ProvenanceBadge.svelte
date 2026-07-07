@@ -30,9 +30,9 @@
   .provenance-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
     height: 18px;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     line-height: 1;
     white-space: nowrap;
     cursor: default;
@@ -45,7 +45,7 @@
   }
 
   .state {
-    padding: 2px 5px;
+    padding: var(--space-1) var(--space-2);
     border: 1px solid var(--panel-strong);
     border-radius: 2px;
     text-transform: uppercase;

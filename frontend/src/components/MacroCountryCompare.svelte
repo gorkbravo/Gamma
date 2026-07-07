@@ -72,22 +72,22 @@
   .workspace-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 0.8fr);
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .primary-column,
   .support-column {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-content: start;
   }
 
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .table-panel {
@@ -97,10 +97,10 @@
 
   .table-panel-header {
     min-height: 26px;
-    padding: 0.3rem 0.75rem;
+    padding: var(--space-2) var(--space-5);
     border-bottom: 1px solid var(--divider);
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -114,14 +114,14 @@
   th,
   td {
     border-bottom: 1px solid var(--divider);
-    padding: 0.4rem 0.55rem;
+    padding: var(--space-3) var(--space-4);
     text-align: left;
     vertical-align: top;
   }
 
   th {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -129,7 +129,7 @@
 
   td {
     color: var(--text-1);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
 
   td strong,
@@ -148,7 +148,7 @@
   .eyebrow {
     margin: 0;
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -164,12 +164,12 @@
   .empty,
   li {
     color: var(--text-1);
-    font-size: 0.8rem;
+    font-size: var(--text-base);
     line-height: 1.45;
   }
 
   ul {
-    padding-left: 1rem;
+    padding-left: var(--space-6);
   }
 
   @media (max-width: 980px) {

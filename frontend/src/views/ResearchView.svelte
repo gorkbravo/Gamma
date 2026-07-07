@@ -1228,6 +1228,24 @@
     return "Basket";
   }
 
+  function formatScopeAsOf(value: string | null | undefined) {
+    if (!value) {
+      return "as of N/A";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return `as of ${value.slice(0, 10)}`;
+    }
+    return `as of ${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  }
+
+  function latestDailySubLabel(currentResult: ResearchResult | null) {
+    if (!currentResult) {
+      return "No daily observation";
+    }
+    return formatScopeAsOf(currentResult.latest_daily_return_at);
+  }
+
   let parsedSynthetic = parseSyntheticText(syntheticText);
   let parsedStrategyCsv = parseResearchCsvText(strategyCsvText);
   let previewRows: ResearchPreviewRow[] = [];
@@ -2115,11 +2133,16 @@
           </div>
         </div>
 
-        <div class="kpi-grid">
+        <div class="kpi-grid summary-kpis">
           <article class="metric">
-            <span>Total Return</span>
+            <span>Lookback Return</span>
             <strong class:positive={(result?.summary.total_return ?? 0) > 0} class:negative={(result?.summary.total_return ?? 0) < 0}>{pct(result?.summary.total_return)}</strong>
-            <small>{result?.observations_count ?? 0} aligned observations</small>
+            <small>{result?.observations_count ?? 0} obs / {lookbackDays}D</small>
+          </article>
+          <article class="metric">
+            <span>Latest Day</span>
+            <strong class:positive={(result?.latest_daily_return ?? 0) > 0} class:negative={(result?.latest_daily_return ?? 0) < 0}>{pct(result?.latest_daily_return)}</strong>
+            <small>{latestDailySubLabel(result)}</small>
           </article>
           <article class="metric">
             <span>Annual Return</span>
@@ -2164,12 +2187,18 @@
             {#if coverageMetrics.missing_symbols.length}
               Missing history: {coverageMetrics.missing_symbols.join(", ")}
             {:else if result}
-              Shared research return stream against {result.benchmark_symbol}
+              Shared return stream against {result.benchmark_symbol}; daily move {latestDailySubLabel(result)}
             {:else}
               Run a scope to seed the chart deck.
             {/if}
           </span>
-          <strong>{result?.scope_type === "synthetic_portfolio" ? `${coverageMetrics.available_symbols.length} symbols in scope` : activePrimaryScopeLabel(result)}</strong>
+          <strong>
+            {#if result?.scope_type === "single_ticker" && result.latest_price_at}
+              {activePrimaryScopeLabel(result)} price {formatScopeAsOf(result.latest_price_at)}
+            {:else}
+              {result?.scope_type === "synthetic_portfolio" ? `${coverageMetrics.available_symbols.length} symbols in scope` : activePrimaryScopeLabel(result)}
+            {/if}
+          </strong>
         </div>
       </article>
 
@@ -3335,30 +3364,30 @@
   .notes-list,
   .mini-groups {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .view {
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   /* ── Panels ── */
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .header-panel {
-    gap: 0.35rem;
-    padding: 0.5rem 0.65rem;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-5);
   }
 
   .header-panel .title {
     color: var(--text-0);
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -3366,7 +3395,7 @@
 
   .header-panel .subtitle {
     color: var(--text-2);
-    font-size: 10.5px;
+    font-size: var(--text-xs);
     letter-spacing: 0.04em;
   }
 
@@ -3385,30 +3414,30 @@
   .header-top {
     display: flex;
     align-items: baseline;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .headline-block {
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-1);
     min-width: 0;
   }
 
   .headline-title-row {
     display: flex;
     align-items: baseline;
-    gap: 0.6rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
   .loading-pill {
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
     background: color-mix(in srgb, var(--accent) 6%, transparent);
-    padding: 0.2rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     white-space: nowrap;
   }
 
@@ -3416,7 +3445,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
@@ -3431,15 +3460,15 @@
     border-right: 1px solid var(--panel-strong);
     background: transparent;
     color: var(--text-1);
-    padding: 0.28rem 0.65rem;
+    padding: var(--space-2) var(--space-5);
     font: inherit;
     font-family: var(--display-font);
-    font-size: 0.79rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     line-height: 1.2;
     display: inline-flex;
     align-items: baseline;
-    gap: 0.5rem;
+    gap: var(--space-4);
     white-space: nowrap;
     cursor: pointer;
     width: auto;
@@ -3460,7 +3489,7 @@
   .treemap-header-right {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
     justify-content: flex-end;
   }
@@ -3483,8 +3512,8 @@
     background-size: 8px 5px;
     color: var(--text-1);
     font: inherit;
-    font-size: 0.75rem;
-    padding: 0.3rem 1.6rem 0.3rem 0.65rem;
+    font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-7) var(--space-2) var(--space-5);
     cursor: pointer;
     min-width: 0;
     white-space: nowrap;
@@ -3512,7 +3541,8 @@
   }
 
   .ctrl-select--short {
-    width: 5.5rem;
+    width: 7rem;
+    flex-shrink: 0;
   }
 
   /* ── Overview grid / treemap ── */
@@ -3542,10 +3572,10 @@
     position: absolute;
     inset: 0 0 auto 0;
     min-height: 1.5rem;
-    padding: 0.28rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     display: flex;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: center;
     background: color-mix(in srgb, var(--bg-1) 86%, transparent);
     border-bottom: 1px solid var(--divider);
@@ -3557,7 +3587,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3578,7 +3608,7 @@
     position: absolute;
     min-height: 0;
     min-width: 0;
-    padding: 0.32rem 0.38rem;
+    padding: var(--space-3) var(--space-3);
     border: 1px solid var(--divider);
     color: var(--text-0);
     text-align: left;
@@ -3596,7 +3626,7 @@
   .tile-copy,
   .tile-bottomline {
     display: grid;
-    gap: 0.12rem;
+    gap: var(--space-1);
   }
 
   .tile-copy {
@@ -3607,7 +3637,7 @@
   .tile-topline {
     display: flex;
     justify-content: space-between;
-    gap: 0.25rem;
+    gap: var(--space-2);
     align-items: start;
   }
 
@@ -3623,51 +3653,51 @@
   }
 
   .treemap-tile strong {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.1;
   }
 
   .treemap-tile span {
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: var(--text-1);
   }
 
   .treemap-tile em {
     font-style: normal;
     font-weight: 700;
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.1;
   }
 
   .treemap-tile small {
     color: var(--text-1);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     line-height: 1.2;
   }
 
   .treemap-tile.hero {
-    padding: 0.45rem 0.5rem;
+    padding: var(--space-4) var(--space-4);
   }
 
   .treemap-tile.hero strong {
-    font-size: 0.82rem;
+    font-size: var(--text-base);
   }
 
   .treemap-tile.hero em {
-    font-size: 0.84rem;
+    font-size: var(--text-base);
   }
 
   .treemap-tile.minor {
-    padding: 0.28rem 0.32rem;
+    padding: var(--space-2) var(--space-3);
   }
 
   .treemap-tile.minor strong,
   .treemap-tile.minor em {
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .treemap-tile.micro {
-    padding: 0.22rem 0.24rem;
+    padding: var(--space-2) var(--space-2);
   }
 
   .treemap-tile.micro .tile-copy {
@@ -3675,7 +3705,7 @@
   }
 
   .treemap-tile.micro strong {
-    font-size: 0.54rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.02em;
   }
 
@@ -3687,7 +3717,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .treemap-tooltip {
@@ -3698,7 +3728,7 @@
     transform: translate(var(--tip-offset-x), var(--tip-offset-y));
     min-width: 12.5rem;
     max-width: 18rem;
-    padding: 0.6rem 0.75rem 0.65rem;
+    padding: var(--space-4) var(--space-5) var(--space-5);
     background: color-mix(in srgb, var(--bg-1) 96%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--panel-strong));
     box-shadow:
@@ -3714,19 +3744,19 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .treemap-tooltip-head strong {
-    font-size: 0.92rem;
+    font-size: var(--text-md);
     letter-spacing: 0.04em;
     color: var(--text-0);
   }
 
   .treemap-tooltip-chip {
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     font-weight: 700;
-    padding: 0.08rem 0.4rem;
+    padding: 0.08rem var(--space-3);
     border: 1px solid var(--divider);
     background: color-mix(in srgb, var(--surface-0) 78%, transparent);
   }
@@ -3748,26 +3778,26 @@
   }
 
   .treemap-tooltip-name {
-    margin-top: 0.32rem;
-    font-size: 0.76rem;
+    margin-top: var(--space-3);
+    font-size: var(--text-sm);
     color: var(--text-1);
     line-height: 1.2;
   }
 
   .treemap-tooltip-sector {
-    margin-top: 0.15rem;
-    font-size: 0.6rem;
+    margin-top: var(--space-1);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.14em;
     color: var(--text-2);
   }
 
   .treemap-tooltip-metrics {
-    margin: 0.55rem 0 0;
-    padding-top: 0.45rem;
+    margin: var(--space-4) 0 0;
+    padding-top: var(--space-4);
     border-top: 1px solid var(--divider);
     display: grid;
-    gap: 0.3rem;
+    gap: var(--space-2);
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -3775,12 +3805,12 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .treemap-tooltip-metrics dt {
     margin: 0;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--text-2);
@@ -3791,7 +3821,7 @@
 
   .treemap-tooltip-metrics dd {
     margin: 0;
-    font-size: 0.8rem;
+    font-size: var(--text-base);
     font-weight: 600;
     color: var(--text-0);
     white-space: nowrap;
@@ -3839,26 +3869,26 @@
   .section-head {
     display: flex;
     justify-content: space-between;
-    gap: 0.6rem;
+    gap: var(--space-4);
     align-items: flex-start;
   }
 
   .chart-foot {
     align-items: center;
     border-top: 1px solid var(--divider);
-    padding-top: 0.45rem;
+    padding-top: var(--space-4);
     flex-wrap: wrap;
   }
 
   .chart-foot span {
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
   }
 
   .chart-foot strong {
     color: var(--text-1);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .top-line {
@@ -3871,39 +3901,39 @@
 
   .tight-head small {
     color: var(--text-2);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     white-space: nowrap;
   }
 
   .inline-refresh {
     width: auto;
     min-height: 1.65rem;
-    padding: 0.25rem 0.6rem;
+    padding: var(--space-2) var(--space-4);
   }
 
   .subchart-label {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.6rem;
-    margin-top: 0.15rem;
+    font-size: var(--text-2xs);
+    margin-top: var(--space-1);
   }
 
   .title-block {
     min-width: 0;
     max-width: 40rem;
     display: grid;
-    gap: 0.12rem;
+    gap: var(--space-1);
   }
 
   .title-block .muted {
     line-height: 1.4;
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
   }
 
   .header-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: end;
     justify-content: flex-end;
     flex-wrap: wrap;
@@ -3918,18 +3948,22 @@
   .kpi-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 0;
-    padding-block: 0.15rem;
+    padding-block: var(--space-1);
+  }
+
+  .summary-kpis {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
   .metric {
     min-width: 0;
-    padding: 0.2rem 0.85rem;
+    padding: var(--space-2) var(--space-5);
     border: 0;
     border-left: 1px solid var(--divider);
     background: none;
     text-align: left;
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-1);
   }
 
   .metric:first-child {
@@ -3941,20 +3975,20 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .metric strong {
     display: block;
-    margin: 0.1rem 0 0.05rem;
-    font-size: 0.95rem;
+    margin: var(--space-1) 0 0.05rem;
+    font-size: var(--text-md);
     line-height: 1.2;
     color: var(--text-0);
   }
 
   .metric small {
     color: var(--text-2);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   /* ── Typography ── */
@@ -3965,23 +3999,23 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   h2 {
-    font-size: 1rem;
+    font-size: var(--text-lg);
     font-weight: 700;
     color: var(--text-0);
   }
 
   h3 {
-    font-size: 0.88rem;
+    font-size: var(--text-base);
     font-weight: 700;
     color: var(--text-0);
   }
 
   h4 {
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     font-weight: 600;
     color: var(--text-0);
     text-transform: uppercase;
@@ -4015,10 +4049,10 @@
   .row {
     display: flex;
     justify-content: space-between;
-    gap: 0.6rem;
+    gap: var(--space-4);
     align-items: center;
     border-top: 1px solid var(--divider);
-    padding-top: 0.42rem;
+    padding-top: var(--space-3);
   }
 
   .row:first-child {
@@ -4028,13 +4062,13 @@
 
   .row span {
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
 
   .row strong {
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     text-align: right;
   }
 
@@ -4042,7 +4076,7 @@
   label,
   .inline-field {
     display: grid;
-    gap: 0.22rem;
+    gap: var(--space-2);
   }
 
   .inline-field {
@@ -4069,9 +4103,9 @@
     border: 1px solid var(--panel-strong);
     background: var(--bg-1);
     color: var(--text-0);
-    padding: 0.4rem 0.6rem;
+    padding: var(--space-3) var(--space-4);
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     display: block;
     width: 100%;
     box-sizing: border-box;
@@ -4130,13 +4164,13 @@
 
   .builder-actions.compact {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-3);
     justify-content: flex-end;
   }
 
   .builder-actions.compact button {
     width: auto;
-    padding: 0.35rem 0.75rem;
+    padding: var(--space-3) var(--space-5);
   }
 
   /* ── Tables ── */
@@ -4165,8 +4199,8 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.6rem;
-    padding: 0.42rem 0.55rem;
+    font-size: var(--text-2xs);
+    padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--divider);
     position: sticky;
     top: 0;
@@ -4176,11 +4210,11 @@
   }
 
   tbody td {
-    padding: 0.45rem 0.55rem;
+    padding: var(--space-4) var(--space-4);
     border-top: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
-    font-size: 0.8rem;
+    font-size: var(--text-base);
   }
 
   .num-cell {
@@ -4190,7 +4224,7 @@
   .compact-input {
     width: 5.5rem;
     min-height: 1.55rem;
-    padding: 0.2rem 0.35rem;
+    padding: var(--space-2) var(--space-3);
     text-align: right;
   }
 
@@ -4209,22 +4243,22 @@
   }
 
   .tight {
-    gap: 0.25rem;
+    gap: var(--space-2);
   }
 
   .history-input {
     min-width: 14rem;
     min-height: 4.4rem;
     max-height: 8rem;
-    padding: 0.3rem 0.4rem;
-    font-size: 0.74rem;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
     line-height: 1.35;
     white-space: pre;
   }
 
   .source-cell {
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-1);
     min-width: 8rem;
   }
 
@@ -4232,7 +4266,7 @@
     color: var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .source-cell span.warning {
@@ -4241,30 +4275,30 @@
 
   .source-cell small {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     line-height: 1.25;
     overflow-wrap: anywhere;
   }
 
   .row-actions {
     display: inline-flex;
-    gap: 0.25rem;
+    gap: var(--space-2);
     align-items: center;
     justify-content: flex-end;
   }
 
   .alignment-diagnostics {
     display: grid;
-    gap: 0.45rem;
+    gap: var(--space-4);
     border-top: 1px solid var(--divider);
-    padding-top: 0.45rem;
+    padding-top: var(--space-4);
   }
 
   .book-validation {
     display: grid;
-    gap: 0.45rem;
+    gap: var(--space-4);
     border-top: 1px solid var(--divider);
-    padding: 0.45rem 0.65rem 0.55rem;
+    padding: var(--space-4) var(--space-5) var(--space-4);
   }
 
   .book-validation.invalid {
@@ -4284,22 +4318,22 @@
   }
 
   .table-panel-header {
-    padding: 0.35rem 0.65rem;
+    padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
   }
 
   .compact-warning-list {
     display: grid;
-    gap: 0.2rem;
-    padding: 0.45rem 0.65rem;
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-5);
     border-top: 1px solid var(--divider);
     color: var(--warning);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .attached-context-list {
@@ -4311,18 +4345,18 @@
   .attached-context-row {
     display: grid;
     grid-template-columns: 4.5rem minmax(0, 1fr) minmax(8rem, auto);
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: center;
-    padding: 0.4rem 0.65rem;
+    padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
   }
 
   .attached-context-row span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .attached-context-row strong,
@@ -4336,20 +4370,20 @@
   }
 
   .object-compose-actions {
-    padding: 0 0.65rem 0.55rem;
+    padding: 0 var(--space-5) var(--space-4);
     justify-content: flex-end;
   }
 
   .handoff-panel {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .handoff-strip,
   .handoff-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: start;
   }
 
@@ -4360,7 +4394,7 @@
   }
 
   .handoff-row {
-    padding: 0.5rem 0;
+    padding: var(--space-4) 0;
     border-top: 1px solid var(--divider);
   }
 
@@ -4371,14 +4405,14 @@
   .stale-handoff-head {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: start;
-    padding: 0.5rem 0 0.25rem;
+    padding: var(--space-4) 0 var(--space-2);
     border-top: 1px solid var(--divider);
   }
 
   .stale-handoff-head strong {
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-2);
@@ -4402,23 +4436,23 @@
 
   .handoff-actions {
     display: flex;
-    gap: 0.35rem;
+    gap: var(--space-3);
     justify-content: flex-end;
   }
 
   .handoff-actions button {
     width: auto;
     min-height: 1.65rem;
-    padding: 0.25rem 0.45rem;
-    font-size: 0.72rem;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
   }
 
   .handoff-warnings {
     grid-column: 1 / -1;
     display: grid;
-    gap: 0.2rem;
+    gap: var(--space-2);
     color: var(--warning);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .table-panel td .stack,
@@ -4434,31 +4468,31 @@
   .table-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: var(--space-3);
     align-items: center;
   }
 
   .table-actions button {
     width: auto;
     min-height: 1.65rem;
-    padding: 0.25rem 0.45rem;
-    font-size: 0.72rem;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
   }
 
   /* ── Pills / tags ── */
   .pill-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.35rem;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
   }
 
   .pill-list span {
     border: 1px solid var(--divider);
     background: var(--surface-0);
     color: var(--text-1);
-    padding: 0.22rem 0.42rem;
-    font-size: 0.7rem;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
     text-transform: none;
     letter-spacing: normal;
   }
@@ -4471,25 +4505,25 @@
   .signed-book {
     border: 1px solid var(--divider);
     background: var(--surface-0);
-    padding: 0.5rem 0.6rem;
-    margin-top: 0.5rem;
+    padding: var(--space-4) var(--space-4);
+    margin-top: var(--space-4);
   }
 
   .focal-hint {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
-    font-size: 0.74rem;
-    margin-top: 0.45rem;
+    font-size: var(--text-sm);
+    margin-top: var(--space-4);
   }
 
   /* ── Notes ── */
   .note-row {
     display: grid;
     grid-template-columns: 5rem minmax(0, 1fr);
-    gap: 0.6rem;
-    padding-top: 0.42rem;
+    gap: var(--space-4);
+    padding-top: var(--space-3);
     border-top: 1px solid var(--divider);
     align-items: baseline;
   }
@@ -4500,7 +4534,7 @@
   }
 
   .note-row p {
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
     color: var(--text-1);
   }
@@ -4509,7 +4543,7 @@
     color: var(--warning);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .note-row.info .note-tag,
@@ -4524,7 +4558,7 @@
 
   .warning {
     color: var(--warning);
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
   }
 
   /* ── Responsive ── */
@@ -4579,7 +4613,7 @@
     }
 
     .metric {
-      padding: 0.45rem 0;
+      padding: var(--space-4) 0;
       border-left: 0;
       border-top: 1px solid var(--divider);
     }
@@ -4611,7 +4645,7 @@
 
     .note-row {
       grid-template-columns: 1fr;
-      gap: 0.25rem;
+      gap: var(--space-2);
     }
   }
 </style>

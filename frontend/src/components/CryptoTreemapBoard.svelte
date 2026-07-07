@@ -122,10 +122,10 @@
     position: absolute;
     inset: 0 0 auto 0;
     min-height: 1.5rem;
-    padding: 0.28rem 0.5rem;
+    padding: var(--space-2) var(--space-4);
     display: flex;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: center;
     background: color-mix(in srgb, var(--bg-1) 86%, transparent);
     border-bottom: 1px solid var(--divider);
@@ -137,7 +137,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .section-head small {
@@ -154,7 +154,7 @@
   .treemap-tile {
     position: absolute;
     border: 1px solid var(--divider);
-    padding: 0.32rem 0.38rem;
+    padding: var(--space-3) var(--space-3);
     text-align: left;
     min-width: 0;
     color: var(--text-0);
@@ -168,7 +168,7 @@
   .tile-copy,
   .tile-bottomline {
     display: grid;
-    gap: 0.12rem;
+    gap: var(--space-1);
   }
 
   .tile-copy {
@@ -179,7 +179,7 @@
   .tile-topline {
     display: flex;
     justify-content: space-between;
-    gap: 0.25rem;
+    gap: var(--space-2);
     align-items: start;
   }
 
@@ -187,7 +187,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     line-height: 1.1;
   }
 
@@ -198,52 +198,52 @@
   }
 
   .tile-move {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.1;
   }
 
   .tile-name {
-    font-size: 0.86rem;
+    font-size: var(--text-base);
     line-height: 1.1;
   }
 
   .tile-bottomline small {
     color: var(--text-1);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     line-height: 1.2;
   }
 
   .treemap-tile.hero {
-    padding: 0.45rem 0.5rem;
+    padding: var(--space-4) var(--space-4);
   }
 
   .treemap-tile.hero .tile-symbol {
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .treemap-tile.hero .tile-move {
-    font-size: 0.84rem;
+    font-size: var(--text-base);
   }
 
   .treemap-tile.major .tile-symbol {
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .treemap-tile.minor {
-    padding: 0.28rem 0.32rem;
+    padding: var(--space-2) var(--space-3);
   }
 
   .treemap-tile.minor .tile-symbol,
   .treemap-tile.minor .tile-move {
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
   }
 
   .treemap-tile.minor .tile-bottomline small {
-    font-size: 0.56rem;
+    font-size: var(--text-2xs);
   }
 
   .treemap-tile.micro {
-    padding: 0.22rem 0.24rem;
+    padding: var(--space-2) var(--space-2);
   }
 
   .treemap-tile.micro .tile-copy {
@@ -251,7 +251,7 @@
   }
 
   .treemap-tile.micro .tile-symbol {
-    font-size: 0.54rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.05em;
   }
 
@@ -266,8 +266,8 @@
   .empty-inline {
     border: 1px dashed var(--divider);
     color: var(--text-2);
-    padding: 0.8rem;
-    font-size: 0.78rem;
+    padding: var(--space-5);
+    font-size: var(--text-sm);
   }
 
   @media (max-width: 900px) {
@@ -277,7 +277,7 @@
     }
 
     .section-head {
-      padding-inline: 0.36rem;
+      padding-inline: var(--space-3);
     }
 
     .section-head small {

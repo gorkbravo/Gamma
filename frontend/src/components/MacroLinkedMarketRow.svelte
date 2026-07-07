@@ -44,7 +44,7 @@
 
 <style>
   .market-row {
-    padding: 0.3rem 0;
+    padding: var(--space-2) 0;
     border-top: 1px solid rgba(46, 60, 74, 0.18);
   }
 
@@ -57,27 +57,27 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
   .market-title {
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     line-height: 1.3;
   }
 
   .market-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: var(--space-3);
     align-items: center;
     color: var(--text-2);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .meta-stat {
     color: var(--text-2);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
   }
 
   .meta-stat.positive { color: var(--positive); }
@@ -88,8 +88,8 @@
     border: 1px solid rgba(122, 166, 200, 0.24);
     background: rgba(122, 166, 200, 0.06);
     color: var(--accent);
-    padding: 0.12rem 0.35rem;
-    font-size: 0.56rem;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;

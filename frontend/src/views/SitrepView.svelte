@@ -394,17 +394,28 @@
       ...allFx.filter((m) => !FX_SERIES_ORDER.includes(m.series_id ?? ""))
     ];
     return ordered.length
-      ? ordered.slice(0, 12).map((m) => ({ ...metricRow(m), group: "", source: "" }))
+      ? ordered.slice(0, 12).map((m) => ({ ...metricRow(m), group: "", source: m.source_provider }))
       : [{
           id: "fx-placeholder",
-          label: "FX strip",
+          label: "FX unavailable",
           group: "",
           last: "N/A",
           change: "N/A",
-          secondary: "Load Macro Snapshot",
+          secondary: data ? "Macro loaded / no FX rows" : "Macro not loaded",
           tone: "warning",
-          source: ""
+          source: data?.source_provider ?? "macro"
         }];
+  }
+
+  function formatFxSourceMix(rows: SitrepMarketRow[], data: MacroSnapshot | null) {
+    if (!data) {
+      return "Macro not loaded";
+    }
+    const providers = [...new Set(rows.map((row) => row.source).filter(Boolean))];
+    if (!providers.length || rows.every((row) => row.id === "fx-placeholder")) {
+      return `${data.source_provider || "Macro"} / FX unavailable`;
+    }
+    return providers.length === 1 ? providers[0].toUpperCase() : `Mixed: ${providers.map((row) => row.toUpperCase()).join(" + ")}`;
   }
 
   const SECTOR_SHORT: Record<string, string> = {
@@ -905,6 +916,15 @@
     ? `${news.source_provider.toUpperCase()} / ${news.items.length} ITEMS / ${news.freshness_label.toUpperCase()}`
     : "NOT LOADED";
   $: providerMode = system?.mock_mode ? "MOCK" : system?.connection.connected ? system.market_data_mode.toUpperCase() : "OFFLINE";
+  $: hasLoadedSitrepData = Boolean(overview || indicesOverview || macro || commodities || news || prediction);
+  $: sitrepState = loading && !hasLoadedSitrepData ? "LOADING" : warnings.length ? "DEGRADED" : equityRows.length ? "LIVE" : "PARTIAL";
+  $: equityTapeState = equityRows.length
+    ? ""
+    : overview
+      ? `US EQUITY TAPE N/A / ${overview.freshness_label.toUpperCase()}`
+      : loading
+        ? "US EQUITY TAPE LOADING"
+        : "US EQUITY TAPE NOT LOADED";
 </script>
 
 <section class="view">
@@ -933,11 +953,11 @@
           {/each}
         </div>
       {:else}
-        <span class="strip-empty">US EQUITY TAPE UNAVAILABLE</span>
+        <span class="strip-empty">{equityTapeState}</span>
       {/if}
     </div>
     <div class="status-line">
-      <span class:warning={loading}>{loading ? "REFRESHING" : "LIVE"}</span>
+      <span class:warning={sitrepState !== "LIVE"}>{sitrepState}</span>
       <span>{providerMode}</span>
       {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
       <span>{formatDateTime(asOf)}</span>
@@ -964,7 +984,7 @@
           <div class="table-header">
             <div class="table-title">
               <span>FX Pairs</span>
-              <small>{macro?.source_provider ?? "Macro / IBKR"}</small>
+              <small>{formatFxSourceMix(fxRows, macro)}</small>
             </div>
             <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")} aria-label={refreshTitle("fx")} title={refreshTitle("fx")}>
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
@@ -1096,16 +1116,16 @@
 <style>
   .view {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .panel {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-content: start;
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: 0.85rem;
+    padding: var(--space-5);
   }
 
   .table-panel {
@@ -1118,8 +1138,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.75rem;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-5);
     border-bottom: 1px solid var(--divider);
     min-height: 26px;
     flex-shrink: 0;
@@ -1128,12 +1148,12 @@
   .table-title {
     display: flex;
     align-items: baseline;
-    gap: 0.45rem;
+    gap: var(--space-4);
     min-width: 0;
   }
 
   .table-title span {
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -1143,7 +1163,7 @@
 
   .table-title small {
     color: var(--text-2);
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1160,7 +1180,7 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     line-height: 1;
     cursor: pointer;
     flex-shrink: 0;
@@ -1204,15 +1224,15 @@
   .header-identity {
     display: flex;
     align-items: baseline;
-    gap: 0.5rem;
-    padding: 0.52rem 0.85rem;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-5);
     flex-shrink: 0;
     white-space: nowrap;
   }
 
   .header-identity .title {
     color: var(--text-0);
-    font-size: 12px;
+    font-size: var(--text-sm);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -1220,14 +1240,14 @@
 
   .header-identity .subtitle {
     color: var(--text-2);
-    font-size: 10.5px;
+    font-size: var(--text-xs);
     letter-spacing: 0.04em;
   }
 
   .title-line {
     display: flex;
     align-items: baseline;
-    gap: 0.45rem;
+    gap: var(--space-4);
     min-width: 0;
   }
 
@@ -1235,7 +1255,7 @@
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    gap: 0.75rem;
+    gap: var(--space-5);
     min-width: 0;
   }
 
@@ -1245,7 +1265,7 @@
   }
 
   h3 {
-    font-size: 0.92rem;
+    font-size: var(--text-md);
   }
 
   .eyebrow {
@@ -1253,7 +1273,7 @@
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
   }
 
   .title-line .eyebrow {
@@ -1287,8 +1307,8 @@
     border: 0;
     display: inline-flex;
     align-items: baseline;
-    gap: 0.38rem;
-    padding: 0.42rem 0.72rem;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-5);
     border-right: 1px solid var(--divider);
     white-space: nowrap;
     cursor: pointer;
@@ -1314,7 +1334,7 @@
   .strip-item em,
   .strip-item b {
     font-style: normal;
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1;
   }
 
@@ -1328,9 +1348,9 @@
 
   .strip-empty {
     display: block;
-    padding: 0.5rem 0.65rem;
+    padding: var(--space-4) var(--space-5);
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     letter-spacing: 0.06em;
   }
 
@@ -1350,27 +1370,27 @@
     flex-shrink: 0;
     gap: 0;
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     white-space: nowrap;
   }
 
   .status-line span {
-    padding: 0 0.6rem;
+    padding: 0 var(--space-4);
     border-left: 1px solid var(--divider);
   }
 
   .workspace-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(29rem, 0.48fr);
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .primary-column,
   .support-column {
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-content: start;
     min-width: 0;
   }
@@ -1378,14 +1398,14 @@
   .market-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .tape-row span {
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
   }
 
   .panel-head small,
@@ -1410,9 +1430,9 @@
     text-align: left;
     display: grid;
     grid-template-columns: 5.8rem minmax(0, 0.9fr) minmax(0, 1.7fr) minmax(5.5rem, 0.45fr);
-    gap: 0.5rem;
+    gap: var(--space-4);
     align-items: baseline;
-    padding: 0.5rem 0;
+    padding: var(--space-4) 0;
     border: 0;
     border-bottom: 1px solid var(--divider);
     min-width: 0;
@@ -1474,33 +1494,33 @@
   .news-row {
     display: grid;
     grid-template-columns: 3rem minmax(0, 1fr) minmax(4.5rem, max-content);
-    gap: 0 0.6rem;
+    gap: 0 var(--space-4);
     align-items: start;
-    padding: 0.42rem 0.75rem;
+    padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
   }
 
   .news-time {
     color: var(--accent);
-    font-size: 0.7rem;
-    padding-top: 0.12rem;
+    font-size: var(--text-xs);
+    padding-top: var(--space-1);
     white-space: nowrap;
   }
 
   .news-title {
     color: var(--text-0);
-    font-size: 0.74rem;
+    font-size: var(--text-sm);
     line-height: 1.35;
     margin: 0;
   }
 
   .news-source {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     text-decoration: none;
     text-align: right;
     white-space: nowrap;
-    padding-top: 0.12rem;
+    padding-top: var(--space-1);
   }
 
   .news-source:hover {
@@ -1508,18 +1528,18 @@
   }
 
   .news-empty {
-    padding: 0.75rem;
+    padding: var(--space-5);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     margin: 0;
   }
 
   a {
     color: var(--accent);
     text-decoration: none;
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
   }
 
   a:hover {
@@ -1535,25 +1555,25 @@
   .need-list div {
     display: grid;
     grid-template-columns: 7.5rem minmax(0, 1fr);
-    gap: 0.5rem;
-    padding: 0.5rem 0;
+    gap: var(--space-4);
+    padding: var(--space-4) 0;
     border-bottom: 1px solid var(--divider);
   }
 
   .warning-list {
     margin: 0;
-    padding-left: 1rem;
+    padding-left: var(--space-6);
     color: var(--text-2);
     line-height: 1.4;
   }
 
   .empty-state {
     margin: 0;
-    padding: 0.75rem 0;
+    padding: var(--space-5) 0;
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
   }
 
   .positive {
@@ -1605,7 +1625,7 @@
 
     .tape-row {
       grid-template-columns: minmax(0, 1fr);
-      gap: 0.16rem;
+      gap: var(--space-1);
     }
 
     .need-list div {

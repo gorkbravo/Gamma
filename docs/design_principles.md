@@ -148,18 +148,22 @@ The app uses two font stacks:
 - `--display-font` (system sans: `"Segoe UI Variable Text", "Segoe UI", -apple-system, "Inter", "Helvetica Neue", Roboto, sans-serif`) — for chrome and labels, not data. Applied globally to `button`, headings (`h1`–`h4`), `.brand` (app branding), and `.panel-header` (panel titles), and explicitly to `.mode-bar button` in each view (their `font: inherit` reset would otherwise revert it). Use it for any new nav/label/heading element so the split stays consistent; never apply it to a data value or table cell.
 
 ### Size Hierarchy
-The base font size is `13.5px` on the body. All sizes below are actual computed values currently in use or targets for convergence.
+The base font size is `13.5px` on the body. **Every `font-size` must resolve to a step in the type scale** — never a raw `px`/`rem` value. The scale lives in `tokens.css`:
 
-| Role | Size | Weight | Color | Notes |
-|---|---|---|---|---|
-| Category label (e.g. `PORTFOLIO MONITOR`, `MACRO`) | `10–11px` | `400–600` | `--text-2` | Uppercase, wide letter-spacing (`0.08–0.1em`) |
-| Sidebar title (`NAVIGATION`) | `~11px` | `600` | `--text-2` | Uppercase |
-| Body / data text | `13–13.5px` | `400` | `--text-0` or `--text-1` | Default inherited size |
-| Section headers (H3) within a tab | `~14–16px` | `700` | `--text-0` | These are panel titles like "Participant Summary", "Book Diagnostics" |
-| Tab-level hero titles (H2) | `~16–20px` | `700` | `--text-0` | Major identifiers like the asset name or market question. Keep concise. |
-| App branding (H1 `GAMMA`) | `~12px` | `600` | `--text-0` | Small, uppercase, wide tracking. Not a display heading. |
+| Token | Size | Role |
+|---|---|---|
+| `--text-2xs` | `10px` | Category labels, eyebrows, table column headers |
+| `--text-xs` | `11px` | Secondary labels, metadata, timestamps, sidebar title |
+| `--text-sm` | `12px` | Compact data, dense controls, sub-labels, app branding (`GAMMA`) |
+| `--text-base` | `13.5px` | Body / data text — matches the global body size |
+| `--text-md` | `15px` | Section headers (H3), panel titles |
+| `--text-lg` | `16px` | Tab-level hero titles (H2) |
+| `--text-xl` | `18px` | Hero identifiers — the ceiling inside tab content |
+
+Pair each with a `--leading-*` step (`--leading-tight` 1.2 for single-line labels/values/cells, `--leading-snug` 1.4 for dense lists, `--leading-normal` 1.5 for prose). The landing page (§12) is the one exemption — its hero may exceed `--text-xl`.
 
 ### Rules
+- **`font-size` uses a scale token. Always.** Do not introduce a new raw size — if a role isn't covered, extend the scale in `tokens.css`, don't hand-pick a one-off value. This is what keeps unrelated views legible as one product.
 - **Hierarchy by weight first, size second.** A `600` weight label next to `400` weight data creates hierarchy without changing size. Use size jumps sparingly.
 - **No text larger than ~20px inside tab content.** Gamma is not a marketing page. If a heading needs to be bigger than the data around it, `700` weight at `15–16px` is sufficient.
 - **No italic in data contexts.** Reserve italic for footnotes, tooltips, or explicitly editorial text.
@@ -200,7 +204,21 @@ Every view follows a consistent layout pattern:
 - **Panel internal padding**: `~0.85–1.05rem` (13–17px). Compact. Content should feel close to its border.
 - **Panel internal gap** (between elements within a panel): `0.5rem` (8px) for sections, tighter for rows.
 
+### The Space Scale
+Every `padding`, `gap`, and `margin` snaps to the space ramp in `tokens.css` — no off-ramp values. Map the measurements above to tokens:
+
+| Token | Value | Typical use |
+|---|---|---|
+| `--space-1` | `2px` | Hairline insets, tight inline gaps |
+| `--space-2` | `4px` | Cell vertical padding, icon gaps |
+| `--space-3` | `6px` | Dense control padding (buttons, mode bars, compact inputs) |
+| `--space-4` | `8px` | **Panel gaps, workspace gaps, internal section gaps** — the default seam |
+| `--space-5` | `12px` | Panel padding (compact), cell horizontal padding |
+| `--space-6` | `16px` | Panel padding (roomy), KPI horizontal padding |
+| `--space-7` | `24px` | Rare — only where a genuine group break is earned |
+
 ### Rules
+- **Space is a scale, not a guess.** Use a `--space-*` token for every gap/padding/margin. If a spacing need isn't covered, it almost certainly should snap to the nearest step rather than justify a new value.
 - **No gratuitous whitespace.** Padding separates logical groups, not decorates. Space is earned by what it separates.
 - **Columns over cards.** Where data can be arranged in a grid or column layout with dividers, prefer that over wrapping in card containers.
 - **Visual grouping through proximity and line, not box.** Related items should be spatially close. A `1px var(--divider)` rule is a perfectly sufficient separator.

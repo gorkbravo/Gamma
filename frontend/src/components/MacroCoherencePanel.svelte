@@ -74,26 +74,26 @@
 <style>
   .coherence-panel {
     display: grid;
-    gap: 0.35rem;
-    padding: 0.45rem 0.55rem;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4);
     border: 1px solid rgba(46, 60, 74, 0.3);
     background: var(--surface-soft);
   }
 
   .coherence-panel.compact {
-    padding: 0.4rem 0.5rem;
-    gap: 0.3rem;
+    padding: var(--space-3) var(--space-4);
+    gap: var(--space-2);
   }
 
   .coherence-head {
     display: grid;
-    gap: 0.2rem;
+    gap: var(--space-2);
   }
 
   .coherence-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: var(--space-3);
     align-items: center;
   }
 
@@ -102,8 +102,8 @@
     border: 1px solid rgba(122, 166, 200, 0.24);
     background: rgba(122, 166, 200, 0.06);
     color: var(--accent);
-    padding: 0.15rem 0.42rem;
-    font-size: 0.58rem;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     line-height: 1.2;
@@ -129,7 +129,7 @@
 
   .coherence-counts {
     color: var(--text-2);
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
@@ -139,20 +139,20 @@
   .methodology-note {
     margin: 0;
     color: var(--text-2);
-    font-size: 0.72rem;
+    font-size: var(--text-sm);
     line-height: 1.4;
   }
 
   .lead-lag-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.35rem;
+    gap: var(--space-3);
   }
 
   .lead-lag-card {
     display: grid;
-    gap: 0.14rem;
-    padding: 0.4rem 0.45rem;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-4);
     border: 1px solid rgba(46, 60, 74, 0.28);
     background: rgba(255, 255, 255, 0.015);
   }
@@ -160,24 +160,24 @@
   .lead-lag-top {
     display: flex;
     justify-content: space-between;
-    gap: 0.4rem;
+    gap: var(--space-3);
     align-items: center;
   }
 
   .lead-lag-label {
     color: var(--text-2);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
   .lead-lag-card strong {
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
     line-height: 1.35;
   }
 
   .lead-lag-score {
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
     color: var(--text-1);
   }
@@ -191,7 +191,7 @@
   }
 
   .methodology-note {
-    padding-left: 0.5rem;
+    padding-left: var(--space-4);
     border-left: 2px solid rgba(46, 60, 74, 0.35);
   }
 

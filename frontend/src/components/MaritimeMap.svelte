@@ -1579,17 +1579,17 @@
     z-index: 10;
     background: color-mix(in srgb, var(--bg-0, #070809) 88%, transparent);
     border: 1px solid var(--panel-border, #1e2228);
-    padding: 0.38rem 0.65rem;
+    padding: var(--space-3) var(--space-5);
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: var(--space-2);
   }
 
   .hud-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.7rem;
+    gap: var(--space-4);
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.09em;
     white-space: nowrap;
@@ -1603,7 +1603,7 @@
     color: var(--text-0, #f0f2f5);
     font-weight: 600;
     margin-left: auto;
-    padding-left: 0.8rem;
+    padding-left: var(--space-5);
   }
 
   .conn-dot {
@@ -1621,7 +1621,7 @@
   .hud-note {
     max-width: 14rem;
     color: var(--warning, #c49a5a);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     line-height: 1.35;
   }
 
@@ -1629,7 +1629,7 @@
     color: inherit;
     text-decoration: none;
     border-top: 1px dashed color-mix(in srgb, var(--warning, #c49a5a) 35%, transparent);
-    padding-top: 0.25rem;
+    padding-top: var(--space-2);
     margin-top: 0.05rem;
     cursor: pointer;
   }
@@ -1651,25 +1651,25 @@
     z-index: 10;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-4);
   }
 
   .map-legend {
     display: flex;
-    gap: 0.9rem;
+    gap: var(--space-6);
     background: color-mix(in srgb, var(--bg-0, #070809) 90%, transparent);
     border: 1px solid var(--panel-border, #1e2228);
-    padding: 0.28rem 0.65rem;
+    padding: var(--space-2) var(--space-5);
   }
 
   .legend-item {
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--text-2, #8a919a);
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
   }
 
   .legend-item::before {
@@ -1702,8 +1702,8 @@
     border: 1px solid var(--panel-border, #1e2228);
     color: var(--text-2, #8a919a);
     font: inherit;
-    font-size: 0.6rem;
-    padding: 0.28rem 0.55rem;
+    font-size: var(--text-2xs);
+    padding: var(--space-2) var(--space-4);
     cursor: pointer;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -1721,7 +1721,7 @@
     left: 0.6rem;
     z-index: 12;
     display: grid;
-    gap: 0.45rem;
+    gap: var(--space-4);
     width: min(21rem, calc(100% - 1.2rem));
     pointer-events: none;
   }
@@ -1729,7 +1729,7 @@
   .top-control-row {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
     width: max-content;
     pointer-events: auto;
   }
@@ -1751,8 +1751,8 @@
 
   .settings-button {
     width: max-content;
-    padding: 0.34rem 0.58rem;
-    font-size: 0.66rem;
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-xs);
     letter-spacing: 0.1em;
     text-transform: uppercase;
     cursor: pointer;
@@ -1805,10 +1805,10 @@
 
   .settings-shelf {
     display: grid;
-    gap: 0.55rem;
+    gap: var(--space-4);
     max-height: calc(100vh - 8rem);
     overflow: auto;
-    padding: 0.65rem;
+    padding: var(--space-5);
   }
 
   .display-settings {
@@ -1822,20 +1822,20 @@
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 0.55rem;
+    gap: var(--space-4);
   }
 
   .shelf-label {
     margin: 0;
     color: var(--text-2, #8a919a);
-    font-size: 0.62rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
 
   .shelf-action {
-    padding: 0.28rem 0.5rem;
-    font-size: 0.64rem;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     cursor: pointer;
@@ -1843,8 +1843,8 @@
 
   .compact-toggle,
   .mini-action {
-    padding: 0.26rem 0.5rem;
-    font-size: 0.62rem;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-2xs);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     cursor: pointer;
@@ -1858,9 +1858,9 @@
   .coverage-mini {
     border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
     border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
-    padding: 0.42rem 0;
+    padding: var(--space-3) 0;
     color: var(--text-2, #8a919a);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -1868,14 +1868,14 @@
   .shelf-note {
     margin: 0;
     color: var(--warning, #c49a5a);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     line-height: 1.35;
   }
 
   .overlay-list,
   .shelf-section {
     display: grid;
-    gap: 0.35rem;
+    gap: var(--space-3);
   }
 
   .settings-toggle-row,
@@ -1883,43 +1883,43 @@
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 0.55rem;
+    gap: var(--space-4);
     border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
-    padding-top: 0.45rem;
+    padding-top: var(--space-4);
   }
 
   .settings-toggle-row strong {
     display: block;
     color: var(--text-0, #f0f2f5);
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
   }
 
   .settings-toggle-row small {
     display: block;
     color: var(--text-2, #8a919a);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     line-height: 1.35;
-    margin-top: 0.12rem;
+    margin-top: var(--space-1);
   }
 
   .filter-actions {
     display: flex;
-    gap: 0.28rem;
+    gap: var(--space-2);
   }
 
   .vessel-filter-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.3rem;
+    gap: var(--space-2);
   }
 
   .vessel-filter {
     display: flex;
     align-items: center;
-    gap: 0.38rem;
-    padding: 0.34rem 0.44rem;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
     color: var(--text-2, #8a919a);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     cursor: pointer;
     text-align: left;
   }
@@ -1940,9 +1940,9 @@
   .overlay-list button,
   .row-button {
     display: grid;
-    gap: 0.16rem;
+    gap: var(--space-1);
     width: 100%;
-    padding: 0.46rem 0.55rem;
+    padding: var(--space-4) var(--space-4);
     text-align: left;
     cursor: pointer;
   }
@@ -1953,7 +1953,7 @@
   .drawer-header strong,
   .replay-copy strong {
     color: var(--text-0, #f0f2f5);
-    font-size: 0.76rem;
+    font-size: var(--text-sm);
   }
 
   .overlay-list small,
@@ -1962,15 +1962,15 @@
   .drawer-section p,
   .replay-copy small {
     color: var(--text-2, #8a919a);
-    font-size: 0.67rem;
+    font-size: var(--text-xs);
     line-height: 1.35;
   }
 
   .static-row {
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-1);
     border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
-    padding-top: 0.4rem;
+    padding-top: var(--space-3);
   }
 
   .detail-drawer {
@@ -1981,9 +1981,9 @@
     width: min(25rem, calc(100% - 1.2rem));
     max-height: calc(100% - 1.2rem);
     overflow: auto;
-    padding: 0.72rem;
+    padding: var(--space-5);
     display: grid;
-    gap: 0.62rem;
+    gap: var(--space-4);
   }
 
   .drawer-grid {
@@ -1993,11 +1993,11 @@
   }
 
   .drawer-grid div {
-    padding: 0.48rem 0.55rem;
+    padding: var(--space-4) var(--space-4);
     border-right: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
     border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
     display: grid;
-    gap: 0.12rem;
+    gap: var(--space-1);
   }
 
   .drawer-grid div:nth-child(2n) {
@@ -2011,21 +2011,21 @@
   .drawer-grid span,
   .drawer-section span {
     color: var(--text-2, #8a919a);
-    font-size: 0.6rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
   .drawer-grid strong {
     color: var(--text-0, #f0f2f5);
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
   }
 
   .drawer-section {
     display: grid;
-    gap: 0.18rem;
+    gap: var(--space-1);
     border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
-    padding-top: 0.5rem;
+    padding-top: var(--space-4);
   }
 
   .drawer-section p {
@@ -2040,7 +2040,7 @@
     bottom: 3.25rem;
     z-index: 11;
     align-items: center;
-    padding: 0.55rem 0.65rem;
+    padding: var(--space-4) var(--space-5);
   }
 
   .replay-copy {
@@ -2052,8 +2052,8 @@
   .replay-panel select {
     min-width: 15rem;
     max-width: 24rem;
-    padding: 0.32rem 0.45rem;
-    font-size: 0.7rem;
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-xs);
   }
 
   .replay-panel input[type="range"] {
@@ -2077,25 +2077,25 @@
   }
 
   :global(.mp-inner) {
-    padding: 0.55rem 0.75rem;
+    padding: var(--space-4) var(--space-5);
     min-width: 180px;
   }
 
   :global(.mp-name) {
     display: block;
     color: var(--text-0, #f0f2f5);
-    font-size: 0.8rem;
-    margin-bottom: 0.4rem;
-    padding-bottom: 0.32rem;
+    font-size: var(--text-base);
+    margin-bottom: var(--space-3);
+    padding-bottom: var(--space-3);
     border-bottom: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
   }
 
   :global(.mp-row) {
     display: flex;
     justify-content: space-between;
-    gap: 1.2rem;
-    padding: 0.1rem 0;
-    font-size: 0.7rem;
+    gap: var(--space-6);
+    padding: var(--space-1) 0;
+    font-size: var(--text-xs);
   }
 
   :global(.mp-row span:first-child) {
@@ -2111,18 +2111,18 @@
   }
 
   :global(.mp-note) {
-    margin-top: 0.35rem;
-    padding-top: 0.35rem;
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
     border-top: 1px solid var(--divider, rgba(50, 56, 64, 0.55));
     color: var(--text-2, #8a919a);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     line-height: 1.35;
   }
 
   /* Keep MapLibre attribution minimal */
   :global(.maplibregl-ctrl-attrib) {
     background: color-mix(in srgb, #070809 88%, transparent) !important;
-    font-size: 0.58rem !important;
+    font-size: var(--text-2xs) !important;
   }
 
   :global(.maplibregl-ctrl-attrib a) {
@@ -2140,7 +2140,7 @@
 
     .map-legend {
       flex-wrap: wrap;
-      gap: 0.5rem;
+      gap: var(--space-4);
     }
 
     .detail-drawer {

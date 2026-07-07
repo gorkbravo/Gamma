@@ -208,14 +208,14 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.75rem;
+    gap: var(--space-5);
+    padding: var(--space-5);
     border-bottom: 1px solid var(--panel-border);
   }
 
   .sidebar-title {
     display: block;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -225,7 +225,7 @@
   .sidebar-actions {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-3);
   }
 
   .header-btn,
@@ -245,15 +245,15 @@
   }
 
   .header-btn {
-    padding: 0.2rem 0.4rem;
-    font-size: 0.72rem;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
   }
 
   .close-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.2rem;
+    padding: var(--space-2);
   }
 
   .header-btn:hover,
@@ -266,19 +266,19 @@
   .tab-list {
     display: flex;
     flex-direction: column;
-    gap: 0.18rem;
-    padding: 0.55rem 0.5rem 0.8rem;
+    gap: var(--space-1);
+    padding: var(--space-4) var(--space-4) var(--space-5);
   }
 
   .tab-row {
     display: grid;
-    gap: 0.18rem;
+    gap: var(--space-1);
   }
 
   .tab-row-main {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.35rem;
+    gap: var(--space-3);
     align-items: stretch;
   }
 
@@ -289,8 +289,8 @@
   .drag-handle {
     display: grid;
     align-content: center;
-    gap: 0.14rem;
-    padding: 0.45rem 0.35rem;
+    gap: var(--space-1);
+    padding: var(--space-4) var(--space-3);
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-1);
@@ -317,19 +317,19 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 0.35rem;
+    padding: 0 var(--space-3);
     color: var(--text-2);
   }
 
   .tab-button {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--space-5);
     width: 100%;
-    padding: 0.58rem 0.7rem;
+    padding: var(--space-4) var(--space-5);
     cursor: pointer;
     text-align: left;
-    font-size: 0.82rem;
+    font-size: var(--text-base);
     font-family: var(--display-font);
     border-radius: var(--radius-sm);
     transition: border-color 120ms ease, background 120ms ease, color 120ms ease;

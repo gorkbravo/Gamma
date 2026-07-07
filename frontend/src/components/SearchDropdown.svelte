@@ -130,9 +130,9 @@
   .search-input {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--space-4);
     width: 100%;
-    padding: 0.28rem 0.55rem;
+    padding: var(--space-2) var(--space-4);
     border: 1px solid var(--panel-border);
     border-radius: var(--radius-sm);
     transition: border-color 120ms ease;
@@ -174,8 +174,8 @@
     right: 0;
     z-index: 20;
     display: grid;
-    gap: 0.2rem;
-    padding: 0.35rem;
+    gap: var(--space-2);
+    padding: var(--space-3);
     border: 1px solid var(--panel-strong);
     border-radius: var(--radius-md);
     background: var(--surface-0);
@@ -187,10 +187,10 @@
   }
 
   .search-status {
-    padding: 0.22rem 0.4rem;
+    padding: var(--space-2) var(--space-3);
     color: var(--warning);
     border-bottom: 1px solid var(--divider);
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
@@ -200,11 +200,11 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-5);
     width: 100%;
-    padding: 0.45rem 0.5rem;
+    padding: var(--space-4) var(--space-4);
     border-radius: 3px;
-    font-size: 0.73rem;
+    font-size: var(--text-sm);
   }
 
   .search-result {
@@ -232,7 +232,7 @@
 
   .result-copy {
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-1);
     min-width: 0;
   }
 
@@ -249,7 +249,7 @@
   .result-state,
   .search-empty {
     color: var(--text-2);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     letter-spacing: 0.04em;
   }
 
