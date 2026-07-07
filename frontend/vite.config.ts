@@ -15,7 +15,7 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173,
+    port: Number(process.env.PORT) || 5173,
     strictPort: true
   },
   preview: {
@@ -24,6 +24,7 @@ export default defineConfig({
     strictPort: true
   },
   test: {
+    include: ["src/**/*.{test,spec}.?(c|m)[jt]s?(x)"],
     globals: true,
     environment: "node"
   }

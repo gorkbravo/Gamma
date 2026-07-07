@@ -344,6 +344,10 @@ export interface ResearchResult {
   benchmark_symbol: string;
   primary_symbol: string | null;
   observations_count: number;
+  latest_daily_return: number | null;
+  latest_daily_return_at: string | null;
+  latest_price: number | null;
+  latest_price_at: string | null;
   snapshot: PortfolioSnapshot | null;
   performance_points: TimeSeriesPoint[];
   benchmark_points: TimeSeriesPoint[];

@@ -35,6 +35,10 @@ function makeResearchResult(scope: string): ResearchResult {
     benchmark_symbol: "SPY",
     primary_symbol: scope === "single_ticker" ? "AAPL" : null,
     observations_count: 10,
+    latest_daily_return: 0.01,
+    latest_daily_return_at: "2026-03-01T00:00:00Z",
+    latest_price: scope === "single_ticker" ? 110 : null,
+    latest_price_at: scope === "single_ticker" ? "2026-03-01T00:00:00Z" : null,
     snapshot: {
       timestamp: "2026-03-01T00:00:00Z",
       base_currency: "USD",

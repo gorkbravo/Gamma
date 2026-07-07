@@ -1021,6 +1021,10 @@ class ResearchAnalyzeResponseModel(BaseModel):
     benchmark_symbol: str
     primary_symbol: str | None = None
     observations_count: int
+    latest_daily_return: float | None = None
+    latest_daily_return_at: datetime | None = None
+    latest_price: float | None = None
+    latest_price_at: datetime | None = None
     snapshot: PortfolioSnapshotModel | None = None
     performance_points: list[TimeSeriesPoint]
     benchmark_points: list[TimeSeriesPoint]
@@ -1050,12 +1054,18 @@ class ResearchAnalyzeResponseModel(BaseModel):
             _daily_vol, annual_vol = realized_vol(result.perf)
             max_dd = max_drawdown(result.perf)
             beta, correlation = _beta_corr(result.perf, result.benchmark_returns)
+        latest_daily_return, latest_daily_return_at = _latest_series_value(result.perf)
+        latest_price, latest_price_at = _latest_series_value(result.primary_price)
 
         return cls(
             scope_type=result.scope_type,
             benchmark_symbol=result.benchmark_symbol,
             primary_symbol=result.primary_symbol,
             observations_count=int(len(result.perf)),
+            latest_daily_return=latest_daily_return,
+            latest_daily_return_at=latest_daily_return_at,
+            latest_price=latest_price,
+            latest_price_at=latest_price_at,
             snapshot=PortfolioSnapshotModel.from_domain(result.snapshot) if result.snapshot is not None else None,
             performance_points=series_to_points(result.perf),
             benchmark_points=series_to_points(result.benchmark_returns),
@@ -1084,6 +1094,16 @@ class ResearchAnalyzeResponseModel(BaseModel):
             history_source_label=result.history_source_label,
             freshness_label=result.freshness_label.value,
         )
+
+
+def _latest_series_value(series: pd.Series) -> tuple[float | None, datetime | None]:
+    if series is None or series.empty:
+        return None, None
+    clean = pd.to_numeric(series, errors="coerce").dropna()
+    if clean.empty:
+        return None, None
+    timestamp = pd.Timestamp(clean.index[-1]).to_pydatetime()
+    return float(clean.iloc[-1]), timestamp
 
 
 def _points_to_series(points: list[TimeSeriesPoint]) -> pd.Series:

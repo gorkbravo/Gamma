@@ -203,6 +203,10 @@ def test_research_analysis_response_preserves_primary_price_ohlcv_for_hero_chart
     assert response.primary_price_points[-1].low == 102.0
     assert response.primary_price_points[-1].close == 104.0
     assert response.primary_price_points[-1].volume == 1400.0
+    assert response.latest_daily_return == result.perf.iloc[-1]
+    assert response.latest_daily_return_at == result.perf.index[-1].to_pydatetime()
+    assert response.latest_price == 104.0
+    assert response.latest_price_at == idx[-1].to_pydatetime()
 
 
 def test_research_service_preserves_synthetic_scope_weights_and_snapshot():

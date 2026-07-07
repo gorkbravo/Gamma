@@ -10,7 +10,7 @@ from src.api.session_auth import GAMMA_SESSION_ENV, GAMMA_SESSION_HEADER
 TEST_GAMMA_SESSION_TOKEN = "test-gamma-session"
 NO_TEST_SESSION_HEADER = "X-Test-No-Gamma-Session"
 
-os.environ.setdefault(GAMMA_SESSION_ENV, TEST_GAMMA_SESSION_TOKEN)
+os.environ[GAMMA_SESSION_ENV] = TEST_GAMMA_SESSION_TOKEN
 
 _original_test_client_init = TestClient.__init__
 
