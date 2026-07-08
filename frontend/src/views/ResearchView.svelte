@@ -98,6 +98,7 @@
   export let strategyLoading = false;
   export let compareLoading = false;
   export let savedLoading = false;
+  export let riskHandoffLoading = false;
   export let selectedEquitySymbol: string | null = null;
   export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
   export let onRun: (options: ResearchRunOptions) => void;
@@ -2529,7 +2530,9 @@
         </div>
 
         <div class="builder-actions">
-          <button type="button" on:click={() => onOpenRisk?.()} disabled={!result?.snapshot}>Open In Risk</button>
+          <button type="button" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
+            {riskHandoffLoading ? "Opening..." : "Open In Risk"}
+          </button>
           <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Open In Options</button>
           {#if surface === "equity"}
             <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(false)} disabled={!activeEquityHandoffSymbol()}>+ Strategy</button>
@@ -2883,7 +2886,9 @@
                 </div>
                 <div class="builder-actions compact">
                   <small>{strategyComposition.returns_points.length} return points</small>
-                  <button type="button" class="ghost-button" on:click={() => onOpenRisk?.()}>Open In Risk</button>
+                  <button type="button" class="ghost-button" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading}>
+                    {riskHandoffLoading ? "Opening..." : "Open In Risk"}
+                  </button>
                 </div>
               </div>
               {#if compositionDiagnosticLegs.length}
@@ -3185,7 +3190,9 @@
                 <h3>Forwardable Research State</h3>
               </div>
               <div class="builder-actions compact">
-                <button type="button" on:click={() => onOpenRisk?.()} disabled={!result?.snapshot}>Risk</button>
+                <button type="button" on:click={() => onOpenRisk?.()} disabled={riskHandoffLoading || !result?.snapshot}>
+                  {riskHandoffLoading ? "Opening..." : "Risk"}
+                </button>
                 <button type="button" class="ghost-button" on:click={() => onOpenIv?.()} disabled={result?.scope_type !== "single_ticker"}>Options</button>
                 <button type="button" class="ghost-button" on:click={() => sendActiveEquityToStrategyLab(true)} disabled={!activeEquityHandoffSymbol()}>Add &amp; Open</button>
               </div>

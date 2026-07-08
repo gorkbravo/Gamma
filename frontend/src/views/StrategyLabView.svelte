@@ -35,6 +35,7 @@
   export let strategyLoading = false;
   export let compareLoading = false;
   export let savedLoading = false;
+  export let riskHandoffLoading = false;
   export let selectedEquitySymbol: string | null = null;
   export let onLoadOverview: (options?: ResearchOverviewLoadOptions) => Promise<unknown> | void;
   export let onRun: (options: ResearchRunOptions) => void;
@@ -78,6 +79,7 @@
   {strategyLoading}
   {compareLoading}
   {savedLoading}
+  {riskHandoffLoading}
   {selectedEquitySymbol}
   {onLoadOverview}
   {onRun}

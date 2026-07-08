@@ -18,6 +18,7 @@
     type NavigationRouteMatch,
   } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
+  import { createRiskHandoffController } from "./lib/risk-handoff";
   import {
     activeTab,
     analyzeStrategyLab,
@@ -226,26 +227,80 @@
     iv: () => import("./views/IvView.svelte"),
   };
 
+  const WORKSPACE_STATE_STORAGE_KEY = "gamma.workspace.state.v1";
+
+  type PersistedWorkspaceState = {
+    workspaceMode: WorkspaceMode;
+    activeTab: TabId;
+    modes?: Partial<Record<TabId, string>>;
+  };
+
+  function loadPersistedWorkspaceState(): PersistedWorkspaceState | null {
+    if (typeof localStorage === "undefined") {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(localStorage.getItem(WORKSPACE_STATE_STORAGE_KEY) ?? "null") as Partial<PersistedWorkspaceState> | null;
+      if (
+        !parsed ||
+        (parsed.workspaceMode !== "portfolio" && parsed.workspaceMode !== "research") ||
+        typeof parsed.activeTab !== "string" ||
+        !isWorkspaceTab(parsed.workspaceMode, parsed.activeTab)
+      ) {
+        return null;
+      }
+      return {
+        workspaceMode: parsed.workspaceMode,
+        activeTab: parsed.activeTab,
+        modes: parsed.modes && typeof parsed.modes === "object" ? parsed.modes : {}
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function persistedMode<T extends string>(state: PersistedWorkspaceState | null, tabId: TabId, fallback: T): T {
+    const modeId = state?.modes?.[tabId];
+    return modeId && getTabModes(tabId).some((mode) => mode.id === modeId) ? (modeId as T) : fallback;
+  }
+
+  function persistWorkspaceState(state: PersistedWorkspaceState | null) {
+    if (typeof localStorage === "undefined") {
+      return;
+    }
+    try {
+      if (!state) {
+        localStorage.removeItem(WORKSPACE_STATE_STORAGE_KEY);
+        return;
+      }
+      localStorage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // Reload recovery is best-effort; live navigation state remains authoritative.
+    }
+  }
+
   type ConsoleEntry = {
     label: string;
     message: string;
     tone: "info" | "warning" | "error" | "action";
   };
 
+  const restoredWorkspaceState = loadPersistedWorkspaceState();
+
   let pollHandle: ReturnType<typeof setInterval> | undefined;
   let ivPollHandle: ReturnType<typeof setInterval> | undefined;
-  let workspaceMode: WorkspaceMode | null = null;
+  let workspaceMode: WorkspaceMode | null = restoredWorkspaceState?.workspaceMode ?? null;
   let navigationSearchResetToken = 0;
   let ivRequestedSymbol = "";
   let ivPollingActive = false;
-  let equityResearchMode: EquityResearchMode = "overview";
-  let strategyLabMode: StrategyLabMode = "composer";
-  let cryptoMode: CryptoMode = "overview";
-  let fundamentalsMode: FundamentalsMode = "overview";
-  let commoditiesMode: CommodityMode = "overview";
-  let maritimeMode: MaritimeMode = "live_map";
-  let optionsMode: OptionsMode = "overview";
-  let riskMode: RiskMode = "overview";
+  let equityResearchMode: EquityResearchMode = persistedMode(restoredWorkspaceState, "equity_research", "overview");
+  let strategyLabMode: StrategyLabMode = persistedMode(restoredWorkspaceState, "strategy_lab", "composer");
+  let cryptoMode: CryptoMode = persistedMode(restoredWorkspaceState, "crypto", "overview");
+  let fundamentalsMode: FundamentalsMode = persistedMode(restoredWorkspaceState, "fundamentals", "overview");
+  let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
+  let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
+  let optionsMode: OptionsMode = persistedMode(restoredWorkspaceState, "iv", "overview");
+  let riskMode: RiskMode = persistedMode(restoredWorkspaceState, "risk", "overview");
   let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
@@ -266,7 +321,12 @@
   let activeViewLoading: TabId | null = null;
   let activeViewLoadError: string | null = null;
   let activeViewLoadSequence = 0;
+  let riskHandoffRunning = false;
   const loadedViewComponents: Partial<Record<TabId, LazyViewComponent>> = {};
+
+  if (restoredWorkspaceState) {
+    activeTab.set(restoredWorkspaceState.activeTab || getWorkspaceHomeTab(restoredWorkspaceState.workspaceMode));
+  }
 
   function normalizeAppTabId(tabId: TabId | "research"): TabId {
     return tabId === "research" ? "equity_research" : tabId;
@@ -355,6 +415,25 @@
     fundamentalsTicker: $selectedFundamentalsTicker,
   });
   $: setRiskWorkspaceMode(riskMode);
+  $: persistWorkspaceState(
+    workspaceMode == null
+      ? null
+      : {
+          workspaceMode,
+          activeTab: isWorkspaceTab(workspaceMode, $activeTab) ? $activeTab : getWorkspaceHomeTab(workspaceMode),
+          modes: {
+            equity_research: equityResearchMode,
+            strategy_lab: strategyLabMode,
+            macro: $macroContext.mode,
+            crypto: cryptoMode,
+            fundamentals: fundamentalsMode,
+            commodities: commoditiesMode,
+            maritime: maritimeMode,
+            iv: optionsMode,
+            risk: riskMode
+          }
+        }
+  );
   $: synthesisCopilotSurface = buildSynthesisCopilotSurface({
     activeTab: $activeTab,
     workspaceMode,
@@ -1403,6 +1482,26 @@
     return $sharedEquitySelection?.symbol.trim().toUpperCase() || null;
   }
 
+  function handoffErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  const riskHandoffController = createRiskHandoffController({
+    getActiveTab: () => $activeTab,
+    getStrategyLabResearchBook: () => $strategyLabResearchBook,
+    getResearchResult: () => $researchResult,
+    setActiveTab: (tab) => activeTab.set(tab),
+    computeRisk,
+    onRunningChange: (running) => {
+      riskHandoffRunning = running;
+    },
+    onError: (error) => {
+      const message = `Risk handoff failed: ${handoffErrorMessage(error)}`;
+      console.error("[Risk handoff]", error);
+      lastError.set(message);
+    }
+  });
+
   function researchResultMatchesSingleEquity(symbol: string) {
     const normalizedSymbol = symbol.trim().toUpperCase();
     return (
@@ -1561,33 +1660,7 @@
   }
 
   async function openRiskFromResearch() {
-    if ($activeTab === "strategy_lab" && $strategyLabResearchBook) {
-      const book = $strategyLabResearchBook;
-      activeTab.set("risk");
-      await computeRisk({
-        snapshot: book.snapshot,
-        sourceScope: "research_book",
-        researchBookReturnPoints: book.object.return_points,
-        riskSourceLabel: book.sourceLabel,
-        riskSourceObjectId: book.object.object_id,
-        riskSourceOrigin: String(book.object.provenance.origin ?? "strategy_lab"),
-        alpha: 0.95,
-        lookbackDays: 252,
-        horizonDays: 1,
-        mcHorizonDays: 10,
-        mcSimulationModel: "Gaussian",
-        mcNumSimulations: 2000,
-        betaWindow: 126,
-        benchmarkSymbol: book.benchmarkSymbol || "SPY"
-      });
-      return;
-    }
-    const request = buildRiskRequestFromResearch($researchResult);
-    if (!request) {
-      return;
-    }
-    activeTab.set("risk");
-    await computeRisk(request);
+    await riskHandoffController.open();
   }
 
   async function runResearchFromView(options: Parameters<typeof runResearch>[0]) {
@@ -2397,6 +2470,7 @@
             strategyLoading={$loading.strategyLab}
             compareLoading={$loading.compareScenario}
             savedLoading={$loading.savedResearch}
+            riskHandoffLoading={riskHandoffRunning}
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onLoadOverview={loadResearchOverview}
             onRun={runResearchFromView}
@@ -2427,6 +2501,7 @@
             strategyLoading={$loading.strategyLab}
             compareLoading={$loading.compareScenario}
             savedLoading={$loading.savedResearch}
+            riskHandoffLoading={riskHandoffRunning}
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onLoadOverview={loadResearchOverview}
             onRun={runResearchFromView}

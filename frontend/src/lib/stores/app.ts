@@ -607,6 +607,7 @@ strategyLabHandoffQueue.subscribe(persistStrategyLabHandoffQueue);
 
 const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
+const riskComputeInflight = new Map<string, Promise<RiskResult | null>>();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = [
   "fx-eurusd", "fx-gbpusd", "fx-eurgbp", "fx-eurchf", "fx-usdjpy", "fx-usdchf", "fx-usdcnh",
   "fx-usdcad", "fx-audusd", "fx-nzdusd"
@@ -634,6 +635,20 @@ const MACRO_COMPARISON_SERIES: Record<string, string> = {
 
 function setLoading(key: string, value: boolean) {
   loading.update((current) => ({ ...current, [key]: value }));
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
 }
 
 function resetCopilotCard(domain: CopilotDomain) {
@@ -2679,40 +2694,52 @@ export async function computeRisk(options: RiskComputeOptions) {
   const snapshot = options.snapshot ?? get(portfolioSnapshot) ?? get(researchResult)?.snapshot ?? null;
   if (!snapshot) {
     lastError.set("Load or build a snapshot before computing risk.");
-    return;
+    return null;
   }
   const snapshotWorkspace: "portfolio" | "research" | "research_book" =
     options.sourceScope ?? (snapshot === get(researchResult)?.snapshot ? "research" : "portfolio");
-  setLoading("risk", true);
-  try {
-    riskResult.set(
-      await postJson<RiskResult>("/risk/compute", {
-        snapshot,
-        source_scope: snapshotWorkspace,
-        source_label: options.riskSourceLabel ?? null,
-        source_object_id: options.riskSourceObjectId ?? null,
-        source_origin: options.riskSourceOrigin ?? null,
-        research_book_return_points: options.researchBookReturnPoints ?? [],
-        alpha: options.alpha,
-        lookback_days: options.lookbackDays,
-        horizon_days: options.horizonDays,
-        mc_horizon_days: options.mcHorizonDays,
-        mc_simulation_model: options.mcSimulationModel,
-        mc_num_simulations: options.mcNumSimulations,
-        beta_window: options.betaWindow,
-        benchmark_symbol: options.benchmarkSymbol,
-        include_monte_carlo: options.includeMonteCarlo ?? true
-      })
-    );
-    riskSnapshotBasis.set(snapshot);
-    riskWorkspaceBasis.set(snapshotWorkspace);
-    resetCopilotCard("risk");
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("risk", false);
+  const payload = {
+    snapshot,
+    source_scope: snapshotWorkspace,
+    source_label: options.riskSourceLabel ?? null,
+    source_object_id: options.riskSourceObjectId ?? null,
+    source_origin: options.riskSourceOrigin ?? null,
+    research_book_return_points: options.researchBookReturnPoints ?? [],
+    alpha: options.alpha,
+    lookback_days: options.lookbackDays,
+    horizon_days: options.horizonDays,
+    mc_horizon_days: options.mcHorizonDays,
+    mc_simulation_model: options.mcSimulationModel,
+    mc_num_simulations: options.mcNumSimulations,
+    beta_window: options.betaWindow,
+    benchmark_symbol: options.benchmarkSymbol,
+    include_monte_carlo: options.includeMonteCarlo ?? true
+  };
+  const requestKey = stableJson(payload);
+  const existingRequest = riskComputeInflight.get(requestKey);
+  if (existingRequest) {
+    return existingRequest;
   }
+  const requestPromise = (async () => {
+    setLoading("risk", true);
+    try {
+      const result = await postJson<RiskResult>("/risk/compute", payload);
+      riskResult.set(result);
+      riskSnapshotBasis.set(snapshot);
+      riskWorkspaceBasis.set(snapshotWorkspace);
+      resetCopilotCard("risk");
+      lastError.set("");
+      return result;
+    } catch (error) {
+      setError(error);
+      return null;
+    } finally {
+      setLoading("risk", false);
+      riskComputeInflight.delete(requestKey);
+    }
+  })();
+  riskComputeInflight.set(requestKey, requestPromise);
+  return requestPromise;
 }
 
 function getCopilotSessionId() {
