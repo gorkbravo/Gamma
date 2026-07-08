@@ -304,6 +304,10 @@
     return parts.join(" / ");
   }
 
+  function cardlessStatusLabel(result: CopilotResearchCardResult) {
+    return result.status === "ready" ? "No renderable card" : result.status.replaceAll("_", " ");
+  }
+
   function sessionStatusLabel(session: CopilotSessionSummary) {
     return session.archived_at ? "archived" : session.active_domain ?? "mixed";
   }
@@ -454,7 +458,12 @@
                   on:click={() => option.domain != null && onToggleScope(option.domain)}
                 >
                   <span class="checkbox" aria-hidden="true"></span>
-                  <span class="context-option-label">{option.label}</span>
+                  <span class="context-option-copy">
+                    <span class="context-option-label">{option.label}</span>
+                    {#if !option.supported && option.disabledReason}
+                      <span class="context-option-reason">{option.disabledReason}</span>
+                    {/if}
+                  </span>
                   {#if option.warningLabel}
                     <span class="dot warn" title={option.warningLabel}></span>
                   {:else if option.freshnessLabel}
@@ -518,10 +527,19 @@
             <div class="msg assistant">
               <div class="role-tag">GAMMA</div>
               <div class="assistant-body">
-                {#if turn.result.message}
+                {#if turn.result.message && turn.result.card}
                   <p class="assistant-text {turn.result.status}">
                     {messageText(turn, index === chatTurns.length - 1)}{#if typewriterTyping && index === chatTurns.length - 1 && turn.id === typewriterId}<span class="caret-blink">▍</span>{/if}
                   </p>
+                {/if}
+                {#if !turn.result.card}
+                  <div class="result-state {turn.result.status}">
+                    <div class="result-state-head">
+                      <span>{cardlessStatusLabel(turn.result)}</span>
+                      <small>{providerLabel(turn.result)}</small>
+                    </div>
+                    <p>{turn.result.message ?? "Copilot returned no renderable card."}</p>
+                  </div>
                 {/if}
                 {#if turn.result.card}
                   <div class="research-card">
@@ -983,8 +1001,22 @@
     color: var(--text-0);
   }
 
-  .context-option-label {
+  .context-option-copy {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
     flex: 1;
+  }
+
+  .context-option-label {
+    min-width: 0;
+  }
+
+  .context-option-reason {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-snug);
+    white-space: normal;
   }
 
   .dot {
@@ -1152,6 +1184,49 @@
   }
 
   .assistant-text.error {
+    color: var(--negative);
+  }
+
+  .result-state {
+    display: grid;
+    gap: var(--space-3);
+    border: 1px solid var(--panel-border);
+    border-left: 2px solid var(--panel-strong);
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .result-state.error {
+    border-left-color: var(--negative);
+  }
+
+  .result-state.unavailable {
+    border-left-color: var(--warning);
+  }
+
+  .result-state-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-5);
+  }
+
+  .result-state-head span,
+  .result-state-head small {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: var(--text-2xs);
+  }
+
+  .result-state p {
+    margin: 0;
+    color: var(--text-1);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    overflow-wrap: anywhere;
+  }
+
+  .result-state.error p {
     color: var(--negative);
   }
 

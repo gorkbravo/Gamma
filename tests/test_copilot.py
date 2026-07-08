@@ -3998,6 +3998,75 @@ def test_openai_provider_uses_request_reasoning_effort_override():
     assert provider.payloads[0]["reasoning"] == {"effort": "high"}
 
 
+def test_openai_provider_retries_once_when_structured_card_is_missing():
+    class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.payloads: list[dict] = []
+
+        def _post_json(self, payload):
+            self.payloads.append(payload)
+            if len(self.payloads) == 1:
+                return {
+                    "id": "resp_missing_card",
+                    "model": "gpt-test",
+                    "output": [{"type": "message", "content": []}],
+                }
+            return {
+                "id": "resp_retry_card",
+                "model": "gpt-test",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "title": "Retry Test",
+                                        "hypothesis": "H",
+                                        "rationale": "R",
+                                        "required_data": [],
+                                        "proposed_test": "T",
+                                        "confounders": [],
+                                        "next_steps": [],
+                                        "caveats": [],
+                                        "source_backed_claims": [],
+                                        "inferred_claims": [],
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    provider = CaptureOpenAIProvider()
+
+    result = provider.generate_research_card(
+        request=CopilotResearchCardRequest(domain="macro"),
+        context=CopilotContextBundle(domain="macro", current_tab="macro", summary_data={}),
+        tool_specs=[],
+        execute_tool=lambda *_args: None,
+    )
+
+    assert result.status == "ready"
+    assert result.card is not None
+    assert result.card.title == "Retry Test"
+    assert result.response_id == "resp_retry_card"
+    assert len(provider.payloads) == 2
+    assert "tools" not in provider.payloads[1]
+    assert "tool_choice" not in provider.payloads[1]
+    assert provider.payloads[1]["prompt_cache_key"].endswith(":structured-retry")
+    retry_text = provider.payloads[1]["input"][-1]["content"][0]["text"]
+    assert "OpenAI returned no structured research card." in retry_text
+
+
 def test_openai_provider_omits_reasoning_items_when_response_storage_is_disabled():
     class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
         def __init__(self):

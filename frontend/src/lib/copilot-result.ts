@@ -124,7 +124,11 @@ export function normalizeCopilotResearchCardResult(
   const card = normalizeCard(row.card);
   const message =
     asOptionalString(row.message) ??
-    (card == null ? (status === "ready" ? "Copilot returned no renderable card." : "Copilot returned no renderable message.") : null);
+    (card == null
+      ? status === "ready"
+        ? "Copilot returned no renderable card."
+        : "Copilot failed before returning a renderable card."
+      : null);
 
   return {
     domain,

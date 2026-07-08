@@ -74,6 +74,24 @@
     return result.model ? `${result.provider} · ${result.model}` : result.provider ?? null;
   }
 
+  function resultMetaParts(result: CopilotResearchCardResult) {
+    const parts: string[] = [];
+    const provider = providerLabelFor(result);
+    if (provider) parts.push(provider);
+    if (result.sources.length) parts.push(`Sources (${result.sources.length})`);
+    if (result.tool_traces.length) parts.push(`Tools (${result.tool_traces.length})`);
+    if (result.warnings.length) parts.push(`Warnings (${result.warnings.length})`);
+    return parts;
+  }
+
+  function hasGroundingMeta(result: CopilotResearchCardResult) {
+    return result.sources.length > 0 || result.tool_traces.length > 0 || result.warnings.length > 0;
+  }
+
+  function cardlessStatusLabel(result: CopilotResearchCardResult) {
+    return result.status === "ready" ? "No renderable card" : result.status.replaceAll("_", " ");
+  }
+
   function cardLabelFor(entry: CopilotThreadEntry) {
     return entry.result.domain === "synthesis" ? "Grounded Research" : "Research Card";
   }
@@ -151,9 +169,57 @@
               </div>
             {/if}
 
-            {#if entry.result.message}
+            {#if entry.result.message || !entry.result.card}
               <div class="bubble assistant-bubble status-bubble {entry.result.status}">
-                <p>{entry.result.message}</p>
+                <div class="bubble-head">
+                  <span class="section-label">{cardlessStatusLabel(entry.result)}</span>
+                  {#if providerLabelFor(entry.result)}
+                    <small title={providerLabelFor(entry.result)}>{providerLabelFor(entry.result)}</small>
+                  {/if}
+                </div>
+                <p>{entry.result.message ?? "Copilot returned no renderable card."}</p>
+                {#if !entry.result.card && hasGroundingMeta(entry.result)}
+                  <details class="meta-details" class:warning={entry.result.warnings?.length}>
+                    <summary>
+                      {#each resultMetaParts(entry.result) as part}<span>{part}</span>{/each}
+                    </summary>
+                    <div class="meta-body">
+                      {#if entry.result.sources?.length}
+                        <div class="meta-group">
+                          <span class="inline-label">Sources</span>
+                          {#each entry.result.sources as source}
+                            <div class="meta-row">
+                              <strong>{source.source_id}</strong>
+                              <small>{source.label} / {source.provider}</small>
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                      {#if entry.result.tool_traces?.length}
+                        <div class="meta-group">
+                          <span class="inline-label">Tools used</span>
+                          {#each entry.result.tool_traces as trace}
+                            <div class="meta-row">
+                              <strong>{trace.tool_name}</strong>
+                              <small>{trace.summary}</small>
+                              {#if trace.source_ids.length}
+                                <small>{trace.source_ids.join(" / ")}</small>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                      {#if entry.result.warnings?.length}
+                        <div class="meta-group">
+                          <span class="inline-label">Warnings</span>
+                          {#each entry.result.warnings as warning}
+                            <small>{warning}</small>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </details>
+                {/if}
               </div>
             {/if}
 
@@ -302,7 +368,10 @@
               disabled={!option.supported || option.domain == null}
               on:click={() => option.domain != null && onToggleScope(option.domain)}
             >
-              {option.label}
+              <span>{option.label}</span>
+              {#if !option.supported && option.disabledReason}
+                <small>{option.disabledReason}</small>
+              {/if}
             </button>
           {/each}
         </div>
@@ -453,6 +522,10 @@
   .status-bubble p {
     color: var(--text-2);
     font-size: var(--text-base);
+  }
+
+  .status-bubble.error p {
+    color: var(--negative);
   }
 
   .status-bubble.error {
@@ -779,6 +852,8 @@
   }
 
   .scope-chip {
+    display: grid;
+    gap: var(--space-1);
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     color: var(--text-2);
@@ -794,6 +869,14 @@
 
   .scope-chip.unavailable {
     opacity: 0.48;
+  }
+
+  .scope-chip small {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-snug);
+    text-align: left;
+    white-space: normal;
   }
 
   .scope-empty {

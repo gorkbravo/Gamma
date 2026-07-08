@@ -479,7 +479,7 @@ def _build_copilot_provider(*, allow_mock: bool = True):
     }
     return OpenAIResponsesCopilotProvider(
         api_key=api_key,
-        model=(os.getenv("GAMMA_COPILOT_MODEL", "gpt-5.4") or "gpt-5.4").strip(),
+        model=(os.getenv("GAMMA_COPILOT_MODEL", "gpt-5.5") or "gpt-5.5").strip(),
         reasoning_effort=(os.getenv("GAMMA_COPILOT_REASONING_EFFORT", "medium") or "medium").strip(),
         api_url=(
             os.getenv("GAMMA_COPILOT_API_URL", "https://api.openai.com/v1/responses")

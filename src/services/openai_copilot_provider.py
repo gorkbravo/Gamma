@@ -61,6 +61,10 @@ RESEARCH_CARD_SCHEMA: dict[str, Any] = {
 }
 
 SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
+STRUCTURED_CARD_PARSE_ERRORS = {
+    "OpenAI returned no structured research card.",
+    "OpenAI returned a non-JSON research card payload.",
+}
 
 
 @dataclass
@@ -98,33 +102,16 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
 
         for turn in range(5):
-            payload: dict[str, Any] = {
-                "model": self.model,
-                "instructions": self._build_instructions(context),
-                "input": input_items,
-                "tools": tool_specs,
-                "tool_choice": "auto",
-                "parallel_tool_calls": False,
-                "max_output_tokens": 1400,
-                "reasoning": {"effort": reasoning_effort},
-                "text": {
-                    "verbosity": "low",
-                    "format": {
-                        "type": "json_schema",
-                        "name": "gamma_research_card",
-                        "strict": True,
-                        "schema": RESEARCH_CARD_SCHEMA,
-                    },
-                },
-                "store": self.store_responses,
-                "safety_identifier": self._safety_identifier(request),
-                "prompt_cache_key": f"gamma-copilot:{request.domain}:research-card:v2",
-                "metadata": {
-                    "app": "gamma",
-                    "domain": request.domain,
-                    "current_tab": context.current_tab,
-                },
-            }
+            payload = self._build_response_payload(
+                request=request,
+                context=context,
+                input_items=input_items,
+                reasoning_effort=reasoning_effort,
+                tool_specs=tool_specs,
+                tool_choice="auto",
+                max_output_tokens=1400,
+                prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2",
+            )
             if turn == 0 and request.previous_response_id and self.store_responses:
                 payload["previous_response_id"] = request.previous_response_id
 
@@ -180,6 +167,19 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             try:
                 card = self._parse_research_card(response)
             except RuntimeError as exc:
+                if self._is_structured_card_parse_error(str(exc)):
+                    retry_result = self._retry_structured_research_card(
+                        request=request,
+                        context=context,
+                        input_items=input_items,
+                        reasoning_effort=reasoning_effort,
+                        parse_error=str(exc),
+                        tool_sources=tool_sources,
+                        tool_traces=tool_traces,
+                        warnings=warnings,
+                    )
+                    if retry_result is not None:
+                        return retry_result
                 return CopilotResearchCardResult(
                     domain=request.domain,
                     current_tab=context.current_tab,
@@ -217,6 +217,154 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             tool_traces=tool_traces,
             warnings=warnings,
         )
+
+    def _build_response_payload(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        input_items: list[dict[str, Any]],
+        reasoning_effort: str,
+        tool_specs: list[dict[str, object]],
+        tool_choice: str | None,
+        max_output_tokens: int,
+        prompt_cache_key: str,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "instructions": self._build_instructions(context),
+            "input": input_items,
+            "parallel_tool_calls": False,
+            "max_output_tokens": max_output_tokens,
+            "reasoning": {"effort": reasoning_effort},
+            "text": {
+                "verbosity": "low",
+                "format": {
+                    "type": "json_schema",
+                    "name": "gamma_research_card",
+                    "strict": True,
+                    "schema": RESEARCH_CARD_SCHEMA,
+                },
+            },
+            "store": self.store_responses,
+            "safety_identifier": self._safety_identifier(request),
+            "prompt_cache_key": prompt_cache_key,
+            "metadata": {
+                "app": "gamma",
+                "domain": request.domain,
+                "current_tab": context.current_tab,
+            },
+        }
+        if tool_specs:
+            payload["tools"] = tool_specs
+            payload["tool_choice"] = tool_choice or "auto"
+        return payload
+
+    def _retry_structured_research_card(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        input_items: list[dict[str, Any]],
+        reasoning_effort: str,
+        parse_error: str,
+        tool_sources: dict[str, CopilotSourceRef],
+        tool_traces: list[CopilotToolTrace],
+        warnings: list[str],
+    ) -> CopilotResearchCardResult | None:
+        retry_payload = self._build_response_payload(
+            request=request,
+            context=context,
+            input_items=[*input_items, self._build_structured_retry_message(parse_error)],
+            reasoning_effort=reasoning_effort,
+            tool_specs=[],
+            tool_choice=None,
+            max_output_tokens=1200,
+            prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2:structured-retry",
+        )
+        try:
+            retry_response = self._post_json(retry_payload)
+        except RuntimeError as exc:
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="error",
+                provider=self.provider_name,
+                model=self.model,
+                message=f"OpenAI structured-output retry failed: {exc}",
+                sources=list(tool_sources.values()),
+                tool_traces=tool_traces,
+                warnings=warnings,
+            )
+
+        refusal = self._extract_refusal(retry_response)
+        if refusal:
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="error",
+                provider=self.provider_name,
+                model=str(retry_response.get("model") or self.model),
+                response_id=str(retry_response.get("id") or ""),
+                message=refusal,
+                sources=list(tool_sources.values()),
+                tool_traces=tool_traces,
+                warnings=warnings,
+            )
+
+        try:
+            card = self._parse_research_card(retry_response)
+        except RuntimeError as exc:
+            if self._is_structured_card_parse_error(str(exc)):
+                message = f"{str(exc).rstrip('.')} after one structured-output retry."
+            else:
+                message = str(exc)
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="error",
+                provider=self.provider_name,
+                model=str(retry_response.get("model") or self.model),
+                response_id=str(retry_response.get("id") or ""),
+                message=message,
+                sources=list(tool_sources.values()),
+                tool_traces=tool_traces,
+                warnings=warnings,
+            )
+
+        return CopilotResearchCardResult(
+            domain=request.domain,
+            current_tab=context.current_tab,
+            status="ready",
+            provider=self.provider_name,
+            model=str(retry_response.get("model") or self.model),
+            response_id=str(retry_response.get("id") or ""),
+            card=card,
+            sources=list(tool_sources.values()),
+            tool_traces=tool_traces,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _is_structured_card_parse_error(message: str) -> bool:
+        return message in STRUCTURED_CARD_PARSE_ERRORS
+
+    @staticmethod
+    def _build_structured_retry_message(parse_error: str) -> dict[str, Any]:
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": (
+                        "The previous response could not be rendered by Gamma because "
+                        f"{parse_error} Return exactly one schema-valid JSON research card. "
+                        "Use only the supplied Gamma context, source ids, tool outputs, and warnings. "
+                        "Do not include prose outside the JSON object."
+                    ),
+                }
+            ],
+        }
 
     def _build_user_message(
         self,
