@@ -194,6 +194,7 @@
     ResearchResult,
     RiskResult,
     StrategyLabHandoffEnvelope,
+    StrategyLabHandoffQueueItem,
     SystemStatus,
     TabId,
     WorkspaceMode
@@ -291,6 +292,7 @@
     strategy: $strategyLabResult,
     strategyComposition: $strategyLabComposition,
     compareResult: $researchCompareResult,
+    strategyLabHandoffs: $strategyLabHandoffQueue,
     macro: $macroContext,
     macroSnapshot: $macroSnapshot,
     commodities: $commoditiesWorkspace,
@@ -340,6 +342,7 @@
     strategy: $strategyLabResult,
     strategyComposition: $strategyLabComposition,
     compareResult: $researchCompareResult,
+    strategyLabHandoffs: $strategyLabHandoffQueue,
     risk: $riskResult,
     riskWorkspace: $riskWorkspaceBasis,
     ivSurface: $ivSurface,
@@ -637,6 +640,7 @@
     strategy,
     strategyComposition,
     compareResult,
+    strategyLabHandoffs,
     macro,
     macroSnapshot,
     commodities,
@@ -658,6 +662,7 @@
     strategy: typeof $strategyLabResult;
     strategyComposition: typeof $strategyLabComposition;
     compareResult: typeof $researchCompareResult;
+    strategyLabHandoffs: StrategyLabHandoffQueueItem[];
     macro: MacroContextState;
     macroSnapshot: MacroSnapshot | null;
     commodities: CommodityWorkspaceResponse | null;
@@ -737,14 +742,31 @@
       );
     }
 
-    if (strategy || strategyComposition || compareResult) {
+    const currentStrategyLabHandoffs = strategyLabHandoffs.filter((item) => !item.stale);
+    if (strategy || strategyComposition || compareResult || currentStrategyLabHandoffs.length) {
+      const strategyWarnings =
+        (strategyComposition?.warnings.length ?? 0) +
+        (strategy?.warnings.length ?? 0) +
+        (compareResult?.warnings.length ?? 0) +
+        currentStrategyLabHandoffs.reduce(
+          (count, item) => count + item.handoff.warnings.length + (item.resolved?.warnings.length ?? 0) + (item.error ? 1 : 0),
+          0
+        );
       pushOption(
         "strategy_lab",
-        strategyComposition?.name ?? strategy?.name ?? (compareResult ? `${compareResult.left.label} vs ${compareResult.right.label}` : "Strategy Lab"),
+        strategyComposition?.name ??
+          strategy?.name ??
+          (compareResult
+            ? `${compareResult.left.label} vs ${compareResult.right.label}`
+            : currentStrategyLabHandoffs.length
+              ? `${currentStrategyLabHandoffs.length} Strategy Lab handoff${currentStrategyLabHandoffs.length === 1 ? "" : "s"}`
+              : "Strategy Lab"),
         formatShortTimestamp(strategyComposition?.retrieved_at ?? strategy?.retrieved_at ?? null)
           ? `Result ${formatShortTimestamp(strategyComposition?.retrieved_at ?? strategy?.retrieved_at ?? null)}`
+          : currentStrategyLabHandoffs.length
+            ? `${currentStrategyLabHandoffs.filter((item) => item.status === "resolved").length} resolved / ${currentStrategyLabHandoffs.filter((item) => item.status === "pending" || item.status === "resolving").length} pending`
           : null,
-        formatWarningLabel((strategyComposition?.warnings.length ?? 0) + (strategy?.warnings.length ?? 0) + (compareResult?.warnings.length ?? 0))
+        formatWarningLabel(strategyWarnings)
       );
     }
 
@@ -879,6 +901,7 @@
     strategy,
     strategyComposition,
     compareResult,
+    strategyLabHandoffs,
     risk,
     riskWorkspace,
     ivSurface,
@@ -901,6 +924,7 @@
     strategy: typeof $strategyLabResult;
     strategyComposition: typeof $strategyLabComposition;
     compareResult: typeof $researchCompareResult;
+    strategyLabHandoffs: StrategyLabHandoffQueueItem[];
     risk: RiskResult | null;
     riskWorkspace: "portfolio" | "research" | "research_book" | null;
     ivSurface: IvSurface | null;
@@ -953,20 +977,37 @@
     }
 
     if (tab === "strategy_lab") {
+      const currentHandoffs = strategyLabHandoffs.filter((item) => !item.stale);
+      const hasStrategyContext =
+        strategy != null || strategyComposition != null || compareResult != null || currentHandoffs.length > 0;
+      const resolvedHandoffs = currentHandoffs.filter((item) => item.status === "resolved").length;
+      const pendingHandoffs = currentHandoffs.filter((item) => item.status === "pending" || item.status === "resolving").length;
       const strategyContextLabel =
         strategyComposition?.name ??
         strategy?.name ??
-        (compareResult ? `${compareResult.left.label} vs ${compareResult.right.label}` : "No strategy context");
+        (compareResult
+          ? `${compareResult.left.label} vs ${compareResult.right.label}`
+          : currentHandoffs.length
+            ? `${currentHandoffs.length} handoff${currentHandoffs.length === 1 ? "" : "s"} (${resolvedHandoffs} resolved / ${pendingHandoffs} pending)`
+            : "No strategy context");
       return {
-        supported: strategy != null || strategyComposition != null || compareResult != null,
+        supported: hasStrategyContext,
         domain: "strategy_lab",
-        triggerLabel: strategyComposition ? "Composition" : strategy ? "Strategy run" : compareResult ? "Comparison" : "Run strategy",
+        triggerLabel: strategyComposition
+          ? "Composition"
+          : strategy
+            ? "Strategy run"
+            : compareResult
+              ? "Comparison"
+              : currentHandoffs.length
+                ? "Handoff context"
+                : "Run strategy",
         contextLabel: strategyContextLabel,
         domainLabel: "Strategy Lab",
         guidance:
-          strategy != null || strategyComposition != null || compareResult != null
+          hasStrategyContext
             ? "Grounded in imported returns, composed research objects, and comparison outputs. Gamma remains read-only and does not execute trades."
-            : "Run a Strategy Lab import, composition, or comparison before generating a research card.",
+            : "Run a Strategy Lab import, composition, comparison, or queue a current handoff before generating a research card.",
         placeholder:
           "Pressure-test the active strategy, identify robustness gaps, or frame the next portfolio experiment.",
         thread: threads.strategy_lab,

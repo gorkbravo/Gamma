@@ -27,7 +27,7 @@ Current snapshot:
 | Backend handoff resolver endpoint | Verified | `POST /research/strategy-lab/resolve-handoff` resolves Prediction Markets contracts, Equity Research tickers, Commodities instruments, and Macro lens context into Strategy Lab-ready objects. |
 | Composer draft ingestion from handoff | Verified | Accepted resolved return-leg handoffs become editable composer rows; accepted Macro lenses attach as read-only context and pass through composition results. |
 | Tab-by-tab capability matrix | In progress | Prediction Markets, Equity Research, Commodities, Macro, and IV/Options are wired; remaining tabs still need concrete handoff implementations. |
-| Copilot context builder for Strategy Lab handoffs | Implemented | Copilot context now includes current pending, resolved, unsupported, errored, and stale Strategy Lab handoff state; backend Copilot exposes `strategy_lab.handoff.*` sources and a read-only handoff drilldown tool. Live browser/model synthesis retest remains open. |
+| Copilot context builder for Strategy Lab handoffs | Verified | Copilot context now includes current pending, resolved, unsupported, errored, and stale Strategy Lab handoff state; backend Copilot exposes `strategy_lab.handoff.*` sources and read-only handoff drilldowns. Browser retest on 2026-07-08 verified pending and resolved handoffs in the live Strategy Lab queue and Copilot source refs/state labels. |
 | Progress tracking and validation checklist | Verified | This document defines the implementation board and now records SLH-001 through SLH-014 validation. |
 
 ## Product Boundary
@@ -291,7 +291,7 @@ Update this board as work lands.
 | SLH-011 | Add Macro lens handoff. | Codex | Verified | Backend/API/frontend tests cover Macro lens resolution and reference-only downgrade behavior; browser flow sent active Macro context with `Lens & Open`, accepted the resolved lens, and composed a portfolio with the lens attached. |
 | SLH-012 | Add shared right-click Strategy handoff menu for instrument rows. | Codex | Implemented | `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`; `npm run test -- src/lib/stores/app.test.ts`; `npm run test -- src/components/CompactContextMenu.test.ts src/views/CommoditiesView.test.ts`; browser verified row menus on Prediction Markets, Equity Research, and Commodities with provider caveats noted below. |
 | SLH-013 | Add IV/Options option-chain row overlay handoff. | Codex | Implemented | `.venv\Scripts\python.exe -m pytest tests\test_research_v2.py tests\test_api.py -q`; `npm run typecheck`; `npm run test -- src/lib/view-models/research.test.ts`; `npm run test -- src/components/CompactContextMenu.test.ts`; browser verified live option-chain row menu and Strategy Lab open/warning path, with full accept blocked by local provider/session split noted below. |
-| SLH-014 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | Codex | Implemented | `.venv\Scripts\python.exe -m pytest tests\test_copilot.py -q`; `npm run typecheck`; `npm run test -- src/lib/stores/app.test.ts`; `npm run test -- src/lib/view-models/research.test.ts`. |
+| SLH-014 | Add Copilot context builder coverage for pending and resolved Strategy Lab handoffs. | Codex | Verified | `.venv\Scripts\python.exe -m pytest tests\test_copilot.py -q`; `npm run typecheck`; `npm run test -- src/lib/stores/app.test.ts`; `npm run test -- src/lib/view-models/research.test.ts`; browser retest created one pending and one resolved Prediction Markets handoff and confirmed Copilot `strategy_lab.handoff.*` source refs/state labels. |
 
 ## Inspection Workflow
 
@@ -350,6 +350,18 @@ Browser:
 - Confirm no page-level horizontal overflow occurs at desktop and narrow viewport widths; horizontally scrollable dense tables are acceptable.
 
 ## Latest Validation Results
+
+Validated for SLH-014 on 2026-07-08:
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| `.venv\Scripts\python.exe -m pytest tests\test_copilot.py -q` | Passed | 66 tests passed with `GAMMA_SESSION_TOKEN=test-gamma-session`, including Strategy Lab pending/resolved handoff context and `strategy_lab.handoff.*` source refs. |
+| `npm run typecheck` | Passed | Frontend typecheck passed after making `App.svelte` Copilot context availability aware of current Strategy Lab handoffs. |
+| `npm run test -- src/lib/stores/app.test.ts` | Passed | 36 tests passed, including Strategy Lab handoff queue and Copilot context/fingerprint coverage. |
+| `npm run test -- src/lib/view-models/research.test.ts` | Passed | 24 tests passed; handoff envelope builders and Strategy Lab draft conversions remain green. |
+| `npm run build` | Passed | Production frontend build passed. Existing unrelated Svelte warnings remain in `IvView.svelte` and `Surface3D.svelte`. |
+| Browser: Strategy Lab handoff queue | Passed | On a fresh mock backend/frontend pair, opened Prediction Markets, used `Add & Open` to create a resolved handoff, returned to Prediction Markets, used `+ Strategy` to create a pending handoff, and verified Strategy Lab showed `1 resolved / 1 awaiting resolver`. |
+| Browser: Copilot source grounding | Passed with synthesis caveat | The Copilot shelf now enables Strategy Lab as a context when current handoffs exist. Selecting Strategy Lab plus the loaded Prediction Markets context produced a ready mock-provider synthesis card with `strategy_lab.handoffs`, one pending `strategy_lab.handoff.*` source labelled `pending_resolution`, one resolved `strategy_lab.handoff.*` source labelled `resolved_return_leg`, and tool trace source ids citing both. |
 
 Validated for SLH-014 on 2026-06-27:
 
@@ -427,6 +439,7 @@ Validated on 2026-06-02:
 - IV/Options overlays are read-only context. They do not become weighted return legs, executable option orders, strategy signals, broker mutations, or rebalance behavior because the current Options workspace has snapshot contract data but no durable option-contract return stream.
 - Copilot Strategy Lab context now includes a compact handoff-context summary derived from the same frontend queue items shown in the Strategy Lab inbound strip. Pending/resolving items are labeled as unresolved user intent; resolved items carry resolved capability, coverage, provider summary, provenance, warnings, and compact resolved object identities.
 - Backend Copilot exposes Strategy Lab handoffs as read-only context sources: `strategy_lab.handoffs` plus one `strategy_lab.handoff.*` source per queue item. The drilldown tool is `get_strategy_lab_handoff_context`.
+- The shell Copilot surface currently routes through synthesis, so a shelf generation needs at least two selected loaded contexts. For the 2026-07-08 retest, selecting `Strategy Lab` plus `Prediction Markets` produced the verified `strategy_lab.handoff.*` citations. The direct Strategy Lab Copilot route remains covered by backend tests for handoff-only context.
 - Stale earlier-session handoffs remain visible as stale context if present in the queue summary, but they are not treated as current resolved evidence or auto-resolution candidates.
 - Accepted composer rows, lenses, and overlays still leave the inbound queue and continue through existing Strategy Lab composition/import context rather than through the handoff queue context.
 - Copilot does not propose, enqueue, accept, or dismiss Strategy Lab handoffs automatically. SLH-014 only lets Copilot explain and cite user-created handoffs and resolver output.
@@ -445,4 +458,4 @@ Validated on 2026-06-02:
 
 ## Recommended Next Step
 
-Retest a live/browser Copilot synthesis over pending and resolved Strategy Lab handoffs, then continue with either durable option-contract history before promoting IV/Options handoffs from overlays to return-bearing legs, or the next non-Strategy-Lab tab participation item such as Crypto token row handoffs.
+Continue with either durable option-contract history before promoting IV/Options handoffs from overlays to return-bearing legs, or the next non-Strategy-Lab tab participation item such as Crypto token row handoffs. Separately, decide whether the shell Copilot should remain synthesis-only or route single selected contexts directly to their domain-specific Copilot endpoints.
