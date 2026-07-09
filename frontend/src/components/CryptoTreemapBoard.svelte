@@ -104,9 +104,7 @@
     min-height: 26rem;
     aspect-ratio: 16 / 9;
     border: 1px solid var(--divider);
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--surface-0) 84%, transparent), transparent 44%),
-      var(--bg-0);
+    background: var(--bg-0);
     overflow: hidden;
   }
 

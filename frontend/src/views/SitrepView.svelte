@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type Hls from "hls.js";
   import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
   import type {
@@ -44,9 +45,14 @@
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | null = null;
   export let onOpenHandoff: ((handoff: SitrepHandoffRequest) => Promise<unknown> | void) | null = null;
 
-  const bloombergLiveVideoId = "iEpJwprxDdk";
-  const bloombergEmbedUrl = `https://www.youtube.com/embed/${bloombergLiveVideoId}?feature=oembed&autoplay=0&mute=1&playsinline=1&rel=0`;
-  const bloombergWatchUrl = `https://www.youtube.com/watch?v=${bloombergLiveVideoId}`;
+  const bloombergStreamUrl = "https://www.bloomberg.com/media-manifest/streams/phoenix-us.m3u8";
+  const bloombergWatchUrl = "https://www.bloomberg.com/live";
+  const bloombergYouTubeUrl = "https://www.youtube.com/channel/UCIALMKvObZNtJ6AmdCLP7Lg/live";
+
+  type BloombergPlaybackStatus = "loading" | "ready" | "unsupported" | "error";
+  let bloombergVideo: HTMLVideoElement | null = null;
+  let bloombergPlaybackStatus: BloombergPlaybackStatus = "loading";
+  let bloombergPlaybackMessage = "HLS stream initializing";
 
   type TapeRow = {
     id: string;
@@ -179,6 +185,77 @@
     if (tasks.length) {
       void Promise.allSettled(tasks);
     }
+  });
+
+  onMount(() => {
+    let cancelled = false;
+    let hlsPlayer: Hls | null = null;
+    const video = bloombergVideo;
+
+    if (!video) {
+      bloombergPlaybackStatus = "unsupported";
+      bloombergPlaybackMessage = "Video element unavailable";
+      return;
+    }
+
+    const markReady = () => {
+      bloombergPlaybackStatus = "ready";
+      bloombergPlaybackMessage = "Bloomberg TV live";
+    };
+    const markError = () => {
+      bloombergPlaybackStatus = "error";
+      bloombergPlaybackMessage = "Open Bloomberg Live externally";
+    };
+
+    video.addEventListener("loadedmetadata", markReady);
+    video.addEventListener("canplay", markReady);
+    video.addEventListener("error", markError);
+
+    void (async () => {
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = bloombergStreamUrl;
+        video.load();
+        return;
+      }
+
+      try {
+        const { default: Hls } = await import("hls.js");
+        if (cancelled) {
+          return;
+        }
+        if (!Hls.isSupported()) {
+          bloombergPlaybackStatus = "unsupported";
+          bloombergPlaybackMessage = "HLS is not supported in this webview";
+          return;
+        }
+
+        hlsPlayer = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true
+        });
+        hlsPlayer.loadSource(bloombergStreamUrl);
+        hlsPlayer.attachMedia(video);
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, markReady);
+        hlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            markError();
+            hlsPlayer?.destroy();
+            hlsPlayer = null;
+          }
+        });
+      } catch {
+        bloombergPlaybackStatus = "unsupported";
+        bloombergPlaybackMessage = "HLS player unavailable";
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      video.removeEventListener("loadedmetadata", markReady);
+      video.removeEventListener("canplay", markReady);
+      video.removeEventListener("error", markError);
+      hlsPlayer?.destroy();
+    };
   });
 
   function formatNumber(value: number | null | undefined, digits = 2) {
@@ -957,6 +1034,12 @@
   $: newsStatus = news
     ? `${news.source_provider.toUpperCase()} / ${news.items.length} ITEMS / ${news.freshness_label.toUpperCase()}`
     : "NOT LOADED";
+  $: tvStatus =
+    bloombergPlaybackStatus === "ready"
+      ? "BLOOMBERG HLS"
+      : bloombergPlaybackStatus === "loading"
+        ? "LOADING HLS"
+        : "OPEN EXTERNALLY";
   $: providerMode = system?.mock_mode ? "MOCK" : system?.connection.connected ? system.market_data_mode.toUpperCase() : "OFFLINE";
   $: hasLoadedSitrepData = Boolean(overview || indicesOverview || macro || commodities || news || prediction);
   $: sitrepState = loading && !hasLoadedSitrepData ? "LOADING" : warnings.length ? "DEGRADED" : equityRows.length ? "LIVE" : "PARTIAL";
@@ -1063,8 +1146,11 @@
       </div>
 
       <article class="panel tape-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Triage</p><h3>What Changed</h3></div>
+        <div class="table-header">
+          <div class="table-title">
+            <span>What Changed</span>
+            <small>divergences / movers / leaders</small>
+          </div>
         </div>
         <div class="tape-list">
           {#if changedRows.length}
@@ -1093,18 +1179,27 @@
 
     <aside class="support-column">
       <article class="panel media-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Live Media</p><h3>Bloomberg TV</h3></div>
-          <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">YouTube</a>
+        <div class="table-header">
+          <div class="table-title">
+            <span>Bloomberg TV</span>
+            <small>{bloombergPlaybackMessage}</small>
+          </div>
+          <div class="media-links">
+            <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">Bloomberg</a>
+            <a href={bloombergYouTubeUrl} target="_blank" rel="noreferrer">YouTube</a>
+          </div>
         </div>
         <div class="video-shell">
-          <iframe
-            title="Bloomberg Television live stream"
-            src={bloombergEmbedUrl}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            referrerpolicy="strict-origin-when-cross-origin"
-            allowfullscreen
-          ></iframe>
+          <video bind:this={bloombergVideo} title="Bloomberg Television live stream" controls muted playsinline preload="metadata"></video>
+          {#if bloombergPlaybackStatus !== "ready"}
+            <div class="video-state">
+              <strong>{bloombergPlaybackStatus === "loading" ? "LOADING BLOOMBERG TV" : "BLOOMBERG TV PLAYER UNAVAILABLE"}</strong>
+              <span>{bloombergPlaybackMessage}</span>
+              {#if bloombergPlaybackStatus !== "loading"}
+                <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">Open Bloomberg Live</a>
+              {/if}
+            </div>
+          {/if}
         </div>
       </article>
 
@@ -1134,12 +1229,14 @@
       </article>
 
       <article class="panel provider-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Coverage</p><h3>Provider Status</h3></div>
+        <div class="table-header">
+          <div class="table-title">
+            <span>Provider Status</span>
+          </div>
         </div>
         <div class="need-list">
           <div><strong>News</strong><span class:warning={!news || news.items.length === 0}>{newsStatus}</span></div>
-          <div><strong>TV</strong><span class="warning">EMBED ONLY</span></div>
+          <div><strong>TV</strong><span class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>{tvStatus}</span></div>
           <div><strong>Listed Markets</strong><span>{overview?.history_source_label ?? "Research Overview policy"}</span></div>
           <div><strong>FX / Rates</strong><span>Macro / FRED / IBKR</span></div>
         </div>
@@ -1170,7 +1267,10 @@
     padding: var(--space-5);
   }
 
-  .table-panel {
+  .table-panel,
+  .tape-panel,
+  .media-panel,
+  .provider-panel {
     padding: 0;
     overflow: hidden;
     gap: 0;
@@ -1210,6 +1310,26 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .media-links {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    flex-shrink: 0;
+  }
+
+  .media-links a,
+  .video-state a {
+    color: var(--accent);
+    font-size: var(--text-xs);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .media-links a:hover,
+  .video-state a:hover {
+    text-decoration: underline;
   }
 
   .reload-button {
@@ -1286,41 +1406,8 @@
     letter-spacing: 0.04em;
   }
 
-  .title-line {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-4);
-    min-width: 0;
-  }
-
-  .panel-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: var(--space-5);
-    min-width: 0;
-  }
-
-  h3,
   p {
     margin: 0;
-  }
-
-  h3 {
-    font-size: var(--text-md);
-  }
-
-  .eyebrow {
-    margin: 0 0 0.08rem;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
-  }
-
-  .title-line .eyebrow {
-    margin: 0;
-    white-space: nowrap;
   }
 
   .equity-strip {
@@ -1341,6 +1428,12 @@
     align-items: center;
     width: max-content;
     animation: strip-scroll 42s linear infinite;
+  }
+
+  /* Rows are click targets — stop the scroll while the pointer is over them */
+  .equity-strip:hover .strip-track,
+  .equity-strip:focus-within .strip-track {
+    animation-play-state: paused;
   }
 
   .strip-item {
@@ -1450,7 +1543,6 @@
     font-size: var(--text-2xs);
   }
 
-  .panel-head small,
   .tape-row small,
   .need-list span {
     color: var(--text-2);
@@ -1460,7 +1552,6 @@
   .tape-list {
     display: grid;
     gap: 0;
-    border-top: 1px solid var(--divider);
   }
 
   .tape-row {
@@ -1474,10 +1565,14 @@
     grid-template-columns: 5.8rem minmax(0, 0.9fr) minmax(0, 1.7fr) minmax(5.5rem, 0.45fr);
     gap: var(--space-4);
     align-items: baseline;
-    padding: var(--space-4) 0;
+    padding: var(--space-3) var(--space-5);
     border: 0;
     border-bottom: 1px solid var(--divider);
     min-width: 0;
+  }
+
+  .tape-row:last-child {
+    border-bottom: 0;
   }
 
   .tape-row.clickable {
@@ -1514,18 +1609,45 @@
     position: relative;
     width: 100%;
     aspect-ratio: 16 / 9;
-    border: 1px solid var(--divider);
     background: var(--bg-0);
     overflow: hidden;
   }
 
-  .video-shell iframe {
+  .video-shell video {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     border: 0;
     background: var(--bg-0);
+  }
+
+  .video-state {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: var(--space-2);
+    padding: var(--space-5);
+    background: var(--bg-0);
+    color: var(--text-2);
+    text-align: center;
+    pointer-events: none;
+  }
+
+  .video-state strong {
+    color: var(--text-0);
+    font-size: var(--text-xs);
+    letter-spacing: 0.08em;
+  }
+
+  .video-state span {
+    font-size: var(--text-xs);
+  }
+
+  .video-state a {
+    pointer-events: auto;
   }
 
   .news-wrap {
@@ -1591,27 +1713,31 @@
   .need-list {
     display: grid;
     gap: 0;
-    border-top: 1px solid var(--divider);
   }
 
   .need-list div {
     display: grid;
     grid-template-columns: 7.5rem minmax(0, 1fr);
     gap: var(--space-4);
-    padding: var(--space-4) 0;
+    padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
+  }
+
+  .need-list div:last-child {
+    border-bottom: 0;
   }
 
   .warning-list {
     margin: 0;
-    padding-left: var(--space-6);
+    padding: var(--space-3) var(--space-5) var(--space-4) calc(var(--space-5) + var(--space-6));
+    border-top: 1px solid var(--divider);
     color: var(--text-2);
     line-height: 1.4;
   }
 
   .empty-state {
     margin: 0;
-    padding: var(--space-5) 0;
+    padding: var(--space-4) var(--space-5);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1650,15 +1776,10 @@
   }
 
   @media (max-width: 820px) {
-    .panel-head,
     .support-column {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       justify-content: stretch;
-    }
-
-    .title-line {
-      flex-wrap: wrap;
     }
 
     .status-line {

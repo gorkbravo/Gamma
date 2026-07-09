@@ -260,6 +260,7 @@
   let compareWarning = "";
   let composerSelection: Record<string, boolean> = {};
   let composerWeights: Record<string, number> = {};
+  let expandedDraftLegs: Record<string, boolean> = {};
   let portfolioName = "Strategy Lab Portfolio";
   let portfolioBenchmarkSymbol = "SPY";
   let portfolioLookbackDays = 756;
@@ -504,6 +505,10 @@
 
   function addPortfolioDraftLeg() {
     portfolioDraftLegs = [...portfolioDraftLegs, defaultStrategyPortfolioDraftLeg(portfolioDraftLegs.length + 1)];
+  }
+
+  function toggleDraftLegDetail(id: string) {
+    expandedDraftLegs = { ...expandedDraftLegs, [id]: !expandedDraftLegs[id] };
   }
 
   function removePortfolioDraftLeg(id: string) {
@@ -2259,11 +2264,8 @@
       </div>
 
       <article class="panel table-panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Constituents</p>
-            <h3>Constituent Detail</h3>
-          </div>
+        <div class="panel-header tight-head">
+          <h3>Constituent Detail</h3>
           <small>{constituentRows.length} rows</small>
         </div>
 
@@ -2560,13 +2562,13 @@
           {#if strategyLabHandoffs.length}
             <article class="panel handoff-panel">
               <div class="handoff-strip">
-                <div class="title-block">
-                  <p class="eyebrow">Inbound Handoffs</p>
-                  <h3>{currentStrategyHandoffs.length} pending object{currentStrategyHandoffs.length === 1 ? "" : "s"}</h3>
-                  <p class="muted">
+                <div class="handoff-summary">
+                  <span class="handoff-label">Inbound Handoffs</span>
+                  <strong>{currentStrategyHandoffs.length} pending</strong>
+                  <small>
                     {currentStrategyHandoffs.filter((item) => item.status === "resolved").length} resolved /
-                    {currentStrategyHandoffs.filter((item) => item.status === "pending" || item.status === "error").length} awaiting resolver{staleStrategyHandoffs.length ? ` / ${staleStrategyHandoffs.length} from earlier sessions` : ""}
-                  </p>
+                    {currentStrategyHandoffs.filter((item) => item.status === "pending" || item.status === "error").length} awaiting{staleStrategyHandoffs.length ? ` / ${staleStrategyHandoffs.length} stale` : ""}
+                  </small>
                 </div>
                 <div class="builder-actions compact">
                   <button type="button" class="ghost-button" on:click={() => showHandoffReview = !showHandoffReview}>
@@ -2648,11 +2650,8 @@
           {/if}
 
           <article class="panel table-panel">
-            <div class="panel-header top-line">
-              <div class="title-block">
-                <p class="eyebrow">Strategy Composer</p>
-                <h2>Mixed Portfolio Engine</h2>
-              </div>
+            <div class="panel-header tight-head">
+              <h3>Portfolio Composer</h3>
               <div class="builder-actions compact">
                 <button type="button" class="ghost-button" on:click={addPortfolioDraftLeg}>Add Leg</button>
                 <button type="button" class="ghost-button" on:click={validatePortfolioDraft} disabled={bookValidationLoading || strategyLoading || !portfolioDraftBuild.legs.length}>
@@ -2699,79 +2698,102 @@
             {/if}
 
             <div class="table-wrap compact-table">
-              <table>
+              <table class="composer-table">
                 <thead>
                   <tr>
                     <th>Label</th>
                     <th>Class</th>
                     <th>Source</th>
-                    <th>Identifier / Object</th>
+                    <th>Identifier</th>
                     <th class="num-cell">Weight</th>
-                    <th>History</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {#each portfolioDraftLegs as leg}
+                  {#each portfolioDraftLegs as leg (leg.id)}
                     <tr>
                       <td><input class="compact-input wide" bind:value={leg.label} placeholder="Leg label" /></td>
                       <td>
-                        <select class="compact-input" bind:value={leg.assetClass}>
+                        <select class="compact-input class-select" bind:value={leg.assetClass}>
                           {#each portfolioAssetClasses as assetClass}
                             <option value={assetClass.id}>{assetClass.label}</option>
                           {/each}
                         </select>
                       </td>
                       <td>
-                        <div class="source-cell">
+                        <div class="source-cell" title={portfolioDraftSourceDetail(leg)}>
                           <span class:warning={portfolioDraftSourceLabel(leg) === "Unset"}>{portfolioDraftSourceLabel(leg)}</span>
                           <small>{portfolioDraftSourceDetail(leg)}</small>
                         </div>
                       </td>
                       <td>
-                        <div class="stack tight">
-                          <input
-                            class="compact-input wide"
-                            bind:value={leg.identifier}
-                            placeholder="Ticker / contract id"
-                            on:input={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}
-                          />
-                          <select
-                            class="compact-input"
-                            bind:value={leg.objectOptionId}
-                            on:change={() => normalizePortfolioDraftLegSource(leg.id, "object")}
-                          >
-                            <option value="">Provider / inline history</option>
-                            {#each composerOptions as option}
-                              <option value={option.id}>{option.label}</option>
-                            {/each}
-                          </select>
-                        </div>
+                        <input
+                          class="compact-input wide"
+                          bind:value={leg.identifier}
+                          placeholder="Ticker / contract id"
+                          on:input={() => normalizePortfolioDraftLegSource(leg.id, "identifier")}
+                        />
                       </td>
                       <td class="num-cell">
                         <input class="compact-input" type="number" step="0.05" bind:value={leg.weight} />
                       </td>
-                      <td>
-                        <div class="stack tight">
-                          <select class="compact-input" bind:value={leg.valueKind}>
-                            <option value="return">Returns</option>
-                            <option value="level">Level / probability</option>
-                          </select>
-                          <textarea
-                            class="history-input"
-                            bind:value={leg.historyText}
-                            placeholder="date,value rows for contracts, commodities, custom streams"
-                            on:input={() => normalizePortfolioDraftLegSource(leg.id, "history")}
-                          ></textarea>
-                        </div>
-                      </td>
                       <td class="num-cell">
                         <div class="row-actions">
-                          <button type="button" class="ghost-button" on:click={() => resetPortfolioDraftLeg(leg.id)}>Reset</button>
-                          <button type="button" class="ghost-button" on:click={() => removePortfolioDraftLeg(leg.id)}>Remove</button>
+                          <button
+                            type="button"
+                            class="ghost-button icon-button"
+                            aria-expanded={Boolean(expandedDraftLegs[leg.id])}
+                            title="Object / inline history source"
+                            on:click={() => toggleDraftLegDetail(leg.id)}
+                          >{expandedDraftLegs[leg.id] ? "▾" : "▸"}</button>
+                          <button
+                            type="button"
+                            class="ghost-button icon-button"
+                            title="Remove leg"
+                            aria-label="Remove leg"
+                            on:click={() => removePortfolioDraftLeg(leg.id)}
+                          >✕</button>
                         </div>
                       </td>
                     </tr>
+                    {#if expandedDraftLegs[leg.id]}
+                      <tr class="leg-detail-row">
+                        <td colspan="6">
+                          <div class="leg-detail">
+                            <label>
+                              <span>Gamma Object</span>
+                              <select
+                                class="compact-input wide"
+                                bind:value={leg.objectOptionId}
+                                on:change={() => normalizePortfolioDraftLegSource(leg.id, "object")}
+                              >
+                                <option value="">Provider / inline history</option>
+                                {#each composerOptions as option}
+                                  <option value={option.id}>{option.label}</option>
+                                {/each}
+                              </select>
+                            </label>
+                            <label>
+                              <span>Value Kind</span>
+                              <select class="compact-input wide" bind:value={leg.valueKind}>
+                                <option value="return">Returns</option>
+                                <option value="level">Level / probability</option>
+                              </select>
+                            </label>
+                            <label class="history-field">
+                              <span>Inline History (date,value)</span>
+                              <textarea
+                                class="history-input"
+                                bind:value={leg.historyText}
+                                placeholder="date,value rows for contracts, commodities, custom streams"
+                                on:input={() => normalizePortfolioDraftLegSource(leg.id, "history")}
+                              ></textarea>
+                            </label>
+                            <button type="button" class="ghost-button leg-reset" on:click={() => resetPortfolioDraftLeg(leg.id)}>Reset</button>
+                          </div>
+                        </td>
+                      </tr>
+                    {/if}
                   {/each}
                 </tbody>
               </table>
@@ -3224,7 +3246,7 @@
         </div>
 
         <article class="panel table-panel">
-          <div class="panel-header"><div><p class="eyebrow">Metrics</p><h3>Side-by-Side</h3></div></div>
+          <div class="panel-header tight-head"><h3>Side-by-Side Metrics</h3></div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Metric</th><th>{compareResult?.left.label ?? "Left"}</th><th>{compareResult?.right.label ?? "Right"}</th></tr></thead>
@@ -3249,7 +3271,7 @@
 
         {#if surfaceModeKind === "equity_comparables"}
           <article class="panel table-panel">
-            <div class="panel-header"><div><p class="eyebrow">Scope Peers</p><h3>Constituent Comparison</h3></div><small>{constituentRows.length} rows</small></div>
+            <div class="panel-header tight-head"><h3>Constituent Comparison</h3><small>{constituentRows.length} rows</small></div>
             <div class="table-wrap compact-table">
               <table>
                 <thead><tr><th>Symbol</th><th>Weight</th><th>Return</th><th>Vol</th></tr></thead>
@@ -4216,6 +4238,37 @@
     max-height: 20rem;
   }
 
+  /* Table panels: the panel is the table — zero padding, each section
+     carries its own inset so the table itself runs edge-to-edge. */
+  .table-panel {
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .table-panel > .panel-header {
+    padding: var(--space-3) var(--space-5);
+    border-bottom: 1px solid var(--divider);
+    align-items: center;
+  }
+
+  .table-panel > .table-wrap {
+    border: 0;
+    background: transparent;
+  }
+
+  .table-panel > :not(.panel-header):not(.table-panel-header) + .table-wrap {
+    border-top: 1px solid var(--divider);
+  }
+
+  .table-panel > .field-grid {
+    padding: var(--space-4) var(--space-5) var(--space-2);
+  }
+
+  .table-panel > .kpi-grid {
+    padding: var(--space-2) var(--space-5) var(--space-3);
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -4266,7 +4319,7 @@
   }
 
   .compact-kpis {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .tight {
@@ -4284,9 +4337,11 @@
   }
 
   .source-cell {
-    display: grid;
-    gap: var(--space-1);
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
     min-width: 8rem;
+    max-width: 16rem;
   }
 
   .source-cell span {
@@ -4294,6 +4349,7 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: var(--text-xs);
+    flex-shrink: 0;
   }
 
   .source-cell span.warning {
@@ -4304,7 +4360,10 @@
     color: var(--text-2);
     font-size: var(--text-xs);
     line-height: 1.25;
-    overflow-wrap: anywhere;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .row-actions {
@@ -4312,6 +4371,68 @@
     gap: var(--space-2);
     align-items: center;
     justify-content: flex-end;
+  }
+
+  .icon-button {
+    width: 1.55rem;
+    min-height: 1.55rem;
+    padding: 0;
+    display: inline-grid;
+    place-items: center;
+    font-size: var(--text-xs);
+    color: var(--text-2);
+  }
+
+  .icon-button[aria-expanded="true"] {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--panel-strong));
+  }
+
+  .composer-table tbody td {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .composer-table .class-select {
+    width: auto;
+    min-width: 7.5rem;
+    text-align: left;
+  }
+
+  .leg-detail-row td {
+    padding: 0;
+    background: var(--surface-soft);
+  }
+
+  .leg-detail {
+    display: grid;
+    grid-template-columns: minmax(12rem, 0.9fr) minmax(9rem, 0.5fr) minmax(16rem, 1.6fr) auto;
+    gap: var(--space-4);
+    align-items: start;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .leg-detail label {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .leg-detail .compact-input.wide {
+    min-width: 0;
+  }
+
+  .leg-detail .history-input {
+    width: 100%;
+    min-width: 0;
+    min-height: 3.2rem;
+  }
+
+  .leg-detail .leg-reset {
+    align-self: end;
+    width: auto;
+    min-height: 1.55rem;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
   }
 
   .alignment-diagnostics {
@@ -4412,6 +4533,31 @@
     grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--space-4);
     align-items: start;
+  }
+
+  .handoff-strip {
+    align-items: center;
+  }
+
+  .handoff-summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-4);
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .handoff-label {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: var(--text-2xs);
+    white-space: nowrap;
+  }
+
+  .handoff-summary small {
+    color: var(--text-2);
+    font-size: var(--text-xs);
   }
 
   .handoff-list {
@@ -4618,6 +4764,7 @@
     .overview-bottom-grid,
     .ranking-grid,
     .builder-actions,
+    .leg-detail,
     .kpi-grid {
       grid-template-columns: 1fr;
     }

@@ -121,6 +121,12 @@
     display: block;
   }
 
+  .context-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   td span {
     color: var(--text-2);
     font-size: var(--text-sm);
@@ -199,7 +205,6 @@
   .profile-fx .move-cell,
   .profile-fx .pct-cell {
     width: 20%;
-    text-align: left;
   }
 
   .profile-yields {
