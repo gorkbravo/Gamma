@@ -2,6 +2,7 @@
   import AllocationDonut from "../components/AllocationDonut.svelte";
   import DiagnosticsPanel, { type DiagnosticsEntry } from "../components/DiagnosticsPanel.svelte";
   import TimeSeriesChart, { type ChartSeries } from "../components/TimeSeriesChart.svelte";
+  import { flashOnChange } from "../lib/flash";
   import type {
     DiagnosticsResponse,
     PortfolioHistoryResponse,
@@ -126,6 +127,15 @@
     return secType === "CASH" || symbol.startsWith("CASH");
   }
 
+  function formatSummaryValue(key: string, raw: string) {
+    const numeric = Number(raw);
+    const text = Number.isFinite(numeric)
+      ? numeric.toLocaleString("en-US", { maximumFractionDigits: 2 })
+      : raw;
+    const suffix = key.includes(":") ? key.split(":", 2)[1] : "";
+    return suffix && suffix !== "BASE" ? `${text} ${suffix}` : text;
+  }
+
   function pickAccountSummaryRows(summary: Record<string, string>) {
     const used = new Set<string>();
     const rows: Array<[string, string]> = [];
@@ -136,14 +146,20 @@
       );
       if (match) {
         used.add(match[0]);
-        rows.push([item.label, match[1]]);
+        rows.push([item.label, formatSummaryValue(match[0], match[1])]);
       }
       if (rows.length >= 6) {
         return rows;
       }
     }
 
-    return [...rows, ...Object.entries(summary).filter(([key]) => !used.has(key)).slice(0, Math.max(0, 6 - rows.length))];
+    return [
+      ...rows,
+      ...Object.entries(summary)
+        .filter(([key]) => !used.has(key))
+        .slice(0, Math.max(0, 6 - rows.length))
+        .map(([key, value]) => [key, formatSummaryValue(key, value)] as [string, string])
+    ];
   }
 
   function buildAllocationSlices(nextSnapshot: PortfolioSnapshot | null) {
@@ -198,6 +214,9 @@
   });
   $: accountRows = pickAccountSummaryRows(snapshot?.account_summary ?? {});
   $: allocationSlices = buildAllocationSlices(snapshot);
+  $: dayPnl = performance?.day_pnl ?? snapshot?.day_pnl ?? null;
+  $: dayPnlPct = performance?.day_pnl_pct ?? snapshot?.day_pnl_pct ?? null;
+  $: dayPnlSource = performance?.day_pnl_source ?? snapshot?.day_pnl_source ?? null;
   $: historyStats = (() => {
     if (historyPoints.length < 2) {
       return { totalReturn: null, maxDrawdown: null, latestValue: null };
@@ -229,7 +248,7 @@
         {
           id: "portfolio-value",
           label: "Portfolio Value",
-          color: "#7aa6c8",
+          color: "var(--chart-primary)",
           type: "line",
           data: historyPoints.map((point) => ({
             time: Math.floor(new Date(point.timestamp).getTime() / 1000),
@@ -249,7 +268,7 @@
         {
           id: "drawdown",
           label: "Drawdown",
-          color: "#b65d54",
+          color: "var(--chart-negative)",
           type: "area",
           invertFilledArea: true,
           data: growthPoints.map((point) => {
@@ -266,7 +285,7 @@
       {
         id: "portfolio-growth",
         label: "Portfolio",
-        color: "#7aa6c8",
+        color: "var(--chart-primary)",
         type: "area",
         data: growthPoints.map((point) => ({
           time: Math.floor(new Date(point.timestamp).getTime() / 1000),
@@ -281,7 +300,7 @@
           performance.benchmark_source === "cash_0"
             ? `${performance.benchmark_symbol} (Cash 0%)`
             : performance.benchmark_symbol,
-        color: "#c49a5a",
+        color: "var(--chart-secondary)",
         type: "line",
         lineStyle: "dashed",
         data: performance.benchmark_points.map((point) => ({
@@ -298,13 +317,10 @@
   <div class="workspace-grid">
     <div class="primary-column">
       <article class="panel performance-panel">
-        <div class="panel-header top-line">
-          <div>
-            <p class="eyebrow">Portfolio Monitor</p>
-            <h2>Portfolio Performance</h2>
-          </div>
+        <div class="panel-head">
+          <h2>Portfolio Performance</h2>
           <div class="chart-controls">
-            <label class="benchmark-field">
+            <label class="control-group benchmark-field">
               <span>Benchmark</span>
               <input
                 bind:value={benchmarkSymbol}
@@ -337,25 +353,29 @@
         <div class="kpi-grid">
           <article class="metric">
             <span>Net Liquidity</span>
-            <strong>{fmt(snapshot?.net_liquidation)} {currency}</strong>
+            <strong use:flashOnChange={{ value: snapshot?.net_liquidation }}>{fmt(snapshot?.net_liquidation)} {currency}</strong>
             <small>{snapshot ? `Updated ${new Date(snapshot.timestamp).toLocaleString("en-US")}` : "Waiting for snapshot"}</small>
           </article>
           <article class="metric">
             <span>Day P&amp;L</span>
-            <strong class:positive={((performance?.day_pnl ?? snapshot?.day_pnl) ?? 0) > 0} class:negative={((performance?.day_pnl ?? snapshot?.day_pnl) ?? 0) < 0}>
-              {fmt(performance?.day_pnl ?? snapshot?.day_pnl)} {currency}
+            <strong
+              use:flashOnChange={{ value: dayPnl, direction: (dayPnl ?? 0) > 0 ? "up" : (dayPnl ?? 0) < 0 ? "down" : "neutral" }}
+              class:positive={(dayPnl ?? 0) > 0}
+              class:negative={(dayPnl ?? 0) < 0}
+            >
+              {fmt(dayPnl)} {currency}
             </strong>
-            <small>{pct(performance?.day_pnl_pct ?? snapshot?.day_pnl_pct)} | {performance?.day_pnl_source ?? snapshot?.day_pnl_source ?? "no source"}</small>
+            <small>{pct(dayPnlPct)} | {dayPnlSource ?? "no source"}</small>
           </article>
           <article class="metric">
             <span>Gross Exposure</span>
-            <strong>{fmt(bookDiagnostics.grossExposure)} {currency}</strong>
+            <strong use:flashOnChange={{ value: bookDiagnostics.grossExposure }}>{fmt(bookDiagnostics.grossExposure)} {currency}</strong>
             <small>Net {fmt(bookDiagnostics.netExposure)} {currency}</small>
           </article>
           <article class="metric">
             <span>Cash Weight</span>
             <strong class:elevated={(bookDiagnostics.cashWeight ?? 0) > 0.25}>{pct(bookDiagnostics.cashWeight)}</strong>
-            <small>{sortedPositions.length} visible lines</small>
+            <small>Cash {fmt(snapshot?.total_cash)} {currency}</small>
           </article>
           <article class="metric">
             <span>Stored Return</span>
@@ -366,7 +386,7 @@
 
         <TimeSeriesChart
           series={chartSeries}
-          height={380}
+          height={360}
           emptyMessage={
             chartMode === "value"
               ? "Refresh the portfolio to seed local history"
@@ -375,23 +395,20 @@
         />
 
         <div class="chart-foot">
-          <span>
+          <span class:warning-text={Boolean(performance?.missing_symbols?.length)}>
             {performance?.missing_symbols?.length
               ? `Missing history: ${performance.missing_symbols.join(", ")}`
               : ""}
           </span>
-          <strong>{historyStats.latestValue == null ? "No latest value" : `${fmt(historyStats.latestValue)} ${currency}`}</strong>
+          <strong>{historyStats.latestValue == null ? "" : `${fmt(historyStats.latestValue)} ${currency}`}</strong>
         </div>
       </article>
 
-      <article class="panel positions-panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Execution Book</p>
-            <h3>Positions</h3>
-          </div>
+      <article class="panel table-panel">
+        <div class="table-head">
+          <h3>Positions <span class="count">{sortedPositions.length}</span></h3>
           <div class="table-controls">
-            <input bind:value={search} placeholder="Filter symbol, type, or currency" />
+            <input bind:value={search} placeholder="Filter symbol, type, currency" />
             <select bind:value={sortKey}>
               <option value="base_market_value">Base Value</option>
               <option value="market_value">Market Value</option>
@@ -404,11 +421,11 @@
             </select>
             <label class="checkbox">
               <input type="checkbox" bind:checked={descending} />
-              <span>Descending</span>
+              <span>Desc</span>
             </label>
             <label class="checkbox">
               <input type="checkbox" bind:checked={includeCash} />
-              <span>Include Cash</span>
+              <span>Cash</span>
             </label>
           </div>
         </div>
@@ -419,38 +436,38 @@
               <tr>
                 <th>Symbol</th>
                 <th>Type</th>
-                <th>Currency</th>
-                <th>Qty</th>
-                <th>Avg Cost</th>
-                <th>Last</th>
-                <th>Mkt Value</th>
-                <th>Base Value</th>
-                <th>FX</th>
-                <th>Weight</th>
-                <th>Unreal. P&amp;L</th>
+                <th>Ccy</th>
+                <th class="num">Qty</th>
+                <th class="num">Avg Cost</th>
+                <th class="num">Last</th>
+                <th class="num">Mkt Value</th>
+                <th class="num">Base Value</th>
+                <th class="num">FX</th>
+                <th class="num">Weight</th>
+                <th class="num">Unreal. P&amp;L</th>
               </tr>
             </thead>
             <tbody>
               {#if sortedPositions.length}
-                {#each sortedPositions as position}
+                {#each sortedPositions as position (position.instrument_id ?? position.symbol)}
                   <tr>
-                    <td>{position.display_symbol ?? position.symbol}</td>
+                    <td class="symbol">{position.display_symbol ?? position.symbol}</td>
                     <td>{position.sec_type}</td>
                     <td>{position.currency}</td>
-                    <td>{fmt(position.quantity, 3)}</td>
-                    <td>{fmt(position.avg_cost)}</td>
-                    <td>{fmt(position.market_price)}</td>
-                    <td>{fmt(position.market_value)} {position.currency}</td>
-                    <td>{fmt(position.base_market_value)} {currency}</td>
-                    <td>{fmt(position.fx_rate, 4)}</td>
-                    <td class:elevated={(position.weight ?? 0) > 0.25}>{pct(position.weight)}</td>
-                    <td class:positive={(position.unrealized_pnl ?? 0) > 0} class:negative={(position.unrealized_pnl ?? 0) < 0}>
-                      {fmt(position.unrealized_pnl)} {currency}
+                    <td class="num">{fmt(position.quantity, 3)}</td>
+                    <td class="num">{fmt(position.avg_cost)}</td>
+                    <td class="num">{fmt(position.market_price)}</td>
+                    <td class="num">{fmt(position.market_value)}</td>
+                    <td class="num">{fmt(position.base_market_value)}</td>
+                    <td class="num">{fmt(position.fx_rate, 4)}</td>
+                    <td class="num" class:elevated={(position.weight ?? 0) > 0.25}>{pct(position.weight)}</td>
+                    <td class="num" class:positive={(position.unrealized_pnl ?? 0) > 0} class:negative={(position.unrealized_pnl ?? 0) < 0}>
+                      {fmt(position.unrealized_pnl)}
                     </td>
                   </tr>
                 {/each}
               {:else}
-                <tr><td colspan="11">No matching positions.</td></tr>
+                <tr><td colspan="11" class="empty">No matching positions.</td></tr>
               {/if}
             </tbody>
           </table>
@@ -458,11 +475,11 @@
       </article>
 
       <article class="panel messages-panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Messages</p>
-            <h3>Broker &amp; Runtime Messages</h3>
-          </div>
+        <div class="table-head">
+          <h3>Messages <span class="count">{consoleEntries.length}</span></h3>
+          <button class="ghost-button" on:click={onToggleDiagnostics}>
+            {diagnosticsOpen ? "Hide Diagnostics" : "Diagnostics"}
+          </button>
         </div>
 
         {#if consoleEntries.length}
@@ -477,16 +494,6 @@
         {:else}
           <p class="muted">No active broker or runtime messages.</p>
         {/if}
-      </article>
-
-      <article class="panel diagnostics-toggle-panel">
-        <div>
-          <p class="eyebrow">Diagnostics</p>
-          <h3>System Visibility</h3>
-        </div>
-        <button class="ghost-button" on:click={onToggleDiagnostics}>
-          {diagnosticsOpen ? "Hide Diagnostics" : "Show Diagnostics"}
-        </button>
       </article>
 
       {#if diagnosticsOpen}
@@ -506,27 +513,21 @@
 
     <aside class="support-column">
       <article class="panel rail-panel">
-        <div class="rail-header">
-          <div>
-            <p class="eyebrow">Allocation</p>
-            <h3>Position Distribution</h3>
-          </div>
+        <div class="rail-head">
+          <h3>Allocation</h3>
         </div>
         <AllocationDonut slices={allocationSlices} />
       </article>
 
       <article class="panel rail-panel">
-        <div class="rail-header">
-          <div>
-            <p class="eyebrow">Diagnostics</p>
-            <h3>Book Diagnostics</h3>
-          </div>
+        <div class="rail-head">
+          <h3>Book Diagnostics</h3>
         </div>
         <div class="stack">
           <div class="row"><span>Largest Position</span><strong>{bookDiagnostics.largestPosition?.symbol ?? "N/A"}</strong></div>
-          <div class="row"><span>Largest Position Weight</span><strong>{pct(bookDiagnostics.largestPosition?.weight)}</strong></div>
-          <div class="row"><span>Best Unreal. P&amp;L</span><strong>{bookDiagnostics.bestPnl?.symbol ?? "N/A"}</strong></div>
-          <div class="row"><span>Worst Unreal. P&amp;L</span><strong>{bookDiagnostics.worstPnl?.symbol ?? "N/A"}</strong></div>
+          <div class="row"><span>Largest Weight</span><strong>{pct(bookDiagnostics.largestPosition?.weight)}</strong></div>
+          <div class="row"><span>Best Unreal. P&amp;L</span><strong class="positive">{bookDiagnostics.bestPnl?.symbol ?? "N/A"}</strong></div>
+          <div class="row"><span>Worst Unreal. P&amp;L</span><strong class="negative">{bookDiagnostics.worstPnl?.symbol ?? "N/A"}</strong></div>
           <div class="row"><span>History Max DD</span><strong class:negative={(historyStats.maxDrawdown ?? 0) < 0}>{pct(historyStats.maxDrawdown)}</strong></div>
         </div>
 
@@ -551,11 +552,8 @@
       </article>
 
       <article class="panel rail-panel">
-        <div class="rail-header">
-          <div>
-            <p class="eyebrow">Account</p>
-            <h3>Account Summary</h3>
-          </div>
+        <div class="rail-head">
+          <h3>Account Summary</h3>
         </div>
         {#if accountRows.length}
           <div class="stack">
@@ -578,13 +576,7 @@
   .view,
   .workspace-grid,
   .primary-column,
-  .support-column,
-  .kpi-grid,
-  .stack,
-  .table-controls,
-  .chart-controls,
-  .mini-groups,
-  .message-list {
+  .support-column {
     display: grid;
     gap: var(--space-4);
   }
@@ -602,69 +594,18 @@
   .panel {
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
-    padding: var(--space-6);
+    padding: var(--space-5);
   }
 
   .performance-panel,
-  .positions-panel,
-  .rail-panel,
-  .messages-panel {
+  .rail-panel {
     display: grid;
     gap: var(--space-4);
   }
 
-  .panel-header,
-  .row,
-  .chart-foot,
-  .rail-header,
-  .diagnostics-toggle-panel {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-5);
-  }
-
-  .top-line {
-    align-items: start;
-  }
-
-  .kpi-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0;
-    padding-block: var(--space-1);
-  }
-
-  .metric {
-    min-width: 0;
-    padding: var(--space-2) var(--space-6);
-    border-left: 1px solid rgba(46, 60, 74, 0.52);
-    background: none;
-    text-align: center;
-  }
-
-  .metric strong {
-    display: block;
-    margin: var(--space-2) 0 var(--space-2);
-    font-size: var(--text-lg);
-    line-height: 1.2;
-  }
-
-  .metric:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .eyebrow,
-  span,
-  small,
-  .muted {
-    color: var(--text-2);
-  }
-
-  .eyebrow,
-  .group-label {
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-xs);
+  .table-panel,
+  .messages-panel {
+    padding: 0;
   }
 
   h2,
@@ -673,24 +614,90 @@
     margin: 0;
   }
 
-  .muted,
-  .chart-foot span,
-  .row strong,
-  .row span {
-    overflow-wrap: anywhere;
+  h2 {
+    font-size: var(--text-md);
+    font-weight: 700;
   }
 
-  .chart-controls {
-    grid-template-columns: minmax(6rem, 7rem) minmax(8.25rem, 9rem) minmax(0, auto);
+  h3 {
+    font-size: var(--text-base);
+    font-weight: 700;
+  }
+
+  .count {
+    color: var(--text-2);
+    font-weight: 500;
+    font-size: var(--text-sm);
+  }
+
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
     align-items: start;
-    justify-items: start;
+    gap: var(--space-4);
   }
 
-  .chart-controls label,
-  .control-group,
-  .checkbox {
+  .table-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    min-height: 26px;
+    padding: var(--space-2) var(--space-5);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .rail-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  /* ── Controls ── */
+  .chart-controls {
+    display: flex;
+    gap: var(--space-4);
+    align-items: start;
+    flex-wrap: wrap;
+  }
+
+  .control-group {
     display: grid;
-    gap: var(--space-3);
+    gap: var(--space-1);
+  }
+
+  .control-group > span {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  input,
+  select {
+    height: 26px;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-0);
+    padding: var(--space-1) var(--space-3);
+    font: inherit;
+    font-size: var(--text-sm);
+  }
+
+  select {
+    cursor: pointer;
+  }
+
+  input:hover,
+  select:hover {
+    border-color: rgba(122, 166, 200, 0.32);
+  }
+
+  .benchmark-field {
+    width: 6rem;
   }
 
   .benchmark-field input {
@@ -699,156 +706,142 @@
     text-transform: uppercase;
   }
 
-  .control-group > span,
-  .chart-controls label > span {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  .table-controls {
-    grid-template-columns: minmax(14rem, 1.3fr) repeat(3, auto);
-    align-items: center;
-    justify-content: end;
-  }
-
-  .checkbox {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    border: 1px solid rgba(46, 60, 74, 0.52);
-    background: var(--surface-soft);
-    padding: var(--space-4) var(--space-5);
-  }
-
-  .checkbox input {
-    width: auto;
-    padding: 0;
-  }
-
-  input,
-  select,
-  button {
-    border: 1px solid var(--panel-strong);
-    background: #0d0f12;
-    color: var(--text-0);
-    padding: var(--space-5) var(--space-5);
-    font: inherit;
-  }
-
-  button {
-    cursor: pointer;
-  }
-
-  .ghost-button {
-    background: transparent;
-  }
-
   .segmented {
     display: inline-flex;
     flex-wrap: wrap;
     border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
   }
 
   .segmented button {
     border: 0;
     border-right: 1px solid var(--panel-strong);
     background: transparent;
-    color: var(--text-1);
-    padding: var(--space-2) var(--space-5);
+    color: var(--text-2);
+    padding: var(--space-1) var(--space-4);
     font: inherit;
+    font-family: var(--display-font);
     font-size: var(--text-sm);
+    font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
   }
 
   .segmented button:last-child { border-right: 0; }
-  .segmented button:hover:not(:disabled) { background: rgba(122, 166, 200, 0.06); color: var(--text-0); }
+  .segmented button:hover:not(:disabled) { background: var(--hover-bg); color: var(--text-0); }
   .segmented button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-  .segmented button.active { background: rgba(122, 166, 200, 0.12); color: var(--accent); }
+  .segmented button.active { background: var(--active-bg); color: var(--accent); }
 
-  .chart-foot,
-  .row {
+  .ghost-button {
+    height: 22px;
+    border: 1px solid var(--panel-strong);
+    background: transparent;
+    color: var(--text-1);
+    padding: 0 var(--space-4);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
+  }
+
+  .ghost-button:hover {
+    background: var(--hover-bg);
+    color: var(--text-0);
+  }
+
+  .table-controls {
+    display: flex;
+    gap: var(--space-3);
     align-items: center;
-    border-top: 1px solid rgba(46, 60, 74, 0.56);
-    padding-top: var(--space-5);
   }
 
-  .row:first-child {
-    border-top: 0;
-    padding-top: 0;
+  .table-controls input[type="text"],
+  .table-controls input:not([type="checkbox"]) {
+    width: 13rem;
   }
 
-  .rail-header {
-    align-items: baseline;
+  .checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-2);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    white-space: nowrap;
   }
 
-  .panel-header > div,
-  .chart-foot > span,
-  .rail-header > div {
+  .checkbox input {
+    height: auto;
+    width: auto;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* ── KPI strip ── */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-block: 1px solid var(--divider);
+  }
+
+  .metric {
+    min-width: 0;
+    padding: var(--space-3) var(--space-4);
+    border-right: 1px solid var(--divider);
+  }
+
+  .metric:last-child {
+    border-right: 0;
+  }
+
+  .metric > span {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .metric strong {
+    display: block;
+    margin: var(--space-1) 0;
+    font-size: var(--text-md);
+    line-height: var(--leading-tight);
+    overflow-wrap: anywhere;
+  }
+
+  .metric small {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    line-height: var(--leading-tight);
+    overflow-wrap: anywhere;
+  }
+
+  .chart-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    border-top: 1px solid var(--divider);
+    padding-top: var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--text-2);
+    min-height: 1em;
+  }
+
+  .chart-foot span {
+    overflow-wrap: anywhere;
     min-width: 0;
   }
 
-  .pill-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-4);
-    margin-top: var(--space-4);
+  .warning-text {
+    color: var(--warning);
   }
 
-  .pill-list span {
-    border: 1px solid rgba(122, 166, 200, 0.14);
-    background: rgba(122, 166, 200, 0.05);
-    color: var(--text-1);
-    padding: var(--space-3) var(--space-4);
-  }
-
+  /* ── Positions table ── */
   .table-wrap {
     overflow: auto;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
-  }
-
-  .message-list {
-    max-height: 14rem;
-    overflow: auto;
-    border-top: 1px solid rgba(46, 60, 74, 0.52);
-    background: none;
-  }
-
-  .message-row {
-    display: grid;
-    grid-template-columns: 6rem minmax(0, 1fr);
-    gap: var(--space-5);
-    padding: var(--space-5) var(--space-5);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
-  }
-
-  .message-row p {
-    color: var(--warning);
-    line-height: 1.45;
-  }
-
-  .message-tag {
-    color: var(--warning);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
-  }
-
-  .message-row.error p,
-  .message-row.error .message-tag {
-    color: var(--warning);
-  }
-
-  .message-row.info p,
-  .message-row.info .message-tag {
-    color: var(--accent-2);
-  }
-
-  .diagnostics-toggle-panel {
-    align-items: center;
   }
 
   table {
@@ -858,20 +851,151 @@
 
   th,
   td {
-    padding: var(--space-5) var(--space-4);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.52);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--divider);
     text-align: left;
     white-space: nowrap;
+    line-height: var(--leading-tight);
   }
 
   th {
     color: var(--text-2);
-    font-size: var(--text-xs);
+    font-size: var(--text-2xs);
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     background: var(--surface-0);
+    position: sticky;
+    top: 0;
+    z-index: 1;
   }
 
+  td {
+    font-size: var(--text-sm);
+  }
+
+  th.num,
+  td.num {
+    text-align: right;
+  }
+
+  td.symbol {
+    color: var(--text-0);
+    font-weight: 600;
+  }
+
+  td.empty {
+    color: var(--text-2);
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  /* ── Messages ── */
+  .message-list {
+    max-height: 12rem;
+    overflow: auto;
+  }
+
+  .message-row {
+    display: grid;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-5);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .message-row:last-child {
+    border-bottom: 0;
+  }
+
+  .message-row p {
+    color: var(--warning);
+    font-size: var(--text-sm);
+    line-height: var(--leading-snug);
+  }
+
+  .message-tag {
+    color: var(--warning);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: var(--text-2xs);
+  }
+
+  .message-row.info p,
+  .message-row.info .message-tag {
+    color: var(--accent-2);
+  }
+
+  .messages-panel .muted {
+    padding: var(--space-3) var(--space-5);
+  }
+
+  .muted {
+    color: var(--text-2);
+    font-size: var(--text-sm);
+  }
+
+  /* ── Rail panels ── */
+  .stack {
+    display: grid;
+  }
+
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--divider);
+    font-size: var(--text-sm);
+  }
+
+  .row:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .row span {
+    color: var(--text-2);
+    overflow-wrap: anywhere;
+  }
+
+  .row strong {
+    overflow-wrap: anywhere;
+    text-align: right;
+  }
+
+  .mini-groups {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .group-label {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+  }
+
+  .pill-list span {
+    border: 1px solid rgba(122, 166, 200, 0.14);
+    background: rgba(122, 166, 200, 0.05);
+    color: var(--text-1);
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  /* ── Semantic values ── */
   .positive {
     color: var(--positive);
   }
@@ -884,50 +1008,32 @@
     color: var(--data-warm);
   }
 
-  th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  @media (max-width: 980px) {
-    .workspace-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .support-column {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-  }
-
+  /* ── Responsive ── */
   @media (max-width: 1080px) {
     .kpi-grid {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .metric {
-      padding: var(--space-5) 0;
-      border-left: 0;
+      border-right: 0;
+      border-top: 1px solid var(--divider);
     }
 
     .metric:first-child,
     .metric:nth-child(2) {
-      padding-top: 0;
+      border-top: 0;
+    }
+
+    .panel-head,
+    .table-head,
+    .chart-foot {
+      flex-direction: column;
+      align-items: stretch;
     }
 
     .chart-controls,
-    .table-controls,
-    .support-column {
-      grid-template-columns: 1fr;
-    }
-
-    .panel-header,
-    .chart-foot,
-    .rail-header,
-    .diagnostics-toggle-panel,
-    .message-row {
-      flex-direction: column;
-      align-items: stretch;
+    .table-controls {
+      flex-wrap: wrap;
     }
 
     .segmented {
@@ -938,16 +1044,20 @@
       flex: 1;
     }
 
-    .checkbox,
-    .chart-controls label,
-    .control-group,
-    .table-controls > * {
-      width: 100%;
+    .table-controls input:not([type="checkbox"]),
+    .table-controls select {
+      flex: 1;
+      min-width: 8rem;
+    }
+  }
+
+  @media (max-width: 980px) {
+    .workspace-grid {
+      grid-template-columns: 1fr;
     }
 
-    .message-row {
-      display: grid;
-      grid-template-columns: 1fr;
+    .support-column {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 </style>

@@ -858,7 +858,9 @@ class IBKRClient:
             total_market += pos.base_market_value
         snapshot.total_market_value = total_market if total_market > 0 else None
 
-        nlv = self._parse_summary_value(snapshot.account_summary, "NetLiquidation", snapshot.base_currency)
+        nlv = self._summary_amount_in_base(
+            snapshot.account_summary, "NetLiquidation", snapshot.base_currency, fx, warnings
+        )
         snapshot.net_liquidation = nlv
         if nlv is None:
             warnings.append("Net liquidation unavailable")
@@ -882,15 +884,19 @@ class IBKRClient:
                 if pos.base_market_value is not None:
                     pos.weight = pos.base_market_value / total_for_weights
 
-        self._compute_day_pnl_from_summary(snapshot)
+        self._compute_day_pnl_from_summary(snapshot, fx, warnings)
         snapshot.warnings.extend(warnings)
 
-    def _compute_day_pnl_from_summary(self, snapshot: PortfolioSnapshot) -> None:
+    def _compute_day_pnl_from_summary(
+        self, snapshot: PortfolioSnapshot, fx: FXService, warnings: List[str]
+    ) -> None:
         nlv = snapshot.net_liquidation
-        prev = self._parse_summary_value(
+        prev = self._summary_amount_in_base(
             snapshot.account_summary,
             "PreviousDayEquityWithLoanValue",
             snapshot.base_currency,
+            fx,
+            warnings,
         )
         if nlv is not None and prev is not None:
             snapshot.day_pnl = float(nlv - prev)
@@ -900,7 +906,9 @@ class IBKRClient:
             return
 
         for tag in ("DayPnL", "DailyPnL", "PnL"):
-            value = self._parse_summary_value(snapshot.account_summary, tag, snapshot.base_currency)
+            value = self._summary_amount_in_base(
+                snapshot.account_summary, tag, snapshot.base_currency, fx, warnings
+            )
             if value is None:
                 continue
             snapshot.day_pnl = float(value)
@@ -1090,22 +1098,78 @@ class IBKRClient:
             )
         return positions, (total_cash if any_converted else None), warnings
 
-    @staticmethod
-    def _parse_summary_value(summary: Dict[str, str], tag: str, base_currency: str | None = None) -> Optional[float]:
-        if base_currency:
-            key = f"{tag}:{base_currency}"
-            if key in summary:
-                try:
-                    return float(summary[key])
-                except Exception:
-                    return None
-        for key, value in summary.items():
-            if key.startswith(tag):
-                try:
-                    return float(value)
-                except Exception:
-                    return None
+    @classmethod
+    def _account_base_currency(cls, summary: Dict[str, str]) -> Optional[str]:
+        for tag in ("NetLiquidation", "EquityWithLoanValue", "TotalCashValue"):
+            for key in summary:
+                prefix, sep, suffix = key.partition(":")
+                if not sep or prefix != tag:
+                    continue
+                ccy = cls._normalize_currency(suffix)
+                if cls._is_valid_currency_code(ccy):
+                    return ccy
         return None
+
+    @classmethod
+    def _summary_amount(
+        cls, summary: Dict[str, str], tag: str, base_currency: str | None = None
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """Return (value, currency) for an account summary tag.
+
+        IB suffixes account-level tags with the *account's* base currency
+        (e.g. ``NetLiquidation:EUR``), which may differ from the app base
+        currency. A ``None`` currency means it could not be determined.
+        """
+
+        def parse(raw: str) -> Optional[float]:
+            try:
+                return float(raw)
+            except Exception:
+                return None
+
+        base = cls._normalize_currency(base_currency) if base_currency else None
+        if base:
+            value = parse(summary.get(f"{tag}:{base}", ""))
+            if value is not None:
+                return value, base
+
+        fallback: Tuple[Optional[float], Optional[str]] = (None, None)
+        for key, raw in summary.items():
+            prefix, sep, suffix = key.partition(":")
+            if prefix != tag:
+                continue
+            value = parse(raw)
+            if value is None:
+                continue
+            ccy = cls._normalize_currency(suffix) if sep else ""
+            if cls._is_valid_currency_code(ccy):
+                return value, ccy
+            if fallback[0] is None and (not sep or ccy == "BASE"):
+                fallback = (value, cls._account_base_currency(summary))
+        return fallback
+
+    def _summary_amount_in_base(
+        self,
+        summary: Dict[str, str],
+        tag: str,
+        base_currency: str,
+        fx: FXService,
+        warnings: List[str],
+    ) -> Optional[float]:
+        value, ccy = self._summary_amount(summary, tag, base_currency)
+        if value is None:
+            return None
+        base = self._normalize_currency(base_currency)
+        if ccy is None or ccy == base:
+            return value
+        try:
+            rate = fx.get_rate(base, ccy)
+        except Exception:
+            rate = None
+        if rate is None:
+            warnings.append(f"FX unavailable for {ccy}->{base}; cannot convert {tag}")
+            return None
+        return value * float(rate)
 
     def get_contracts(self) -> List[Contract]:
         if self.mock:

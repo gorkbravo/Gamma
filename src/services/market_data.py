@@ -261,7 +261,7 @@ class MarketDataService:
 
     def fetch_ohlcv_history(self, contract: Contract, lookback_days: int) -> Optional[pd.DataFrame]:
         key = self._ohlcv_cache_key(contract, lookback_days)
-        cached = self.cache.get(key)
+        cached = self.cache.get_frame(key)
         if cached is not None:
             with self._history_lock:
                 self._history_cache_hits += 1
@@ -281,7 +281,7 @@ class MarketDataService:
             nonlocal result
             result = frame
             if frame is not None:
-                self.cache.set(key, frame)
+                self.cache.set_frame(key, frame)
             done.set()
 
         def on_error(exc: Exception) -> None:
