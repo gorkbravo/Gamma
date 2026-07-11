@@ -15,7 +15,6 @@ import {
   buildResearchTreemapLayout,
   buildResearchTreemapSections,
   buildPreviewRows,
-  classifyResearchSurfaceMode,
   classifySavedResearchSurface,
   defaultStrategyPortfolioDraftLeg,
   deriveConstituentsFromResearchResult,
@@ -179,24 +178,6 @@ describe("research view model helpers", () => {
       } as any)
     ).toBe("strategy");
     expect(classifySavedResearchSurface({ object_type: "memo", payload: {} } as any)).toBe("unknown");
-  });
-
-  it("classifies split equity research and strategy lab modes distinctly", () => {
-    expect(classifyResearchSurfaceMode("equity", "overview")).toBe("overview");
-    expect(classifyResearchSurfaceMode("equity", "scope_analysis")).toBe("scope_analysis");
-    expect(classifyResearchSurfaceMode("equity", "comparables")).toBe("equity_comparables");
-    expect(classifyResearchSurfaceMode("equity", "scenario_context")).toBe("equity_scenario_context");
-    expect(classifyResearchSurfaceMode("equity", "saved_equity_research")).toBe("equity_saved");
-
-    expect(classifyResearchSurfaceMode("strategy", "composer")).toBe("strategy_composer");
-    expect(classifyResearchSurfaceMode("strategy", "backtest_analyze")).toBe("strategy_backtest");
-    expect(classifyResearchSurfaceMode("strategy", "regime_stress")).toBe("strategy_regime");
-    expect(classifyResearchSurfaceMode("strategy", "imports")).toBe("strategy_imports");
-    expect(classifyResearchSurfaceMode("strategy", "saved_runs")).toBe("strategy_saved");
-
-    expect(classifyResearchSurfaceMode("legacy", "strategy_lab")).toBe("legacy_strategy");
-    expect(classifyResearchSurfaceMode("legacy", "compare_scenario")).toBe("legacy_compare");
-    expect(classifyResearchSurfaceMode("equity", "composer")).toBe("unknown");
   });
 
   it("builds a strategy lab research object from scope performance", () => {

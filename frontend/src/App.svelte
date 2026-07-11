@@ -2467,7 +2467,6 @@
             savedItems={$savedResearchItems}
             loading={$loading.research}
             overviewLoading={$loading.researchOverview}
-            strategyLoading={$loading.strategyLab}
             compareLoading={$loading.compareScenario}
             savedLoading={$loading.savedResearch}
             riskHandoffLoading={riskHandoffRunning}
@@ -2475,12 +2474,10 @@
             onLoadOverview={loadResearchOverview}
             onRun={runResearchFromView}
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, $activeTab)}
-            onAnalyzeStrategy={analyzeStrategyLab}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}
             onDeleteSaved={deleteSavedResearchItem}
-            onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
             onOpenStrategyLab={openStrategyLabFromEquityResearch}
@@ -2490,35 +2487,22 @@
           <svelte:component
             this={activeViewComponent}
             bind:mode={strategyLabMode}
-            overview={$researchOverview}
             result={$researchResult}
             strategyResult={$strategyLabResult}
             strategyComposition={$strategyLabComposition}
-            compareResult={$researchCompareResult}
             savedItems={$savedResearchItems}
-            loading={$loading.research}
-            overviewLoading={$loading.researchOverview}
             strategyLoading={$loading.strategyLab}
-            compareLoading={$loading.compareScenario}
             savedLoading={$loading.savedResearch}
             riskHandoffLoading={riskHandoffRunning}
-            selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
-            onLoadOverview={loadResearchOverview}
-            onRun={runResearchFromView}
-            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "strategy_lab")}
             onAnalyzeStrategy={analyzeStrategyLab}
             onComposeStrategy={composeStrategyLab}
             onComposePortfolioStrategy={composeStrategyLabPortfolio}
             onValidatePortfolioStrategy={validateStrategyLabPortfolio}
-            onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}
             onDeleteSaved={deleteSavedResearchItem}
             onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
-            onOpenIv={openIvFromResearch}
-            onOpenStrategyLab={openStrategyLabFromEquityResearch}
-            onSendToStrategyLab={handleStrategyLabHandoff}
             strategyLabHandoffs={$strategyLabHandoffQueue}
             handoffLoading={$loading.strategyLabHandoff}
             onResolveStrategyLabHandoffs={resolvePendingStrategyLabHandoffs}
