@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Dict, List, Protocol, Tuple
+from typing import Dict, List, Protocol, Sequence, Tuple
 
 import pandas as pd
 from ib_insync import Contract
@@ -468,6 +468,116 @@ class ResearchDataProvider:
             self._last_history_sources[resolved.instrument_id or resolved.normalized_symbol()] = stored
             return replace(result, series=clean_series)
         return result
+
+    def load_instrument_history_results(
+        self,
+        instruments: Sequence[InstrumentReference],
+        lookback_days: int,
+        *,
+        defaults: InstrumentDefaults | None = None,
+        provider_policy: str | None = None,
+        bypass_cache: bool = False,
+        max_age_seconds: int | float | None = None,
+    ) -> dict[str, ResearchHistoryResult]:
+        """Load a universe efficiently while preserving provider order and provenance.
+
+        Providers with a native batch API (currently yfinance) receive all unresolved
+        symbols together. IBKR and other providers remain serialized through their
+        existing throttled request path, which is required for TWS safety.
+        """
+        resolved_defaults = defaults or self.instrument_defaults
+        resolved = [instrument.with_defaults(resolved_defaults) for instrument in instruments]
+        results: dict[str, ResearchHistoryResult] = {}
+        pending: dict[str, tuple[InstrumentReference, str]] = {}
+        warnings_by_symbol: dict[str, list[str]] = {}
+
+        for instrument in resolved:
+            symbol = instrument.normalized_symbol()
+            cache_key = self._history_cache_key(instrument, resolved_defaults, provider_policy=provider_policy)
+            if not symbol or not cache_key:
+                results[symbol] = ResearchHistoryResult.unavailable(
+                    source_provider="unavailable",
+                    source_label="Unavailable history source",
+                    origin="research_data_provider.load_instrument_history_results",
+                    warning="Instrument history key is empty",
+                )
+                continue
+            cached = None if bypass_cache else self.history_cache.get(
+                cache_key,
+                lookback_days,
+                max_age_seconds=max_age_seconds,
+            )
+            if cached is not None and not cached.empty:
+                metadata = self._history_metadata.get(cache_key)
+                if metadata is None:
+                    metadata = ResearchHistoryResult(
+                        series=None,
+                        source_provider="research_cache",
+                        source_label="Research history cache",
+                        origin="research_cache.memory",
+                        freshness_label=FreshnessLabel.HISTORICAL,
+                        transformation_note="Loaded from Gamma's in-memory research history cache.",
+                    )
+                results[symbol] = replace(metadata, series=cached.astype(float), warnings=[])
+                continue
+            pending[symbol] = (instrument, cache_key)
+            warnings_by_symbol[symbol] = []
+
+        for provider in self._history_providers_for_policy(provider_policy):
+            if not pending:
+                break
+            batch_loader = getattr(provider, "load_histories", None)
+            batch_results: dict[str, ResearchHistoryResult]
+            if callable(batch_loader) and len(pending) > 1:
+                batch_results = batch_loader([row[0] for row in pending.values()], lookback_days)
+            else:
+                # This intentionally stays serial for TWS/IBKR providers.
+                batch_results = {
+                    symbol: provider.load_history(instrument, lookback_days)
+                    for symbol, (instrument, _cache_key) in pending.items()
+                }
+
+            completed: list[str] = []
+            for symbol, (instrument, cache_key) in pending.items():
+                result = batch_results.get(symbol)
+                if result is None:
+                    result = ResearchHistoryResult.unavailable(
+                        source_provider=str(getattr(provider, "provider_id", "unavailable")),
+                        source_label=str(getattr(provider, "source_label", "Unavailable history source")),
+                        origin="research_data_provider.batch_provider",
+                        warning=f"Batch provider returned no row for {symbol}",
+                    )
+                warnings_by_symbol[symbol].extend(result.warnings)
+                if result.series is None or result.series.empty:
+                    continue
+                combined = replace(
+                    result,
+                    series=result.series.astype(float),
+                    warnings=list(dict.fromkeys(warnings_by_symbol[symbol])),
+                )
+                self.history_cache.set(cache_key, combined.series, lookback_days)
+                stored = replace(combined, series=None)
+                self._history_metadata[cache_key] = stored
+                self._last_history_sources[instrument.instrument_id or symbol] = stored
+                self._last_history_warnings.extend(combined.warnings)
+                results[symbol] = combined
+                completed.append(symbol)
+            for symbol in completed:
+                pending.pop(symbol, None)
+
+        for symbol, (instrument, _cache_key) in pending.items():
+            warnings = warnings_by_symbol[symbol]
+            warnings.append(f"No configured history provider returned usable data for {instrument.normalized_display_symbol()}.")
+            self._last_history_warnings.extend(warnings)
+            results[symbol] = ResearchHistoryResult(
+                series=None,
+                source_provider="unavailable",
+                source_label="Unavailable history source",
+                origin="research_data_provider.provider_chain.batch",
+                freshness_label=FreshnessLabel.UNAVAILABLE,
+                warnings=list(dict.fromkeys(warnings)),
+            )
+        return results
 
     def drain_history_warnings(self) -> list[str]:
         warnings = list(dict.fromkeys(self._last_history_warnings))

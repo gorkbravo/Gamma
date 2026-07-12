@@ -1,6 +1,7 @@
 import { get, writable } from "svelte/store";
 import { deleteJson, getJson, getText, patchJson, postJson, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
+import { isAbortError, RequestCoordinator } from "../request-coordinator";
 import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
 import type {
   ActionResponse,
@@ -607,7 +608,7 @@ strategyLabHandoffQueue.subscribe(persistStrategyLabHandoffQueue);
 
 const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
 const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
-const riskComputeInflight = new Map<string, Promise<RiskResult | null>>();
+const requestCoordinator = new RequestCoordinator();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = [
   "fx-eurusd", "fx-gbpusd", "fx-eurgbp", "fx-eurchf", "fx-usdjpy", "fx-usdchf", "fx-usdcnh",
   "fx-usdcad", "fx-audusd", "fx-nzdusd"
@@ -635,6 +636,21 @@ const MACRO_COMPARISON_SERIES: Record<string, string> = {
 
 function setLoading(key: string, value: boolean) {
   loading.update((current) => ({ ...current, [key]: value }));
+}
+
+const loadingActivityCounts = new Map<string, number>();
+
+function beginLoading(key: string) {
+  const next = (loadingActivityCounts.get(key) ?? 0) + 1;
+  loadingActivityCounts.set(key, next);
+  setLoading(key, true);
+}
+
+function endLoading(key: string) {
+  const next = Math.max(0, (loadingActivityCounts.get(key) ?? 1) - 1);
+  if (next === 0) loadingActivityCounts.delete(key);
+  else loadingActivityCounts.set(key, next);
+  setLoading(key, next > 0);
 }
 
 function stableJson(value: unknown): string {
@@ -1247,18 +1263,21 @@ function appendCopilotThreadResult(
 }
 
 export async function refreshSystemStatus() {
-  setLoading("status", true);
-  try {
-    const nextStatus = await getJson<SystemStatus>("/system/status");
-    systemStatus.set(nextStatus);
-    lastError.set("");
-    return nextStatus;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("status", false);
-  }
+  return requestCoordinator.run("system-status", "status", async (signal) => {
+    setLoading("status", true);
+    try {
+      const nextStatus = await getJson<SystemStatus>("/system/status", { signal });
+      if (signal.aborted) return null;
+      systemStatus.set(nextStatus);
+      lastError.set("");
+      return nextStatus;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("system-status", signal)) setLoading("status", false);
+    }
+  });
 }
 
 export async function loadDiagnostics() {
@@ -1274,15 +1293,21 @@ export async function loadDiagnostics() {
 }
 
 export async function loadProviderUsage() {
-  setLoading("providerUsage", true);
-  try {
-    providerUsage.set(await getJson<ProviderUsageResponse>("/system/provider-usage"));
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("providerUsage", false);
-  }
+  return requestCoordinator.run("provider-usage", "provider-usage", async (signal) => {
+    setLoading("providerUsage", true);
+    try {
+      const response = await getJson<ProviderUsageResponse>("/system/provider-usage", { signal });
+      if (signal.aborted) return null;
+      providerUsage.set(response);
+      lastError.set("");
+      return response;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("provider-usage", signal)) setLoading("providerUsage", false);
+    }
+  });
 }
 
 export async function toggleConnection() {
@@ -1454,51 +1479,55 @@ export async function loadPortfolioPerformance(options?: {
 }
 
 export async function loadResearchOverview(options: ResearchOverviewLoadOptions = {}) {
-  setLoading("researchOverview", true);
-  try {
-    const params = new URLSearchParams({
-      universe_id: options.universeId ?? "broad_us_market",
-      timeframe: options.timeframe ?? "3M",
-      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
-      surface: options.surface ?? "research_overview"
-    });
-    if (options.forceRefresh) {
-      params.set("force_refresh", "true");
+  const params = new URLSearchParams({
+    universe_id: options.universeId ?? "broad_us_market",
+    timeframe: options.timeframe ?? "3M",
+    benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+    surface: options.surface ?? "research_overview"
+  });
+  if (options.forceRefresh) params.set("force_refresh", "true");
+  const path = `/research/overview?${params.toString()}`;
+  return requestCoordinator.run("research-overview", path, async (signal) => {
+    beginLoading("researchOverview");
+    try {
+      const overview = await getJson<ResearchOverviewResponse>(path, { signal });
+      if (signal.aborted) return null;
+      researchOverview.set(overview);
+      lastError.set("");
+      return overview;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      endLoading("researchOverview");
     }
-    const overview = await getJson<ResearchOverviewResponse>(`/research/overview?${params.toString()}`);
-    researchOverview.set(overview);
-    lastError.set("");
-    return overview;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("researchOverview", false);
-  }
+  });
 }
 
 export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOptions = {}) {
-  setLoading("researchOverview", true);
-  try {
-    const params = new URLSearchParams({
+  const params = new URLSearchParams({
       universe_id: options.universeId ?? "global_indices",
       timeframe: options.timeframe ?? "3M",
       benchmark_symbol: options.benchmarkSymbol ?? "SPY",
       surface: options.surface ?? "sitrep"
     });
-    if (options.forceRefresh) {
-      params.set("force_refresh", "true");
+  if (options.forceRefresh) params.set("force_refresh", "true");
+  const path = `/research/overview?${params.toString()}`;
+  return requestCoordinator.run("sitrep-indices-overview", path, async (signal) => {
+    beginLoading("researchOverview");
+    try {
+      const overview = await getJson<ResearchOverviewResponse>(path, { signal });
+      if (signal.aborted) return null;
+      sitrepIndicesOverview.set(overview);
+      lastError.set("");
+      return overview;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      endLoading("researchOverview");
     }
-    const overview = await getJson<ResearchOverviewResponse>(`/research/overview?${params.toString()}`);
-    sitrepIndicesOverview.set(overview);
-    lastError.set("");
-    return overview;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("researchOverview", false);
-  }
+  });
 }
 
 export async function loadNewsFeed(options: { limit?: number; forceRefresh?: boolean } = {}) {
@@ -1523,37 +1552,40 @@ export async function loadNewsFeed(options: { limit?: number; forceRefresh?: boo
 }
 
 export async function runResearch(options: ResearchRunOptions) {
-  setLoading("research", true);
-  try {
-    const payload = {
+  const payload = {
       scope_type: options.scopeType,
       primary_symbol: options.primarySymbol ?? "",
       synthetic_positions: options.syntheticPositions ?? [],
       benchmark_symbol: options.benchmarkSymbol,
       lookback_days: options.lookbackDays
-    };
-    const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload);
-    researchResult.set(nextResearchResult);
-    strategyLabComposition.set(null);
-    researchCompareResult.set(null);
-    // Downstream analysis must be recomputed from the latest executed research scope.
-    riskResult.set(null);
-    riskSnapshotBasis.set(null);
-    riskWorkspaceBasis.set(null);
-    resetCopilotCard("research");
-    resetCopilotCard("risk");
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("research", false);
-  }
+  };
+  const key = stableJson(payload);
+  return requestCoordinator.run("research-analysis", key, async (signal) => {
+    setLoading("research", true);
+    try {
+      const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload, { signal });
+      if (signal.aborted) return null;
+      researchResult.set(nextResearchResult);
+      strategyLabComposition.set(null);
+      researchCompareResult.set(null);
+      riskResult.set(null);
+      riskSnapshotBasis.set(null);
+      riskWorkspaceBasis.set(null);
+      resetCopilotCard("research");
+      resetCopilotCard("risk");
+      lastError.set("");
+      return nextResearchResult;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("research-analysis", signal)) setLoading("research", false);
+    }
+  });
 }
 
 export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabResult>("/research/strategy-lab/analyze", {
+  const payload = {
       name: options.name,
       rows: options.rows,
       date_column: options.dateColumn,
@@ -1562,50 +1594,60 @@ export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
       benchmark_column: options.benchmarkColumn || null,
       benchmark_value_kind: options.benchmarkValueKind ?? "return",
       min_observations: options.minObservations ?? 5
-    });
-    strategyLabResult.set(result);
-    strategyLabComposition.set(null);
-    researchCompareResult.set(null);
-    resetCopilotCard("research");
-    lastError.set("");
-    return result;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+  };
+  return requestCoordinator.run("strategy-lab-work", `analyze:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabResult>("/research/strategy-lab/analyze", payload, { signal });
+      if (signal.aborted) return null;
+      strategyLabResult.set(result);
+      strategyLabComposition.set(null);
+      researchCompareResult.set(null);
+      resetCopilotCard("research");
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 export async function composeStrategyLab(options: StrategyLabComposeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/compose", {
+  const payload = {
       name: options.name,
       legs: options.legs,
       lenses: options.lenses,
       overlays: options.overlays,
       benchmark_object: options.benchmarkObject ?? null,
       min_observations: options.minObservations ?? 5
-    });
-    strategyLabComposition.set(result);
-    researchCompareResult.set(null);
-    resetCopilotCard("research");
-    lastError.set("");
-    return result;
-  } catch (error) {
-    strategyLabComposition.set(null);
-    setError(error);
-    return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+  };
+  return requestCoordinator.run("strategy-lab-work", `compose:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/compose", payload, { signal });
+      if (signal.aborted) return null;
+      strategyLabComposition.set(result);
+      researchCompareResult.set(null);
+      resetCopilotCard("research");
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) {
+        strategyLabComposition.set(null);
+        setError(error);
+      }
+      return null;
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", {
+  const payload = {
       name: options.name,
       legs: options.legs,
       lenses: options.lenses ?? [],
@@ -1614,7 +1656,12 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
       benchmark_object: options.benchmarkObject ?? null,
       lookback_days: options.lookbackDays ?? 756,
       min_observations: options.minObservations ?? 5
-    });
+  };
+  return requestCoordinator.run("strategy-lab-work", `portfolio-compose:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", payload, { signal });
+      if (signal.aborted) return null;
     strategyLabComposition.set(result);
     if (options.validation?.valid) {
       const book = buildStrategyLabResearchBook(result, options.validation, options.benchmarkSymbol ?? null);
@@ -1624,13 +1671,16 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     resetCopilotCard("research");
     lastError.set("");
     return result;
-  } catch (error) {
-    strategyLabComposition.set(null);
-    setError(error);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        strategyLabComposition.set(null);
+        setError(error);
+      }
     return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 function buildStrategyLabResearchBook(
@@ -1695,9 +1745,7 @@ function buildStrategyLabResearchBook(
 }
 
 export async function validateStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabBookValidation>("/research/strategy-lab/portfolio-validate", {
+  const payload = {
       name: options.name,
       legs: options.legs,
       lenses: options.lenses ?? [],
@@ -1706,15 +1754,21 @@ export async function validateStrategyLabPortfolio(options: StrategyLabPortfolio
       benchmark_object: options.benchmarkObject ?? null,
       lookback_days: options.lookbackDays ?? 756,
       min_observations: options.minObservations ?? 5
-    });
-    lastError.set("");
-    return result;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+  };
+  return requestCoordinator.run("strategy-lab-work", `portfolio-validate:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabBookValidation>("/research/strategy-lab/portfolio-validate", payload, { signal });
+      if (signal.aborted) return null;
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 export function enqueueStrategyLabHandoff(handoff: StrategyLabHandoffEnvelope) {
@@ -1747,7 +1801,11 @@ export function enqueueAndOpenStrategyLab(handoff: StrategyLabHandoffEnvelope) {
   return enqueueStrategyLabHandoff(handoff);
 }
 
-export async function resolvePendingStrategyLabHandoffs() {
+export function resolvePendingStrategyLabHandoffs() {
+  return requestCoordinator.run("strategy-lab-handoff-resolution", "pending", resolvePendingStrategyLabHandoffsImpl);
+}
+
+async function resolvePendingStrategyLabHandoffsImpl(signal: AbortSignal) {
   // Stale earlier-session items stay out of auto-resolution; the user can dismiss
   // them or re-send the handoff from the source tab for fresh data.
   const pending = get(strategyLabHandoffQueue).filter(
@@ -1759,6 +1817,7 @@ export async function resolvePendingStrategyLabHandoffs() {
   setLoading("strategyLabHandoff", true);
   try {
     for (const item of pending) {
+      if (signal.aborted) break;
       strategyLabHandoffQueue.update((current) =>
         current.map((candidate) =>
           candidate.id === item.id
@@ -1769,7 +1828,8 @@ export async function resolvePendingStrategyLabHandoffs() {
       try {
         const resolved = await postJson<StrategyLabResolvedHandoff>("/research/strategy-lab/resolve-handoff", {
           handoff: item.handoff
-        });
+        }, { signal });
+        if (signal.aborted) break;
         strategyLabHandoffQueue.update((current) =>
           current.map((candidate) =>
             candidate.id === item.id
@@ -1784,6 +1844,7 @@ export async function resolvePendingStrategyLabHandoffs() {
           )
         );
       } catch (error) {
+        if (isAbortError(error)) break;
         const message = errorMessage(error);
         strategyLabHandoffQueue.update((current) =>
           current.map((candidate) =>
@@ -1797,7 +1858,9 @@ export async function resolvePendingStrategyLabHandoffs() {
     }
     return get(strategyLabHandoffQueue);
   } finally {
-    setLoading("strategyLabHandoff", false);
+    if (requestCoordinator.isCurrent("strategy-lab-handoff-resolution", signal)) {
+      setLoading("strategyLabHandoff", false);
+    }
   }
 }
 
@@ -1842,22 +1905,25 @@ export function restoreStrategyLabResult(result: StrategyLabResult) {
 }
 
 export async function compareResearch(options: ResearchCompareOptions) {
-  setLoading("compareScenario", true);
-  try {
-    const payload = {
+  const payload = {
       left: serializeCompareLeg(options.left),
       right: serializeCompareLeg(options.right)
-    };
-    const result = await postJson<ResearchCompareResult>("/research/compare-scenario/analyze", payload);
-    researchCompareResult.set(result);
-    lastError.set("");
-    return result;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("compareScenario", false);
-  }
+  };
+  return requestCoordinator.run("research-compare", stableJson(payload), async (signal) => {
+    setLoading("compareScenario", true);
+    try {
+      const result = await postJson<ResearchCompareResult>("/research/compare-scenario/analyze", payload, { signal });
+      if (signal.aborted) return null;
+      researchCompareResult.set(result);
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("research-compare", signal)) setLoading("compareScenario", false);
+    }
+  });
 }
 
 function serializeCompareLeg(leg: ResearchCompareLegInput) {
@@ -1870,20 +1936,25 @@ function serializeCompareLeg(leg: ResearchCompareLegInput) {
 }
 
 export async function loadSavedResearch() {
-  setLoading("savedResearch", true);
-  try {
-    const response = await getJson<SavedResearchListResponse>("/research/saved");
-    const items = Array.isArray(response.items) ? response.items : [];
-    savedResearchItems.set(items);
-    lastError.set("");
-    return items;
-  } catch (error) {
-    savedResearchItems.set([]);
-    setError(error);
-    return [];
-  } finally {
-    setLoading("savedResearch", false);
-  }
+  return requestCoordinator.run("saved-research", "list", async (signal) => {
+    setLoading("savedResearch", true);
+    try {
+      const response = await getJson<SavedResearchListResponse>("/research/saved", { signal });
+      if (signal.aborted) return [];
+      const items = Array.isArray(response.items) ? response.items : [];
+      savedResearchItems.set(items);
+      lastError.set("");
+      return items;
+    } catch (error) {
+      if (!isAbortError(error)) {
+        savedResearchItems.set([]);
+        setError(error);
+      }
+      return [];
+    } finally {
+      if (requestCoordinator.isCurrent("saved-research", signal)) setLoading("savedResearch", false);
+    }
+  });
 }
 
 export async function saveResearchItem(options: SavedResearchCreateOptions) {
@@ -2716,14 +2787,11 @@ export async function computeRisk(options: RiskComputeOptions) {
     include_monte_carlo: options.includeMonteCarlo ?? true
   };
   const requestKey = stableJson(payload);
-  const existingRequest = riskComputeInflight.get(requestKey);
-  if (existingRequest) {
-    return existingRequest;
-  }
-  const requestPromise = (async () => {
+  return requestCoordinator.run("risk-compute", requestKey, async (signal) => {
     setLoading("risk", true);
     try {
-      const result = await postJson<RiskResult>("/risk/compute", payload);
+      const result = await postJson<RiskResult>("/risk/compute", payload, { signal });
+      if (signal.aborted) return null;
       riskResult.set(result);
       riskSnapshotBasis.set(snapshot);
       riskWorkspaceBasis.set(snapshotWorkspace);
@@ -2731,15 +2799,12 @@ export async function computeRisk(options: RiskComputeOptions) {
       lastError.set("");
       return result;
     } catch (error) {
-      setError(error);
+      if (!isAbortError(error)) setError(error);
       return null;
     } finally {
-      setLoading("risk", false);
-      riskComputeInflight.delete(requestKey);
+      if (requestCoordinator.isCurrent("risk-compute", signal)) setLoading("risk", false);
     }
-  })();
-  riskComputeInflight.set(requestKey, requestPromise);
-  return requestPromise;
+  });
 }
 
 function getCopilotSessionId() {
@@ -3613,17 +3678,21 @@ export async function loadIvUnderlyingHistory(options: { symbol: string; lookbac
   if (current && current.symbol.trim().toUpperCase() !== symbol) {
     ivUnderlyingHistory.set(null);
   }
-  try {
-    const params = new URLSearchParams({
+  const params = new URLSearchParams({
       symbol,
       lookback_days: String(options.lookbackDays ?? 252),
       force_refresh: options.forceRefresh ? "true" : "false"
-    });
-    const history = await getJson<IvUnderlyingHistoryResponse>(`/iv/underlying-history?${params.toString()}`);
-    ivUnderlyingHistory.set(history);
-    return history;
-  } catch (error) {
-    ivUnderlyingHistory.set({
+  });
+  const path = `/iv/underlying-history?${params.toString()}`;
+  return requestCoordinator.run("iv-underlying-history", path, async (signal) => {
+    try {
+      const history = await getJson<IvUnderlyingHistoryResponse>(path, { signal });
+      if (signal.aborted) return null;
+      ivUnderlyingHistory.set(history);
+      return history;
+    } catch (error) {
+      if (isAbortError(error)) return null;
+      ivUnderlyingHistory.set({
       symbol,
       lookback_days: options.lookbackDays ?? 252,
       points: [],
@@ -3634,9 +3703,10 @@ export async function loadIvUnderlyingHistory(options: { symbol: string; lookbac
       retrieved_at: new Date().toISOString(),
       warnings: [error instanceof Error ? error.message : "Underlying price history request failed."],
       transformation_note: null
-    });
-    return null;
-  }
+      });
+      return null;
+    }
+  });
 }
 
 export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
@@ -3716,26 +3786,34 @@ export async function clearPortfolioHistory() {
 }
 
 export async function loadIvSession() {
-  setLoading("ivSession", true);
-  try {
-    const session = await getJson<IvSessionStatus>("/iv/session");
-    ivSession.set(session);
-    ivSurface.update((current) => {
-      if (hasRenderableIvSurface(session.surface)) {
-        return session.surface;
+  return requestCoordinator.run("iv-session", "status", async (signal) => {
+    setLoading("ivSession", true);
+    try {
+      const session = await getJson<IvSessionStatus>("/iv/session", { signal });
+      if (signal.aborted) return null;
+      ivSession.set(session);
+      ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
+      const sessionSymbol = String(session.surface?.symbol || session.active_symbol || "").trim().toUpperCase();
+      const currentHistory = get(ivUnderlyingHistory);
+      const currentHistorySymbol = String(currentHistory?.symbol ?? "").trim().toUpperCase();
+      if (sessionSymbol && (currentHistorySymbol !== sessionSymbol || !currentHistory?.points.length)) {
+        await loadIvUnderlyingHistory({ symbol: sessionSymbol });
       }
-      return current;
-    });
-    const sessionSymbol = session.surface?.symbol || session.active_symbol;
-    if (sessionSymbol) {
-      await loadIvUnderlyingHistory({ symbol: sessionSymbol });
+      if (signal.aborted) return null;
+      lastError.set("");
+      return session;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("iv-session", signal)) setLoading("ivSession", false);
     }
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("ivSession", false);
-  }
+  });
+}
+
+export function cancelIvSessionRequest() {
+  requestCoordinator.cancel("iv-session");
+  requestCoordinator.cancel("iv-underlying-history");
 }
 
 export async function startIvSession(options: IvLoadOptions) {

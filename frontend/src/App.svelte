@@ -19,6 +19,7 @@
   } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
   import { createRiskHandoffController } from "./lib/risk-handoff";
+  import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
   import {
     activeTab,
     analyzeStrategyLab,
@@ -31,6 +32,7 @@
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
+    cancelIvSessionRequest,
     commoditiesWorkspace,
     activeCopilotSession,
     copilotActionDefinitions,
@@ -287,8 +289,9 @@
 
   const restoredWorkspaceState = loadPersistedWorkspaceState();
 
-  let pollHandle: ReturnType<typeof setInterval> | undefined;
-  let ivPollHandle: ReturnType<typeof setInterval> | undefined;
+  let systemStatusPoller: AdaptivePoller | null = null;
+  let providerUsagePoller: AdaptivePoller | null = null;
+  let ivSessionPoller: AdaptivePoller | null = null;
   let workspaceMode: WorkspaceMode | null = restoredWorkspaceState?.workspaceMode ?? null;
   let navigationSearchResetToken = 0;
   let ivRequestedSymbol = "";
@@ -1316,6 +1319,28 @@
   onMount(() => {
     restoreWorkspaceTabOrders();
     void bootstrapApp();
+    systemStatusPoller = createAdaptivePoller({
+      task: async () => Boolean(await refreshSystemStatus()),
+      baseDelayMs: 15_000,
+      maxDelayMs: 120_000,
+      runImmediately: false
+    });
+    providerUsagePoller = createAdaptivePoller({
+      task: async () => Boolean(await loadProviderUsage()),
+      baseDelayMs: 30_000,
+      maxDelayMs: 180_000,
+      runImmediately: false
+    });
+    ivSessionPoller = createAdaptivePoller({
+      task: async () => {
+        const session = await loadIvSession();
+        return { ok: Boolean(session), nextDelayMs: session?.running ? 1_500 : 10_000 };
+      },
+      baseDelayMs: 1_500,
+      maxDelayMs: 30_000,
+      runImmediately: false
+    });
+    systemStatusPoller.start();
     const handleGlobalKeydown = (event: KeyboardEvent) => {
       void handleAppKeydown(event);
     };
@@ -1323,16 +1348,12 @@
       logger: console,
     });
     window.addEventListener("keydown", handleGlobalKeydown);
-    pollHandle = setInterval(() => {
-      void refreshSystemStatus();
-      void loadProviderUsage();
-    }, 5000);
     return () => {
       uninstallExternalLinkHandler();
       window.removeEventListener("keydown", handleGlobalKeydown);
-      if (pollHandle) {
-        clearInterval(pollHandle);
-      }
+      systemStatusPoller?.stop();
+      providerUsagePoller?.stop();
+      ivSessionPoller?.stop();
       stopIvPolling();
     };
   });
@@ -1362,7 +1383,7 @@
     }
   }
 
-  $: {
+  $: if (ivSessionPoller) {
     const shouldPollIv = workspaceMode != null && $activeTab === "iv";
     if (shouldPollIv && !ivPollingActive) {
       ivPollingActive = true;
@@ -1372,6 +1393,11 @@
       ivPollingActive = false;
       stopIvPolling();
     }
+  }
+
+  $: if (providerUsagePoller) {
+    if (settingsOpen) providerUsagePoller.start();
+    else providerUsagePoller.stop();
   }
 
   $: consoleEntries = (() => {
@@ -1614,16 +1640,10 @@
       if (!$researchOverview) {
         await loadResearchOverview();
       }
-      if (equityResearchMode === "saved_equity_research") {
-        await loadSavedResearch();
-      }
       if (!$savedResearchItems.length) {
         await loadSavedResearch();
       }
     } else if (nextTab === "strategy_lab") {
-      if (strategyLabMode === "saved_runs") {
-        await loadSavedResearch();
-      }
       if (!$savedResearchItems.length) {
         await loadSavedResearch();
       }
@@ -1847,19 +1867,12 @@
   }
 
   function startIvPolling() {
-    if (ivPollHandle) {
-      return;
-    }
-    ivPollHandle = setInterval(() => {
-      void loadIvSession();
-    }, 1500);
+    ivSessionPoller?.start();
   }
 
   function stopIvPolling() {
-    if (ivPollHandle) {
-      clearInterval(ivPollHandle);
-      ivPollHandle = undefined;
-    }
+    ivSessionPoller?.stop();
+    cancelIvSessionRequest();
   }
 
   function handleToggleSidebar() {

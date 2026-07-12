@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
+from concurrent.futures import Future
 import math
+from threading import Lock
 from typing import Any
 
 import pandas as pd
@@ -154,8 +156,44 @@ class ResearchService:
         self.provider = provider
         self.saved_store = saved_store
         self._overview_cache: dict[tuple[str, str, str, str, str], ResearchOverviewResult] = {}
+        self._overview_lock = Lock()
+        self._overview_inflight: dict[tuple[str, str, str, str, str], Future[ResearchOverviewResult]] = {}
 
     def overview(self, request: ResearchOverviewRequest) -> ResearchOverviewResult:
+        key_warnings: list[str] = []
+        provider_policy = self._overview_provider_policy(request.provider_policy)
+        universe = self._overview_universe(request.universe_id, key_warnings)
+        timeframe = self._overview_timeframe(request.timeframe, key_warnings)
+        benchmark_symbol = str(request.benchmark_symbol or "").strip().upper() or "SPY"
+        cache_seconds = self._overview_cache_seconds(provider_policy)
+        cache_key = self._overview_cache_key(provider_policy, universe.universe_id, timeframe, benchmark_symbol)
+        with self._overview_lock:
+            future = self._overview_inflight.get(cache_key)
+            if future is not None:
+                owner = False
+            else:
+                owner = True
+            cached = self._get_cached_overview(cache_key, cache_seconds, force_refresh=request.force_refresh)
+            if future is None and cached is not None:
+                return cached
+            if future is None:
+                future = Future()
+                self._overview_inflight[cache_key] = future
+        if not owner:
+            return future.result()
+        try:
+            result = self._compute_overview(request)
+            future.set_result(result)
+            return result
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            with self._overview_lock:
+                if self._overview_inflight.get(cache_key) is future:
+                    self._overview_inflight.pop(cache_key, None)
+
+    def _compute_overview(self, request: ResearchOverviewRequest) -> ResearchOverviewResult:
         warnings: list[str] = []
         retrieved_at = now_utc()
         provider_policy = self._overview_provider_policy(request.provider_policy)
@@ -197,16 +235,31 @@ class ResearchService:
         thin_history_symbols: list[str] = []
         observation_counts: dict[str, int] = {}
 
-        for instrument in universe.instruments:
-            reference = self._overview_reference(instrument)
-            symbol = instrument.normalized_symbol()
-            history_result = self._load_overview_history(
-                reference,
+        references = [self._overview_reference(instrument) for instrument in universe.instruments]
+        bulk_loader = getattr(self.provider, "load_instrument_history_results", None)
+        bulk_histories: dict[str, ResearchHistoryResult] = {}
+        if callable(bulk_loader):
+            bulk_histories = bulk_loader(
+                references,
                 lookback_days,
                 provider_policy=provider_policy,
-                force_refresh=request.force_refresh,
-                cache_seconds=cache_seconds,
+                bypass_cache=request.force_refresh,
+                max_age_seconds=cache_seconds,
             )
+        history_results: list[ResearchHistoryResult] = []
+
+        for instrument, reference in zip(universe.instruments, references):
+            symbol = instrument.normalized_symbol()
+            history_result = bulk_histories.get(symbol) if bulk_histories else None
+            if history_result is None:
+                history_result = self._load_overview_history(
+                    reference,
+                    lookback_days,
+                    provider_policy=provider_policy,
+                    force_refresh=request.force_refresh,
+                    cache_seconds=cache_seconds,
+                )
+            history_results.append(history_result)
             series = history_result.series
             returns = returns_from_price_series(series, lookback_days)
             node_warnings: list[str] = list(history_result.warnings)
@@ -243,7 +296,12 @@ class ResearchService:
                 )
             )
 
-        source_summary = self._provider_history_source_summary(source_provider, history_source_label, freshness_label)
+        source_summary = self._history_results_source_summary(
+            history_results,
+            source_provider,
+            history_source_label,
+            freshness_label,
+        )
         source_provider = source_summary.source_provider
         history_source_label = source_summary.source_label
         freshness_label = source_summary.freshness_label
@@ -319,7 +377,8 @@ class ResearchService:
             coverage_label=universe.coverage_label,
         )
         if cache_seconds > 0:
-            self._overview_cache[cache_key] = result
+            with self._overview_lock:
+                self._overview_cache[cache_key] = result
         return result
 
     def analyze(self, request: ResearchAnalysisRequest) -> ResearchAnalysisResult:
@@ -2006,6 +2065,37 @@ class ResearchService:
             source_label=default_source_label,
             origin="research_service.history_source_summary",
             freshness_label=default_freshness_label,
+        )
+
+    @staticmethod
+    def _history_results_source_summary(
+        rows: list[ResearchHistoryResult],
+        default_source_provider: str,
+        default_source_label: str,
+        default_freshness_label: FreshnessLabel,
+    ) -> ResearchHistoryResult:
+        usable = [row for row in rows if row.series is not None and not row.series.empty]
+        if not usable:
+            return ResearchHistoryResult(
+                series=None,
+                source_provider=default_source_provider,
+                source_label=default_source_label,
+                origin="research_service.history_results_summary",
+                freshness_label=default_freshness_label,
+            )
+        providers = sorted({row.source_provider for row in usable})
+        if len(providers) == 1:
+            representative = usable[0]
+            return replace(representative, series=None, warnings=[])
+        labels = sorted({row.source_label for row in usable})
+        return ResearchHistoryResult(
+            series=None,
+            source_provider="mixed",
+            source_label=f"Mixed listed-market history providers: {', '.join(labels)}",
+            origin="research_service.history_results_summary",
+            freshness_label=FreshnessLabel.HISTORICAL,
+            warnings=["Scope uses more than one listed-market history provider."],
+            transformation_note="Gamma selected the first configured provider with usable daily history for each instrument.",
         )
 
     @staticmethod

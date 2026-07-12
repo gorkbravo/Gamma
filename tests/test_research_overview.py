@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+import sys
+import time
 
 import pandas as pd
 
@@ -11,7 +15,7 @@ from src.models.provenance import FreshnessLabel
 from src.models.research_overview import ResearchOverviewRequest
 from src.services.data_providers import ResearchDataProvider
 from src.services.research_cache import ResearchHistoryCache
-from src.services.research_market_data import ResearchHistoryResult
+from src.services.research_market_data import ResearchHistoryResult, YFinanceListedMarketHistoryProvider
 
 
 class _OverviewProvider:
@@ -255,3 +259,122 @@ def test_research_overview_reports_mixed_history_provider_sources():
     assert result.source_provider == "mixed"
     assert result.history_source_label.startswith("Mixed listed-market history providers")
     assert any("more than one listed-market history provider" in warning for warning in result.warnings)
+
+
+class _BatchHistoryProvider(_FakeHistoryProvider):
+    def __init__(self, provider_id: str, source_label: str, histories: dict[str, pd.Series]) -> None:
+        super().__init__(provider_id, source_label, histories)
+        self.batch_calls = 0
+        self.single_calls = 0
+
+    def load_history(self, instrument: InstrumentReference, lookback_days: int) -> ResearchHistoryResult:
+        self.single_calls += 1
+        return super().load_history(instrument, lookback_days)
+
+    def load_histories(self, instruments, lookback_days: int) -> dict[str, ResearchHistoryResult]:
+        self.batch_calls += 1
+        return {
+            instrument.normalized_symbol(): super(_BatchHistoryProvider, self).load_history(instrument, lookback_days)
+            for instrument in instruments
+        }
+
+
+def test_research_data_provider_batches_universe_and_reuses_cache():
+    idx = pd.date_range("2026-01-02", periods=8, freq="B")
+    batch = _BatchHistoryProvider(
+        "batch",
+        "Batch history",
+        {
+            "AAPL": pd.Series(range(8), index=idx, dtype=float) + 100,
+            "MSFT": pd.Series(range(8), index=idx, dtype=float) + 200,
+        },
+    )
+    provider = _research_data_provider(batch)
+    instruments = [InstrumentReference(symbol="AAPL"), InstrumentReference(symbol="MSFT")]
+
+    first = provider.load_instrument_history_results(instruments, 20, provider_policy="research_overview")
+    second = provider.load_instrument_history_results(instruments, 20, provider_policy="research_overview")
+
+    assert batch.batch_calls == 1
+    assert batch.single_calls == 0
+    assert set(first) == {"AAPL", "MSFT"}
+    assert all(result.series is not None and not result.series.empty for result in first.values())
+    assert all(result.series is not None and not result.series.empty for result in second.values())
+
+
+def test_yfinance_provider_uses_one_bounded_batch(monkeypatch):
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    columns = pd.MultiIndex.from_product([["AAPL", "MSFT"], ["Open", "High", "Low", "Close", "Volume"]])
+    values = []
+    for row in range(len(idx)):
+        values.append([
+            100 + row, 101 + row, 99 + row, 100.5 + row, 1000 + row,
+            200 + row, 201 + row, 199 + row, 200.5 + row, 2000 + row,
+        ])
+    frame = pd.DataFrame(values, index=idx, columns=columns)
+    calls: list[dict] = []
+
+    def download(symbols, **kwargs):
+        calls.append({"symbols": symbols, **kwargs})
+        return frame
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=download))
+    provider = YFinanceListedMarketHistoryProvider()
+    results = provider.load_histories(
+        [InstrumentReference(symbol="AAPL"), InstrumentReference(symbol="MSFT")],
+        20,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["threads"] == 2
+    assert set(results) == {"AAPL", "MSFT"}
+    assert results["AAPL"].origin == "yfinance.download.batch"
+    assert results["MSFT"].series is not None
+
+
+class _SlowOverviewProvider(_OverviewProvider):
+    def __init__(self, histories: dict[str, pd.Series]) -> None:
+        super().__init__(histories)
+        self.history_calls = 0
+        self.benchmark_calls = 0
+        self._counter_lock = Lock()
+
+    def load_instrument_history(self, instrument, lookback_days):
+        with self._counter_lock:
+            self.history_calls += 1
+        time.sleep(0.02)
+        return super().load_instrument_history(instrument, lookback_days)
+
+    def load_benchmark_history(self, symbol, lookback_days, *, base_currency=None, warnings=None):
+        with self._counter_lock:
+            self.benchmark_calls += 1
+        time.sleep(0.02)
+        return super().load_benchmark_history(
+            symbol,
+            lookback_days,
+            base_currency=base_currency,
+            warnings=warnings,
+        )
+
+
+def test_research_overview_single_flight_coalesces_concurrent_requests():
+    idx = pd.date_range("2026-01-02", periods=8, freq="B")
+    provider = _SlowOverviewProvider(
+        {
+            "AAPL": pd.Series(range(8), index=idx, dtype=float) + 100,
+            "MSFT": pd.Series(range(8), index=idx, dtype=float) + 200,
+            "SAP": pd.Series(range(8), index=idx, dtype=float) + 300,
+        }
+    )
+    service = ResearchService(provider)
+    request = ResearchOverviewRequest(universe_id="sample_equities", timeframe="1M", benchmark_symbol="AAPL")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service.overview, request)
+        second = executor.submit(service.overview, request)
+        first_result = first.result(timeout=5)
+        second_result = second.result(timeout=5)
+
+    assert first_result is second_result
+    assert provider.benchmark_calls == 1
+    assert provider.history_calls == 3

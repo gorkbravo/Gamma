@@ -6,9 +6,15 @@ const SESSION_HEADER = "X-Gamma-Session";
 export const API_BASE = rawBase.replace(/\/+$/, "");
 export const WS_BASE = API_BASE.replace(/^http/i, "ws");
 
-export async function getJson<T>(path: string): Promise<T> {
+export interface RequestOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: sessionHeaders()
+    headers: sessionHeaders(),
+    signal: options.signal
   });
   if (!response.ok) {
     throw await httpError(response);
@@ -19,10 +25,13 @@ export async function getJson<T>(path: string): Promise<T> {
 export async function postJson<T>(
   path: string,
   body: unknown,
-  options: { timeoutMs?: number } = {}
+  options: RequestOptions = {}
 ): Promise<T> {
   const timeoutMs = options.timeoutMs;
   const controller = timeoutMs ? new AbortController() : null;
+  const abortFromCaller = () => controller?.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (options.signal?.aborted) abortFromCaller();
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   let response: Response;
   try {
@@ -33,10 +42,10 @@ export async function postJson<T>(
         ...sessionHeaders()
       },
       body: JSON.stringify(body),
-      signal: controller?.signal
+      signal: controller?.signal ?? options.signal
     });
   } catch (error) {
-    if (controller?.signal.aborted) {
+    if (controller?.signal.aborted && !options.signal?.aborted) {
       throw new Error(`Request timed out after ${Math.round((timeoutMs ?? 0) / 1000)}s: ${path}`);
     }
     throw error;
@@ -44,6 +53,7 @@ export async function postJson<T>(
     if (timer != null) {
       clearTimeout(timer);
     }
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
   if (!response.ok) {
     throw await httpError(response);

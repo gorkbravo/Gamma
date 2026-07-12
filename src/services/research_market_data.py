@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Protocol, Sequence
 
 import pandas as pd
 from ib_insync import Contract
@@ -220,6 +220,88 @@ class YFinanceListedMarketHistoryProvider:
                 "when higher-fidelity providers have no usable history."
             ),
         )
+
+    def load_histories(
+        self,
+        instruments: Sequence[InstrumentReference],
+        lookback_days: int,
+    ) -> dict[str, ResearchHistoryResult]:
+        resolved = [(instrument, self._provider_symbol(instrument)) for instrument in instruments]
+        symbols = list(dict.fromkeys(symbol for _instrument, symbol in resolved if symbol))
+        if not symbols:
+            return {}
+        if len(symbols) == 1:
+            instrument = next(instrument for instrument, symbol in resolved if symbol == symbols[0])
+            return {instrument.normalized_symbol(): self.load_history(instrument, lookback_days)}
+        try:
+            import yfinance as yf  # type: ignore[import-not-found]
+        except Exception:
+            return {
+                instrument.normalized_symbol(): ResearchHistoryResult.unavailable(
+                    source_provider=self.provider_id,
+                    source_label=self.source_label,
+                    origin="yfinance.download.batch",
+                    warning="yfinance batch history is configured but the yfinance package is not installed.",
+                )
+                for instrument, _symbol in resolved
+            }
+
+        start = datetime.utcnow().date() - timedelta(days=max(int(lookback_days * 1.8), 30) + 10)
+        try:
+            frame = yf.download(
+                symbols,
+                start=start.isoformat(),
+                progress=False,
+                auto_adjust=True,
+                group_by="ticker",
+                threads=min(8, len(symbols)),
+                timeout=float(self.timeout_seconds),
+            )
+        except Exception as exc:
+            logger.debug("yfinance batch history request failed", exc_info=True)
+            return {
+                instrument.normalized_symbol(): ResearchHistoryResult.unavailable(
+                    source_provider=self.provider_id,
+                    source_label=self.source_label,
+                    origin="yfinance.download.batch",
+                    warning=f"yfinance batch history unavailable for {symbol}: {exc}",
+                )
+                for instrument, symbol in resolved
+            }
+
+        results: dict[str, ResearchHistoryResult] = {}
+        for instrument, provider_symbol in resolved:
+            key = instrument.normalized_symbol()
+            try:
+                symbol_frame = frame[provider_symbol] if isinstance(frame.columns, pd.MultiIndex) else frame
+            except (KeyError, TypeError):
+                symbol_frame = None
+            ohlcv = self._ohlcv_frame(symbol_frame) if symbol_frame is not None else None
+            series = _close_series_from_ohlcv(ohlcv)
+            if series is None or series.empty:
+                results[key] = ResearchHistoryResult.unavailable(
+                    source_provider=self.provider_id,
+                    source_label=self.source_label,
+                    origin="yfinance.download.batch",
+                    warning=f"yfinance batch history unavailable for {provider_symbol}",
+                )
+                continue
+            results[key] = ResearchHistoryResult(
+                series=series.astype(float),
+                source_provider=self.provider_id,
+                source_label=self.source_label,
+                origin="yfinance.download.batch",
+                freshness_label=FreshnessLabel.HISTORICAL,
+                ohlcv=ohlcv,
+                warnings=[
+                    "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context, not institutional quote truth."
+                ],
+                transformation_note=(
+                    "Gamma uses a bounded yfinance batch of adjusted daily histories as read-only overview data; "
+                    "configured fallback providers resolve any missing symbols."
+                ),
+            )
+        return results
 
     @staticmethod
     def _provider_symbol(instrument: InstrumentReference) -> str:
