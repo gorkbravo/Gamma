@@ -21,8 +21,16 @@
     ResearchOverviewLoadOptions
   } from "../lib/stores/app";
   import {
+    SITREP_FOLLOW_UP_STORAGE_KEY,
+    formatSitrepWindowLabel,
+    isSitrepFollowUpSaved,
+    parseSitrepFollowUps,
+    removeSitrepFollowUp,
     resolveSitrepMarketHandoff,
     resolveSitrepTapeHandoff,
+    serializeSitrepFollowUps,
+    toggleSitrepFollowUp,
+    type SitrepFollowUp,
     type SitrepHandoffRequest,
     type SitrepMarketHandoffProfile,
   } from "../lib/view-models/sitrep";
@@ -337,6 +345,23 @@
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit"
+    });
+  }
+
+  function formatDateTimeWithZone(value: string | null | undefined) {
+    if (!value) {
+      return "N/A";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value.slice(0, 16);
+    }
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short"
     });
   }
 
@@ -849,20 +874,11 @@
     return "";
   }
 
-  function buildTapeRows(
-    newsData: NewsEventFeedResponse | null,
+  function buildEventRows(
     macroData: MacroSnapshot | null,
     predictionData: PredictionMarketListResponse | null,
     commodityData: CommodityWorkspaceResponse | null
   ): TapeRow[] {
-    const newsRows: TapeRow[] = (newsData?.items ?? []).slice(0, 6).map((item) => ({
-      id: item.normalized_id,
-      source: item.source_name,
-      tone: "neutral",
-      title: item.title,
-      detail: item.summary ?? item.source_domain ?? item.url,
-      meta: `${item.freshness_label} / ${formatDateTime(item.published_at)}`
-    }));
     const focusRows: TapeRow[] = (macroData?.focus_items ?? []).slice(0, 4).map((item) => ({
       id: item.focus_id,
       source: "Macro",
@@ -915,7 +931,7 @@
         targetMode: "events_cross_domain"
       }
     }));
-    return [...newsRows, ...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 14);
+    return [...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 12);
   }
 
   function buildWhatChangedRows(
@@ -987,6 +1003,135 @@
       .slice(0, 6);
   }
 
+  let followUps: SitrepFollowUp[] = [];
+  let followUpsLoaded = false;
+
+  onMount(() => {
+    followUps = parseSitrepFollowUps(window.localStorage.getItem(SITREP_FOLLOW_UP_STORAGE_KEY));
+    followUpsLoaded = true;
+  });
+
+  $: if (followUpsLoaded && typeof window !== "undefined") {
+    window.localStorage.setItem(SITREP_FOLLOW_UP_STORAGE_KEY, serializeSitrepFollowUps(followUps));
+  }
+
+  function toggleFollowUp(row: TapeRow) {
+    followUps = toggleSitrepFollowUp(followUps, row);
+  }
+
+  function dismissFollowUp(id: string) {
+    followUps = removeSitrepFollowUp(followUps, id);
+  }
+
+  function openFollowUp(item: SitrepFollowUp) {
+    if (item.handoff) {
+      void onOpenHandoff?.(item.handoff);
+    }
+  }
+
+  type ProviderStatusRow = {
+    id: string;
+    domain: string;
+    source: string;
+    freshness: string;
+    asOf: string;
+    warn: boolean;
+  };
+
+  function providerStatusRow(
+    id: string,
+    domain: string,
+    source: string | null | undefined,
+    freshness: string | null | undefined,
+    asOf: string | null | undefined,
+    warn = false
+  ): ProviderStatusRow {
+    return {
+      id,
+      domain,
+      source: (source ?? "").trim() || "N/A",
+      freshness: ((freshness ?? "").trim() || "N/A").toUpperCase(),
+      asOf: asOf ? formatDateTime(asOf) : "N/A",
+      warn
+    };
+  }
+
+  function buildProviderStatusRows(
+    indicesData: ResearchOverviewResponse | null,
+    overviewData: ResearchOverviewResponse | null,
+    macroData: MacroSnapshot | null,
+    commodityData: CommodityWorkspaceResponse | null,
+    predictionData: PredictionMarketListResponse | null,
+    newsData: NewsEventFeedResponse | null,
+    windowLabel: string
+  ): ProviderStatusRow[] {
+    const rows: ProviderStatusRow[] = [];
+    rows.push(
+      indicesData
+        ? providerStatusRow("indices", "Indices", indicesData.source_provider, indicesData.freshness_label, indicesData.retrieved_at)
+        : providerStatusRow("indices", "Indices", null, "not loaded", null, true)
+    );
+    rows.push(
+      overviewData
+        ? providerStatusRow("equities", "US Equities", overviewData.source_provider, overviewData.freshness_label, overviewData.retrieved_at)
+        : providerStatusRow("equities", "US Equities", null, "not loaded", null, true)
+    );
+    rows.push(
+      macroData
+        ? providerStatusRow("macro", "FX / Rates", macroData.source_provider, `${windowLabel} window`, macroData.retrieved_at, macroData.warnings.length > 0)
+        : providerStatusRow("macro", "FX / Rates", null, "not loaded", null, true)
+    );
+    if (commodityData) {
+      const coverage = commodityData.coverage;
+      rows.push(
+        providerStatusRow(
+          "commodities",
+          "Commodities",
+          coverage.provider_label || coverage.source_provider,
+          coverage.freshness_label,
+          coverage.as_of ?? commodityData.retrieved_at,
+          coverage.coverage_status === "unavailable"
+        )
+      );
+    } else {
+      rows.push(providerStatusRow("commodities", "Commodities", null, "not loaded", null, true));
+    }
+    if (predictionData) {
+      const venues = predictionData.venues ?? [];
+      const stale = venues.reduce((total, venue) => total + venue.stale_markets + venue.broken_markets, 0);
+      const latest = venues
+        .map((venue) => venue.retrieved_at)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1);
+      rows.push(
+        providerStatusRow(
+          "prediction",
+          "Prediction Mkts",
+          venues.map((venue) => venue.venue).join(" + ") || "prediction markets",
+          stale > 0 ? `${stale} stale` : "open",
+          latest ?? null,
+          stale > 0
+        )
+      );
+    } else {
+      rows.push(providerStatusRow("prediction", "Prediction Mkts", null, "not loaded", null, true));
+    }
+    rows.push(
+      newsData
+        ? providerStatusRow(
+            "news",
+            "News",
+            newsData.source_provider,
+            `${newsData.items.length} items / ${newsData.freshness_label}`,
+            newsData.retrieved_at,
+            newsData.items.length === 0
+          )
+        : providerStatusRow("news", "News", null, "not loaded", null, true)
+    );
+    return rows;
+  }
+
   function isActionableSitrepWarning(value: string | null | undefined) {
     const text = (value ?? "").trim();
     if (!text) return false;
@@ -1024,16 +1169,15 @@
   $: fxRows = buildFxRows(macro);
   $: yieldRows = buildYieldRows(macro);
   $: commodityRows = buildCommodityRows(commodities);
-  $: tapeRows = buildTapeRows(news, macro, prediction, commodities);
+  $: eventRows = buildEventRows(macro, prediction, commodities);
   $: changedRows = buildWhatChangedRows(macro, overview, commodities);
   $: warnings = warningRows(news, overview, macro, commodities, prediction);
+  $: macroWindowLabel = ((macro?.timeframe ?? "3M").trim() || "3M").toUpperCase();
+  $: providerStatusRows = buildProviderStatusRows(indicesOverview, overview, macro, commodities, prediction, news, macroWindowLabel);
   $: asOf = news?.retrieved_at ?? macro?.retrieved_at ?? overview?.retrieved_at ?? commodities?.retrieved_at ?? null;
   $: pricedRatio = overview?.coverage.coverage_ratio ?? null;
   $: highDivergences = (macro?.top_divergences ?? []).filter((item) => item.label === "high").length;
   $: staleMarkets = (prediction?.venues ?? []).reduce((total, venue) => total + venue.stale_markets + venue.broken_markets, 0);
-  $: newsStatus = news
-    ? `${news.source_provider.toUpperCase()} / ${news.items.length} ITEMS / ${news.freshness_label.toUpperCase()}`
-    : "NOT LOADED";
   $: tvStatus =
     bloombergPlaybackStatus === "ready"
       ? "BLOOMBERG HLS"
@@ -1085,7 +1229,7 @@
       <span class:warning={sitrepState !== "LIVE"}>{sitrepState}</span>
       <span>{providerMode}</span>
       {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
-      <span>{formatDateTime(asOf)}</span>
+      <span>{formatDateTimeWithZone(asOf)}</span>
     </div>
   </article>
 
@@ -1115,7 +1259,7 @@
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
+          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("CHG", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("%CHG", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1128,7 +1272,7 @@
               <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
+          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1141,7 +1285,7 @@
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
+          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG (1D)" pctChangeLabel="%CHG (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
       </div>
 
@@ -1155,22 +1299,74 @@
         <div class="tape-list">
           {#if changedRows.length}
             {#each changedRows as row (row.id)}
-              <button
-                type="button"
-                use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'}
-                class="tape-row {row.tone}"
-                class:clickable={hasTapeHandoff(row)}
-                disabled={!hasTapeHandoff(row)}
-                on:click={() => openTapeRow(row)}
-              >
-                <span>{row.source}</span>
-                <strong>{row.title}</strong>
-                <p>{row.detail}</p>
-                <small>{row.meta}</small>
-              </button>
+              <div class="tape-row-wrap">
+                <button
+                  type="button"
+                  use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'}
+                  class="tape-row {row.tone}"
+                  class:clickable={hasTapeHandoff(row)}
+                  disabled={!hasTapeHandoff(row)}
+                  on:click={() => openTapeRow(row)}
+                >
+                  <span>{row.source}</span>
+                  <strong>{row.title}</strong>
+                  <p>{row.detail}</p>
+                  <small>{row.meta}</small>
+                </button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={isSitrepFollowUpSaved(followUps, row.id)}
+                  on:click={() => toggleFollowUp(row)}
+                  aria-pressed={isSitrepFollowUpSaved(followUps, row.id)}
+                  aria-label={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                  title={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                >{isSitrepFollowUpSaved(followUps, row.id) ? "★" : "☆"}</button>
+              </div>
             {/each}
           {:else}
             <p class="empty-state">LOAD MARKET CONTEXT TO POPULATE CHANGE TRIAGE.</p>
+          {/if}
+        </div>
+      </article>
+
+      <article class="panel tape-panel">
+        <div class="table-header">
+          <div class="table-title">
+            <span>Events &amp; Markets</span>
+            <small>macro focus / calendar / prediction markets / commodities</small>
+          </div>
+        </div>
+        <div class="tape-list">
+          {#if eventRows.length}
+            {#each eventRows as row (row.id)}
+              <div class="tape-row-wrap">
+                <button
+                  type="button"
+                  use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'}
+                  class="tape-row {row.tone}"
+                  class:clickable={hasTapeHandoff(row)}
+                  disabled={!hasTapeHandoff(row)}
+                  on:click={() => openTapeRow(row)}
+                >
+                  <span>{row.source}</span>
+                  <strong>{row.title}</strong>
+                  <p>{row.detail}</p>
+                  <small>{row.meta}</small>
+                </button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={isSitrepFollowUpSaved(followUps, row.id)}
+                  on:click={() => toggleFollowUp(row)}
+                  aria-pressed={isSitrepFollowUpSaved(followUps, row.id)}
+                  aria-label={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                  title={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                >{isSitrepFollowUpSaved(followUps, row.id) ? "★" : "☆"}</button>
+              </div>
+            {/each}
+          {:else}
+            <p class="empty-state">LOAD MACRO / PREDICTION / COMMODITY CONTEXT TO POPULATE EVENTS.</p>
           {/if}
         </div>
       </article>
@@ -1228,17 +1424,67 @@
         </div>
       </article>
 
+      <article class="panel tape-panel follow-up-panel">
+        <div class="table-header">
+          <div class="table-title">
+            <span>Follow-Ups</span>
+            <small>{followUps.length ? `${followUps.length} saved / persists locally` : "star triage rows to save them"}</small>
+          </div>
+        </div>
+        <div class="tape-list">
+          {#if followUps.length}
+            {#each followUps as item (item.id)}
+              <div class="tape-row-wrap">
+                <button
+                  type="button"
+                  class="tape-row follow-up-row {item.tone}"
+                  class:clickable={Boolean(item.handoff)}
+                  disabled={!item.handoff}
+                  on:click={() => openFollowUp(item)}
+                  title={item.handoff ? "Open in target tab" : "No handoff target"}
+                >
+                  <span>{item.source}</span>
+                  <strong>{item.title}</strong>
+                  <p>{item.detail}</p>
+                  <small>{shortDate(item.saved_at)}</small>
+                </button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  on:click={() => dismissFollowUp(item.id)}
+                  aria-label="Dismiss follow-up"
+                  title="Dismiss follow-up"
+                >✕</button>
+              </div>
+            {/each}
+          {:else}
+            <p class="empty-state">NO SAVED FOLLOW-UPS.</p>
+          {/if}
+        </div>
+      </article>
+
       <article class="panel provider-panel">
         <div class="table-header">
           <div class="table-title">
             <span>Provider Status</span>
+            <small>source / freshness / as of</small>
           </div>
         </div>
-        <div class="need-list">
-          <div><strong>News</strong><span class:warning={!news || news.items.length === 0}>{newsStatus}</span></div>
-          <div><strong>TV</strong><span class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>{tvStatus}</span></div>
-          <div><strong>Listed Markets</strong><span>{overview?.history_source_label ?? "Research Overview policy"}</span></div>
-          <div><strong>FX / Rates</strong><span>Macro / FRED / IBKR</span></div>
+        <div class="status-list">
+          {#each providerStatusRows as row (row.id)}
+            <div class="status-row" class:warn={row.warn}>
+              <strong>{row.domain}</strong>
+              <span class="status-source">{row.source}</span>
+              <span class="status-freshness" class:warning={row.warn}>{row.freshness}</span>
+              <span class="status-asof">{row.asOf}</span>
+            </div>
+          {/each}
+          <div class="status-row" class:warn={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>
+            <strong>TV</strong>
+            <span class="status-source">Bloomberg HLS</span>
+            <span class="status-freshness" class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>{tvStatus}</span>
+            <span class="status-asof">live stream</span>
+          </div>
         </div>
         {#if warnings.length}
           <ul class="warning-list">
@@ -1543,8 +1789,7 @@
     font-size: var(--text-2xs);
   }
 
-  .tape-row small,
-  .need-list span {
+  .tape-row small {
     color: var(--text-2);
     line-height: 1.35;
   }
@@ -1552,6 +1797,58 @@
   .tape-list {
     display: grid;
     gap: 0;
+  }
+
+  .tape-row-wrap {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--divider);
+    min-width: 0;
+  }
+
+  .tape-row-wrap:last-child {
+    border-bottom: 0;
+  }
+
+  .tape-row-wrap .tape-row {
+    flex: 1;
+    min-width: 0;
+    border-bottom: 0;
+  }
+
+  .tape-pin {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-left: 1px solid var(--divider);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-sm);
+    width: 2rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+
+  .tape-pin:hover,
+  .tape-pin:focus-visible {
+    background: var(--bg-1);
+    color: var(--accent);
+  }
+
+  .tape-pin:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .tape-pin.active {
+    color: var(--accent);
+  }
+
+  .follow-up-panel .tape-list {
+    overflow: auto;
+    max-height: 18rem;
   }
 
   .tape-row {
@@ -1710,21 +2007,47 @@
     color: var(--text-0);
   }
 
-  .need-list {
+  .status-list {
     display: grid;
     gap: 0;
   }
 
-  .need-list div {
+  .status-row {
     display: grid;
-    grid-template-columns: 7.5rem minmax(0, 1fr);
+    grid-template-columns: 7rem minmax(0, 1fr) minmax(5.5rem, max-content) minmax(6rem, max-content);
     gap: var(--space-4);
+    align-items: baseline;
     padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
   }
 
-  .need-list div:last-child {
+  .status-row:last-child {
     border-bottom: 0;
+  }
+
+  .status-row strong {
+    color: var(--text-1);
+    font-size: var(--text-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .status-row span {
+    color: var(--text-2);
+    font-size: var(--text-sm);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-row .status-freshness {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .status-row .status-asof {
+    text-align: right;
   }
 
   .warning-list {
@@ -1791,7 +2114,7 @@
       gap: var(--space-1);
     }
 
-    .need-list div {
+    .status-row {
       grid-template-columns: minmax(0, 1fr);
     }
   }

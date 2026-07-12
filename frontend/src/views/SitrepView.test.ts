@@ -1,6 +1,6 @@
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
-import type { ResearchOverviewResponse } from "../lib/api/types";
+import type { MacroMetric, MacroSnapshot, ResearchOverviewResponse } from "../lib/api/types";
 import SitrepView from "./SitrepView.svelte";
 
 describe("SitrepView", () => {
@@ -31,7 +31,212 @@ describe("SitrepView", () => {
     expect(body).toContain("EWJ / Jun 26");
     expect(body).toContain("-4.2%");
   });
+
+  it("labels FX and rates change columns with the macro window", () => {
+    const { body } = render(SitrepView, {
+      props: {
+        overview: null,
+        indicesOverview: null,
+        news: null,
+        macro: makeMacroSnapshot(),
+        commodities: null,
+        prediction: null,
+        loading: false,
+        onLoadNews: vi.fn(),
+        onLoadOverview: vi.fn(),
+        onLoadIndicesOverview: vi.fn(),
+        onLoadMacro: vi.fn(),
+        onLoadCommodities: vi.fn(),
+        onLoadPrediction: vi.fn(),
+        onOpenHandoff: vi.fn(),
+      },
+    });
+
+    expect(body).toContain("CHG (3M)");
+    expect(body).toContain("%CHG (3M)");
+    expect(body).toContain("Move (3M)");
+    expect(body).toContain("CHG (1D)");
+    expect(body).toContain("%CHG (1D)");
+  });
+
+  it("renders macro events in the Events & Markets panel with a follow-up affordance", () => {
+    const { body } = render(SitrepView, {
+      props: {
+        overview: null,
+        indicesOverview: null,
+        news: null,
+        macro: makeMacroSnapshot(),
+        commodities: null,
+        prediction: null,
+        loading: false,
+        onLoadNews: vi.fn(),
+        onLoadOverview: vi.fn(),
+        onLoadIndicesOverview: vi.fn(),
+        onLoadMacro: vi.fn(),
+        onLoadCommodities: vi.fn(),
+        onLoadPrediction: vi.fn(),
+        onOpenHandoff: vi.fn(),
+      },
+    });
+
+    expect(body).toContain("Events &amp; Markets");
+    expect(body).toContain("CPI release");
+    expect(body).toContain("Save as follow-up");
+    expect(body).toContain("Follow-Ups");
+    expect(body).toContain("NO SAVED FOLLOW-UPS.");
+  });
+
+  it("groups per-domain source, freshness, and as-of in Provider Status", () => {
+    const { body } = render(SitrepView, {
+      props: {
+        overview: null,
+        indicesOverview: makeGlobalIndicesOverview(),
+        news: null,
+        macro: makeMacroSnapshot(),
+        commodities: null,
+        prediction: null,
+        loading: false,
+        onLoadNews: vi.fn(),
+        onLoadOverview: vi.fn(),
+        onLoadIndicesOverview: vi.fn(),
+        onLoadMacro: vi.fn(),
+        onLoadCommodities: vi.fn(),
+        onLoadPrediction: vi.fn(),
+        onOpenHandoff: vi.fn(),
+      },
+    });
+
+    expect(body).toContain("source / freshness / as of");
+    expect(body).toContain("Indices");
+    expect(body).toContain("HISTORICAL");
+    expect(body).toContain("FX / Rates");
+    expect(body).toContain("3M WINDOW");
+    expect(body).toContain("Prediction Mkts");
+    expect(body).toContain("NOT LOADED");
+  });
 });
+
+function makeMacroMetric(overrides: Partial<MacroMetric>): MacroMetric {
+  return {
+    metric_id: "metric",
+    label: "Metric",
+    value: null,
+    display_value: null,
+    unit: null,
+    delta_value: null,
+    delta_display: null,
+    series_id: null,
+    source_provider: "fred",
+    retrieved_at: "2026-07-12T18:00:00Z",
+    origin: "test",
+    transformation_note: null,
+    comparison_region: null,
+    comparison_label: null,
+    comparison_value: null,
+    comparison_display_value: null,
+    comparison_delta_value: null,
+    comparison_delta_display: null,
+    gap_value: null,
+    gap_display: null,
+    ...overrides,
+  };
+}
+
+function makeMacroSnapshot(): MacroSnapshot {
+  return {
+    region: "US",
+    timeframe: "3M",
+    theme: "all",
+    comparison_region: null,
+    available_regions: ["US"],
+    available_timeframes: ["3M"],
+    available_themes: ["all"],
+    focus_items: [],
+    snapshot_cards: [
+      {
+        card_id: "fx-card",
+        title: "FX",
+        subtitle: null,
+        summary: "FX context",
+        mode_target: "snapshot",
+        target_theme: null,
+        metrics: [
+          makeMacroMetric({
+            metric_id: "fx-eurusd",
+            label: "EUR/USD",
+            series_id: "fx-eurusd",
+            value: 1.141,
+            display_value: "1.141",
+            delta_value: 0.012,
+            delta_display: "+0.012",
+            source_provider: "ibkr",
+          }),
+        ],
+        linked_markets: [],
+        source_provider: "fred",
+        retrieved_at: "2026-07-12T18:00:00Z",
+        origin: "test",
+        transformation_note: null,
+      },
+    ],
+    rates_policy: {
+      headline: "Rates",
+      summary: "Curve context",
+      policy_metrics: [],
+      curve_nodes: [
+        {
+          tenor: "2Y",
+          current_value: 4.13,
+          prior_value: 3.78,
+          change_bps: 35,
+          source_provider: "treasury",
+          retrieved_at: "2026-07-12T18:00:00Z",
+          origin: "test",
+          transformation_note: null,
+        },
+      ],
+      real_yield_metrics: [],
+      events: [],
+      linked_markets: [],
+      path_headline: null,
+      path_summary: null,
+      path_metrics: [],
+      path_research_focus: null,
+      meeting_path: null,
+      market_alignment_label: null,
+      market_alignment_summary: null,
+      source_provider: "treasury",
+      retrieved_at: "2026-07-12T18:00:00Z",
+      origin: "test",
+      transformation_note: null,
+      comparison_region: null,
+      comparison_summary: null,
+    },
+    cross_asset: [],
+    top_divergences: [],
+    event_studies: [],
+    upcoming_events: [
+      {
+        event_id: "evt-cpi",
+        title: "CPI release",
+        category: "inflation",
+        region: "US",
+        scheduled_at: "2026-07-15T12:30:00Z",
+        relative_label: "in 3d",
+        importance: "high",
+        source_provider: "sample",
+        retrieved_at: "2026-07-12T18:00:00Z",
+        origin: "test",
+        transformation_note: null,
+      },
+    ],
+    warnings: [],
+    source_provider: "fred",
+    retrieved_at: "2026-07-12T18:00:00Z",
+    origin: "test",
+    transformation_note: null,
+  };
+}
 
 function makeGlobalIndicesOverview(): ResearchOverviewResponse {
   return {

@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  SITREP_FOLLOW_UP_LIMIT,
+  formatSitrepWindowLabel,
+  isSitrepFollowUpSaved,
+  parseSitrepFollowUps,
+  removeSitrepFollowUp,
   resolveSitrepMarketHandoff,
   resolveSitrepTapeHandoff,
+  serializeSitrepFollowUps,
+  toggleSitrepFollowUp,
+  type SitrepFollowUp,
   type SitrepHandoffRequest,
   type SitrepMarketHandoffProfile,
   type SitrepMarketHandoffRow,
@@ -101,5 +109,95 @@ describe("sitrep handoff view model", () => {
     };
 
     expect(resolveSitrepTapeHandoff(row)).toEqual(row.handoff);
+  });
+});
+
+describe("sitrep follow-ups", () => {
+  const tapeRow: SitrepTapeHandoffRow = {
+    id: "evt-cpi",
+    source: "Event",
+    tone: "warning",
+    title: "CPI release",
+    detail: "Inflation / US",
+    meta: "in 3d",
+    handoff: { targetTab: "macro", targetMode: "events_regimes" },
+  };
+
+  it("saves a row as a follow-up and toggles it back off", () => {
+    const saved = toggleSitrepFollowUp([], tapeRow, "2026-07-12T00:00:00Z");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      id: "evt-cpi",
+      title: "CPI release",
+      handoff: { targetTab: "macro", targetMode: "events_regimes" },
+      saved_at: "2026-07-12T00:00:00Z",
+    });
+    expect(isSitrepFollowUpSaved(saved, "evt-cpi")).toBe(true);
+    expect(toggleSitrepFollowUp(saved, tapeRow)).toHaveLength(0);
+  });
+
+  it("caps the follow-up list at the configured limit", () => {
+    let followUps: SitrepFollowUp[] = [];
+    for (let index = 0; index < SITREP_FOLLOW_UP_LIMIT + 5; index += 1) {
+      followUps = toggleSitrepFollowUp(followUps, { ...tapeRow, id: `row-${index}`, handoff: null });
+    }
+    expect(followUps).toHaveLength(SITREP_FOLLOW_UP_LIMIT);
+    expect(followUps[0].id).toBe(`row-${SITREP_FOLLOW_UP_LIMIT + 4}`);
+  });
+
+  it("removes follow-ups by id", () => {
+    const saved = toggleSitrepFollowUp([], tapeRow, "2026-07-12T00:00:00Z");
+    expect(removeSitrepFollowUp(saved, "evt-cpi")).toHaveLength(0);
+    expect(removeSitrepFollowUp(saved, "missing")).toHaveLength(1);
+  });
+
+  it("round-trips follow-ups through serialization", () => {
+    const saved = toggleSitrepFollowUp([], tapeRow, "2026-07-12T00:00:00Z");
+    const parsed = parseSitrepFollowUps(serializeSitrepFollowUps(saved));
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      id: "evt-cpi",
+      title: "CPI release",
+      detail: "Inflation / US",
+      meta: "in 3d",
+      saved_at: "2026-07-12T00:00:00Z",
+      handoff: { targetTab: "macro", targetMode: "events_regimes" },
+    });
+  });
+
+  it("rejects malformed persisted payloads instead of throwing", () => {
+    expect(parseSitrepFollowUps(null)).toEqual([]);
+    expect(parseSitrepFollowUps("not json")).toEqual([]);
+    expect(parseSitrepFollowUps('{"id":"x"}')).toEqual([]);
+    expect(
+      parseSitrepFollowUps(
+        JSON.stringify([
+          { id: "", title: "no id" },
+          { id: "valid", title: "Valid row", handoff: { targetMode: "snapshot" } },
+          { id: "valid", title: "Duplicate id" },
+          42,
+        ])
+      )
+    ).toEqual([
+      {
+        id: "valid",
+        source: "",
+        tone: "neutral",
+        title: "Valid row",
+        detail: "",
+        meta: "",
+        handoff: null,
+        saved_at: new Date(0).toISOString(),
+      },
+    ]);
+  });
+});
+
+describe("sitrep window labels", () => {
+  it("appends the change window to column labels", () => {
+    expect(formatSitrepWindowLabel("CHG", "3M")).toBe("CHG (3M)");
+    expect(formatSitrepWindowLabel("Move", "3m")).toBe("Move (3M)");
+    expect(formatSitrepWindowLabel("CHG", null)).toBe("CHG");
+    expect(formatSitrepWindowLabel("CHG", "  ")).toBe("CHG");
   });
 });
