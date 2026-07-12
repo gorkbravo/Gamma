@@ -20,6 +20,13 @@
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
   import { createRiskHandoffController } from "./lib/risk-handoff";
   import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
+  import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
+  import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
+  import {
+    loadPersistedWorkspaceState,
+    persistedMode,
+    persistWorkspaceState
+  } from "./lib/shell/workspace-state";
   import {
     activeTab,
     analyzeStrategyLab,
@@ -102,6 +109,7 @@
     portfolioPerformance,
     portfolioSnapshot,
     providerUsage,
+    requestMetrics,
     predictionMarketCalibration,
     predictionMarketDetail,
     predictionMarketHistory,
@@ -228,58 +236,6 @@
     risk: () => import("./views/RiskView.svelte"),
     iv: () => import("./views/IvView.svelte"),
   };
-
-  const WORKSPACE_STATE_STORAGE_KEY = "gamma.workspace.state.v1";
-
-  type PersistedWorkspaceState = {
-    workspaceMode: WorkspaceMode;
-    activeTab: TabId;
-    modes?: Partial<Record<TabId, string>>;
-  };
-
-  function loadPersistedWorkspaceState(): PersistedWorkspaceState | null {
-    if (typeof localStorage === "undefined") {
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(localStorage.getItem(WORKSPACE_STATE_STORAGE_KEY) ?? "null") as Partial<PersistedWorkspaceState> | null;
-      if (
-        !parsed ||
-        (parsed.workspaceMode !== "portfolio" && parsed.workspaceMode !== "research") ||
-        typeof parsed.activeTab !== "string" ||
-        !isWorkspaceTab(parsed.workspaceMode, parsed.activeTab)
-      ) {
-        return null;
-      }
-      return {
-        workspaceMode: parsed.workspaceMode,
-        activeTab: parsed.activeTab,
-        modes: parsed.modes && typeof parsed.modes === "object" ? parsed.modes : {}
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  function persistedMode<T extends string>(state: PersistedWorkspaceState | null, tabId: TabId, fallback: T): T {
-    const modeId = state?.modes?.[tabId];
-    return modeId && getTabModes(tabId).some((mode) => mode.id === modeId) ? (modeId as T) : fallback;
-  }
-
-  function persistWorkspaceState(state: PersistedWorkspaceState | null) {
-    if (typeof localStorage === "undefined") {
-      return;
-    }
-    try {
-      if (!state) {
-        localStorage.removeItem(WORKSPACE_STATE_STORAGE_KEY);
-        return;
-      }
-      localStorage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // Reload recovery is best-effort; live navigation state remains authoritative.
-    }
-  }
 
   type ConsoleEntry = {
     label: string;
@@ -1318,7 +1274,8 @@
 
   onMount(() => {
     restoreWorkspaceTabOrders();
-    void bootstrapApp();
+    markStartupBegin();
+    void bootstrapApp().finally(() => markStartupUsable(workspaceMode == null ? "landing" : $activeTab));
     systemStatusPoller = createAdaptivePoller({
       task: async () => Boolean(await refreshSystemStatus()),
       baseDelayMs: 15_000,
@@ -1372,15 +1329,38 @@
   }
 
   async function bootstrapApp() {
-    const [status] = await Promise.all([
-      refreshSystemStatus(),
-      loadDiagnostics(),
-      loadProviderUsage(),
-      loadCopilotActionDefinitions()
-    ]);
-    if (status?.mock_mode || status?.connection.connected) {
-      await loadPortfolioSnapshot();
-    }
+    const status = await refreshSystemStatus();
+    if (!restoredWorkspaceState) return;
+    await hydrateTab(restoredWorkspaceState.activeTab, status);
+  }
+
+  async function hydrateTab(tab: TabId, status: SystemStatus | null = $systemStatus) {
+    await hydrateActiveWorkspace(tab, status, {
+      portfolio: loadPortfolioSnapshot,
+      sitrep: loadSitrepContext,
+      equityResearch: async () => {
+        await Promise.allSettled([loadResearchOverview(), loadSavedResearch()]);
+      },
+      strategyLab: loadSavedResearch,
+      macro: loadMacroWorkspace,
+      commodities: () => loadCommoditiesWorkspace({ mode: commoditiesMode }),
+      predictionMarkets: loadPredictionMarketScreener,
+      crypto: loadCryptoWorkspace,
+      fundamentals: () => loadFundamentalsSearch({ query: $selectedFundamentalsTicker ?? undefined }),
+      maritime: () => loadMaritimeWorkspace({ mode: maritimeMode }),
+      copilot: handleLoadCopilotWorkspaceState,
+      risk: async () => {
+        if (workspaceMode === "portfolio" && (status?.mock_mode || status?.connection.connected)) {
+          await loadPortfolioSnapshot();
+        } else {
+          await applySharedEquityToTab("risk");
+        }
+      },
+      iv: async () => {
+        const autoLoaded = await loadResearchIvContext();
+        if (!autoLoaded) await loadIvSession();
+      }
+    });
   }
 
   $: if (ivSessionPoller) {
@@ -1478,14 +1458,7 @@
     copilotOpen = false;
     settingsOpen = false;
     activeTab.set(getWorkspaceHomeTab(mode));
-    const tasks: Array<Promise<unknown>> = [loadDiagnostics(), loadProviderUsage()];
-    if (mode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
-      tasks.push(loadPortfolioSnapshot());
-    }
-    if (mode === "research") {
-      tasks.push(loadSitrepContext());
-    }
-    await Promise.allSettled(tasks);
+    await hydrateTab(getWorkspaceHomeTab(mode));
   }
 
   async function switchWorkspace(mode: WorkspaceMode) {
@@ -2394,6 +2367,12 @@
       <StatusRail
         status={$systemStatus}
         providerUsage={$providerUsage}
+        requestMetrics={$requestMetrics}
+        pollingState={{
+          system: true,
+          providerUsage: settingsOpen,
+          iv: ivPollingActive
+        }}
         workspaceMode={workspaceMode}
         busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.researchOverview || $loading.macro || $loading.commodities || $loading.prediction || $loading.ivSession}
         settingsOpen={settingsOpen}

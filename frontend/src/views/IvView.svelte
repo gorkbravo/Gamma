@@ -57,7 +57,7 @@
     type TermCurve,
     type TermCurvePoint,
   } from "../lib/view-models/iv";
-  import Surface3D, { type SurfaceModel } from "../components/Surface3D.svelte";
+  import type { SurfaceModel } from "../components/Surface3D.svelte";
 
   export let mode: OptionsMode = "overview";
   export let status: SystemStatus | null = null;
@@ -95,6 +95,15 @@
     y: 0,
     row: null as ChainRow | null
   };
+  let Surface3DComponent: any = null;
+  let surface3DLoading = false;
+
+  $: if ((mode === "surface" || mode === "distribution") && !Surface3DComponent && !surface3DLoading) {
+    surface3DLoading = true;
+    void import("../components/Surface3D.svelte")
+      .then((module) => { Surface3DComponent = module.default; })
+      .finally(() => { surface3DLoading = false; });
+  }
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
@@ -810,7 +819,8 @@
           <div class="panel-head">
             <h3>IV Surface</h3>
           </div>
-          <Surface3D
+          {#if Surface3DComponent}
+          <svelte:component this={Surface3DComponent}
             strikes={result?.strikes ?? []}
             expiries={result?.expiries ?? []}
             grid={result?.iv_grid ?? []}
@@ -821,6 +831,7 @@
             modelLoading={loading}
             onSurfaceModelChange={chooseSurfaceModel}
           />
+          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
         </article>
 
         <article class="panel table-panel">
@@ -982,7 +993,8 @@
           <div class="panel-head">
             <h3>Implied Probability Surface</h3>
           </div>
-          <Surface3D
+          {#if Surface3DComponent}
+          <svelte:component this={Surface3DComponent}
             strikes={probabilitySurface?.strikes ?? []}
             expiries={probabilitySurface?.expiries ?? []}
             grid={probabilitySurface?.densityGrid ?? []}
@@ -996,6 +1008,7 @@
             formatValue={densityPct}
             emptyMessage="Load a max-depth surface to render the implied probability surface."
           />
+          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
         </article>
 
         <article class="panel probability-slice-panel">

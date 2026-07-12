@@ -620,7 +620,12 @@ def _build_research_history_providers(
             providers.append(
                 trace_provider(
                     YFinanceListedMarketHistoryProvider(
-                        timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0)
+                        timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0),
+                        max_retries=int(os.getenv("YFINANCE_MAX_RETRIES", "2") or 2),
+                        base_backoff_seconds=float(os.getenv("YFINANCE_BACKOFF_SECONDS", "0.25") or 0.25),
+                        max_backoff_seconds=float(os.getenv("YFINANCE_MAX_BACKOFF_SECONDS", "2") or 2.0),
+                        circuit_rate_limit_threshold=int(os.getenv("YFINANCE_CIRCUIT_THRESHOLD", "3") or 3),
+                        circuit_cooldown_seconds=float(os.getenv("YFINANCE_CIRCUIT_COOLDOWN_SECONDS", "30") or 30.0),
                     ),
                     provider_usage,
                     endpoint_prefix="research_history",

@@ -1,3 +1,5 @@
+import { recordRequestMetric } from "./request-metrics";
+
 export function isAbortError(error: unknown): boolean {
   return typeof DOMException !== "undefined" && error instanceof DOMException
     ? error.name === "AbortError"
@@ -21,9 +23,13 @@ export class RequestCoordinator {
   run<T>(scope: string, key: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const current = this.active.get(scope) as ActiveRequest<T> | undefined;
     if (current?.key === key) {
+      recordRequestMetric(key, "coalesced");
       return current.promise;
     }
-    current?.controller.abort();
+    if (current) {
+      recordRequestMetric(current.key, "cancelled");
+      current.controller.abort();
+    }
 
     const controller = new AbortController();
     const request: ActiveRequest<T> = {
@@ -42,6 +48,7 @@ export class RequestCoordinator {
 
   cancel(scope: string): void {
     const current = this.active.get(scope);
+    if (current) recordRequestMetric(current.key, "cancelled");
     current?.controller.abort();
     if (current && this.active.get(scope) === current) {
       this.active.delete(scope);

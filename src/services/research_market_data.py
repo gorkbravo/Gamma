@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+import random
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 import pandas as pd
 from ib_insync import Contract
@@ -20,6 +23,25 @@ logger = logging.getLogger(__name__)
 
 
 _CLASS_SHARE_SYMBOL_RE = re.compile(r"^([A-Z0-9]+)[-.]([A-Z]{1,2})$")
+
+
+class YFinanceCircuitOpenError(RuntimeError):
+    pass
+
+
+def is_yfinance_rate_limit_error(error: BaseException) -> bool:
+    text = f"{error.__class__.__name__}: {error}".lower()
+    return any(token in text for token in ("429", "too many requests", "rate limit", "ratelimit"))
+
+
+def is_retryable_yfinance_error(error: BaseException) -> bool:
+    if is_yfinance_rate_limit_error(error):
+        return True
+    text = f"{error.__class__.__name__}: {error}".lower()
+    return any(token in text for token in (
+        "timeout", "timed out", "connection reset", "connection aborted",
+        "temporarily unavailable", "bad gateway", "service unavailable", " 502", " 503", " 504"
+    ))
 
 
 @dataclass(frozen=True)
@@ -152,6 +174,17 @@ class IbkrListedMarketHistoryProvider:
 @dataclass
 class YFinanceListedMarketHistoryProvider:
     timeout_seconds: float = 10.0
+    max_retries: int = 2
+    base_backoff_seconds: float = 0.25
+    max_backoff_seconds: float = 2.0
+    circuit_rate_limit_threshold: int = 3
+    circuit_cooldown_seconds: float = 30.0
+    sleep: Callable[[float], None] = time.sleep
+    monotonic: Callable[[], float] = time.monotonic
+    jitter: Callable[[float, float], float] = random.uniform
+    _consecutive_rate_limits: int = field(default=0, init=False, repr=False)
+    _circuit_open_until: float = field(default=0.0, init=False, repr=False)
+    _state_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     provider_id: str = "yfinance"
     source_label: str = "Yahoo Finance/yfinance daily history"
@@ -177,7 +210,8 @@ class YFinanceListedMarketHistoryProvider:
 
         start = datetime.utcnow().date() - timedelta(days=max(int(lookback_days * 1.8), 30) + 10)
         try:
-            frame = yf.download(
+            frame, resilience_warnings = self._download_with_resilience(
+                yf.download,
                 symbol,
                 start=start.isoformat(),
                 progress=False,
@@ -191,7 +225,7 @@ class YFinanceListedMarketHistoryProvider:
                 source_provider=self.provider_id,
                 source_label=self.source_label,
                 origin="yfinance.download",
-                warning=f"yfinance history unavailable for {symbol}: {exc}",
+                warning=self._failure_warning(symbol, exc),
             )
 
         ohlcv = self._ohlcv_frame(frame)
@@ -213,7 +247,8 @@ class YFinanceListedMarketHistoryProvider:
             freshness_label=FreshnessLabel.HISTORICAL,
             ohlcv=ohlcv,
             warnings=[
-                "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context, not institutional quote truth."
+                "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context, not institutional quote truth.",
+                *resilience_warnings,
             ],
             transformation_note=(
                 "Gamma uses yfinance adjusted daily close history as read-only public overview data or as a fallback "
@@ -248,7 +283,8 @@ class YFinanceListedMarketHistoryProvider:
 
         start = datetime.utcnow().date() - timedelta(days=max(int(lookback_days * 1.8), 30) + 10)
         try:
-            frame = yf.download(
+            frame, resilience_warnings = self._download_with_resilience(
+                yf.download,
                 symbols,
                 start=start.isoformat(),
                 progress=False,
@@ -264,7 +300,7 @@ class YFinanceListedMarketHistoryProvider:
                     source_provider=self.provider_id,
                     source_label=self.source_label,
                     origin="yfinance.download.batch",
-                    warning=f"yfinance batch history unavailable for {symbol}: {exc}",
+                    warning=self._failure_warning(symbol, exc, batch=True),
                 )
                 for instrument, symbol in resolved
             }
@@ -294,7 +330,8 @@ class YFinanceListedMarketHistoryProvider:
                 freshness_label=FreshnessLabel.HISTORICAL,
                 ohlcv=ohlcv,
                 warnings=[
-                    "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context, not institutional quote truth."
+                    "Yahoo Finance/yfinance is an unofficial public source; overview boards use it as live-ish research context, not institutional quote truth.",
+                    *resilience_warnings,
                 ],
                 transformation_note=(
                     "Gamma uses a bounded yfinance batch of adjusted daily histories as read-only overview data; "
@@ -302,6 +339,59 @@ class YFinanceListedMarketHistoryProvider:
                 ),
             )
         return results
+
+    def _download_with_resilience(self, download: Callable[..., object], *args, **kwargs):
+        warnings: list[str] = []
+        with self._state_lock:
+            remaining = self._circuit_open_until - self.monotonic()
+        if remaining > 0:
+            raise YFinanceCircuitOpenError(
+                f"yfinance rate-limit circuit is open for another {remaining:.1f}s; request skipped to avoid a retry storm"
+            )
+
+        attempts = max(0, int(self.max_retries)) + 1
+        for attempt in range(attempts):
+            try:
+                frame = download(*args, **kwargs)
+                with self._state_lock:
+                    self._consecutive_rate_limits = 0
+                    self._circuit_open_until = 0.0
+                return frame, warnings
+            except Exception as exc:
+                rate_limited = is_yfinance_rate_limit_error(exc)
+                if rate_limited:
+                    with self._state_lock:
+                        self._consecutive_rate_limits += 1
+                        if self._consecutive_rate_limits >= max(1, int(self.circuit_rate_limit_threshold)):
+                            self._circuit_open_until = self.monotonic() + max(0.0, float(self.circuit_cooldown_seconds))
+                            raise YFinanceCircuitOpenError(
+                                f"yfinance rate-limit circuit opened for {self.circuit_cooldown_seconds:.0f}s after repeated rate limits"
+                            ) from exc
+                if attempt >= attempts - 1 or not is_retryable_yfinance_error(exc):
+                    raise
+                base = min(
+                    max(0.0, float(self.max_backoff_seconds)),
+                    max(0.0, float(self.base_backoff_seconds)) * (2 ** attempt),
+                )
+                delay = min(
+                    max(0.0, float(self.max_backoff_seconds)),
+                    base + max(0.0, float(self.jitter(0.0, base * 0.25))),
+                )
+                warnings.append(
+                    f"yfinance {'rate limit' if rate_limited else 'temporary failure'}; retry {attempt + 1}/{attempts - 1} after {delay:.2f}s."
+                )
+                if delay > 0:
+                    self.sleep(delay)
+        raise RuntimeError("yfinance retry loop exhausted")
+
+    @staticmethod
+    def _failure_warning(symbol: str, error: BaseException, *, batch: bool = False) -> str:
+        prefix = "yfinance batch history" if batch else "yfinance history"
+        if isinstance(error, YFinanceCircuitOpenError):
+            return f"{prefix} unavailable for {symbol}: {error}. Gamma will use stale cache or the next configured provider when available."
+        if is_yfinance_rate_limit_error(error):
+            return f"{prefix} rate-limited for {symbol}; Gamma will use stale cache or the next configured provider when available."
+        return f"{prefix} unavailable for {symbol}: {error}"
 
     @staticmethod
     def _provider_symbol(instrument: InstrumentReference) -> str:

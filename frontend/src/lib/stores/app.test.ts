@@ -37,6 +37,7 @@ import type {
   SystemStatus
 } from "../api/types";
 import {
+  clearFrontendQueryCache,
   analyzeStrategyLab,
   acceptResolvedStrategyLabHandoff,
   copilotCards,
@@ -119,6 +120,7 @@ import {
 describe("app store orchestration", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    clearFrontendQueryCache();
     systemStatus.set(null);
     diagnostics.set(null);
     providerUsage.set(null);
@@ -986,14 +988,15 @@ describe("app store orchestration", () => {
     expect(get(savedResearchItems).some((saved) => saved.id === "saved-1")).toBe(false);
   });
 
-  it("clears saved research items when the saved endpoint is unavailable", async () => {
-    savedResearchItems.set([makeSavedResearchItem("stale-saved")]);
+  it("preserves saved research items when the saved endpoint is temporarily unavailable", async () => {
+    const staleSavedItem = makeSavedResearchItem("stale-saved");
+    savedResearchItems.set([staleSavedItem]);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(notFound({ detail: "Not Found" })));
 
     const items = await loadSavedResearch();
 
-    expect(items).toEqual([]);
-    expect(get(savedResearchItems)).toEqual([]);
+    expect(items).toEqual([staleSavedItem]);
+    expect(get(savedResearchItems)).toEqual([staleSavedItem]);
     expect(get(lastError)).toContain("404");
   });
 

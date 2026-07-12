@@ -2,6 +2,25 @@ import { get, writable } from "svelte/store";
 import { deleteJson, getJson, getText, patchJson, postJson, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
 import { isAbortError, RequestCoordinator } from "../request-coordinator";
+import { queryCache, stableQueryKey } from "../query-cache";
+export { requestMetrics, resetRequestMetrics } from "../request-metrics";
+export { queryStates } from "../query-cache";
+export function clearFrontendQueryCache() { queryCache.clear(); }
+import { beginLoading, endLoading, lastError, loading, setError, setLoading } from "./runtime";
+export { lastError, loading } from "./runtime";
+import {
+  diagnostics, diagnosticsLog, loadDiagnostics, loadProviderUsage, providerUsage,
+  refreshSystemStatus, setMarketDataMode, systemStatus, toggleConnection
+} from "./system";
+export {
+  diagnostics, diagnosticsLog, loadDiagnostics, loadProviderUsage, providerUsage,
+  refreshSystemStatus, setMarketDataMode, systemStatus, toggleConnection
+} from "./system";
+import {
+  loadPortfolioPerformanceData, loadPortfolioSnapshotData,
+  portfolioHistory, portfolioPerformance, portfolioSnapshot
+} from "./portfolio";
+export { portfolioHistory, portfolioPerformance, portfolioSnapshot } from "./portfolio";
 import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
 import type {
   ActionResponse,
@@ -341,13 +360,6 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
 }
 
 export const activeTab = writable<TabId>("portfolio");
-export const systemStatus = writable<SystemStatus | null>(null);
-export const diagnostics = writable<DiagnosticsResponse | null>(null);
-export const providerUsage = writable<ProviderUsageResponse | null>(null);
-export const diagnosticsLog = writable<string[]>([]);
-export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
-export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
-export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
 export const researchOverview = writable<ResearchOverviewResponse | null>(null);
 export const sitrepIndicesOverview = writable<ResearchOverviewResponse | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
@@ -488,7 +500,6 @@ strategyLabResearchBook.subscribe(persistStrategyLabResearchBook);
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivUnderlyingHistory = writable<IvUnderlyingHistoryResponse | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
-export const lastError = writable<string>("");
 
 export type ChartTheme = "blue" | "amber" | "green";
 export const chartTheme = writable<ChartTheme>("blue");
@@ -513,36 +524,6 @@ export function setFontFamily(family: FontFamily) {
     document.documentElement.style.setProperty("--app-font", `"${family}"`);
   }
 }
-export const loading = writable<Record<string, boolean>>({
-  status: false,
-  diagnostics: false,
-  providerUsage: false,
-  diagnosticsAction: false,
-  portfolio: false,
-  portfolioAction: false,
-  researchOverview: false,
-  research: false,
-  strategyLab: false,
-  strategyLabHandoff: false,
-  compareScenario: false,
-  savedResearch: false,
-  macro: false,
-  macroHistory: false,
-  news: false,
-  commodities: false,
-  maritime: false,
-  prediction: false,
-  predictionDetail: false,
-  crypto: false,
-  cryptoDetail: false,
-  cryptoPortfolio: false,
-  fundamentals: false,
-  fundamentalsSave: false,
-  copilot: false,
-  risk: false,
-  iv: false,
-  ivSession: false
-});
 
 const STRATEGY_LAB_HANDOFF_STORAGE_KEY = "gamma.strategyLab.handoffQueue.v1";
 // Restored handoffs older than this are grouped as an earlier session instead of
@@ -606,8 +587,6 @@ function isStrategyLabHandoffQueueItem(value: unknown): value is StrategyLabHand
 export const strategyLabHandoffQueue = writable<StrategyLabHandoffQueueItem[]>(loadPersistedStrategyLabHandoffQueue());
 strategyLabHandoffQueue.subscribe(persistStrategyLabHandoffQueue);
 
-const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
-const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
 const requestCoordinator = new RequestCoordinator();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = [
   "fx-eurusd", "fx-gbpusd", "fx-eurgbp", "fx-eurchf", "fx-usdjpy", "fx-usdchf", "fx-usdcnh",
@@ -633,25 +612,6 @@ const MACRO_COMPARISON_SERIES: Record<string, string> = {
   "eu-hicp-yoy": "us-cpi-yoy",
   "eu-eurusd": "us-dollar-broad"
 };
-
-function setLoading(key: string, value: boolean) {
-  loading.update((current) => ({ ...current, [key]: value }));
-}
-
-const loadingActivityCounts = new Map<string, number>();
-
-function beginLoading(key: string) {
-  const next = (loadingActivityCounts.get(key) ?? 0) + 1;
-  loadingActivityCounts.set(key, next);
-  setLoading(key, true);
-}
-
-function endLoading(key: string) {
-  const next = Math.max(0, (loadingActivityCounts.get(key) ?? 1) - 1);
-  if (next === 0) loadingActivityCounts.delete(key);
-  else loadingActivityCounts.set(key, next);
-  setLoading(key, next > 0);
-}
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== "object") {
@@ -724,10 +684,6 @@ export function setMacroContext(nextContext: Partial<MacroContextState>) {
 export function setRiskWorkspaceMode(mode: string) {
   riskWorkspaceMode.set(mode);
   resetCopilotCard("risk");
-}
-
-function setError(error: unknown) {
-  lastError.set(error instanceof Error ? error.message : String(error));
 }
 
 function errorMessage(error: unknown) {
@@ -1262,100 +1218,6 @@ function appendCopilotThreadResult(
   }));
 }
 
-export async function refreshSystemStatus() {
-  return requestCoordinator.run("system-status", "status", async (signal) => {
-    setLoading("status", true);
-    try {
-      const nextStatus = await getJson<SystemStatus>("/system/status", { signal });
-      if (signal.aborted) return null;
-      systemStatus.set(nextStatus);
-      lastError.set("");
-      return nextStatus;
-    } catch (error) {
-      if (!isAbortError(error)) setError(error);
-      return null;
-    } finally {
-      if (requestCoordinator.isCurrent("system-status", signal)) setLoading("status", false);
-    }
-  });
-}
-
-export async function loadDiagnostics() {
-  setLoading("diagnostics", true);
-  try {
-    diagnostics.set(await getJson<DiagnosticsResponse>("/diagnostics"));
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("diagnostics", false);
-  }
-}
-
-export async function loadProviderUsage() {
-  return requestCoordinator.run("provider-usage", "provider-usage", async (signal) => {
-    setLoading("providerUsage", true);
-    try {
-      const response = await getJson<ProviderUsageResponse>("/system/provider-usage", { signal });
-      if (signal.aborted) return null;
-      providerUsage.set(response);
-      lastError.set("");
-      return response;
-    } catch (error) {
-      if (!isAbortError(error)) setError(error);
-      return null;
-    } finally {
-      if (requestCoordinator.isCurrent("provider-usage", signal)) setLoading("providerUsage", false);
-    }
-  });
-}
-
-export async function toggleConnection() {
-  setLoading("status", true);
-  try {
-    const nextStatus = await postJson<SystemStatus>("/system/connection/toggle", {});
-    systemStatus.set(nextStatus);
-    diagnostics.update((current) =>
-      current == null
-        ? current
-        : {
-            ...current,
-            connection: nextStatus.connection
-          }
-    );
-    lastError.set("");
-    return nextStatus;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("status", false);
-  }
-}
-
-export async function setMarketDataMode(mode: string) {
-  setLoading("status", true);
-  try {
-    const nextStatus = await postJson<SystemStatus>("/system/market-data-mode", {
-      market_data_mode: mode
-    });
-    systemStatus.set(nextStatus);
-    diagnostics.update((current) =>
-      current == null
-        ? current
-        : {
-            ...current,
-            market_data_mode: nextStatus.market_data_mode
-          }
-    );
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("status", false);
-  }
-}
-
 export async function setBaseCurrency(currency: string) {
   setLoading("status", true);
   try {
@@ -1403,51 +1265,8 @@ export async function setBaseCurrency(currency: string) {
 }
 
 export async function loadPortfolioSnapshot() {
-  setLoading("portfolio", true);
-  try {
-    const [snapshotResult, historyResult] = await Promise.allSettled([
-      getJson<PortfolioSnapshot>("/portfolio/snapshot"),
-      getJson<PortfolioHistoryResponse>("/portfolio/history")
-    ]);
-
-    const errors: unknown[] = [];
-
-    if (snapshotResult.status === "fulfilled") {
-      portfolioSnapshot.set(snapshotResult.value);
-      const performanceResult = await Promise.allSettled([
-        postJson<PortfolioPerformanceResponse>("/portfolio/performance", {
-          snapshot: snapshotResult.value,
-          benchmark_symbol: "SPY",
-          lookback_days: 252
-        })
-      ]);
-      const performance = performanceResult[0];
-      if (performance.status === "fulfilled") {
-        portfolioPerformance.set(performance.value);
-      } else {
-        errors.push(performance.reason);
-      }
-    } else {
-      errors.push(snapshotResult.reason);
-    }
-
-    if (historyResult.status === "fulfilled") {
-      portfolioHistory.set(historyResult.value);
-    } else {
-      errors.push(historyResult.reason);
-    }
-
-    if (errors.length === 0) {
-      resetCopilotCard("portfolio");
-      lastError.set("");
-    } else {
-      setError(errors[0]);
-    }
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("portfolio", false);
-  }
+  const loaded = await loadPortfolioSnapshotData();
+  if (loaded) resetCopilotCard("portfolio");
 }
 
 export async function loadPortfolioPerformance(options?: {
@@ -1455,27 +1274,8 @@ export async function loadPortfolioPerformance(options?: {
   benchmarkSymbol?: string;
   lookbackDays?: number;
 }) {
-  const snapshot = options?.snapshot ?? get(portfolioSnapshot);
-  if (!snapshot) {
-    lastError.set("Load a portfolio snapshot before requesting portfolio performance.");
-    return;
-  }
-  setLoading("portfolio", true);
-  try {
-    portfolioPerformance.set(
-      await postJson<PortfolioPerformanceResponse>("/portfolio/performance", {
-        snapshot,
-        benchmark_symbol: options?.benchmarkSymbol ?? "SPY",
-        lookback_days: options?.lookbackDays ?? 252
-      })
-    );
-    resetCopilotCard("portfolio");
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("portfolio", false);
-  }
+  const loaded = await loadPortfolioPerformanceData(options);
+  if (loaded) resetCopilotCard("portfolio");
 }
 
 export async function loadResearchOverview(options: ResearchOverviewLoadOptions = {}) {
@@ -1487,21 +1287,30 @@ export async function loadResearchOverview(options: ResearchOverviewLoadOptions 
   });
   if (options.forceRefresh) params.set("force_refresh", "true");
   const path = `/research/overview?${params.toString()}`;
-  return requestCoordinator.run("research-overview", path, async (signal) => {
-    beginLoading("researchOverview");
-    try {
-      const overview = await getJson<ResearchOverviewResponse>(path, { signal });
-      if (signal.aborted) return null;
-      researchOverview.set(overview);
-      lastError.set("");
-      return overview;
-    } catch (error) {
-      if (!isAbortError(error)) setError(error);
-      return null;
-    } finally {
-      endLoading("researchOverview");
-    }
+  const key = stableQueryKey("/research/overview", {
+    universe_id: options.universeId ?? "broad_us_market",
+    timeframe: options.timeframe ?? "3M",
+    benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+    surface: options.surface ?? "research_overview"
   });
+  beginLoading("researchOverview");
+  try {
+    const overview = await queryCache.query<ResearchOverviewResponse>({
+      scope: "research-overview",
+      key,
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<ResearchOverviewResponse>(path, { signal }),
+      onData: (data) => researchOverview.set(data)
+    });
+    lastError.set("");
+    return overview;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return null;
+  } finally {
+    endLoading("researchOverview");
+  }
 }
 
 export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOptions = {}) {
@@ -1513,21 +1322,30 @@ export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOpt
     });
   if (options.forceRefresh) params.set("force_refresh", "true");
   const path = `/research/overview?${params.toString()}`;
-  return requestCoordinator.run("sitrep-indices-overview", path, async (signal) => {
-    beginLoading("researchOverview");
-    try {
-      const overview = await getJson<ResearchOverviewResponse>(path, { signal });
-      if (signal.aborted) return null;
-      sitrepIndicesOverview.set(overview);
-      lastError.set("");
-      return overview;
-    } catch (error) {
-      if (!isAbortError(error)) setError(error);
-      return null;
-    } finally {
-      endLoading("researchOverview");
-    }
+  const key = stableQueryKey("/research/overview", {
+    universe_id: options.universeId ?? "global_indices",
+    timeframe: options.timeframe ?? "3M",
+    benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+    surface: options.surface ?? "sitrep"
   });
+  beginLoading("researchOverview");
+  try {
+    const overview = await queryCache.query<ResearchOverviewResponse>({
+      scope: "sitrep-indices-overview",
+      key,
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<ResearchOverviewResponse>(path, { signal }),
+      onData: (data) => sitrepIndicesOverview.set(data)
+    });
+    lastError.set("");
+    return overview;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return null;
+  } finally {
+    endLoading("researchOverview");
+  }
 }
 
 export async function loadNewsFeed(options: { limit?: number; forceRefresh?: boolean } = {}) {
@@ -1936,25 +1754,23 @@ function serializeCompareLeg(leg: ResearchCompareLegInput) {
 }
 
 export async function loadSavedResearch() {
-  return requestCoordinator.run("saved-research", "list", async (signal) => {
-    setLoading("savedResearch", true);
-    try {
-      const response = await getJson<SavedResearchListResponse>("/research/saved", { signal });
-      if (signal.aborted) return [];
-      const items = Array.isArray(response.items) ? response.items : [];
-      savedResearchItems.set(items);
-      lastError.set("");
-      return items;
-    } catch (error) {
-      if (!isAbortError(error)) {
-        savedResearchItems.set([]);
-        setError(error);
-      }
-      return [];
-    } finally {
-      if (requestCoordinator.isCurrent("saved-research", signal)) setLoading("savedResearch", false);
-    }
-  });
+  beginLoading("savedResearch");
+  try {
+    const response = await queryCache.query<SavedResearchListResponse>({
+      scope: "saved-research",
+      key: "/research/saved",
+      staleTimeMs: 60_000,
+      fetcher: (signal) => getJson<SavedResearchListResponse>("/research/saved", { signal }),
+      onData: (data) => savedResearchItems.set(Array.isArray(data.items) ? data.items : [])
+    });
+    lastError.set("");
+    return Array.isArray(response.items) ? response.items : [];
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return get(savedResearchItems);
+  } finally {
+    endLoading("savedResearch");
+  }
 }
 
 export async function saveResearchItem(options: SavedResearchCreateOptions) {
@@ -1971,6 +1787,7 @@ export async function saveResearchItem(options: SavedResearchCreateOptions) {
       transformation_note: options.transformationNote ?? null
     });
     savedResearchItems.update((current) => [item, ...current.filter((existing) => existing.id !== item.id)]);
+    queryCache.invalidate("/research/saved");
     lastError.set("");
     return item;
   } catch (error) {
@@ -1987,6 +1804,7 @@ export async function deleteSavedResearchItem(itemId: string) {
     const response = await deleteJson<SavedResearchDeleteResponse>(`/research/saved/${encodeURIComponent(itemId)}`);
     if (response.success) {
       savedResearchItems.update((current) => current.filter((item) => item.id !== itemId));
+      queryCache.invalidate("/research/saved");
     }
     lastError.set("");
     return response.success;
@@ -2071,24 +1889,36 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
     resetCopilotCard("macro");
   }
   const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
-  const requestKey = JSON.stringify(payload);
-  const existingRequest = macroWorkspaceInflight.get(requestKey);
-  if (existingRequest) {
-    return existingRequest;
-  }
+  const requestKey = stableQueryKey("/macro/workspace", payload);
   const requestPromise = (async () => {
-    setLoading("macro", true);
+    beginLoading("macro");
     try {
-      const [snapshot, divergences, events] = await Promise.all([
-        postJson<MacroSnapshot>("/macro/snapshot", payload),
-        postJson<MacroDivergenceListResponse>("/macro/divergences", payload),
-        getJson<MacroEventsResponse>(
-          `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
-        )
-        ]);
-        macroSnapshot.set(snapshot);
-        macroDivergences.set(divergences);
-        macroEvents.set(events);
+      const bundle = await queryCache.query<{
+        snapshot: MacroSnapshot;
+        divergences: MacroDivergenceListResponse;
+        events: MacroEventsResponse;
+      }>({
+        scope: "macro-workspace",
+        key: requestKey,
+        staleTimeMs: 10 * 60_000,
+        forceRefresh: options.forceRefresh,
+        fetcher: async (signal) => {
+          const [snapshot, divergences, events] = await Promise.all([
+            postJson<MacroSnapshot>("/macro/snapshot", payload, { signal }),
+            postJson<MacroDivergenceListResponse>("/macro/divergences", payload, { signal }),
+            getJson<MacroEventsResponse>(
+              `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`,
+              { signal }
+            )
+          ]);
+          return { snapshot, divergences, events };
+        },
+        onData: ({ snapshot, divergences, events }) => {
+          macroSnapshot.set(snapshot);
+          macroDivergences.set(divergences);
+          macroEvents.set(events);
+        }
+      });
         const primarySeries = seriesForMacroMode(nextContext);
         if (primarySeries.length) {
           await prefetchMacroSeries(primarySeries, {
@@ -2110,16 +1940,14 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
           });
         }
         lastError.set("");
-        return snapshot;
+        return bundle.snapshot;
       } catch (error) {
       setError(error);
       return null;
     } finally {
-      setLoading("macro", false);
-      macroWorkspaceInflight.delete(requestKey);
+      endLoading("macro");
     }
   })();
-  macroWorkspaceInflight.set(requestKey, requestPromise);
   return requestPromise;
 }
 
@@ -2143,25 +1971,35 @@ export async function loadMaritimeWorkspace(options: MaritimeLoadOptions = {}) {
 }
 
 export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOptions = {}) {
-  setLoading("commodities", true);
+  beginLoading("commodities");
   try {
     const current = get(commoditiesWorkspace);
     const mode = options.mode ?? current?.mode ?? "overview";
-    const response = await postJson<CommodityWorkspaceResponse>("/commodities/workspace", {
+    const payload = {
       mode,
       selected_instrument_id:
         options.selectedInstrumentId ?? resolveCommodityInstrumentForMode(current, mode) ?? "wti",
       force_refresh: options.forceRefresh ?? false
+    };
+    const response = await queryCache.query<CommodityWorkspaceResponse>({
+      scope: "commodities-workspace",
+      key: stableQueryKey("/commodities/workspace", {
+        mode: payload.mode,
+        selected_instrument_id: payload.selected_instrument_id
+      }),
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => postJson<CommodityWorkspaceResponse>("/commodities/workspace", payload, { signal }),
+      onData: (data) => commoditiesWorkspace.set(data)
     });
-    commoditiesWorkspace.set(response);
     resetCopilotCard("commodities");
     lastError.set("");
     return response;
   } catch (error) {
-    setError(error);
+    if (!isAbortError(error)) setError(error);
     return null;
   } finally {
-    setLoading("commodities", false);
+    endLoading("commodities");
   }
 }
 
@@ -2216,30 +2054,25 @@ export async function loadMacroSeriesHistory(seriesId: string, options: MacroLoa
   });
   const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
   const cacheKey = macroHistoryKey(seriesId, payload.region, payload.timeframe);
-  const requestKey = `${cacheKey}:${payload.force_refresh ? "refresh" : "cached"}`;
-  const existingRequest = macroSeriesInflight.get(requestKey);
-  if (existingRequest) {
-    return existingRequest;
+  const path = `/macro/series/${encodeURIComponent(seriesId)}/history?region=${encodeURIComponent(payload.region)}&timeframe=${encodeURIComponent(payload.timeframe)}&force_refresh=${payload.force_refresh ? "true" : "false"}`;
+  beginLoading("macroHistory");
+  try {
+    const history = await queryCache.query<MacroSeriesHistory>({
+      scope: `macro-series:${cacheKey}`,
+      key: stableQueryKey(`/macro/series/${seriesId}/history`, { region: payload.region, timeframe: payload.timeframe }),
+      staleTimeMs: 30 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<MacroSeriesHistory>(path, { signal }),
+      onData: (data) => macroSeriesHistories.update((current) => ({ ...current, [cacheKey]: data }))
+    });
+    lastError.set("");
+    return history;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return get(macroSeriesHistories)[cacheKey] ?? null;
+  } finally {
+    endLoading("macroHistory");
   }
-  const requestPromise = (async () => {
-    setLoading("macroHistory", true);
-    try {
-      const history = await getJson<MacroSeriesHistory>(
-        `/macro/series/${encodeURIComponent(seriesId)}/history?region=${encodeURIComponent(payload.region)}&timeframe=${encodeURIComponent(payload.timeframe)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
-      );
-      macroSeriesHistories.update((current) => ({ ...current, [cacheKey]: history }));
-      lastError.set("");
-      return history;
-    } catch (error) {
-      setError(error);
-      return null;
-    } finally {
-      setLoading("macroHistory", false);
-      macroSeriesInflight.delete(requestKey);
-    }
-  })();
-  macroSeriesInflight.set(requestKey, requestPromise);
-  return requestPromise;
 }
 
 export async function loadPredictionMarketScreener(options: PredictionMarketScreenerOptions = {}) {
@@ -3684,15 +3517,22 @@ export async function loadIvUnderlyingHistory(options: { symbol: string; lookbac
       force_refresh: options.forceRefresh ? "true" : "false"
   });
   const path = `/iv/underlying-history?${params.toString()}`;
-  return requestCoordinator.run("iv-underlying-history", path, async (signal) => {
-    try {
-      const history = await getJson<IvUnderlyingHistoryResponse>(path, { signal });
-      if (signal.aborted) return null;
-      ivUnderlyingHistory.set(history);
-      return history;
-    } catch (error) {
-      if (isAbortError(error)) return null;
-      ivUnderlyingHistory.set({
+  const key = stableQueryKey("/iv/underlying-history", {
+    symbol,
+    lookback_days: options.lookbackDays ?? 252
+  });
+  try {
+    return await queryCache.query<IvUnderlyingHistoryResponse>({
+      scope: "iv-underlying-history",
+      key,
+      staleTimeMs: 15 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<IvUnderlyingHistoryResponse>(path, { signal }),
+      onData: (history) => ivUnderlyingHistory.set(history)
+    });
+  } catch (error) {
+    if (isAbortError(error)) return null;
+    if (!get(ivUnderlyingHistory)) ivUnderlyingHistory.set({
       symbol,
       lookback_days: options.lookbackDays ?? 252,
       points: [],
@@ -3703,10 +3543,9 @@ export async function loadIvUnderlyingHistory(options: { symbol: string; lookbac
       retrieved_at: new Date().toISOString(),
       warnings: [error instanceof Error ? error.message : "Underlying price history request failed."],
       transformation_note: null
-      });
-      return null;
-    }
-  });
+    });
+    return null;
+  }
 }
 
 export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
@@ -3813,7 +3652,6 @@ export async function loadIvSession() {
 
 export function cancelIvSessionRequest() {
   requestCoordinator.cancel("iv-session");
-  requestCoordinator.cancel("iv-underlying-history");
 }
 
 export async function startIvSession(options: IvLoadOptions) {

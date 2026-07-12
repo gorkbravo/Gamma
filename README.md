@@ -164,6 +164,8 @@ The current listed-market policy is configured server-side:
 - `SITREP_MARKET_DATA_PROVIDERS=yfinance` for SITREP listed-market boards
 - `RESEARCH_OVERVIEW_CACHE_SECONDS=300` and `SITREP_MARKET_DATA_CACHE_SECONDS=300` for the 5-minute live-ish overview cache
 
+yfinance is treated as an unofficial, rate-limited provider. Gamma performs at most two bounded retries by default with exponential backoff and jitter, opens a short circuit after repeated rate limits, preserves stale history when available, and continues to the next configured provider for symbols that remain unresolved. Tune this with `YFINANCE_MAX_RETRIES`, `YFINANCE_BACKOFF_SECONDS`, `YFINANCE_MAX_BACKOFF_SECONDS`, `YFINANCE_CIRCUIT_THRESHOLD`, and `YFINANCE_CIRCUIT_COOLDOWN_SECONDS`. SITREP cash-index symbols remain on their own provider policy because public Yahoo symbols do not map generically to IBKR index contracts.
+
 `AKShare` is documented and recognized as a future China/Asia provider hook, but Gamma does not ship a live AKShare adapter yet.
 
 ## Currency, Caching, And State
@@ -751,6 +753,8 @@ Backend:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+The test suite forces mock listed-market providers before application runtime import, regardless of local `.env` values. It uses a deterministic offline SPY benchmark derived from bundled sample histories, so tests cannot accidentally contact Yahoo Finance or TWS.
 
 Frontend and desktop checks:
 

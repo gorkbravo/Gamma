@@ -2,9 +2,16 @@
   import type { ProviderUsageHealth, ProviderUsageResponse, ProviderUsageSummary, SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
   import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
+  import type { RequestMetricSnapshot } from "../lib/request-metrics";
 
   export let status: SystemStatus | null = null;
   export let providerUsage: ProviderUsageResponse | null = null;
+  export let requestMetrics: RequestMetricSnapshot | null = null;
+  export let pollingState: { system: boolean; providerUsage: boolean; iv: boolean } = {
+    system: false,
+    providerUsage: false,
+    iv: false
+  };
   export let workspaceMode: WorkspaceMode = "portfolio";
   export let busy = false;
   export let settingsOpen = false;
@@ -95,6 +102,20 @@
           <button class="ghost wide" on:click={onToggleConnection} disabled={busy || !status?.connection.action_enabled}>
             {busy ? "Working..." : status?.connection.action_text ?? "Connect"}
           </button>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-head">
+            <span class="label">Frontend Requests</span>
+            <strong>{requestMetrics?.totals.network_request ?? 0} network</strong>
+          </div>
+          <div class="row"><span>Cache / stale</span><strong>{requestMetrics?.totals.cache_hit ?? 0} / {requestMetrics?.totals.stale_hit ?? 0}</strong></div>
+          <div class="row"><span>Coalesced / cancelled</span><strong>{requestMetrics?.totals.coalesced ?? 0} / {requestMetrics?.totals.cancelled ?? 0}</strong></div>
+          <div class="row"><span>Slow / failed</span><strong>{requestMetrics?.totals.slow_request ?? 0} / {requestMetrics?.totals.network_error ?? 0}</strong></div>
+          {#if requestMetrics?.startup}
+            <div class="row"><span>Startup usable</span><strong>{requestMetrics.startup.durationMs.toFixed(0)} ms / {requestMetrics.startup.networkRequests} req</strong></div>
+          {/if}
+          <small>Polling: system {pollingState.system ? "active" : "paused"}; provider {pollingState.providerUsage ? "active" : "paused"}; Options {pollingState.iv ? "active" : "paused"}. Hidden windows pause adaptive pollers.</small>
         </div>
 
         <div class="settings-section">
