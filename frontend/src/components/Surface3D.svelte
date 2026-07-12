@@ -1,6 +1,13 @@
 <script lang="ts" context="module">
   type RGB = [number, number, number];
   export type SurfaceModel = "linear" | "spline" | "ssvi";
+  export type SurfaceObservedPoint = {
+    strike: number;
+    dte: number;
+    iv: number;
+    rowIndex: number;
+    colIndex: number;
+  };
 
   export const SURFACE_MODEL_OPTIONS: Array<{ id: SurfaceModel; label: string }> = [
     { id: "linear", label: "Line interpolation" },
@@ -61,6 +68,7 @@
   export let strikes: number[] = [];
   export let expiries: string[] = [];
   export let grid: Array<Array<number | null>> = [];
+  export let observedPoints: SurfaceObservedPoint[] = [];
   export let dte: number[] = [];
   export let atmStrikeIndex = -1;
   export let height = 380;
@@ -87,7 +95,7 @@
   let yaw = DEFAULT_YAW;
   let pitch = DEFAULT_PITCH;
   let zoom = DEFAULT_ZOOM;
-  let hoverPick: { sx: number; sy: number; strike: number; dte: number; iv: number } | null = null;
+  let hoverPick: { sx: number; sy: number; strike: number; dte: number; iv: number; source: "observed" | "fit" } | null = null;
 
   let canvas: HTMLCanvasElement;
   let wrap: HTMLDivElement;
@@ -109,16 +117,20 @@
     axis: "#2e353e",
     panel: "#0b0d10",
     accent: "#7aa6c8",
+    observation: "",
+    canvas: "",
   };
 
   $: rows = grid.length;
   $: cols = strikes.length;
   $: hasData = rows >= 2 && cols >= 2;
+  $: showObservedOverlay = surfaceModel !== "linear" && surfaceModel !== "spline" && surfaceModelStatus !== "fallback" && surfaceModelStatus !== "unavailable" && observedPoints.length > 0;
+  $: if (showObservedOverlay && renderMode === "points") renderMode = "surface";
   $: legendGradient = `linear-gradient(90deg, ${SURFACE_COLORMAPS[colormap]
     .map((c, i, arr) => `rgb(${c[0]},${c[1]},${c[2]}) ${(i / (arr.length - 1)) * 100}%`)
     .join(", ")})`;
 
-  $: if (ctx && grid) {
+  $: if (ctx && grid && observedPoints) {
     computeRange();
     scheduleRender();
   }
@@ -128,6 +140,9 @@
     colormap;
     renderMode;
     showGrid;
+    surfaceModel;
+    surfaceModelStatus;
+    showObservedOverlay;
     scheduleRender();
   }
 
@@ -139,6 +154,14 @@
         if (v != null && Number.isFinite(v) && v > 0) {
           if (v < lo) lo = v;
           if (v > hi) hi = v;
+        }
+      }
+    }
+    if (showObservedOverlay) {
+      for (const point of observedPoints) {
+        if (Number.isFinite(point.iv) && point.iv > 0) {
+          if (point.iv < lo) lo = point.iv;
+          if (point.iv > hi) hi = point.iv;
         }
       }
     }
@@ -159,6 +182,8 @@
     theme.axis = get("--panel-strong", theme.axis);
     theme.panel = get("--bg-1", theme.panel);
     theme.accent = get("--accent", theme.accent);
+    theme.observation = get("--text-0", theme.observation || theme.text);
+    theme.canvas = get("--bg-0", theme.canvas || theme.panel);
   }
 
   function gx(j: number) {
@@ -321,6 +346,24 @@
     }
   }
 
+  function drawObservedPoints(project: (x: number, y: number, z: number) => Projected) {
+    if (!ctx || !showObservedOverlay) return;
+    const points = observedPoints
+      .filter((point) => point.rowIndex >= 0 && point.rowIndex < rows && point.colIndex >= 0 && point.colIndex < cols)
+      .map((point) => ({ point, projected: project(gx(point.colIndex), gy(point.iv), gz(point.rowIndex)) }))
+      .sort((left, right) => right.projected.depth - left.projected.depth);
+    const radius = Math.max(2.8, Math.min(cssW, cssH) * 0.009);
+    for (const { projected } of points) {
+      ctx.beginPath();
+      ctx.arc(projected.sx, projected.sy, radius, 0, Math.PI * 2);
+      ctx.fillStyle = theme.observation;
+      ctx.fill();
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = theme.canvas;
+      ctx.stroke();
+    }
+  }
+
   function drawLabels(project: (x: number, y: number, z: number) => Projected) {
     if (!ctx || !strikes.length || !rows) return;
     ctx.fillStyle = theme.text;
@@ -363,11 +406,12 @@
     if (showGrid) drawGrids(project);
     if (renderMode === "points") drawPoints(project);
     else drawSurface(project, renderMode === "wireframe");
+    drawObservedPoints(project);
     drawLabels(project);
     if (hoverPick) {
       ctx.beginPath();
       ctx.arc(hoverPick.sx, hoverPick.sy, 4.5, 0, Math.PI * 2);
-      ctx.fillStyle = theme.accent;
+      ctx.fillStyle = hoverPick.source === "observed" ? theme.observation : theme.accent;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = "rgba(240,242,245,0.85)";
@@ -426,6 +470,18 @@
     const project = makeProjector();
     let best: typeof hoverPick = null;
     let bestDist = 15 * 15;
+    if (showObservedOverlay) {
+      for (const point of observedPoints) {
+        const p = project(gx(point.colIndex), gy(point.iv), gz(point.rowIndex));
+        const dx = p.sx - mx;
+        const dy = p.sy - my;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) {
+          bestDist = d;
+          best = { sx: p.sx, sy: p.sy, strike: point.strike, dte: point.dte, iv: point.iv, source: "observed" };
+        }
+      }
+    }
     for (let i = 0; i < rows; i += 1) {
       for (let j = 0; j < cols; j += 1) {
         const v = grid[i]?.[j];
@@ -436,11 +492,17 @@
         const d = dx * dx + dy * dy;
         if (d < bestDist) {
           bestDist = d;
-          best = { sx: p.sx, sy: p.sy, strike: strikes[j], dte: dte[i] ?? 0, iv: v };
+          best = { sx: p.sx, sy: p.sy, strike: strikes[j], dte: dte[i] ?? 0, iv: v, source: "fit" };
         }
       }
     }
-    if (best?.strike !== hoverPick?.strike || best?.dte !== hoverPick?.dte || !!best !== !!hoverPick) {
+    if (
+      best?.strike !== hoverPick?.strike ||
+      best?.dte !== hoverPick?.dte ||
+      best?.iv !== hoverPick?.iv ||
+      best?.source !== hoverPick?.source ||
+      !!best !== !!hoverPick
+    ) {
       hoverPick = best;
       scheduleRender();
     }
@@ -498,8 +560,10 @@
   <div class="surface3d-toolbar">
     <span class="surface3d-hint">
       {#if hoverPick}
+        <span class="pick-source">{hoverPick.source === "observed" ? "OBS" : "FIT"}</span>
         <strong class="pick">{Math.round(hoverPick.strike)} · {hoverPick.dte}D · {formatValue(hoverPick.iv)}</strong>
       {:else}
+        {#if showObservedOverlay}<span class="fit-key"><i></i>{observedPoints.length} OBS / {surfaceModel.toUpperCase()} FIT</span>{/if}
         Drag to orbit · scroll to zoom
       {/if}
     </span>
@@ -537,7 +601,7 @@
           <select bind:value={renderMode}>
             <option value="surface">Surface</option>
             <option value="wireframe">Wireframe</option>
-            <option value="points">Points</option>
+            {#if !showObservedOverlay}<option value="points">Points</option>{/if}
           </select>
         </label>
         <label class="checkbox">
@@ -597,6 +661,29 @@
   .surface3d-hint .pick {
     color: var(--accent);
     font-weight: 600;
+  }
+
+  .pick-source,
+  .fit-key {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+
+  .pick-source {
+    margin-right: var(--space-2);
+  }
+
+  .fit-key {
+    margin-right: var(--space-2);
+  }
+
+  .fit-key i {
+    display: inline-block;
+    width: var(--space-2);
+    height: var(--space-2);
+    margin-right: var(--space-2);
+    background: var(--text-0);
+    border: 1px solid var(--bg-0);
   }
 
   .gear {

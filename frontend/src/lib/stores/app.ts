@@ -69,6 +69,7 @@ import type {
   MacroSeriesHistory,
   MacroSnapshot,
   NewsEventFeedResponse,
+  SitrepWorkspaceResponse,
   PredictionCalibrationSummary,
   PredictionMarket,
   PredictionMarketListResponse,
@@ -500,6 +501,7 @@ strategyLabResearchBook.subscribe(persistStrategyLabResearchBook);
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivUnderlyingHistory = writable<IvUnderlyingHistoryResponse | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
+export const ivError = writable("");
 
 export type ChartTheme = "blue" | "amber" | "green";
 export const chartTheme = writable<ChartTheme>("blue");
@@ -1345,6 +1347,49 @@ export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOpt
     return null;
   } finally {
     endLoading("researchOverview");
+  }
+}
+
+export async function loadSitrepWorkspace(options: { forceRefresh?: boolean } = {}) {
+  const params = new URLSearchParams();
+  if (options.forceRefresh) params.set("force_refresh", "true");
+  const query = params.toString();
+  const path = query ? `/sitrep/workspace?${query}` : "/sitrep/workspace";
+  beginLoading("researchOverview");
+  beginLoading("macro");
+  beginLoading("commodities");
+  setLoading("prediction", true);
+  setLoading("news", true);
+  try {
+    const workspace = await queryCache.query<SitrepWorkspaceResponse>({
+      scope: "sitrep-workspace",
+      key: stableQueryKey("/sitrep/workspace", {}),
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<SitrepWorkspaceResponse>(path, { signal }),
+      onData: (data) => {
+        if (data.equities_overview) researchOverview.set(data.equities_overview);
+        if (data.indices_overview) sitrepIndicesOverview.set(data.indices_overview);
+        if (data.macro_snapshot) macroSnapshot.set(data.macro_snapshot);
+        if (data.commodities) commoditiesWorkspace.set(data.commodities);
+        if (data.prediction_markets) predictionMarketScreener.set(data.prediction_markets);
+        if (data.news) newsFeed.set(data.news);
+        if (data.section_warnings.length) {
+          console.warn("SITREP workspace sections degraded:", data.section_warnings);
+        }
+      }
+    });
+    lastError.set("");
+    return workspace;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return null;
+  } finally {
+    endLoading("researchOverview");
+    endLoading("macro");
+    endLoading("commodities");
+    setLoading("prediction", false);
+    setLoading("news", false);
   }
 }
 
@@ -3591,10 +3636,16 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
       lastError.set(message);
     }
     resetCopilotCard("iv");
-    if (shouldReplaceSurface || request.preserveExisting === false) {
+    if (hasRenderableIvSurface(surface)) {
+      ivError.set("");
       lastError.set("");
+    } else {
+      const message = surface.warnings[0] ?? surface.messages[0] ?? `No options surface snapshot available for ${request.symbol}.`;
+      ivError.set(message);
+      lastError.set(message);
     }
   } catch (error) {
+    ivError.set(errorMessage(error));
     setError(error);
   } finally {
     setLoading("iv", false);
@@ -3632,17 +3683,24 @@ export async function loadIvSession() {
       if (signal.aborted) return null;
       ivSession.set(session);
       ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
-      const sessionSymbol = String(session.surface?.symbol || session.active_symbol || "").trim().toUpperCase();
+      const sessionHasSurface = hasRenderableIvSurface(session.surface);
+      const sessionSymbol = String(sessionHasSurface ? session.surface?.symbol : "").trim().toUpperCase();
       const currentHistory = get(ivUnderlyingHistory);
       const currentHistorySymbol = String(currentHistory?.symbol ?? "").trim().toUpperCase();
       if (sessionSymbol && (currentHistorySymbol !== sessionSymbol || !currentHistory?.points.length)) {
         await loadIvUnderlyingHistory({ symbol: sessionSymbol });
       }
       if (signal.aborted) return null;
-      lastError.set("");
+      if (sessionHasSurface) {
+        ivError.set("");
+        lastError.set("");
+      }
       return session;
     } catch (error) {
-      if (!isAbortError(error)) setError(error);
+      if (!isAbortError(error)) {
+        ivError.set(errorMessage(error));
+        setError(error);
+      }
       return null;
     } finally {
       if (requestCoordinator.isCurrent("iv-session", signal)) setLoading("ivSession", false);
@@ -3670,8 +3728,10 @@ export async function startIvSession(options: IvLoadOptions) {
       await loadIvUnderlyingHistory({ symbol: sessionSymbol });
     }
     resetCopilotCard("iv");
+    ivError.set("");
     lastError.set("");
   } catch (error) {
+    ivError.set(errorMessage(error));
     setError(error);
   } finally {
     setLoading("ivSession", false);
@@ -3689,8 +3749,10 @@ export async function stopIvSession() {
       await loadIvUnderlyingHistory({ symbol: sessionSymbol });
     }
     resetCopilotCard("iv");
+    ivError.set("");
     lastError.set("");
   } catch (error) {
+    ivError.set(errorMessage(error));
     setError(error);
   } finally {
     setLoading("ivSession", false);

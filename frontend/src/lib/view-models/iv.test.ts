@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { IvSurface, TimeSeriesPoint } from "../api/types";
+import type { IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../api/types";
 import {
   blackScholesPrice,
   blackScholesGreeks,
@@ -12,7 +12,11 @@ import {
   deriveImpliedProbabilitySelection,
   deriveImpliedProbabilitySlice,
   deriveImpliedProbabilitySurface,
+  deriveFittedSmileSamples,
+  deriveIvSurfaceAlerts,
   deriveIvSmile,
+  deriveObservedSurfacePoints,
+  deriveObservedTermStructure,
   deriveOptionPayoffMatrix,
   deriveOverviewSnapshot,
   deriveRealizedVolatility,
@@ -23,8 +27,42 @@ import {
   deriveSurfaceStats,
   deriveTermCurve,
   deriveTermStructure,
+  hasParametricIvFit,
   nearestStrikeIndex,
 } from "./iv";
+
+const connectedStatus: SystemStatus = {
+  healthy: true,
+  app_name: "Gamma",
+  backend: "test",
+  mock_mode: false,
+  base_currency: "USD",
+  market_data_mode: "delayed",
+  connection: {
+    connected: true,
+    status_text: "Connected",
+    action_text: "Disconnect",
+    action_enabled: true,
+    active_account: "TEST",
+  },
+  cached_symbols: [],
+};
+
+const idleSession: IvSessionStatus = {
+  running: false,
+  status_text: "Idle",
+  active_symbol: null,
+  market_data_mode: "delayed",
+  messages: [],
+  surface: makeSurface({
+    snapshot_available: false,
+    spot: null,
+    expiries: [],
+    strikes: [],
+    iv_grid: [],
+    points: 0,
+  }),
+};
 
 function makeSurface(overrides: Partial<IvSurface> = {}): IvSurface {
   return {
@@ -144,6 +182,81 @@ function makeSurface(overrides: Partial<IvSurface> = {}): IvSurface {
 }
 
 describe("options surface view models", () => {
+  it("explains an idle empty surface and names the visible symbol", () => {
+    expect(deriveIvSurfaceAlerts({
+      result: null,
+      session: idleSession,
+      status: connectedStatus,
+      requestedSymbol: "xle",
+    })).toEqual([
+      "No options surface snapshot is available for XLE. The provider session is idle; load the surface and check options entitlements if collection remains unavailable.",
+    ]);
+  });
+
+  it("distinguishes disconnected and collecting empty states", () => {
+    const disconnected = deriveIvSurfaceAlerts({
+      result: null,
+      session: idleSession,
+      status: {
+        ...connectedStatus,
+        connection: { ...connectedStatus.connection, connected: false },
+      },
+      requestedSymbol: "SPY",
+    });
+    const collecting = deriveIvSurfaceAlerts({
+      result: null,
+      session: { ...idleSession, running: true, active_symbol: "QQQ" },
+      status: connectedStatus,
+      requestedSymbol: "",
+    });
+
+    expect(disconnected).toEqual([
+      "IBKR/TWS is disconnected. Connect it before loading an options surface for SPY.",
+    ]);
+    expect(collecting).toEqual([
+      "The QQQ options session is running, but no surface snapshot has been collected yet.",
+    ]);
+  });
+
+  it("preserves provider detail without duplicating messages", () => {
+    const unavailable = makeSurface({
+      snapshot_available: false,
+      spot: null,
+      expiries: [],
+      strikes: [],
+      iv_grid: [],
+      points: 0,
+      warnings: ["No market data entitlement for XLE."],
+      messages: ["No market data entitlement for XLE."],
+    });
+
+    expect(deriveIvSurfaceAlerts({
+      result: unavailable,
+      session: idleSession,
+      status: connectedStatus,
+      requestedSymbol: "XLE",
+    })).toEqual([
+      "No options surface snapshot is available for XLE. The provider session is idle; load the surface and check options entitlements if collection remains unavailable.",
+      "No market data entitlement for XLE.",
+    ]);
+  });
+
+  it("does not render an availability alert while loading or after data arrives", () => {
+    expect(deriveIvSurfaceAlerts({
+      result: null,
+      session: idleSession,
+      status: connectedStatus,
+      requestedSymbol: "SPY",
+      loading: true,
+    })).toEqual([]);
+    expect(deriveIvSurfaceAlerts({
+      result: makeSurface(),
+      session: idleSession,
+      status: connectedStatus,
+      requestedSymbol: "SPY",
+    })).toEqual([]);
+  });
+
   it("derives ATM term and surface diagnostics", () => {
     const surface = makeSurface();
 
@@ -417,6 +530,34 @@ describe("options surface view models", () => {
     }
   });
 
+  it("separates observed smile points from an applied parametric fit", () => {
+    const surface = makeSurface({ surface_model: "ssvi", surface_model_status: "applied" });
+    const rows = deriveChainRows(surface, "20260515");
+    const fitted = deriveFittedSmileSamples(surface, "20260515");
+    const smile = deriveIvSmile(rows, 100, 320, 150, fitted);
+
+    expect(hasParametricIvFit(surface)).toBe(true);
+    expect(hasParametricIvFit({ ...surface, surface_model: "spline" })).toBe(false);
+    expect(hasParametricIvFit({ ...surface, surface_model_status: "fallback" })).toBe(false);
+    expect(smile?.points).toHaveLength(3);
+    expect(smile?.fitPoints).toHaveLength(5);
+    expect(smile?.linePath).toContain(smile!.fitPoints[0].x.toFixed(1));
+  });
+
+  it("derives observed 3D coordinates and observed ATM term points from option pairs", () => {
+    const surface = makeSurface({ surface_model: "ssvi", surface_model_status: "partial" });
+    const observed = deriveObservedSurfacePoints(surface);
+    const observedTerm = deriveObservedTermStructure(surface);
+
+    expect(observed.map((point) => [point.rowIndex, point.colIndex, point.strike])).toEqual([
+      [0, 1, 95],
+      [0, 2, 100],
+      [0, 3, 105],
+    ]);
+    expect(observed.every((point) => point.iv > 0)).toBe(true);
+    expect(observedTerm).toEqual([{ expiry: "20260515", iv: 0.18 }]);
+  });
+
   it("derives an ATM call payoff matrix across price levels and DTE", () => {
     const rows = deriveChainRows(makeSurface(), "20260515");
     const matrix = deriveOptionPayoffMatrix(rows, 100, "call", 24);
@@ -479,6 +620,15 @@ describe("options surface view models", () => {
     expect(curve!.linePath.startsWith("M")).toBe(true);
     expect(curve!.areaPath.endsWith("Z")).toBe(true);
     expect(deriveTermCurve([], 300, 130)).toBeNull();
+  });
+
+  it("projects observed term points separately from the fitted curve", () => {
+    const term = deriveTermStructure(makeSurface());
+    const curve = deriveTermCurve(term, 300, 130, [{ expiry: "20260515", iv: 0.195 }]);
+
+    expect(curve?.observedPoints).toHaveLength(1);
+    expect(curve?.observedPoints[0].iv).toBe(0.195);
+    expect(curve?.points).toHaveLength(3);
   });
 
   it("parses days to expiry from TWS-style expiry strings", () => {

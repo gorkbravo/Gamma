@@ -49,6 +49,7 @@
   export let onLoadMacro: (options?: MacroLoadOptions) => Promise<unknown> | void;
   export let onLoadCommodities: (options?: CommodityWorkspaceLoadOptions) => Promise<unknown> | void;
   export let onLoadPrediction: (options?: PredictionMarketScreenerOptions) => Promise<unknown> | void;
+  export let onLoadWorkspace: (() => Promise<unknown> | void) | null = null;
   export let selectedEquitySymbol: string | null = null;
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | null = null;
   export let onOpenHandoff: ((handoff: SitrepHandoffRequest) => Promise<unknown> | void) | null = null;
@@ -171,6 +172,12 @@
   }
 
   onMount(() => {
+    const missingSection =
+      !overview || !indicesOverview || !macro || !news || !commodities || !prediction;
+    if (onLoadWorkspace && missingSection) {
+      void onLoadWorkspace();
+      return;
+    }
     const tasks: Array<Promise<unknown> | void> = [];
     if (!overview) {
       tasks.push(onLoadOverview({ universeId: "broad_us_market", timeframe: "DoD", benchmarkSymbol: "SPY", surface: "sitrep" }));

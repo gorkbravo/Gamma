@@ -24,6 +24,7 @@ from src.application.provider_capability_registry import (
 )
 from src.application.research_service import ResearchService
 from src.application.risk_service import RiskService
+from src.application.sitrep_service import SitrepService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.models.commodities import (
@@ -125,6 +126,7 @@ class ApplicationRuntime:
     crypto_service: CryptoService
     fundamentals_service: FundamentalsService
     news_service: NewsService
+    sitrep_service: SitrepService
     copilot_service: CopilotService
     risk_service: RiskService
     iv_service: IVService
@@ -351,6 +353,13 @@ def build_runtime(
             for provider in _build_news_providers(live_mode=not bool(mock_mode))
         ]
     )
+    sitrep_service = SitrepService(
+        research_service=research_service,
+        macro_service=macro_service,
+        commodities_service=commodities_service,
+        prediction_market_service=prediction_market_service,
+        news_service=news_service,
+    )
     risk_service = RiskService(
         client,
         market_data,
@@ -408,6 +417,7 @@ def build_runtime(
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
         news_service=news_service,
+        sitrep_service=sitrep_service,
         copilot_service=copilot_service,
         risk_service=risk_service,
         iv_service=iv_service,

@@ -55,6 +55,7 @@ import {
   diagnostics,
   fundamentalsSearch,
   fundamentalsSearchState,
+  ivError,
   ivSession,
   ivSurface,
   lastError,
@@ -92,6 +93,9 @@ import {
   predictionMarketRelated,
   predictionMarketScreener,
   predictionMarketWallet,
+  loadSitrepWorkspace,
+  sitrepIndicesOverview,
+  commoditiesWorkspace,
   researchOverview,
   researchCompareResult,
   researchResult,
@@ -124,6 +128,7 @@ describe("app store orchestration", () => {
     systemStatus.set(null);
     diagnostics.set(null);
     providerUsage.set(null);
+    ivError.set("");
     portfolioSnapshot.set(null);
     portfolioHistory.set(null);
     portfolioPerformance.set(null);
@@ -1595,12 +1600,50 @@ describe("app store orchestration", () => {
       }
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(session)));
+    ivError.set("No market data entitlement for XLE.");
 
     await loadIvSession();
 
     expect(get(ivSession)?.running).toBe(false);
     expect(get(ivSurface)?.symbol).toBe("AAPL");
     expect(get(ivSurface)?.points).toBe(3);
+    expect(get(ivError)).toBe("No market data entitlement for XLE.");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a failed surface-load reason visible across an idle status poll", async () => {
+    ivSurface.set(makeIvSurface({ symbol: "SPY", points: 3 }));
+    const unavailable = {
+      ...makeIvSurface({ symbol: "XLE" }),
+      snapshot_available: false,
+      spot: null,
+      expiries: [],
+      strikes: [],
+      iv_grid: [],
+      points: 0,
+      warnings: ["No market data entitlement for XLE."],
+    };
+    const idle: IvSessionStatus = {
+      running: false,
+      status_text: "Idle",
+      active_symbol: null,
+      market_data_mode: "delayed",
+      messages: [],
+      surface: unavailable,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(unavailable))
+      .mockResolvedValueOnce(ok(idle));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadIvSurface({ symbol: "XLE", depthPreset: "max" });
+    await loadIvSession();
+
+    expect(get(ivSurface)?.symbol).toBe("SPY");
+    expect(get(ivError)).toBe("No market data entitlement for XLE.");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/iv/surface?symbol=XLE");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/iv/session");
   });
 
   it("queues, resolves, accepts, and dismisses Strategy Lab handoffs", async () => {
@@ -2113,6 +2156,51 @@ describe("app store orchestration", () => {
     expect(secondBody.previous_response_id).toBeUndefined();
     expect(get(copilotThreads).synthesis.entries).toHaveLength(1);
     expect(get(copilotThreads).synthesis.entries[0]?.result.response_id).toBe("resp_synthesis_2");
+  });
+
+  it("fans a /sitrep/workspace payload out into the per-domain stores", async () => {
+    researchOverview.set(null);
+    sitrepIndicesOverview.set(null);
+    macroSnapshot.set(null);
+    commoditiesWorkspace.set(null);
+    predictionMarketScreener.set(null);
+    newsFeed.set(null);
+    const workspace = {
+      equities_overview: null,
+      indices_overview: null,
+      macro_snapshot: makeMacroSnapshot(),
+      commodities: null,
+      prediction_markets: { markets: [], venues: [], warnings: [] },
+      news: {
+        items: [],
+        source_provider: "sample_news",
+        retrieved_at: "2026-07-12T18:00:00Z",
+        origin: "test",
+        freshness_label: "mocked",
+        warnings: [],
+        transformation_note: null
+      },
+      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
+      section_warnings: ["SITREP section 'commodities' failed to load: boom"],
+      source_provider: "gamma_sitrep",
+      retrieved_at: "2026-07-12T18:00:00Z",
+      origin: "sitrep_service.workspace",
+      transformation_note: null
+    };
+    const fetchMock = vi.fn().mockResolvedValue(ok(workspace));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadSitrepWorkspace();
+
+    expect(result?.source_provider).toBe("gamma_sitrep");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/sitrep/workspace");
+    expect(get(macroSnapshot)).not.toBeNull();
+    expect(get(newsFeed)?.source_provider).toBe("sample_news");
+    expect(get(predictionMarketScreener)).not.toBeNull();
+    expect(get(researchOverview)).toBeNull();
+    expect(get(sitrepIndicesOverview)).toBeNull();
+    expect(get(commoditiesWorkspace)).toBeNull();
   });
 });
 

@@ -212,6 +212,21 @@ export interface NewsEventFeedResponse {
   transformation_note: string | null;
 }
 
+export interface SitrepWorkspaceResponse {
+  equities_overview: ResearchOverviewResponse | null;
+  indices_overview: ResearchOverviewResponse | null;
+  macro_snapshot: MacroSnapshot | null;
+  commodities: CommodityWorkspaceResponse | null;
+  prediction_markets: PredictionMarketListResponse | null;
+  news: NewsEventFeedResponse | null;
+  sections: string[];
+  section_warnings: string[];
+  source_provider: string;
+  retrieved_at: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export interface TimeSeriesPoint {
   timestamp: string;
   value: number;

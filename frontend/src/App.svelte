@@ -69,6 +69,7 @@
     computeRisk,
     forceAccountSubscribe,
     ivSurface,
+    ivError,
     ivUnderlyingHistory,
     ivSession,
     lastError,
@@ -80,6 +81,7 @@
     loadFundamentalsSearch,
     loadResearchOverview,
     loadSitrepIndicesOverview,
+    loadSitrepWorkspace,
     loadSavedResearch,
     macroContext,
     loadMacroSeriesHistory,
@@ -461,38 +463,9 @@
   }
 
   async function loadSitrepContext(options: { forceRefresh?: boolean } = {}) {
-    await Promise.allSettled([
-      loadNewsFeed({ limit: 25, forceRefresh: options.forceRefresh }),
-      loadResearchOverview({
-        universeId: "broad_us_market",
-        timeframe: "DoD",
-        benchmarkSymbol: "SPY",
-        forceRefresh: options.forceRefresh
-      }),
-      loadSitrepIndicesOverview({
-        universeId: "global_indices",
-        timeframe: "DoD",
-        benchmarkSymbol: "SPY",
-        forceRefresh: options.forceRefresh
-      }),
-      loadMacroWorkspace({
-        region: "US",
-        timeframe: "3M",
-        theme: "all",
-        mode: "snapshot",
-        forceRefresh: options.forceRefresh
-      }),
-      loadCommoditiesWorkspace({
-        mode: "overview",
-        forceRefresh: options.forceRefresh
-      }),
-      loadPredictionMarketScreener({
-        status: "open",
-        sortBy: "research_rank",
-        limit: 12,
-        forceRefresh: options.forceRefresh
-      })
-    ]);
+    // The backend-owned /sitrep/workspace contract composes all six sections
+    // server-side; the store fans them out into the per-domain stores.
+    await loadSitrepWorkspace({ forceRefresh: options.forceRefresh });
   }
 
   const macroModeLabels: Record<MacroContextState["mode"], string> = {
@@ -1621,7 +1594,9 @@
         await loadSavedResearch();
       }
     } else if (nextTab === "macro") {
-      if (!$macroSnapshot) {
+      // A SITREP workspace load fans out the snapshot alone, so check the
+      // divergence/event stores too before skipping the full Macro bundle.
+      if (!$macroSnapshot || !$macroDivergences || !$macroEvents) {
         await loadMacroWorkspace();
       }
     } else if (nextTab === "commodities") {
@@ -1677,6 +1652,15 @@
     if (!autoLoaded) {
       await loadIvSession();
     }
+  }
+
+  async function handleLoadIvSurface(options: Parameters<typeof loadIvSurface>[0]) {
+    if (typeof options !== "string") {
+      ivRequestedSymbol = options.symbol.trim().toUpperCase();
+    } else {
+      ivRequestedSymbol = options.trim().toUpperCase();
+    }
+    await loadIvSurface(options);
   }
 
   async function openStrategyLabFromEquityResearch() {
@@ -2444,6 +2428,7 @@
             onLoadMacro={loadMacroWorkspace}
             onLoadCommodities={loadCommoditiesWorkspace}
             onLoadPrediction={loadPredictionMarketScreener}
+            onLoadWorkspace={loadSitrepWorkspace}
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
             onOpenHandoff={openSitrepHandoff}
@@ -2639,8 +2624,8 @@
             researchPrimarySymbol={$researchResult?.primary_symbol ?? null}
             loading={$loading.iv}
             sessionLoading={$loading.ivSession}
-            errorMessage={$lastError}
-            onLoad={loadIvSurface}
+            errorMessage={$ivError}
+            onLoad={handleLoadIvSurface}
             onStopSession={stopIvSession}
             onSendToCopilot={handleSendToCopilot}
             onSendToStrategyLab={handleStrategyLabHandoff}
