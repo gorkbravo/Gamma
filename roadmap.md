@@ -89,7 +89,7 @@ This table tracks the visible app tabs as of 2026-07-12. Percentages are pragmat
 | Portfolio | `Portfolio` | ~74% | Harden account/history persistence, improve first-run provider setup, broaden diagnostics around IBKR subscriptions, and add beta-facing empty/error states. Base-currency snapshot handling and OHLCV caching were fixed in July. |
 | Portfolio / Research | `Risk` | ~78% | Separate research-book context from the live account in one screen (audit P1), expand per-leg contribution decomposition for research books, validate optimization/scenario assumptions more deeply, add richer stress/regime slices, and expand interactive test coverage. Strategy Lab book handoff and idempotent auto-compute now work. |
 | Portfolio / Research | `Options` | ~75% | Harden live-provider smoke coverage, add historical IV/skew persistence, improve expiry/strike and moneyness controls, make source/Greeks assumptions more inspectable, make underlying-history sourcing more durable, and deepen Research/Fundamentals/Copilot handoffs. View-scoped adaptive polling, visible-symbol loading, scoped IV errors, and honest empty-surface reasons landed on July 12; SSVI visuals now separate observed option-pair IV points from fitted surface/smile/term geometry. A live IBKR retest remains. |
-| Research | `SITREP` | ~74% | Harden the aggregator into a backend-owned SITREP contract over time, broaden news source coverage and entity/ticker tagging, improve media/provider resilience, and deepen lens/entity preservation on handoffs. As of 2026-07-12: FX/rates change columns carry their window, the header timestamp carries a TZ suffix, per-domain source/freshness/as-of is normalized in Provider Status, macro/prediction/commodity event triage is visible again in an Events & Markets panel, and starred follow-ups persist locally with working handoffs. |
+| Research | `SITREP` | ~78% | Broaden news source coverage and entity/ticker tagging, improve media/provider resilience, deepen lens/entity preservation on handoffs, and build saved triage and Copilot synthesis on top of the new backend contract. As of 2026-07-13 the backend owns the situation-report contract: `GET /sitrep/workspace` composes equities/indices/macro/commodities/prediction-markets/news server-side with per-section degradation warnings, and the frontend loads SITREP through that single request. Window-labeled change columns, TZ-suffixed timestamps, normalized Provider Status, the Events & Markets panel, and locally persisted follow-ups shipped in the July 12 pass. |
 | Research | `Equity Research` | ~80% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, comparables depth, scenario context, explicit provider selection, and a visible warning when synthetic-scope short legs are dropped. Now a self-contained view with latest-day KPIs and price provenance. |
 | Research | `Strategy Lab` | ~78% | Deepen Gamma object composition, saved-run workflows, and read-only sandbox architecture decisions; fix composer state-loss traps (legs reset on tab switch, silent compose no-op before validation). Signed long/short books, all-mode UI polish, the Risk handoff, and Copilot grounding landed in June/July. |
 | Research | `Macro` | ~86% | Deepen Trade Partners and Country Compare beyond first-pass US/curated coverage, expand EU/global official data, improve source citations, and wire real handoffs to Commodities, Sealanes, Prediction Markets, and Copilot memos. |
@@ -513,9 +513,9 @@ At the end of this workstream, Gamma should have a clearer platform layer for pr
 
 ## Workstream 1A - SITREP
 
-_Status: In progress (~75%)_
+_Status: In progress (~78%)_
 _Dependency marker: Cross-domain aggregator; improves with provider foundation_
-_Recent progress: A first-pass locked `SITREP` tab is now the Research workspace home. It aggregates Research Overview, Macro Snapshot, Commodities Overview, Prediction Markets screener, and News payloads into a dense situation-report surface with a Bloomberg Television embed, cross-domain change triage, equities, FX, yields, commodities tables, provider caveats, system/provider mode context, and first-pass row handoffs into Research, Macro, Commodities, and Prediction Markets. A 2026-07-12 pass closed the audit's unlabeled-window finding (FX/rates change columns carry their window, header timestamp carries a TZ suffix), normalized Provider Status into per-domain source/freshness/as-of rows, restored macro/prediction/commodity event visibility in an Events & Markets panel, and added locally persisted starred follow-ups whose saved handoffs reopen the originating tab/mode._
+_Recent progress: A first-pass locked `SITREP` tab is now the Research workspace home. It aggregates Research Overview, Macro Snapshot, Commodities Overview, Prediction Markets screener, and News payloads into a dense situation-report surface with a Bloomberg Television embed, cross-domain change triage, equities, FX, yields, commodities tables, provider caveats, system/provider mode context, and first-pass row handoffs into Research, Macro, Commodities, and Prediction Markets. A 2026-07-12 pass closed the audit's unlabeled-window finding (FX/rates change columns carry their window, header timestamp carries a TZ suffix), normalized Provider Status into per-domain source/freshness/as-of rows, restored macro/prediction/commodity event visibility in an Events & Markets panel, and added locally persisted starred follow-ups whose saved handoffs reopen the originating tab/mode. On 2026-07-13 the backend took ownership of the situation-report contract: `SitrepService` composes all six sections concurrently behind `GET /sitrep/workspace` with per-section degradation warnings, and the frontend now loads SITREP through that single request while panel-level refreshes keep their targeted per-domain loaders._
 
 ### Why this workstream matters
 
@@ -527,24 +527,25 @@ SITREP is the operating picture for Gamma. It should not replace the domain tabs
 
 This makes it different from `Research`, `Macro`, `Commodities`, or `Prediction Markets`. Those tabs remain analytical domains. SITREP is the entry point and triage layer that compresses signals from them.
 
-### Current first pass
+### Current composition
 
-The first pass deliberately reuses existing payloads rather than adding a new backend service too early:
+The composition reuses existing domain payloads, but since 2026-07-13 the backend owns the aggregate contract (`SitrepService` / `GET /sitrep/workspace`) instead of the frontend firing six separate requests:
 
-- `Research Overview` supplies equity market-map nodes, leaders, laggards, coverage, and freshness labels.
+- `Research Overview` supplies equity market-map nodes, leaders, laggards, coverage, and freshness labels (plus the global-indices board).
 - `Macro Snapshot` supplies focus items, FX/rates metrics, divergences, event windows, and warnings.
 - `Commodities Overview` supplies commodity price, curve, inventory, event, and provider coverage context.
 - `Prediction Markets` supplies open market/event context and freshness warnings.
+- `News` supplies the market-news feed.
 - Bloomberg Television is embedded through the public YouTube channel live-stream endpoint when YouTube/Bloomberg allow embedding.
 
-This is useful immediately, but it is still an aggregator over existing tab data, not a normalized SITREP backend model.
+Sections load concurrently server-side; a failing section degrades into an explicit `section_warnings` entry and a null section rather than failing the report, and the frontend keeps per-panel refresh buttons on the targeted per-domain loaders.
 
 ### Provider and data needs
 
 Required for the next meaningful step:
 
 - `News hardening`: normalized source, URL, publication time, detected tickers/entities, tags, summary snippets, provenance, and RSS/sample fallback behavior are now usable. Remaining work is breadth, resilience, and better source/ticker/entity enrichment rather than making news exist.
-- `SITREP response model`: a backend-owned payload should eventually own the cross-domain situation-report contract. The current Svelte composition is acceptable for the first pass, but a service-owned model would make saved triage, Copilot synthesis, and test coverage cleaner.
+- `SITREP response model`: done at first-pass level. `SitrepService` owns the cross-domain contract behind `GET /sitrep/workspace` with section subsets, force-refresh, concurrent composition, per-section degradation, and API test coverage. Remaining work is building saved triage and Copilot synthesis on top of it and section-level cache policy tuning.
 - `Provider-neutral listed-market data`: broader and fresher equity/index/ETF coverage beyond the current narrow Research Overview seeds.
 - `FX and rates freshness policy`: clearer distinction between delayed IBKR, FRED/public daily series, and unavailable intraday context.
 - `Media embed fallback`: YouTube embeds can be blocked by remote policy, so the UI should keep a fallback link and avoid treating the video as guaranteed infrastructure.
@@ -555,7 +556,7 @@ Required for the next meaningful step:
 
 - `Locked navigation home`: ~90% complete. SITREP is now pinned as the first Research workspace tab and the old Research tab is no longer the locked home.
 - `Dense visual shell`: ~82% complete. The shell has been through the visual-language and terminal-density passes onto shared type/space tokens, with row-level drilldowns, latest-day corroboration columns on the index board, an Events & Markets triage panel, and a Follow-Ups panel. Remaining work is responsive polish and richer action affordances.
-- `Cross-domain aggregation`: ~58% complete. Existing tab payloads are reused effectively and first-pass handoff metadata exists, but there is no dedicated backend SITREP schema yet.
+- `Cross-domain aggregation`: ~78% complete. The backend now owns the situation-report contract: `SitrepService` composes equities/indices/macro/commodities/prediction-markets/news concurrently behind `GET /sitrep/workspace`, supports section subsets and force refresh, degrades failing sections into explicit warnings, and is the frontend's single SITREP load path. Remaining work: saved triage and Copilot synthesis built on the contract, section-level cache policies, and a SITREP-specific normalized summary layer beyond embedded domain payloads.
 - `News`: ~62% complete. The News provider boundary and RSS/sample feed path are usable in SITREP. Remaining work is broader source coverage, entity/ticker tagging, deduping, richer summaries, and better source reliability handling.
 - `Bloomberg TV`: ~45% complete. YouTube embed is wired on a best-effort basis, but external embed availability cannot be controlled by Gamma.
 - `Provider transparency`: ~78% complete. Provider Status now groups per-domain source, freshness, and as-of rows for indices, US equities, FX/rates, commodities, prediction markets, news, and TV; FX/rates change columns carry their window label; commodity changes are labeled 1D; and the header timestamp carries a TZ suffix. Remaining work is normalized source quality labels beyond freshness and provenance-badge adoption inside SITREP tables.
