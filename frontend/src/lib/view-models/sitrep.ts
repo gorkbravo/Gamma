@@ -15,6 +15,9 @@ export interface SitrepHandoffRequest {
   label?: string | null;
   marketId?: string | null;
   commodityId?: string | null;
+  timeframe?: string | null;
+  region?: string | null;
+  theme?: string | null;
 }
 
 export interface SitrepMarketHandoffRow {
@@ -28,6 +31,9 @@ export interface SitrepMarketHandoffRow {
   last: string;
   change: string;
   secondary: string;
+  timeframe?: string | null;
+  region?: string | null;
+  theme?: string | null;
 }
 
 export interface SitrepTapeHandoffRow {
@@ -52,6 +58,7 @@ export function resolveSitrepMarketHandoff(
           targetMode: "scope_analysis",
           symbol,
           label: row.selectionLabel ?? row.label,
+          timeframe: row.timeframe ?? "1Y",
         }
       : null;
   }
@@ -64,16 +71,29 @@ export function resolveSitrepMarketHandoff(
           targetMode: "scope_analysis",
           symbol,
           label: row.proxyLabel ?? `${row.label} proxy`,
+          timeframe: row.timeframe ?? "1Y",
         }
       : { targetTab: "equity_research", targetMode: "overview" };
   }
 
   if (profile === "fx") {
-    return { targetTab: "macro", targetMode: "snapshot" satisfies MacroMode };
+    return {
+      targetTab: "macro",
+      targetMode: "snapshot" satisfies MacroMode,
+      timeframe: row.timeframe ?? "3M",
+      region: row.region ?? "US",
+      theme: row.theme ?? "all",
+    };
   }
 
   if (profile === "yields") {
-    return { targetTab: "macro", targetMode: "rates_policy" satisfies MacroMode };
+    return {
+      targetTab: "macro",
+      targetMode: "rates_policy" satisfies MacroMode,
+      timeframe: row.timeframe ?? "3M",
+      region: row.region ?? "US",
+      theme: row.theme ?? "all",
+    };
   }
 
   if (profile === "commodities") {
@@ -227,7 +247,92 @@ function coerceFollowUpHandoff(candidate: unknown): SitrepHandoffRequest | null 
     label: typeof record.label === "string" ? record.label : null,
     marketId: typeof record.marketId === "string" ? record.marketId : null,
     commodityId: typeof record.commodityId === "string" ? record.commodityId : null,
+    timeframe: typeof record.timeframe === "string" ? record.timeframe : null,
+    region: typeof record.region === "string" ? record.region : null,
+    theme: typeof record.theme === "string" ? record.theme : null,
   };
+}
+
+export interface SitrepSectionClock {
+  id: string;
+  label: string;
+  retrievedAt: string | null | undefined;
+}
+
+export interface SitrepOldestSection {
+  id: string;
+  label: string;
+  retrievedAt: string;
+}
+
+/** Returns the oldest valid loaded section timestamp; unloaded/invalid sections are ignored. */
+export function oldestSitrepSection(sections: SitrepSectionClock[]): SitrepOldestSection | null {
+  let oldest: SitrepOldestSection | null = null;
+  let oldestMillis = Number.POSITIVE_INFINITY;
+  for (const section of sections) {
+    if (!section.retrievedAt) continue;
+    const millis = Date.parse(section.retrievedAt);
+    if (!Number.isFinite(millis) || millis >= oldestMillis) continue;
+    oldestMillis = millis;
+    oldest = { id: section.id, label: section.label, retrievedAt: section.retrievedAt };
+  }
+  return oldest;
+}
+
+export function formatSitrepSectionAge(
+  retrievedAt: string | null | undefined,
+  now: Date = new Date()
+): string {
+  if (!retrievedAt) return "N/A";
+  const millis = Date.parse(retrievedAt);
+  if (!Number.isFinite(millis)) return "N/A";
+  const minutes = Math.max(0, Math.floor((now.getTime() - millis) / 60_000));
+  if (minutes < 1) return "<1m old";
+  if (minutes < 60) return `${minutes}m old`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h old`;
+  return `${Math.floor(hours / 24)}d old`;
+}
+
+export interface SitrepNewsEntityLike {
+  label: string;
+  entity_type: string;
+  symbol?: string | null;
+}
+
+/**
+ * Routes a detected news ticker/company/index entity into Equity Research
+ * scope analysis. Non-listed entity types (central banks, regulators,
+ * crypto assets, chokepoints) have no equity scope and return null.
+ */
+export function resolveSitrepNewsEntityHandoff(entity: SitrepNewsEntityLike): SitrepHandoffRequest | null {
+  const symbol = (entity.symbol ?? "").trim().toUpperCase();
+  if (!symbol) {
+    return null;
+  }
+  const entityType = (entity.entity_type ?? "").trim().toLowerCase();
+  if (!["company", "ticker", "index", "etf", "equity"].includes(entityType)) {
+    return null;
+  }
+  return {
+    targetTab: "equity_research",
+    targetMode: "scope_analysis",
+    symbol,
+    label: entity.label || symbol,
+    timeframe: "1Y",
+  };
+}
+
+const NEWS_RELIABILITY_LABELS: Record<string, string> = {
+  official: "OFFICIAL",
+  major_outlet: "OUTLET",
+  aggregator: "AGGR",
+  sample: "SAMPLE",
+};
+
+/** Compact per-source reliability label; unknown reliability renders nothing. */
+export function formatNewsReliabilityLabel(value: string | null | undefined): string {
+  return NEWS_RELIABILITY_LABELS[(value ?? "").trim().toLowerCase()] ?? "";
 }
 
 export function formatSitrepWindowLabel(base: string, timeframe: string | null | undefined): string {

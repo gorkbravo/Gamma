@@ -198,6 +198,7 @@ export interface NewsEventItem {
   detected_entities: NewsEventEntity[];
   tags: string[];
   freshness_label: string;
+  source_reliability?: string;
   warnings: string[];
   transformation_note: string | null;
 }

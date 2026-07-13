@@ -21,6 +21,7 @@
   {#if label}<span class="context-label">{label}</span>{/if}
   <span class="state {tone}">{stateText}</span>
   {#if data?.provider}<span class="provider">{data.provider}</span>{/if}
+  {#if data?.qualityLabel}<span class="quality">{data.qualityLabel}</span>{/if}
   {#if timeText}<span class="time">{timeText}</span>{/if}
   {#if data?.transformationNote}<span class="transform" aria-label="Transformed value">ƒ</span>{/if}
   {#if data?.warnings.length}<span class="warn-count">!{data.warnings.length}</span>{/if}
@@ -76,6 +77,12 @@
 
   .time {
     color: var(--text-2);
+  }
+
+  .quality {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .transform {

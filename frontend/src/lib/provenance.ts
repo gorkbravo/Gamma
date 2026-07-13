@@ -26,6 +26,7 @@ export interface ProvenanceBadgeData {
   provider: string | null;
   state: ProvenanceState;
   rawLabel: string | null;
+  qualityLabel?: string | null;
   retrievedAt: string | null;
   sourceTimestamp: string | null;
   transformationNote: string | null;
@@ -140,6 +141,7 @@ export interface ProvenanceOverrides {
   sourceTimestamp?: string | null;
   transformationNote?: string | null;
   warnings?: string[];
+  qualityLabel?: string | null;
 }
 
 export function toProvenanceBadge(
@@ -159,6 +161,7 @@ export function toProvenanceBadge(
     provider,
     state: overrides.state ?? normalizeProvenanceState(rawLabel),
     rawLabel,
+    qualityLabel: overrides.qualityLabel ?? null,
     retrievedAt: overrides.retrievedAt ?? source.retrieved_at ?? null,
     sourceTimestamp: overrides.sourceTimestamp ?? source.source_timestamp ?? null,
     transformationNote: overrides.transformationNote ?? source.transformation_note ?? null,
@@ -187,6 +190,7 @@ export function provenanceTitle(data: ProvenanceBadgeData): string {
   const lines: string[] = [];
   lines.push(`Provider: ${data.provider ?? "unknown"}`);
   lines.push(`State: ${data.state}${data.rawLabel && normalizeProvenanceState(data.rawLabel) === "unknown" ? ` (reported: ${data.rawLabel})` : ""}`);
+  if (data.qualityLabel) lines.push(`Quality: ${data.qualityLabel}`);
   if (data.retrievedAt) lines.push(`Retrieved: ${data.retrievedAt}`);
   if (data.sourceTimestamp) lines.push(`Source timestamp: ${data.sourceTimestamp}`);
   if (data.transformationNote) lines.push(`Transformation: ${data.transformationNote}`);

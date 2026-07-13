@@ -3,12 +3,16 @@
   import type Hls from "hls.js";
   import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import { toProvenanceBadge, type ProvenanceBadgeData } from "../lib/provenance";
   import type {
     CommodityPriceBasis,
     CommodityWorkspaceResponse,
     MacroMetric,
     MacroSnapshot,
+    NewsEventEntity,
     NewsEventFeedResponse,
+    NewsEventItem,
     PredictionMarketListResponse,
     ResearchOverviewNode,
     ResearchOverviewResponse,
@@ -21,9 +25,13 @@
     ResearchOverviewLoadOptions
   } from "../lib/stores/app";
   import {
+    formatNewsReliabilityLabel,
+    formatSitrepSectionAge,
     formatSitrepWindowLabel,
     isSitrepFollowUpSaved,
+    oldestSitrepSection,
     resolveSitrepMarketHandoff,
+    resolveSitrepNewsEntityHandoff,
     resolveSitrepTapeHandoff,
     type SitrepFollowUp,
     type SitrepFollowUpStatus,
@@ -95,6 +103,9 @@
     secondaryTone?: string;
     tone: string;
     source: string;
+    timeframe?: string | null;
+    region?: string | null;
+    theme?: string | null;
   };
 
   type RefreshKey = "indices" | "fx" | "rates" | "commodities" | "news";
@@ -419,6 +430,40 @@
     return words.length > 1 && name.length > 10 ? words[0] : name;
   }
 
+  type NewsEntityChip = { entity: NewsEventEntity; handoff: SitrepHandoffRequest };
+
+  function newsEntityChips(item: NewsEventItem): NewsEntityChip[] {
+    const seen = new Set<string>();
+    const chips: NewsEntityChip[] = [];
+    for (const entity of item.detected_entities ?? []) {
+      const handoff = resolveSitrepNewsEntityHandoff(entity);
+      const symbol = (entity.symbol ?? "").trim().toUpperCase();
+      if (!handoff || !symbol || seen.has(symbol)) {
+        continue;
+      }
+      seen.add(symbol);
+      chips.push({ entity, handoff });
+      if (chips.length >= 4) {
+        break;
+      }
+    }
+    return chips;
+  }
+
+  function openNewsEntity(chip: NewsEntityChip) {
+    const symbol = chip.handoff.symbol ?? chip.entity.symbol ?? "";
+    if (symbol) {
+      onSelectEquity?.(symbol, chip.entity.label);
+    }
+    void onOpenHandoff?.(chip.handoff);
+  }
+
+  function newsItemProvenance(item: NewsEventItem): ProvenanceBadgeData {
+    return toProvenanceBadge(item, {
+      qualityLabel: formatNewsReliabilityLabel(item.source_reliability) || null
+    });
+  }
+
   function shortDate(value: string | null | undefined) {
     if (!value) {
       return "N/A";
@@ -526,7 +571,14 @@
       ...allFx.filter((m) => !FX_SERIES_ORDER.includes(m.series_id ?? ""))
     ];
     return ordered.length
-      ? ordered.slice(0, 12).map((m) => ({ ...metricRow(m), group: "", source: m.source_provider }))
+      ? ordered.slice(0, 12).map((m) => ({
+          ...metricRow(m),
+          group: "",
+          source: m.source_provider,
+          timeframe: data?.timeframe ?? "3M",
+          region: data?.region ?? "US",
+          theme: data?.theme ?? "all"
+        }))
       : [{
           id: "fx-placeholder",
           label: "FX unavailable",
@@ -612,7 +664,12 @@
         secondary: m.display_value ?? "",
         source: ""
       }));
-    return [...curveRows, ...policyRows].slice(0, 10);
+    return [...curveRows, ...policyRows].slice(0, 10).map((row) => ({
+      ...row,
+      timeframe: data?.timeframe ?? "3M",
+      region: data?.region ?? "US",
+      theme: data?.theme ?? "all"
+    }));
   }
 
   function buildEquityRows(data: ResearchOverviewResponse | null): SitrepMarketRow[] {
@@ -632,7 +689,8 @@
         change: formatPct(latestDailyReturn),
         secondary: node.metrics.annual_volatility == null ? "" : formatPct(node.metrics.annual_volatility),
         tone: toneFromValue(latestDailyReturn),
-        source: ""
+        source: "",
+        timeframe: "1Y"
       };
     });
   }
@@ -695,7 +753,8 @@
         changePctTone: toneFromValue(latestDailyReturn),
         secondary: proxy ? `${proxy.symbol} / ${shortDate(node.metrics.latest_daily_return_at)}` : shortDate(node.metrics.latest_daily_return_at),
         tone: toneFromValue(latestDailyReturn),
-        source: node.source_provider
+        source: node.source_provider,
+        timeframe: "1Y"
       };
     });
   }
@@ -901,7 +960,10 @@
       meta: item.source_provider,
       handoff: {
         targetTab: "macro",
-        targetMode: item.mode_target ?? "snapshot"
+        targetMode: item.mode_target ?? "snapshot",
+        timeframe: macroData?.timeframe ?? "3M",
+        region: macroData?.region ?? "US",
+        theme: item.target_theme ?? macroData?.theme ?? "all"
       }
     }));
     const eventRows: TapeRow[] = (macroData?.upcoming_events ?? []).slice(0, 4).map((event) => ({
@@ -913,7 +975,10 @@
       meta: event.relative_label ?? shortDate(event.scheduled_at),
       handoff: {
         targetTab: "macro",
-        targetMode: "events_regimes"
+        targetMode: "events_regimes",
+        timeframe: macroData?.timeframe ?? "3M",
+        region: event.region || macroData?.region || "US",
+        theme: macroData?.theme ?? "all"
       }
     }));
     const marketRows: TapeRow[] = (predictionData?.markets ?? []).slice(0, 4).map((market) => ({
@@ -941,7 +1006,8 @@
       meta: event.relative_label ?? shortDate(event.scheduled_at),
       handoff: {
         targetTab: "commodities",
-        targetMode: "events_cross_domain"
+        targetMode: "events_cross_domain",
+        commodityId: event.linked_instrument_ids?.[0] ?? null
       }
     }));
     return [...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 12);
@@ -961,7 +1027,10 @@
       meta: `score ${item.score.toFixed(1)} / ${item.label}`,
       handoff: {
         targetTab: "macro",
-        targetMode: "cross_asset"
+        targetMode: "cross_asset",
+        timeframe: macroData?.timeframe ?? "3M",
+        region: macroData?.region ?? "US",
+        theme: item.theme ?? macroData?.theme ?? "all"
       }
     }));
     const movers: TapeRow[] = buildCommodityRows(commodityData)
@@ -989,7 +1058,10 @@
         meta: overviewData?.freshness_label ?? "research overview",
         handoff: {
           targetTab: "equity_research",
-          targetMode: "overview"
+          targetMode: "scope_analysis",
+          symbol: item.symbol ?? null,
+          label: item.label,
+          timeframe: "1Y"
         }
       }));
     return [...divergenceRows, ...equityRows, ...movers].slice(0, 10);
@@ -1070,6 +1142,7 @@
     source: string;
     freshness: string;
     asOf: string;
+    age: string;
     warn: boolean;
   };
 
@@ -1087,6 +1160,7 @@
       source: (source ?? "").trim() || "N/A",
       freshness: ((freshness ?? "").trim() || "N/A").toUpperCase(),
       asOf: asOf ? formatDateTime(asOf) : "N/A",
+      age: formatSitrepSectionAge(asOf),
       warn
     };
   }
@@ -1206,10 +1280,47 @@
   $: commodityRows = buildCommodityRows(commodities);
   $: eventRows = buildEventRows(macro, prediction, commodities);
   $: changedRows = buildWhatChangedRows(macro, overview, commodities);
-  $: warnings = warningRows(news, overview, macro, commodities, prediction);
+  $: warnings = [
+    ...(workspaceMeta?.section_warnings ?? []),
+    ...warningRows(news, overview, macro, commodities, prediction)
+  ].slice(0, 6);
   $: macroWindowLabel = ((macro?.timeframe ?? "3M").trim() || "3M").toUpperCase();
   $: providerStatusRows = buildProviderStatusRows(indicesOverview, overview, macro, commodities, prediction, news, macroWindowLabel);
-  $: asOf = news?.retrieved_at ?? macro?.retrieved_at ?? overview?.retrieved_at ?? commodities?.retrieved_at ?? null;
+  $: predictionRetrievedAt = (prediction?.venues ?? [])
+    .map((venue) => venue.retrieved_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  $: oldestSection = oldestSitrepSection([
+    { id: "equities", label: "Equities", retrievedAt: overview?.retrieved_at },
+    { id: "indices", label: "Indices", retrievedAt: indicesOverview?.retrieved_at },
+    { id: "macro", label: "Macro", retrievedAt: macro?.retrieved_at },
+    { id: "commodities", label: "Commodities", retrievedAt: commodities?.retrieved_at },
+    { id: "prediction", label: "Prediction", retrievedAt: predictionRetrievedAt },
+    { id: "news", label: "News", retrievedAt: news?.retrieved_at }
+  ]);
+  $: indicesProvenance = indicesOverview
+    ? toProvenanceBadge(indicesOverview, { qualityLabel: indicesOverview.coverage_label })
+    : null;
+  $: fxProvenance = macro
+    ? toProvenanceBadge(macro, {
+        provider: formatFxSourceMix(fxRows, macro),
+        qualityLabel: `${macroWindowLabel} window`
+      })
+    : null;
+  $: ratesProvenance = macro
+    ? toProvenanceBadge(macro, {
+        provider: macro.rates_policy?.source_provider ?? macro.source_provider,
+        retrievedAt: macro.rates_policy?.retrieved_at ?? macro.retrieved_at,
+        qualityLabel: `${macroWindowLabel} window`
+      })
+    : null;
+  $: commoditiesProvenance = commodities
+    ? toProvenanceBadge(commodities.coverage, {
+        provider: formatCommodityProviderMix(commodities),
+        qualityLabel: commodities.coverage.coverage_status
+      })
+    : null;
   $: pricedRatio = overview?.coverage.coverage_ratio ?? null;
   $: highDivergences = (macro?.top_divergences ?? []).filter((item) => item.label === "high").length;
   $: staleMarkets = (prediction?.venues ?? []).reduce((total, venue) => total + venue.stale_markets + venue.broken_markets, 0);
@@ -1264,7 +1375,7 @@
       <span class:warning={sitrepState !== "LIVE"}>{sitrepState}</span>
       <span>{providerMode}</span>
       {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
-      <span>{formatDateTimeWithZone(asOf)}</span>
+      <span>{oldestSection ? `OLDEST ${oldestSection.label.toUpperCase()} ${formatDateTimeWithZone(oldestSection.retrievedAt)}` : "OLDEST N/A"}</span>
     </div>
   </article>
 
@@ -1281,7 +1392,7 @@
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
+          <SitrepMarketTable rows={indexRows} provenance={indicesProvenance} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1294,7 +1405,7 @@
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("CHG", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("%CHG", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
+          <SitrepMarketTable rows={fxRows} provenance={fxProvenance} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("CHG", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("%CHG", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1307,7 +1418,7 @@
               <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
+          <SitrepMarketTable rows={yieldRows} provenance={ratesProvenance} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1320,7 +1431,7 @@
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG (1D)" pctChangeLabel="%CHG (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
+          <SitrepMarketTable rows={commodityRows} provenance={commoditiesProvenance} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG (1D)" pctChangeLabel="%CHG (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
       </div>
 
@@ -1447,10 +1558,28 @@
         <div class="news-wrap">
           {#if news?.items?.length}
             {#each news.items as item (item.normalized_id)}
+              {@const chips = newsEntityChips(item)}
               <div use:flashOnMount={'neutral'} class="news-row">
                 <span class="news-time">{formatTime(item.published_at)}</span>
-                <p class="news-title">{item.title}</p>
-                <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{abbreviateSource(item.source_name)}</a>
+                <div class="news-body">
+                  <p class="news-title">{item.title}</p>
+                  {#if chips.length}
+                    <span class="news-chips">
+                      {#each chips as chip (chip.handoff.symbol)}
+                        <button
+                          type="button"
+                          class="news-chip"
+                          on:click={() => openNewsEntity(chip)}
+                          title={`Open ${chip.entity.label} in Equity Research`}
+                        >{chip.handoff.symbol}</button>
+                      {/each}
+                    </span>
+                  {/if}
+                </div>
+                <span class="news-meta">
+                  <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{abbreviateSource(item.source_name)}</a>
+                  <ProvenanceBadge data={newsItemProvenance(item)} showTime={false} />
+                </span>
               </div>
             {/each}
           {:else}
@@ -1539,7 +1668,7 @@
         <div class="table-header">
           <div class="table-title">
             <span>Provider Status</span>
-            <small>source / freshness / as of</small>
+            <small>source / freshness / as of / age</small>
           </div>
         </div>
         <div class="status-list">
@@ -1549,6 +1678,7 @@
               <span class="status-source">{row.source}</span>
               <span class="status-freshness" class:warning={row.warn}>{row.freshness}</span>
               <span class="status-asof">{row.asOf}</span>
+              <span class="status-age" class:warning={row.warn}>{row.age}</span>
             </div>
           {/each}
           <div class="status-row" class:warn={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>
@@ -1556,6 +1686,7 @@
             <span class="status-source">Bloomberg HLS</span>
             <span class="status-freshness" class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>{tvStatus}</span>
             <span class="status-asof">live stream</span>
+            <span class="status-age">external</span>
           </div>
         </div>
         {#if warnings.length}
@@ -2102,6 +2233,40 @@
     margin: 0;
   }
 
+  .news-body,
+  .news-meta {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .news-meta {
+    justify-items: end;
+  }
+
+  .news-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .news-chip {
+    height: 20px;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .news-chip:hover,
+  .news-chip:focus-visible {
+    border-color: var(--accent);
+  }
+
   .news-source {
     color: var(--text-2);
     font-size: var(--text-xs);
@@ -2141,7 +2306,7 @@
 
   .status-row {
     display: grid;
-    grid-template-columns: 7rem minmax(0, 1fr) minmax(5.5rem, max-content) minmax(6rem, max-content);
+    grid-template-columns: 7rem minmax(0, 1fr) minmax(5.5rem, max-content) minmax(6rem, max-content) minmax(4rem, max-content);
     gap: var(--space-4);
     align-items: baseline;
     padding: var(--space-3) var(--space-5);
@@ -2174,6 +2339,10 @@
   }
 
   .status-row .status-asof {
+    text-align: right;
+  }
+
+  .status-row .status-age {
     text-align: right;
   }
 

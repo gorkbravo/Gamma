@@ -358,7 +358,7 @@
       <span class="scope-row-label">Context</span>
       {#if scopeOptions.length}
         <div class="scope-chips">
-          {#each scopeOptions as option (option.tabId)}
+          {#each scopeOptions as option (option.domain ?? option.tabId)}
             <button
               class="scope-chip"
               class:selected={option.domain != null && selectedScopeDomains.includes(option.domain)}

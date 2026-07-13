@@ -201,6 +201,46 @@ describe("CopilotResearchCard", () => {
     expect(body).toContain("macro.snapshot");
     expect(body).toContain("Run a Strategy Lab import");
   });
+
+  it("renders distinct domains that share one source tab without duplicate keys", () => {
+    const { body } = render(CopilotResearchCard, {
+      props: {
+        open: true,
+        available: true,
+        selectedScopeDomains: ["research", "equity_research"],
+        scopeOptions: [
+          {
+            tabId: "equity_research",
+            domain: "research",
+            label: "Research Result",
+            contextLabel: "SPY result",
+            fingerprintLabel: "FP result",
+            freshnessLabel: null,
+            warningLabel: null,
+            supported: true,
+            disabledReason: null
+          },
+          {
+            tabId: "equity_research",
+            domain: "equity_research",
+            label: "Equity Research",
+            contextLabel: "SPY overview",
+            fingerprintLabel: "FP overview",
+            freshnessLabel: null,
+            warningLabel: null,
+            supported: true,
+            disabledReason: null
+          }
+        ],
+        onGenerate: vi.fn(),
+        onClose: vi.fn(),
+        onToggleScope: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Research Result");
+    expect(body).toContain("Equity Research");
+  });
 });
 
 function makeResult(

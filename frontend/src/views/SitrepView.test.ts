@@ -106,13 +106,14 @@ describe("SitrepView", () => {
       },
     });
 
-    expect(body).toContain("source / freshness / as of");
+    expect(body).toContain("source / freshness / as of / age");
     expect(body).toContain("Indices");
     expect(body).toContain("HISTORICAL");
     expect(body).toContain("FX / Rates");
     expect(body).toContain("3M WINDOW");
     expect(body).toContain("Prediction Mkts");
     expect(body).toContain("NOT LOADED");
+    expect(body).toContain("OLDEST INDICES");
   });
 
   it("renders backend follow-ups with notes, resolved state, and triage actions", () => {
@@ -172,6 +173,58 @@ describe("SitrepView", () => {
     expect(body).toContain("Add follow-up note");
     expect(body).toContain("Edit follow-up note");
     expect(body).toContain("Dismiss follow-up");
+  });
+
+  it("renders clickable news ticker chips through the shared provenance badge", () => {
+    const { body } = render(SitrepView, {
+      props: {
+        overview: null,
+        indicesOverview: null,
+        macro: null,
+        commodities: null,
+        prediction: null,
+        loading: false,
+        onLoadNews: vi.fn(),
+        onLoadOverview: vi.fn(),
+        onLoadIndicesOverview: vi.fn(),
+        onLoadMacro: vi.fn(),
+        onLoadCommodities: vi.fn(),
+        onLoadPrediction: vi.fn(),
+        onOpenHandoff: vi.fn(),
+        news: {
+          items: [{
+            normalized_id: "rss:test:1",
+            provider_item_id: "1",
+            title: "Apple expands AI investment",
+            summary: null,
+            url: "https://example.com/apple",
+            source_provider: "rss",
+            source_name: "Test Outlet",
+            source_domain: "example.com",
+            published_at: "2026-07-13T11:30:00Z",
+            retrieved_at: "2026-07-13T11:35:00Z",
+            origin: "rss.feed:test",
+            detected_entities: [{ label: "Apple", entity_type: "company", symbol: "AAPL", normalized_id: null, metadata: {} }],
+            tags: ["equities"],
+            freshness_label: "delayed",
+            source_reliability: "major_outlet",
+            warnings: [],
+            transformation_note: null,
+          }],
+          source_provider: "rss",
+          retrieved_at: "2026-07-13T11:35:00Z",
+          origin: "news_service.latest",
+          freshness_label: "delayed",
+          warnings: [],
+          transformation_note: null,
+        }
+      },
+    });
+
+    expect(body).toContain("Open Apple in Equity Research");
+    expect(body).toContain("AAPL");
+    expect(body).toContain("OUTLET");
+    expect(body).toContain("DELAYED");
   });
 });
 
