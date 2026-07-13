@@ -109,11 +109,13 @@ describe("CopilotResearchCard", () => {
     expect(body).toContain("Research Agent");
     expect(body).toContain("Research Operator");
     expect(body).toContain("Context");
+    expect(body).toContain('aria-haspopup="listbox"');
+    expect(body).toContain("Portfolio, Macro");
+    expect(body).not.toContain('class="scope-chip');
     expect(body).toContain("Portfolio");
     expect(body).toContain("Macro");
-    // Fingerprint and warning details are surfaced via the chip tooltip.
-    expect(body).toContain("FP a1b2c3d4");
-    expect(body).toContain("1 warning");
+    // Detailed fingerprint and warning metadata moves into the collapsed dropdown.
+    expect(body).not.toContain("FP a1b2c3d4");
     expect(body).toContain("Grounded Research");
     expect(body).toContain("Ask a follow-up grounded in this context scope...");
   });
@@ -199,7 +201,7 @@ describe("CopilotResearchCard", () => {
     expect(body).toContain("Sources (1)");
     expect(body).toContain("Tools (1)");
     expect(body).toContain("macro.snapshot");
-    expect(body).toContain("Run a Strategy Lab import");
+    expect(body).toContain("Select context");
   });
 
   it("renders distinct domains that share one source tab without duplicate keys", () => {

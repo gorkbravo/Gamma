@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type {
     CopilotBaseDomain,
     CopilotReasoningEffort,
@@ -44,6 +45,10 @@
   let composerHint = "";
   let composerPlaceholder = "";
   let composerButtonLabel = "Generate";
+  let contextMenuOpen = false;
+  let contextPickerEl: HTMLDivElement | null = null;
+  let selectedScopeOptions: CopilotGroundingScopeOption[] = [];
+  let contextSummary = "Select context";
 
   function setRoleMode(nextMode: CopilotRoleMode) {
     roleMode = nextMode;
@@ -104,6 +109,23 @@
     return parts.join(" · ");
   }
 
+  onMount(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (contextMenuOpen && contextPickerEl && !contextPickerEl.contains(event.target as Node)) {
+        contextMenuOpen = false;
+      }
+    };
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") contextMenuOpen = false;
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeydown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeydown);
+    };
+  });
+
   $: threadEntries = thread?.entries ?? [];
   $: hasThread = threadEntries.length > 0;
   $: composerHint = !available
@@ -127,6 +149,16 @@
       : hasThread
         ? "Follow up"
         : "Generate";
+  $: selectedScopeOptions = scopeOptions.filter(
+    (option) => option.domain != null && option.supported && selectedScopeDomains.includes(option.domain)
+  );
+  $: contextSummary =
+    selectedScopeOptions.length === 0
+      ? "Select context"
+      : selectedScopeOptions.length <= 2
+        ? selectedScopeOptions.map((option) => option.label).join(", ")
+        : `${selectedScopeOptions[0].label} +${selectedScopeOptions.length - 1}`;
+  $: if (!open) contextMenuOpen = false;
 </script>
 
 {#if open}
@@ -355,27 +387,52 @@
     </div>
 
     <div class="scope-row">
-      <span class="scope-row-label">Context</span>
       {#if scopeOptions.length}
-        <div class="scope-chips">
-          {#each scopeOptions as option (option.domain ?? option.tabId)}
-            <button
-              class="scope-chip"
-              class:selected={option.domain != null && selectedScopeDomains.includes(option.domain)}
-              class:unavailable={!option.supported}
-              type="button"
-              title={scopeTooltip(option)}
-              disabled={!option.supported || option.domain == null}
-              on:click={() => option.domain != null && onToggleScope(option.domain)}
-            >
-              <span>{option.label}</span>
-              {#if !option.supported && option.disabledReason}
-                <small>{option.disabledReason}</small>
-              {/if}
-            </button>
-          {/each}
+        <div class="context-picker" bind:this={contextPickerEl}>
+          <button
+            class="context-trigger"
+            class:open={contextMenuOpen}
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded={contextMenuOpen}
+            on:click={() => (contextMenuOpen = !contextMenuOpen)}
+          >
+            <span class="scope-row-label">Context</span>
+            <span class="context-value">{contextSummary}</span>
+            <span class="caret" aria-hidden="true">▾</span>
+          </button>
+          {#if contextMenuOpen}
+            <div class="context-menu" role="listbox" aria-label="Context scope" aria-multiselectable="true">
+              {#each scopeOptions as option (option.domain ?? option.tabId)}
+                <button
+                  type="button"
+                  role="option"
+                  class="context-option"
+                  class:selected={option.domain != null && selectedScopeDomains.includes(option.domain)}
+                  aria-selected={option.domain != null && selectedScopeDomains.includes(option.domain)}
+                  disabled={!option.supported || option.domain == null}
+                  title={scopeTooltip(option)}
+                  on:click={() => option.domain != null && onToggleScope(option.domain)}
+                >
+                  <span class="checkbox" aria-hidden="true"></span>
+                  <span class="context-option-copy">
+                    <span class="context-option-label">{option.label}</span>
+                    {#if !option.supported && option.disabledReason}
+                      <span class="context-option-reason">{option.disabledReason}</span>
+                    {/if}
+                  </span>
+                  {#if option.warningLabel}
+                    <span class="status-dot warn" title={option.warningLabel}></span>
+                  {:else if option.freshnessLabel}
+                    <span class="status-dot ok" title={option.freshnessLabel}></span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
         </div>
       {:else}
+        <span class="scope-row-label">Context</span>
         <small class="scope-empty">{selectionMessage ?? "Load a context to use Copilot."}</small>
       {/if}
     </div>
@@ -834,8 +891,7 @@
   .scope-row {
     display: flex;
     align-items: center;
-    gap: var(--space-4);
-    flex-wrap: wrap;
+    min-height: 28px;
   }
 
   .scope-row-label {
@@ -845,38 +901,123 @@
     font-size: var(--text-2xs);
   }
 
-  .scope-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-3);
+  .context-picker {
+    position: relative;
+    min-width: 0;
   }
 
-  .scope-chip {
+  .context-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-4);
+    height: 28px;
+    max-width: 100%;
+    padding: 0 var(--space-4);
+    font-size: var(--text-sm);
+    background: var(--bg-1);
+    border: 1px solid var(--panel-strong);
+  }
+
+  .context-trigger:hover:not(:disabled),
+  .context-trigger.open {
+    border-color: var(--accent);
+  }
+
+  .context-value {
+    color: var(--text-0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .caret {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+  }
+
+  .context-menu {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0;
+    z-index: 60;
+    width: min(22rem, calc(100vw - 2rem));
+    max-height: min(22rem, 50vh);
+    overflow-y: auto;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+
+  .context-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    border: 0;
+    border-bottom: 1px solid var(--divider);
+    background: transparent;
+    color: var(--text-1);
+    text-align: left;
+    font-size: var(--text-sm);
+  }
+
+  .context-option:last-child {
+    border-bottom: 0;
+  }
+
+  .context-option:hover:not(:disabled) {
+    background: var(--hover-bg);
+  }
+
+  .context-option:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .checkbox {
+    width: 13px;
+    height: 13px;
+    border: 1px solid var(--panel-strong);
+    flex: none;
+  }
+
+  .context-option.selected .checkbox {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .context-option.selected .context-option-label {
+    color: var(--text-0);
+  }
+
+  .context-option-copy {
     display: grid;
     gap: var(--space-1);
-    padding: var(--space-2) var(--space-4);
-    font-size: var(--text-sm);
-    color: var(--text-2);
-    background: var(--surface-0);
-    border: 1px solid rgba(46, 60, 74, 0.52);
+    min-width: 0;
+    flex: 1;
   }
 
-  .scope-chip.selected {
-    color: var(--accent);
-    border-color: rgba(122, 166, 200, 0.42);
-    background: rgba(122, 166, 200, 0.08);
-  }
-
-  .scope-chip.unavailable {
-    opacity: 0.48;
-  }
-
-  .scope-chip small {
+  .context-option-reason {
     color: var(--text-2);
     font-size: var(--text-2xs);
     line-height: var(--leading-snug);
-    text-align: left;
     white-space: normal;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .status-dot.ok {
+    background: var(--positive);
+  }
+
+  .status-dot.warn {
+    background: var(--warning);
   }
 
   .scope-empty {
