@@ -21,18 +21,16 @@
     ResearchOverviewLoadOptions
   } from "../lib/stores/app";
   import {
-    SITREP_FOLLOW_UP_STORAGE_KEY,
     formatSitrepWindowLabel,
     isSitrepFollowUpSaved,
-    parseSitrepFollowUps,
-    removeSitrepFollowUp,
     resolveSitrepMarketHandoff,
     resolveSitrepTapeHandoff,
-    serializeSitrepFollowUps,
-    toggleSitrepFollowUp,
     type SitrepFollowUp,
+    type SitrepFollowUpStatus,
     type SitrepHandoffRequest,
     type SitrepMarketHandoffProfile,
+    type SitrepTapeHandoffRow,
+    type SitrepWorkspaceMeta,
   } from "../lib/view-models/sitrep";
 
   export let system: SystemStatus | null = null;
@@ -53,6 +51,14 @@
   export let selectedEquitySymbol: string | null = null;
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | null = null;
   export let onOpenHandoff: ((handoff: SitrepHandoffRequest) => Promise<unknown> | void) | null = null;
+  export let workspaceMeta: SitrepWorkspaceMeta | null = null;
+  export let followUps: SitrepFollowUp[] = [];
+  export let onLoadFollowUps: (() => Promise<unknown> | void) | null = null;
+  export let onToggleFollowUp: ((row: SitrepTapeHandoffRow) => Promise<unknown> | void) | null = null;
+  export let onUpdateFollowUp:
+    | ((id: string, patch: { note?: string; status?: SitrepFollowUpStatus }) => Promise<unknown> | void)
+    | null = null;
+  export let onDismissFollowUp: ((id: string) => Promise<unknown> | void) | null = null;
 
   const bloombergStreamUrl = "https://www.bloomberg.com/media-manifest/streams/phoenix-us.m3u8";
   const bloombergWatchUrl = "https://www.bloomberg.com/live";
@@ -1010,24 +1016,19 @@
       .slice(0, 6);
   }
 
-  let followUps: SitrepFollowUp[] = [];
-  let followUpsLoaded = false;
-
   onMount(() => {
-    followUps = parseSitrepFollowUps(window.localStorage.getItem(SITREP_FOLLOW_UP_STORAGE_KEY));
-    followUpsLoaded = true;
+    void onLoadFollowUps?.();
   });
 
-  $: if (followUpsLoaded && typeof window !== "undefined") {
-    window.localStorage.setItem(SITREP_FOLLOW_UP_STORAGE_KEY, serializeSitrepFollowUps(followUps));
-  }
-
   function toggleFollowUp(row: TapeRow) {
-    followUps = toggleSitrepFollowUp(followUps, row);
+    void onToggleFollowUp?.(row);
   }
 
   function dismissFollowUp(id: string) {
-    followUps = removeSitrepFollowUp(followUps, id);
+    if (followUpNoteDraftId === id) {
+      cancelFollowUpNote();
+    }
+    void onDismissFollowUp?.(id);
   }
 
   function openFollowUp(item: SitrepFollowUp) {
@@ -1035,6 +1036,33 @@
       void onOpenHandoff?.(item.handoff);
     }
   }
+
+  let followUpNoteDraftId: string | null = null;
+  let followUpNoteDraft = "";
+
+  function beginFollowUpNote(item: SitrepFollowUp) {
+    followUpNoteDraftId = item.id;
+    followUpNoteDraft = item.note;
+  }
+
+  function cancelFollowUpNote() {
+    followUpNoteDraftId = null;
+    followUpNoteDraft = "";
+  }
+
+  async function saveFollowUpNote(item: SitrepFollowUp) {
+    await onUpdateFollowUp?.(item.id, { note: followUpNoteDraft.trim() });
+    cancelFollowUpNote();
+  }
+
+  function toggleFollowUpResolved(item: SitrepFollowUp) {
+    void onUpdateFollowUp?.(item.id, {
+      status: item.status === "resolved" ? "open" : "resolved",
+    });
+  }
+
+  $: openFollowUpCount = followUps.filter((item) => item.status !== "resolved").length;
+  $: resolvedFollowUpCount = followUps.length - openFollowUpCount;
 
   type ProviderStatusRow = {
     id: string;
@@ -1435,13 +1463,17 @@
         <div class="table-header">
           <div class="table-title">
             <span>Follow-Ups</span>
-            <small>{followUps.length ? `${followUps.length} saved / persists locally` : "star triage rows to save them"}</small>
+            <small>
+              {followUps.length
+                ? `${openFollowUpCount} open / ${resolvedFollowUpCount} resolved / saved on backend`
+                : "star triage rows to save them"}
+            </small>
           </div>
         </div>
         <div class="tape-list">
           {#if followUps.length}
             {#each followUps as item (item.id)}
-              <div class="tape-row-wrap">
+              <div class="tape-row-wrap" class:resolved={item.status === "resolved"}>
                 <button
                   type="button"
                   class="tape-row follow-up-row {item.tone}"
@@ -1450,11 +1482,31 @@
                   on:click={() => openFollowUp(item)}
                   title={item.handoff ? "Open in target tab" : "No handoff target"}
                 >
-                  <span>{item.source}</span>
+                  <span>{item.status === "resolved" ? "RESOLVED" : item.source}</span>
                   <strong>{item.title}</strong>
-                  <p>{item.detail}</p>
+                  <p>
+                    {item.detail}
+                    {#if item.note}<em class="follow-up-note">✎ {item.note}</em>{/if}
+                  </p>
                   <small>{shortDate(item.saved_at)}</small>
                 </button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={followUpNoteDraftId === item.id}
+                  on:click={() => (followUpNoteDraftId === item.id ? cancelFollowUpNote() : beginFollowUpNote(item))}
+                  aria-label={item.note ? "Edit follow-up note" : "Add follow-up note"}
+                  title={item.note ? "Edit follow-up note" : "Add follow-up note"}
+                >✎</button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={item.status === "resolved"}
+                  on:click={() => toggleFollowUpResolved(item)}
+                  aria-pressed={item.status === "resolved"}
+                  aria-label={item.status === "resolved" ? "Reopen follow-up" : "Mark follow-up resolved"}
+                  title={item.status === "resolved" ? "Reopen follow-up" : "Mark follow-up resolved"}
+                >✓</button>
                 <button
                   type="button"
                   class="tape-pin"
@@ -1463,6 +1515,19 @@
                   title="Dismiss follow-up"
                 >✕</button>
               </div>
+              {#if followUpNoteDraftId === item.id}
+                <form class="follow-up-note-editor" on:submit|preventDefault={() => saveFollowUpNote(item)}>
+                  <input
+                    type="text"
+                    bind:value={followUpNoteDraft}
+                    placeholder="Add a triage note"
+                    aria-label={`Note for ${item.title}`}
+                    maxlength="240"
+                  />
+                  <button type="submit">Save</button>
+                  <button type="button" on:click={cancelFollowUpNote}>Cancel</button>
+                </form>
+              {/if}
             {/each}
           {:else}
             <p class="empty-state">NO SAVED FOLLOW-UPS.</p>
@@ -1856,6 +1921,61 @@
   .follow-up-panel .tape-list {
     overflow: auto;
     max-height: 18rem;
+  }
+
+  .tape-row-wrap.resolved .tape-row {
+    opacity: 0.55;
+  }
+
+  .tape-row-wrap.resolved .tape-row strong {
+    text-decoration: line-through;
+  }
+
+  .follow-up-note {
+    display: block;
+    color: var(--text-2);
+    font-style: normal;
+    font-size: var(--text-xs);
+  }
+
+  .follow-up-note-editor {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-3) var(--space-5);
+    border-bottom: 1px solid var(--divider);
+    background: var(--bg-1);
+  }
+
+  .follow-up-note-editor input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-0);
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-0);
+    font: inherit;
+    font-size: var(--text-sm);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .follow-up-note-editor button {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
+  }
+
+  .follow-up-note-editor button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .tape-row {

@@ -22,6 +22,17 @@ import {
 } from "./portfolio";
 export { portfolioHistory, portfolioPerformance, portfolioSnapshot } from "./portfolio";
 import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
+import {
+  SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY,
+  SITREP_FOLLOW_UP_STORAGE_KEY,
+  buildSitrepFollowUpCreatePayload,
+  findSitrepFollowUpByRow,
+  parseSitrepFollowUps,
+  type SitrepFollowUp,
+  type SitrepFollowUpStatus,
+  type SitrepTapeHandoffRow,
+  type SitrepWorkspaceMeta
+} from "../view-models/sitrep";
 import type {
   ActionResponse,
   BaseCurrencyResponse,
@@ -363,6 +374,8 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
 export const activeTab = writable<TabId>("portfolio");
 export const researchOverview = writable<ResearchOverviewResponse | null>(null);
 export const sitrepIndicesOverview = writable<ResearchOverviewResponse | null>(null);
+export const sitrepFollowUps = writable<SitrepFollowUp[]>([]);
+export const sitrepWorkspaceMeta = writable<SitrepWorkspaceMeta | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
 export const strategyLabResult = writable<StrategyLabResult | null>(null);
 export const strategyLabComposition = writable<StrategyLabCompositionResult | null>(null);
@@ -1374,6 +1387,11 @@ export async function loadSitrepWorkspace(options: { forceRefresh?: boolean } = 
         if (data.commodities) commoditiesWorkspace.set(data.commodities);
         if (data.prediction_markets) predictionMarketScreener.set(data.prediction_markets);
         if (data.news) newsFeed.set(data.news);
+        sitrepWorkspaceMeta.set({
+          retrieved_at: data.retrieved_at,
+          sections: data.sections,
+          section_warnings: data.section_warnings
+        });
         if (data.section_warnings.length) {
           console.warn("SITREP workspace sections degraded:", data.section_warnings);
         }
@@ -1390,6 +1408,101 @@ export async function loadSitrepWorkspace(options: { forceRefresh?: boolean } = 
     endLoading("commodities");
     setLoading("prediction", false);
     setLoading("news", false);
+  }
+}
+
+interface SitrepFollowUpListResponse {
+  items: SitrepFollowUp[];
+}
+
+/**
+ * One-time migration of pre-backend localStorage follow-ups into the backend
+ * store. On failure the local copy is kept so a later load can retry.
+ */
+async function migrateLegacySitrepFollowUps() {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  const raw = localStorage.getItem(SITREP_FOLLOW_UP_STORAGE_KEY);
+  if (!raw) {
+    return;
+  }
+  const legacy = parseSitrepFollowUps(raw);
+  for (const item of legacy) {
+    try {
+      await postJson<SitrepFollowUp>("/sitrep/follow-ups", {
+        row_id: item.row_id,
+        title: item.title,
+        source: item.source,
+        tone: item.tone,
+        detail: item.detail,
+        meta: item.meta,
+        note: item.note,
+        handoff: item.handoff,
+        saved_at: item.saved_at
+      });
+    } catch {
+      return;
+    }
+  }
+  localStorage.setItem(SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY, raw);
+  localStorage.removeItem(SITREP_FOLLOW_UP_STORAGE_KEY);
+}
+
+export async function loadSitrepFollowUps() {
+  try {
+    await migrateLegacySitrepFollowUps();
+    const response = await getJson<SitrepFollowUpListResponse>("/sitrep/follow-ups");
+    sitrepFollowUps.set(response.items);
+    return response.items;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return null;
+  }
+}
+
+export async function toggleSitrepFollowUpItem(row: SitrepTapeHandoffRow) {
+  const existing = findSitrepFollowUpByRow(get(sitrepFollowUps), row.id);
+  try {
+    if (existing) {
+      await deleteJson<{ success: boolean }>(`/sitrep/follow-ups/${existing.id}`);
+      sitrepFollowUps.update((items) => items.filter((item) => item.id !== existing.id));
+      return null;
+    }
+    const created = await postJson<SitrepFollowUp>(
+      "/sitrep/follow-ups",
+      buildSitrepFollowUpCreatePayload(row)
+    );
+    sitrepFollowUps.update((items) => [created, ...items.filter((item) => item.row_id !== created.row_id)]);
+    return created;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function updateSitrepFollowUpItem(
+  id: string,
+  patch: { note?: string; status?: SitrepFollowUpStatus }
+) {
+  try {
+    const updated = await patchJson<SitrepFollowUp>(`/sitrep/follow-ups/${id}`, patch);
+    sitrepFollowUps.update((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+    return updated;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function dismissSitrepFollowUpItem(id: string) {
+  try {
+    await deleteJson<{ success: boolean }>(`/sitrep/follow-ups/${id}`);
+    sitrepFollowUps.update((items) => items.filter((item) => item.id !== id));
+    return true;
+  } catch (error) {
+    setError(error);
+    return false;
   }
 }
 

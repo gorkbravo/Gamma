@@ -26,6 +26,12 @@ from src.models.macro import MacroSnapshotPayload
 from src.models.news import NewsEventFeed
 from src.models.prediction_markets import PredictionMarketScreenerResult
 from src.models.research_overview import ResearchOverviewRequest, ResearchOverviewResult
+from src.models.sitrep import (
+    SitrepFollowUp,
+    SitrepFollowUpCreateRequest,
+    SitrepFollowUpUpdateRequest,
+)
+from src.services.sitrep_follow_up_store import SitrepFollowUpStore
 from src.utils.time import now_utc
 
 SITREP_SECTIONS = (
@@ -87,12 +93,14 @@ class SitrepService:
         commodities_service: CommoditiesService,
         prediction_market_service: PredictionMarketService,
         news_service: NewsService,
+        follow_up_store: SitrepFollowUpStore | None = None,
     ) -> None:
         self.research_service = research_service
         self.macro_service = macro_service
         self.commodities_service = commodities_service
         self.prediction_market_service = prediction_market_service
         self.news_service = news_service
+        self.follow_up_store = follow_up_store
 
     def get_workspace(self, request: SitrepWorkspaceRequest | None = None) -> SitrepWorkspaceResult:
         normalized = request or SitrepWorkspaceRequest()
@@ -134,6 +142,23 @@ class SitrepService:
             section_warnings=warnings,
             retrieved_at=now_utc(),
         )
+
+    def list_follow_ups(self) -> list[SitrepFollowUp]:
+        return self._require_follow_up_store().list_items()
+
+    def create_follow_up(self, request: SitrepFollowUpCreateRequest) -> SitrepFollowUp:
+        return self._require_follow_up_store().create_item(request)
+
+    def update_follow_up(self, item_id: str, request: SitrepFollowUpUpdateRequest) -> SitrepFollowUp | None:
+        return self._require_follow_up_store().update_item(item_id, request)
+
+    def delete_follow_up(self, item_id: str) -> bool:
+        return self._require_follow_up_store().delete_item(item_id)
+
+    def _require_follow_up_store(self) -> SitrepFollowUpStore:
+        if self.follow_up_store is None:
+            raise ValueError("SITREP follow-up persistence is not configured for this runtime.")
+        return self.follow_up_store
 
     def _load_overview(self, universe_id: str, force_refresh: bool) -> ResearchOverviewResult:
         return self.research_service.overview(

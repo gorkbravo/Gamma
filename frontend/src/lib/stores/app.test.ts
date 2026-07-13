@@ -94,6 +94,12 @@ import {
   predictionMarketScreener,
   predictionMarketWallet,
   loadSitrepWorkspace,
+  loadSitrepFollowUps,
+  toggleSitrepFollowUpItem,
+  updateSitrepFollowUpItem,
+  dismissSitrepFollowUpItem,
+  sitrepFollowUps,
+  sitrepWorkspaceMeta,
   sitrepIndicesOverview,
   commoditiesWorkspace,
   researchOverview,
@@ -2201,6 +2207,155 @@ describe("app store orchestration", () => {
     expect(get(researchOverview)).toBeNull();
     expect(get(sitrepIndicesOverview)).toBeNull();
     expect(get(commoditiesWorkspace)).toBeNull();
+    expect(get(sitrepWorkspaceMeta)).toEqual({
+      retrieved_at: "2026-07-12T18:00:00Z",
+      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
+      section_warnings: ["SITREP section 'commodities' failed to load: boom"]
+    });
+  });
+});
+
+describe("sitrep follow-ups store", () => {
+  function makeLocalStorageStub(initial: Record<string, string> = {}) {
+    const backing = new Map(Object.entries(initial));
+    return {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => void backing.set(key, value),
+      removeItem: (key: string) => void backing.delete(key),
+      clear: () => backing.clear(),
+      key: (index: number) => [...backing.keys()][index] ?? null,
+      get length() {
+        return backing.size;
+      },
+      _backing: backing
+    };
+  }
+
+  const backendFollowUp = {
+    id: "uuid-1",
+    row_id: "evt-cpi",
+    title: "CPI release",
+    source: "Event",
+    tone: "warning",
+    detail: "Inflation / US",
+    meta: "in 3d",
+    note: "",
+    status: "open",
+    handoff: { targetTab: "macro", targetMode: "events_regimes" },
+    saved_at: "2026-07-12T00:00:00Z",
+    updated_at: "2026-07-12T00:00:00Z",
+    resolved_at: null
+  };
+
+  beforeEach(() => {
+    sitrepFollowUps.set([]);
+  });
+
+  it("migrates legacy localStorage follow-ups into the backend before listing", async () => {
+    const storage = makeLocalStorageStub({
+      "gamma.sitrep.follow_ups.v1": JSON.stringify([
+        {
+          id: "evt-cpi",
+          source: "Event",
+          tone: "warning",
+          title: "CPI release",
+          detail: "Inflation / US",
+          meta: "in 3d",
+          handoff: { targetTab: "macro", targetMode: "events_regimes" },
+          saved_at: "2026-07-12T00:00:00Z"
+        }
+      ])
+    });
+    vi.stubGlobal("localStorage", storage);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(backendFollowUp))
+      .mockResolvedValueOnce(ok({ items: [backendFollowUp] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const items = await loadSitrepFollowUps();
+
+    expect(items).toHaveLength(1);
+    expect(get(sitrepFollowUps)[0]?.row_id).toBe("evt-cpi");
+    const createCall = fetchMock.mock.calls[0];
+    expect(String(createCall?.[0])).toContain("/sitrep/follow-ups");
+    expect(createCall?.[1]?.method).toBe("POST");
+    const createBody = JSON.parse(String(createCall?.[1]?.body ?? "{}"));
+    expect(createBody.row_id).toBe("evt-cpi");
+    expect(createBody.saved_at).toBe("2026-07-12T00:00:00Z");
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1")).toBeNull();
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1.migrated")).not.toBeNull();
+  });
+
+  it("keeps the legacy localStorage payload when migration fails", async () => {
+    const legacyRaw = JSON.stringify([{ id: "evt-cpi", title: "CPI release" }]);
+    const storage = makeLocalStorageStub({ "gamma.sitrep.follow_ups.v1": legacyRaw });
+    vi.stubGlobal("localStorage", storage);
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("backend down"))
+      .mockResolvedValueOnce(ok({ items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadSitrepFollowUps();
+
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1")).toBe(legacyRaw);
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1.migrated")).toBeNull();
+  });
+
+  it("toggles a follow-up on and off through the backend endpoints", async () => {
+    vi.stubGlobal("localStorage", makeLocalStorageStub());
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(backendFollowUp));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const created = await toggleSitrepFollowUpItem({
+      id: "evt-cpi",
+      source: "Event",
+      tone: "warning",
+      title: "CPI release",
+      detail: "Inflation / US",
+      meta: "in 3d",
+      handoff: { targetTab: "macro", targetMode: "events_regimes" }
+    });
+
+    expect(created?.id).toBe("uuid-1");
+    expect(get(sitrepFollowUps)).toHaveLength(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+
+    fetchMock.mockResolvedValueOnce(ok({ success: true }));
+    const removed = await toggleSitrepFollowUpItem({
+      id: "evt-cpi",
+      source: "Event",
+      tone: "warning",
+      title: "CPI release",
+      detail: "Inflation / US",
+      meta: "in 3d",
+      handoff: null
+    });
+
+    expect(removed).toBeNull();
+    expect(get(sitrepFollowUps)).toHaveLength(0);
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("DELETE");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/sitrep/follow-ups/uuid-1");
+  });
+
+  it("updates note and resolved state in place", async () => {
+    vi.stubGlobal("localStorage", makeLocalStorageStub());
+    sitrepFollowUps.set([backendFollowUp as never]);
+    const resolved = { ...backendFollowUp, status: "resolved", note: "watch 2s10s", resolved_at: "2026-07-13T00:00:00Z" };
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(resolved));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const updated = await updateSitrepFollowUpItem("uuid-1", { note: "watch 2s10s", status: "resolved" });
+
+    expect(updated?.status).toBe("resolved");
+    expect(get(sitrepFollowUps)[0]?.note).toBe("watch 2s10s");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PATCH");
+
+    fetchMock.mockResolvedValueOnce(ok({ success: true }));
+    const dismissed = await dismissSitrepFollowUpItem("uuid-1");
+    expect(dismissed).toBe(true);
+    expect(get(sitrepFollowUps)).toHaveLength(0);
   });
 });
 

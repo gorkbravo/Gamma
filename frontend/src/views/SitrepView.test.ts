@@ -114,6 +114,65 @@ describe("SitrepView", () => {
     expect(body).toContain("Prediction Mkts");
     expect(body).toContain("NOT LOADED");
   });
+
+  it("renders backend follow-ups with notes, resolved state, and triage actions", () => {
+    const { body } = render(SitrepView, {
+      props: {
+        overview: null,
+        indicesOverview: null,
+        news: null,
+        macro: null,
+        commodities: null,
+        prediction: null,
+        loading: false,
+        onLoadNews: vi.fn(),
+        onLoadOverview: vi.fn(),
+        onLoadIndicesOverview: vi.fn(),
+        onLoadMacro: vi.fn(),
+        onLoadCommodities: vi.fn(),
+        onLoadPrediction: vi.fn(),
+        onOpenHandoff: vi.fn(),
+        followUps: [
+          {
+            id: "uuid-open",
+            row_id: "evt-cpi",
+            source: "Event",
+            tone: "warning",
+            title: "CPI release",
+            detail: "Inflation / US",
+            meta: "in 3d",
+            note: "Watch the 2s10s reaction",
+            status: "open" as const,
+            handoff: { targetTab: "macro" as const, targetMode: "events_regimes" },
+            saved_at: "2026-07-12T00:00:00Z",
+          },
+          {
+            id: "uuid-resolved",
+            row_id: "divergence-1",
+            source: "Macro",
+            tone: "neutral",
+            title: "Rates vs equities divergence",
+            detail: "score 2.4",
+            meta: "high",
+            note: "",
+            status: "resolved" as const,
+            handoff: null,
+            saved_at: "2026-07-10T00:00:00Z",
+            resolved_at: "2026-07-13T00:00:00Z",
+          },
+        ],
+      },
+    });
+
+    expect(body).toContain("1 open / 1 resolved / saved on backend");
+    expect(body).toContain("Watch the 2s10s reaction");
+    expect(body).toContain("RESOLVED");
+    expect(body).toContain("Mark follow-up resolved");
+    expect(body).toContain("Reopen follow-up");
+    expect(body).toContain("Add follow-up note");
+    expect(body).toContain("Edit follow-up note");
+    expect(body).toContain("Dismiss follow-up");
+  });
 });
 
 function makeMacroMetric(overrides: Partial<MacroMetric>): MacroMetric {

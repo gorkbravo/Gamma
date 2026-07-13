@@ -82,6 +82,12 @@
     loadResearchOverview,
     loadSitrepIndicesOverview,
     loadSitrepWorkspace,
+    loadSitrepFollowUps,
+    toggleSitrepFollowUpItem,
+    updateSitrepFollowUpItem,
+    dismissSitrepFollowUpItem,
+    sitrepFollowUps,
+    sitrepWorkspaceMeta,
     loadSavedResearch,
     macroContext,
     loadMacroSeriesHistory,
@@ -465,7 +471,10 @@
   async function loadSitrepContext(options: { forceRefresh?: boolean } = {}) {
     // The backend-owned /sitrep/workspace contract composes all six sections
     // server-side; the store fans them out into the per-domain stores.
-    await loadSitrepWorkspace({ forceRefresh: options.forceRefresh });
+    await Promise.allSettled([
+      loadSitrepWorkspace({ forceRefresh: options.forceRefresh }),
+      loadSitrepFollowUps(),
+    ]);
   }
 
   const macroModeLabels: Record<MacroContextState["mode"], string> = {
@@ -2432,6 +2441,12 @@
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
             onOpenHandoff={openSitrepHandoff}
+            workspaceMeta={$sitrepWorkspaceMeta}
+            followUps={$sitrepFollowUps}
+            onLoadFollowUps={loadSitrepFollowUps}
+            onToggleFollowUp={toggleSitrepFollowUpItem}
+            onUpdateFollowUp={(id, patch) => updateSitrepFollowUpItem(id, patch)}
+            onDismissFollowUp={dismissSitrepFollowUpItem}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component

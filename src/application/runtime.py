@@ -82,6 +82,7 @@ from src.services.portfolio_history_store import PortfolioHistoryStore
 from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
+from src.services.sitrep_follow_up_store import SitrepFollowUpStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.time import now_utc
 from src.utils.logging_config import setup_logging
@@ -359,6 +360,7 @@ def build_runtime(
         commodities_service=commodities_service,
         prediction_market_service=prediction_market_service,
         news_service=news_service,
+        follow_up_store=SitrepFollowUpStore(base_dir=resolved_history_dir / "sitrep"),
     )
     risk_service = RiskService(
         client,

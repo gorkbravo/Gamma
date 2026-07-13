@@ -104,3 +104,96 @@ def test_sitrep_unknown_sections_fall_back_to_all():
     from src.application.sitrep_service import _normalize_sections
 
     assert _normalize_sections(normalized.sections) == set(SITREP_SECTIONS)
+
+
+def test_sitrep_follow_up_crud_roundtrip(tmp_path):
+    client = _build_client(tmp_path)
+    try:
+        created = client.post(
+            "/sitrep/follow-ups",
+            json={
+                "row_id": "divergence-1",
+                "title": "Rates vs equities divergence",
+                "source": "Macro",
+                "tone": "warning",
+                "detail": "Score 2.4 / high",
+                "meta": "score 2.4 / high",
+                "handoff": {"targetTab": "macro", "targetMode": "cross_asset"},
+            },
+        )
+        assert created.status_code == 200
+        item = created.json()
+        assert item["status"] == "open"
+        assert item["note"] == ""
+        assert item["handoff"] == {"targetTab": "macro", "targetMode": "cross_asset"}
+
+        # Re-creating the same row id is idempotent, not a duplicate.
+        duplicate = client.post(
+            "/sitrep/follow-ups",
+            json={"row_id": "divergence-1", "title": "Rates vs equities divergence"},
+        )
+        assert duplicate.status_code == 200
+        assert duplicate.json()["id"] == item["id"]
+
+        listed = client.get("/sitrep/follow-ups")
+        assert listed.status_code == 200
+        assert [row["id"] for row in listed.json()["items"]] == [item["id"]]
+
+        noted = client.patch(
+            f"/sitrep/follow-ups/{item['id']}",
+            json={"note": "Check the 2s10s reaction after CPI."},
+        )
+        assert noted.status_code == 200
+        assert noted.json()["note"] == "Check the 2s10s reaction after CPI."
+        assert noted.json()["status"] == "open"
+
+        resolved = client.patch(f"/sitrep/follow-ups/{item['id']}", json={"status": "resolved"})
+        assert resolved.status_code == 200
+        assert resolved.json()["status"] == "resolved"
+        assert resolved.json()["resolved_at"] is not None
+        assert resolved.json()["note"] == "Check the 2s10s reaction after CPI."
+
+        reopened = client.patch(f"/sitrep/follow-ups/{item['id']}", json={"status": "open"})
+        assert reopened.status_code == 200
+        assert reopened.json()["status"] == "open"
+        assert reopened.json()["resolved_at"] is None
+
+        deleted = client.delete(f"/sitrep/follow-ups/{item['id']}")
+        assert deleted.status_code == 200
+        assert deleted.json()["success"] is True
+        assert client.get("/sitrep/follow-ups").json()["items"] == []
+    finally:
+        client.app.state.runtime.shutdown()
+
+
+def test_sitrep_follow_up_validation_errors(tmp_path):
+    client = _build_client(tmp_path)
+    try:
+        missing_title = client.post("/sitrep/follow-ups", json={"row_id": "x", "title": " "})
+        assert missing_title.status_code == 422
+
+        created = client.post("/sitrep/follow-ups", json={"row_id": "x", "title": "Row"})
+        assert created.status_code == 200
+        item_id = created.json()["id"]
+
+        bad_status = client.patch(f"/sitrep/follow-ups/{item_id}", json={"status": "done"})
+        assert bad_status.status_code == 422
+
+        missing = client.patch("/sitrep/follow-ups/does-not-exist", json={"note": "n"})
+        assert missing.status_code == 404
+    finally:
+        client.app.state.runtime.shutdown()
+
+
+def test_sitrep_follow_up_store_persists_across_instances(tmp_path):
+    from src.models.sitrep import SitrepFollowUpCreateRequest
+    from src.services.sitrep_follow_up_store import SitrepFollowUpStore
+
+    store = SitrepFollowUpStore(base_dir=tmp_path / "sitrep")
+    store.create_item(SitrepFollowUpCreateRequest(row_id="r1", title="Persisted row"))
+
+    reloaded = SitrepFollowUpStore(base_dir=tmp_path / "sitrep")
+    items = reloaded.list_items()
+    assert len(items) == 1
+    assert items[0].row_id == "r1"
+    assert items[0].status == "open"

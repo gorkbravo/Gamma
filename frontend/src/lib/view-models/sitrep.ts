@@ -91,53 +91,76 @@ export function resolveSitrepTapeHandoff(row: SitrepTapeHandoffRow): SitrepHando
   return row.handoff ?? null;
 }
 
+/** Aggregate metadata from the single /sitrep/workspace load (section list + degradation warnings). */
+export interface SitrepWorkspaceMeta {
+  retrieved_at: string;
+  sections: string[];
+  section_warnings: string[];
+}
+
+export type SitrepFollowUpStatus = "open" | "resolved";
+
 export interface SitrepFollowUp {
+  /** Backend store id (uuid). Legacy localStorage entries reuse the row id until migrated. */
   id: string;
+  /** Stable triage-row id used to match the originating What Changed / Events row. */
+  row_id: string;
   source: string;
   tone: string;
   title: string;
   detail: string;
   meta: string;
+  note: string;
+  status: SitrepFollowUpStatus;
   handoff: SitrepHandoffRequest | null;
   saved_at: string;
+  resolved_at?: string | null;
 }
 
 export const SITREP_FOLLOW_UP_STORAGE_KEY = "gamma.sitrep.follow_ups.v1";
-export const SITREP_FOLLOW_UP_LIMIT = 24;
+export const SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY = "gamma.sitrep.follow_ups.v1.migrated";
+export const SITREP_FOLLOW_UP_LIMIT = 48;
 
-export function isSitrepFollowUpSaved(followUps: SitrepFollowUp[], id: string): boolean {
-  return followUps.some((item) => item.id === id);
+export function isSitrepFollowUpSaved(followUps: SitrepFollowUp[], rowId: string): boolean {
+  return followUps.some((item) => item.row_id === rowId);
 }
 
-export function toggleSitrepFollowUp(
+export function findSitrepFollowUpByRow(
   followUps: SitrepFollowUp[],
-  row: SitrepTapeHandoffRow,
-  savedAt: string = new Date().toISOString()
-): SitrepFollowUp[] {
-  if (isSitrepFollowUpSaved(followUps, row.id)) {
-    return removeSitrepFollowUp(followUps, row.id);
-  }
-  const entry: SitrepFollowUp = {
-    id: row.id,
-    source: row.source,
-    tone: row.tone,
-    title: row.title,
-    detail: row.detail,
-    meta: row.meta,
-    handoff: row.handoff ?? null,
-    saved_at: savedAt,
-  };
-  return [entry, ...followUps].slice(0, SITREP_FOLLOW_UP_LIMIT);
+  rowId: string
+): SitrepFollowUp | null {
+  return followUps.find((item) => item.row_id === rowId) ?? null;
 }
 
 export function removeSitrepFollowUp(followUps: SitrepFollowUp[], id: string): SitrepFollowUp[] {
   return followUps.filter((item) => item.id !== id);
 }
 
-export function serializeSitrepFollowUps(followUps: SitrepFollowUp[]): string {
-  return JSON.stringify(followUps.slice(0, SITREP_FOLLOW_UP_LIMIT));
+export interface SitrepFollowUpCreatePayload {
+  row_id: string;
+  title: string;
+  source: string;
+  tone: string;
+  detail: string;
+  meta: string;
+  note?: string;
+  handoff: SitrepHandoffRequest | null;
+  saved_at?: string;
 }
 
+export function buildSitrepFollowUpCreatePayload(row: SitrepTapeHandoffRow): SitrepFollowUpCreatePayload {
+  return {
+    row_id: row.id,
+    title: row.title,
+    source: row.source,
+    tone: row.tone,
+    detail: row.detail,
+    meta: row.meta,
+    handoff: row.handoff ?? null,
+  };
+}
+
+/** Parses the legacy localStorage payload so pre-backend follow-ups can be migrated. */
 export function parseSitrepFollowUps(raw: string | null | undefined): SitrepFollowUp[] {
   if (!raw) {
     return [];
@@ -154,7 +177,7 @@ export function parseSitrepFollowUps(raw: string | null | undefined): SitrepFoll
   const items: SitrepFollowUp[] = [];
   for (const candidate of parsed) {
     const entry = coerceFollowUp(candidate);
-    if (entry && !items.some((item) => item.id === entry.id)) {
+    if (entry && !items.some((item) => item.row_id === entry.row_id)) {
       items.push(entry);
     }
     if (items.length >= SITREP_FOLLOW_UP_LIMIT) {
@@ -172,15 +195,20 @@ function coerceFollowUp(candidate: unknown): SitrepFollowUp | null {
   if (typeof record.id !== "string" || !record.id.trim() || typeof record.title !== "string" || !record.title.trim()) {
     return null;
   }
+  const rowId = typeof record.row_id === "string" && record.row_id.trim() ? record.row_id : record.id;
   return {
     id: record.id,
+    row_id: rowId,
     source: typeof record.source === "string" ? record.source : "",
     tone: typeof record.tone === "string" ? record.tone : "neutral",
     title: record.title,
     detail: typeof record.detail === "string" ? record.detail : "",
     meta: typeof record.meta === "string" ? record.meta : "",
+    note: typeof record.note === "string" ? record.note : "",
+    status: record.status === "resolved" ? "resolved" : "open",
     handoff: coerceFollowUpHandoff(record.handoff),
     saved_at: typeof record.saved_at === "string" ? record.saved_at : new Date(0).toISOString(),
+    resolved_at: typeof record.resolved_at === "string" ? record.resolved_at : null,
   };
 }
 

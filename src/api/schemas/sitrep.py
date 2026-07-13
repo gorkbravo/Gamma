@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.schemas.commodities import CommodityWorkspaceResponseModel
 from src.api.schemas.macro import MacroSnapshotResponseModel
@@ -10,6 +11,7 @@ from src.api.schemas.news import NewsEventFeedResponseModel
 from src.api.schemas.prediction_markets import PredictionMarketListResponseModel
 from src.api.schemas.research import ResearchOverviewResponseModel
 from src.application.sitrep_service import SitrepWorkspaceResult
+from src.models.sitrep import SitrepFollowUp
 
 
 class SitrepWorkspaceResponseModel(BaseModel):
@@ -62,3 +64,66 @@ class SitrepWorkspaceResponseModel(BaseModel):
             origin=result.origin,
             transformation_note=result.transformation_note,
         )
+
+
+class SitrepFollowUpModel(BaseModel):
+    id: str
+    row_id: str
+    title: str
+    source: str = ""
+    tone: str = "neutral"
+    detail: str = ""
+    meta: str = ""
+    note: str = ""
+    status: str = "open"
+    handoff: dict[str, Any] | None = None
+    saved_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, item: SitrepFollowUp) -> "SitrepFollowUpModel":
+        return cls(
+            id=item.id,
+            row_id=item.row_id,
+            title=item.title,
+            source=item.source,
+            tone=item.tone,
+            detail=item.detail,
+            meta=item.meta,
+            note=item.note,
+            status=item.status,
+            handoff=dict(item.handoff) if item.handoff else None,
+            saved_at=item.saved_at,
+            updated_at=item.updated_at,
+            resolved_at=item.resolved_at,
+        )
+
+
+class SitrepFollowUpListResponseModel(BaseModel):
+    items: list[SitrepFollowUpModel] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, items: list[SitrepFollowUp]) -> "SitrepFollowUpListResponseModel":
+        return cls(items=[SitrepFollowUpModel.from_domain(item) for item in items])
+
+
+class SitrepFollowUpCreateRequestModel(BaseModel):
+    row_id: str
+    title: str
+    source: str = ""
+    tone: str = "neutral"
+    detail: str = ""
+    meta: str = ""
+    note: str = ""
+    handoff: dict[str, Any] | None = None
+    saved_at: datetime | None = None
+
+
+class SitrepFollowUpUpdateRequestModel(BaseModel):
+    note: str | None = None
+    status: str | None = None
+
+
+class SitrepFollowUpDeleteResponseModel(BaseModel):
+    success: bool
