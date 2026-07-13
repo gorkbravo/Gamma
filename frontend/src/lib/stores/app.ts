@@ -357,6 +357,7 @@ function createEmptyCopilotThread(domain: CopilotDomain): CopilotThreadState {
 function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> {
   return {
     portfolio: createEmptyCopilotThread("portfolio"),
+    sitrep: createEmptyCopilotThread("sitrep"),
     research: createEmptyCopilotThread("research"),
     equity_research: createEmptyCopilotThread("equity_research"),
     strategy_lab: createEmptyCopilotThread("strategy_lab"),
@@ -430,6 +431,7 @@ export const fundamentalsReverseValuation = writable<FundamentalsReverseValuatio
 export const fundamentalsDcfSnapshots = writable<FundamentalsDcfSnapshotList | null>(null);
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
   portfolio: null,
+  sitrep: null,
   research: null,
   equity_research: null,
   strategy_lab: null,
@@ -905,6 +907,7 @@ const COPILOT_OPERATOR_TIMEOUT_MS = 300_000;
 
 const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   portfolio: "Portfolio",
+  sitrep: "SITREP",
   research: "Research",
   equity_research: "Equity Research",
   strategy_lab: "Strategy Lab",
@@ -948,6 +951,28 @@ function buildCopilotContextFingerprint(
       benchmarkSymbol: performance?.benchmark_symbol ?? null,
       performancePoints: performance?.performance_points.length ?? 0,
       performanceTimestamp: lastItem(performance?.performance_points ?? [])?.timestamp ?? null
+    });
+  }
+
+  if (domain === "sitrep") {
+    const meta = get(sitrepWorkspaceMeta);
+    const overview = get(researchOverview);
+    const indices = get(sitrepIndicesOverview);
+    const macro = get(macroSnapshot);
+    const commodities = get(commoditiesWorkspace);
+    const news = get(newsFeed);
+    const followUps = get(sitrepFollowUps);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      workspaceRetrievedAt: meta?.retrieved_at ?? null,
+      sectionWarnings: meta?.section_warnings.length ?? 0,
+      equitiesRetrievedAt: overview?.retrieved_at ?? null,
+      indicesRetrievedAt: indices?.retrieved_at ?? null,
+      macroRetrievedAt: macro?.retrieved_at ?? null,
+      commoditiesRetrievedAt: commodities?.retrieved_at ?? null,
+      newsRetrievedAt: news?.retrieved_at ?? null,
+      followUps: followUps.map((item) => ({ id: item.id, status: item.status }))
     });
   }
 
@@ -2848,6 +2873,13 @@ function normalizeReasoningEffort(effort: CopilotReasoningEffort | undefined) {
 
 function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode | null | undefined) {
   switch (domain) {
+    case "sitrep":
+      // The backend composes the SITREP bundle itself from SitrepService plus
+      // the persisted follow-up store, so only tab/mode routing is sent.
+      return {
+        current_tab: "sitrep",
+        workspace_mode: workspaceMode
+      };
     case "portfolio":
       return {
         current_tab: "portfolio",
@@ -3014,6 +3046,9 @@ function validateSynthesisScopeDomain(
   if (domain === "portfolio" && !get(portfolioSnapshot)) {
     return "Load the Portfolio context before including it in a synthesis card.";
   }
+  if (domain === "sitrep" && !get(sitrepWorkspaceMeta)) {
+    return "Load the SITREP workspace before including it in a synthesis card.";
+  }
   if (domain === "research" && !get(researchResult)) {
     return "Run a Research analysis before including it in a synthesis card.";
   }
@@ -3068,6 +3103,9 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "portfolio" && !get(portfolioSnapshot)) {
     return "Load a portfolio snapshot before generating a research card.";
   }
+  if (domain === "sitrep" && !get(sitrepWorkspaceMeta)) {
+    return "Load the SITREP workspace before generating a research card.";
+  }
   if (domain === "research" && !get(researchResult)) {
     return "Run a research analysis before generating a research card.";
   }
@@ -3100,6 +3138,7 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   }
   if (
     domain === "portfolio" ||
+    domain === "sitrep" ||
     domain === "research" ||
     domain === "equity_research" ||
     domain === "strategy_lab" ||

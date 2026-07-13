@@ -33,6 +33,7 @@ from src.application.research_service import ResearchAnalysisRequest, ResearchSe
 from src.application.research_action_registry import ResearchActionRegistry
 from src.application.request_limits import MAX_RISK_LOOKBACK_DAYS
 from src.application.risk_service import RiskComputeRequest, RiskService
+from src.application.sitrep_service import SitrepService, SitrepWorkspaceRequest
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.copilot import (
     CopilotContextBundle,
@@ -152,6 +153,7 @@ class CopilotService:
         portfolio_provider: Any | None = None,
         research_provider: Any | None = None,
         news_service: NewsService | None = None,
+        sitrep_service: SitrepService | None = None,
         provider: CopilotProvider,
         store: CopilotStore | None = None,
     ) -> None:
@@ -164,6 +166,7 @@ class CopilotService:
         self.portfolio_provider = portfolio_provider
         self.research_provider = research_provider
         self.news_service = news_service
+        self.sitrep_service = sitrep_service
         self.provider = provider
         self.store = store
         self.agents_operator_service = CopilotAgentsOperatorService()
@@ -174,6 +177,7 @@ class CopilotService:
             "strategy_lab": self._build_strategy_lab_context,
             "macro": self._build_macro_context,
             "commodities": self._build_commodities_context,
+            "sitrep": self._build_sitrep_context,
             "prediction_markets": self._build_prediction_market_context,
             "crypto": self._build_crypto_context,
             "fundamentals": self._build_fundamentals_context,
@@ -3806,6 +3810,217 @@ class CopilotService:
             sources=sources,
             warnings=warnings,
         )
+
+    def _build_sitrep_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        if self.sitrep_service is None:
+            raise ValueError("SITREP copilot requires a configured SitrepService.")
+        workspace = self.sitrep_service.get_workspace(SitrepWorkspaceRequest(force_refresh=False))
+        warnings: list[str] = list(workspace.section_warnings)
+
+        follow_ups: list[dict[str, Any]] = []
+        if self.sitrep_service.follow_up_store is not None:
+            follow_ups = [
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "source": item.source,
+                    "detail": item.detail,
+                    "note": item.note,
+                    "status": item.status,
+                    "saved_at": item.saved_at.isoformat(),
+                }
+                for item in self.sitrep_service.list_follow_ups()[:12]
+            ]
+        else:
+            warnings.append("SITREP follow-up persistence is not configured; follow-ups are omitted.")
+
+        summary_data: dict[str, Any] = {
+            "workspace_mode": request.context.workspace_mode or "research",
+            "retrieved_at": workspace.retrieved_at.isoformat(),
+            "sections_loaded": [
+                section
+                for section, payload in (
+                    ("equities", workspace.equities_overview),
+                    ("indices", workspace.indices_overview),
+                    ("macro", workspace.macro_snapshot),
+                    ("commodities", workspace.commodities),
+                    ("prediction_markets", workspace.prediction_markets),
+                    ("news", workspace.news),
+                )
+                if payload is not None
+            ],
+            "section_warnings": list(workspace.section_warnings),
+            "equities": self._sitrep_overview_summary(workspace.equities_overview),
+            "indices": self._sitrep_overview_summary(workspace.indices_overview),
+            "macro": self._sitrep_macro_summary(workspace.macro_snapshot),
+            "commodities": self._sitrep_commodities_summary(workspace.commodities),
+            "prediction_markets": self._sitrep_prediction_summary(workspace.prediction_markets),
+            "news": self._sitrep_news_summary(workspace.news),
+            "follow_ups": follow_ups,
+            "warnings": warnings,
+        }
+
+        sources = [
+            CopilotSourceRef(
+                source_id="sitrep.workspace",
+                label="SITREP situation-report workspace",
+                kind="workspace",
+                provider=workspace.source_provider,
+                origin=workspace.origin,
+                description="Backend-composed SITREP workspace: equities, indices, macro, commodities, prediction markets, and news sections with per-section degradation warnings.",
+                retrieved_at=workspace.retrieved_at,
+            )
+        ]
+        for section, payload in (
+            ("equities", workspace.equities_overview),
+            ("indices", workspace.indices_overview),
+            ("macro", workspace.macro_snapshot),
+            ("commodities", workspace.commodities),
+            ("news", workspace.news),
+        ):
+            if payload is None:
+                continue
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"sitrep.{section}",
+                    label=f"SITREP {section.replace('_', ' ')} section",
+                    kind="workspace_section",
+                    provider=str(getattr(payload, "source_provider", "") or "gamma"),
+                    origin=str(getattr(payload, "origin", "") or f"gamma.sitrep.{section}"),
+                    description=f"{section.replace('_', ' ').title()} payload embedded in the SITREP workspace.",
+                    retrieved_at=getattr(payload, "retrieved_at", None),
+                )
+            )
+        if follow_ups:
+            sources.append(
+                CopilotSourceRef(
+                    source_id="sitrep.follow_ups",
+                    label="SITREP saved follow-ups",
+                    kind="saved_research",
+                    provider="gamma_sitrep",
+                    origin="sitrep_follow_up_store",
+                    description="Locally persisted SITREP triage follow-ups with notes and resolved states.",
+                    retrieved_at=workspace.retrieved_at,
+                )
+            )
+
+        return CopilotContextBundle(
+            domain="sitrep",
+            current_tab=request.context.current_tab or "sitrep",
+            summary_data=summary_data,
+            tool_state={"workspace": workspace, "follow_ups": follow_ups},
+            sources=sources,
+            warnings=dedupe_warnings(warnings),
+        )
+
+    @staticmethod
+    def _sitrep_overview_summary(overview: Any) -> dict[str, Any] | None:
+        if overview is None:
+            return None
+
+        def _rank_items(items: Any) -> list[dict[str, Any]]:
+            return [
+                {"label": item.label, "symbol": item.symbol, "value": item.value}
+                for item in list(items)[:3]
+            ]
+
+        return {
+            "universe_id": overview.universe_id,
+            "universe_label": overview.universe_label,
+            "timeframe": overview.timeframe,
+            "coverage_ratio": overview.coverage.coverage_ratio,
+            "coverage_label": overview.coverage_label,
+            "freshness_label": getattr(overview.freshness_label, "value", str(overview.freshness_label)),
+            "leaders": _rank_items(overview.rankings.leaders),
+            "laggards": _rank_items(overview.rankings.laggards),
+            "warning_count": len(overview.warnings),
+        }
+
+    @staticmethod
+    def _sitrep_macro_summary(snapshot: Any) -> dict[str, Any] | None:
+        if snapshot is None:
+            return None
+        return {
+            "region": snapshot.region,
+            "timeframe": snapshot.timeframe,
+            "focus_items": [
+                {"title": item.title, "why_now": item.why_now}
+                for item in snapshot.focus_items[:3]
+            ],
+            "top_divergences": [
+                {"headline": row.headline, "label": row.label}
+                for row in snapshot.top_divergences[:3]
+            ],
+            "upcoming_events": [
+                {"title": event.title, "scheduled_at": event.scheduled_at.isoformat()}
+                for event in snapshot.upcoming_events[:3]
+            ],
+            "warning_count": len(snapshot.warnings),
+        }
+
+    @staticmethod
+    def _sitrep_commodities_summary(workspace: Any) -> dict[str, Any] | None:
+        if workspace is None:
+            return None
+        return {
+            "mode": workspace.mode,
+            "coverage_status": workspace.coverage.coverage_status,
+            "provider": workspace.coverage.source_provider or workspace.coverage.provider_id,
+            "freshness_label": workspace.coverage.freshness_label,
+            "movers": [
+                {
+                    "instrument_id": summary.instrument.instrument_id,
+                    "name": summary.instrument.name,
+                    "family": summary.instrument.family,
+                    "latest_change_pct": summary.latest_change_pct,
+                    "curve_state": summary.curve_state,
+                }
+                for summary in workspace.market_summaries[:6]
+            ],
+            "event_count": len(workspace.events),
+            "warning_count": len(workspace.warnings),
+        }
+
+    @staticmethod
+    def _sitrep_prediction_summary(screener: Any) -> dict[str, Any] | None:
+        if screener is None:
+            return None
+        return {
+            "markets": [
+                {
+                    "market_id": market.market_id,
+                    "title": market.title,
+                    "venue": market.venue,
+                    "current_probability": market.current_probability,
+                }
+                for market in screener.markets[:6]
+            ],
+            "venues": [venue.venue for venue in screener.venues],
+            "warning_count": len(screener.warnings),
+        }
+
+    @staticmethod
+    def _sitrep_news_summary(feed: Any) -> dict[str, Any] | None:
+        if feed is None:
+            return None
+        return {
+            "source_provider": feed.source_provider,
+            "freshness_label": getattr(feed.freshness_label, "value", str(feed.freshness_label)),
+            "items": [
+                {
+                    "title": item.title,
+                    "source_name": item.source_name,
+                    "published_at": item.published_at.isoformat(),
+                    "tickers": [
+                        entity.symbol
+                        for entity in item.detected_entities
+                        if getattr(entity, "symbol", None)
+                    ],
+                }
+                for item in feed.items[:10]
+            ],
+            "warning_count": len(feed.warnings),
+        }
 
     def _build_prediction_market_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
         market_id = (request.context.prediction_market_id or "").strip()

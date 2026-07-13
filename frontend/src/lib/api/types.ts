@@ -2890,6 +2890,7 @@ export interface MaritimeTrackResponse {
 
 export type CopilotBaseDomain =
   | "portfolio"
+  | "sitrep"
   | "research"
   | "equity_research"
   | "strategy_lab"

@@ -220,7 +220,7 @@
   } from "./lib/api/types";
   import type { CryptoMode } from "./lib/view-models/crypto";
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
-  import type { SitrepHandoffRequest } from "./lib/view-models/sitrep";
+  import type { SitrepHandoffRequest, SitrepWorkspaceMeta } from "./lib/view-models/sitrep";
   import type { OptionsMode } from "./lib/view-models/iv";
   import type { EquityResearchMode, StrategyLabMode } from "./lib/view-models/research";
   import type { RiskMode } from "./lib/risk-workspace";
@@ -314,6 +314,7 @@
     system: $systemStatus,
     portfolio: $portfolioSnapshot,
     portfolioPerformance: $portfolioPerformance,
+    sitrepMeta: $sitrepWorkspaceMeta,
     overview: $researchOverview,
     research: $researchResult,
     strategy: $strategyLabResult,
@@ -624,7 +625,7 @@
     unavailableLabel: string;
   }> = [
     { tabId: "portfolio", domain: "portfolio", label: "Portfolio", unavailableLabel: "Load a portfolio snapshot" },
-    { tabId: "sitrep", domain: null, label: "SITREP", unavailableLabel: "SITREP is not a standalone Copilot context" },
+    { tabId: "sitrep", domain: "sitrep", label: "SITREP", unavailableLabel: "Load the SITREP workspace" },
     { tabId: "equity_research", domain: "equity_research", label: "Equity Research", unavailableLabel: "Load Equity Research overview or run Scope Analysis" },
     { tabId: "strategy_lab", domain: "strategy_lab", label: "Strategy Lab", unavailableLabel: "Run a Strategy Lab import, composition, or comparison" },
     { tabId: "macro", domain: "macro", label: "Macro", unavailableLabel: "Load the Macro workspace" },
@@ -649,12 +650,21 @@
     return match?.domain ?? null;
   }
 
+  function describeSitrepCopilotContext(meta: SitrepWorkspaceMeta) {
+    const degraded = meta.section_warnings.length;
+    const sectionLabel = `${meta.sections.length} section${meta.sections.length === 1 ? "" : "s"}`;
+    return degraded
+      ? `SITREP | ${sectionLabel} | ${degraded} degraded`
+      : `SITREP | ${sectionLabel} loaded`;
+  }
+
   function buildSynthesisScopeOptions({
     activeTab,
     workspaceMode,
     system,
     portfolio,
     portfolioPerformance,
+    sitrepMeta,
     overview,
     research,
     strategy,
@@ -677,6 +687,7 @@
     system: SystemStatus | null;
     portfolio: PortfolioSnapshot | null;
     portfolioPerformance: PortfolioPerformanceResponse | null;
+    sitrepMeta: SitrepWorkspaceMeta | null;
     overview: typeof $researchOverview;
     research: ResearchResult | null;
     strategy: typeof $strategyLabResult;
@@ -728,6 +739,17 @@
         formatWarningLabel(
           portfolio.warnings.length + (portfolioPerformance?.warnings.length ?? 0)
         )
+      );
+    }
+
+    if (sitrepMeta) {
+      pushOption(
+        "sitrep",
+        describeSitrepCopilotContext(sitrepMeta),
+        formatShortTimestamp(sitrepMeta.retrieved_at)
+          ? `Workspace ${formatShortTimestamp(sitrepMeta.retrieved_at)}`
+          : null,
+        formatWarningLabel(sitrepMeta.section_warnings.length)
       );
     }
 

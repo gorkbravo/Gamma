@@ -4186,3 +4186,74 @@ def test_runtime_enables_openai_response_storage_by_default(tmp_path, monkeypatc
         assert runtime.copilot_service.provider.store_responses is True
     finally:
         runtime.shutdown()
+
+
+def test_sitrep_copilot_context_bundles_sections_warnings_and_follow_ups(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        created = client.post(
+            "/sitrep/follow-ups",
+            json={
+                "row_id": "evt-cpi",
+                "title": "CPI release",
+                "source": "Event",
+                "note": "Watch the front end",
+            },
+        )
+        assert created.status_code == 200
+
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "sitrep",
+                "prompt": "Summarize the situation report.",
+                "context": {"current_tab": "sitrep", "workspace_mode": "research"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["domain"] == "sitrep"
+        source_ids = {source["source_id"] for source in payload["sources"]}
+        assert "sitrep.workspace" in source_ids
+        assert "sitrep.news" in source_ids
+        assert "sitrep.follow_ups" in source_ids
+    finally:
+        runtime.shutdown()
+
+
+def test_sitrep_copilot_context_builder_summary_shape(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        bundle = runtime.copilot_service._build_context_for_domain(
+            "sitrep", CopilotRequestContext(current_tab="sitrep", workspace_mode="research")
+        )
+        assert bundle.domain == "sitrep"
+        summary = bundle.summary_data
+        assert set(summary["sections_loaded"]) == {
+            "equities",
+            "indices",
+            "macro",
+            "commodities",
+            "prediction_markets",
+            "news",
+        }
+        assert summary["equities"]["universe_id"] == "broad_us_market"
+        assert summary["indices"]["universe_id"] == "global_indices"
+        assert summary["macro"]["region"] == "US"
+        assert summary["news"]["items"]
+        assert isinstance(summary["follow_ups"], list)
+        assert summary["section_warnings"] == []
+    finally:
+        runtime.shutdown()

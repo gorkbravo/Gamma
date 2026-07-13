@@ -380,6 +380,7 @@ def build_runtime(
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,
         news_service=news_service,
+        sitrep_service=sitrep_service,
         provider=trace_provider(
             _build_copilot_provider(allow_mock=bool(mock_mode)),
             provider_usage,

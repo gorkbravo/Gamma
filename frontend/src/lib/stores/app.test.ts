@@ -2357,11 +2357,39 @@ describe("sitrep follow-ups store", () => {
     expect(dismissed).toBe(true);
     expect(get(sitrepFollowUps)).toHaveLength(0);
   });
+
+  it("grounds a SITREP research card once the workspace is loaded", async () => {
+    sitrepWorkspaceMeta.set(null);
+    const blocked = await loadCopilotResearchCard("sitrep", "Summarize the situation report.", {
+      workspaceMode: "research"
+    });
+    expect(blocked?.status).toBe("error");
+    expect(blocked?.message).toContain("Load the SITREP workspace");
+
+    sitrepWorkspaceMeta.set({
+      retrieved_at: "2026-07-13T09:00:00Z",
+      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
+      section_warnings: []
+    });
+    const fetchMock = vi.fn().mockResolvedValue(ok(makeCopilotResult("sitrep", "resp_sitrep_1", "SITREP card")));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadCopilotResearchCard("sitrep", "Summarize the situation report.", {
+      workspaceMode: "research"
+    });
+
+    expect(result?.status).toBe("ready");
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(body.domain).toBe("sitrep");
+    expect(body.context.current_tab).toBe("sitrep");
+    expect(get(copilotThreads).sitrep.entries).toHaveLength(1);
+  });
 });
 
 function emptyCopilotCards() {
   return {
     portfolio: null,
+    sitrep: null,
     research: null,
     equity_research: null,
     strategy_lab: null,
@@ -2379,6 +2407,7 @@ function emptyCopilotCards() {
 function emptyCopilotThreads() {
   return {
     portfolio: { domain: "portfolio" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    sitrep: { domain: "sitrep" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     research: { domain: "research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     equity_research: { domain: "equity_research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     strategy_lab: { domain: "strategy_lab" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
@@ -2888,6 +2917,7 @@ function makeCryptoToken(tokenId: string): CryptoToken {
 function makeCopilotResult(
   domain:
     | "portfolio"
+    | "sitrep"
     | "research"
     | "equity_research"
     | "strategy_lab"
