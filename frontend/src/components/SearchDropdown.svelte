@@ -1,3 +1,7 @@
+<script context="module" lang="ts">
+  let nextSearchDropdownId = 0;
+</script>
+
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
 
@@ -22,15 +26,25 @@
   export let clearOnEscape = false;
 
   const dispatch = createEventDispatcher<{
+    input: string;
     select: SearchDropdownItem;
     submit: void;
   }>();
 
   let focused = false;
   let inputElement: HTMLInputElement | null = null;
+  let activeIndex = -1;
+  const dropdownId = `search-dropdown-${++nextSearchDropdownId}`;
 
   $: normalizedValue = value.trim().toLowerCase();
   $: showResults = focused && normalizedValue.length > 0;
+  $: if (activeIndex >= results.length) activeIndex = results.length ? 0 : -1;
+
+  function handleInput(event: Event) {
+    value = (event.currentTarget as HTMLInputElement).value;
+    activeIndex = results.length ? 0 : -1;
+    dispatch("input", value);
+  }
 
   function selectResult(item: SearchDropdownItem) {
     dispatch("select", item);
@@ -49,13 +63,21 @@
       return;
     }
 
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!results.length) return;
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      activeIndex = (activeIndex + direction + results.length) % results.length;
+      return;
+    }
+
     if (event.key !== "Enter") {
       return;
     }
 
     if (enterBehavior === "select-first" && results.length > 0) {
       event.preventDefault();
-      selectResult(results[0]);
+      selectResult(results[Math.max(activeIndex, 0)]);
       return;
     }
 
@@ -73,7 +95,7 @@
     </span>
     <input
       bind:this={inputElement}
-      bind:value
+      value={value}
       type="search"
       {placeholder}
       aria-label={ariaLabel}
@@ -81,25 +103,34 @@
       autocorrect="off"
       autocapitalize="off"
       spellcheck="false"
+      role="combobox"
+      aria-expanded={showResults}
+      aria-controls={`${dropdownId}-results`}
+      aria-activedescendant={activeIndex >= 0 ? `${dropdownId}-option-${activeIndex}` : undefined}
       on:focus={() => (focused = true)}
       on:blur={() => setTimeout(() => (focused = false), 120)}
+      on:input={handleInput}
       on:keydown={handleKeydown}
     />
   </label>
 
   {#if showResults}
-    <div class="search-results" class:stale role="listbox" aria-label="Search results">
+    <div id={`${dropdownId}-results`} class="search-results" class:stale role="listbox" aria-label="Search results">
       {#if stale && results.length > 0}
         <div class="search-status">{staleLabel}</div>
       {/if}
       {#if results.length > 0}
-        {#each results as item}
+        {#each results as item, index}
           <button
+            id={`${dropdownId}-option-${index}`}
             class="search-result"
-            class:selected={item.selected}
+            class:selected={item.selected || index === activeIndex}
             class:stale-result={stale}
             type="button"
-            on:mousedown|preventDefault={() => selectResult(item)}
+            role="option"
+            aria-selected={item.selected || index === activeIndex}
+            on:mouseenter={() => (activeIndex = index)}
+            on:click={() => selectResult(item)}
           >
             <span class="result-copy">
               <strong>{item.primary}</strong>

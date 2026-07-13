@@ -412,6 +412,7 @@ export const cryptoFlowSummary = writable<CryptoFlowSummary | null>(null);
 export const cryptoComparison = writable<CryptoComparison | null>(null);
 export const cryptoSyntheticPortfolio = writable<CryptoSyntheticPortfolio | null>(null);
 export const fundamentalsSearch = writable<FundamentalsSearchResponse | null>(null);
+export const fundamentalsLoadWarnings = writable<string[]>([]);
 export const fundamentalsSearchState = writable<FundamentalsSearchState>({
   query: "",
   loading: false,
@@ -2527,20 +2528,16 @@ export async function loadFundamentalsSearch(options: FundamentalsSearchOptions 
       requestedAt: null,
       completedAt: new Date().toISOString()
     });
-    const explicitQuery = Boolean(query);
     const currentSelection = get(selectedFundamentalsTicker);
-    const selectedStillVisible = response.results.some((result) => result.ticker === currentSelection);
-    const nextSelection = selectedStillVisible
-      ? currentSelection
-      : explicitQuery
-        ? response.results[0]?.ticker ?? currentSelection
-        : currentSelection;
-    if (nextSelection) {
-      await selectFundamentalsCompany(nextSelection, {
-        resetThread: nextSelection !== currentSelection || get(fundamentalsOverview) == null,
+    const exactTickerMatch = query
+      ? response.results.find((result) => result.ticker.trim().toUpperCase() === query.toUpperCase()) ?? null
+      : null;
+    if (exactTickerMatch && (currentSelection !== exactTickerMatch.ticker || get(fundamentalsOverview) == null)) {
+      await selectFundamentalsCompany(exactTickerMatch.ticker, {
+        resetThread: currentSelection !== exactTickerMatch.ticker || get(fundamentalsOverview) == null,
         forceRefresh: options.forceRefresh
       });
-    } else {
+    } else if (!currentSelection && !query && response.results.length === 0) {
       selectedFundamentalsTicker.set(null);
       fundamentalsOverview.set(null);
       fundamentalsFinancials.set(null);
@@ -2580,6 +2577,7 @@ export async function selectFundamentalsCompany(
     resetCopilotCard("fundamentals");
   }
   setLoading("fundamentals", true);
+  fundamentalsLoadWarnings.set([]);
   try {
     const querySuffix = options.forceRefresh ? "?force_refresh=true" : "";
     const [overviewResult, financialsResult, dcfResult, peersResult, reverseResult, referenceResult, snapshotsResult] = await Promise.allSettled([
@@ -2593,12 +2591,14 @@ export async function selectFundamentalsCompany(
     ]);
 
     const errors: unknown[] = [];
+    const sectionWarnings: string[] = [];
 
     if (overviewResult.status === "fulfilled") {
       fundamentalsOverview.set(overviewResult.value);
     } else {
       fundamentalsOverview.set(null);
       errors.push(overviewResult.reason);
+      sectionWarnings.push(`Overview unavailable: ${errorMessage(overviewResult.reason)}`);
     }
 
     if (financialsResult.status === "fulfilled") {
@@ -2606,6 +2606,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsFinancials.set(null);
       errors.push(financialsResult.reason);
+      sectionWarnings.push(`Financials unavailable: ${errorMessage(financialsResult.reason)}`);
     }
 
     if (dcfResult.status === "fulfilled") {
@@ -2613,6 +2614,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsDcfModel.set(null);
       errors.push(dcfResult.reason);
+      sectionWarnings.push(`DCF unavailable: ${errorMessage(dcfResult.reason)}`);
     }
 
     if (peersResult.status === "fulfilled") {
@@ -2620,6 +2622,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsPeers.set(null);
       errors.push(peersResult.reason);
+      sectionWarnings.push(`Peers unavailable: ${errorMessage(peersResult.reason)}`);
     }
 
     if (reverseResult.status === "fulfilled") {
@@ -2627,6 +2630,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsReverseValuation.set(null);
       errors.push(reverseResult.reason);
+      sectionWarnings.push(`Reverse valuation unavailable: ${errorMessage(reverseResult.reason)}`);
     }
 
     if (referenceResult.status === "fulfilled") {
@@ -2634,6 +2638,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsReference.set(null);
       errors.push(referenceResult.reason);
+      sectionWarnings.push(`Reference / filings unavailable: ${errorMessage(referenceResult.reason)}`);
     }
 
     if (snapshotsResult.status === "fulfilled") {
@@ -2641,7 +2646,10 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsDcfSnapshots.set(null);
       errors.push(snapshotsResult.reason);
+      sectionWarnings.push(`DCF snapshots unavailable: ${errorMessage(snapshotsResult.reason)}`);
     }
+
+    fundamentalsLoadWarnings.set(sectionWarnings);
 
     if (errors.length === 0) {
       lastError.set("");

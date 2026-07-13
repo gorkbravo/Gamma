@@ -562,16 +562,19 @@ Important caveats:
 
 #### Fundamentals tab
 
-Fundamentals is paused at the roadmap's first-pass checkpoint. It is a company-analysis workspace built around SEC-native data, Gamma-owned calculations, and local model state.
+Fundamentals is complete for the current roadmap pass. It is a company-analysis workspace built around SEC-native data, Gamma-owned calculations, explicit provenance, and local model state.
 
 Main surfaces:
 
-- company search and selection
+- exact-ticker company focus, keyboard/browser-drivable search, and explicit unsupported ETF/fund/non-US states
 - overview with company profile, headline KPIs, filing provenance, peer basket, and peer heatmap
-- financial statement views across income statement, balance sheet, and cash flow
+- financial statement views across income statement, balance sheet, cash flow, and ratios, with YoY/QoQ comparisons and amendment context
 - annual and quarterly statement basis toggles
 - Gamma-owned ratio and operating metric views
-- DCF workbench with Bear / Base / Bull scenarios, sensitivity, and local persistence
+- DCF workbench with Bear / Base / Bull scenarios, sensitivity, terminal-value multiple framing, snapshots, and local persistence
+- reverse valuation and raw-versus-normalized filing inspection
+- context-preserving handoffs to Strategy Lab, Copilot, Equity Research, Risk, and Options
+- section-level degradation warnings that retain successful payloads when one Fundamentals endpoint is unavailable
 
 What Gamma normalizes:
 
@@ -584,7 +587,7 @@ Important caveats:
 
 - Fundamentals is currently strongest for US SEC filers
 - market-price-aware fields depend on available market context
-- raw-vs-normalized inspection, reverse valuation, deeper restatement handling, and broader regional coverage are current-roadmap work
+- broader non-US filing/reference providers and consensus-estimate depth are optional future expansion rather than blockers for the current completion boundary
 
 #### Copilot layer
 
@@ -614,7 +617,7 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
 - `Phase 4 - AI Copilot`: paused around 70% in the archived phase roadmap; the current roadmap has since added a dedicated Copilot workspace alongside the shell shelf, with local sessions, synthesis, memos, and bounded read-only operator actions
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
-- `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
+- `Phase 6 - Fundamentals`: archived phase checkpoint paused around 83%; current-roadmap Fundamentals V2 is complete for this pass with six modes, filing inspection, peer/DCF/reverse-valuation workflows, cross-tab handoffs, and reliability coverage
 - `Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
 - `Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 

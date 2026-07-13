@@ -58,6 +58,7 @@
     fundamentalsReference,
     fundamentalsReverseValuation,
     fundamentalsSearch,
+    fundamentalsLoadWarnings,
     fundamentalsSearchState,
     cryptoFlowSummary,
     cryptoLiquidity,
@@ -1558,11 +1559,12 @@
     }
 
     if (tab === "fundamentals") {
-      await loadFundamentalsSearch({ query: symbol });
-      if ($selectedFundamentalsTicker !== symbol || !$fundamentalsOverview) {
+      const response = await loadFundamentalsSearch({ query: symbol });
+      const exactMatch = response?.results?.some((result) => result.ticker.trim().toUpperCase() === symbol) ?? false;
+      if (exactMatch && ($selectedFundamentalsTicker !== symbol || !$fundamentalsOverview)) {
         await selectFundamentalsCompany(symbol);
       }
-      return true;
+      return exactMatch;
     }
 
     if (tab === "risk") {
@@ -2030,6 +2032,15 @@
     sidebarOpen = false;
     settingsOpen = false;
     await handleLoadCopilotWorkspaceState();
+  }
+
+  async function handleFundamentalsRelatedTab(
+    target: "equity_research" | "risk" | "iv",
+    ticker: string,
+    label: string
+  ) {
+    setSharedEquitySelection(ticker, { label, sourceTab: "fundamentals" });
+    await selectTab(target);
   }
 
   async function handleLoadCopilotWorkspaceState() {
@@ -2587,6 +2598,7 @@
             bind:mode={fundamentalsMode}
             search={$fundamentalsSearch}
             selectedTicker={$selectedFundamentalsTicker}
+            focusedTicker={$sharedEquitySelection?.symbol ?? null}
             overview={$fundamentalsOverview}
             financials={$fundamentalsFinancials}
             dcfModel={$fundamentalsDcfModel}
@@ -2596,6 +2608,7 @@
             dcfSnapshots={$fundamentalsDcfSnapshots}
             loading={$loading.fundamentals}
             searchState={$fundamentalsSearchState}
+            loadWarnings={$fundamentalsLoadWarnings}
             saving={$loading.fundamentalsSave}
             onSearch={loadFundamentalsSearch}
             onSelectCompany={selectFundamentalsCompanyFromView}
@@ -2604,6 +2617,8 @@
             onSaveDcfSnapshot={saveFundamentalsDcfSnapshot}
             onLoadDcfSnapshot={loadFundamentalsDcfSnapshot}
             onSendToCopilot={handleSendToCopilot}
+            onSendToStrategyLab={handleStrategyLabHandoff}
+            onOpenRelatedTab={handleFundamentalsRelatedTab}
           />
         {:else if $activeTab === "maritime"}
           <svelte:component

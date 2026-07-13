@@ -14,7 +14,8 @@
     FundamentalsPeers,
     FundamentalsReference,
     FundamentalsReverseValuation,
-    FundamentalsSearchResponse
+    FundamentalsSearchResponse,
+    StrategyLabHandoffEnvelope
   } from "../lib/api/types";
   import type {
     FundamentalsDcfSavePayload,
@@ -25,6 +26,7 @@
   import { heroPricePointFromApiPoint, type HeroPricePoint } from "../lib/view-models/hero-price-chart";
   import {
     buildDcfSavePayload,
+    amendmentSummary,
     createDcfDraft,
     dcfDecisionGateFromWarnings,
     driverTone,
@@ -34,10 +36,12 @@
     parseEditableNumber,
     setDraftActiveScenario,
     snapshotDisplayName,
+    statementTrends,
     statementViewForSelection,
     sourceTracesForStatement,
     updateDraftAssumptionSeriesValue,
     updateDraftOverride,
+    terminalValueFraming,
     updateDraftScalarAssumption,
     type FundamentalsDcfDraft,
     type FundamentalsMode,
@@ -47,6 +51,7 @@
 
   export let search: FundamentalsSearchResponse | null = null;
   export let selectedTicker: string | null = null;
+  export let focusedTicker: string | null = null;
   export let overview: FundamentalsOverview | null = null;
   export let financials: FundamentalsFinancials | null = null;
   export let dcfModel: FundamentalsDcfModel | null = null;
@@ -65,6 +70,7 @@
     completedAt: null
   };
   export let saving = false;
+  export let loadWarnings: string[] = [];
   export let onSearch: (options?: FundamentalsSearchOptions) => Promise<unknown> | void;
   export let onSelectCompany: (ticker: string, options?: FundamentalsSelectOptions) => Promise<unknown> | void;
   export let onSavePeerBasket: (ticker: string, peerTickers: string[]) => Promise<unknown> | void;
@@ -72,6 +78,8 @@
   export let onSaveDcfSnapshot: (ticker: string, name?: string) => Promise<unknown> | void;
   export let onLoadDcfSnapshot: (ticker: string, snapshotId: string) => Promise<unknown> | void;
   export let onSendToCopilot: (handoff: CrossTabHandoffEnvelope) => Promise<unknown> | void = () => {};
+  export let onSendToStrategyLab: (handoff: StrategyLabHandoffEnvelope, options?: { open?: boolean }) => Promise<unknown> | void = () => {};
+  export let onOpenRelatedTab: (target: "equity_research" | "risk" | "iv", ticker: string, label: string) => Promise<unknown> | void = () => {};
 
   const modeOptions = fundamentalsModes;
   const statementOptions: Array<{ id: FundamentalsStatementKind; label: string }> = [
@@ -254,6 +262,36 @@
     return unit === "percent" ? parsed / 100 : parsed;
   }
 
+  function currentCompanyHandoffMetadata() {
+    return {
+      ticker: currentCompany?.ticker ?? null,
+      cik: currentCompany?.cik ?? null,
+      exchange: currentCompany?.exchange ?? null,
+      latest_report_period: currentCompany?.latest_report_period ?? null,
+      latest_filing_date: currentCompany?.latest_filing_date ?? null,
+      peer_tickers: overview?.peer_basket?.peer_tickers ?? peers?.peer_basket?.peer_tickers ?? [],
+      active_dcf_scenario: activeScenario
+        ? {
+            scenario_id: activeScenario.scenario_id,
+            label: activeScenario.label,
+            implied_value_per_share: activeScenario.summary?.implied_value_per_share ?? null,
+            current_price: activeScenario.summary?.current_price ?? null,
+            upside_downside_pct: activeScenario.summary?.upside_downside_pct ?? null,
+            assumptions: activeScenario.assumptions
+          }
+        : null,
+      reverse_valuation_drivers: reverseDrivers.map((driver) => ({
+        driver_id: driver.driver_id,
+        implied_value: driver.implied_value,
+        base_value: driver.base_value,
+        gap_to_base: driver.gap_to_base,
+        success: driver.success
+      })),
+      filing_count: referenceFilings.length,
+      source_provider: currentCompany?.source_provider ?? null
+    };
+  }
+
   function sendCurrentCompanyToCopilot() {
     const company = currentCompany;
     if (!company) {
@@ -268,13 +306,7 @@
         normalized_id: company.ticker,
         provider_id: company.cik,
         native_id: company.cik,
-        metadata: {
-          ticker: company.ticker,
-          cik: company.cik,
-          exchange: company.exchange,
-          latest_report_period: company.latest_report_period,
-          latest_filing_date: company.latest_filing_date
-        }
+        metadata: currentCompanyHandoffMetadata()
       },
       selected_timeframe: company.latest_report_period
         ? { label: `Latest report ${shortDate(company.latest_report_period)}`, start: null, end: company.latest_report_period }
@@ -291,6 +323,44 @@
       intended_target_mode: "active_tab"
     };
     void onSendToCopilot(handoff);
+  }
+
+  function sendCurrentCompanyToStrategyLab() {
+    const company = currentCompany;
+    if (!company) return;
+    const handoff: StrategyLabHandoffEnvelope = {
+      source_tab: "fundamentals",
+      source_mode: mode,
+      selected_entity: {
+        entity_type: "equity_symbol",
+        label: `${company.name} (${company.ticker})`,
+        normalized_id: company.ticker,
+        provider_id: company.ticker,
+        native_id: company.cik,
+        metadata: { ...currentCompanyHandoffMetadata(), symbol: company.ticker }
+      },
+      selected_timeframe: company.latest_report_period
+        ? { label: `Latest report ${shortDate(company.latest_report_period)}`, start: null, end: company.latest_report_period }
+        : null,
+      provider: company.source_provider,
+      source: null,
+      warnings: combinedWarnings,
+      normalized_ids: { symbol: company.ticker, ticker: company.ticker, ...(company.cik ? { cik: company.cik } : {}) },
+      timestamp: new Date().toISOString(),
+      intended_target_tab: "strategy_lab",
+      intended_target_mode: "composer",
+      resolver_capability: "return_leg",
+      asset_class: "equity",
+      value_kind: "return",
+      default_side: "long",
+      default_weight: null
+    };
+    void onSendToStrategyLab(handoff, { open: true });
+  }
+
+  function openRelatedTab(target: "equity_research" | "risk" | "iv") {
+    if (!currentCompany) return;
+    void onOpenRelatedTab(target, currentCompany.ticker, currentCompany.name);
   }
 
   function projectionEditableValue(scenario: FundamentalsDcfScenario | null, lineKey: string, index: number) {
@@ -524,7 +594,7 @@
   $: peerWarnings = peers?.warnings ?? [];
   $: reverseWarnings = reverseValuation?.warnings ?? [];
   $: referenceWarnings = [...(reference?.warnings ?? []), ...(reference?.provider_warnings ?? []), ...(reference?.inspection?.warnings ?? [])];
-  $: combinedWarnings = [...overviewWarnings, ...financialWarnings, ...dcfWarnings, ...peerWarnings, ...reverseWarnings, ...referenceWarnings].reduce<string[]>((rows, warning) => {
+  $: combinedWarnings = [...loadWarnings, ...overviewWarnings, ...financialWarnings, ...dcfWarnings, ...peerWarnings, ...reverseWarnings, ...referenceWarnings].reduce<string[]>((rows, warning) => {
     const text = warning.trim();
     if (!text || rows.includes(text)) {
       return rows;
@@ -536,6 +606,7 @@
   $: currentRatioView = statementViewForSelection(financials, statementBasis, "ratios");
   $: currentSourceTraces = sourceTracesForStatement(reference, statementBasis, statementKind).slice(0, 24);
   $: activeScenario = findDcfScenario(dcfModel, dcfDraft.activeScenarioId);
+  $: activeTerminalFraming = terminalValueFraming(activeScenario);
   $: activeScenarioSummary = activeScenario?.summary ?? null;
   $: activeCostOfCapitalRows = activeScenario?.cost_of_capital_rows ?? [];
   $: activeValuationBridgeRows = activeScenario?.valuation_bridge_rows ?? [];
@@ -617,6 +688,12 @@
   $: reverseDcfAidDrivers = reverseDrivers.slice(0, 3);
   $: reverseGapMetrics = reverseValuation?.scenario_gap_metrics ?? [];
   $: referenceFilings = reference?.filings ?? overview?.filings ?? financials?.filings ?? [];
+  $: currentStatementTrends = statementTrends(currentStatement, 8);
+  $: currentAmendmentSummary = amendmentSummary(currentStatement, financials?.filings ?? []);
+  $: normalizedFocusedTicker = focusedTicker?.trim().toUpperCase() ?? "";
+  $: focusedTickerNotice = normalizedFocusedTicker && !searchLoading && searchState.query.trim().toUpperCase() === normalizedFocusedTicker && currentCompany?.ticker !== normalizedFocusedTicker
+    ? `${normalizedFocusedTicker} has no matching SEC company profile. ETFs, funds, and unsupported non-US issuers can stay in equity focus, but filing-backed Fundamentals cannot load them yet.`
+    : "";
   $: referenceInspection = reference?.inspection ?? null;
   $: dcfSnapshotRows = dcfSnapshots?.snapshots ?? [];
 </script>
@@ -670,7 +747,7 @@
             loading={searchLoading}
             stale={searchHasStaleResults}
             results={searchDropdownResults}
-            enterBehavior="submit"
+            enterBehavior="select-first"
             on:submit={() => runSearch(false)}
             on:select={(event) => chooseCompany(String(event.detail.id))}
           />
@@ -684,8 +761,28 @@
           <button type="button" class="secondary" on:click={sendCurrentCompanyToCopilot} disabled={loading}>
             Send to Copilot
           </button>
+          <button type="button" class="secondary" on:click={sendCurrentCompanyToStrategyLab} disabled={loading}>
+            Strategy Lab
+          </button>
         {/if}
       </div>
+
+      {#if currentCompany}
+        <div class="handoff-strip" aria-label="Open selected company in another research tab">
+          <span class="focus-label">Continue in</span>
+          <button type="button" class="link-button" on:click={() => openRelatedTab("equity_research")}>Equity Research</button>
+          <button type="button" class="link-button" on:click={() => openRelatedTab("risk")}>Risk</button>
+          <button type="button" class="link-button" on:click={() => openRelatedTab("iv")}>Options</button>
+          <small>Preserves {currentCompany.ticker}, the active Fundamentals mode, scenario context, and warnings.</small>
+        </div>
+      {/if}
+
+      {#if focusedTickerNotice}
+        <div class="context-warning" role="status">
+          <span class="focus-label">Equity focus</span>
+          <p>{focusedTickerNotice}</p>
+        </div>
+      {/if}
 
       {#if headerNote}
         <div class="header-note" title={combinedWarnings.join(" | ")}>
@@ -1128,6 +1225,53 @@
     </div>
   {:else if mode === "financials"}
     <div class="financials-shell">
+      <div class="financials-insight-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Period Comparison</p>
+              <h3>{statementBasis === "annual" ? "YoY" : "QoQ"} Statement Changes</h3>
+            </div>
+            <small>{currentStatementTrends.length} comparable rows</small>
+          </div>
+          <div class="table-wrap compact-wrap">
+            <table>
+              <thead><tr><th>Line</th><th>Latest</th><th>Prior</th><th>Change</th></tr></thead>
+              <tbody>
+                {#if currentStatementTrends.length}
+                  {#each currentStatementTrends as trend}
+                    <tr>
+                      <td>{trend.label}</td>
+                      <td><strong>{trend.latestDisplay}</strong><small>{trend.latestLabel}</small></td>
+                      <td>{trend.priorDisplay}<small>{trend.priorLabel}</small></td>
+                      <td class={toneClass(trend.change)}>{trend.changeDisplay}</td>
+                    </tr>
+                  {/each}
+                {:else}
+                  <tr><td colspan="4">Two comparable periods are required for trend analysis.</td></tr>
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel amendment-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Restatement Context</p>
+              <h3>Amendments</h3>
+            </div>
+            <small>{currentAmendmentSummary.amendmentFilings} amended filings</small>
+          </div>
+          <div class="kpi-grid compact-kpi-grid">
+            <div class="metric"><span>Statement periods</span><strong>{currentAmendmentSummary.amendedPeriods}</strong></div>
+            <div class="metric"><span>Mapped cells</span><strong>{currentAmendmentSummary.amendedCells}</strong></div>
+            <div class="metric"><span>Latest amendment</span><strong>{shortDate(currentAmendmentSummary.latestAmendmentDate)}</strong></div>
+          </div>
+          <p class="method-note">Amendment markers come from SEC filing forms and normalized period metadata. They flag source chronology; they do not claim every amended filing changed every mapped value.</p>
+        </article>
+      </div>
+
       <article class="panel table-panel">
         <div class="panel-header">
           <div>
@@ -1353,6 +1497,14 @@
             <span>Upside / Downside</span>
             <strong class={dcfDecisionGate.blocked ? "" : toneClass(activeScenarioSummary?.upside_downside_pct)}>{dcfDecisionGate.blocked ? "N/A" : pct(activeScenarioSummary?.upside_downside_pct)}</strong>
           </article>
+        </div>
+
+        <div class="terminal-framing" aria-label="Terminal value framing">
+          <div><span>Terminal growth</span><strong>{pct(activeTerminalFraming.terminalGrowth)}</strong></div>
+          <div><span>WACC</span><strong>{pct(activeTerminalFraming.wacc)}</strong></div>
+          <div><span>Implied terminal EV / FCF</span><strong>{activeTerminalFraming.impliedTerminalFcfMultiple == null ? "N/A" : `${activeTerminalFraming.impliedTerminalFcfMultiple.toFixed(1)}x`}</strong></div>
+          <div><span>PV terminal share of EV</span><strong>{pct(activeTerminalFraming.terminalValueShare)}</strong></div>
+          <p>This is a framing of the active perpetual-growth DCF, not a second valuation method. The implied multiple makes duration dependence easier to inspect.</p>
         </div>
       </article>
 
@@ -2033,6 +2185,17 @@
     align-items: start;
   }
 
+  .financials-insight-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(18rem, 0.75fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  .amendment-panel {
+    align-content: start;
+  }
+
   .dcf-diagnostics-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2104,6 +2267,42 @@
 
   .header-top {
     align-items: baseline;
+  }
+
+  .handoff-strip,
+  .context-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    min-height: 28px;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--divider);
+  }
+
+  .handoff-strip small {
+    margin-left: auto;
+    color: var(--text-2);
+    font-size: var(--text-xs);
+  }
+
+  .link-button {
+    min-height: 24px;
+    padding: var(--space-1) var(--space-3);
+    border-color: var(--panel-border);
+    background: transparent;
+    color: var(--accent);
+  }
+
+  .context-warning {
+    align-items: flex-start;
+    color: var(--warning);
+  }
+
+  .context-warning p {
+    margin: 0;
+    color: var(--text-1);
+    font-size: var(--text-sm);
+    line-height: var(--leading-snug);
   }
 
   .panel-header,
@@ -2798,6 +2997,60 @@
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
+  .compact-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .compact-kpi-grid .metric {
+    padding-inline: var(--space-4);
+  }
+
+  .compact-kpi-grid .metric strong {
+    font-size: var(--text-base);
+  }
+
+  .method-note {
+    margin: 0;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--divider);
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+  }
+
+  .terminal-framing {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-block: 1px solid var(--divider);
+  }
+
+  .terminal-framing > div {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-5);
+    border-left: 1px solid var(--divider);
+  }
+
+  .terminal-framing > div:first-child {
+    border-left: 0;
+  }
+
+  .terminal-framing span {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .terminal-framing p {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: var(--space-3) var(--space-5);
+    border-top: 1px solid var(--divider);
+    color: var(--text-2);
+    font-size: var(--text-xs);
+  }
+
   .metric {
     border: 0;
     border-left: 1px solid var(--divider);
@@ -2880,6 +3133,13 @@
     border-top: 1px solid var(--divider);
     vertical-align: middle;
     font-size: var(--text-sm);
+  }
+
+  tbody td small {
+    display: block;
+    margin-top: var(--space-1);
+    color: var(--text-2);
+    font-size: var(--text-2xs);
   }
 
   .period-head {
@@ -3012,6 +3272,7 @@
     .peer-layout,
     .profile-grid,
     .financials-support-grid,
+    .financials-insight-grid,
     .dcf-diagnostics-grid {
       grid-template-columns: 1fr;
     }
@@ -3025,6 +3286,13 @@
     .search-strip {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .search-control,
+    .filter-wide {
+      flex: none;
+      width: 100%;
+      max-width: none;
     }
 
     .headline-kpi {
@@ -3052,6 +3320,20 @@
     .valuation-kpi-grid,
     .scenario-kpi-grid {
       grid-template-columns: 1fr;
+    }
+
+    .terminal-framing {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .handoff-strip {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .handoff-strip small {
+      width: 100%;
+      margin-left: 0;
     }
 
     .header-note {

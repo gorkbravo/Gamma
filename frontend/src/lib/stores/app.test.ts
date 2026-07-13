@@ -54,6 +54,7 @@ import {
   cryptoWorkspace,
   diagnostics,
   fundamentalsSearch,
+  fundamentalsLoadWarnings,
   fundamentalsSearchState,
   ivError,
   ivSession,
@@ -150,6 +151,7 @@ describe("app store orchestration", () => {
     selectedCryptoTokenId.set(null);
     selectedFundamentalsTicker.set(null);
     fundamentalsSearch.set(null);
+    fundamentalsLoadWarnings.set([]);
     fundamentalsSearchState.set({
       query: "",
       loading: false,
@@ -294,7 +296,7 @@ describe("app store orchestration", () => {
     expect(get(fundamentalsSearch)?.results).toEqual([]);
   });
 
-  it("selects the first fundamentals result for an explicit search", async () => {
+  it("selects an exact ticker fundamentals result for an explicit search", async () => {
     const searchResponse: FundamentalsSearchResponse = {
       results: [
         {
@@ -326,6 +328,56 @@ describe("app store orchestration", () => {
       expect.stringContaining("/fundamentals/MSFT/reverse-valuation"),
       expect.any(Object)
     );
+  });
+
+  it("does not auto-select a fuzzy SEC result for a non-company focus", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({
+      results: [{
+        ticker: "XEL",
+        name: "Xcel Energy Inc.",
+        cik: "0000072903",
+        exchange: "Nasdaq",
+        source_provider: "sec",
+        retrieved_at: "2026-07-13T00:00:00Z",
+        origin: "fixture",
+        transformation_note: null
+      }]
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadFundamentalsSearch({ query: "XLE" });
+
+    expect(get(selectedFundamentalsTicker)).toBeNull();
+    expect(get(fundamentalsSearch)?.results[0]?.ticker).toBe("XEL");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps fulfilled fundamentals sections and reports degraded section loads", async () => {
+    const searchResponse: FundamentalsSearchResponse = {
+      results: [{
+        ticker: "MSFT",
+        name: "Microsoft Corporation",
+        cik: "0000789019",
+        exchange: "Nasdaq",
+        source_provider: "sec",
+        retrieved_at: "2026-07-13T00:00:00Z",
+        origin: "fixture",
+        transformation_note: null
+      }]
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/fundamentals/search")) return ok(searchResponse);
+      if (url.includes("/financials")) return notFound({ detail: "quarterly facts unavailable" });
+      return ok({ warnings: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadFundamentalsSearch({ query: "MSFT" });
+
+    expect(get(selectedFundamentalsTicker)).toBe("MSFT");
+    expect(get(fundamentalsLoadWarnings)).toEqual([
+      expect.stringContaining("Financials unavailable")
+    ]);
   });
 
   it("loads snapshot, history, and shared performance together", async () => {

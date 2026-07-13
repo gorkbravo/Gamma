@@ -1,5 +1,20 @@
 import { expect, test } from "@playwright/test";
 
+test("Fundamentals company search accepts real input and selects a visible result", async ({ page }) => {
+  await page.goto("/e2e/fundamentals-dcf-harness.html");
+
+  const search = page.getByRole("combobox", { name: "Company search" });
+  await search.fill("AAPL");
+  await expect(search).toHaveAttribute("aria-expanded", "true");
+  const result = page.getByRole("option", { name: /AAPL.*APPLE INC/i });
+  await expect(result).toBeVisible();
+  await result.click();
+
+  await expect
+    .poll(() => page.evaluate(() => window.__gammaFundamentalsSelections.at(-1)))
+    .toBe("AAPL");
+});
+
 test("MSFT-style Fundamentals DCF edits stay targetable, saveable, and recoverable", async ({ page }) => {
   await page.goto("/e2e/fundamentals-dcf-harness.html");
 

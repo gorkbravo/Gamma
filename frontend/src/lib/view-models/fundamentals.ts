@@ -1,6 +1,7 @@
 import type {
   FundamentalsDcfModel,
   FundamentalsDcfScenario,
+  FundamentalsFiling,
   FundamentalsFinancials,
   FundamentalsReference,
   FundamentalsReverseValuationDriver,
@@ -36,6 +37,33 @@ export interface FundamentalsDcfDraft {
 export interface FundamentalsDcfDecisionGate {
   blocked: boolean;
   reasons: string[];
+}
+
+export interface FundamentalsStatementTrend {
+  lineKey: string;
+  label: string;
+  unit: string;
+  latestLabel: string;
+  latestDisplay: string;
+  priorLabel: string;
+  priorDisplay: string;
+  change: number | null;
+  changeDisplay: string;
+}
+
+export interface FundamentalsAmendmentSummary {
+  amendedPeriods: number;
+  amendedCells: number;
+  amendmentFilings: number;
+  latestAmendmentDate: string | null;
+}
+
+export interface FundamentalsTerminalFraming {
+  terminalGrowth: number | null;
+  wacc: number | null;
+  terminalValue: number | null;
+  terminalValueShare: number | null;
+  impliedTerminalFcfMultiple: number | null;
 }
 
 const DCF_BLOCKING_WARNING_PATTERNS = [
@@ -281,6 +309,95 @@ export function sourceTracesForStatement(
 ): FundamentalsSourceTrace[] {
   const traces = reference?.inspection?.traces ?? [];
   return traces.filter((trace) => trace.basis === basis && trace.statement === statementKind);
+}
+
+export function statementTrends(
+  view: FundamentalsStatementView | null,
+  limit = 8
+): FundamentalsStatementTrend[] {
+  if (!view || limit <= 0) return [];
+  const periodByKey = new Map(view.periods.map((period) => [period.period_key, period]));
+  const order = new Map(view.periods.map((period, index) => [period.period_key, index]));
+  return view.lines.reduce<FundamentalsStatementTrend[]>((rows, line) => {
+    if (rows.length >= limit) return rows;
+    const comparable = line.cells
+      .filter((cell) => cell.value != null && Number.isFinite(cell.value))
+      .sort((left, right) => (order.get(left.period_key) ?? 999) - (order.get(right.period_key) ?? 999));
+    if (comparable.length < 2) return rows;
+    const [latest, prior] = comparable;
+    const latestValue = latest.value as number;
+    const priorValue = prior.value as number;
+    const change = line.unit === "percent" || line.unit === "ratio"
+      ? latestValue - priorValue
+      : priorValue === 0
+        ? null
+        : (latestValue - priorValue) / Math.abs(priorValue);
+    const changeDisplay = change == null
+      ? "N/A"
+      : line.unit === "percent"
+        ? `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)} pp`
+        : line.unit === "ratio"
+          ? `${change >= 0 ? "+" : ""}${change.toFixed(2)}x`
+          : `${change >= 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
+    return [...rows, {
+      lineKey: line.line_key,
+      label: line.label,
+      unit: line.unit,
+      latestLabel: periodByKey.get(latest.period_key)?.label ?? latest.period_key,
+      latestDisplay: latest.display_value ?? String(latestValue),
+      priorLabel: periodByKey.get(prior.period_key)?.label ?? prior.period_key,
+      priorDisplay: prior.display_value ?? String(priorValue),
+      change,
+      changeDisplay
+    }];
+  }, []);
+}
+
+export function amendmentSummary(
+  view: FundamentalsStatementView | null,
+  filings: FundamentalsFiling[] = []
+): FundamentalsAmendmentSummary {
+  const amendedPeriods = view?.periods.filter((period) => period.is_amendment).length ?? 0;
+  const amendedCells = view?.lines.reduce(
+    (count, line) => count + line.cells.filter((cell) => cell.is_amendment).length,
+    0
+  ) ?? 0;
+  const amendmentRows = filings.filter((filing) => filing.is_amendment);
+  const latestAmendmentDate = amendmentRows
+    .map((filing) => filing.filing_date)
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
+  return {
+    amendedPeriods,
+    amendedCells,
+    amendmentFilings: amendmentRows.length,
+    latestAmendmentDate
+  };
+}
+
+export function terminalValueFraming(
+  scenario: FundamentalsDcfScenario | null
+): FundamentalsTerminalFraming {
+  const terminalGrowthRaw = scenario?.assumptions?.terminal_growth_pct;
+  const waccRaw = scenario?.assumptions?.wacc_pct;
+  const terminalGrowth = typeof terminalGrowthRaw === "number" ? terminalGrowthRaw : null;
+  const wacc = typeof waccRaw === "number" ? waccRaw : null;
+  const terminalValue = scenario?.summary?.terminal_value ?? null;
+  const enterpriseValue = scenario?.summary?.enterprise_value ?? null;
+  return {
+    terminalGrowth,
+    wacc,
+    terminalValue,
+    terminalValueShare:
+      scenario?.summary?.discounted_terminal_value != null && enterpriseValue != null && enterpriseValue !== 0
+        ? scenario.summary.discounted_terminal_value / enterpriseValue
+        : null,
+    impliedTerminalFcfMultiple:
+      terminalGrowth != null && wacc != null && wacc > terminalGrowth
+        ? (1 + terminalGrowth) / (wacc - terminalGrowth)
+        : null
+  };
 }
 
 export function snapshotDisplayName(name: string | null | undefined, createdAt: string | null | undefined) {

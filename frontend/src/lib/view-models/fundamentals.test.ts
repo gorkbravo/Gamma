@@ -17,6 +17,9 @@ import {
   parseEditableNumber,
   setDraftActiveScenario,
   snapshotDisplayName,
+  amendmentSummary,
+  statementTrends,
+  terminalValueFraming,
   statementViewForSelection,
   sourceTracesForStatement,
   updateDraftOverride,
@@ -123,6 +126,45 @@ describe("fundamentals view-model helpers", () => {
     expect(driverTone(driver)).toBe("warning");
     expect(snapshotDisplayName("Base case", "2026-04-09T10:00:00Z")).toBe("Base case");
     expect(snapshotDisplayName("", "2026-04-09T10:00:00Z")).toContain("Snapshot");
+  });
+
+  it("builds comparable statement trends and amendment context", () => {
+    const view = {
+      statement: "income",
+      basis: "annual",
+      periods: [
+        { period_key: "2025", label: "FY 2025", is_amendment: true },
+        { period_key: "2024", label: "FY 2024", is_amendment: false }
+      ],
+      lines: [{
+        line_key: "revenue",
+        label: "Revenue",
+        statement: "income",
+        unit: "currency",
+        cells: [
+          { period_key: "2025", value: 120, display_value: "$120", is_amendment: true },
+          { period_key: "2024", value: 100, display_value: "$100", is_amendment: false }
+        ]
+      }]
+    } as any;
+    expect(statementTrends(view)).toEqual([
+      expect.objectContaining({ lineKey: "revenue", changeDisplay: "+20.0%", latestLabel: "FY 2025" })
+    ]);
+    expect(amendmentSummary(view, [{ filing_date: "2026-01-10", is_amendment: true } as any])).toEqual({
+      amendedPeriods: 1,
+      amendedCells: 1,
+      amendmentFilings: 1,
+      latestAmendmentDate: "2026-01-10"
+    });
+  });
+
+  it("frames terminal value without introducing a second valuation model", () => {
+    const framing = terminalValueFraming({
+      assumptions: { wacc_pct: 0.1, terminal_growth_pct: 0.025 },
+      summary: { terminal_value: 1000, discounted_terminal_value: 600, enterprise_value: 800 }
+    } as any);
+    expect(framing.impliedTerminalFcfMultiple).toBeCloseTo(13.6667, 3);
+    expect(framing.terminalValueShare).toBe(0.75);
   });
 });
 

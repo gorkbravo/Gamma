@@ -628,7 +628,7 @@ class ResearchService:
             raise ResearchValidationError(["Strategy Lab handoff resolver only accepts strategy_lab targets."])
         if handoff.source_tab == "macro":
             return self._resolve_macro_strategy_handoff(handoff)
-        if handoff.source_tab == "equity_research":
+        if handoff.source_tab in {"equity_research", "fundamentals"}:
             return self._resolve_equity_research_strategy_handoff(handoff)
         if handoff.source_tab == "commodities":
             if commodities_service is None:
@@ -828,13 +828,13 @@ class ResearchService:
         )
         symbol = str(symbol or "").strip().upper()
         if not symbol:
-            raise ResearchValidationError(["Equity Research handoff is missing a ticker symbol."])
+            raise ResearchValidationError(["Listed-equity handoff is missing a ticker symbol."])
 
         label = str(handoff.selected_entity.label or symbol).strip() or symbol
         warnings = list(handoff.warnings)
         warnings.extend(
             [
-                "Equity Research handoff resolved to listed-market return history for read-only Strategy Lab analysis.",
+                f"{handoff.source_tab.replace('_', ' ').title()} handoff resolved to listed-market return history for read-only Strategy Lab analysis.",
                 "Provider prices are converted to percentage returns; Gamma does not create orders or rebalance portfolios.",
             ]
         )
