@@ -1516,7 +1516,13 @@
     );
   }
 
-  async function ensureSingleEquityResearch(symbol: string) {
+  function sitrepLookbackDays(timeframe: string | null | undefined) {
+    return ({ "1M": 30, "3M": 90, "6M": 180, "1Y": 365, MAX: 1825 } as Record<string, number>)[
+      (timeframe ?? "").trim().toUpperCase()
+    ] ?? $researchDraft.lookbackDays;
+  }
+
+  async function ensureSingleEquityResearch(symbol: string, timeframe?: string | null) {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!normalizedSymbol) {
       return;
@@ -1525,16 +1531,17 @@
       ...$researchDraft,
       scopeType: "single_ticker",
       primarySymbol: normalizedSymbol,
-      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY"
+      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY",
+      lookbackDays: sitrepLookbackDays(timeframe)
     });
-    if (researchResultMatchesSingleEquity(normalizedSymbol)) {
+    if (researchResultMatchesSingleEquity(normalizedSymbol) && !timeframe) {
       return;
     }
     await runResearch({
       scopeType: "single_ticker",
       primarySymbol: normalizedSymbol,
       benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY",
-      lookbackDays: $researchDraft.lookbackDays
+      lookbackDays: sitrepLookbackDays(timeframe)
     });
   }
 
@@ -2209,10 +2216,26 @@
     if (targetTab === "equity_research" && handoff.symbol) {
       // An explicit handoff overrides any preserved basket; passive tab returns do not.
       equityResearchMode = "scope_analysis";
-      await ensureSingleEquityResearch(handoff.symbol);
+      await ensureSingleEquityResearch(handoff.symbol, handoff.timeframe);
       if (handoff.targetMode) {
         await selectModeById(targetTab, handoff.targetMode);
       }
+      return;
+    }
+
+    if (targetTab === "equity_research" && handoff.targetMode === "overview") {
+      await loadResearchOverview({ timeframe: handoff.timeframe ?? undefined });
+      await selectModeById(targetTab, "overview");
+      return;
+    }
+
+    if (targetTab === "macro") {
+      await loadMacroWorkspace({
+        mode: (handoff.targetMode ?? "snapshot") as MacroContextState["mode"],
+        region: handoff.region as MacroContextState["region"] | undefined,
+        timeframe: handoff.timeframe as MacroContextState["timeframe"] | undefined,
+        theme: handoff.theme as MacroContextState["theme"] | undefined
+      });
       return;
     }
 
@@ -2472,13 +2495,13 @@
             onLoadPrediction={loadPredictionMarketScreener}
             onLoadWorkspace={loadSitrepWorkspace}
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
-            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
+            onSelectEquity={(symbol: string, label?: string | null) => selectSharedEquity(symbol, label, "sitrep")}
             onOpenHandoff={openSitrepHandoff}
             workspaceMeta={$sitrepWorkspaceMeta}
             followUps={$sitrepFollowUps}
             onLoadFollowUps={loadSitrepFollowUps}
             onToggleFollowUp={toggleSitrepFollowUpItem}
-            onUpdateFollowUp={(id, patch) => updateSitrepFollowUpItem(id, patch)}
+            onUpdateFollowUp={(id: string, patch: { note?: string; status?: "open" | "resolved" }) => updateSitrepFollowUpItem(id, patch)}
             onDismissFollowUp={dismissSitrepFollowUpItem}
           />
         {:else if $activeTab === "equity_research"}
