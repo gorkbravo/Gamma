@@ -7,109 +7,90 @@ You are continuing work in C:\Users\User\Desktop\Gamma.
 
 Read first:
 - AGENTS.md instructions in the repo root.
-- roadmap.md.
-- docs/copilot_v2_tab_plan.md, especially "Two Copilot Roles", Phase 7, and Open Decisions.
+- roadmap.md, especially Workstream 7.
+- docs/copilot_v2_tab_plan.md, especially "July 2026 Copilot Completion Plan".
 - docs/design_principles.md if touching frontend UI.
 
 Current product decision:
-- Copilot has two roles:
-  1. Research Agent: thesis/synthesis from Gamma context.
-  2. Research Operator: runs app-native read-only tests/simulations and drafts confirmed local research-state changes, producing traceable reports.
-- The user has approved adopting the OpenAI Agents SDK for the Research Operator path.
-- Do not rewrite the Research Agent path unless there is a concrete reason. Keep the current planner/executor/report foundation working while the Operator migrates behind the same Gamma action registry.
+- Copilot has two roles inside one workspace:
+  1. Research Agent: grounded thesis, synthesis, challenge, and artifact drafting.
+  2. Research Operator: app-native tests, simulations, traces, and confirmed local research-state workflows.
+- The quick shelf remains for contextual cards. The dedicated tab owns persistent sessions, plans/runs, sources, traces, confirmations, memos, and reports.
+- Agent/Operator are role controls, not top-level tab modes.
+- The user approved the OpenAI Agents SDK for the Research Operator path behind Gamma's action registry.
+- Gamma backend services remain authoritative for permissions, execution, confirmation tokens, persistence, and local research-state mutation rules.
 
 Critical boundary:
-- Gamma remains a read-only research environment for market/account/wallet activity.
+- Gamma is a read-only research environment for market/account/wallet activity.
 - Never add trade execution, order placement, account modification, wallet signing, wallet transactions, rebalancing, or arbitrary in-app strategy code execution.
-- Agents SDK may plan, coordinate, trace, stream, and hand off, but Gamma backend services remain authoritative for permissions, execution, confirmation tokens, persistence, and local research-state mutation rules.
+- Read-only analytics may run automatically when bounded. Durable local research-state changes require the active confirmation policy.
 
-Recent completed work:
-- Added ResearchActionRegistry in src/application/research_action_registry.py.
-- Extended CopilotResearchActionDefinition with permission/provenance/retry metadata.
-- Added operator plan models:
-  - CopilotOperatorPlan
-  - CopilotOperatorPlanStep
-  - CopilotOperatorConfirmationCheckpoint
-- Added backend routes:
-  - GET /copilot/actions
-  - POST /copilot/operator-plan
-  - POST /copilot/operator-plan/execute
-- Added first read-only operator tools:
-  - run_risk_scenario_analysis
-  - run_fundamentals_reverse_valuation
-- DCF mutation planning stops before apply and exposes a confirmation checkpoint.
-- Frontend now has TypeScript contracts, store calls, and Copilot workspace UI controls for Research Agent / Research Operator, Operator Plan, Run Operator, ordered steps, permission policies, expected artifacts, checkpoints, warnings, and execution summary.
+Current implementation:
+- Dedicated Copilot chat workspace plus contextual shelf.
+- Local sessions, turns, context snapshots, archive/search, and new-chat.
+- Structured research cards and explicit provider-error states.
+- Research plans, bounded execution, ResearchActionRegistry, Operator plans/events, confirmation checkpoints, reports, and Markdown export routes.
+- Direct Responses API Research Agent provider.
+- Agents SDK Research Operator behind GAMMA_COPILOT_OPERATOR_ORCHESTRATOR=agents_sdk.
+- Typed read-only tools across most major Gamma domains and a confirmed Fundamentals DCF mutation flow.
+- Operator eval harness with passing custom-loop and offline Agents SDK cases; current live baseline is GPT-5.5.
+
+Authoritative next delivery order:
+1. Provider-native streaming and explicit provider/run state.
+2. Typed transcript blocks and full evidence/source/tool/warning parity between the shelf and dedicated tab.
+3. Complete in-tab memo/report editing, export, and session lifecycle.
+4. Live Operator events, cancellation, and inline confirmations.
+5. Missing Sealanes/news and high-value IV/Commodities/Equity Research drilldowns plus source navigation.
+6. Eval-backed GPT-5.6 model policy and routing.
+7. Agents SDK default-orchestrator decision.
+8. Diagnostics, first-run guidance, accessibility, and release validation.
+9. Optional explicit external deep research; voice remains later.
+
+OpenAI model direction as of 2026-07-13:
+- Do not make a model-string-only migration.
+- Compare GPT-5.6 Terra low/medium with the passing GPT-5.5 baseline for standard Agent and Operator work.
+- Reserve GPT-5.6 Sol for deep synthesis/report work only where evals show a material gain.
+- Use GPT-5.6 Luna only for low-risk auxiliary work after grounding/citation evals pass.
+- Keep the Responses Multi-agent beta out of the default path while Gamma needs stricter tool-call budgets and permission control.
+- Keep Agents SDK as the controlled Operator orchestration candidate behind the Gamma action registry.
+
+First implementation slice:
+1. Replace the synchronous OpenAI provider call and wrapper stream with provider-native Responses semantic events.
+2. Define one Gamma run-event contract for Agent and Operator: created, text delta, tool call/result, warning, confirmation-needed, refusal, incomplete, cancelled, failed, usage, and completed.
+3. Add run ids, monotonic sequence ids, cancellation, timeout, idempotent finalization, and persistence/replay tests.
+4. Build the frontend event reducer, real incremental rendering, Stop/Retry controls, and typed final/non-success blocks.
+5. Remove the client-side fake typewriter after real deltas are verified.
 
 Relevant files:
+- src/services/openai_copilot_provider.py
 - src/application/copilot_service.py
+- src/application/copilot_agents_operator.py
 - src/application/research_action_registry.py
 - src/application/runtime.py
 - src/models/copilot.py
 - src/api/routes/copilot.py
 - src/api/schemas/copilot.py
+- src/services/copilot_store.py
+- evals/copilot_operator_eval.py
 - tests/test_copilot.py
+- tests/test_copilot_agents_sdk_smoke.py
 - frontend/src/lib/api/types.ts
 - frontend/src/lib/stores/app.ts
 - frontend/src/views/CopilotView.svelte
+- frontend/src/components/CopilotResearchCard.svelte
 - docs/copilot_v2_tab_plan.md
 
-Best next implementation slice:
-1. Add operator progress events.
-   - Backend event contract should support: plan, step-start, tool-result, warning, confirmation-needed, artifact-created, final-report.
-   - Keep backend authoritative; UI should render events but not drive execution state as the source of truth.
-   - Persist the event trace into Copilot sessions or an operator-run trace record.
-
-2. Add an Agents SDK-backed Research Operator prototype behind the existing action registry.
-   - Start narrow: same supported tasks as the custom operator loop.
-   - The SDK layer should translate plans/tool calls into Gamma action-registry executions, not call domain services directly.
-   - Preserve confirmation-required behavior for mutation/apply tools.
-   - Add a config/feature flag or clearly isolated service so the current custom loop remains available during comparison.
-
-3. Add an eval/benchmark harness before making Agents SDK the default.
-   Compare custom loop vs Agents SDK-backed operator on:
-   - DCF edit proposal/apply
-   - reverse valuation plus report
-   - risk shock analysis
-   - hypothetical portfolio comparison
-   - Strategy Lab backtest
-   - cross-domain single-name event report
-   Eval dimensions:
-   - correct tool selection
-   - permission compliance
-   - stops for confirmation
-   - source/warning preservation
-   - useful final report
-   - trace completeness
-
-4. Broaden read-only operator tools after the event/prototype path is stable.
-   Priorities:
-   - Strategy Lab backtest/composition analysis
-   - Research scope analysis
-   - Options event/volatility comparison
-   - Portfolio hypothetical comparison
-   - Risk shock scenario with actual shock parameters rather than only current baseline risk
-
-5. Generalize confirmed mutation flow only after read-only operator reliability improves.
-   Candidate local research-state mutations:
-   - saved research scopes
-   - Strategy Lab compositions
-   - memo edits
-   - watchlists
-   - scenario/model snapshots
-   - hypothetical portfolio definitions
-   Every mutation must return diff, rationale, warnings, source ids, rollback/snapshot context, and require confirmation when durable/non-trivial.
-
-Validation commands:
-- python -m pytest tests/test_copilot.py
-- python -m pytest tests/test_api.py -k "risk_compute_endpoint or copilot or fundamentals"
+Validation:
+- python -m pytest tests/test_copilot.py tests/test_copilot_agents_sdk_smoke.py tests/test_copilot_operator_eval.py
 - cd frontend; npm run typecheck
 - cd frontend; npm run build
-- cd frontend; npm test -- app.test
+- cd frontend; npm test -- CopilotView CopilotResearchCard copilot-result
+- Run the live Agent/Operator smoke suite only when OPENAI_API_KEY is intentionally configured for that run.
 
 Watch out:
-- There may be unrelated dirty files in the worktree. Do not revert or modify them unless required.
-- Keep changes scoped.
-- Use rg for searching.
-- Use apply_patch for manual edits.
-- Use python -m pytest, not bare pytest.
+- Preserve unrelated dirty worktree changes.
+- Use rg for searching and apply_patch for manual edits.
+- Provider/model errors must be visible and typed; never downgrade them to neutral empty cards.
+- Validate every source-backed claim against known context/tool source ids.
+- Do not broaden durable mutation families before streaming, cancellation, inline confirmation, and read-only Operator reliability are complete.
 ```
