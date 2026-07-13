@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -39,6 +40,123 @@ FeedFetcher = Callable[[RssFeedConfig, float, str], bytes]
 RSS_USER_AGENT = "GammaResearch/0.1 read-only RSS news adapter"
 MAX_RSS_FEED_BYTES = 5 * 1024 * 1024
 SUMMARY_MAX_CHARS = 420
+
+# Curated feed tiers map onto compact reliability labels: tier 1 is an
+# official/primary source, tier 2 an established outlet, tier 3 an
+# aggregator/secondary feed. This is a source-quality label, not a claim
+# about individual article accuracy.
+FEED_TIER_RELIABILITY: dict[int, str] = {1: "official", 2: "major_outlet", 3: "aggregator"}
+
+
+def feed_tier_reliability(tier: int) -> str:
+    return FEED_TIER_RELIABILITY.get(int(tier), "unknown")
+
+
+# --- Ticker / entity detection ------------------------------------------------
+#
+# Detection is deliberately high-precision and curated: explicit cashtags,
+# explicit exchange references, and a small case-sensitive keyword map for
+# names that are unambiguous in market-news context. Missing an entity is
+# acceptable; tagging the wrong ticker on a headline is not.
+
+_CASHTAG_RE = re.compile(r"(?<![A-Za-z0-9$])\$([A-Z]{1,5})(?![A-Za-z])")
+_EXCHANGE_REF_RE = re.compile(
+    r"\((?:NYSE|NASDAQ|Nasdaq|AMEX|NYSE\s?Arca|NYSEARCA|CBOE|OTC)\s*:\s*([A-Z]{1,5})(?:\.[A-Z])?\)"
+)
+
+
+@dataclass(frozen=True)
+class _EntityKeyword:
+    pattern: re.Pattern[str]
+    entity: NewsEventEntity
+
+
+def _company(pattern: str, label: str, symbol: str) -> _EntityKeyword:
+    return _EntityKeyword(re.compile(pattern), NewsEventEntity(label=label, entity_type="company", symbol=symbol))
+
+
+def _macro_entity(pattern: str, label: str, entity_type: str, normalized_id: str) -> _EntityKeyword:
+    return _EntityKeyword(
+        re.compile(pattern),
+        NewsEventEntity(label=label, entity_type=entity_type, normalized_id=normalized_id),
+    )
+
+
+_ENTITY_KEYWORDS: tuple[_EntityKeyword, ...] = (
+    _macro_entity(r"\bFederal Reserve\b|\bFOMC\b|\bFed\b", "Federal Reserve", "central_bank", "fed"),
+    _macro_entity(r"\bEuropean Central Bank\b|\bECB\b", "European Central Bank", "central_bank", "ecb"),
+    _macro_entity(r"\bBank of Japan\b|\bBOJ\b|\bBoJ\b", "Bank of Japan", "central_bank", "boj"),
+    _macro_entity(r"\bBank of England\b|\bBoE\b", "Bank of England", "central_bank", "boe"),
+    _macro_entity(r"\bOPEC\+?", "OPEC", "organization", "opec"),
+    _macro_entity(r"\bSecurities and Exchange Commission\b|\bSEC\b", "U.S. Securities and Exchange Commission", "regulator", "sec"),
+    _macro_entity(r"\bU\.?S\.? Treasury\b|\bTreasury Department\b", "U.S. Treasury", "government", "us_treasury"),
+    _macro_entity(r"\bBitcoin\b", "Bitcoin", "crypto_asset", "btc"),
+    _macro_entity(r"\bEthereum\b", "Ethereum", "crypto_asset", "eth"),
+    _company(r"\bApple\b", "Apple", "AAPL"),
+    _company(r"\bMicrosoft\b", "Microsoft", "MSFT"),
+    _company(r"\bNvidia\b|\bNVIDIA\b", "Nvidia", "NVDA"),
+    _company(r"\bTesla\b", "Tesla", "TSLA"),
+    _company(r"\bAmazon\b", "Amazon", "AMZN"),
+    _company(r"\bAlphabet\b|\bGoogle\b", "Alphabet", "GOOGL"),
+    _company(r"\bMeta Platforms\b|\bMeta\b", "Meta Platforms", "META"),
+    _company(r"\bNetflix\b", "Netflix", "NFLX"),
+    _company(r"\bBoeing\b", "Boeing", "BA"),
+    _company(r"\bIntel\b", "Intel", "INTC"),
+    _company(r"\bAMD\b", "AMD", "AMD"),
+    _company(r"\bBroadcom\b", "Broadcom", "AVGO"),
+    _company(r"\bOracle\b", "Oracle", "ORCL"),
+    _company(r"\bPalantir\b", "Palantir", "PLTR"),
+    _company(r"\bJPMorgan\b|\bJP Morgan\b", "JPMorgan Chase", "JPM"),
+    _company(r"\bGoldman Sachs\b", "Goldman Sachs", "GS"),
+    _company(r"\bMorgan Stanley\b", "Morgan Stanley", "MS"),
+    _company(r"\bBerkshire Hathaway\b", "Berkshire Hathaway", "BRK-B"),
+    _company(r"\bExxon\b", "ExxonMobil", "XOM"),
+    _company(r"\bChevron\b", "Chevron", "CVX"),
+    _company(r"\bDisney\b", "Walt Disney", "DIS"),
+    _company(r"\bWalmart\b", "Walmart", "WMT"),
+    _company(r"\bCoinbase\b", "Coinbase", "COIN"),
+    _company(r"\bTSMC\b|\bTaiwan Semiconductor\b", "TSMC", "TSM"),
+    _company(r"\bEli Lilly\b", "Eli Lilly", "LLY"),
+    _company(r"\bPfizer\b", "Pfizer", "PFE"),
+    _company(r"\bModerna\b", "Moderna", "MRNA"),
+    _company(r"\bGeneral Motors\b", "General Motors", "GM"),
+    _company(r"\bFord Motor\b", "Ford Motor", "F"),
+    _company(r"\bStarbucks\b", "Starbucks", "SBUX"),
+    _company(r"\bNike\b", "Nike", "NKE"),
+    _company(r"\bMcDonald'?s\b", "McDonald's", "MCD"),
+    _company(r"\bSalesforce\b", "Salesforce", "CRM"),
+    _company(r"\bUber\b", "Uber", "UBER"),
+    _company(r"\bAirbnb\b", "Airbnb", "ABNB"),
+)
+
+# Cashtag strings that are currencies/abbreviations, not listed tickers.
+_CASHTAG_STOPLIST = {"USD", "EUR", "GBP", "JPY", "CNY", "CNH", "CHF", "CAD", "AUD", "NZD", "US", "UK", "EU", "AI", "CEO", "IPO", "ETF", "GDP", "CPI"}
+
+
+def detect_news_entities(text: str) -> list[NewsEventEntity]:
+    """Extract high-confidence tickers/entities from headline + snippet text."""
+    if not str(text or "").strip():
+        return []
+    detected: dict[str, NewsEventEntity] = {}
+    for regex in (_EXCHANGE_REF_RE, _CASHTAG_RE):
+        for match in regex.finditer(text):
+            symbol = match.group(1).upper()
+            if symbol in _CASHTAG_STOPLIST:
+                continue
+            entity = NewsEventEntity(label=symbol, entity_type="ticker", symbol=symbol)
+            detected.setdefault(entity.resolved_id(), entity)
+    for keyword in _ENTITY_KEYWORDS:
+        if keyword.pattern.search(text):
+            detected.setdefault(keyword.entity.resolved_id(), keyword.entity)
+    return list(detected.values())
+
+
+def merge_news_entities(*groups: tuple[NewsEventEntity, ...] | list[NewsEventEntity]) -> list[NewsEventEntity]:
+    merged: dict[str, NewsEventEntity] = {}
+    for group in groups:
+        for entity in group:
+            merged.setdefault(entity.resolved_id(), entity)
+    return list(merged.values())
 
 DEFAULT_RSS_FEEDS: tuple[RssFeedConfig, ...] = (
     RssFeedConfig(
@@ -123,6 +241,33 @@ DEFAULT_RSS_FEEDS: tuple[RssFeedConfig, ...] = (
         region="Global",
         tier=2,
     ),
+    RssFeedConfig(
+        feed_id="ecb_press",
+        source_name="ECB Press Releases",
+        url="https://www.ecb.europa.eu/rss/press.html",
+        tags=("official", "macro", "policy", "rates", "eu"),
+        region="EU",
+        tier=1,
+        detected_entities=(
+            NewsEventEntity(label="European Central Bank", entity_type="central_bank", normalized_id="ecb"),
+        ),
+    ),
+    RssFeedConfig(
+        feed_id="cnbc_top_news",
+        source_name="CNBC Top News",
+        url="https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        tags=("markets", "business", "us"),
+        region="US",
+        tier=2,
+    ),
+    RssFeedConfig(
+        feed_id="yahoo_finance",
+        source_name="Yahoo Finance",
+        url="https://finance.yahoo.com/news/rssindex",
+        tags=("markets", "equities"),
+        region="US",
+        tier=3,
+    ),
 )
 
 
@@ -202,6 +347,7 @@ class SampleNewsEventProvider:
                 ],
                 tags=["macro", "policy", "rates"],
                 freshness_label=FreshnessLabel.MOCKED,
+                source_reliability="sample",
                 transformation_note="Static sample item used to validate Gamma's normalized news/event contract.",
             ),
             NewsEventItem(
@@ -224,6 +370,7 @@ class SampleNewsEventProvider:
                 ],
                 tags=["commodities", "energy", "maritime"],
                 freshness_label=FreshnessLabel.MOCKED,
+                source_reliability="sample",
                 transformation_note="Static sample item used to validate Gamma's normalized news/event contract.",
             ),
             NewsEventItem(
@@ -245,6 +392,7 @@ class SampleNewsEventProvider:
                 ],
                 tags=["crypto", "liquidity"],
                 freshness_label=FreshnessLabel.MOCKED,
+                source_reliability="sample",
                 transformation_note="Static sample item used to validate Gamma's normalized news/event contract.",
             ),
         ]
@@ -369,6 +517,10 @@ def _entry_to_item(
     summary = _clean_summary(_first_child_text(entry, summary_fields))
     tags = _entry_tags(feed, entry)
     normalized_id = _normalized_item_id(feed.feed_id, provider_item_id, url, title, index)
+    detected_entities = merge_news_entities(
+        feed.detected_entities,
+        detect_news_entities(f"{title}. {summary or ''}"),
+    )
     return NewsEventItem(
         normalized_id=normalized_id,
         provider_item_id=provider_item_id,
@@ -380,13 +532,15 @@ def _entry_to_item(
         published_at=published_at,
         retrieved_at=retrieved_at,
         origin=f"rss.feed:{feed.feed_id}",
-        detected_entities=list(feed.detected_entities),
+        detected_entities=detected_entities,
         tags=tags,
         freshness_label=FreshnessLabel.DELAYED,
+        source_reliability=feed_tier_reliability(feed.tier),
         warnings=item_warnings,
         transformation_note=(
             "Parsed from a curated source-owned RSS/Atom feed; Gamma strips HTML from snippets, normalizes URLs and "
-            "timestamps, and combines curated feed tags with source category labels."
+            "timestamps, combines curated feed tags with source category labels, and tags high-confidence "
+            "tickers/entities detected in the headline and snippet."
         ),
     )
 

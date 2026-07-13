@@ -58,8 +58,8 @@ class NewsService:
             freshness_label=freshness_label,
             warnings=list(dict.fromkeys(warnings)),
             transformation_note=(
-                "Gamma merges normalized news/event provider feeds, dedupes by provider item id or canonical URL, "
-                "sorts by publication time, and applies the requested item limit."
+                "Gamma merges normalized news/event provider feeds, dedupes by provider item id, canonical URL, "
+                "or identical cross-feed headline, sorts by publication time, and applies the requested item limit."
             ),
         )
         if self.cache_ttl.total_seconds() > 0:
@@ -98,6 +98,11 @@ def _dedupe_keys(item: NewsEventItem) -> list[str]:
     keys = [item.dedupe_key()]
     if item.url:
         keys.append(canonical_news_url(item.url))
+    # Same headline syndicated by two feeds dedupes cross-feed; short/generic
+    # titles are excluded so unrelated brief items are not merged.
+    title_key = item.title_dedupe_key()
+    if len(title_key) >= len("title:") + 20:
+        keys.append(title_key)
     return list(dict.fromkeys(keys))
 
 
