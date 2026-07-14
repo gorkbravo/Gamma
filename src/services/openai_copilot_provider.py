@@ -17,7 +17,13 @@ from src.models.copilot import (
     ResearchCard,
     ResearchClaim,
 )
-from src.services.copilot_provider import CopilotProvider, ToolExecutor
+from src.services.copilot_provider import (
+    CancelCheck,
+    CopilotProvider,
+    CopilotRunCancelled,
+    RunEventEmitter,
+    ToolExecutor,
+)
 
 
 RESEARCH_CARD_SCHEMA: dict[str, Any] = {
@@ -217,6 +223,290 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             tool_traces=tool_traces,
             warnings=warnings,
         )
+
+    def stream_research_card(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        tool_specs: list[dict[str, object]],
+        execute_tool: ToolExecutor,
+        emit: RunEventEmitter,
+        should_cancel: CancelCheck,
+    ) -> CopilotResearchCardResult:
+        """Provider-native streaming variant of `generate_research_card`.
+
+        Emits semantic run events (`text.delta`, `tool.call`, `tool.result`,
+        `warning`, `refusal`, `incomplete`, `usage`) while the Responses SSE
+        stream is consumed. Raises `CopilotRunCancelled` when `should_cancel`
+        trips mid-stream. Returns the final result exactly like the
+        synchronous path so persistence and replay stay identical.
+        """
+        input_items: list[dict[str, Any]] = [self._build_user_message(request, context)]
+        tool_traces: list[CopilotToolTrace] = []
+        tool_sources: dict[str, CopilotSourceRef] = {source.source_id: source for source in context.sources}
+        warnings = list(context.warnings)
+        reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
+
+        def build_result(
+            *,
+            status: str,
+            message: str | None = None,
+            card: ResearchCard | None = None,
+            model: str | None = None,
+            response_id: str | None = None,
+        ) -> CopilotResearchCardResult:
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status=status,
+                provider=self.provider_name,
+                model=model or self.model,
+                response_id=response_id,
+                message=message,
+                card=card,
+                sources=list(tool_sources.values()),
+                tool_traces=tool_traces,
+                warnings=warnings,
+            )
+
+        for turn in range(5):
+            payload = self._build_response_payload(
+                request=request,
+                context=context,
+                input_items=input_items,
+                reasoning_effort=reasoning_effort,
+                tool_specs=tool_specs,
+                tool_choice="auto",
+                max_output_tokens=1400,
+                prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2",
+            )
+            payload["stream"] = True
+            if turn == 0 and request.previous_response_id and self.store_responses:
+                payload["previous_response_id"] = request.previous_response_id
+
+            try:
+                response, terminal = self._post_json_stream(payload, emit, should_cancel)
+            except CopilotRunCancelled:
+                raise
+            except RuntimeError as exc:
+                return build_result(status="error", message=str(exc))
+
+            self._emit_usage(emit, response)
+
+            if terminal == "incomplete":
+                reason = str(
+                    (response.get("incomplete_details") or {}).get("reason") or "incomplete"
+                )
+                emit("incomplete", {"reason": reason})
+                return build_result(
+                    status="incomplete",
+                    message=f"OpenAI ended the response early: {reason}.",
+                    model=str(response.get("model") or self.model),
+                    response_id=str(response.get("id") or "") or None,
+                )
+
+            tool_calls = [item for item in response.get("output", []) if item.get("type") == "function_call"]
+            if tool_calls:
+                input_items.extend(self._continuation_output_items(response))
+                for item in tool_calls:
+                    if should_cancel():
+                        raise CopilotRunCancelled()
+                    tool_name = str(item.get("name") or "").strip()
+                    arguments = self._parse_tool_arguments(item.get("arguments"))
+                    emit("tool.call", {"tool_name": tool_name, "arguments": arguments})
+                    execution = execute_tool(tool_name, arguments, context)
+                    tool_traces.append(execution.trace)
+                    for source in execution.sources:
+                        tool_sources[source.source_id] = source
+                    emit(
+                        "tool.result",
+                        {
+                            "tool_name": tool_name,
+                            "summary": execution.trace.summary,
+                            "source_ids": list(execution.trace.source_ids),
+                        },
+                    )
+                    input_items.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": item.get("call_id"),
+                            "output": self._format_tool_output(execution.output),
+                        }
+                    )
+                continue
+
+            refusal = self._extract_refusal(response)
+            if refusal:
+                emit("refusal", {"message": refusal})
+                return build_result(
+                    status="refused",
+                    message=refusal,
+                    model=str(response.get("model") or self.model),
+                    response_id=str(response.get("id") or "") or None,
+                )
+
+            try:
+                card = self._parse_research_card(response)
+            except RuntimeError as exc:
+                if self._is_structured_card_parse_error(str(exc)):
+                    emit(
+                        "warning",
+                        {"message": f"Structured research card parse failed; retrying once: {exc}"},
+                    )
+                    retry_result = self._retry_structured_research_card(
+                        request=request,
+                        context=context,
+                        input_items=input_items,
+                        reasoning_effort=reasoning_effort,
+                        parse_error=str(exc),
+                        tool_sources=tool_sources,
+                        tool_traces=tool_traces,
+                        warnings=warnings,
+                    )
+                    if retry_result is not None:
+                        return retry_result
+                return build_result(
+                    status="error",
+                    message=str(exc),
+                    model=str(response.get("model") or self.model),
+                    response_id=str(response.get("id") or "") or None,
+                )
+
+            return build_result(
+                status="ready",
+                card=card,
+                model=str(response.get("model") or self.model),
+                response_id=str(response.get("id") or "") or None,
+            )
+
+        return build_result(
+            status="error",
+            message="Copilot exceeded the allowed number of tool rounds.",
+        )
+
+    @staticmethod
+    def _emit_usage(emit: RunEventEmitter, response: dict[str, Any]) -> None:
+        usage = response.get("usage")
+        if not isinstance(usage, dict):
+            return
+        emit(
+            "usage",
+            {
+                key: usage.get(key)
+                for key in ("input_tokens", "output_tokens", "total_tokens")
+                if usage.get(key) is not None
+            },
+        )
+
+    def _post_json_stream(
+        self,
+        payload: dict[str, Any],
+        emit: RunEventEmitter,
+        should_cancel: CancelCheck,
+    ) -> tuple[dict[str, Any], str]:
+        """POST with `stream: true` and consume Responses SSE semantic events.
+
+        Returns `(final_response, terminal)` where terminal is `completed` or
+        `incomplete`. Provider failures raise RuntimeError; cancellation
+        raises CopilotRunCancelled between SSE lines.
+        """
+        try:
+            stream = self._open_stream(payload)
+        except HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                body = json.loads(raw)
+                message = body.get("error", {}).get("message") or raw
+            except json.JSONDecodeError:
+                message = raw or str(exc)
+            raise RuntimeError(f"OpenAI request failed: {message}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"OpenAI request failed: {exc.reason}") from exc
+
+        try:
+            return self._consume_sse_stream(stream, emit, should_cancel)
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+    def _open_stream(self, payload: dict[str, Any]):
+        """Open the streaming HTTP response. Overridable in tests."""
+        request = Request(
+            self.api_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            },
+            method="POST",
+        )
+        return urlopen(request, timeout=self.timeout_seconds)
+
+    def _consume_sse_stream(
+        self,
+        stream: Any,
+        emit: RunEventEmitter,
+        should_cancel: CancelCheck,
+    ) -> tuple[dict[str, Any], str]:
+        data_lines: list[str] = []
+        for raw_line in stream:
+            if should_cancel():
+                raise CopilotRunCancelled()
+            if isinstance(raw_line, bytes):
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+            else:
+                line = str(raw_line).rstrip("\r\n")
+            if line == "":
+                if data_lines:
+                    outcome = self._dispatch_sse_event("\n".join(data_lines), emit)
+                    data_lines = []
+                    if outcome is not None:
+                        return outcome
+                continue
+            if line.startswith("data:"):
+                chunk = line[5:].lstrip()
+                if chunk != "[DONE]":
+                    data_lines.append(chunk)
+        if data_lines:
+            outcome = self._dispatch_sse_event("\n".join(data_lines), emit)
+            if outcome is not None:
+                return outcome
+        raise RuntimeError("OpenAI stream ended without a terminal response event.")
+
+    @staticmethod
+    def _dispatch_sse_event(
+        raw_data: str,
+        emit: RunEventEmitter,
+    ) -> tuple[dict[str, Any], str] | None:
+        try:
+            parsed = json.loads(raw_data)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        event_type = str(parsed.get("type") or "")
+        if event_type == "response.output_text.delta":
+            delta = str(parsed.get("delta") or "")
+            if delta:
+                emit("text.delta", {"delta": delta})
+            return None
+        if event_type == "response.completed":
+            response = parsed.get("response")
+            return (response if isinstance(response, dict) else {}, "completed")
+        if event_type == "response.incomplete":
+            response = parsed.get("response")
+            return (response if isinstance(response, dict) else {}, "incomplete")
+        if event_type == "response.failed":
+            response = parsed.get("response")
+            error = (response or {}).get("error") if isinstance(response, dict) else None
+            message = (error or {}).get("message") if isinstance(error, dict) else None
+            raise RuntimeError(f"OpenAI request failed: {message or 'response.failed'}")
+        if event_type == "error":
+            raise RuntimeError(f"OpenAI request failed: {parsed.get('message') or 'stream error'}")
+        return None
 
     def _build_response_payload(
         self,

@@ -108,6 +108,9 @@
     loadCopilotSession,
     loadCopilotSessions,
     executeCopilotOperatorPlan,
+    streamCopilotResearchCard,
+    cancelCopilotRun,
+    copilotActiveRun,
     macroDivergences,
     macroEvents,
     macroSeriesHistories,
@@ -1963,7 +1966,7 @@
     prompt = "",
     reasoningEffort?: CopilotReasoningEffort
   ) {
-    return loadCopilotResearchCard(domain, prompt, {
+    return streamCopilotResearchCard(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
@@ -2663,6 +2666,8 @@
             operatorResult={$copilotOperatorResult}
             latestHandoff={latestCopilotHandoff}
             loading={$loading.copilot}
+            activeRun={$copilotActiveRun}
+            onCancelRun={cancelCopilotRun}
             onGenerate={handleGenerateCopilotWorkspace}
             onPlan={handlePlanCopilotWorkspace}
             onOperatorPlan={handleOperatorPlanCopilotWorkspace}

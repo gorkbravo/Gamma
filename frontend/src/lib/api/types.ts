@@ -3112,6 +3112,32 @@ export interface CopilotResearchReport {
   transformation_note: string | null;
 }
 
+export type CopilotRunEventType =
+  | "run.created"
+  | "text.delta"
+  | "tool.call"
+  | "tool.result"
+  | "warning"
+  | "confirmation.needed"
+  | "refusal"
+  | "incomplete"
+  | "usage"
+  | "cancelled"
+  | "failed"
+  | "completed"
+  | string;
+
+/** One NDJSON line from POST /copilot/research-card/stream. */
+export interface CopilotRunEvent {
+  run_id: string;
+  sequence: number;
+  event: CopilotRunEventType;
+  timestamp: string;
+  data: Record<string, unknown>;
+  /** Present on terminal events; wire shape — normalize before use. */
+  result: unknown | null;
+}
+
 export interface CopilotThreadEntry {
   entryId: string;
   turnIndex: number;

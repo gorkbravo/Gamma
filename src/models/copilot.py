@@ -311,6 +311,45 @@ class CopilotResearchCardResult:
     warnings: list[str] = field(default_factory=list)
 
 
+COPILOT_RUN_EVENT_TYPES = {
+    "run.created",
+    "text.delta",
+    "tool.call",
+    "tool.result",
+    "warning",
+    "confirmation.needed",
+    "refusal",
+    "incomplete",
+    "usage",
+    "cancelled",
+    "failed",
+    "completed",
+}
+
+COPILOT_RUN_TERMINAL_EVENT_TYPES = {"cancelled", "failed", "completed"}
+
+
+@dataclass(frozen=True)
+class CopilotRunEvent:
+    """One semantic event in a streamed Copilot run.
+
+    `sequence` is monotonically increasing per run. Exactly one terminal event
+    (`completed`, `failed`, or `cancelled`) ends a run; terminal events carry
+    the final persisted result so replay and live consumption converge.
+    """
+
+    run_id: str
+    sequence: int
+    event_type: str
+    timestamp: datetime = field(default_factory=now_utc)
+    data: dict[str, Any] = field(default_factory=dict)
+    result: CopilotResearchCardResult | None = None
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.event_type in COPILOT_RUN_TERMINAL_EVENT_TYPES
+
+
 @dataclass(frozen=True)
 class CopilotContextSnapshot:
     snapshot_id: str

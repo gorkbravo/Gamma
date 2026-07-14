@@ -1,6 +1,12 @@
 import { get, writable } from "svelte/store";
-import { deleteJson, getJson, getText, patchJson, postJson, postText } from "../api/client";
+import { deleteJson, getJson, getText, patchJson, postJson, postNdjsonStream, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
+import {
+  createCopilotRunState,
+  isTerminalCopilotRunEvent,
+  reduceCopilotRunEvent,
+  type CopilotRunState
+} from "../copilot-run";
 import { isAbortError, RequestCoordinator } from "../request-coordinator";
 import { queryCache, stableQueryKey } from "../query-cache";
 export { requestMetrics, resetRequestMetrics } from "../request-metrics";
@@ -47,6 +53,7 @@ import type {
   CopilotResearchActionDefinition,
   CopilotResearchPlan,
   CopilotResearchReport,
+  CopilotRunEvent,
   CopilotSessionDetail,
   CopilotSessionSummary,
   CopilotThreadEntry,
@@ -453,6 +460,8 @@ export const copilotResearchPlan = writable<CopilotResearchPlan | null>(null);
 export const copilotOperatorPlan = writable<CopilotOperatorPlan | null>(null);
 export const copilotOperatorResult = writable<CopilotResearchCardResult | null>(null);
 export const copilotActionDefinitions = writable<CopilotResearchActionDefinition[]>([]);
+// Live streamed Copilot run state for the dedicated tab; null when idle.
+export const copilotActiveRun = writable<CopilotRunState | null>(null);
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -3249,6 +3258,160 @@ export async function loadCopilotResearchCard(
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
     return result;
   } finally {
+    setLoading("copilot", false);
+  }
+}
+
+const COPILOT_STREAM_TIMEOUT_MS = 330_000;
+
+let activeCopilotRunId: string | null = null;
+
+function newCopilotRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `run_${crypto.randomUUID().replaceAll("-", "")}`;
+  }
+  return `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function cancelCopilotRun() {
+  const runId = activeCopilotRunId;
+  if (!runId) {
+    return null;
+  }
+  try {
+    // The backend delivers the terminal `cancelled` event through the open
+    // stream, so the stream reader — not this call — settles the run.
+    return await postJson<{ run_id: string; found: boolean; cancelled: boolean }>(
+      `/copilot/runs/${runId}/cancel`,
+      {}
+    );
+  } catch {
+    // The run may already have finished; a failed cancel is not an error state.
+    return null;
+  }
+}
+
+export async function streamCopilotResearchCard(
+  domain: CopilotDomain,
+  prompt = "",
+  options: CopilotLoadOptions = {}
+) {
+  setLoading("copilot", true);
+  const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
+    synthesisDomains: options.synthesisDomains,
+    activeTabId: options.activeTabId
+  });
+  let activeThread = get(copilotThreads)[domain];
+  if (!activeThread) {
+    activeThread = createEmptyCopilotThread(domain);
+  }
+  const continuingThread =
+    activeThread.contextFingerprint != null &&
+    activeThread.contextFingerprint === contextFingerprint &&
+    activeThread.latestResponseId != null;
+  const previousResponseId = continuingThread ? activeThread.latestResponseId : null;
+  let baseThread =
+    continuingThread || !activeThread.entries.length
+      ? activeThread
+      : createEmptyCopilotThread(domain);
+
+  try {
+    const validationError = validateCopilotContext(domain, options);
+    if (validationError) {
+      lastError.set(validationError);
+      const result = buildCopilotFailureResult(domain, validationError);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+      return result;
+    }
+    const context = buildCopilotContext(domain, options.workspaceMode);
+    if (!context) {
+      const message = "The active Copilot context is unavailable.";
+      lastError.set(message);
+      const result = buildCopilotFailureResult(domain, message);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+      return result;
+    }
+
+    const synthesis =
+      domain === "synthesis"
+        ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
+        : null;
+    if (domain === "synthesis" && !synthesis) {
+      const message = "The active synthesis scope is unavailable.";
+      lastError.set(message);
+      const result = buildCopilotFailureResult(domain, message);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+      return result;
+    }
+
+    if (!continuingThread && activeThread.entries.length) {
+      resetCopilotCard(domain);
+      baseThread = createEmptyCopilotThread(domain);
+    }
+
+    const runId = newCopilotRunId();
+    const payload = {
+      domain,
+      prompt,
+      user_session_id: getCopilotSessionId(),
+      context_fingerprint: contextFingerprint,
+      run_id: runId,
+      ...(normalizeReasoningEffort(options.reasoningEffort)
+        ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
+        : {}),
+      ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+      context,
+      ...(synthesis ? { synthesis } : {})
+    };
+
+    const controller = new AbortController();
+    activeCopilotRunId = runId;
+    const timer = setTimeout(() => controller.abort(), COPILOT_STREAM_TIMEOUT_MS);
+    let runState = createCopilotRunState(runId);
+    copilotActiveRun.set(runState);
+    let finalResult: CopilotResearchCardResult | null = null;
+
+    try {
+      await postNdjsonStream(
+        "/copilot/research-card/stream",
+        payload,
+        (line) => {
+          let event: CopilotRunEvent;
+          try {
+            event = JSON.parse(line) as CopilotRunEvent;
+          } catch {
+            return;
+          }
+          runState = reduceCopilotRunEvent(runState, event);
+          copilotActiveRun.set(runState);
+          if (finalResult == null && isTerminalCopilotRunEvent(event) && runState.rawResult != null) {
+            finalResult = normalizeCopilotResearchCardResult(domain, runState.rawResult);
+          }
+        },
+        { signal: controller.signal }
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (finalResult == null) {
+      throw new Error("Copilot stream ended without a final result.");
+    }
+    const settled: CopilotResearchCardResult = finalResult;
+    appendCopilotThreadResult(domain, settled, prompt, contextFingerprint, previousResponseId, baseThread);
+    lastError.set(settled.status === "ready" ? "" : settled.message ?? "Copilot failed.");
+    return settled;
+  } catch (error) {
+    const message = errorMessage(error).includes("timed out")
+      ? `${errorMessage(error)}. Your prompt draft is preserved; retry or reduce the synthesis scope.`
+      : errorMessage(error);
+    lastError.set(message);
+    const result = buildCopilotFailureResult(domain, message);
+    appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
+    return result;
+  } finally {
+    activeCopilotRunId = null;
+    copilotActiveRun.set(null);
     setLoading("copilot", false);
   }
 }

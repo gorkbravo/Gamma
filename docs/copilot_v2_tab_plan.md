@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Start Here
 
@@ -292,6 +292,13 @@ Feature fit:
 - Add run ids, monotonic sequence ids, reconnect/resume behavior, cancellation, timeouts, and idempotent finalization.
 - Make Agent and Operator use the same frontend run-event reducer even if their backend orchestrators differ.
 - Persist only finalized event state plus the bounded trace needed for replay; avoid treating UI deltas as the durable source of truth.
+
+Implementation note (2026-07-14, first slice landed):
+- `/copilot/research-card/stream` now streams NDJSON Gamma run events (`run.created`, `text.delta`, `tool.call`, `tool.result`, `warning`, `refusal`, `incomplete`, `usage`, plus exactly one terminal `completed`/`failed`/`cancelled` carrying the final persisted result) instead of buffering a synchronous provider result. `CopilotRunEvent` in `src/models/copilot.py` defines the contract; `CopilotService.stream_research_card_events` owns run ids, monotonic sequence ids, a run registry, a 300s run timeout, cancellation, and idempotent finalization; `POST /copilot/runs/{run_id}/cancel` cancels an in-flight run (clients may supply `run_id` so Stop works before the first event).
+- `OpenAIResponsesCopilotProvider.stream_research_card` consumes provider-native Responses SSE (`response.output_text.delta`, `response.completed`, `response.incomplete`, `response.failed`, `error`) and emits typed `refused`/`incomplete` result statuses; the mock provider streams deterministic deltas so mock mode exercises the same path. Live-verified against GPT-5.5 with per-token deltas on 2026-07-14.
+- Terminal results persist through the existing turn store (including `cancelled` turns), so session replay matches the streamed outcome. Non-streaming providers fall back to `run.created` + terminal on the same contract.
+- Frontend: `frontend/src/lib/copilot-run.ts` reduces run events (stale/duplicate sequence and post-terminal events are dropped), the dedicated tab renders provisional streamed text with tool status chips plus Stop during the run and Retry after non-ready outcomes, and the client-side typewriter simulation is removed. The shelf still uses the non-streaming loader.
+- Still open from this workstream: adopting the official OpenAI SDK client, reconnect/resume, streaming function-call argument deltas as their own events, and moving Operator runs onto the same live event stream (workstream D).
 
 #### B. Answer contract and evidence UX — blocker
 

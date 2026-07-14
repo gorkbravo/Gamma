@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -18,6 +17,8 @@ from src.api.schemas.copilot import (
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
     CopilotResearchActionDefinitionModel,
+    CopilotRunCancelResponseModel,
+    CopilotRunEventModel,
     CopilotResearchPlanModel,
     CopilotResearchReportModel,
     CopilotResearchReportRequestModel,
@@ -94,17 +95,30 @@ def stream_research_card(
     payload: CopilotResearchCardRequestModel,
     request: Request,
 ) -> StreamingResponse:
+    """Stream one research-card run as NDJSON Gamma run events.
+
+    Events arrive as they happen (`run.created`, `text.delta`, `tool.call`,
+    `tool.result`, `warning`, `refusal`, `incomplete`, `usage`) and exactly one
+    terminal event (`completed`, `failed`, or `cancelled`) carries the final
+    persisted result.
+    """
     runtime = request.app.state.runtime
-    result = runtime.copilot_service.generate_research_card(payload.to_domain())
 
     def iter_events():
-        for event in runtime.copilot_service.stream_events_for_result(result):
-            data = event["data"]
-            if hasattr(data, "__dataclass_fields__"):
-                data = CopilotResearchCardResponseModel.from_domain(data).model_dump(mode="json")
-            yield json.dumps({"event": event["event"], "data": data}, default=str) + "\n"
+        for event in runtime.copilot_service.stream_research_card_events(
+            payload.to_domain(),
+            run_id=payload.run_id,
+        ):
+            yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
 
     return StreamingResponse(iter_events(), media_type="application/x-ndjson")
+
+
+@router.post("/copilot/runs/{run_id}/cancel", response_model=CopilotRunCancelResponseModel)
+def cancel_copilot_run(run_id: str, request: Request) -> CopilotRunCancelResponseModel:
+    runtime = request.app.state.runtime
+    outcome = runtime.copilot_service.cancel_run(run_id)
+    return CopilotRunCancelResponseModel(**outcome)
 
 
 @router.post("/copilot/mutations/fundamentals/dcf/propose", response_model=CopilotDraftMutationModel)

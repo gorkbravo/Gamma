@@ -34,9 +34,16 @@ Current implementation:
 - Agents SDK Research Operator behind GAMMA_COPILOT_OPERATOR_ORCHESTRATOR=agents_sdk.
 - Typed read-only tools across most major Gamma domains and a confirmed Fundamentals DCF mutation flow.
 - Operator eval harness with passing custom-loop and offline Agents SDK cases; current live baseline is GPT-5.5.
+- Provider-native Responses SSE streaming for research cards behind one NDJSON Gamma run-event
+  contract (run ids, monotonic sequences, cancellation route, run timeout, idempotent terminal
+  persistence), a frontend run-event reducer with provisional text + Stop/Retry in the dedicated
+  tab, and no client-side fake typewriter (landed 2026-07-14; Agent path only, shelf and
+  Operator still non-streaming).
 
 Authoritative next delivery order:
-1. Provider-native streaming and explicit provider/run state.
+1. Provider-native streaming and explicit provider/run state. (First slice landed 2026-07-14:
+   Agent research-card streaming, run-event contract, cancellation, Stop/Retry. Remaining:
+   official SDK client, reconnect/resume, shelf parity, Operator live events.)
 2. Typed transcript blocks and full evidence/source/tool/warning parity between the shelf and dedicated tab.
 3. Complete in-tab memo/report editing, export, and session lifecycle.
 4. Live Operator events, cancellation, and inline confirmations.

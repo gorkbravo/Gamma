@@ -65,6 +65,54 @@ export async function postJson<T>(
   return (await response.json()) as T;
 }
 
+export async function postNdjsonStream(
+  path: string,
+  body: unknown,
+  onLine: (line: string) => void,
+  options: RequestOptions = {}
+): Promise<void> {
+  const response = await instrumentedFetch(path, () =>
+    fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...sessionHeaders()
+      },
+      body: JSON.stringify(body),
+      signal: options.signal
+    })
+  );
+  if (!response.ok) {
+    throw await httpError(response);
+  }
+  if (!response.body) {
+    throw new Error(`Streaming response body unavailable: ${path}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line) {
+        onLine(line);
+      }
+      newlineIndex = buffer.indexOf("\n");
+    }
+  }
+  const tail = (buffer + decoder.decode()).trim();
+  if (tail) {
+    onLine(tail);
+  }
+}
+
 async function instrumentedFetch(path: string, request: () => Promise<Response>): Promise<Response> {
   const key = requestMetricKey(path);
   const started = performance.now();

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 import json
 import logging
 import math
+import queue
 import re
+import threading
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from src.application.copilot_context_helpers import (
     dedupe_warnings,
@@ -54,6 +56,7 @@ from src.models.copilot import (
     CopilotResearchPlanDomain,
     CopilotResearchPlanEntity,
     CopilotResearchReport,
+    CopilotRunEvent,
     CopilotSession,
     CopilotSourceRef,
     CopilotTurn,
@@ -71,12 +74,22 @@ from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.models.prediction_markets import PredictionProbabilityPoint
 from src.models.provenance import FreshnessLabel
 from src.models.research_lab import ResearchComparisonLeg, ResearchComparisonRequest
-from src.services.copilot_provider import CopilotProvider
+from src.services.copilot_provider import CopilotProvider, CopilotRunCancelled
 from src.utils.time import now_utc
 
 logger = logging.getLogger(__name__)
 
 MAX_OPERATOR_FINAL_OUTPUT_BYTES = 50_000
+
+DEFAULT_COPILOT_RUN_TIMEOUT_SECONDS = 300.0
+
+
+@dataclass
+class _CopilotRunHandle:
+    run_id: str
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    status: str = "running"
+    finalized: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,6 +183,8 @@ class CopilotService:
         self.provider = provider
         self.store = store
         self.agents_operator_service = CopilotAgentsOperatorService()
+        self._runs: dict[str, _CopilotRunHandle] = {}
+        self._runs_lock = threading.Lock()
         self._context_builders = {
             "portfolio": self._build_portfolio_context,
             "research": self._build_research_context,
@@ -1018,31 +1033,263 @@ class CopilotService:
                 ),
             )
         result = self._normalize_result_sources(result)
-        if self.store is not None:
-            try:
-                self.store.record_turn(
-                    session_id=normalized_request.user_session_id,
-                    title=normalized_request.session_title,
-                    domain=resolved_domain,
-                    current_tab=context.current_tab,
-                    workspace_mode=normalized_request.context.workspace_mode,
-                    prompt=normalized_request.prompt,
-                    context_fingerprint=normalized_request.context_fingerprint,
-                    context_summary=self._context_summary_for_persistence(context),
-                    result=result,
-                )
-            except Exception:
-                logger.exception("Copilot persistence failed for domain %s", resolved_domain)
-                result = replace(
-                    result,
-                    warnings=dedupe_warnings(
-                        [
-                            *result.warnings,
-                            "Copilot generated a response, but failed to persist this turn locally.",
-                        ]
-                    ),
-                )
+        return self._persist_result_turn(normalized_request, resolved_domain, context, result)
+
+    def _persist_result_turn(
+        self,
+        normalized_request: CopilotResearchCardRequest,
+        resolved_domain: str,
+        context: CopilotContextBundle,
+        result: CopilotResearchCardResult,
+    ) -> CopilotResearchCardResult:
+        if self.store is None:
+            return result
+        try:
+            self.store.record_turn(
+                session_id=normalized_request.user_session_id,
+                title=normalized_request.session_title,
+                domain=resolved_domain,
+                current_tab=context.current_tab,
+                workspace_mode=normalized_request.context.workspace_mode,
+                prompt=normalized_request.prompt,
+                context_fingerprint=normalized_request.context_fingerprint,
+                context_summary=self._context_summary_for_persistence(context),
+                result=result,
+            )
+        except Exception:
+            logger.exception("Copilot persistence failed for domain %s", resolved_domain)
+            result = replace(
+                result,
+                warnings=dedupe_warnings(
+                    [
+                        *result.warnings,
+                        "Copilot generated a response, but failed to persist this turn locally.",
+                    ]
+                ),
+            )
         return result
+
+    def cancel_run(self, run_id: str) -> dict[str, Any]:
+        """Request cancellation of an in-flight streamed run. Idempotent."""
+        normalized = (run_id or "").strip()
+        with self._runs_lock:
+            handle = self._runs.get(normalized)
+        if handle is None:
+            return {"run_id": normalized, "found": False, "cancelled": False, "status": "unknown"}
+        handle.cancel_event.set()
+        return {"run_id": normalized, "found": True, "cancelled": True, "status": handle.status}
+
+    def stream_research_card_events(
+        self,
+        request: CopilotResearchCardRequest,
+        *,
+        run_id: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> Iterator[CopilotRunEvent]:
+        """Stream one research-card run as Gamma run events.
+
+        Emits `run.created` first, provider semantic events while the run is
+        live, and exactly one terminal event (`completed`, `failed`, or
+        `cancelled`) carrying the final persisted result. Sequence ids are
+        monotonic per run. Closing the generator cancels the provider stream.
+        """
+        resolved_run_id = (run_id or "").strip() or new_copilot_id("run")
+        handle = _CopilotRunHandle(run_id=resolved_run_id)
+        with self._runs_lock:
+            self._runs[resolved_run_id] = handle
+
+        sequence = {"next": 0}
+
+        def make_event(
+            event_type: str,
+            data: dict[str, Any] | None = None,
+            result: CopilotResearchCardResult | None = None,
+        ) -> CopilotRunEvent:
+            event = CopilotRunEvent(
+                run_id=resolved_run_id,
+                sequence=sequence["next"],
+                event_type=event_type,
+                data=data or {},
+                result=result,
+            )
+            sequence["next"] += 1
+            return event
+
+        deadline = time.monotonic() + (timeout_seconds or DEFAULT_COPILOT_RUN_TIMEOUT_SECONDS)
+
+        def timed_out() -> bool:
+            return time.monotonic() > deadline
+
+        def should_cancel() -> bool:
+            return handle.cancel_event.is_set() or timed_out()
+
+        resolved_domain = self._resolve_domain(request)
+        normalized_request = replace(request, domain=resolved_domain)
+        provider_name = getattr(self.provider, "provider_name", "unknown")
+
+        def finalize(result: CopilotResearchCardResult, context: CopilotContextBundle | None) -> CopilotResearchCardResult:
+            if handle.finalized:
+                return result
+            handle.finalized = True
+            handle.status = "done"
+            normalized = self._normalize_result_sources(result)
+            if context is not None:
+                normalized = self._persist_result_turn(normalized_request, resolved_domain, context, normalized)
+            return normalized
+
+        try:
+            yield make_event(
+                "run.created",
+                {
+                    "domain": resolved_domain,
+                    "provider": provider_name,
+                    "model": getattr(self.provider, "model", None),
+                    "provider_streaming": hasattr(self.provider, "stream_research_card"),
+                },
+            )
+
+            builder = self._context_builders.get(resolved_domain)
+            if builder is None:
+                message = f"Unsupported copilot domain: {resolved_domain}"
+                result = finalize(
+                    CopilotResearchCardResult(
+                        domain=resolved_domain,
+                        current_tab=request.context.current_tab,
+                        status="error",
+                        provider=provider_name,
+                        message=message,
+                    ),
+                    None,
+                )
+                yield make_event("failed", {"message": message}, result=result)
+                return
+
+            try:
+                context = builder(normalized_request)
+            except ValueError as exc:
+                result = finalize(
+                    CopilotResearchCardResult(
+                        domain=resolved_domain,
+                        current_tab=request.context.current_tab,
+                        status="error",
+                        provider=provider_name,
+                        message=str(exc),
+                    ),
+                    None,
+                )
+                yield make_event("failed", {"message": str(exc)}, result=result)
+                return
+
+            tool_specs = [
+                tool.to_openai_spec()
+                for tool in self._tools.values()
+                if resolved_domain in tool.domains
+            ]
+
+            event_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+            def worker() -> None:
+                try:
+                    if hasattr(self.provider, "stream_research_card"):
+                        provider_result = self.provider.stream_research_card(
+                            request=normalized_request,
+                            context=context,
+                            tool_specs=tool_specs,
+                            execute_tool=self._execute_tool,
+                            emit=lambda etype, data: event_queue.put(("event", (etype, dict(data)))),
+                            should_cancel=should_cancel,
+                        )
+                    else:
+                        provider_result = self.provider.generate_research_card(
+                            request=normalized_request,
+                            context=context,
+                            tool_specs=tool_specs,
+                            execute_tool=self._execute_tool,
+                        )
+                    event_queue.put(("final", provider_result))
+                except CopilotRunCancelled as exc:
+                    event_queue.put(("cancelled", exc.reason))
+                except Exception as exc:  # pragma: no cover - defensive transport guard
+                    logger.exception("Copilot streaming provider failed for domain %s", resolved_domain)
+                    event_queue.put(("error", f"Copilot failed: {exc}"))
+
+            thread = threading.Thread(target=worker, daemon=True, name=f"copilot-run-{resolved_run_id}")
+            thread.start()
+
+            while True:
+                try:
+                    kind, payload = event_queue.get(timeout=0.2)
+                except queue.Empty:
+                    if should_cancel():
+                        reason = "timeout" if timed_out() and not handle.cancel_event.is_set() else "user_cancelled"
+                        handle.cancel_event.set()
+                        result = finalize(self._cancelled_result(resolved_domain, context, reason), context)
+                        yield make_event("cancelled", {"reason": reason}, result=result)
+                        return
+                    continue
+
+                if kind == "event":
+                    etype, data = payload
+                    yield make_event(etype, data)
+                    continue
+                if kind == "final":
+                    result = finalize(payload, context)
+                    yield make_event("completed", {"status": result.status}, result=result)
+                    return
+                if kind == "cancelled":
+                    reason = str(payload or "cancelled")
+                    if reason == "cancelled" and timed_out() and not handle.cancel_event.is_set():
+                        reason = "timeout"
+                    result = finalize(self._cancelled_result(resolved_domain, context, reason), context)
+                    yield make_event("cancelled", {"reason": reason}, result=result)
+                    return
+                if kind == "error":
+                    message = str(payload)
+                    result = finalize(
+                        CopilotResearchCardResult(
+                            domain=resolved_domain,
+                            current_tab=context.current_tab,
+                            status="error",
+                            provider=provider_name,
+                            message=message,
+                            sources=list(context.sources),
+                            warnings=dedupe_warnings(
+                                [
+                                    *context.warnings,
+                                    "Copilot generation failed before a research card could be produced.",
+                                ]
+                            ),
+                        ),
+                        context,
+                    )
+                    yield make_event("failed", {"message": message}, result=result)
+                    return
+        finally:
+            handle.cancel_event.set()
+            handle.status = "done"
+            with self._runs_lock:
+                self._runs.pop(resolved_run_id, None)
+
+    def _cancelled_result(
+        self,
+        domain: str,
+        context: CopilotContextBundle,
+        reason: str,
+    ) -> CopilotResearchCardResult:
+        message = (
+            "Copilot run timed out before completing."
+            if reason == "timeout"
+            else "Copilot run was cancelled before completing."
+        )
+        return CopilotResearchCardResult(
+            domain=domain,
+            current_tab=context.current_tab,
+            status="cancelled",
+            provider=getattr(self.provider, "provider_name", "unknown"),
+            message=message,
+            sources=list(context.sources),
+            warnings=dedupe_warnings([*context.warnings, message]),
+        )
 
     def plan_research(self, request: CopilotResearchCardRequest) -> CopilotResearchPlan:
         prompt = str(request.prompt or "").strip()
@@ -2434,25 +2681,6 @@ class CopilotService:
             source_memo_ids=source_memo_ids,
         )
         return CopilotReportService.export_markdown(report)
-
-    @staticmethod
-    def stream_events_for_result(result: CopilotResearchCardResult) -> list[dict[str, Any]]:
-        return [
-            {"event": "status", "data": {"status": "started", "domain": result.domain}},
-            {
-                "event": "metadata",
-                "data": {
-                    "provider": result.provider,
-                    "model": result.model,
-                    "response_id": result.response_id,
-                    "source_count": len(result.sources),
-                    "tool_count": len(result.tool_traces),
-                    "warning_count": len(result.warnings),
-                },
-            },
-            {"event": "result", "data": result},
-            {"event": "done", "data": {"status": result.status}},
-        ]
 
     @staticmethod
     def _extract_plan_entities(

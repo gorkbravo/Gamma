@@ -14,6 +14,7 @@
     CopilotThreadEntry,
     CopilotThreadState
   } from "../lib/api/types";
+  import type { CopilotRunState } from "../lib/copilot-run";
 
   type CopilotGroundingScopeOption = {
     tabId: string;
@@ -56,6 +57,8 @@
   export let operatorResult: CopilotResearchCardResult | null = null;
   export let latestHandoff: CrossTabHandoffEnvelope | null = null;
   export let loading = false;
+  export let activeRun: CopilotRunState | null = null;
+  export let onCancelRun: () => Promise<unknown> | void = () => {};
   export let onGenerate: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void;
   export let onPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
   export let onOperatorPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
@@ -80,16 +83,6 @@
   let contextEl: HTMLDivElement | null = null;
   let scrollEl: HTMLDivElement | null = null;
   let shouldScroll = false;
-
-  const reduceMotion =
-    typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // Typewriter reveal for the most recent assistant message.
-  let typewriterId = "";
-  let typewriterShown = "";
-  let typewriterTyping = false;
-  let typewriterTimer: ReturnType<typeof setInterval> | null = null;
-  let lastSeenTurnId: string | null = null;
 
   function activeTurns() {
     return activeSession?.turns ?? [];
@@ -150,62 +143,6 @@
   function setRoleMode(nextMode: CopilotRoleMode) {
     roleMode = nextMode;
     reasoningEffort = nextMode === "operator" ? "low" : "medium";
-  }
-
-  function clearTypewriter() {
-    if (typewriterTimer) {
-      clearInterval(typewriterTimer);
-      typewriterTimer = null;
-    }
-    typewriterTyping = false;
-  }
-
-  function startTypewriter(turn: ChatTurn) {
-    clearTypewriter();
-    const full = turn.result.message ?? "";
-    typewriterId = turn.id;
-    if (reduceMotion || !full) {
-      typewriterShown = full;
-      return;
-    }
-    typewriterShown = "";
-    typewriterTyping = true;
-    const step = Math.max(1, Math.round(full.length / 140));
-    let cursor = 0;
-    typewriterTimer = setInterval(() => {
-      cursor += step;
-      typewriterShown = full.slice(0, cursor);
-      if (scrollEl) {
-        scrollEl.scrollTop = scrollEl.scrollHeight;
-      }
-      if (cursor >= full.length) {
-        typewriterShown = full;
-        clearTypewriter();
-      }
-    }, 16);
-  }
-
-  function maybeAnimate(turns: ChatTurn[], isLive: boolean) {
-    const last = turns[turns.length - 1];
-    const id = last?.id ?? null;
-    if (lastSeenTurnId === null && id !== null) {
-      // Skip animating content that was already present on first render.
-      lastSeenTurnId = id;
-      typewriterId = id;
-      typewriterShown = last?.result.message ?? "";
-      return;
-    }
-    if (id && id !== lastSeenTurnId && isLive && last?.result.message) {
-      startTypewriter(last);
-    }
-    lastSeenTurnId = id;
-  }
-
-  function messageText(turn: ChatTurn, isLast: boolean) {
-    if (isLast && turn.id === typewriterId) {
-      return typewriterShown;
-    }
-    return turn.result.message ?? "";
   }
 
   async function handleGenerate() {
@@ -335,7 +272,6 @@
     return () => {
       document.removeEventListener("click", onDocClick);
       document.removeEventListener("keydown", onKey);
-      clearTypewriter();
     };
   });
 
@@ -361,7 +297,6 @@
         prompt: turn.prompt,
         result: turn.result
       }));
-  $: maybeAnimate(chatTurns, threadEntries.length > 0);
   $: selectedScopeOptions = synthesisSurface.scopeOptions.filter(
     (option) =>
       option.domain != null && option.supported && synthesisSurface.selectedScopeDomains.includes(option.domain)
@@ -376,9 +311,29 @@
   $: hasPlanMessage =
     (roleMode === "agent" && researchPlan != null) ||
     (roleMode === "operator" && (operatorPlan != null || operatorResult != null));
+  $: runStreaming = activeRun != null && (activeRun.phase === "pending" || activeRun.phase === "streaming");
+  $: lastTurn = chatTurns.length ? chatTurns[chatTurns.length - 1] : null;
+  $: retryPrompt =
+    !runStreaming && !loading && lastTurn != null && lastTurn.result.status !== "ready" && lastTurn.prompt
+      ? lastTurn.prompt
+      : null;
   // Re-scroll to the bottom whenever the transcript or in-flight state changes.
-  $: if (chatTurns || loading || hasPlanMessage) {
+  $: if (chatTurns || loading || hasPlanMessage || activeRun) {
     shouldScroll = true;
+  }
+
+  async function handleStop() {
+    await onCancelRun();
+  }
+
+  async function handleRetry() {
+    if (!retryPrompt || !surface.supported || !surface.domain || loading) {
+      return;
+    }
+    const result = await onGenerate(surface.domain, retryPrompt, reasoningEffort);
+    if (result != null) {
+      await onLoadSessions();
+    }
   }
 </script>
 
@@ -511,7 +466,7 @@
           <h2>Grounded Research Copilot</h2>
           <p>Select a context to ground the conversation, then ask anything across your Gamma tabs.</p>
         </div>
-      {:else if chatTurns.length === 0 && !hasPlanMessage}
+      {:else if chatTurns.length === 0 && !hasPlanMessage && !runStreaming && !loading}
         <div class="empty-chat">
           <h2>Ask anything</h2>
           <p>Grounded in {contextSummary}. Gamma stays read-only and Copilot preserves provenance and warnings.</p>
@@ -528,9 +483,7 @@
               <div class="role-tag">GAMMA</div>
               <div class="assistant-body">
                 {#if turn.result.message && turn.result.card}
-                  <p class="assistant-text {turn.result.status}">
-                    {messageText(turn, index === chatTurns.length - 1)}{#if typewriterTyping && index === chatTurns.length - 1 && turn.id === typewriterId}<span class="caret-blink">▍</span>{/if}
-                  </p>
+                  <p class="assistant-text {turn.result.status}">{turn.result.message}</p>
                 {/if}
                 {#if !turn.result.card}
                   <div class="result-state {turn.result.status}">
@@ -671,7 +624,41 @@
             </div>
           {/if}
 
-          {#if loading}
+          {#if runStreaming && promptText.trim()}
+            <div class="msg user">
+              <div class="bubble">{promptText.trim()}</div>
+            </div>
+          {/if}
+          {#if runStreaming && activeRun}
+            <div class="msg assistant">
+              <div class="role-tag">GAMMA</div>
+              <div class="assistant-body">
+                {#if activeRun.toolNotes.length}
+                  <div class="run-tools">
+                    {#each activeRun.toolNotes as note, noteIndex (noteIndex)}
+                      <span class="run-tool" class:done={note.state === "done"} title={note.summary ?? note.toolName}>
+                        {note.state === "running" ? "⋯" : "✓"} {note.toolName}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
+                {#if activeRun.provisionalText}
+                  <pre class="run-provisional" aria-label="Provisional streamed output">{activeRun.provisionalText}<span class="caret-blink">▍</span></pre>
+                  <small class="run-provisional-note">provisional stream — the final structured card replaces this on completion</small>
+                {:else}
+                  <div class="thinking" aria-label="Generating">
+                    <span></span><span></span><span></span>
+                  </div>
+                {/if}
+                {#if activeRun.warnings.length}
+                  <p class="run-status-detail">{activeRun.warnings[activeRun.warnings.length - 1]}</p>
+                {/if}
+                {#if activeRun.statusDetail}
+                  <p class="run-status-detail">{activeRun.statusDetail}</p>
+                {/if}
+              </div>
+            </div>
+          {:else if loading}
             <div class="msg assistant">
               <div class="role-tag">GAMMA</div>
               <div class="assistant-body">
@@ -696,18 +683,29 @@
       <div class="composer-actions">
         <span class="composer-hint">{surface.selectionMessage ?? surface.guidance}</span>
         <div class="composer-buttons">
+          {#if retryPrompt}
+            <button type="button" class="secondary" disabled={!surface.supported} on:click={handleRetry} title="Resend the last prompt">
+              Retry
+            </button>
+          {/if}
           <button type="button" class="secondary" disabled={!surface.domain || loading} on:click={handlePlan}>
             {roleMode === "operator" ? "Operator Plan" : "Plan"}
           </button>
-          <button type="button" class="primary" disabled={!surface.supported || loading} on:click={handleSubmit}>
-            {#if loading}
-              {roleMode === "operator" ? "Running…" : "Generating…"}
-            {:else if roleMode === "operator"}
-              Run Operator
-            {:else}
-              {chatTurns.length ? "Follow Up" : "Send"}
-            {/if}
-          </button>
+          {#if runStreaming}
+            <button type="button" class="primary stop" on:click={handleStop} title="Cancel the streaming run">
+              Stop
+            </button>
+          {:else}
+            <button type="button" class="primary" disabled={!surface.supported || loading} on:click={handleSubmit}>
+              {#if loading}
+                {roleMode === "operator" ? "Running…" : "Generating…"}
+              {:else if roleMode === "operator"}
+                Run Operator
+              {:else}
+                {chatTurns.length ? "Follow Up" : "Send"}
+              {/if}
+            </button>
+          {/if}
         </div>
       </div>
     </footer>
@@ -1413,6 +1411,54 @@
     }
   }
 
+  /* ---- Live streamed run ---- */
+  .run-provisional {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    border: 1px dashed var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-1);
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 14rem;
+    overflow-y: auto;
+  }
+
+  .run-provisional-note {
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: var(--text-2xs);
+  }
+
+  .run-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .run-tool {
+    border: 1px solid var(--panel-strong);
+    padding: 1px var(--space-3);
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .run-tool.done {
+    color: var(--text-1);
+    border-color: color-mix(in srgb, var(--accent) 36%, var(--panel-strong));
+  }
+
+  .run-status-detail {
+    margin: 0;
+    color: var(--warn, #c9a227);
+    font-size: var(--text-sm);
+  }
+
   /* ---- Composer ---- */
   .composer {
     display: grid;
@@ -1486,6 +1532,11 @@
   .composer-buttons button.primary {
     color: var(--accent);
     border-color: rgba(122, 166, 200, 0.34);
+  }
+
+  .composer-buttons button.primary.stop {
+    color: var(--down, #c96a5b);
+    border-color: color-mix(in srgb, var(--down, #c96a5b) 40%, var(--panel-strong));
   }
 
   .composer-buttons button:disabled {
