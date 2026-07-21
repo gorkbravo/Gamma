@@ -3091,6 +3091,21 @@ export interface CopilotReportToolTraceSummary {
   tool_name: string;
   summary: string;
   source_ids: string[];
+  status: string;
+  step_id: string | null;
+  event_type: string | null;
+  output_summary: Record<string, unknown>;
+  warnings: string[];
+}
+
+export interface CopilotReportWarningProvenance {
+  warning: string;
+  source_ids: string[];
+  tool_name: string | null;
+  step_id: string | null;
+  event_type: string | null;
+  event_id: string | null;
+  sequence: number | null;
 }
 
 export interface CopilotResearchReport {
@@ -3104,6 +3119,7 @@ export interface CopilotResearchReport {
   assumptions: string[];
   missing_data: string[];
   warnings: string[];
+  warning_provenance: CopilotReportWarningProvenance[];
   tool_trace_summary: CopilotReportToolTraceSummary[];
   sources: CopilotSourceRef[];
   generated_at: string;
@@ -3112,15 +3128,54 @@ export interface CopilotResearchReport {
   transformation_note: string | null;
 }
 
+export interface CopilotMutationDiffEntry {
+  path: string;
+  label: string;
+  before: unknown;
+  after: unknown;
+  unit: string | null;
+  change_type: string;
+}
+
+export interface CopilotDraftMutation {
+  mutation_id: string;
+  domain: string;
+  tool_id: string;
+  action_type: string;
+  target_id: string;
+  target_label: string;
+  status: string;
+  requires_confirmation: boolean;
+  confirmation_token: string;
+  diff: CopilotMutationDiffEntry[];
+  rendered_diff: string[];
+  proposed_payload: Record<string, unknown>;
+  rationale: string | null;
+  warnings: string[];
+  source_ids: string[];
+  rollback_snapshot_id: string | null;
+  created_at: string;
+  expires_at: string | null;
+  applied_at: string | null;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
 export type CopilotRunEventType =
   | "run.created"
   | "text.delta"
+  | "function.arguments"
   | "tool.call"
   | "tool.result"
+  | "plan"
+  | "artifact.created"
+  | "report"
   | "warning"
   | "confirmation.needed"
   | "refusal"
   | "incomplete"
+  | "provider.error"
   | "usage"
   | "cancelled"
   | "failed"

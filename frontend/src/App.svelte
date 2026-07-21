@@ -1232,12 +1232,19 @@
     const selectedScopeOptions = scopeOptions.filter((option) =>
       option.domain != null && option.supported && selectedDomains.includes(option.domain)
     );
-    const selectionFingerprint = previewCopilotThreadFingerprint("synthesis", {
+    const resolvedDomain: CopilotDomain =
+      selectedScopeOptions.length === 1
+        ? (selectedScopeOptions[0].domain as CopilotBaseDomain)
+        : "synthesis";
+    const selectionFingerprint = previewCopilotThreadFingerprint(resolvedDomain, {
       workspaceMode,
-      synthesisDomains: selectedScopeOptions.map((option) => option.domain as CopilotBaseDomain),
+      synthesisDomains:
+        resolvedDomain === "synthesis"
+          ? selectedScopeOptions.map((option) => option.domain as CopilotBaseDomain)
+          : undefined,
       activeTabId: activeTab,
     });
-    const storedThread = threads.synthesis;
+    const storedThread = threads[resolvedDomain];
     const scopeChanged =
       storedThread.entries.length > 0 &&
       storedThread.contextFingerprint != null &&
@@ -1264,10 +1271,10 @@
 
     return {
       supported,
-      domain: "synthesis",
+      domain: resolvedDomain,
       triggerLabel: supported ? "Context-grounded Copilot" : "Select context",
       contextLabel: `Context | ${scopeSummary}`,
-      domainLabel: "Copilot Context",
+      domainLabel: selectedScopeOptions.length === 1 ? selectedScopeOptions[0].label : "Copilot Context",
       guidance: supported
         ? "Grounded only in the selected Gamma context tabs. Gamma remains read-only, and Copilot should preserve provenance, warnings, and domain-specific caveats."
         : selectionMessage,

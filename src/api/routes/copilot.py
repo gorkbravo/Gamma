@@ -71,6 +71,29 @@ def execute_research_operator_plan(
     return CopilotResearchCardResponseModel.from_domain(result)
 
 
+@router.post("/copilot/operator-plan/execute/stream")
+def stream_research_operator_plan(
+    payload: CopilotResearchCardRequestModel,
+    request: Request,
+) -> StreamingResponse:
+    """Stream Agent and Operator work through the same Gamma run envelope."""
+    runtime = request.app.state.runtime
+    try:
+        events = runtime.copilot_service.stream_research_operator_events(
+            payload.to_domain(),
+            run_id=payload.run_id,
+            after_sequence=payload.last_seen_sequence if payload.last_seen_sequence is not None else -1,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def iter_events():
+        for event in events:
+            yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
+
+    return StreamingResponse(iter_events(), media_type="application/x-ndjson")
+
+
 @router.get("/copilot/actions", response_model=list[CopilotResearchActionDefinitionModel])
 def list_copilot_actions(request: Request) -> list[CopilotResearchActionDefinitionModel]:
     runtime = request.app.state.runtime
@@ -104,11 +127,40 @@ def stream_research_card(
     """
     runtime = request.app.state.runtime
 
-    def iter_events():
-        for event in runtime.copilot_service.stream_research_card_events(
+    try:
+        events = runtime.copilot_service.stream_research_card_events(
             payload.to_domain(),
             run_id=payload.run_id,
-        ):
+            after_sequence=payload.last_seen_sequence if payload.last_seen_sequence is not None else -1,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def iter_events():
+        for event in events:
+            yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
+
+    return StreamingResponse(iter_events(), media_type="application/x-ndjson")
+
+
+@router.get("/copilot/runs/{run_id}/events")
+def replay_copilot_run_events(
+    run_id: str,
+    request: Request,
+    after_sequence: int = -1,
+) -> StreamingResponse:
+    """Resume an active or recently completed run from a monotonic cursor."""
+    runtime = request.app.state.runtime
+    try:
+        events = runtime.copilot_service.stream_existing_run_events(
+            run_id,
+            after_sequence=max(-1, after_sequence),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    def iter_events():
+        for event in events:
             yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
 
     return StreamingResponse(iter_events(), media_type="application/x-ndjson")

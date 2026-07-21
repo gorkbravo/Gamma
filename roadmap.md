@@ -54,7 +54,7 @@ Provider adapters, data models, reusable analytics, provenance, cross-tab handof
 
 ## Current App State Snapshot
 
-_Updated: 2026-07-13_
+_Updated: 2026-07-15_
 
 Gamma is now a broad read-only research application with two primary workspaces:
 
@@ -74,7 +74,7 @@ The implemented app state is materially ahead of the original second-pass starti
 - `Fundamentals` is a deep current-roadmap workspace with Overview, Financials, Peers, DCF, Reverse Valuation, and Reference / Filings modes. It uses SEC/EdgarTools ingestion, IBKR market context, local peer/DCF persistence, raw-versus-normalized inspection, DCF snapshots, reverse solves, and Copilot tools.
 - `Commodities` is a first-pass current-roadmap domain tab with six modes, sample/EIA/FRED/IBKR provider paths, curve/spread/inventory/event/cross-domain models, Energy and Metals analytics, and Copilot grounding.
 - `Sealanes` is a paused maritime prototype with normalized maritime models, sample/static context, AISstream server-side websocket proxying, viewport live subscriptions, map overlays, route/chokepoint/port/vessel/event concepts, and clear data-provider limits.
-- `Copilot` now exists both as the shell shelf and as a dedicated workspace rebuilt as a standard chat interface: conversation sidebar with search/archive/new-chat, chat transcript, pinned composer, multi-select context-scope dropdown, and Agent/Operator role controls. It supports grounded research cards, read-only domain tools, OpenAI/mock/disabled provider boundaries, local sessions/turns/context snapshots, synthesis/active-tab focus, and an NDJSON streaming endpoint wrapper around the current synchronous provider boundary. Memos were removed from the tab; backend memo endpoints remain, but the app does not yet expose a complete memo editing/export workflow.
+- `Copilot` now exists both as the shell shelf and as a dedicated workspace rebuilt as a standard chat interface: conversation sidebar with search/archive/new-chat, chat transcript, pinned composer, multi-select context-scope dropdown, and Agent/Operator role controls. It supports grounded research cards, read-only domain tools, OpenAI/mock/disabled provider boundaries, local sessions/turns/context snapshots, synthesis/active-tab focus, provider-native Responses streaming through a Gamma run-event contract, cancellation/timeout/idempotent terminal persistence, and typed finalized-result transcript blocks with full current ResearchCard/source/tool/warning rendering in the dedicated tab. Memos were removed from the tab; backend memo/report endpoints remain, but the app does not yet expose a complete artifact editing/export workflow.
 - `System` now exposes health, status, provider capabilities, provider usage diagnostics with activation-aware health labels, read-only boundary metadata, diagnostics, connection toggles, market-data mode, base-currency mutation, and account-subscribe helpers.
 - `News` has a first-pass sample/RSS provider boundary and `/news/latest` feed route for lightweight event context.
 
@@ -82,7 +82,7 @@ The main remaining roadmap gaps are no longer "make the tabs exist." They are li
 
 ### Current Tab Progress Snapshot
 
-This table tracks the visible app tabs as of 2026-07-12. Percentages are pragmatic implementation snapshots, not release promises.
+This table tracks the visible app tabs as of 2026-07-15. Percentages are pragmatic implementation snapshots, not release promises.
 
 | Workspace | Tab | Current completion | What is left |
 | --- | --- | ---: | --- |
@@ -98,7 +98,7 @@ This table tracks the visible app tabs as of 2026-07-12. Percentages are pragmat
 | Research | `Fundamentals` | Complete (100% current pass) | Complete-for-now US SEC company research workspace. July 13 completion added exact-match focus continuity with explicit unsupported-instrument states, keyboard/browser-drivable search, Fundamentals-to-Strategy-Lab/Copilot/Equity Research/Risk/Options handoffs, YoY/QoQ statement trends, amendment/restatement context, terminal-value multiple framing, section-level degradation warnings, and targeted browser/reliability coverage. Broader non-US providers and consensus-estimate depth remain optional future expansion, not current-pass blockers. |
 | Research | `Commodities` | ~75% | Retain freshly fetched quotes across drill interactions (audit P1), add vendor-grade futures-chain history, continuous/roll-adjusted mapping, historical curve snapshots, real metals warehouse data, seasonal inventory surprise models, unit-normalized basis checks, and live cross-domain handoff flows. The `% CHG` prior-close fix and dated daily references are verified live. |
 | Research | `Sealanes` | Paused ~45% | Evaluate AIS/historical data providers, add durable AIS caching, keep static chokepoint context rendering when the live sample is empty, improve chokepoint baselines, build real event replay, enrich vessel metadata, and avoid risk labels until methodology is validated. |
-| Research | `Copilot` | ~68% | Replace wrapper streaming with provider-level streaming, make live-provider structured-card output reliable and surface provider errors instead of neutral empty states, add memo editing/export in the slide-over, strengthen source-backed versus inferred labels, and expand Sealanes/news drilldowns. The tab is now a standard chat UI with session search/archive. |
+| Research | `Copilot` | 76% | Extend typed transcript blocks to plans/Operator/reports/confirmations, add in-tab memo/report editing and export, finish session lifecycle and retention controls, productionize inline Operator confirmations and Agents SDK live events, validate claim/source resolution, expand Sealanes/news and priority domain drilldowns, add shelf-to-workspace continuity, and pass the Copilot release gate. |
 
 ### Completion Boundary For The Current Pass
 
@@ -114,7 +114,7 @@ The current pass should be considered complete when:
 - README run commands, validation commands, and provider setup notes are accurate;
 - beta-facing diagnostics, empty states, and first-run guidance are good enough for a trusted tester who has not read the code.
 
-Everything beyond that line should be treated as targeted future deepening, not as required to call the current app "complete for now." In particular, deeper wallet analytics, vendor-grade futures history, full global macro coverage, exhaustive options modeling, broader non-US fundamentals, richer maritime AIS history, and Copilot voice/true provider streaming are valuable future work, but they are not blockers for this completion boundary. A feature that only works through sample data when a real provider path is available should be treated as incomplete or degraded, not as done.
+Everything beyond that line should be treated as targeted future deepening, not as required to call the current app "complete for now." In particular, deeper wallet analytics, vendor-grade futures history, full global macro coverage, exhaustive options modeling, broader non-US fundamentals, richer maritime AIS history, Copilot voice, and optional external deep research are valuable future work, but they are not blockers for this completion boundary. Copilot V2's own 100% gate below is intentionally stricter than the app-wide first-pass completion boundary. A feature that only works through sample data when a real provider path is available should be treated as incomplete or degraded, not as done.
 
 ---
 
@@ -1522,14 +1522,14 @@ At the end of Fundamentals V2, Gamma should support deeper company research, pee
 
 ## Workstream 7 - Copilot V2
 
-_Status: In progress (~68%)_
+_Status: In progress (76%; checkpoint 1 verified)_
 _Dependency marker: Parallelizable, but quality depends on tab-owned context builders_
 _Parallelization note: Streaming and session persistence can be built early. Deep domain reasoning improves as each tab exposes better context and tools._
-_Recent progress: The dedicated Copilot tab was rebuilt in June 2026 as a standard chat interface: conversation sidebar with session search, archive toggle, and new-chat; chat transcript with a client-side typewriter reveal; pinned composer with Agent/Operator and thinking controls; and a compact multi-select context-scope dropdown. Roles and context grounding were overhauled, and research cards and Plan/Operator output render as assistant messages. Memos were removed from the tab (backend memo endpoints remain, but a complete in-tab artifact workflow does not). The provider layer still wraps a synchronous OpenAI boundary in the NDJSON streaming endpoint, and the 2026-07-08 live audit found the configured live provider returning no structured research card with the error hidden behind a neutral empty state (error handling since improved). The repo-grounded July 13 completion layout, GPT-5.6 model-fit strategy, remaining engineering workstreams, delivery order, and definition of done now live in [`docs/copilot_v2_tab_plan.md`](./docs/copilot_v2_tab_plan.md)._
+_Recent progress: The dedicated Copilot tab was rebuilt in June 2026 as a standard chat interface with session search/archive/new-chat, a pinned composer, Agent/Operator controls, and multi-select context scope. On July 14, the Agent path gained provider-native Responses streaming behind one Gamma NDJSON run-event contract. On July 15, finalized Agent results gained a discriminated transcript-block model and the dedicated tab reached parity with the shelf for all current ResearchCard fields and evidence. On July 17, checkpoint 1 replaced raw `urllib` transport with the supported OpenAI SDK, made runs server-owned with bounded cursor replay across disconnects, added completed function-argument and provider-error events, moved shelf Agent and custom-loop Operator work onto the shared run/reducer contract, added safe-boundary Operator cancellation, and verified idempotent single-terminal persistence across cancellation, timeout, refusal, incomplete output, provider failure, duplicate/stale/post-terminal events, and reconnect. The detailed engineering spec remains [`docs/copilot_v2_tab_plan.md`](./docs/copilot_v2_tab_plan.md); the milestone sequence and percentage gates below are the authoritative roadmap path to 100%._
 
 ### Why this workstream matters
 
-The current Copilot layer is useful, but it is still a shell-level drawer. This roadmap should keep that quick-assist surface while adding a dedicated Copilot workspace.
+Copilot already spans a quick shell shelf and a dedicated workspace. The remaining work is to turn those implemented surfaces into one reliable, replayable, source-resolved research system rather than two partially overlapping interfaces.
 
 The goal is not to create a generic chatbot. The goal is to create an AI-assisted research layer grounded in Gamma's internal state.
 
@@ -1553,7 +1553,7 @@ Copilot should have two surfaces:
 - shell-level Copilot shelf for quick contextual research cards,
 - dedicated Copilot workspace for persistent sessions, synthesis, workflow planning, and memos.
 
-Current dedicated workspace structure:
+Current and target dedicated workspace structure:
 
 - no global mode bar,
 - a compact focus selector for `Synthesis` versus `Active Tab`,
@@ -1561,21 +1561,22 @@ Current dedicated workspace structure:
 - a composer grounded in Gamma context,
 - an Operator Plan / Run Operator path for ordered app-native tests and confirmed local research-state workflows,
 - session/thread history,
-- memo creation from persisted turns,
+- artifact creation from persisted turns, with complete in-tab memo/report editing still required,
 - scope controls for cross-domain synthesis.
 
 Earlier drafts considered `Ask`, `Synthesize`, `Plan`, `Memo`, `Sessions`, and later `Voice` as separate modes. The implemented direction intentionally keeps Copilot closer to the SITREP pattern: a dedicated workspace with internal focus controls rather than a durable tab-level mode bar. This keeps Copilot from becoming another multi-mode analytical domain while still giving it persistent sessions and memo output.
 
 #### Completion snapshot
 
-- `Shell shelf`: ~82% complete. The existing contextual Copilot card remains live across supported tabs with read-only grounding and provider warnings. Remaining work: richer inline drilldowns, better source navigation, and live-provider structured-card reliability (the 2026-07-08 audit saw silent `no structured research card` errors from gpt-5.4).
-- `Dedicated workspace`: ~72% complete. The tab is now a standard chat interface: conversation sidebar (sessions, new chat, search, archived toggle), transcript with typewriter reveal, pinned composer, Agent/Operator role controls, and a multi-select context-scope dropdown. Remaining work: richer planning workflow, better selected-context management, and incremental rendering once true streaming exists.
-- `Streaming`: ~35% complete. `/copilot/research-card/stream` emits NDJSON status/metadata/result/done events around the current provider result, and the chat UI simulates streaming with a client-side typewriter. Remaining work: true token/event streaming through the model provider boundary and frontend incremental rendering.
+- `Shell shelf`: ~88% complete. The contextual card remains live across supported tabs with read-only grounding, multi-select scope, full ResearchCard detail, provider warnings, and the same streaming loader/reducer used by the workspace. Remaining work: `Open in Copilot` continuity, source navigation, and reliable promotion of the exact thread/context.
+- `Dedicated workspace`: ~80% complete. The standard chat interface now has sessions/search/archive/new-chat, a pinned composer, Agent/Operator controls, multi-select context scope, real provisional provider deltas, Stop/Retry, typed non-success states, full finalized ResearchCard/evidence parity, and native single-context domain resolution. Remaining work: typed plan/Operator/report/confirmation blocks, support inspector behavior, artifacts, richer session lifecycle, and source navigation.
+- `Streaming and run lifecycle`: checkpoint 1 complete. The supported OpenAI SDK consumes typed Responses events; Agent and custom-loop Operator runs use one server-owned Gamma event contract with monotonic ids, completed function arguments, tools, warnings, confirmations, refusal/incomplete/provider-error/usage states, cancellation, timeout, bounded replay, disconnect survival, and exactly one persisted terminal. UI deltas remain provisional memory state rather than durable truth. Restart replay and richer retained run/session state remain checkpoint 3 work.
 - `Session persistence`: ~80% complete. Local JSON persistence stores sessions, turns, context snapshots, and model/card results, and the chat sidebar now supports session search, archive/unarchive, and new-session flows. Remaining work: richer session titles, deletion, and migration/version handling.
-- `Memos`: ~50% complete. Memos were removed from the Copilot tab and can still be generated from persisted turns through backend endpoints, but the app does not yet expose a complete in-tab artifact workflow. Remaining work: creation from selected turns, editing, autosave/overwrite behavior, export, stronger source-backed/inferred claim separation, and richer memo templates.
+- `Artifacts, memos, and reports`: ~50% complete. Backend memo/report schemas, persistence, generation, and Markdown export foundations exist, but the app does not yet expose a complete in-tab artifact workflow. Remaining work: source-turn selection, templates, editing, autosave, duplicate/delete, explicit overwrite, preview/export, and exact source/trace linkage.
 - `Read-only tools and grounding`: ~80% complete. Copilot has domain context builders and read-only tools for Portfolio, Research, Strategy Lab, Risk, IV, Macro, Commodities, Prediction Markets, Crypto, Fundamentals, and synthesis, and the June grounding overhaul plus handoff-context coverage improved context fidelity. Remaining work: Sealanes/news drilldowns, stronger provenance citations, and tool coverage parity across V2 tabs.
-- `Research Operator`: ~62% complete. Backend action registry metadata, operator plan models, `/copilot/actions`, `/copilot/operator-plan`, `/copilot/operator-plan/execute`, progress events, persisted operator traces, typed read-only risk shocks, Strategy Lab backtest summaries, hypothetical portfolio comparison, reverse-valuation tools, DCF confirmation checkpoints, an eval harness, and Agents SDK orchestration behind a feature flag are live. Remaining work: more read-only drilldowns, richer trace/report surfaces, generalized confirmed mutations, and an eval-backed decision before making Agents SDK the default.
-- `Voice`: ~0% complete. Voice remains out of scope until text/session/memo workflows are more mature.
+- `Research Operator`: ~68% complete. Backend action registry metadata, operator plan models, shared live custom-loop events, safe-step cancellation, persisted progress/traces, typed read-only analyses, DCF confirmation checkpoints, reports, an eval harness, and Agents SDK orchestration behind a feature flag are live. Remaining work: provider-native Agents SDK progress parity, inline confirmations/diffs/rollback context, failure/resume evals, broader read-only drilldowns, and an evidence-backed default-orchestrator decision.
+- `Diagnostics, routing, and release evidence`: ~45% complete. Provider configuration and usage foundations exist, and Agent/Operator test/eval paths are present. Remaining work: versioned model policy, resolved routing/usage/latency visibility, retention controls, structured diagnostic ids, accessibility/responsive coverage, restart replay, and representative live smoke gates.
+- `Voice and optional external deep research`: excluded from Copilot V2 100%. They remain later opt-in extensions after the text workspace passes its release gate.
 
 #### 1. Ask mode
 
@@ -1681,25 +1682,48 @@ Potential infrastructure includes:
 - local session persistence,
 - optional later provider abstraction.
 
-### Progression notes
+### Path from ~72% to 100%
 
-Updated progression:
+Copilot percentage should advance only when a checkpoint's exit criteria are implemented and verified. The target percentage is a completion gate, not an estimate based on code volume. Work inside adjacent checkpoints may overlap, but a later percentage should not be claimed while an earlier blocker remains open.
 
-1. Harden true provider-level streaming beyond the current NDJSON wrapper.
-2. Improve session persistence with delete flows and clearer session naming (archive/search shipped with the chat rebuild).
-3. Expand tab context-builder adoption and source-citation paths.
-4. Deepen synthesis and planning workflows inside the dedicated workspace rather than adding a global mode bar.
-5. Improve memo templates, editing, export, and source-backed versus inferred claim labels.
-6. Advance Research Operator with progress events, broader read-only tools, report/trace surfaces, and confirmed local research-state mutations.
-7. Adopt Agents SDK for the Research Operator path behind Gamma's action registry, keeping Gamma's backend permission checks, confirmation tokens, and persistence authoritative.
-8. Add richer domain tools as each V2 tab matures, especially Sealanes/news and deeper IV/Commodities drilldowns.
-9. Consider voice only after the core workspace is stable.
+| Checkpoint | Target | Required delivery | Exit criteria |
+| --- | ---: | --- | --- |
+| Current verified baseline | ~72% | Native Agent streaming first slice, cancellable Gamma run-event contract, finalized-result transcript blocks, dedicated/shelf ResearchCard evidence parity, existing sessions/tools/operator foundations. | Current Copilot backend suites, frontend suites, typecheck, and production build remain green; live-provider failures stay typed rather than becoming neutral empty cards. |
+| 1. Finish transport and run lifecycle | **76% verified 2026-07-17** | Supported OpenAI SDK typed streaming; completed function-call arguments, tool start/result, refusal, incomplete, provider error, usage, and final events; bounded cursor replay; shelf Agent and custom-loop Operator on the shared event/reducer contract. | Agent and Operator each produce one run id and one persisted terminal; pre-first-event and safe-boundary cancellation, timeout, reconnect, disconnect, duplicate/stale/post-terminal, refusal, incomplete, and provider-error tests pass. Focused gate: 85 backend tests; frontend: 259 tests plus typecheck/build/desktop check; desktop and 720px mock Agent/Operator UI inspected with zero console errors. |
+| 2. Complete transcript and evidence contract | 80% | Extend discriminated transcript blocks to plans, Operator steps/results, reports, confirmations, diffs, and typed non-success states; resolve claim evidence to known source ids; add source/context navigation; visibly separate source-backed claims, inference, assumptions, missing data, and warnings. | Every persisted source-backed claim resolves to the turn's context/tool source registry or is reclassified before persistence. Shelf and workspace render equivalent evidence, and supported source refs open the correct Gamma tab/mode/entity without losing lens context. |
+| 3. Finish sessions and in-tab artifacts | 86% | Add session rename, restore, delete, schema versioning/migrations, corrupted-record recovery, and faithful persistence of role/depth/scope/model/run/usage/artifact state. Add memo/report source-turn selection, templates, edit/autosave, preview, duplicate/delete, explicit overwrite, and Markdown export inside the workspace. | Restarting Gamma faithfully reopens transcript, context snapshots, runs, plans, traces, confirmations, memos, and reports. Artifact exports preserve claim labels, inline evidence refs, source metadata, warnings, provider/model metadata, and source-turn links. |
+| 4. Productionize Research Operator | 91% | Stream Operator progress live; cancel only between safe steps; render inline confirmation checkpoints with before/after diff and rollback/snapshot context; retain one authoritative action registry and permission path; expand failure, stale-context, partial-tool, repeated-confirmation, cancellation, and resume evals. | Bounded read-only analyses run automatically, while every durable/non-trivial local research-state mutation stops on the exact active confirmation token. No trade, order, account, rebalance, wallet, or arbitrary-code capability exists. The default-orchestrator decision is backed by permission and quality evals rather than feature-flag availability alone. |
+| 5. Close context and tool-coverage gaps | 94% | Add Sealanes context/read-only drilldowns without invented risk labels; make news item-level context first class; add priority IV, Commodities, and Equity Research drilldowns; implement context-size budgets, deterministic compaction, stale-context invalidation, and navigation mappings/fingerprints for every selectable scope. | Representative NVDA, CPI/Fed, oil-disruption, and portfolio-rate-shock requests select the appropriate domains, explain omissions, preserve freshness/provenance, and degrade explicitly when a provider or context is unavailable. |
+| 6. Finish continuity, model policy, retention, and diagnostics | 97% | Add `Open in Copilot` from the shelf with exact thread/context/entity/lens continuity; add a versioned capability-aware model policy and eval-backed routing; record resolved model, routing reason, effort, latency, usage/cache/provider/tool counts, cancellation outcome, and orchestrator; explain local versus provider retention and support a tested `store: false` path. | Settings and the run inspector expose actionable configuration/provider/model/storage state and copyable safe diagnostic ids without credentials or sensitive payloads. Shelf promotion loses no context. Routing and any Agents SDK default are justified by recorded eval results against the retained baseline. |
+| 7. Pass the Copilot V2 release gate | 100% | Complete accessibility, keyboard, desktop/narrow responsive, first-run, disabled/unconfigured/rate-limit/quota guidance, mock/offline, migration, restart-replay, and live-provider validation. Reconcile roadmap, detailed spec, README, provider setup, and validation commands. | Backend, frontend, build, eval, persistence-replay, and permission-invariant suites pass. Live Agent and Operator smoke passes for the representative research prompts when providers are intentionally configured. Happy, degraded, unavailable, refused, incomplete, cancelled, timeout, and provider-error states are all visible and tested. No execution-capable tool or hidden sample fallback crosses the read-only boundary. |
 
-Current OpenAI model direction is documented in [`docs/copilot_v2_tab_plan.md`](./docs/copilot_v2_tab_plan.md): evaluate GPT-5.6 Terra as the standard Agent/Operator candidate against the passing GPT-5.5 baseline, reserve GPT-5.6 Sol for measured deep-work gains, use Luna only for low-risk auxiliary work after evals, and do not make the Responses Multi-agent beta the default while Gamma's tool-call budgets and permission controls are stricter than that beta surface currently supports.
+### Sequencing and dependency rules
+
+1. Checkpoints 1 and 2 are the immediate blockers and may proceed together because the shared run-event and transcript-block contracts constrain all later UI.
+2. Checkpoint 3 should land before broadening durable mutations so sessions and artifacts can replay confirmations and rollback context faithfully.
+3. Checkpoint 4 may deepen read-only Operator coverage while checkpoint 3 is underway, but no new durable mutation family should ship before inline confirmation, persistence, and replay are reliable.
+4. Checkpoint 5 should add backend context/tool contracts before large UI additions; source ids, freshness, fingerprints, and navigation mappings are part of each tool's definition of done.
+5. Checkpoint 6 model routing must remain eval-backed. Do not advance completion by changing model strings alone.
+6. Checkpoint 7 is a hard release gate. Passing unit tests without representative live-provider, restart-replay, accessibility, and permission-boundary evidence is not 100%.
+
+Current model candidates and OpenAI-specific implementation details remain documented in [`docs/copilot_v2_tab_plan.md`](./docs/copilot_v2_tab_plan.md). The roadmap requirement is stable: routing must be capability-aware, versioned, observable, and supported by comparative eval evidence.
+
+### Explicit non-goals for Copilot V2 100%
+
+The following do not block 100%:
+
+- voice input or spoken output,
+- unrestricted web browsing,
+- default long-running external deep research,
+- arbitrary code execution,
+- trading, order routing, account mutation, portfolio rebalancing, wallet connection/signing, or wallet transactions,
+- adding every conceivable domain tool after the representative cross-domain research workflows pass.
+
+Optional external deep research may be added later only as an explicit background job with provider/data-retention disclosure, citations, cancellation, and hard spend/tool limits. Voice remains a later extension after the text workspace is complete.
 
 ### Deliverable
 
-At the end of Copilot V2, Gamma should have a dedicated AI research workspace that can ask, synthesize, plan, and draft memos from grounded Gamma context while preserving the read-only boundary.
+At 100%, Gamma should have one coherent Copilot research system across the shelf and dedicated workspace. It should stream and replay grounded Agent and Operator work; resolve claims to known evidence; run bounded read-only Gamma analyses; stop for visible confirmation before durable local research-state changes; create, edit, save, reopen, and export memos/reports; preserve session, context, trace, artifact, provider, model, usage, and warning state across restart; and expose understandable diagnostics and non-success states while preserving Gamma's read-only market/account/wallet boundary.
 
 ---
 
@@ -2464,7 +2488,7 @@ Likely early wins:
 - Research saved scopes,
 - Macro EU/global/event refinements,
 - Fundamentals raw-versus-normalized inspection,
-- Copilot streaming/session persistence,
+- Copilot run-lifecycle/session persistence hardening,
 - IV source transparency, history, and handoff hardening.
 
 ### First new-domain prototypes
@@ -2488,7 +2512,7 @@ After data shapes are proven:
 - IV skew/term modules and Realized vs IV,
 - Crypto Wallets & Flows,
 - Fundamentals Reverse Valuation,
-- Copilot true streaming, session search/archive, and memo polish,
+- Copilot shared Agent/Operator streaming, typed evidence, complete session/artifact lifecycle, and release validation,
 - Sealanes Chokepoints and Event Replay.
 
 ### Beta readiness
@@ -2536,7 +2560,7 @@ Add raw-versus-normalized inspection, better peer/reference depth, DCF improveme
 
 ### Workstream 7 - Copilot V2
 
-Keep the shell shelf and dedicated no-mode-bar Copilot workspace, then harden true streaming, sessions, synthesis, planning, memos, and later voice.
+Finish the coherent shelf plus dedicated no-mode-bar Copilot system through shared Agent/Operator run lifecycle, typed evidence, source-resolved claims, complete sessions/artifacts, bounded confirmed Operator workflows, context/tool parity, diagnostics, and the release gate. Voice and optional external deep research remain later extensions.
 
 ### Workstream 8 - Commodities
 

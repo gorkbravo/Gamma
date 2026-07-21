@@ -90,6 +90,9 @@ describe("CopilotView", () => {
     expect(body).toContain("Connect the loaded context.");
     expect(body).toContain("OpenAI returned no structured research card.");
     expect(body).toContain("openai_responses / gpt-5.5");
-    expect(body).toContain("1 sources / 1 tools");
+    expect(body).toContain("Sources (1)");
+    expect(body).toContain("Tools (1)");
+    expect(body).toContain("Macro Snapshot");
+    expect(body).toContain("get_synthesis_scope_summary");
   });
 });

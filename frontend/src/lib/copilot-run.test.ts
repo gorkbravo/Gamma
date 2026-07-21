@@ -37,17 +37,27 @@ describe("reduceCopilotRunEvent", () => {
       { toolName: "get_macro", state: "done", summary: "Loaded", sourceIds: ["macro.snapshot"] }
     ]);
 
-    state = reduceCopilotRunEvent(state, event({ sequence: 3, event: "text.delta", data: { delta: "Hello " } }));
-    state = reduceCopilotRunEvent(state, event({ sequence: 4, event: "text.delta", data: { delta: "world" } }));
+    state = reduceCopilotRunEvent(
+      state,
+      event({
+        sequence: 3,
+        event: "function.arguments",
+        data: { item_id: "fc_1", arguments: '{"region":"US"}' }
+      })
+    );
+    expect(state.functionArguments).toEqual([{ itemId: "fc_1", arguments: '{"region":"US"}' }]);
+
+    state = reduceCopilotRunEvent(state, event({ sequence: 4, event: "text.delta", data: { delta: "Hello " } }));
+    state = reduceCopilotRunEvent(state, event({ sequence: 5, event: "text.delta", data: { delta: "world" } }));
     expect(state.provisionalText).toBe("Hello world");
 
     state = reduceCopilotRunEvent(
       state,
-      event({ sequence: 5, event: "usage", data: { input_tokens: 10, output_tokens: 3 } })
+      event({ sequence: 6, event: "usage", data: { input_tokens: 10, output_tokens: 3 } })
     );
     expect(state.usage).toEqual({ input_tokens: 10, output_tokens: 3 });
 
-    const completion = event({ sequence: 6, event: "completed", data: { status: "ready" }, result: { status: "ready" } });
+    const completion = event({ sequence: 7, event: "completed", data: { status: "ready" }, result: { status: "ready" } });
     expect(isTerminalCopilotRunEvent(completion)).toBe(true);
     state = reduceCopilotRunEvent(state, completion);
     expect(state.phase).toBe("completed");
@@ -104,7 +114,13 @@ describe("reduceCopilotRunEvent", () => {
 
     state = reduceCopilotRunEvent(
       state,
-      event({ sequence: 3, event: "failed", data: { message: "Provider transport failed." } })
+      event({ sequence: 3, event: "provider.error", data: { message: "Provider transport failed." } })
+    );
+    expect(state.statusDetail).toBe("Provider transport failed.");
+
+    state = reduceCopilotRunEvent(
+      state,
+      event({ sequence: 4, event: "failed", data: { message: "Provider transport failed." } })
     );
     expect(state.phase).toBe("failed");
     expect(state.statusDetail).toBe("Provider transport failed.");

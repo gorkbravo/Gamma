@@ -1864,8 +1864,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("macro", "resp_macro_2", "Macro Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("macro", "Map the active macro setup.");
@@ -1888,8 +1888,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("macro", "resp_macro_2", "Macro Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("macro", "Map the active macro setup.");
@@ -1942,7 +1942,8 @@ describe("app store orchestration", () => {
     strategyLabResult.set(makeStrategyLabResult());
     strategyLabComposition.set(composition as any);
     const enrichedFingerprint = previewCopilotThreadFingerprint("research", { workspaceMode: "research" });
-    const fetchMock = vi.fn().mockResolvedValueOnce(ok(makeCopilotResult("research", "resp_research_1", "Research Card")));
+    const researchCard = makeCopilotResult("research", "resp_research_1", "Research Card");
+    const fetchMock = vi.fn().mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(researchCard, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("research", "Assess the current Strategy Lab setup.", {
@@ -2033,7 +2034,8 @@ describe("app store orchestration", () => {
     };
     enqueueStrategyLabHandoff(handoff);
     const pendingFingerprint = previewCopilotThreadFingerprint("strategy_lab", { workspaceMode: "research" });
-    const pendingFetch = vi.fn().mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_pending", "Pending Strategy Card")));
+    const pendingCard = makeCopilotResult("strategy_lab", "resp_strategy_pending", "Pending Strategy Card");
+    const pendingFetch = vi.fn().mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(pendingCard, init)));
     vi.stubGlobal("fetch", pendingFetch);
 
     await loadCopilotResearchCard("strategy_lab", "Explain pending handoff state.", {
@@ -2049,7 +2051,10 @@ describe("app store orchestration", () => {
     const resolvedFetch = vi
       .fn()
       .mockResolvedValueOnce(ok(resolved))
-      .mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_resolved", "Resolved Strategy Card")));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(
+        makeCopilotResult("strategy_lab", "resp_strategy_resolved", "Resolved Strategy Card"),
+        init
+      )));
     vi.stubGlobal("fetch", resolvedFetch);
 
     await resolvePendingStrategyLabHandoffs();
@@ -2074,8 +2079,14 @@ describe("app store orchestration", () => {
     strategyLabResult.set(makeStrategyLabResult());
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(makeCopilotResult("equity_research", "resp_equity_1", "Equity Card")))
-      .mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_1", "Strategy Card")));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(
+        makeCopilotResult("equity_research", "resp_equity_1", "Equity Card"),
+        init
+      )))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(
+        makeCopilotResult("strategy_lab", "resp_strategy_1", "Strategy Card"),
+        init
+      )));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("equity_research", "Assess the active equity scope.", {
@@ -2098,7 +2109,7 @@ describe("app store orchestration", () => {
   });
 
   it("adds a visible copilot error turn when generation fails before a response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("Failed to fetch")));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Failed to fetch")));
 
     const result = await loadCopilotResearchCard("macro", "Map the active macro setup.");
 
@@ -2109,6 +2120,67 @@ describe("app store orchestration", () => {
     expect(get(copilotThreads).macro.entries).toHaveLength(1);
     expect(get(copilotThreads).macro.entries[0]?.prompt).toBe("Map the active macro setup.");
     expect(get(copilotThreads).macro.entries[0]?.result.message).toContain("Failed to fetch");
+  });
+
+  it("resumes a disconnected copilot stream from the last accepted sequence", async () => {
+    const result = makeCopilotResult("macro", "resp_reconnected", "Reconnected Card");
+    let runId = "";
+    const encoder = new TextEncoder();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce((_url, init) => {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as { run_id: string };
+        runId = payload.run_id;
+        const partial = [
+          JSON.stringify({
+            run_id: runId,
+            sequence: 0,
+            event: "run.created",
+            timestamp: "2026-03-01T00:00:00Z",
+            data: { domain: "macro", provider: "mock" },
+            result: null
+          }),
+          JSON.stringify({
+            run_id: runId,
+            sequence: 1,
+            event: "text.delta",
+            timestamp: "2026-03-01T00:00:01Z",
+            data: { delta: "partial" },
+            result: null
+          })
+        ].join("\n") + "\n";
+        let sent = false;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(encoder.encode(partial));
+              return;
+            }
+            controller.error(new Error("connection dropped"));
+          }
+        });
+        return Promise.resolve(new Response(body, { status: 200 }));
+      })
+      .mockImplementationOnce(() => Promise.resolve(new Response(
+        JSON.stringify({
+          run_id: runId,
+          sequence: 2,
+          event: "completed",
+          timestamp: "2026-03-01T00:00:02Z",
+          data: { status: "ready" },
+          result
+        }) + "\n",
+        { status: 200, headers: { "content-type": "application/x-ndjson" } }
+      )));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const settled = await loadCopilotResearchCard("macro", "Reconnect this run.");
+
+    expect(settled?.response_id).toBe("resp_reconnected");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(`/copilot/runs/${runId}/events?after_sequence=1`);
+    expect(get(copilotThreads).macro.entries).toHaveLength(1);
   });
 
   it("threads previous_response_id through synthesis follow-ups when the grounding scope is unchanged", async () => {
@@ -2146,8 +2218,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("synthesis", "resp_synthesis_2", "Synthesis Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("synthesis", "Connect the loaded portfolio and macro context.", {
@@ -2191,8 +2263,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("synthesis", "resp_synthesis_2", "Synthesis Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("synthesis", "Connect the loaded portfolio and macro context.", {
@@ -2423,7 +2495,8 @@ describe("sitrep follow-ups store", () => {
       sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
       section_warnings: []
     });
-    const fetchMock = vi.fn().mockResolvedValue(ok(makeCopilotResult("sitrep", "resp_sitrep_1", "SITREP card")));
+    const sitrepCard = makeCopilotResult("sitrep", "resp_sitrep_1", "SITREP card");
+    const fetchMock = vi.fn().mockImplementation((_url, init) => Promise.resolve(copilotStreamOk(sitrepCard, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await loadCopilotResearchCard("sitrep", "Summarize the situation report.", {
@@ -2829,6 +2902,34 @@ function ok(body: unknown) {
       return body;
     }
   };
+}
+
+function copilotStreamOk(result: CopilotResearchCardResult, init: RequestInit | undefined) {
+  const payload = JSON.parse(String(init?.body ?? "{}")) as { run_id?: string };
+  const runId = payload.run_id ?? "run_test";
+  const timestamp = "2026-03-01T00:00:00Z";
+  const body = [
+    JSON.stringify({
+      run_id: runId,
+      sequence: 0,
+      event: "run.created",
+      timestamp,
+      data: { domain: result.domain, provider: result.provider, model: result.model },
+      result: null
+    }),
+    JSON.stringify({
+      run_id: runId,
+      sequence: 1,
+      event: "completed",
+      timestamp,
+      data: { status: result.status },
+      result
+    })
+  ].join("\n") + "\n";
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "application/x-ndjson" }
+  });
 }
 
 function notFound(body: unknown) {

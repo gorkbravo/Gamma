@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 ## Start Here
 
@@ -169,13 +169,12 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The largest gaps are integration and reliability gaps, not missing concepts:
+The largest gaps are integration and reliability gaps, not missing concepts. Checkpoint 1 is verified at 76%: the supported OpenAI SDK now feeds typed events into server-owned Agent and Operator runs, shelf and workspace Agent calls share that path, and bounded replay survives subscriber disconnects. Remaining gaps are:
 
-- `/copilot/research-card/stream` waits for a synchronous provider result and only then emits wrapper events;
-- the dedicated tab renders less claim/source/tool detail than the shelf even though the backend result already contains it;
-- live structured-card failures still need a hard reliability gate and first-class provider error states;
+- transcript blocks do not yet cover every plan, Operator, report, confirmation, mutation diff, artifact, and typed non-success shape;
+- claim/source refs still need server-side resolution plus context navigation before persistence;
 - the memo APIs and report APIs are not a complete in-tab artifact workflow;
-- operator events arrive after execution rather than as a live, cancellable run;
+- the custom Operator streams live and cancels at safe step boundaries, but Agents SDK progress parity and inline confirmation/diff/rollback UX remain incomplete;
 - the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5;
 - Sealanes, news, and some deeper IV/Commodities drilldowns do not yet have tool parity;
 - privacy, retention, cost, usage, and model-routing diagnostics are not yet understandable from the Copilot workspace.
@@ -284,21 +283,21 @@ Feature fit:
 
 ### Remaining Engineering Workstreams
 
-#### A. Provider transport and run lifecycle — blocker
+#### A. Provider transport and run lifecycle — checkpoint 1 complete (76%)
 
-- Replace the raw `urllib` synchronous call with the supported OpenAI SDK or an equivalent typed streaming client.
-- Stream Responses semantic events through one Gamma event contract over SSE or NDJSON without buffering the final result first.
-- Stream function-call argument completion, tool start/result, refusal, incomplete, error, usage, and final events.
-- Add run ids, monotonic sequence ids, reconnect/resume behavior, cancellation, timeouts, and idempotent finalization.
-- Make Agent and Operator use the same frontend run-event reducer even if their backend orchestrators differ.
-- Persist only finalized event state plus the bounded trace needed for replay; avoid treating UI deltas as the durable source of truth.
+- [x] Replace raw `urllib` with the supported OpenAI SDK typed Responses client while preserving the provider protocol.
+- [x] Stream Responses semantic events through one Gamma NDJSON event contract without buffering provider deltas behind the final result.
+- [x] Stream completed function-call arguments, tool start/result, refusal, incomplete, provider error, usage, cancellation, and final events.
+- [x] Add run ids, monotonic sequence ids, bounded cursor replay, cancellation, timeouts, and idempotent finalization.
+- [x] Make shelf Agent, workspace Agent, and custom-loop Operator use the same frontend run-event reducer.
+- [x] Persist finalized result plus bounded trace; provisional UI deltas are not durable truth.
 
-Implementation note (2026-07-14, first slice landed):
-- `/copilot/research-card/stream` now streams NDJSON Gamma run events (`run.created`, `text.delta`, `tool.call`, `tool.result`, `warning`, `refusal`, `incomplete`, `usage`, plus exactly one terminal `completed`/`failed`/`cancelled` carrying the final persisted result) instead of buffering a synchronous provider result. `CopilotRunEvent` in `src/models/copilot.py` defines the contract; `CopilotService.stream_research_card_events` owns run ids, monotonic sequence ids, a run registry, a 300s run timeout, cancellation, and idempotent finalization; `POST /copilot/runs/{run_id}/cancel` cancels an in-flight run (clients may supply `run_id` so Stop works before the first event).
-- `OpenAIResponsesCopilotProvider.stream_research_card` consumes provider-native Responses SSE (`response.output_text.delta`, `response.completed`, `response.incomplete`, `response.failed`, `error`) and emits typed `refused`/`incomplete` result statuses; the mock provider streams deterministic deltas so mock mode exercises the same path. Live-verified against GPT-5.5 with per-token deltas on 2026-07-14.
-- Terminal results persist through the existing turn store (including `cancelled` turns), so session replay matches the streamed outcome. Non-streaming providers fall back to `run.created` + terminal on the same contract.
-- Frontend: `frontend/src/lib/copilot-run.ts` reduces run events (stale/duplicate sequence and post-terminal events are dropped), the dedicated tab renders provisional streamed text with tool status chips plus Stop during the run and Retry after non-ready outcomes, and the client-side typewriter simulation is removed. The shelf still uses the non-streaming loader.
-- Still open from this workstream: adopting the official OpenAI SDK client, reconnect/resume, streaming function-call argument deltas as their own events, and moving Operator runs onto the same live event stream (workstream D).
+Implementation note (2026-07-17, checkpoint complete):
+- `OpenAIResponsesCopilotProvider` now uses `openai>=2.38,<3` and `client.responses.create(..., stream=True)`. Typed SDK events are normalized at the provider boundary; no raw `urllib` transport remains. Function arguments, refusal, incomplete, failed/error, text, usage, and tool rounds map into Gamma semantics.
+- `CopilotService` owns a bounded 512-event, 15-minute in-memory replay record per active/recent run. POST reconnect uses `last_seen_sequence`; `GET /copilot/runs/{run_id}/events?after_sequence=N` resumes without re-execution. Closing a subscriber does not cancel server work. Duplicate run ids may only reattach to the identical request.
+- Agent and custom-loop Operator runs each have one Gamma run id, monotonic sequences, post-terminal event rejection, explicit pre-first-event/safe-boundary cancellation, timeout, and exactly one persisted terminal result. Operator plan, step/tool, warning, confirmation, artifact, report, and final states stream over the shared envelope.
+- The shelf now calls the same streaming loader as the dedicated workspace. The client retries a disconnected stream from its last accepted sequence; the reducer drops foreign, stale, duplicate, and post-terminal events. One selected context resolves to its native typed domain; two or more resolve to synthesis.
+- Checkpoint evidence: `85 passed` across `tests/test_copilot.py`, Agents SDK smoke, and Operator eval; frontend `41 files / 259 tests` passed; typecheck, build, and desktop check passed. Mock Agent and Operator were inspected at 1440x900 and 720x900 with no console errors. Live-provider release smoke remains intentionally unclaimed.
 
 #### B. Answer contract and evidence UX — blocker
 
@@ -307,6 +306,11 @@ Implementation note (2026-07-14, first slice landed):
 - Add claim-level evidence resolution and deep links through `CrossTabHandoffEnvelope` where possible.
 - Validate every cited source id against the context/tool source registry before persisting a source-backed claim.
 - Keep inference, assumption, missing-data, and warning categories visibly distinct in cards, reports, and exports.
+
+Implementation note (2026-07-15, first transcript-block slice landed):
+- `frontend/src/lib/copilot-transcript.ts` now maps finalized Agent results into discriminated transcript blocks for messages, structured research cards, typed non-success states, evidence, and provider metadata. `CopilotTranscriptResult.svelte` renders that contract in the dedicated workspace.
+- The dedicated transcript now has parity with the shelf for all current `ResearchCard` fields: required data, confounders, next steps, caveats, source-backed claims with evidence refs, inferred claims, sources, tool traces, and warnings. Cardless error/refused/incomplete/cancelled results retain the same expandable grounding evidence.
+- Still open from this workstream: extending the block contract to plans, live Operator results, reports, and confirmations; claim-level source resolution/deep links; and server-side validation that every source-backed claim resolves to the turn's context/tool source registry before persistence.
 
 #### C. Context and tool coverage — blocker
 
@@ -364,8 +368,8 @@ Implementation note (2026-07-14, first slice landed):
 
 ### Delivery Order
 
-1. Provider-native streaming plus explicit provider state.
-2. Typed transcript blocks and dedicated-tab evidence parity.
+1. ~~Provider-native streaming, shared run lifecycle, bounded replay, and explicit provider state.~~ Completed 2026-07-17 at checkpoint 1 (76%).
+2. Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.
 3. In-tab artifacts/memos and session lifecycle completion.
 4. Live operator events, cancellation, and inline confirmations.
 5. Missing context/tool coverage and source navigation.

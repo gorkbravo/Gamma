@@ -9,6 +9,11 @@ export interface CopilotRunToolNote {
   sourceIds: string[];
 }
 
+export interface CopilotRunFunctionArguments {
+  itemId: string | null;
+  arguments: string;
+}
+
 export interface CopilotRunState {
   runId: string;
   phase: CopilotRunPhase;
@@ -17,6 +22,7 @@ export interface CopilotRunState {
   model: string | null;
   /** Raw streamed text; provisional until the schema-valid final result lands. */
   provisionalText: string;
+  functionArguments: CopilotRunFunctionArguments[];
   toolNotes: CopilotRunToolNote[];
   warnings: string[];
   usage: Record<string, number> | null;
@@ -38,6 +44,7 @@ export function createCopilotRunState(runId: string): CopilotRunState {
     provider: null,
     model: null,
     provisionalText: "",
+    functionArguments: [],
     toolNotes: [],
     warnings: [],
     usage: null,
@@ -84,6 +91,15 @@ export function reduceCopilotRunEvent(state: CopilotRunState, event: CopilotRunE
     case "text.delta":
       next.phase = "streaming";
       next.provisionalText = state.provisionalText + (asString(data.delta) ?? "");
+      return next;
+    case "function.arguments":
+      next.functionArguments = [
+        ...state.functionArguments,
+        {
+          itemId: asString(data.item_id),
+          arguments: asString(data.arguments) ?? "{}"
+        }
+      ];
       return next;
     case "tool.call":
       next.toolNotes = [
@@ -136,6 +152,9 @@ export function reduceCopilotRunEvent(state: CopilotRunState, event: CopilotRunE
       next.statusDetail = asString(data.reason)
         ? `Response ended early: ${asString(data.reason)}`
         : "Response ended early.";
+      return next;
+    case "provider.error":
+      next.statusDetail = asString(data.message) ?? "Copilot provider failed.";
       return next;
     case "confirmation.needed":
       next.statusDetail = asString(data.message) ?? "Confirmation required before continuing.";

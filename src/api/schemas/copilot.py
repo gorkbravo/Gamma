@@ -156,6 +156,8 @@ class CopilotResearchCardRequestModel(BaseModel):
     # Optional client-supplied run id for streamed runs so Stop can target the
     # run before the first event arrives. The server generates one when omitted.
     run_id: str | None = None
+    # Reconnect cursor. Only events with a greater sequence are replayed.
+    last_seen_sequence: int | None = Field(default=None, ge=-1)
     context: CopilotRequestContextModel = Field(default_factory=CopilotRequestContextModel)
     synthesis: CopilotSynthesisRequestModel | None = None
 

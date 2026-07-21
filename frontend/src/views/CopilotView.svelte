@@ -1,5 +1,6 @@
 <script lang="ts">
   import { afterUpdate, onMount } from "svelte";
+  import CopilotTranscriptResult from "../components/CopilotTranscriptResult.svelte";
   import type {
     CopilotBaseDomain,
     CopilotDomain,
@@ -227,22 +228,6 @@
       event.preventDefault();
       void handleSubmit();
     }
-  }
-
-  function providerLabel(result: CopilotResearchCardResult) {
-    return result.model ? `${result.provider} / ${result.model}` : result.provider;
-  }
-
-  function sourceSummary(result: CopilotResearchCardResult) {
-    const parts: string[] = [];
-    if (result.sources.length) parts.push(`${result.sources.length} sources`);
-    if (result.tool_traces.length) parts.push(`${result.tool_traces.length} tools`);
-    if (result.warnings.length) parts.push(`${result.warnings.length} warnings`);
-    return parts.join(" / ");
-  }
-
-  function cardlessStatusLabel(result: CopilotResearchCardResult) {
-    return result.status === "ready" ? "No renderable card" : result.status.replaceAll("_", " ");
   }
 
   function sessionStatusLabel(session: CopilotSessionSummary) {
@@ -482,30 +467,7 @@
             <div class="msg assistant">
               <div class="role-tag">GAMMA</div>
               <div class="assistant-body">
-                {#if turn.result.message && turn.result.card}
-                  <p class="assistant-text {turn.result.status}">{turn.result.message}</p>
-                {/if}
-                {#if !turn.result.card}
-                  <div class="result-state {turn.result.status}">
-                    <div class="result-state-head">
-                      <span>{cardlessStatusLabel(turn.result)}</span>
-                      <small>{providerLabel(turn.result)}</small>
-                    </div>
-                    <p>{turn.result.message ?? "Copilot returned no renderable card."}</p>
-                  </div>
-                {/if}
-                {#if turn.result.card}
-                  <div class="research-card">
-                    <h4>{turn.result.card.title}</h4>
-                    <div class="card-field"><span>Hypothesis</span><p>{turn.result.card.hypothesis}</p></div>
-                    <div class="card-field"><span>Rationale</span><p>{turn.result.card.rationale}</p></div>
-                    <div class="card-field"><span>Proposed test</span><p>{turn.result.card.proposed_test}</p></div>
-                  </div>
-                {/if}
-                <div class="assistant-meta">
-                  <span>{providerLabel(turn.result)}</span>
-                  {#if sourceSummary(turn.result)}<span>{sourceSummary(turn.result)}</span>{/if}
-                </div>
+                <CopilotTranscriptResult result={turn.result} />
               </div>
             </div>
           {/each}
@@ -1172,62 +1134,6 @@
     gap: var(--space-4);
   }
 
-  .assistant-text {
-    margin: 0;
-    color: var(--text-0);
-    font-size: var(--text-base);
-    line-height: 1.6;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .assistant-text.error {
-    color: var(--negative);
-  }
-
-  .result-state {
-    display: grid;
-    gap: var(--space-3);
-    border: 1px solid var(--panel-border);
-    border-left: 2px solid var(--panel-strong);
-    padding: var(--space-4) var(--space-5);
-  }
-
-  .result-state.error {
-    border-left-color: var(--negative);
-  }
-
-  .result-state.unavailable {
-    border-left-color: var(--warning);
-  }
-
-  .result-state-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-5);
-  }
-
-  .result-state-head span,
-  .result-state-head small {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-  }
-
-  .result-state p {
-    margin: 0;
-    color: var(--text-1);
-    font-size: var(--text-base);
-    line-height: var(--leading-normal);
-    overflow-wrap: anywhere;
-  }
-
-  .result-state.error p {
-    color: var(--negative);
-  }
-
   .caret-blink {
     color: var(--accent);
     animation: caret 1s steps(1) infinite;
@@ -1237,49 +1143,6 @@
     50% {
       opacity: 0;
     }
-  }
-
-  .research-card {
-    display: grid;
-    gap: var(--space-3);
-    border: 1px solid var(--panel-border);
-    border-left: 2px solid var(--accent);
-    padding: var(--space-4) var(--space-5);
-  }
-
-  .research-card h4 {
-    margin: 0;
-    color: var(--text-0);
-    font-size: var(--text-base);
-  }
-
-  .card-field {
-    display: grid;
-    gap: var(--space-1);
-  }
-
-  .card-field span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-  }
-
-  .card-field p {
-    margin: 0;
-    color: var(--text-1);
-    font-size: var(--text-base);
-    line-height: 1.5;
-  }
-
-  .assistant-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-4);
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
   }
 
   /* ---- Plan / operator chat blocks ---- */
@@ -1455,7 +1318,7 @@
 
   .run-status-detail {
     margin: 0;
-    color: var(--warn, #c9a227);
+    color: var(--warning);
     font-size: var(--text-sm);
   }
 
@@ -1535,8 +1398,8 @@
   }
 
   .composer-buttons button.primary.stop {
-    color: var(--down, #c96a5b);
-    border-color: color-mix(in srgb, var(--down, #c96a5b) 40%, var(--panel-strong));
+    color: var(--negative);
+    border-color: color-mix(in srgb, var(--negative) 40%, var(--panel-strong));
   }
 
   .composer-buttons button:disabled {

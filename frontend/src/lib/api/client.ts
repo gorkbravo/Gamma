@@ -82,6 +82,28 @@ export async function postNdjsonStream(
       signal: options.signal
     })
   );
+  await consumeNdjsonResponse(response, path, onLine);
+}
+
+export async function getNdjsonStream(
+  path: string,
+  onLine: (line: string) => void,
+  options: RequestOptions = {}
+): Promise<void> {
+  const response = await instrumentedFetch(path, () =>
+    fetch(`${API_BASE}${path}`, {
+      headers: sessionHeaders(),
+      signal: options.signal
+    })
+  );
+  await consumeNdjsonResponse(response, path, onLine);
+}
+
+async function consumeNdjsonResponse(
+  response: Response,
+  path: string,
+  onLine: (line: string) => void
+): Promise<void> {
   if (!response.ok) {
     throw await httpError(response);
   }

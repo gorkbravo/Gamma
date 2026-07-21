@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, time
+from functools import cached_property
 from hashlib import sha256
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from src.models.copilot import (
     CopilotContextBundle,
@@ -290,6 +291,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             except CopilotRunCancelled:
                 raise
             except RuntimeError as exc:
+                emit("provider.error", {"message": str(exc), "provider": self.provider_name})
                 return build_result(status="error", message=str(exc))
 
             self._emit_usage(emit, response)
@@ -405,7 +407,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         emit: RunEventEmitter,
         should_cancel: CancelCheck,
     ) -> tuple[dict[str, Any], str]:
-        """POST with `stream: true` and consume Responses SSE semantic events.
+        """Use the supported OpenAI SDK and consume typed Responses events.
 
         Returns `(final_response, terminal)` where terminal is `completed` or
         `incomplete`. Provider failures raise RuntimeError; cancellation
@@ -413,85 +415,59 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         """
         try:
             stream = self._open_stream(payload)
-        except HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace")
-            try:
-                body = json.loads(raw)
-                message = body.get("error", {}).get("message") or raw
-            except json.JSONDecodeError:
-                message = raw or str(exc)
-            raise RuntimeError(f"OpenAI request failed: {message}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"OpenAI request failed: {exc.reason}") from exc
+        except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
+            raise RuntimeError(self._sdk_error_message(exc)) from exc
 
         try:
-            return self._consume_sse_stream(stream, emit, should_cancel)
+            return self._consume_response_stream(stream, emit, should_cancel)
         finally:
             close = getattr(stream, "close", None)
             if callable(close):
                 close()
 
     def _open_stream(self, payload: dict[str, Any]):
-        """Open the streaming HTTP response. Overridable in tests."""
-        request = Request(
-            self.api_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-            },
-            method="POST",
-        )
-        return urlopen(request, timeout=self.timeout_seconds)
+        """Open a typed Responses stream. Overridable by provider tests."""
+        return self._client.responses.create(**payload)
 
-    def _consume_sse_stream(
+    def _consume_response_stream(
         self,
         stream: Any,
         emit: RunEventEmitter,
         should_cancel: CancelCheck,
     ) -> tuple[dict[str, Any], str]:
-        data_lines: list[str] = []
-        for raw_line in stream:
+        for sdk_event in stream:
             if should_cancel():
                 raise CopilotRunCancelled()
-            if isinstance(raw_line, bytes):
-                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-            else:
-                line = str(raw_line).rstrip("\r\n")
-            if line == "":
-                if data_lines:
-                    outcome = self._dispatch_sse_event("\n".join(data_lines), emit)
-                    data_lines = []
-                    if outcome is not None:
-                        return outcome
-                continue
-            if line.startswith("data:"):
-                chunk = line[5:].lstrip()
-                if chunk != "[DONE]":
-                    data_lines.append(chunk)
-        if data_lines:
-            outcome = self._dispatch_sse_event("\n".join(data_lines), emit)
+            parsed = self._sdk_to_dict(sdk_event)
+            outcome = self._dispatch_response_event(parsed, emit)
             if outcome is not None:
                 return outcome
         raise RuntimeError("OpenAI stream ended without a terminal response event.")
 
     @staticmethod
-    def _dispatch_sse_event(
-        raw_data: str,
+    def _dispatch_response_event(
+        parsed: dict[str, Any],
         emit: RunEventEmitter,
     ) -> tuple[dict[str, Any], str] | None:
-        try:
-            parsed = json.loads(raw_data)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(parsed, dict):
-            return None
         event_type = str(parsed.get("type") or "")
         if event_type == "response.output_text.delta":
             delta = str(parsed.get("delta") or "")
             if delta:
                 emit("text.delta", {"delta": delta})
+            return None
+        if event_type == "response.function_call_arguments.done":
+            emit(
+                "function.arguments",
+                {
+                    "item_id": parsed.get("item_id"),
+                    "output_index": parsed.get("output_index"),
+                    "arguments": parsed.get("arguments") or "{}",
+                },
+            )
+            return None
+        if event_type == "response.refusal.done":
+            refusal = str(parsed.get("refusal") or "The model refused the request.")
+            emit("refusal", {"message": refusal})
             return None
         if event_type == "response.completed":
             response = parsed.get("response")
@@ -507,6 +483,40 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         if event_type == "error":
             raise RuntimeError(f"OpenAI request failed: {parsed.get('message') or 'stream error'}")
         return None
+
+    @staticmethod
+    def _sdk_to_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            rendered = model_dump(mode="json")
+            return rendered if isinstance(rendered, dict) else {}
+        return {}
+
+    @cached_property
+    def _client(self) -> OpenAI:
+        base_url = self.api_url.rstrip("/")
+        if base_url.endswith("/responses"):
+            base_url = base_url[: -len("/responses")]
+        return OpenAI(
+            api_key=self.api_key,
+            base_url=base_url,
+            timeout=self.timeout_seconds,
+        )
+
+    @staticmethod
+    def _sdk_error_message(exc: Exception) -> str:
+        if isinstance(exc, APITimeoutError):
+            return "OpenAI request timed out."
+        if isinstance(exc, APIConnectionError):
+            return "OpenAI is currently unreachable."
+        if isinstance(exc, APIStatusError):
+            status = getattr(exc, "status_code", None)
+            message = getattr(exc, "message", None) or str(exc)
+            prefix = f"OpenAI request failed ({status})" if status else "OpenAI request failed"
+            return f"{prefix}: {message}"
+        return f"OpenAI request failed: {exc}"
 
     def _build_response_payload(
         self,
@@ -733,28 +743,14 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         )
 
     def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
-        request = Request(
-            self.api_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace")
-            try:
-                body = json.loads(raw)
-                message = body.get("error", {}).get("message") or raw
-            except json.JSONDecodeError:
-                message = raw or str(exc)
-            raise RuntimeError(f"OpenAI request failed: {message}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"OpenAI request failed: {exc.reason}") from exc
+            response = self._client.responses.create(**payload)
+        except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
+            raise RuntimeError(self._sdk_error_message(exc)) from exc
+        rendered = self._sdk_to_dict(response)
+        if not rendered:
+            raise RuntimeError("OpenAI returned an unreadable response payload.")
+        return rendered
 
     @staticmethod
     def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
@@ -777,26 +773,13 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
 
     def _continuation_output_items(self, response: dict[str, Any]) -> list[dict[str, Any]]:
         output_items = response.get("output", [])
-        if self.store_responses:
-            return [
-                dict(item)
-                for item in output_items
-                if isinstance(item, dict)
-            ]
-
+        # Reasoning items returned alongside function calls must be supplied on
+        # the next Responses request, including when provider storage is off.
         return [
-            self._stateless_function_call_item(item)
+            dict(item)
             for item in output_items
-            if isinstance(item, dict) and item.get("type") == "function_call"
+            if isinstance(item, dict)
         ]
-
-    @staticmethod
-    def _stateless_function_call_item(item: dict[str, Any]) -> dict[str, Any]:
-        return {
-            key: item[key]
-            for key in ("type", "call_id", "name", "arguments")
-            if key in item
-        }
 
     @staticmethod
     def _extract_refusal(response: dict[str, Any]) -> str | None:
