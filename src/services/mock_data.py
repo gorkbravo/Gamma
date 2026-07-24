@@ -94,6 +94,8 @@ class MockDataService:
     def load_history(self, symbol: str) -> pd.Series | None:
         path = self.base_path / f"history_{symbol}.csv"
         if not path.exists():
+            if str(symbol).strip().upper() == "SPY":
+                return self._benchmark_history()
             return None
         df = pd.read_csv(path, parse_dates=["date"], index_col="date")
         return df["close"]
@@ -101,6 +103,9 @@ class MockDataService:
     def load_ohlcv_history(self, symbol: str) -> pd.DataFrame | None:
         path = self.base_path / f"history_{symbol}.csv"
         if not path.exists():
+            if str(symbol).strip().upper() == "SPY":
+                history = self._benchmark_history()
+                return history.rename("close").to_frame() if history is not None else None
             return None
         df = pd.read_csv(path, parse_dates=["date"], index_col="date")
         columns = [column for column in ("open", "high", "low", "close", "volume") if column in df.columns]
@@ -116,3 +121,18 @@ class MockDataService:
             df = pd.read_csv(csv, parse_dates=["date"], index_col="date")
             histories[symbol] = df["close"]
         return histories
+
+    def _benchmark_history(self) -> pd.Series | None:
+        """Deterministic offline benchmark used by tests and mock research flows."""
+        components: list[pd.Series] = []
+        for symbol in ("AAPL", "MSFT"):
+            path = self.base_path / f"history_{symbol}.csv"
+            if not path.exists():
+                continue
+            frame = pd.read_csv(path, parse_dates=["date"], index_col="date")
+            series = pd.to_numeric(frame["close"], errors="coerce").dropna()
+            if not series.empty:
+                components.append(series / float(series.iloc[0]) * 100.0)
+        if not components:
+            return None
+        return pd.concat(components, axis=1, join="inner").mean(axis=1).rename("close")

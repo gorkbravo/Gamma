@@ -1,13 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type Hls from "hls.js";
   import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
+  import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
+  import { toProvenanceBadge, type ProvenanceBadgeData } from "../lib/provenance";
   import type {
     CommodityPriceBasis,
     CommodityWorkspaceResponse,
     MacroMetric,
     MacroSnapshot,
+    NewsEventEntity,
     NewsEventFeedResponse,
+    NewsEventItem,
     PredictionMarketListResponse,
     ResearchOverviewNode,
     ResearchOverviewResponse,
@@ -20,10 +25,20 @@
     ResearchOverviewLoadOptions
   } from "../lib/stores/app";
   import {
+    formatNewsReliabilityLabel,
+    formatSitrepSectionAge,
+    formatSitrepWindowLabel,
+    isSitrepFollowUpSaved,
+    oldestSitrepSection,
     resolveSitrepMarketHandoff,
+    resolveSitrepNewsEntityHandoff,
     resolveSitrepTapeHandoff,
+    type SitrepFollowUp,
+    type SitrepFollowUpStatus,
     type SitrepHandoffRequest,
     type SitrepMarketHandoffProfile,
+    type SitrepTapeHandoffRow,
+    type SitrepWorkspaceMeta,
   } from "../lib/view-models/sitrep";
 
   export let system: SystemStatus | null = null;
@@ -40,13 +55,27 @@
   export let onLoadMacro: (options?: MacroLoadOptions) => Promise<unknown> | void;
   export let onLoadCommodities: (options?: CommodityWorkspaceLoadOptions) => Promise<unknown> | void;
   export let onLoadPrediction: (options?: PredictionMarketScreenerOptions) => Promise<unknown> | void;
+  export let onLoadWorkspace: (() => Promise<unknown> | void) | null = null;
   export let selectedEquitySymbol: string | null = null;
   export let onSelectEquity: ((symbol: string, label?: string | null) => void) | null = null;
   export let onOpenHandoff: ((handoff: SitrepHandoffRequest) => Promise<unknown> | void) | null = null;
+  export let workspaceMeta: SitrepWorkspaceMeta | null = null;
+  export let followUps: SitrepFollowUp[] = [];
+  export let onLoadFollowUps: (() => Promise<unknown> | void) | null = null;
+  export let onToggleFollowUp: ((row: SitrepTapeHandoffRow) => Promise<unknown> | void) | null = null;
+  export let onUpdateFollowUp:
+    | ((id: string, patch: { note?: string; status?: SitrepFollowUpStatus }) => Promise<unknown> | void)
+    | null = null;
+  export let onDismissFollowUp: ((id: string) => Promise<unknown> | void) | null = null;
 
-  const bloombergLiveVideoId = "iEpJwprxDdk";
-  const bloombergEmbedUrl = `https://www.youtube.com/embed/${bloombergLiveVideoId}?feature=oembed&autoplay=0&mute=1&playsinline=1&rel=0`;
-  const bloombergWatchUrl = `https://www.youtube.com/watch?v=${bloombergLiveVideoId}`;
+  const bloombergStreamUrl = "https://www.bloomberg.com/media-manifest/streams/phoenix-us.m3u8";
+  const bloombergWatchUrl = "https://www.bloomberg.com/live";
+  const bloombergYouTubeUrl = "https://www.youtube.com/channel/UCIALMKvObZNtJ6AmdCLP7Lg/live";
+
+  type BloombergPlaybackStatus = "loading" | "ready" | "unsupported" | "error";
+  let bloombergVideo: HTMLVideoElement | null = null;
+  let bloombergPlaybackStatus: BloombergPlaybackStatus = "loading";
+  let bloombergPlaybackMessage = "HLS stream initializing";
 
   type TapeRow = {
     id: string;
@@ -74,6 +103,9 @@
     secondaryTone?: string;
     tone: string;
     source: string;
+    timeframe?: string | null;
+    region?: string | null;
+    theme?: string | null;
   };
 
   type RefreshKey = "indices" | "fx" | "rates" | "commodities" | "news";
@@ -157,6 +189,12 @@
   }
 
   onMount(() => {
+    const missingSection =
+      !overview || !indicesOverview || !macro || !news || !commodities || !prediction;
+    if (onLoadWorkspace && missingSection) {
+      void onLoadWorkspace();
+      return;
+    }
     const tasks: Array<Promise<unknown> | void> = [];
     if (!overview) {
       tasks.push(onLoadOverview({ universeId: "broad_us_market", timeframe: "DoD", benchmarkSymbol: "SPY", surface: "sitrep" }));
@@ -179,6 +217,77 @@
     if (tasks.length) {
       void Promise.allSettled(tasks);
     }
+  });
+
+  onMount(() => {
+    let cancelled = false;
+    let hlsPlayer: Hls | null = null;
+    const video = bloombergVideo;
+
+    if (!video) {
+      bloombergPlaybackStatus = "unsupported";
+      bloombergPlaybackMessage = "Video element unavailable";
+      return;
+    }
+
+    const markReady = () => {
+      bloombergPlaybackStatus = "ready";
+      bloombergPlaybackMessage = "Bloomberg TV live";
+    };
+    const markError = () => {
+      bloombergPlaybackStatus = "error";
+      bloombergPlaybackMessage = "Open Bloomberg Live externally";
+    };
+
+    video.addEventListener("loadedmetadata", markReady);
+    video.addEventListener("canplay", markReady);
+    video.addEventListener("error", markError);
+
+    void (async () => {
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = bloombergStreamUrl;
+        video.load();
+        return;
+      }
+
+      try {
+        const { default: Hls } = await import("hls.js");
+        if (cancelled) {
+          return;
+        }
+        if (!Hls.isSupported()) {
+          bloombergPlaybackStatus = "unsupported";
+          bloombergPlaybackMessage = "HLS is not supported in this webview";
+          return;
+        }
+
+        hlsPlayer = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true
+        });
+        hlsPlayer.loadSource(bloombergStreamUrl);
+        hlsPlayer.attachMedia(video);
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, markReady);
+        hlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            markError();
+            hlsPlayer?.destroy();
+            hlsPlayer = null;
+          }
+        });
+      } catch {
+        bloombergPlaybackStatus = "unsupported";
+        bloombergPlaybackMessage = "HLS player unavailable";
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      video.removeEventListener("loadedmetadata", markReady);
+      video.removeEventListener("canplay", markReady);
+      video.removeEventListener("error", markError);
+      hlsPlayer?.destroy();
+    };
   });
 
   function formatNumber(value: number | null | undefined, digits = 2) {
@@ -263,6 +372,23 @@
     });
   }
 
+  function formatDateTimeWithZone(value: string | null | undefined) {
+    if (!value) {
+      return "N/A";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value.slice(0, 16);
+    }
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short"
+    });
+  }
+
   function formatTime(value: string | null | undefined) {
     if (!value) return "";
     const date = new Date(value);
@@ -302,6 +428,40 @@
     if (SOURCE_ABBREV[key]) return SOURCE_ABBREV[key];
     const words = name.trim().split(/\s+/);
     return words.length > 1 && name.length > 10 ? words[0] : name;
+  }
+
+  type NewsEntityChip = { entity: NewsEventEntity; handoff: SitrepHandoffRequest };
+
+  function newsEntityChips(item: NewsEventItem): NewsEntityChip[] {
+    const seen = new Set<string>();
+    const chips: NewsEntityChip[] = [];
+    for (const entity of item.detected_entities ?? []) {
+      const handoff = resolveSitrepNewsEntityHandoff(entity);
+      const symbol = (entity.symbol ?? "").trim().toUpperCase();
+      if (!handoff || !symbol || seen.has(symbol)) {
+        continue;
+      }
+      seen.add(symbol);
+      chips.push({ entity, handoff });
+      if (chips.length >= 4) {
+        break;
+      }
+    }
+    return chips;
+  }
+
+  function openNewsEntity(chip: NewsEntityChip) {
+    const symbol = chip.handoff.symbol ?? chip.entity.symbol ?? "";
+    if (symbol) {
+      onSelectEquity?.(symbol, chip.entity.label);
+    }
+    void onOpenHandoff?.(chip.handoff);
+  }
+
+  function newsItemProvenance(item: NewsEventItem): ProvenanceBadgeData {
+    return toProvenanceBadge(item, {
+      qualityLabel: formatNewsReliabilityLabel(item.source_reliability) || null
+    });
   }
 
   function shortDate(value: string | null | undefined) {
@@ -411,7 +571,14 @@
       ...allFx.filter((m) => !FX_SERIES_ORDER.includes(m.series_id ?? ""))
     ];
     return ordered.length
-      ? ordered.slice(0, 12).map((m) => ({ ...metricRow(m), group: "", source: m.source_provider }))
+      ? ordered.slice(0, 12).map((m) => ({
+          ...metricRow(m),
+          group: "",
+          source: m.source_provider,
+          timeframe: data?.timeframe ?? "3M",
+          region: data?.region ?? "US",
+          theme: data?.theme ?? "all"
+        }))
       : [{
           id: "fx-placeholder",
           label: "FX unavailable",
@@ -497,7 +664,12 @@
         secondary: m.display_value ?? "",
         source: ""
       }));
-    return [...curveRows, ...policyRows].slice(0, 10);
+    return [...curveRows, ...policyRows].slice(0, 10).map((row) => ({
+      ...row,
+      timeframe: data?.timeframe ?? "3M",
+      region: data?.region ?? "US",
+      theme: data?.theme ?? "all"
+    }));
   }
 
   function buildEquityRows(data: ResearchOverviewResponse | null): SitrepMarketRow[] {
@@ -517,7 +689,8 @@
         change: formatPct(latestDailyReturn),
         secondary: node.metrics.annual_volatility == null ? "" : formatPct(node.metrics.annual_volatility),
         tone: toneFromValue(latestDailyReturn),
-        source: ""
+        source: "",
+        timeframe: "1Y"
       };
     });
   }
@@ -580,7 +753,8 @@
         changePctTone: toneFromValue(latestDailyReturn),
         secondary: proxy ? `${proxy.symbol} / ${shortDate(node.metrics.latest_daily_return_at)}` : shortDate(node.metrics.latest_daily_return_at),
         tone: toneFromValue(latestDailyReturn),
-        source: node.source_provider
+        source: node.source_provider,
+        timeframe: "1Y"
       };
     });
   }
@@ -772,20 +946,11 @@
     return "";
   }
 
-  function buildTapeRows(
-    newsData: NewsEventFeedResponse | null,
+  function buildEventRows(
     macroData: MacroSnapshot | null,
     predictionData: PredictionMarketListResponse | null,
     commodityData: CommodityWorkspaceResponse | null
   ): TapeRow[] {
-    const newsRows: TapeRow[] = (newsData?.items ?? []).slice(0, 6).map((item) => ({
-      id: item.normalized_id,
-      source: item.source_name,
-      tone: "neutral",
-      title: item.title,
-      detail: item.summary ?? item.source_domain ?? item.url,
-      meta: `${item.freshness_label} / ${formatDateTime(item.published_at)}`
-    }));
     const focusRows: TapeRow[] = (macroData?.focus_items ?? []).slice(0, 4).map((item) => ({
       id: item.focus_id,
       source: "Macro",
@@ -795,7 +960,10 @@
       meta: item.source_provider,
       handoff: {
         targetTab: "macro",
-        targetMode: item.mode_target ?? "snapshot"
+        targetMode: item.mode_target ?? "snapshot",
+        timeframe: macroData?.timeframe ?? "3M",
+        region: macroData?.region ?? "US",
+        theme: item.target_theme ?? macroData?.theme ?? "all"
       }
     }));
     const eventRows: TapeRow[] = (macroData?.upcoming_events ?? []).slice(0, 4).map((event) => ({
@@ -807,7 +975,10 @@
       meta: event.relative_label ?? shortDate(event.scheduled_at),
       handoff: {
         targetTab: "macro",
-        targetMode: "events_regimes"
+        targetMode: "events_regimes",
+        timeframe: macroData?.timeframe ?? "3M",
+        region: event.region || macroData?.region || "US",
+        theme: macroData?.theme ?? "all"
       }
     }));
     const marketRows: TapeRow[] = (predictionData?.markets ?? []).slice(0, 4).map((market) => ({
@@ -835,10 +1006,11 @@
       meta: event.relative_label ?? shortDate(event.scheduled_at),
       handoff: {
         targetTab: "commodities",
-        targetMode: "events_cross_domain"
+        targetMode: "events_cross_domain",
+        commodityId: event.linked_instrument_ids?.[0] ?? null
       }
     }));
-    return [...newsRows, ...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 14);
+    return [...focusRows, ...eventRows, ...marketRows, ...commodityRows].slice(0, 12);
   }
 
   function buildWhatChangedRows(
@@ -855,7 +1027,10 @@
       meta: `score ${item.score.toFixed(1)} / ${item.label}`,
       handoff: {
         targetTab: "macro",
-        targetMode: "cross_asset"
+        targetMode: "cross_asset",
+        timeframe: macroData?.timeframe ?? "3M",
+        region: macroData?.region ?? "US",
+        theme: item.theme ?? macroData?.theme ?? "all"
       }
     }));
     const movers: TapeRow[] = buildCommodityRows(commodityData)
@@ -883,7 +1058,10 @@
         meta: overviewData?.freshness_label ?? "research overview",
         handoff: {
           targetTab: "equity_research",
-          targetMode: "overview"
+          targetMode: "scope_analysis",
+          symbol: item.symbol ?? null,
+          label: item.label,
+          timeframe: "1Y"
         }
       }));
     return [...divergenceRows, ...equityRows, ...movers].slice(0, 10);
@@ -908,6 +1086,159 @@
     ]
       .filter(isActionableSitrepWarning)
       .slice(0, 6);
+  }
+
+  onMount(() => {
+    void onLoadFollowUps?.();
+  });
+
+  function toggleFollowUp(row: TapeRow) {
+    void onToggleFollowUp?.(row);
+  }
+
+  function dismissFollowUp(id: string) {
+    if (followUpNoteDraftId === id) {
+      cancelFollowUpNote();
+    }
+    void onDismissFollowUp?.(id);
+  }
+
+  function openFollowUp(item: SitrepFollowUp) {
+    if (item.handoff) {
+      void onOpenHandoff?.(item.handoff);
+    }
+  }
+
+  let followUpNoteDraftId: string | null = null;
+  let followUpNoteDraft = "";
+
+  function beginFollowUpNote(item: SitrepFollowUp) {
+    followUpNoteDraftId = item.id;
+    followUpNoteDraft = item.note;
+  }
+
+  function cancelFollowUpNote() {
+    followUpNoteDraftId = null;
+    followUpNoteDraft = "";
+  }
+
+  async function saveFollowUpNote(item: SitrepFollowUp) {
+    await onUpdateFollowUp?.(item.id, { note: followUpNoteDraft.trim() });
+    cancelFollowUpNote();
+  }
+
+  function toggleFollowUpResolved(item: SitrepFollowUp) {
+    void onUpdateFollowUp?.(item.id, {
+      status: item.status === "resolved" ? "open" : "resolved",
+    });
+  }
+
+  $: openFollowUpCount = followUps.filter((item) => item.status !== "resolved").length;
+  $: resolvedFollowUpCount = followUps.length - openFollowUpCount;
+
+  type ProviderStatusRow = {
+    id: string;
+    domain: string;
+    source: string;
+    freshness: string;
+    asOf: string;
+    age: string;
+    warn: boolean;
+  };
+
+  function providerStatusRow(
+    id: string,
+    domain: string,
+    source: string | null | undefined,
+    freshness: string | null | undefined,
+    asOf: string | null | undefined,
+    warn = false
+  ): ProviderStatusRow {
+    return {
+      id,
+      domain,
+      source: (source ?? "").trim() || "N/A",
+      freshness: ((freshness ?? "").trim() || "N/A").toUpperCase(),
+      asOf: asOf ? formatDateTime(asOf) : "N/A",
+      age: formatSitrepSectionAge(asOf),
+      warn
+    };
+  }
+
+  function buildProviderStatusRows(
+    indicesData: ResearchOverviewResponse | null,
+    overviewData: ResearchOverviewResponse | null,
+    macroData: MacroSnapshot | null,
+    commodityData: CommodityWorkspaceResponse | null,
+    predictionData: PredictionMarketListResponse | null,
+    newsData: NewsEventFeedResponse | null,
+    windowLabel: string
+  ): ProviderStatusRow[] {
+    const rows: ProviderStatusRow[] = [];
+    rows.push(
+      indicesData
+        ? providerStatusRow("indices", "Indices", indicesData.source_provider, indicesData.freshness_label, indicesData.retrieved_at)
+        : providerStatusRow("indices", "Indices", null, "not loaded", null, true)
+    );
+    rows.push(
+      overviewData
+        ? providerStatusRow("equities", "US Equities", overviewData.source_provider, overviewData.freshness_label, overviewData.retrieved_at)
+        : providerStatusRow("equities", "US Equities", null, "not loaded", null, true)
+    );
+    rows.push(
+      macroData
+        ? providerStatusRow("macro", "FX / Rates", macroData.source_provider, `${windowLabel} window`, macroData.retrieved_at, macroData.warnings.length > 0)
+        : providerStatusRow("macro", "FX / Rates", null, "not loaded", null, true)
+    );
+    if (commodityData) {
+      const coverage = commodityData.coverage;
+      rows.push(
+        providerStatusRow(
+          "commodities",
+          "Commodities",
+          coverage.provider_label || coverage.source_provider,
+          coverage.freshness_label,
+          coverage.as_of ?? commodityData.retrieved_at,
+          coverage.coverage_status === "unavailable"
+        )
+      );
+    } else {
+      rows.push(providerStatusRow("commodities", "Commodities", null, "not loaded", null, true));
+    }
+    if (predictionData) {
+      const venues = predictionData.venues ?? [];
+      const stale = venues.reduce((total, venue) => total + venue.stale_markets + venue.broken_markets, 0);
+      const latest = venues
+        .map((venue) => venue.retrieved_at)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1);
+      rows.push(
+        providerStatusRow(
+          "prediction",
+          "Prediction Mkts",
+          venues.map((venue) => venue.venue).join(" + ") || "prediction markets",
+          stale > 0 ? `${stale} stale` : "open",
+          latest ?? null,
+          stale > 0
+        )
+      );
+    } else {
+      rows.push(providerStatusRow("prediction", "Prediction Mkts", null, "not loaded", null, true));
+    }
+    rows.push(
+      newsData
+        ? providerStatusRow(
+            "news",
+            "News",
+            newsData.source_provider,
+            `${newsData.items.length} items / ${newsData.freshness_label}`,
+            newsData.retrieved_at,
+            newsData.items.length === 0
+          )
+        : providerStatusRow("news", "News", null, "not loaded", null, true)
+    );
+    return rows;
   }
 
   function isActionableSitrepWarning(value: string | null | undefined) {
@@ -947,16 +1278,58 @@
   $: fxRows = buildFxRows(macro);
   $: yieldRows = buildYieldRows(macro);
   $: commodityRows = buildCommodityRows(commodities);
-  $: tapeRows = buildTapeRows(news, macro, prediction, commodities);
+  $: eventRows = buildEventRows(macro, prediction, commodities);
   $: changedRows = buildWhatChangedRows(macro, overview, commodities);
-  $: warnings = warningRows(news, overview, macro, commodities, prediction);
-  $: asOf = news?.retrieved_at ?? macro?.retrieved_at ?? overview?.retrieved_at ?? commodities?.retrieved_at ?? null;
+  $: warnings = [
+    ...(workspaceMeta?.section_warnings ?? []),
+    ...warningRows(news, overview, macro, commodities, prediction)
+  ].slice(0, 6);
+  $: macroWindowLabel = ((macro?.timeframe ?? "3M").trim() || "3M").toUpperCase();
+  $: providerStatusRows = buildProviderStatusRows(indicesOverview, overview, macro, commodities, prediction, news, macroWindowLabel);
+  $: predictionRetrievedAt = (prediction?.venues ?? [])
+    .map((venue) => venue.retrieved_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  $: oldestSection = oldestSitrepSection([
+    { id: "equities", label: "Equities", retrievedAt: overview?.retrieved_at },
+    { id: "indices", label: "Indices", retrievedAt: indicesOverview?.retrieved_at },
+    { id: "macro", label: "Macro", retrievedAt: macro?.retrieved_at },
+    { id: "commodities", label: "Commodities", retrievedAt: commodities?.retrieved_at },
+    { id: "prediction", label: "Prediction", retrievedAt: predictionRetrievedAt },
+    { id: "news", label: "News", retrievedAt: news?.retrieved_at }
+  ]);
+  $: indicesProvenance = indicesOverview
+    ? toProvenanceBadge(indicesOverview, { qualityLabel: indicesOverview.coverage_label })
+    : null;
+  $: fxProvenance = macro
+    ? toProvenanceBadge(macro, {
+        provider: formatFxSourceMix(fxRows, macro),
+        qualityLabel: `${macroWindowLabel} window`
+      })
+    : null;
+  $: ratesProvenance = macro
+    ? toProvenanceBadge(macro, {
+        provider: macro.rates_policy?.source_provider ?? macro.source_provider,
+        retrievedAt: macro.rates_policy?.retrieved_at ?? macro.retrieved_at,
+        qualityLabel: `${macroWindowLabel} window`
+      })
+    : null;
+  $: commoditiesProvenance = commodities
+    ? toProvenanceBadge(commodities.coverage, {
+        provider: formatCommodityProviderMix(commodities),
+        qualityLabel: commodities.coverage.coverage_status
+      })
+    : null;
   $: pricedRatio = overview?.coverage.coverage_ratio ?? null;
   $: highDivergences = (macro?.top_divergences ?? []).filter((item) => item.label === "high").length;
   $: staleMarkets = (prediction?.venues ?? []).reduce((total, venue) => total + venue.stale_markets + venue.broken_markets, 0);
-  $: newsStatus = news
-    ? `${news.source_provider.toUpperCase()} / ${news.items.length} ITEMS / ${news.freshness_label.toUpperCase()}`
-    : "NOT LOADED";
+  $: tvStatus =
+    bloombergPlaybackStatus === "ready"
+      ? "BLOOMBERG HLS"
+      : bloombergPlaybackStatus === "loading"
+        ? "LOADING HLS"
+        : "OPEN EXTERNALLY";
   $: providerMode = system?.mock_mode ? "MOCK" : system?.connection.connected ? system.market_data_mode.toUpperCase() : "OFFLINE";
   $: hasLoadedSitrepData = Boolean(overview || indicesOverview || macro || commodities || news || prediction);
   $: sitrepState = loading && !hasLoadedSitrepData ? "LOADING" : warnings.length ? "DEGRADED" : equityRows.length ? "LIVE" : "PARTIAL";
@@ -1002,7 +1375,7 @@
       <span class:warning={sitrepState !== "LIVE"}>{sitrepState}</span>
       <span>{providerMode}</span>
       {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
-      <span>{formatDateTime(asOf)}</span>
+      <span>{oldestSection ? `OLDEST ${oldestSection.label.toUpperCase()} ${formatDateTimeWithZone(oldestSection.retrievedAt)}` : "OLDEST N/A"}</span>
     </div>
   </article>
 
@@ -1019,7 +1392,7 @@
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
+          <SitrepMarketTable rows={indexRows} provenance={indicesProvenance} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1032,7 +1405,7 @@
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel="CHG" emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
+          <SitrepMarketTable rows={fxRows} provenance={fxProvenance} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("CHG", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("%CHG", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1045,7 +1418,7 @@
               <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
+          <SitrepMarketTable rows={yieldRows} provenance={ratesProvenance} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
 
         <article class="panel table-panel">
@@ -1058,33 +1431,88 @@
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
+          <SitrepMarketTable rows={commodityRows} provenance={commoditiesProvenance} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG (1D)" pctChangeLabel="%CHG (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
       </div>
 
       <article class="panel tape-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Triage</p><h3>What Changed</h3></div>
+        <div class="table-header">
+          <div class="table-title">
+            <span>What Changed</span>
+            <small>divergences / movers / leaders</small>
+          </div>
         </div>
         <div class="tape-list">
           {#if changedRows.length}
             {#each changedRows as row (row.id)}
-              <button
-                type="button"
-                use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'}
-                class="tape-row {row.tone}"
-                class:clickable={hasTapeHandoff(row)}
-                disabled={!hasTapeHandoff(row)}
-                on:click={() => openTapeRow(row)}
-              >
-                <span>{row.source}</span>
-                <strong>{row.title}</strong>
-                <p>{row.detail}</p>
-                <small>{row.meta}</small>
-              </button>
+              <div class="tape-row-wrap">
+                <button
+                  type="button"
+                  use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'}
+                  class="tape-row {row.tone}"
+                  class:clickable={hasTapeHandoff(row)}
+                  disabled={!hasTapeHandoff(row)}
+                  on:click={() => openTapeRow(row)}
+                >
+                  <span>{row.source}</span>
+                  <strong>{row.title}</strong>
+                  <p>{row.detail}</p>
+                  <small>{row.meta}</small>
+                </button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={isSitrepFollowUpSaved(followUps, row.id)}
+                  on:click={() => toggleFollowUp(row)}
+                  aria-pressed={isSitrepFollowUpSaved(followUps, row.id)}
+                  aria-label={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                  title={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                >{isSitrepFollowUpSaved(followUps, row.id) ? "★" : "☆"}</button>
+              </div>
             {/each}
           {:else}
             <p class="empty-state">LOAD MARKET CONTEXT TO POPULATE CHANGE TRIAGE.</p>
+          {/if}
+        </div>
+      </article>
+
+      <article class="panel tape-panel">
+        <div class="table-header">
+          <div class="table-title">
+            <span>Events &amp; Markets</span>
+            <small>macro focus / calendar / prediction markets / commodities</small>
+          </div>
+        </div>
+        <div class="tape-list">
+          {#if eventRows.length}
+            {#each eventRows as row (row.id)}
+              <div class="tape-row-wrap">
+                <button
+                  type="button"
+                  use:flashOnMount={row.tone === 'positive' ? 'up' : row.tone === 'negative' ? 'down' : 'neutral'}
+                  class="tape-row {row.tone}"
+                  class:clickable={hasTapeHandoff(row)}
+                  disabled={!hasTapeHandoff(row)}
+                  on:click={() => openTapeRow(row)}
+                >
+                  <span>{row.source}</span>
+                  <strong>{row.title}</strong>
+                  <p>{row.detail}</p>
+                  <small>{row.meta}</small>
+                </button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={isSitrepFollowUpSaved(followUps, row.id)}
+                  on:click={() => toggleFollowUp(row)}
+                  aria-pressed={isSitrepFollowUpSaved(followUps, row.id)}
+                  aria-label={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                  title={isSitrepFollowUpSaved(followUps, row.id) ? "Remove follow-up" : "Save as follow-up"}
+                >{isSitrepFollowUpSaved(followUps, row.id) ? "★" : "☆"}</button>
+              </div>
+            {/each}
+          {:else}
+            <p class="empty-state">LOAD MACRO / PREDICTION / COMMODITY CONTEXT TO POPULATE EVENTS.</p>
           {/if}
         </div>
       </article>
@@ -1093,18 +1521,27 @@
 
     <aside class="support-column">
       <article class="panel media-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Live Media</p><h3>Bloomberg TV</h3></div>
-          <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">YouTube</a>
+        <div class="table-header">
+          <div class="table-title">
+            <span>Bloomberg TV</span>
+            <small>{bloombergPlaybackMessage}</small>
+          </div>
+          <div class="media-links">
+            <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">Bloomberg</a>
+            <a href={bloombergYouTubeUrl} target="_blank" rel="noreferrer">YouTube</a>
+          </div>
         </div>
         <div class="video-shell">
-          <iframe
-            title="Bloomberg Television live stream"
-            src={bloombergEmbedUrl}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            referrerpolicy="strict-origin-when-cross-origin"
-            allowfullscreen
-          ></iframe>
+          <video bind:this={bloombergVideo} title="Bloomberg Television live stream" controls muted playsinline preload="metadata"></video>
+          {#if bloombergPlaybackStatus !== "ready"}
+            <div class="video-state">
+              <strong>{bloombergPlaybackStatus === "loading" ? "LOADING BLOOMBERG TV" : "BLOOMBERG TV PLAYER UNAVAILABLE"}</strong>
+              <span>{bloombergPlaybackMessage}</span>
+              {#if bloombergPlaybackStatus !== "loading"}
+                <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">Open Bloomberg Live</a>
+              {/if}
+            </div>
+          {/if}
         </div>
       </article>
 
@@ -1121,10 +1558,28 @@
         <div class="news-wrap">
           {#if news?.items?.length}
             {#each news.items as item (item.normalized_id)}
+              {@const chips = newsEntityChips(item)}
               <div use:flashOnMount={'neutral'} class="news-row">
                 <span class="news-time">{formatTime(item.published_at)}</span>
-                <p class="news-title">{item.title}</p>
-                <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{abbreviateSource(item.source_name)}</a>
+                <div class="news-body">
+                  <p class="news-title">{item.title}</p>
+                  {#if chips.length}
+                    <span class="news-chips">
+                      {#each chips as chip (chip.handoff.symbol)}
+                        <button
+                          type="button"
+                          class="news-chip"
+                          on:click={() => openNewsEntity(chip)}
+                          title={`Open ${chip.entity.label} in Equity Research`}
+                        >{chip.handoff.symbol}</button>
+                      {/each}
+                    </span>
+                  {/if}
+                </div>
+                <span class="news-meta">
+                  <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{abbreviateSource(item.source_name)}</a>
+                  <ProvenanceBadge data={newsItemProvenance(item)} showTime={false} />
+                </span>
               </div>
             {/each}
           {:else}
@@ -1133,15 +1588,106 @@
         </div>
       </article>
 
-      <article class="panel provider-panel">
-        <div class="panel-head">
-          <div class="title-line"><p class="eyebrow">Coverage</p><h3>Provider Status</h3></div>
+      <article class="panel tape-panel follow-up-panel">
+        <div class="table-header">
+          <div class="table-title">
+            <span>Follow-Ups</span>
+            <small>
+              {followUps.length
+                ? `${openFollowUpCount} open / ${resolvedFollowUpCount} resolved / saved on backend`
+                : "star triage rows to save them"}
+            </small>
+          </div>
         </div>
-        <div class="need-list">
-          <div><strong>News</strong><span class:warning={!news || news.items.length === 0}>{newsStatus}</span></div>
-          <div><strong>TV</strong><span class="warning">EMBED ONLY</span></div>
-          <div><strong>Listed Markets</strong><span>{overview?.history_source_label ?? "Research Overview policy"}</span></div>
-          <div><strong>FX / Rates</strong><span>Macro / FRED / IBKR</span></div>
+        <div class="tape-list">
+          {#if followUps.length}
+            {#each followUps as item (item.id)}
+              <div class="tape-row-wrap" class:resolved={item.status === "resolved"}>
+                <button
+                  type="button"
+                  class="tape-row follow-up-row {item.tone}"
+                  class:clickable={Boolean(item.handoff)}
+                  disabled={!item.handoff}
+                  on:click={() => openFollowUp(item)}
+                  title={item.handoff ? "Open in target tab" : "No handoff target"}
+                >
+                  <span>{item.status === "resolved" ? "RESOLVED" : item.source}</span>
+                  <strong>{item.title}</strong>
+                  <p>
+                    {item.detail}
+                    {#if item.note}<em class="follow-up-note">✎ {item.note}</em>{/if}
+                  </p>
+                  <small>{shortDate(item.saved_at)}</small>
+                </button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={followUpNoteDraftId === item.id}
+                  on:click={() => (followUpNoteDraftId === item.id ? cancelFollowUpNote() : beginFollowUpNote(item))}
+                  aria-label={item.note ? "Edit follow-up note" : "Add follow-up note"}
+                  title={item.note ? "Edit follow-up note" : "Add follow-up note"}
+                >✎</button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  class:active={item.status === "resolved"}
+                  on:click={() => toggleFollowUpResolved(item)}
+                  aria-pressed={item.status === "resolved"}
+                  aria-label={item.status === "resolved" ? "Reopen follow-up" : "Mark follow-up resolved"}
+                  title={item.status === "resolved" ? "Reopen follow-up" : "Mark follow-up resolved"}
+                >✓</button>
+                <button
+                  type="button"
+                  class="tape-pin"
+                  on:click={() => dismissFollowUp(item.id)}
+                  aria-label="Dismiss follow-up"
+                  title="Dismiss follow-up"
+                >✕</button>
+              </div>
+              {#if followUpNoteDraftId === item.id}
+                <form class="follow-up-note-editor" on:submit|preventDefault={() => saveFollowUpNote(item)}>
+                  <input
+                    type="text"
+                    bind:value={followUpNoteDraft}
+                    placeholder="Add a triage note"
+                    aria-label={`Note for ${item.title}`}
+                    maxlength="240"
+                  />
+                  <button type="submit">Save</button>
+                  <button type="button" on:click={cancelFollowUpNote}>Cancel</button>
+                </form>
+              {/if}
+            {/each}
+          {:else}
+            <p class="empty-state">NO SAVED FOLLOW-UPS.</p>
+          {/if}
+        </div>
+      </article>
+
+      <article class="panel provider-panel">
+        <div class="table-header">
+          <div class="table-title">
+            <span>Provider Status</span>
+            <small>source / freshness / as of / age</small>
+          </div>
+        </div>
+        <div class="status-list">
+          {#each providerStatusRows as row (row.id)}
+            <div class="status-row" class:warn={row.warn}>
+              <strong>{row.domain}</strong>
+              <span class="status-source">{row.source}</span>
+              <span class="status-freshness" class:warning={row.warn}>{row.freshness}</span>
+              <span class="status-asof">{row.asOf}</span>
+              <span class="status-age" class:warning={row.warn}>{row.age}</span>
+            </div>
+          {/each}
+          <div class="status-row" class:warn={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>
+            <strong>TV</strong>
+            <span class="status-source">Bloomberg HLS</span>
+            <span class="status-freshness" class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>{tvStatus}</span>
+            <span class="status-asof">live stream</span>
+            <span class="status-age">external</span>
+          </div>
         </div>
         {#if warnings.length}
           <ul class="warning-list">
@@ -1170,7 +1716,10 @@
     padding: var(--space-5);
   }
 
-  .table-panel {
+  .table-panel,
+  .tape-panel,
+  .media-panel,
+  .provider-panel {
     padding: 0;
     overflow: hidden;
     gap: 0;
@@ -1210,6 +1759,26 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .media-links {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    flex-shrink: 0;
+  }
+
+  .media-links a,
+  .video-state a {
+    color: var(--accent);
+    font-size: var(--text-xs);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .media-links a:hover,
+  .video-state a:hover {
+    text-decoration: underline;
   }
 
   .reload-button {
@@ -1286,41 +1855,8 @@
     letter-spacing: 0.04em;
   }
 
-  .title-line {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-4);
-    min-width: 0;
-  }
-
-  .panel-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: var(--space-5);
-    min-width: 0;
-  }
-
-  h3,
   p {
     margin: 0;
-  }
-
-  h3 {
-    font-size: var(--text-md);
-  }
-
-  .eyebrow {
-    margin: 0 0 0.08rem;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
-  }
-
-  .title-line .eyebrow {
-    margin: 0;
-    white-space: nowrap;
   }
 
   .equity-strip {
@@ -1341,6 +1877,12 @@
     align-items: center;
     width: max-content;
     animation: strip-scroll 42s linear infinite;
+  }
+
+  /* Rows are click targets — stop the scroll while the pointer is over them */
+  .equity-strip:hover .strip-track,
+  .equity-strip:focus-within .strip-track {
+    animation-play-state: paused;
   }
 
   .strip-item {
@@ -1450,9 +1992,7 @@
     font-size: var(--text-2xs);
   }
 
-  .panel-head small,
-  .tape-row small,
-  .need-list span {
+  .tape-row small {
     color: var(--text-2);
     line-height: 1.35;
   }
@@ -1460,7 +2000,113 @@
   .tape-list {
     display: grid;
     gap: 0;
-    border-top: 1px solid var(--divider);
+  }
+
+  .tape-row-wrap {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--divider);
+    min-width: 0;
+  }
+
+  .tape-row-wrap:last-child {
+    border-bottom: 0;
+  }
+
+  .tape-row-wrap .tape-row {
+    flex: 1;
+    min-width: 0;
+    border-bottom: 0;
+  }
+
+  .tape-pin {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-left: 1px solid var(--divider);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-sm);
+    width: 2rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+
+  .tape-pin:hover,
+  .tape-pin:focus-visible {
+    background: var(--bg-1);
+    color: var(--accent);
+  }
+
+  .tape-pin:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .tape-pin.active {
+    color: var(--accent);
+  }
+
+  .follow-up-panel .tape-list {
+    overflow: auto;
+    max-height: 18rem;
+  }
+
+  .tape-row-wrap.resolved .tape-row {
+    opacity: 0.55;
+  }
+
+  .tape-row-wrap.resolved .tape-row strong {
+    text-decoration: line-through;
+  }
+
+  .follow-up-note {
+    display: block;
+    color: var(--text-2);
+    font-style: normal;
+    font-size: var(--text-xs);
+  }
+
+  .follow-up-note-editor {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-3) var(--space-5);
+    border-bottom: 1px solid var(--divider);
+    background: var(--bg-1);
+  }
+
+  .follow-up-note-editor input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-0);
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-0);
+    font: inherit;
+    font-size: var(--text-sm);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .follow-up-note-editor button {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
+  }
+
+  .follow-up-note-editor button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .tape-row {
@@ -1474,10 +2120,14 @@
     grid-template-columns: 5.8rem minmax(0, 0.9fr) minmax(0, 1.7fr) minmax(5.5rem, 0.45fr);
     gap: var(--space-4);
     align-items: baseline;
-    padding: var(--space-4) 0;
+    padding: var(--space-3) var(--space-5);
     border: 0;
     border-bottom: 1px solid var(--divider);
     min-width: 0;
+  }
+
+  .tape-row:last-child {
+    border-bottom: 0;
   }
 
   .tape-row.clickable {
@@ -1514,18 +2164,45 @@
     position: relative;
     width: 100%;
     aspect-ratio: 16 / 9;
-    border: 1px solid var(--divider);
     background: var(--bg-0);
     overflow: hidden;
   }
 
-  .video-shell iframe {
+  .video-shell video {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     border: 0;
     background: var(--bg-0);
+  }
+
+  .video-state {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: var(--space-2);
+    padding: var(--space-5);
+    background: var(--bg-0);
+    color: var(--text-2);
+    text-align: center;
+    pointer-events: none;
+  }
+
+  .video-state strong {
+    color: var(--text-0);
+    font-size: var(--text-xs);
+    letter-spacing: 0.08em;
+  }
+
+  .video-state span {
+    font-size: var(--text-xs);
+  }
+
+  .video-state a {
+    pointer-events: auto;
   }
 
   .news-wrap {
@@ -1554,6 +2231,40 @@
     font-size: var(--text-sm);
     line-height: 1.35;
     margin: 0;
+  }
+
+  .news-body,
+  .news-meta {
+    display: grid;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .news-meta {
+    justify-items: end;
+  }
+
+  .news-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .news-chip {
+    height: 20px;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .news-chip:hover,
+  .news-chip:focus-visible {
+    border-color: var(--accent);
   }
 
   .news-source {
@@ -1588,30 +2299,64 @@
     color: var(--text-0);
   }
 
-  .need-list {
+  .status-list {
     display: grid;
     gap: 0;
-    border-top: 1px solid var(--divider);
   }
 
-  .need-list div {
+  .status-row {
     display: grid;
-    grid-template-columns: 7.5rem minmax(0, 1fr);
+    grid-template-columns: 7rem minmax(0, 1fr) minmax(5.5rem, max-content) minmax(6rem, max-content) minmax(4rem, max-content);
     gap: var(--space-4);
-    padding: var(--space-4) 0;
+    align-items: baseline;
+    padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
+  }
+
+  .status-row:last-child {
+    border-bottom: 0;
+  }
+
+  .status-row strong {
+    color: var(--text-1);
+    font-size: var(--text-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .status-row span {
+    color: var(--text-2);
+    font-size: var(--text-sm);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-row .status-freshness {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .status-row .status-asof {
+    text-align: right;
+  }
+
+  .status-row .status-age {
+    text-align: right;
   }
 
   .warning-list {
     margin: 0;
-    padding-left: var(--space-6);
+    padding: var(--space-3) var(--space-5) var(--space-4) calc(var(--space-5) + var(--space-6));
+    border-top: 1px solid var(--divider);
     color: var(--text-2);
     line-height: 1.4;
   }
 
   .empty-state {
     margin: 0;
-    padding: var(--space-5) 0;
+    padding: var(--space-4) var(--space-5);
     color: var(--text-2);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1650,15 +2395,10 @@
   }
 
   @media (max-width: 820px) {
-    .panel-head,
     .support-column {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       justify-content: stretch;
-    }
-
-    .title-line {
-      flex-wrap: wrap;
     }
 
     .status-line {
@@ -1670,7 +2410,7 @@
       gap: var(--space-1);
     }
 
-    .need-list div {
+    .status-row {
       grid-template-columns: minmax(0, 1fr);
     }
   }

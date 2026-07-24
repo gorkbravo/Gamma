@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-05-27
+Last updated: 2026-07-15
 
 ## Start Here
 
@@ -136,6 +136,12 @@ Use current OpenAI docs when implementing provider or orchestration changes:
 - [Agents SDK](https://developers.openai.com/api/docs/guides/agents): code-first agent app guidance, orchestration, handoffs, guardrails, results/state, and observability.
 - [SDKs and CLI - Use the Agents SDK](https://developers.openai.com/api/docs/libraries#use-the-agents-sdk): use Agents SDK when the app needs orchestration for agents, tools, handoffs, guardrails, tracing, or sandbox execution.
 - [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model): current model, reasoning, structured output, prompt caching, tool-calling, and state-management guidance.
+- [GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol), [Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra), and [Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna): the current capability, balanced, and efficient model tiers.
+- [Streaming Responses](https://developers.openai.com/api/docs/guides/streaming-responses): provider-native semantic SSE events for text, tools, refusals, completion, and errors.
+- [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs): strict schema output, explicit refusals, and streaming structured responses.
+- [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching): GPT-5.6 explicit/implicit cache controls and usage accounting.
+- [Responses API Multi-agent beta](https://developers.openai.com/api/docs/guides/responses-multi-agent): hosted parallel subagent orchestration for independently divisible work.
+- [Deep research](https://developers.openai.com/api/docs/guides/deep-research): long-running, source-heavy web/file/MCP research through explicit background jobs.
 
 Implementation interpretation for Gamma:
 
@@ -145,6 +151,247 @@ Implementation interpretation for Gamma:
 - Use hosted tools only where they fit the product boundary. Web search may be useful for context, but approved provider adapters are preferred for durable research workflows.
 - Keep tool descriptions specific: what the tool does, when to use it, inputs, side effects, retry safety, and common failure modes.
 - Use structured outputs for plans, tool decisions, reports, and proposed mutations. Do not rely on prose parsing for critical actions.
+
+## July 2026 Copilot Completion Plan
+
+This section is the authoritative remaining-work layout for completing the in-app Copilot. It reconciles the current roadmap, the shipped code, the June/July UI rebuild, and the current OpenAI model/API guidance. Older phase notes below remain useful implementation history, but this section owns priority and completion scope.
+
+### Current Reality
+
+Gamma already has more than a chat shell:
+
+- a dedicated chat workspace and a contextual shelf;
+- local sessions, turns, context snapshots, archive/search, and new-chat flows;
+- structured research cards with source-backed and inferred claim fields;
+- planner, bounded executor, action registry, operator plans, confirmation checkpoints, persisted traces, reports, and Markdown export routes;
+- a direct Responses API provider and an Agents SDK Research Operator behind a feature flag;
+- typed read-only tools across most major Gamma domains;
+- a narrow confirmed DCF mutation flow with rollback context;
+- offline and optional live operator eval paths.
+
+The largest gaps are integration and reliability gaps, not missing concepts. Checkpoint 1 is verified at 76%: the supported OpenAI SDK now feeds typed events into server-owned Agent and Operator runs, shelf and workspace Agent calls share that path, and bounded replay survives subscriber disconnects. Remaining gaps are:
+
+- transcript blocks do not yet cover every plan, Operator, report, confirmation, mutation diff, artifact, and typed non-success shape;
+- claim/source refs still need server-side resolution plus context navigation before persistence;
+- the memo APIs and report APIs are not a complete in-tab artifact workflow;
+- the custom Operator streams live and cancels at safe step boundaries, but Agents SDK progress parity and inline confirmation/diff/rollback UX remain incomplete;
+- the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5;
+- Sealanes, news, and some deeper IV/Commodities drilldowns do not yet have tool parity;
+- privacy, retention, cost, usage, and model-routing diagnostics are not yet understandable from the Copilot workspace.
+
+### Completion Boundary
+
+Copilot is complete for the current Gamma pass when a user can do all of the following without leaving the app or reading backend logs:
+
+1. Start, search, rename, archive, restore, and delete a research conversation.
+2. See exactly which Gamma contexts, entities, timeframes, freshness states, and warnings ground the turn.
+3. Ask a normal research question and receive a genuinely streamed answer with visible provider/model/run state.
+4. Distinguish source-backed claims, inference, assumptions, missing data, and warnings, with clickable source/context destinations.
+5. Preview a research plan, run bounded read-only tools, watch live progress, stop the run, and inspect per-step results.
+6. Reach an inline confirmation checkpoint for any durable local research-state mutation and see the before/after diff and rollback context before applying it.
+7. Create, edit, autosave, duplicate, and export a memo or report inside the Copilot workspace.
+8. Reopen a session and recover the transcript, context snapshots, plans, events, artifacts, confirmations, and provider metadata faithfully.
+9. Get explicit `unavailable`, `degraded`, `refused`, `incomplete`, `cancelled`, and `error` states instead of a neutral empty card.
+10. Use the shelf for quick contextual work and promote that exact thread/context into the full workspace without losing state.
+
+Voice, unrestricted web browsing, arbitrary code execution, trading/account/wallet actions, and automatic durable mutations are not current-pass completion requirements. Explicit long-running external deep research is a later opt-in extension, not the default answer path.
+
+### Final In-App Layout
+
+Copilot remains one research workspace, not a collection of top-level modes. `Research Agent` and `Research Operator` are role/focus controls, not tab modes.
+
+```text
+Copilot workspace
+  Left rail (14-16rem)
+    New conversation
+    Search / active / archived filters
+    Conversation list
+    Saved artifacts for selected conversation
+
+  Primary transcript
+    Compact run header
+      Context scope + freshness/warning count
+      Agent / Operator
+      Depth: Quick / Standard / Deep
+      Model profile: Auto (resolved model shown, advanced override optional)
+    Transcript
+      User turns
+      Streamed answer blocks
+      Plans and approval checkpoints
+      Live operator steps
+      Cards, diffs, memos, and reports
+    Pinned composer
+      Prompt / stop / retry
+      Plan or run action
+      Explicit save/export action
+
+  Collapsible support inspector (18-22rem)
+    Context
+    Run / trace
+    Sources and warnings
+    Artifacts
+    Provider / model / token / latency diagnostics
+```
+
+At medium widths, the inspector becomes an in-workspace drawer. At narrow widths, the conversation rail becomes a compact overlay and the transcript remains primary. The quick shelf keeps its smaller card-oriented layout and gains `Open in Copilot` rather than reproducing the full operator/artifact UI.
+
+Required UI behavior:
+
+- render the full research-card contract in the dedicated tab, including required data, confounders, next steps, caveats, source-backed claims, inferred claims, tools, and warnings;
+- put citations beside the claims they support and let a source open the originating Gamma tab/mode/entity when a handoff exists;
+- show provider/model as secondary metadata, not as the main answer label;
+- replace the client-side typewriter simulation with provider deltas and a stable final structured render;
+- keep partial text visibly provisional until the schema-valid final result is available;
+- show tool-start/tool-result/confirmation/error events as compact status rows and move verbose payloads to the inspector;
+- add Stop, Retry, Copy, Save as memo, Export report, and Open source actions;
+- preserve selected contexts and role/depth per session, while preventing stale context from silently carrying into a new conversation;
+- keep destructive session deletion and durable mutation application confirmation-gated.
+
+### OpenAI Model Fit And Routing
+
+The current OpenAI guidance names GPT-5.6 as the latest family. All three GPT-5.6 tiers support Responses, streaming, structured outputs, function calling, web/file search, prompt caching, text/image input, and a 1,050,000-token context window. Gamma should expose product-level profiles and record the resolved model on every turn rather than force most users to choose raw model slugs.
+
+| Gamma workload | Candidate | Starting effort | Rationale |
+|---|---|---:|---|
+| Standard Research Agent answer and synthesis | `gpt-5.6-terra` | `medium` | Best default candidate for research quality versus cost. |
+| Quick follow-up, title, compact summary, low-risk formatting | `gpt-5.6-luna` | `low` or `none` | High-volume efficiency; only adopt where evals show no grounding/citation regression. |
+| Standard Research Operator tool selection | `gpt-5.6-terra` | `low`, compare `medium` | Natural successor candidate to the current passing GPT-5.5-low operator baseline. |
+| Deep cross-domain synthesis or difficult final report review | `gpt-5.6-sol` | `medium` or `high` | Reserve frontier capacity for work with measured quality benefit. |
+| Quality-first final review | same selected GPT-5.6 tier with `reasoning.mode: pro` | eval-backed | Use only for non-interactive, quality-first work; it is not the normal streaming chat path. |
+| Explicit outside-source deep research | `o4-mini-deep-research` or `o3-deep-research` | background job | Optional future workflow requiring source tools, long-run UX, retention disclosure, and separate cost limits. |
+
+Migration policy:
+
+- keep current GPT-5.5 defaults until the existing live operator and research-card eval suites run against GPT-5.6;
+- benchmark `gpt-5.6-terra` low/medium against GPT-5.5 low/medium first, then test Sol only on cases where Terra misses quality gates;
+- do not route by model marketing tier alone; route by depth profile, task risk, tool complexity, latency budget, and measured eval performance;
+- resolve `Auto` server-side and persist model, reasoning effort/mode, provider, usage, latency, cache reads/writes, and routing reason;
+- allow an advanced per-run override, but keep provider availability and safety policy authoritative;
+- use a versioned model-policy configuration instead of scattering model strings through runtime, tests, and UI.
+
+Feature fit:
+
+- **Provider-native Responses streaming:** adopt now. It directly solves the largest UX/reliability gap.
+- **Structured Outputs:** keep, but generate/validate the schema from one typed source where practical; handle refusal and incomplete events separately from parse failure.
+- **Persisted reasoning and response continuation:** evaluate per session with explicit retention controls. Do not let OpenAI response state become Gamma's only transcript store.
+- **Prompt caching:** instrument current cache behavior first. For GPT-5.6, evaluate explicit breakpoints around stable instructions/tool schemas and track both cache reads and billable cache writes.
+- **Programmatic Tool Calling:** do not use it to replace Gamma analytics. Consider it only for bounded, read-only filtering/joining/reduction after direct function-tool execution remains authoritative.
+- **Responses Multi-agent beta:** do not make it the default operator. It can parallelize independent domain research, but its beta schema, shared tool visibility, extra token use, and lack of `max_tool_calls` support conflict with Gamma's current deterministic budget controls. Re-evaluate behind a flag after provider streaming and single-agent operator promotion.
+- **Agents SDK:** retain as the chosen Research Operator orchestration layer behind Gamma's action registry. It remains the better controlled path for typed tools, traces, approvals, server-owned state, and evals.
+- **Deep research models:** add only as an explicit `External deep research` job with provider/data-retention disclosure, background progress, cancellation, citations, and hard spend/tool limits.
+- **Realtime/voice:** defer until the text workspace meets the completion gate.
+
+### Remaining Engineering Workstreams
+
+#### A. Provider transport and run lifecycle — checkpoint 1 complete (76%)
+
+- [x] Replace raw `urllib` with the supported OpenAI SDK typed Responses client while preserving the provider protocol.
+- [x] Stream Responses semantic events through one Gamma NDJSON event contract without buffering provider deltas behind the final result.
+- [x] Stream completed function-call arguments, tool start/result, refusal, incomplete, provider error, usage, cancellation, and final events.
+- [x] Add run ids, monotonic sequence ids, bounded cursor replay, cancellation, timeouts, and idempotent finalization.
+- [x] Make shelf Agent, workspace Agent, and custom-loop Operator use the same frontend run-event reducer.
+- [x] Persist finalized result plus bounded trace; provisional UI deltas are not durable truth.
+
+Implementation note (2026-07-17, checkpoint complete):
+- `OpenAIResponsesCopilotProvider` now uses `openai>=2.38,<3` and `client.responses.create(..., stream=True)`. Typed SDK events are normalized at the provider boundary; no raw `urllib` transport remains. Function arguments, refusal, incomplete, failed/error, text, usage, and tool rounds map into Gamma semantics.
+- `CopilotService` owns a bounded 512-event, 15-minute in-memory replay record per active/recent run. POST reconnect uses `last_seen_sequence`; `GET /copilot/runs/{run_id}/events?after_sequence=N` resumes without re-execution. Closing a subscriber does not cancel server work. Duplicate run ids may only reattach to the identical request.
+- Agent and custom-loop Operator runs each have one Gamma run id, monotonic sequences, post-terminal event rejection, explicit pre-first-event/safe-boundary cancellation, timeout, and exactly one persisted terminal result. Operator plan, step/tool, warning, confirmation, artifact, report, and final states stream over the shared envelope.
+- The shelf now calls the same streaming loader as the dedicated workspace. The client retries a disconnected stream from its last accepted sequence; the reducer drops foreign, stale, duplicate, and post-terminal events. One selected context resolves to its native typed domain; two or more resolve to synthesis.
+- Checkpoint evidence: `85 passed` across `tests/test_copilot.py`, Agents SDK smoke, and Operator eval; frontend `41 files / 259 tests` passed; typecheck, build, and desktop check passed. Mock Agent and Operator were inspected at 1440x900 and 720x900 with no console errors. Live-provider release smoke remains intentionally unclaimed.
+
+#### B. Answer contract and evidence UX — blocker
+
+- Unify `ResearchCard`, operator result, plan, report, and error rendering around typed transcript block models.
+- Restore dedicated-tab parity with the shelf's full card/source/tool/warning rendering.
+- Add claim-level evidence resolution and deep links through `CrossTabHandoffEnvelope` where possible.
+- Validate every cited source id against the context/tool source registry before persisting a source-backed claim.
+- Keep inference, assumption, missing-data, and warning categories visibly distinct in cards, reports, and exports.
+
+Implementation note (2026-07-15, first transcript-block slice landed):
+- `frontend/src/lib/copilot-transcript.ts` now maps finalized Agent results into discriminated transcript blocks for messages, structured research cards, typed non-success states, evidence, and provider metadata. `CopilotTranscriptResult.svelte` renders that contract in the dedicated workspace.
+- The dedicated transcript now has parity with the shelf for all current `ResearchCard` fields: required data, confounders, next steps, caveats, source-backed claims with evidence refs, inferred claims, sources, tool traces, and warnings. Cardless error/refused/incomplete/cancelled results retain the same expandable grounding evidence.
+- Still open from this workstream: extending the block contract to plans, live Operator results, reports, and confirmations; claim-level source resolution/deep links; and server-side validation that every source-backed claim resolves to the turn's context/tool source registry before persistence.
+
+#### C. Context and tool coverage — blocker
+
+- Finish Sealanes context and read-only drilldowns without inventing risk labels.
+- Make news a first-class external-context drilldown with item-level source/freshness refs.
+- Add the highest-value missing IV, Commodities, Equity Research, and cross-tab drilldowns identified in their roadmap sections.
+- Add context-size budgets, deterministic compaction/summaries, and stale-context invalidation.
+- Add source navigation mappings and context fingerprints for every selectable scope.
+
+#### D. Research Operator productionization — blocker
+
+- Stream operator events live and support cancellation between safe steps.
+- Expand the eval set before switching the feature flag: provider failure, stale/missing context, partial tool failure, cancellation, repeated confirmation, and resume-after-restart.
+- Run GPT-5.6 Terra/Sol comparisons against the existing GPT-5.5 baseline.
+- Promote Agents SDK only if it passes all permission gates and improves a measured dimension such as tool selection, trace quality, resumability, latency, or maintainability.
+- Keep one server-side action registry, permission policy, confirmation-token service, and persistence path for both custom and Agents SDK orchestrators.
+- Do not broaden durable mutations until the read-only operator and inline confirmation UI are reliable.
+
+#### E. Artifacts, memos, and reports — blocker
+
+- Bring memo/report creation into the dedicated workspace instead of relying on backend-only endpoints or a separate floating surface.
+- Add template choice, source-turn selection, title/body editing, autosave state, explicit overwrite confirmation, duplicate, and delete.
+- Add preview and export for Markdown first; add PDF/DOCX only if a real use case justifies the formatting surface.
+- Preserve claim labels, inline citations, source metadata, warnings, model/provider metadata, context snapshots, and tool-trace summary in exports.
+- Link artifacts back to the exact source turns and show artifacts in the session rail/inspector.
+
+#### F. Sessions, retention, and model policy — blocker
+
+- Add session rename, restore, delete, schema versioning, migrations, and corrupted-record recovery.
+- Persist role, depth, model profile/resolution, selected scopes, context fingerprints, run status, usage, and artifacts.
+- Add a visible retention control explaining Gamma-local storage versus OpenAI stored responses.
+- Support a `store: false` path without breaking local continuation, including encrypted reasoning replay only if it is intentionally adopted and tested.
+- Put model aliases, allowed efforts/modes, routing rules, and fallbacks in a versioned policy object with capability validation.
+
+#### G. Shelf/full-workspace continuity — required
+
+- Add `Open in Copilot` from the shelf, preserving thread id, active context, sources, warnings, and selected entity/lens.
+- Keep quick shelf responses concise and card-oriented; send plans, long runs, confirmations, and artifacts to the full tab.
+- Ensure handoffs from source tabs and the shelf converge on the same session/context contract.
+
+#### H. Diagnostics and first-run experience — required
+
+- Show OpenAI configuration, selected/resolved model, orchestrator, storage mode, last provider error, and provider capability state in Settings and the run inspector.
+- Surface structured provider errors with retry guidance and a copyable diagnostic id; never leak credentials or raw sensitive payloads.
+- Record latency, input/output/reasoning tokens, cache reads/writes, provider calls, tool calls, and cancellation outcome.
+- Add first-run guidance for disabled, unconfigured, unavailable, rate-limited, and quota-exhausted states.
+
+#### I. Validation and release gate — blocker
+
+- Backend: provider event parsing, structured output/refusal/incomplete handling, cancellation, persistence replay, migrations, permission/confirmation invariants, and model-policy tests.
+- Frontend: streamed reducer, transcript blocks, source navigation, artifact editing, error states, Stop/Retry, responsive inspector, keyboard navigation, and accessibility tests.
+- Evals: grounded claims, citation validity, tool selection, domain omission, warning preservation, confirmation stops, final report usefulness, and cost/latency capture.
+- Live smoke: Agent and Operator paths for the representative NVDA, CPI/Fed, oil, and portfolio-rate-shock prompts against configured providers.
+- Regression: shelf and dedicated-tab parity, session reopen after restart, offline/mock behavior, disabled-provider behavior, and no execution-capable tools.
+
+### Delivery Order
+
+1. ~~Provider-native streaming, shared run lifecycle, bounded replay, and explicit provider state.~~ Completed 2026-07-17 at checkpoint 1 (76%).
+2. Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.
+3. In-tab artifacts/memos and session lifecycle completion.
+4. Live operator events, cancellation, and inline confirmations.
+5. Missing context/tool coverage and source navigation.
+6. GPT-5.6 eval-backed model policy and routing rollout.
+7. Agents SDK default decision.
+8. Diagnostics, first-run guidance, accessibility, and full release gate.
+9. Optional external deep research; later voice.
+
+Do not start with model-string replacement alone. The GPT-5.6 migration should land with provider streaming, capability-aware configuration, usage instrumentation, and eval evidence so the model change improves the product rather than merely changing metadata.
+
+### Definition Of Done
+
+- Provider-native deltas reach the UI before completion; the fake typewriter path is removed.
+- Every completed live turn ends in one schema-valid final block or a typed non-success state.
+- All source-backed claims resolve to known source ids; unsupported claims are inference or missing data.
+- All operator tools pass the server action registry; forbidden execution/account/wallet actions do not exist in the registry.
+- Confirmation-required actions cannot apply without the exact active token and visible diff.
+- Session replay after app restart reproduces the final transcript, trace, artifacts, and context metadata.
+- The dedicated tab supports full memo/report editing and export.
+- The shelf can promote a thread into the tab without context loss.
+- GPT-5.6 routing is backed by recorded eval results against the GPT-5.5 baseline.
+- Live smoke and frontend/backend test suites cover happy, degraded, unavailable, refused, incomplete, cancelled, and provider-error paths.
 
 ## Smart Depth Policy
 
@@ -529,8 +776,8 @@ Future agents should update this checklist in place.
 ### Phase 0 - Documentation And Boundary
 
 - [x] Create living agentic harness spec.
-- [ ] Reconcile this document with `roadmap.md` if the roadmap changes.
-- [ ] Add any new OpenAI docs references used during implementation.
+- [x] Reconcile this document with `roadmap.md` if the roadmap changes.
+- [x] Add current GPT-5.6, streaming, structured output, caching, Multi-agent, and deep-research references.
 
 ### Phase 1 - Planner-Only Prototype
 

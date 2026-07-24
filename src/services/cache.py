@@ -87,6 +87,30 @@ class CacheService:
         meta = {"timestamp": datetime.utcnow().isoformat()}
         meta_path.write_text(json.dumps(meta))
 
+    def get_frame(self, key: str) -> Optional[pd.DataFrame]:
+        data_path = self._data_path(key)
+        meta_path = self._meta_path(key)
+        if not data_path.exists() or not meta_path.exists():
+            return None
+        try:
+            meta = json.loads(meta_path.read_text())
+            ts = datetime.fromisoformat(meta.get("timestamp"))
+            if datetime.utcnow() - ts > self.ttl:
+                return None
+            df = pd.read_csv(data_path, parse_dates=["date"], index_col="date")
+            return df if not df.empty else None
+        except Exception:
+            return None
+
+    def set_frame(self, key: str, frame: pd.DataFrame) -> None:
+        data_path = self._data_path(key)
+        meta_path = self._meta_path(key)
+        df = frame.copy()
+        df.index.name = "date"
+        df.to_csv(data_path)
+        meta = {"timestamp": datetime.utcnow().isoformat()}
+        meta_path.write_text(json.dumps(meta))
+
     def get_value(self, key: str) -> Optional[float]:
         value_path = self._value_path(key)
         if not value_path.exists():

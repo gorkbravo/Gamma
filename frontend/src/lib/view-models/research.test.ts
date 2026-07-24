@@ -15,7 +15,6 @@ import {
   buildResearchTreemapLayout,
   buildResearchTreemapSections,
   buildPreviewRows,
-  classifyResearchSurfaceMode,
   classifySavedResearchSurface,
   defaultStrategyPortfolioDraftLeg,
   deriveConstituentsFromResearchResult,
@@ -179,24 +178,6 @@ describe("research view model helpers", () => {
       } as any)
     ).toBe("strategy");
     expect(classifySavedResearchSurface({ object_type: "memo", payload: {} } as any)).toBe("unknown");
-  });
-
-  it("classifies split equity research and strategy lab modes distinctly", () => {
-    expect(classifyResearchSurfaceMode("equity", "overview")).toBe("overview");
-    expect(classifyResearchSurfaceMode("equity", "scope_analysis")).toBe("scope_analysis");
-    expect(classifyResearchSurfaceMode("equity", "comparables")).toBe("equity_comparables");
-    expect(classifyResearchSurfaceMode("equity", "scenario_context")).toBe("equity_scenario_context");
-    expect(classifyResearchSurfaceMode("equity", "saved_equity_research")).toBe("equity_saved");
-
-    expect(classifyResearchSurfaceMode("strategy", "composer")).toBe("strategy_composer");
-    expect(classifyResearchSurfaceMode("strategy", "backtest_analyze")).toBe("strategy_backtest");
-    expect(classifyResearchSurfaceMode("strategy", "regime_stress")).toBe("strategy_regime");
-    expect(classifyResearchSurfaceMode("strategy", "imports")).toBe("strategy_imports");
-    expect(classifyResearchSurfaceMode("strategy", "saved_runs")).toBe("strategy_saved");
-
-    expect(classifyResearchSurfaceMode("legacy", "strategy_lab")).toBe("legacy_strategy");
-    expect(classifyResearchSurfaceMode("legacy", "compare_scenario")).toBe("legacy_compare");
-    expect(classifyResearchSurfaceMode("equity", "composer")).toBe("unknown");
   });
 
   it("builds a strategy lab research object from scope performance", () => {
@@ -641,6 +622,34 @@ describe("research view model helpers", () => {
         ]
       },
       leg_contributions: { JETS: 0.01, XLE: -0.004 },
+      risk_legs: [
+        {
+          leg_id: "1:leg:jets",
+          label: "JETS",
+          symbol: "JETS",
+          instrument_id: "leg:jets",
+          weight: 0.7,
+          return_points: [
+            { timestamp: "2026-03-01T00:00:00Z", value: 0.01 },
+            { timestamp: "2026-03-02T00:00:00Z", value: -0.004 }
+          ],
+          source_provider: "yfinance",
+          warnings: []
+        },
+        {
+          leg_id: "2:leg:xle",
+          label: "XLE",
+          symbol: "XLE",
+          instrument_id: "leg:xle",
+          weight: -0.3,
+          return_points: [
+            { timestamp: "2026-03-01T00:00:00Z", value: -0.004 },
+            { timestamp: "2026-03-02T00:00:00Z", value: 0.006 }
+          ],
+          source_provider: "yfinance",
+          warnings: []
+        }
+      ],
       lenses: [],
       overlays: []
     };
@@ -666,6 +675,7 @@ describe("research view model helpers", () => {
       expect.objectContaining({ symbol: "XLE", weight: -0.3 })
     ]);
     expect(object?.return_points).toEqual(composition.returns_points);
+    expect(object?.risk_legs).toEqual(composition.risk_legs);
     expect(object?.provenance).toMatchObject({
       origin: "research_service.strategy_lab.portfolio_compose",
       validation_origin: "research_service.strategy_lab.validate_book",

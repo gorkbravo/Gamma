@@ -371,9 +371,22 @@ class _FakeIbkrClient:
 
 
 class _FakeMarketData:
-    def __init__(self, prices: dict[int, float], delayed: set[int] | None = None):
+    def __init__(
+        self,
+        prices: dict[int, float],
+        delayed: set[int] | None = None,
+        history: pd.Series | None = None,
+    ):
         self.prices = prices
         self.delayed = delayed or set()
+        self.history = (
+            history
+            if history is not None
+            else pd.Series(
+                [76.0, 77.5, 79.25],
+                index=pd.to_datetime(["2026-01-02", "2026-01-03", "2026-01-04"]),
+            )
+        )
 
     def quote_key(self, contract):
         return f"conid_{contract.conId}"
@@ -391,10 +404,7 @@ class _FakeMarketData:
 
     def fetch_history(self, contract, lookback_days):
         del contract, lookback_days
-        return pd.Series(
-            [76.0, 77.5, 79.25],
-            index=pd.to_datetime(["2026-01-02", "2026-01-03", "2026-01-04"]),
-        )
+        return self.history.copy()
 
 
 def _future_detail(con_id: int, month: str, local_symbol: str, symbol: str = "CL", exchange: str = "NYMEX"):
@@ -438,8 +448,9 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
     assert wti_curve.source_provider == "ibkr"
     assert [node.contract.symbol for node in wti_curve.nodes] == ["CLQ6", "CLU6", "CLV6"]
     assert [node.price for node in wti_curve.nodes] == [80.0, 79.2, 78.7]
-    assert [node.previous_price for node in wti_curve.nodes] == [None, None, None]
-    assert [node.change for node in wti_curve.nodes] == [None, None, None]
+    assert [node.previous_price for node in wti_curve.nodes] == [79.25, None, None]
+    assert [node.change for node in wti_curve.nodes] == [0.75, None, None]
+    assert wti_curve.previous_as_of == datetime(2026, 1, 4)
     assert wti_curve.nodes[0].contract.contract_id == "ibkr:1001"
     assert wti_curve.nodes[0].contract.contract_month == "Aug 2026"
     assert any("Delayed IBKR quote" in warning for warning in wti_curve.warnings)
@@ -451,6 +462,15 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
     cached_history = provider._load_curve_history("wti")
     assert cached_history
     assert cached_history[-1]["nodes"][0]["contract_id"] == "ibkr:1001"
+    assert cached_history[-1]["headline_quote_context"] == {
+        "current_contract_id": "ibkr:1001",
+        "current_price": 80.0,
+        "current_source_provider": "ibkr",
+        "current_source_timestamp": wti_curve.as_of.isoformat(),
+        "prior_value": 79.25,
+        "prior_source_provider": "ibkr",
+        "prior_source_timestamp": "2026-01-04T00:00:00",
+    }
 
     service = CommoditiesService(provider=provider)
     workspace = service.get_workspace(
@@ -466,6 +486,153 @@ def test_ibkr_provider_builds_futures_curve_from_contract_details_and_quotes(tmp
     assert wti_summary.quote_basis is not None
     assert wti_summary.quote_basis.previous_value == 79.25
     assert wti_summary.quote_basis.previous_source_timestamp is not None
+
+
+def test_ibkr_cached_curve_retains_exact_fresh_quote_prior_pair_across_restart(tmp_path):
+    cache_dir = tmp_path / "cache"
+    details = [
+        _future_detail(1101, "202608", "CLQ6"),
+        _future_detail(1102, "202609", "CLU6"),
+    ]
+    history = pd.Series(
+        [86.83, 86.83],
+        index=pd.to_datetime(["2026-07-21", "2026-07-22"]),
+    )
+    fresh_provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient(details),
+        market_data=_FakeMarketData({1101: 92.10, 1102: 91.40}, history=history),
+        cache=CacheService(cache_dir),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["wti"],
+        selected_cache_seconds=300,
+        contract_depth=2,
+        history_days=3,
+    )
+
+    fresh_workspace = CommoditiesService(provider=fresh_provider).get_workspace(
+        CommodityWorkspaceRequest(
+            mode="overview",
+            selected_instrument_id="wti",
+            force_refresh=True,
+        )
+    )
+    fresh_summary = next(
+        row for row in fresh_workspace.market_summaries if row.instrument.instrument_id == "wti"
+    )
+
+    restarted_client = _FakeIbkrClient(details)
+    restarted_provider = IbkrCommoditiesDataProvider(
+        client=restarted_client,
+        market_data=_FakeMarketData({1101: 0.0, 1102: 0.0}, history=pd.Series(dtype=float)),
+        cache=CacheService(cache_dir),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["wti"],
+        selected_cache_seconds=300,
+        contract_depth=2,
+        history_days=3,
+    )
+    cached_workspace = CommoditiesService(provider=restarted_provider).get_workspace(
+        CommodityWorkspaceRequest(
+            mode="curves_spreads",
+            selected_instrument_id="wti",
+            force_refresh=False,
+        )
+    )
+    cached_summary = next(
+        row for row in cached_workspace.market_summaries if row.instrument.instrument_id == "wti"
+    )
+
+    assert restarted_client.requests == []
+    assert fresh_summary.latest_price == cached_summary.latest_price == pytest.approx(92.10)
+    assert fresh_summary.latest_change == cached_summary.latest_change == pytest.approx(5.27)
+    assert fresh_summary.latest_change_pct == cached_summary.latest_change_pct == pytest.approx(
+        5.27 / 86.83,
+        abs=0.000001,
+    )
+    assert fresh_summary.quote_basis is not None
+    assert cached_summary.quote_basis is not None
+    assert fresh_summary.quote_basis.provider == "ibkr"
+    assert cached_summary.quote_basis.provider == "ibkr_cached"
+    assert cached_summary.quote_basis.source_timestamp == fresh_summary.quote_basis.source_timestamp
+    assert (
+        cached_summary.quote_basis.previous_source_timestamp
+        == fresh_summary.quote_basis.previous_source_timestamp
+        == datetime(2026, 7, 22)
+    )
+
+
+def test_ibkr_cached_curve_without_prior_reference_keeps_change_unavailable(tmp_path):
+    details = [
+        _future_detail(1201, "202608", "CLQ6"),
+        _future_detail(1202, "202609", "CLU6"),
+    ]
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient(details),
+        market_data=_FakeMarketData({1201: 92.10, 1202: 91.40}, history=pd.Series(dtype=float)),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["wti"],
+        selected_cache_seconds=300,
+        contract_depth=2,
+        history_days=3,
+    )
+
+    provider.get_snapshot(force_refresh=True, selected_instrument_id="wti")
+    cached_workspace = CommoditiesService(provider=provider).get_workspace(
+        CommodityWorkspaceRequest(
+            mode="curves_spreads",
+            selected_instrument_id="wti",
+            force_refresh=False,
+        )
+    )
+    cached_summary = next(
+        row for row in cached_workspace.market_summaries if row.instrument.instrument_id == "wti"
+    )
+
+    assert cached_summary.latest_price == pytest.approx(92.10)
+    assert cached_summary.latest_change is None
+    assert cached_summary.latest_change_pct is None
+    assert cached_summary.quote_basis is not None
+    assert cached_summary.quote_basis.previous_source_timestamp is None
+
+
+def test_ibkr_cached_curve_rejects_mismatched_quote_context_timestamps(tmp_path):
+    details = [
+        _future_detail(1301, "202608", "CLQ6"),
+        _future_detail(1302, "202609", "CLU6"),
+    ]
+    provider = IbkrCommoditiesDataProvider(
+        client=_FakeIbkrClient(details),
+        market_data=_FakeMarketData({1301: 92.10, 1302: 91.40}),
+        cache=CacheService(tmp_path),
+        reference_provider=SampleCommoditiesDataProvider(),
+        enabled_instrument_ids=["wti"],
+        selected_cache_seconds=300,
+        contract_depth=2,
+        history_days=3,
+    )
+
+    provider.get_snapshot(force_refresh=True, selected_instrument_id="wti")
+    cached_rows = provider._load_curve_history("wti")
+    cached_rows[-1]["headline_quote_context"]["current_source_timestamp"] = "2026-07-23T00:00:00"
+    provider.cache.set_json(provider._curve_history_key("wti"), cached_rows)
+
+    cached_workspace = CommoditiesService(provider=provider).get_workspace(
+        CommodityWorkspaceRequest(
+            mode="curves_spreads",
+            selected_instrument_id="wti",
+            force_refresh=False,
+        )
+    )
+    cached_summary = next(
+        row for row in cached_workspace.market_summaries if row.instrument.instrument_id == "wti"
+    )
+
+    assert cached_summary.latest_price == pytest.approx(92.10)
+    assert cached_summary.latest_change is None
+    assert cached_summary.latest_change_pct is None
+    assert cached_summary.quote_basis is not None
+    assert cached_summary.quote_basis.previous_source_timestamp is None
 
 
 def test_ibkr_provider_fetches_broad_shallow_curves_and_deepens_selected(tmp_path):

@@ -119,7 +119,7 @@ Gamma mixes broker, public-market, public-macro, on-chain, and filing data. The 
 
 - `IBKR`: portfolio snapshots, security history when explicitly configured or needed as fallback, FX spot/history, IV surfaces, fundamentals market-price context, and commodity futures curves where the user has entitlements
 - `Yahoo Finance / yfinance`: default public live-ish listed-market history for Research Overview and SITREP boards; unofficial and not institutional quote truth
-- `FRED`: macro time series
+- `FRED`: macro time series; configure `FRED_API_KEY` for uncached API requests. Macro snapshots preserve the remaining series and return an explicit warning when an individual FRED series is unavailable.
 - `US Census`: optional live US trade-partner rows for Macro when `CENSUS_API_KEY` is configured
 - `EIA`: optional selected official US energy fundamentals for the Commodities tab when `EIA_API_KEY` is configured
 - `US Treasury`: Treasury curve snapshots for the US rates view
@@ -163,6 +163,8 @@ The current listed-market policy is configured server-side:
 - `RESEARCH_MARKET_DATA_PROVIDERS=yfinance,ibkr` for Research Overview
 - `SITREP_MARKET_DATA_PROVIDERS=yfinance` for SITREP listed-market boards
 - `RESEARCH_OVERVIEW_CACHE_SECONDS=300` and `SITREP_MARKET_DATA_CACHE_SECONDS=300` for the 5-minute live-ish overview cache
+
+yfinance is treated as an unofficial, rate-limited provider. Gamma performs at most two bounded retries by default with exponential backoff and jitter, opens a short circuit after repeated rate limits, preserves stale history when available, and continues to the next configured provider for symbols that remain unresolved. Tune this with `YFINANCE_MAX_RETRIES`, `YFINANCE_BACKOFF_SECONDS`, `YFINANCE_MAX_BACKOFF_SECONDS`, `YFINANCE_CIRCUIT_THRESHOLD`, and `YFINANCE_CIRCUIT_COOLDOWN_SECONDS`. SITREP cash-index symbols remain on their own provider policy because public Yahoo symbols do not map generically to IBKR index contracts.
 
 `AKShare` is documented and recognized as a future China/Asia provider hook, but Gamma does not ship a live AKShare adapter yet.
 
@@ -560,16 +562,19 @@ Important caveats:
 
 #### Fundamentals tab
 
-Fundamentals is paused at the roadmap's first-pass checkpoint. It is a company-analysis workspace built around SEC-native data, Gamma-owned calculations, and local model state.
+Fundamentals is complete for the current roadmap pass. It is a company-analysis workspace built around SEC-native data, Gamma-owned calculations, explicit provenance, and local model state.
 
 Main surfaces:
 
-- company search and selection
+- exact-ticker company focus, keyboard/browser-drivable search, and explicit unsupported ETF/fund/non-US states
 - overview with company profile, headline KPIs, filing provenance, peer basket, and peer heatmap
-- financial statement views across income statement, balance sheet, and cash flow
+- financial statement views across income statement, balance sheet, cash flow, and ratios, with YoY/QoQ comparisons and amendment context
 - annual and quarterly statement basis toggles
 - Gamma-owned ratio and operating metric views
-- DCF workbench with Bear / Base / Bull scenarios, sensitivity, and local persistence
+- DCF workbench with Bear / Base / Bull scenarios, sensitivity, terminal-value multiple framing, snapshots, and local persistence
+- reverse valuation and raw-versus-normalized filing inspection
+- context-preserving handoffs to Strategy Lab, Copilot, Equity Research, Risk, and Options
+- section-level degradation warnings that retain successful payloads when one Fundamentals endpoint is unavailable
 
 What Gamma normalizes:
 
@@ -582,7 +587,7 @@ Important caveats:
 
 - Fundamentals is currently strongest for US SEC filers
 - market-price-aware fields depend on available market context
-- raw-vs-normalized inspection, reverse valuation, deeper restatement handling, and broader regional coverage are current-roadmap work
+- broader non-US filing/reference providers and consensus-estimate depth are optional future expansion rather than blockers for the current completion boundary
 
 #### Copilot layer
 
@@ -612,7 +617,7 @@ Per [`roadmap.md`](./roadmap.md), Gamma's current roadmap state is:
 - `Phase 3 - Keyboard Navigation & Workspace Customization`: complete
 - `Phase 4 - AI Copilot`: paused around 70% in the archived phase roadmap; the current roadmap has since added a dedicated Copilot workspace alongside the shell shelf, with local sessions, synthesis, memos, and bounded read-only operator actions
 - `Phase 5 - Crypto`: paused around 73%, with a first-pass token explorer, screener, narrative baskets, DEX liquidity view, comparative context, and Copilot support now live
-- `Phase 6 - Fundamentals`: paused around 83%, with a first-pass Overview, Financials, and DCF workspace backed by SEC-native ingestion, Gamma-owned analytics, peer context, and persistent DCF scenarios
+- `Phase 6 - Fundamentals`: archived phase checkpoint paused around 83%; current-roadmap Fundamentals V2 is complete for this pass with six modes, filing inspection, peer/DCF/reverse-valuation workflows, cross-tab handoffs, and reliability coverage
 - `Workstream 1A - SITREP`: first-pass locked research-home tab live with cross-domain triage, Bloomberg Television YouTube embed, equities/FX/yields/commodities tables, and explicit provider caveats
 - `Workstream 8 - Commodities`: first-pass vertical slice live with sample fallback, optional EIA energy fundamentals, IBKR-built futures curves, curves/spreads/inventory analytics, UI tab, API surface, and Copilot context
 
@@ -676,6 +681,16 @@ $env:MOCK_DATA="true"
 $env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+Optional live FRED-backed Macro series:
+
+```powershell
+$env:FRED_API_KEY="<your key>"
+$env:GAMMA_SESSION_TOKEN="<dev-only random token>"
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+If one FRED or IBKR FX series fails, Macro skips that series, keeps the remaining snapshot, and returns a provider/reference-specific warning. Provider exception text and credentials are not copied into the user-facing warning.
 
 Optional Commodities EIA enrichment:
 
@@ -751,6 +766,8 @@ Backend:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+The test suite forces mock listed-market providers before application runtime import, regardless of local `.env` values. It uses a deterministic offline SPY benchmark derived from bundled sample histories, so tests cannot accidentally contact Yahoo Finance or TWS.
 
 Frontend and desktop checks:
 

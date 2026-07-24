@@ -1,5 +1,4 @@
 import type {
-  EquityResearchMode,
   CommodityCurveSnapshot,
   CommodityInstrument,
   CommodityMarketSummary,
@@ -25,7 +24,6 @@ import type {
   StrategyLabPortfolioLegInput,
   StrategyLabBookValidation,
   StrategyLabCompositionResult,
-  StrategyLabMode,
   StrategyLabPortfolioLegAssetClass,
   StrategyLabResult,
   ResearchStructure,
@@ -34,58 +32,6 @@ import type {
 import type { ChainRow, StrategyOptionType } from "./iv";
 
 export type { EquityResearchMode, StrategyLabMode } from "../api/types";
-
-export type ResearchMode = "overview" | "scope_analysis" | "strategy_lab" | "compare_scenario" | "saved_research";
-export type ResearchSurface = "legacy" | "equity" | "strategy";
-export type ResearchSurfaceMode = ResearchMode | EquityResearchMode | StrategyLabMode;
-export type ResearchSurfaceModeKind =
-  | "overview"
-  | "scope_analysis"
-  | "equity_comparables"
-  | "equity_scenario_context"
-  | "equity_saved"
-  | "strategy_composer"
-  | "strategy_backtest"
-  | "strategy_regime"
-  | "strategy_imports"
-  | "strategy_saved"
-  | "legacy_strategy"
-  | "legacy_compare"
-  | "legacy_saved"
-  | "unknown";
-
-export function classifyResearchSurfaceMode(
-  surface: ResearchSurface,
-  mode: ResearchSurfaceMode
-): ResearchSurfaceModeKind {
-  if (mode === "overview") {
-    return "overview";
-  }
-  if (mode === "scope_analysis") {
-    return "scope_analysis";
-  }
-
-  if (surface === "equity") {
-    if (mode === "comparables") return "equity_comparables";
-    if (mode === "scenario_context") return "equity_scenario_context";
-    if (mode === "saved_equity_research") return "equity_saved";
-    return "unknown";
-  }
-
-  if (surface === "strategy") {
-    if (mode === "composer") return "strategy_composer";
-    if (mode === "backtest_analyze") return "strategy_backtest";
-    if (mode === "regime_stress") return "strategy_regime";
-    if (mode === "imports") return "strategy_imports";
-    if (mode === "saved_runs") return "strategy_saved";
-    return "unknown";
-  }
-
-  if (mode === "strategy_lab") return "legacy_strategy";
-  if (mode === "compare_scenario") return "legacy_compare";
-  if (mode === "saved_research") return "legacy_saved";
-  return "unknown";
-}
 
 export interface SyntheticPositionDraft {
   symbol: string;
@@ -1055,6 +1001,11 @@ export function buildResearchBookObjectFromStrategyComposition(
   }));
   const start = returnPoints[0]?.timestamp ?? null;
   const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  const riskLegs = (result.risk_legs ?? []).map((leg) => ({
+    ...leg,
+    return_points: normalizeResearchObjectReturnPoints(leg.return_points),
+    warnings: [...(leg.warnings ?? [])]
+  }));
   const signature = buildDeterministicSignature({
     name: result.name,
     weights: weights.map((weight) => ({
@@ -1062,6 +1013,11 @@ export function buildResearchBookObjectFromStrategyComposition(
       weight: normalizeSignatureNumber(weight.weight)
     })),
     return_points: normalizeReturnPointSignature(returnPoints),
+    risk_legs: riskLegs.map((leg) => ({
+      leg_id: leg.leg_id,
+      weight: normalizeSignatureNumber(leg.weight),
+      return_points: normalizeReturnPointSignature(leg.return_points)
+    })),
     validation: {
       aligned_observation_count: validation.aligned_observation_count,
       retrieved_at: validation.retrieved_at
@@ -1098,7 +1054,8 @@ export function buildResearchBookObjectFromStrategyComposition(
         "Research book is durable Strategy Lab context for read-only Risk analysis, not a live account portfolio."
       ])
     ),
-    return_points: returnPoints
+    return_points: returnPoints,
+    risk_legs: riskLegs
   };
 }
 

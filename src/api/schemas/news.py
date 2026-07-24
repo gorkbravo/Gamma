@@ -36,6 +36,7 @@ class NewsEventItemModel(BaseModel):
     detected_entities: list[NewsEventEntityModel] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     freshness_label: FreshnessLabel = FreshnessLabel.UNKNOWN
+    source_reliability: str = "unknown"
     warnings: list[str] = Field(default_factory=list)
     transformation_note: str | None = None
 

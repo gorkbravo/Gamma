@@ -1,5 +1,7 @@
 # Fundamentals Phase 6 Spec
 
+> **Implementation status (2026-07-13):** This document remains the V1 architecture and product-shape specification. The active [`roadmap.md`](../roadmap.md) now marks Fundamentals V2 complete for the current pass. The shipped workspace extends this foundation with Peers, Reverse Valuation, and Reference / Filings modes; raw-versus-normalized inspection; YoY/QoQ and amendment context; DCF snapshots and terminal-value framing; cross-tab handoffs; explicit degraded states; and browser/reliability coverage. Non-US providers, estimates, and segment depth remain future expansion.
+
 ## Goal
 
 Implement Phase 6 as a first-pass `Fundamentals` research workspace that lets the user:

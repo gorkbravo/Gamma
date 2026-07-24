@@ -23,8 +23,11 @@ class ResearchHistoryCache:
             existing = self._entries.get(key)
             if existing is not None:
                 existing_series, existing_lookback, _stored_at = existing
-                if existing_lookback > lookback and len(existing_series) >= len(series):
-                    return
+                # Refreshes must be able to replace overlapping older observations. Merge
+                # non-overlapping history, but let the newly fetched payload win by date.
+                series = pd.concat([existing_series, series])
+                series = series[~series.index.duplicated(keep="last")].sort_index()
+                lookback = max(lookback, existing_lookback)
             self._entries[key] = (series, lookback, now_utc())
 
     def get(

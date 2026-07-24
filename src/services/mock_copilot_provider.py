@@ -14,13 +14,61 @@ from src.models.copilot import (
     ResearchCard,
     ResearchClaim,
 )
-from src.services.copilot_provider import CopilotProvider, ToolExecutor
+from src.services.copilot_provider import (
+    CancelCheck,
+    CopilotProvider,
+    CopilotRunCancelled,
+    RunEventEmitter,
+    ToolExecutor,
+)
 
 
 @dataclass
 class MockCopilotProvider(CopilotProvider):
     model: str = "gamma-mock-research-card-v1"
     provider_name: str = "mock"
+    provider_id: str = "mock_copilot"
+
+    def stream_research_card(
+        self,
+        *,
+        request: CopilotResearchCardRequest,
+        context: CopilotContextBundle,
+        tool_specs: list[dict[str, object]],
+        execute_tool: ToolExecutor,
+        emit: RunEventEmitter,
+        should_cancel: CancelCheck,
+    ) -> CopilotResearchCardResult:
+        """Deterministic streaming variant: emits tool and text-delta events
+        around the same card the synchronous path produces."""
+
+        def traced_execute(tool_name: str, arguments: dict[str, object], ctx: CopilotContextBundle):
+            if should_cancel():
+                raise CopilotRunCancelled()
+            emit("tool.call", {"tool_name": tool_name, "arguments": arguments})
+            execution = execute_tool(tool_name, arguments, ctx)
+            emit(
+                "tool.result",
+                {
+                    "tool_name": tool_name,
+                    "summary": execution.trace.summary,
+                    "source_ids": list(execution.trace.source_ids),
+                },
+            )
+            return execution
+
+        result = self.generate_research_card(
+            request=request,
+            context=context,
+            tool_specs=tool_specs,
+            execute_tool=traced_execute,
+        )
+        text = result.card.hypothesis if result.card is not None else (result.message or "")
+        for start in range(0, len(text), 48):
+            if should_cancel():
+                raise CopilotRunCancelled()
+            emit("text.delta", {"delta": text[start : start + 48]})
+        return result
 
     def generate_research_card(
         self,

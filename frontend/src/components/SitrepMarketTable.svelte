@@ -18,6 +18,8 @@
 
 <script lang="ts">
   import { flashOnChange } from "../lib/flash";
+  import ProvenanceBadge from "./ProvenanceBadge.svelte";
+  import type { ProvenanceBadgeData } from "../lib/provenance";
 
   export let rows: SitrepMarketRow[] = [];
   export let emptyLabel = "No data loaded.";
@@ -31,6 +33,7 @@
   export let contextTone = false;
   export let profile: "default" | "equities" | "indices" | "fx" | "yields" | "commodities" = "default";
   export let onSelect: ((row: SitrepMarketRow) => void) | null = null;
+  export let provenance: ProvenanceBadgeData | null = null;
 
   $: colCount = 3 + (hideGroup ? 0 : 1) + (showPctChange ? 1 : 0) + (hideContext ? 0 : 1);
 
@@ -44,6 +47,9 @@
 </script>
 
 <div class="table-wrap">
+  {#if provenance}
+    <div class="table-provenance"><ProvenanceBadge data={provenance} /></div>
+  {/if}
   <table class={`profile-${profile}`}>
     <thead>
       <tr>
@@ -93,6 +99,14 @@
     max-height: 20rem;
   }
 
+  .table-provenance {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space-1) var(--space-4);
+    border-bottom: 1px solid var(--divider);
+    min-height: 20px;
+  }
+
   table {
     width: 100%;
     min-width: 33rem;
@@ -119,6 +133,12 @@
   td strong,
   td span {
     display: block;
+  }
+
+  .context-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   td span {
@@ -199,7 +219,6 @@
   .profile-fx .move-cell,
   .profile-fx .pct-cell {
     width: 20%;
-    text-align: left;
   }
 
   .profile-yields {

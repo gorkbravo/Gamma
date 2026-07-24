@@ -13,6 +13,21 @@ from src.models.copilot import (
 
 ToolExecutor = Callable[[str, dict[str, object], CopilotContextBundle], CopilotToolExecution]
 
+# Streaming providers call this with (event_type, data) for each semantic
+# provider event: text deltas, tool activity, warnings, refusals, usage.
+RunEventEmitter = Callable[[str, dict[str, object]], None]
+
+# Returns True when the active run should stop (user cancel or run timeout).
+CancelCheck = Callable[[], bool]
+
+
+class CopilotRunCancelled(Exception):
+    """Raised inside a streaming provider when the run is cancelled or times out."""
+
+    def __init__(self, reason: str = "cancelled") -> None:
+        super().__init__(reason)
+        self.reason = reason
+
 
 class CopilotProvider(Protocol):
     provider_name: str
@@ -32,6 +47,7 @@ class CopilotProvider(Protocol):
 class UnavailableCopilotProvider:
     message: str
     provider_name: str = "unconfigured"
+    provider_id: str = "unavailable_copilot"
 
     def generate_research_card(
         self,

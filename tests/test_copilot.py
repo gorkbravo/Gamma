@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 
 from fastapi.testclient import TestClient
@@ -1334,34 +1336,525 @@ def test_copilot_generates_research_report_and_markdown_snapshot(tmp_path):
         runtime.shutdown()
 
 
-def test_copilot_stream_endpoint_emits_ndjson_events(tmp_path):
+_MACRO_STREAM_REQUEST = {
+    "domain": "macro",
+    "prompt": "Stream the macro card.",
+    "user_session_id": "session_test_stream",
+    "context": {
+        "current_tab": "macro",
+        "workspace_mode": "research",
+        "macro": {
+            "mode": "snapshot",
+            "region": "US",
+            "timeframe": "3M",
+            "theme": "all",
+            "comparison_region": None,
+        },
+    },
+}
+
+
+def test_copilot_stream_endpoint_emits_run_events(tmp_path):
     client, runtime = _build_test_client(tmp_path)
     try:
         response = client.post(
             "/copilot/research-card/stream",
-            json={
-                "domain": "macro",
-                "prompt": "Stream the macro card.",
-                "user_session_id": "session_test_stream",
-                "context": {
-                    "current_tab": "macro",
-                    "workspace_mode": "research",
-                    "macro": {
-                        "mode": "snapshot",
-                        "region": "US",
-                        "timeframe": "3M",
-                        "theme": "all",
-                        "comparison_region": None,
-                    },
-                },
-            },
+            json={**_MACRO_STREAM_REQUEST, "run_id": "run_client_supplied"},
         )
         assert response.status_code == 200
         events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
-        assert [event["event"] for event in events] == ["status", "metadata", "result", "done"]
-        assert events[2]["data"]["card"]["title"] == "Macro test card"
+        assert events[0]["event"] == "run.created"
+        assert events[0]["run_id"] == "run_client_supplied"
+        assert events[-1]["event"] == "completed"
+        assert events[-1]["result"]["card"]["title"] == "Macro test card"
+        sequences = [event["sequence"] for event in events]
+        assert sequences == sorted(sequences)
+        assert len(set(sequences)) == len(sequences)
+        terminal_events = [
+            event for event in events if event["event"] in {"completed", "failed", "cancelled"}
+        ]
+        assert len(terminal_events) == 1
     finally:
         runtime.shutdown()
+
+
+def test_copilot_stream_persists_turn_for_replay(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post("/copilot/research-card/stream", json=_MACRO_STREAM_REQUEST)
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        final_result = events[-1]["result"]
+
+        detail = client.get("/copilot/sessions/session_test_stream").json()
+        assert len(detail["turns"]) == 1
+        persisted = detail["turns"][0]["result"]
+        assert persisted["status"] == final_result["status"] == "ready"
+        assert persisted["card"]["title"] == final_result["card"]["title"]
+        assert persisted["response_id"] == final_result["response_id"]
+    finally:
+        runtime.shutdown()
+
+
+class _StreamingStubProvider:
+    """Streaming provider stub that emits semantic events before finishing."""
+
+    provider_name = "streaming_stub"
+    model = "streaming-stub-model"
+
+    def __init__(self, *, deltas: int = 3, wait_for_cancel: bool = False):
+        self.deltas = deltas
+        self.wait_for_cancel = wait_for_cancel
+
+    def generate_research_card(self, *, request, context, tool_specs, execute_tool):
+        raise AssertionError("streaming provider should use stream_research_card")
+
+    def stream_research_card(self, *, request, context, tool_specs, execute_tool, emit, should_cancel):
+        from src.services.copilot_provider import CopilotRunCancelled
+
+        for index in range(self.deltas):
+            if should_cancel():
+                raise CopilotRunCancelled()
+            emit("text.delta", {"delta": f"chunk-{index} "})
+        if self.wait_for_cancel:
+            deadline = time.monotonic() + 10.0
+            while not should_cancel():
+                if time.monotonic() > deadline:
+                    raise AssertionError("cancellation never arrived")
+                time.sleep(0.02)
+            raise CopilotRunCancelled()
+        emit("usage", {"input_tokens": 10, "output_tokens": 4})
+        return CopilotResearchCardResult(
+            domain=request.domain,
+            current_tab=context.current_tab,
+            status="ready",
+            provider=self.provider_name,
+            model=self.model,
+            response_id="resp_streaming_stub",
+            card=ResearchCard(
+                title="Streamed macro card",
+                hypothesis="Streaming should deliver deltas before the final card.",
+                rationale="Provider-native events reach the Gamma run contract.",
+                required_data=[],
+                proposed_test="Consume the run events in order.",
+                confounders=[],
+                next_steps=[],
+                caveats=[],
+                source_backed_claims=[],
+                inferred_claims=[],
+            ),
+            sources=list(context.sources),
+            warnings=list(context.warnings),
+        )
+
+
+def test_copilot_streaming_provider_events_reach_run_contract(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = _StreamingStubProvider(deltas=3)
+    try:
+        response = client.post("/copilot/research-card/stream", json=_MACRO_STREAM_REQUEST)
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        event_types = [event["event"] for event in events]
+        assert event_types[0] == "run.created"
+        assert event_types.count("text.delta") == 3
+        assert "usage" in event_types
+        assert event_types[-1] == "completed"
+        deltas = [event["data"]["delta"] for event in events if event["event"] == "text.delta"]
+        assert deltas == ["chunk-0 ", "chunk-1 ", "chunk-2 "]
+        assert events[-1]["result"]["status"] == "ready"
+        assert events[-1]["result"]["card"]["title"] == "Streamed macro card"
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_run_cancellation_emits_cancelled_terminal_and_persists(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = _StreamingStubProvider(deltas=2, wait_for_cancel=True)
+    try:
+        request = CopilotResearchCardRequest(
+            domain="macro",
+            prompt="Cancel this run.",
+            user_session_id="session_cancel_test",
+            context=CopilotRequestContext(current_tab="macro", workspace_mode="research"),
+        )
+        events = []
+        cancellation_requested = False
+        stream = runtime.copilot_service.stream_research_card_events(request, run_id="run_cancel_test")
+        for event in stream:
+            events.append(event)
+            if not cancellation_requested and len([e for e in events if e.event_type == "text.delta"]) == 2:
+                outcome = runtime.copilot_service.cancel_run("run_cancel_test")
+                assert outcome["found"] is True
+                assert outcome["cancelled"] is True
+                cancellation_requested = True
+
+        assert events[-1].event_type == "cancelled"
+        assert events[-1].result is not None
+        assert events[-1].result.status == "cancelled"
+        terminal = [e for e in events if e.event_type in {"completed", "failed", "cancelled"}]
+        assert len(terminal) == 1
+        sequences = [e.sequence for e in events]
+        assert sequences == sorted(sequences)
+
+        # Cancelled runs persist a replayable cancelled turn.
+        detail = client.get("/copilot/sessions/session_cancel_test").json()
+        assert len(detail["turns"]) == 1
+        assert detail["turns"][0]["result"]["status"] == "cancelled"
+
+        # Cancelling a finished retained run is a safe no-op.
+        outcome = runtime.copilot_service.cancel_run("run_cancel_test")
+        assert outcome["found"] is True
+        assert outcome["cancelled"] is False
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_run_reconnect_replays_after_cursor_without_duplicate_persistence(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        request = {**_MACRO_STREAM_REQUEST, "run_id": "run_replay_test"}
+        initial = client.post("/copilot/research-card/stream", json=request)
+        assert initial.status_code == 200
+        events = [json.loads(line) for line in initial.text.splitlines() if line.strip()]
+        cursor = events[0]["sequence"]
+
+        replay = client.get(f"/copilot/runs/run_replay_test/events?after_sequence={cursor}")
+        assert replay.status_code == 200
+        replayed = [json.loads(line) for line in replay.text.splitlines() if line.strip()]
+        assert replayed
+        assert all(event["sequence"] > cursor for event in replayed)
+        assert replayed[-1]["event"] == "completed"
+
+        duplicate = client.post(
+            "/copilot/research-card/stream",
+            json={**request, "last_seen_sequence": replayed[-1]["sequence"]},
+        )
+        assert duplicate.status_code == 200
+        assert duplicate.text == ""
+        detail = client.get("/copilot/sessions/session_test_stream").json()
+        assert len(detail["turns"]) == 1
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_run_rejects_duplicate_id_for_different_request(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        first = client.post(
+            "/copilot/research-card/stream",
+            json={**_MACRO_STREAM_REQUEST, "run_id": "run_duplicate_test"},
+        )
+        assert first.status_code == 200
+        duplicate = client.post(
+            "/copilot/research-card/stream",
+            json={
+                **_MACRO_STREAM_REQUEST,
+                "run_id": "run_duplicate_test",
+                "prompt": "A different request must not reuse this run.",
+            },
+        )
+        assert duplicate.status_code == 409
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_disconnect_does_not_cancel_server_owned_run(tmp_path):
+    class DisconnectProvider(_StreamingStubProvider):
+        def stream_research_card(self, *, request, context, tool_specs, execute_tool, emit, should_cancel):
+            emit("text.delta", {"delta": "still running "})
+            time.sleep(0.08)
+            return super().stream_research_card(
+                request=request,
+                context=context,
+                tool_specs=tool_specs,
+                execute_tool=execute_tool,
+                emit=emit,
+                should_cancel=should_cancel,
+            )
+
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = DisconnectProvider(deltas=1)
+    try:
+        request = CopilotResearchCardRequest(
+            domain="macro",
+            prompt="Survive subscriber disconnect.",
+            user_session_id="session_disconnect_test",
+            context=CopilotRequestContext(current_tab="macro", workspace_mode="research"),
+        )
+        subscription = runtime.copilot_service.stream_research_card_events(
+            request,
+            run_id="run_disconnect_test",
+        )
+        assert next(subscription).event_type == "run.created"
+        subscription.close()
+
+        replayed = list(runtime.copilot_service.stream_existing_run_events("run_disconnect_test"))
+        assert replayed[-1].event_type == "completed"
+        assert replayed[-1].result is not None
+        assert replayed[-1].result.status == "ready"
+        detail = client.get("/copilot/sessions/session_disconnect_test").json()
+        assert len(detail["turns"]) == 1
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_cancel_before_first_event_and_timeout_are_terminal_and_persisted(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = _StreamingStubProvider(wait_for_cancel=True)
+    try:
+        pending = runtime.copilot_service.cancel_run("run_pre_cancelled")
+        assert pending == {
+            "run_id": "run_pre_cancelled",
+            "found": False,
+            "cancelled": True,
+            "status": "pending",
+        }
+        cancelled_request = CopilotResearchCardRequest(
+            domain="macro",
+            prompt="Cancel before start.",
+            user_session_id="session_pre_cancelled",
+            context=CopilotRequestContext(current_tab="macro", workspace_mode="research"),
+        )
+        cancelled_events = list(runtime.copilot_service.stream_research_card_events(
+            cancelled_request,
+            run_id="run_pre_cancelled",
+        ))
+        assert [event.event_type for event in cancelled_events] == ["run.created", "cancelled"]
+        assert cancelled_events[-1].result is not None
+        assert cancelled_events[-1].result.status == "cancelled"
+
+        timeout_request = replace(
+            cancelled_request,
+            prompt="Time out safely.",
+            user_session_id="session_timeout_test",
+        )
+        timeout_events = list(runtime.copilot_service.stream_research_card_events(
+            timeout_request,
+            run_id="run_timeout_test",
+            timeout_seconds=0.03,
+        ))
+        assert timeout_events[-1].event_type == "cancelled"
+        assert timeout_events[-1].data["reason"] == "timeout"
+        assert timeout_events[-1].result is not None
+        assert timeout_events[-1].result.status == "timeout"
+        assert len(client.get("/copilot/sessions/session_pre_cancelled").json()["turns"]) == 1
+        assert len(client.get("/copilot/sessions/session_timeout_test").json()["turns"]) == 1
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_refusal_incomplete_and_provider_error_are_typed_run_states(tmp_path):
+    class TerminalStateProvider:
+        provider_name = "terminal_state_stub"
+        model = "terminal-state-model"
+
+        def __init__(self, status: str):
+            self.status = status
+
+        def generate_research_card(self, *, request, context, tool_specs, execute_tool):
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status=self.status,
+                provider=self.provider_name,
+                model=self.model,
+                message=f"typed {self.status}",
+                sources=list(context.sources),
+                warnings=list(context.warnings),
+            )
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        expected = {
+            "refused": ("refusal", "completed"),
+            "incomplete": ("incomplete", "completed"),
+            "error": ("provider.error", "failed"),
+        }
+        for status, (semantic, terminal) in expected.items():
+            runtime.copilot_service.provider = TerminalStateProvider(status)
+            request = CopilotResearchCardRequest(
+                domain="macro",
+                prompt=f"Return {status}.",
+                user_session_id=f"session_{status}_test",
+                context=CopilotRequestContext(current_tab="macro", workspace_mode="research"),
+            )
+            events = list(runtime.copilot_service.stream_research_card_events(
+                request,
+                run_id=f"run_{status}_test",
+            ))
+            event_types = [event.event_type for event in events]
+            assert semantic in event_types
+            assert event_types[-1] == terminal
+            assert sum(event.is_terminal for event in events) == 1
+            assert len(client.get(f"/copilot/sessions/session_{status}_test").json()["turns"]) == 1
+    finally:
+        runtime.shutdown()
+
+
+def test_openai_provider_streams_sdk_semantic_events():
+    class StreamingCaptureProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self, sse_lines):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.sse_lines = sse_lines
+            self.payloads: list[dict] = []
+
+        def _open_stream(self, payload):
+            self.payloads.append(payload)
+            return iter(self.sse_lines)
+
+    card_payload = json.dumps(
+        {
+            "title": "SSE card",
+            "hypothesis": "Streaming works.",
+            "rationale": "Deltas arrived before completion.",
+            "required_data": [],
+            "proposed_test": "n/a",
+            "confounders": [],
+            "next_steps": [],
+            "caveats": [],
+            "source_backed_claims": [],
+            "inferred_claims": [],
+        }
+    )
+    final_response = {
+        "id": "resp_sse_test",
+        "model": "gpt-test",
+        "usage": {"input_tokens": 12, "output_tokens": 7, "total_tokens": 19},
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": card_payload}],
+            }
+        ],
+    }
+    sse_lines = [
+        {"type": "response.created", "response": {"id": "resp_sse_test"}},
+        {"type": "response.output_text.delta", "delta": '{"title": "SSE'},
+        {"type": "response.output_text.delta", "delta": ' card"}'},
+        {
+            "type": "response.function_call_arguments.done",
+            "item_id": "fc_test",
+            "output_index": 0,
+            "arguments": '{"region":"US"}',
+        },
+        {"type": "response.completed", "response": final_response},
+    ]
+
+    provider = StreamingCaptureProvider(sse_lines)
+    emitted: list[tuple[str, dict]] = []
+    result = provider.stream_research_card(
+        request=CopilotResearchCardRequest(domain="macro", prompt="stream test"),
+        context=CopilotContextBundle(
+            domain="macro",
+            current_tab="macro",
+            summary_data={},
+            sources=[],
+            warnings=[],
+        ),
+        tool_specs=[],
+        execute_tool=lambda name, arguments, context: (_ for _ in ()).throw(
+            AssertionError("no tools expected")
+        ),
+        emit=lambda etype, data: emitted.append((etype, data)),
+        should_cancel=lambda: False,
+    )
+
+    assert provider.payloads[0]["stream"] is True
+    delta_events = [data["delta"] for etype, data in emitted if etype == "text.delta"]
+    assert delta_events == ['{"title": "SSE', ' card"}']
+    usage_events = [data for etype, data in emitted if etype == "usage"]
+    assert usage_events == [{"input_tokens": 12, "output_tokens": 7, "total_tokens": 19}]
+    argument_events = [data for etype, data in emitted if etype == "function.arguments"]
+    assert argument_events == [
+        {"item_id": "fc_test", "output_index": 0, "arguments": '{"region":"US"}'}
+    ]
+    assert result.status == "ready"
+    assert result.card is not None
+    assert result.card.title == "SSE card"
+    assert result.response_id == "resp_sse_test"
+
+
+def test_openai_provider_stream_incomplete_returns_typed_state():
+    class IncompleteStreamProvider(OpenAIResponsesCopilotProvider):
+        def _open_stream(self, payload):
+            del payload
+            incomplete = {
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_incomplete",
+                    "model": "gpt-test",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "output": [],
+                },
+            }
+            return iter([incomplete])
+
+    provider = IncompleteStreamProvider(
+        api_key="test-key",
+        model="gpt-test",
+        reasoning_effort="low",
+        store_responses=False,
+    )
+    emitted: list[tuple[str, dict]] = []
+    result = provider.stream_research_card(
+        request=CopilotResearchCardRequest(domain="macro", prompt="incomplete test"),
+        context=CopilotContextBundle(
+            domain="macro",
+            current_tab="macro",
+            summary_data={},
+            sources=[],
+            warnings=[],
+        ),
+        tool_specs=[],
+        execute_tool=lambda name, arguments, context: (_ for _ in ()).throw(
+            AssertionError("no tools expected")
+        ),
+        emit=lambda etype, data: emitted.append((etype, data)),
+        should_cancel=lambda: False,
+    )
+
+    assert ("incomplete", {"reason": "max_output_tokens"}) in emitted
+    assert result.status == "incomplete"
+    assert "max_output_tokens" in (result.message or "")
+
+
+def test_openai_provider_stream_error_emits_typed_provider_error():
+    class ErrorStreamProvider(OpenAIResponsesCopilotProvider):
+        def _open_stream(self, payload):
+            del payload
+            return iter([{"type": "error", "message": "provider transport failed"}])
+
+    provider = ErrorStreamProvider(
+        api_key="test-key",
+        model="gpt-test",
+        reasoning_effort="low",
+        store_responses=False,
+    )
+    emitted: list[tuple[str, dict]] = []
+    result = provider.stream_research_card(
+        request=CopilotResearchCardRequest(domain="macro", prompt="provider error test"),
+        context=CopilotContextBundle(
+            domain="macro",
+            current_tab="macro",
+            summary_data={},
+            sources=[],
+            warnings=[],
+        ),
+        tool_specs=[],
+        execute_tool=lambda *_args: None,
+        emit=lambda etype, data: emitted.append((etype, data)),
+        should_cancel=lambda: False,
+    )
+
+    assert result.status == "error"
+    assert emitted[-1][0] == "provider.error"
+    assert "provider transport failed" in emitted[-1][1]["message"]
 
 
 def test_macro_copilot_route_degrades_when_macro_provider_fails(tmp_path):
@@ -2755,6 +3248,91 @@ def test_copilot_operator_execution_runs_read_only_risk_analysis(tmp_path):
         runtime.shutdown()
 
 
+def test_copilot_operator_stream_uses_shared_run_contract_and_persists_once(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        response = client.post(
+            "/copilot/operator-plan/execute/stream",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "run_id": "run_operator_stream_test",
+                "user_session_id": "session_operator_stream_test",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+        assert response.status_code == 200
+        events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        event_types = [event["event"] for event in events]
+        assert event_types[0] == "run.created"
+        assert "plan" in event_types
+        assert "tool.call" in event_types
+        assert "tool.result" in event_types
+        assert "artifact.created" in event_types
+        assert "report" in event_types
+        assert event_types[-1] == "completed"
+        assert all(event["run_id"] == "run_operator_stream_test" for event in events)
+        assert [event["sequence"] for event in events] == list(range(len(events)))
+        assert sum(event["event"] in {"completed", "failed", "cancelled"} for event in events) == 1
+        assert events[-1]["result"]["status"] == "ready"
+        detail = client.get("/copilot/sessions/session_operator_stream_test").json()
+        assert len(detail["turns"]) == 1
+    finally:
+        runtime.shutdown()
+
+
+def test_copilot_operator_stream_cancels_at_safe_step_boundary(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        service = runtime.copilot_service
+        original_append = service._append_run_event
+        cancellation_sent = False
+
+        def append_and_cancel(handle, event_type, data=None, *, result=None):
+            nonlocal cancellation_sent
+            event = original_append(handle, event_type, data, result=result)
+            if event_type == "tool.result" and not cancellation_sent:
+                cancellation_sent = True
+                outcome = service.cancel_run(handle.run_id)
+                assert outcome["cancelled"] is True
+            return event
+
+        service._append_run_event = append_and_cancel
+        response = client.post(
+            "/copilot/operator-plan/execute/stream",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "run_id": "run_operator_cancel_test",
+                "user_session_id": "session_operator_cancel_test",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+        events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        assert cancellation_sent is True
+        assert events[-1]["event"] == "cancelled"
+        assert events[-1]["result"]["status"] == "cancelled"
+        final_report = next(
+            event for event in reversed(events) if event["event"] == "report"
+        )
+        assert final_report["data"]["payload"]["status"] == "cancelled"
+        detail = client.get("/copilot/sessions/session_operator_cancel_test").json()
+        assert len(detail["turns"]) == 1
+        assert detail["turns"][0]["result"]["status"] == "cancelled"
+    finally:
+        runtime.shutdown()
+
+
 def test_copilot_operator_final_outputs_compact_when_payload_is_large():
     outputs = {
         "step_run_large_analysis": {
@@ -3891,6 +4469,87 @@ def test_copilot_service_normalizes_result_source_timestamps():
     assert normalized.sources[0].retrieved_at == datetime(2026, 4, 30, 8, 12, 22)
 
 
+def test_copilot_service_reclassifies_unresolved_claims_before_persistence():
+    result = CopilotResearchCardResult(
+        domain="macro",
+        current_tab="copilot",
+        status="ready",
+        provider="stub",
+        card=ResearchCard(
+            title="Evidence resolution",
+            hypothesis="H",
+            rationale="R",
+            proposed_test="T",
+            source_backed_claims=[
+                ResearchClaim(claim="Fully grounded.", evidence_refs=["macro.known"]),
+                ResearchClaim(claim="Partially grounded.", evidence_refs=["macro.known", "fake.source"]),
+                ResearchClaim(claim="Unsupported claim.", evidence_refs=["missing.source"]),
+                ResearchClaim(claim="Uncited claim.", evidence_refs=[]),
+            ],
+            inferred_claims=["Existing inference."],
+        ),
+        sources=[
+            CopilotSourceRef(
+                source_id="macro.known",
+                label="Known macro source",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.macro",
+            )
+        ],
+    )
+
+    normalized = CopilotService._normalize_result_sources(result)
+
+    assert normalized.card is not None
+    assert [(claim.claim, claim.evidence_refs) for claim in normalized.card.source_backed_claims] == [
+        ("Fully grounded.", ["macro.known"]),
+        ("Partially grounded.", ["macro.known"]),
+    ]
+    assert normalized.card.inferred_claims == [
+        "Existing inference.",
+        "Unsupported claim.",
+        "Uncited claim.",
+    ]
+    assert any("fake.source" in warning for warning in normalized.warnings)
+    assert any("missing.source" in warning for warning in normalized.warnings)
+
+
+def test_copilot_store_defensively_reclassifies_unresolved_claims(tmp_path):
+    store = CopilotStore(tmp_path / "copilot")
+    result = CopilotResearchCardResult(
+        domain="macro",
+        current_tab="copilot",
+        status="ready",
+        provider="stub",
+        card=ResearchCard(
+            title="Persistence boundary",
+            hypothesis="H",
+            rationale="R",
+            proposed_test="T",
+            source_backed_claims=[ResearchClaim(claim="Fake citation.", evidence_refs=["unknown.source"])],
+        ),
+    )
+
+    session, _snapshot, _turn = store.record_turn(
+        session_id=None,
+        title=None,
+        domain="macro",
+        current_tab="copilot",
+        workspace_mode="research",
+        prompt="Check evidence.",
+        context_fingerprint="fp-evidence",
+        context_summary={},
+        result=result,
+    )
+
+    restored = store.list_turns(session.session_id)[0].result
+    assert restored.card is not None
+    assert restored.card.source_backed_claims == []
+    assert restored.card.inferred_claims == ["Fake citation."]
+    assert any("Reclassified" in warning for warning in restored.warnings)
+
+
 def test_openai_provider_omits_previous_response_id_when_response_storage_is_disabled():
     class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
         def __init__(self):
@@ -3998,7 +4657,76 @@ def test_openai_provider_uses_request_reasoning_effort_override():
     assert provider.payloads[0]["reasoning"] == {"effort": "high"}
 
 
-def test_openai_provider_omits_reasoning_items_when_response_storage_is_disabled():
+def test_openai_provider_retries_once_when_structured_card_is_missing():
+    class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
+        def __init__(self):
+            super().__init__(
+                api_key="test-key",
+                model="gpt-test",
+                reasoning_effort="low",
+                store_responses=False,
+            )
+            self.payloads: list[dict] = []
+
+        def _post_json(self, payload):
+            self.payloads.append(payload)
+            if len(self.payloads) == 1:
+                return {
+                    "id": "resp_missing_card",
+                    "model": "gpt-test",
+                    "output": [{"type": "message", "content": []}],
+                }
+            return {
+                "id": "resp_retry_card",
+                "model": "gpt-test",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "title": "Retry Test",
+                                        "hypothesis": "H",
+                                        "rationale": "R",
+                                        "required_data": [],
+                                        "proposed_test": "T",
+                                        "confounders": [],
+                                        "next_steps": [],
+                                        "caveats": [],
+                                        "source_backed_claims": [],
+                                        "inferred_claims": [],
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    provider = CaptureOpenAIProvider()
+
+    result = provider.generate_research_card(
+        request=CopilotResearchCardRequest(domain="macro"),
+        context=CopilotContextBundle(domain="macro", current_tab="macro", summary_data={}),
+        tool_specs=[],
+        execute_tool=lambda *_args: None,
+    )
+
+    assert result.status == "ready"
+    assert result.card is not None
+    assert result.card.title == "Retry Test"
+    assert result.response_id == "resp_retry_card"
+    assert len(provider.payloads) == 2
+    assert "tools" not in provider.payloads[1]
+    assert "tool_choice" not in provider.payloads[1]
+    assert provider.payloads[1]["prompt_cache_key"].endswith(":structured-retry")
+    retry_text = provider.payloads[1]["input"][-1]["content"][0]["text"]
+    assert "OpenAI returned no structured research card." in retry_text
+
+
+def test_openai_provider_preserves_reasoning_items_when_response_storage_is_disabled():
     class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
         def __init__(self):
             super().__init__(
@@ -4090,15 +4818,11 @@ def test_openai_provider_omits_reasoning_items_when_response_storage_is_disabled
     assert result.status == "ready"
     assert len(provider.payloads) == 2
     second_input = provider.payloads[1]["input"]
-    assert not any(item.get("type") == "reasoning" for item in second_input)
+    reasoning = next(item for item in second_input if item.get("type") == "reasoning")
+    assert reasoning["id"] == "rs_not_persisted"
     function_call = next(item for item in second_input if item.get("type") == "function_call")
-    assert function_call == {
-        "type": "function_call",
-        "call_id": "call_123",
-        "name": "get_macro_workspace_drilldown",
-        "arguments": "{}",
-    }
-    assert "id" not in function_call
+    assert function_call["id"] == "fc_not_persisted"
+    assert function_call["call_id"] == "call_123"
 
 
 def test_runtime_enables_openai_response_storage_by_default(tmp_path, monkeypatch):
@@ -4115,5 +4839,76 @@ def test_runtime_enables_openai_response_storage_by_default(tmp_path, monkeypatc
     try:
         assert isinstance(runtime.copilot_service.provider, OpenAIResponsesCopilotProvider)
         assert runtime.copilot_service.provider.store_responses is True
+    finally:
+        runtime.shutdown()
+
+
+def test_sitrep_copilot_context_bundles_sections_warnings_and_follow_ups(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        created = client.post(
+            "/sitrep/follow-ups",
+            json={
+                "row_id": "evt-cpi",
+                "title": "CPI release",
+                "source": "Event",
+                "note": "Watch the front end",
+            },
+        )
+        assert created.status_code == 200
+
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "sitrep",
+                "prompt": "Summarize the situation report.",
+                "context": {"current_tab": "sitrep", "workspace_mode": "research"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ready"
+        assert payload["domain"] == "sitrep"
+        source_ids = {source["source_id"] for source in payload["sources"]}
+        assert "sitrep.workspace" in source_ids
+        assert "sitrep.news" in source_ids
+        assert "sitrep.follow_ups" in source_ids
+    finally:
+        runtime.shutdown()
+
+
+def test_sitrep_copilot_context_builder_summary_shape(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    try:
+        bundle = runtime.copilot_service._build_context_for_domain(
+            "sitrep", CopilotRequestContext(current_tab="sitrep", workspace_mode="research")
+        )
+        assert bundle.domain == "sitrep"
+        summary = bundle.summary_data
+        assert set(summary["sections_loaded"]) == {
+            "equities",
+            "indices",
+            "macro",
+            "commodities",
+            "prediction_markets",
+            "news",
+        }
+        assert summary["equities"]["universe_id"] == "broad_us_market"
+        assert summary["indices"]["universe_id"] == "global_indices"
+        assert summary["macro"]["region"] == "US"
+        assert summary["news"]["items"]
+        assert isinstance(summary["follow_ups"], list)
+        assert summary["section_warnings"] == []
     finally:
         runtime.shutdown()

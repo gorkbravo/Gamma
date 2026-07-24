@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Dict, List, Protocol, Tuple
+import logging
+import time
+from typing import Dict, List, Protocol, Sequence, Tuple
 
 import pandas as pd
 from ib_insync import Contract
@@ -29,6 +31,10 @@ from src.services.research_market_data import (
 )
 from src.services.research_cache import ResearchHistoryCache
 from src.utils.time import now_utc
+
+
+logger = logging.getLogger(__name__)
+SLOW_PROVIDER_REQUEST_SECONDS = 2.0
 
 
 def contract_for_position(position: PositionItem) -> Contract:
@@ -459,6 +465,7 @@ class ResearchDataProvider:
                 transformation_note="Loaded from Gamma's in-memory research history cache.",
             )
 
+        stale_cached = self.history_cache.get(cache_key, lookback_days)
         result = self._fetch_from_history_providers(resolved, lookback_days, provider_policy=provider_policy)
         if result.series is not None and not result.series.empty:
             clean_series = result.series.astype(float)
@@ -467,7 +474,180 @@ class ResearchDataProvider:
             self._history_metadata[cache_key] = stored
             self._last_history_sources[resolved.instrument_id or resolved.normalized_symbol()] = stored
             return replace(result, series=clean_series)
+        if stale_cached is not None and not stale_cached.empty:
+            metadata = self._history_metadata.get(cache_key)
+            warnings = list(dict.fromkeys([
+                *result.warnings,
+                "Live provider refresh failed; Gamma is preserving stale cached history instead of blanking usable data."
+            ]))
+            fallback = replace(
+                metadata,
+                series=stale_cached.astype(float),
+                freshness_label=FreshnessLabel.STALE,
+                warnings=warnings,
+            ) if metadata is not None else ResearchHistoryResult(
+                series=stale_cached.astype(float),
+                source_provider="research_cache",
+                source_label="Stale research history cache",
+                origin="research_cache.memory.stale_fallback",
+                freshness_label=FreshnessLabel.STALE,
+                warnings=warnings,
+                transformation_note="Preserved the most recent usable history after configured providers failed."
+            )
+            self._last_history_warnings.extend(warnings)
+            self._last_history_sources[resolved.instrument_id or resolved.normalized_symbol()] = replace(fallback, series=None)
+            return fallback
         return result
+
+    def load_instrument_history_results(
+        self,
+        instruments: Sequence[InstrumentReference],
+        lookback_days: int,
+        *,
+        defaults: InstrumentDefaults | None = None,
+        provider_policy: str | None = None,
+        bypass_cache: bool = False,
+        max_age_seconds: int | float | None = None,
+    ) -> dict[str, ResearchHistoryResult]:
+        """Load a universe efficiently while preserving provider order and provenance.
+
+        Providers with a native batch API (currently yfinance) receive all unresolved
+        symbols together. IBKR and other providers remain serialized through their
+        existing throttled request path, which is required for TWS safety.
+        """
+        resolved_defaults = defaults or self.instrument_defaults
+        resolved = [instrument.with_defaults(resolved_defaults) for instrument in instruments]
+        results: dict[str, ResearchHistoryResult] = {}
+        pending: dict[str, tuple[InstrumentReference, str]] = {}
+        warnings_by_symbol: dict[str, list[str]] = {}
+        stale_by_symbol: dict[str, pd.Series] = {}
+
+        for instrument in resolved:
+            symbol = instrument.normalized_symbol()
+            cache_key = self._history_cache_key(instrument, resolved_defaults, provider_policy=provider_policy)
+            if not symbol or not cache_key:
+                results[symbol] = ResearchHistoryResult.unavailable(
+                    source_provider="unavailable",
+                    source_label="Unavailable history source",
+                    origin="research_data_provider.load_instrument_history_results",
+                    warning="Instrument history key is empty",
+                )
+                continue
+            cached = None if bypass_cache else self.history_cache.get(
+                cache_key,
+                lookback_days,
+                max_age_seconds=max_age_seconds,
+            )
+            if cached is not None and not cached.empty:
+                metadata = self._history_metadata.get(cache_key)
+                if metadata is None:
+                    metadata = ResearchHistoryResult(
+                        series=None,
+                        source_provider="research_cache",
+                        source_label="Research history cache",
+                        origin="research_cache.memory",
+                        freshness_label=FreshnessLabel.HISTORICAL,
+                        transformation_note="Loaded from Gamma's in-memory research history cache.",
+                    )
+                results[symbol] = replace(metadata, series=cached.astype(float), warnings=[])
+                continue
+            pending[symbol] = (instrument, cache_key)
+            warnings_by_symbol[symbol] = []
+            stale_cached = self.history_cache.get(cache_key, lookback_days)
+            if stale_cached is not None and not stale_cached.empty:
+                stale_by_symbol[symbol] = stale_cached
+
+        for provider in self._history_providers_for_policy(provider_policy):
+            if not pending:
+                break
+            batch_loader = getattr(provider, "load_histories", None)
+            batch_results: dict[str, ResearchHistoryResult]
+            batch_size = len(pending)
+            started = time.perf_counter()
+            if callable(batch_loader) and batch_size > 1:
+                batch_results = batch_loader([row[0] for row in pending.values()], lookback_days)
+            else:
+                # This intentionally stays serial for TWS/IBKR providers.
+                batch_results = {
+                    symbol: provider.load_history(instrument, lookback_days)
+                    for symbol, (instrument, _cache_key) in pending.items()
+                }
+            duration = time.perf_counter() - started
+            provider_id = str(getattr(provider, "provider_id", "unknown"))
+            log = logger.warning if duration >= SLOW_PROVIDER_REQUEST_SECONDS else logger.info
+            log(
+                "Research overview provider batch provider=%s size=%d duration_ms=%.1f policy=%s",
+                provider_id,
+                batch_size,
+                duration * 1000.0,
+                provider_policy or "default",
+            )
+
+            completed: list[str] = []
+            for symbol, (instrument, cache_key) in pending.items():
+                result = batch_results.get(symbol)
+                if result is None:
+                    result = ResearchHistoryResult.unavailable(
+                        source_provider=str(getattr(provider, "provider_id", "unavailable")),
+                        source_label=str(getattr(provider, "source_label", "Unavailable history source")),
+                        origin="research_data_provider.batch_provider",
+                        warning=f"Batch provider returned no row for {symbol}",
+                    )
+                warnings_by_symbol[symbol].extend(result.warnings)
+                if result.series is None or result.series.empty:
+                    continue
+                combined = replace(
+                    result,
+                    series=result.series.astype(float),
+                    warnings=list(dict.fromkeys(warnings_by_symbol[symbol])),
+                )
+                self.history_cache.set(cache_key, combined.series, lookback_days)
+                stored = replace(combined, series=None)
+                self._history_metadata[cache_key] = stored
+                self._last_history_sources[instrument.instrument_id or symbol] = stored
+                self._last_history_warnings.extend(combined.warnings)
+                results[symbol] = combined
+                completed.append(symbol)
+            for symbol in completed:
+                pending.pop(symbol, None)
+
+        for symbol, (instrument, _cache_key) in pending.items():
+            warnings = warnings_by_symbol[symbol]
+            stale_cached = stale_by_symbol.get(symbol)
+            if stale_cached is not None and not stale_cached.empty:
+                warnings.append(
+                    "Live provider refresh failed; Gamma is preserving stale cached history instead of blanking usable data."
+                )
+                metadata = self._history_metadata.get(_cache_key)
+                fallback = replace(
+                    metadata,
+                    series=stale_cached.astype(float),
+                    freshness_label=FreshnessLabel.STALE,
+                    warnings=list(dict.fromkeys(warnings)),
+                ) if metadata is not None else ResearchHistoryResult(
+                    series=stale_cached.astype(float),
+                    source_provider="research_cache",
+                    source_label="Stale research history cache",
+                    origin="research_cache.memory.stale_fallback",
+                    freshness_label=FreshnessLabel.STALE,
+                    warnings=list(dict.fromkeys(warnings)),
+                    transformation_note="Preserved the most recent usable history after configured providers failed.",
+                )
+                self._last_history_warnings.extend(fallback.warnings)
+                self._last_history_sources[instrument.instrument_id or symbol] = replace(fallback, series=None)
+                results[symbol] = fallback
+                continue
+            warnings.append(f"No configured history provider returned usable data for {instrument.normalized_display_symbol()}.")
+            self._last_history_warnings.extend(warnings)
+            results[symbol] = ResearchHistoryResult(
+                series=None,
+                source_provider="unavailable",
+                source_label="Unavailable history source",
+                origin="research_data_provider.provider_chain.batch",
+                freshness_label=FreshnessLabel.UNAVAILABLE,
+                warnings=list(dict.fromkeys(warnings)),
+            )
+        return results
 
     def drain_history_warnings(self) -> list[str]:
         warnings = list(dict.fromkeys(self._last_history_warnings))

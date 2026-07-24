@@ -37,6 +37,7 @@ import type {
   SystemStatus
 } from "../api/types";
 import {
+  clearFrontendQueryCache,
   analyzeStrategyLab,
   acceptResolvedStrategyLabHandoff,
   copilotCards,
@@ -53,7 +54,9 @@ import {
   cryptoWorkspace,
   diagnostics,
   fundamentalsSearch,
+  fundamentalsLoadWarnings,
   fundamentalsSearchState,
+  ivError,
   ivSession,
   ivSurface,
   lastError,
@@ -91,6 +94,15 @@ import {
   predictionMarketRelated,
   predictionMarketScreener,
   predictionMarketWallet,
+  loadSitrepWorkspace,
+  loadSitrepFollowUps,
+  toggleSitrepFollowUpItem,
+  updateSitrepFollowUpItem,
+  dismissSitrepFollowUpItem,
+  sitrepFollowUps,
+  sitrepWorkspaceMeta,
+  sitrepIndicesOverview,
+  commoditiesWorkspace,
   researchOverview,
   researchCompareResult,
   researchResult,
@@ -119,9 +131,11 @@ import {
 describe("app store orchestration", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    clearFrontendQueryCache();
     systemStatus.set(null);
     diagnostics.set(null);
     providerUsage.set(null);
+    ivError.set("");
     portfolioSnapshot.set(null);
     portfolioHistory.set(null);
     portfolioPerformance.set(null);
@@ -137,6 +151,7 @@ describe("app store orchestration", () => {
     selectedCryptoTokenId.set(null);
     selectedFundamentalsTicker.set(null);
     fundamentalsSearch.set(null);
+    fundamentalsLoadWarnings.set([]);
     fundamentalsSearchState.set({
       query: "",
       loading: false,
@@ -281,7 +296,7 @@ describe("app store orchestration", () => {
     expect(get(fundamentalsSearch)?.results).toEqual([]);
   });
 
-  it("selects the first fundamentals result for an explicit search", async () => {
+  it("selects an exact ticker fundamentals result for an explicit search", async () => {
     const searchResponse: FundamentalsSearchResponse = {
       results: [
         {
@@ -313,6 +328,56 @@ describe("app store orchestration", () => {
       expect.stringContaining("/fundamentals/MSFT/reverse-valuation"),
       expect.any(Object)
     );
+  });
+
+  it("does not auto-select a fuzzy SEC result for a non-company focus", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok({
+      results: [{
+        ticker: "XEL",
+        name: "Xcel Energy Inc.",
+        cik: "0000072903",
+        exchange: "Nasdaq",
+        source_provider: "sec",
+        retrieved_at: "2026-07-13T00:00:00Z",
+        origin: "fixture",
+        transformation_note: null
+      }]
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadFundamentalsSearch({ query: "XLE" });
+
+    expect(get(selectedFundamentalsTicker)).toBeNull();
+    expect(get(fundamentalsSearch)?.results[0]?.ticker).toBe("XEL");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps fulfilled fundamentals sections and reports degraded section loads", async () => {
+    const searchResponse: FundamentalsSearchResponse = {
+      results: [{
+        ticker: "MSFT",
+        name: "Microsoft Corporation",
+        cik: "0000789019",
+        exchange: "Nasdaq",
+        source_provider: "sec",
+        retrieved_at: "2026-07-13T00:00:00Z",
+        origin: "fixture",
+        transformation_note: null
+      }]
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/fundamentals/search")) return ok(searchResponse);
+      if (url.includes("/financials")) return notFound({ detail: "quarterly facts unavailable" });
+      return ok({ warnings: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadFundamentalsSearch({ query: "MSFT" });
+
+    expect(get(selectedFundamentalsTicker)).toBe("MSFT");
+    expect(get(fundamentalsLoadWarnings)).toEqual([
+      expect.stringContaining("Financials unavailable")
+    ]);
   });
 
   it("loads snapshot, history, and shared performance together", async () => {
@@ -986,14 +1051,15 @@ describe("app store orchestration", () => {
     expect(get(savedResearchItems).some((saved) => saved.id === "saved-1")).toBe(false);
   });
 
-  it("clears saved research items when the saved endpoint is unavailable", async () => {
-    savedResearchItems.set([makeSavedResearchItem("stale-saved")]);
+  it("preserves saved research items when the saved endpoint is temporarily unavailable", async () => {
+    const staleSavedItem = makeSavedResearchItem("stale-saved");
+    savedResearchItems.set([staleSavedItem]);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(notFound({ detail: "Not Found" })));
 
     const items = await loadSavedResearch();
 
-    expect(items).toEqual([]);
-    expect(get(savedResearchItems)).toEqual([]);
+    expect(items).toEqual([staleSavedItem]);
+    expect(get(savedResearchItems)).toEqual([staleSavedItem]);
     expect(get(lastError)).toContain("404");
   });
 
@@ -1592,12 +1658,50 @@ describe("app store orchestration", () => {
       }
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(session)));
+    ivError.set("No market data entitlement for XLE.");
 
     await loadIvSession();
 
     expect(get(ivSession)?.running).toBe(false);
     expect(get(ivSurface)?.symbol).toBe("AAPL");
     expect(get(ivSurface)?.points).toBe(3);
+    expect(get(ivError)).toBe("No market data entitlement for XLE.");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a failed surface-load reason visible across an idle status poll", async () => {
+    ivSurface.set(makeIvSurface({ symbol: "SPY", points: 3 }));
+    const unavailable = {
+      ...makeIvSurface({ symbol: "XLE" }),
+      snapshot_available: false,
+      spot: null,
+      expiries: [],
+      strikes: [],
+      iv_grid: [],
+      points: 0,
+      warnings: ["No market data entitlement for XLE."],
+    };
+    const idle: IvSessionStatus = {
+      running: false,
+      status_text: "Idle",
+      active_symbol: null,
+      market_data_mode: "delayed",
+      messages: [],
+      surface: unavailable,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(unavailable))
+      .mockResolvedValueOnce(ok(idle));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadIvSurface({ symbol: "XLE", depthPreset: "max" });
+    await loadIvSession();
+
+    expect(get(ivSurface)?.symbol).toBe("SPY");
+    expect(get(ivError)).toBe("No market data entitlement for XLE.");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/iv/surface?symbol=XLE");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/iv/session");
   });
 
   it("queues, resolves, accepts, and dismisses Strategy Lab handoffs", async () => {
@@ -1760,8 +1864,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("macro", "resp_macro_2", "Macro Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("macro", "Map the active macro setup.");
@@ -1784,8 +1888,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("macro", "resp_macro_2", "Macro Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("macro", "Map the active macro setup.");
@@ -1838,7 +1942,8 @@ describe("app store orchestration", () => {
     strategyLabResult.set(makeStrategyLabResult());
     strategyLabComposition.set(composition as any);
     const enrichedFingerprint = previewCopilotThreadFingerprint("research", { workspaceMode: "research" });
-    const fetchMock = vi.fn().mockResolvedValueOnce(ok(makeCopilotResult("research", "resp_research_1", "Research Card")));
+    const researchCard = makeCopilotResult("research", "resp_research_1", "Research Card");
+    const fetchMock = vi.fn().mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(researchCard, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("research", "Assess the current Strategy Lab setup.", {
@@ -1929,7 +2034,8 @@ describe("app store orchestration", () => {
     };
     enqueueStrategyLabHandoff(handoff);
     const pendingFingerprint = previewCopilotThreadFingerprint("strategy_lab", { workspaceMode: "research" });
-    const pendingFetch = vi.fn().mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_pending", "Pending Strategy Card")));
+    const pendingCard = makeCopilotResult("strategy_lab", "resp_strategy_pending", "Pending Strategy Card");
+    const pendingFetch = vi.fn().mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(pendingCard, init)));
     vi.stubGlobal("fetch", pendingFetch);
 
     await loadCopilotResearchCard("strategy_lab", "Explain pending handoff state.", {
@@ -1945,7 +2051,10 @@ describe("app store orchestration", () => {
     const resolvedFetch = vi
       .fn()
       .mockResolvedValueOnce(ok(resolved))
-      .mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_resolved", "Resolved Strategy Card")));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(
+        makeCopilotResult("strategy_lab", "resp_strategy_resolved", "Resolved Strategy Card"),
+        init
+      )));
     vi.stubGlobal("fetch", resolvedFetch);
 
     await resolvePendingStrategyLabHandoffs();
@@ -1970,8 +2079,14 @@ describe("app store orchestration", () => {
     strategyLabResult.set(makeStrategyLabResult());
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(makeCopilotResult("equity_research", "resp_equity_1", "Equity Card")))
-      .mockResolvedValueOnce(ok(makeCopilotResult("strategy_lab", "resp_strategy_1", "Strategy Card")));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(
+        makeCopilotResult("equity_research", "resp_equity_1", "Equity Card"),
+        init
+      )))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(
+        makeCopilotResult("strategy_lab", "resp_strategy_1", "Strategy Card"),
+        init
+      )));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("equity_research", "Assess the active equity scope.", {
@@ -1994,7 +2109,7 @@ describe("app store orchestration", () => {
   });
 
   it("adds a visible copilot error turn when generation fails before a response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("Failed to fetch")));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Failed to fetch")));
 
     const result = await loadCopilotResearchCard("macro", "Map the active macro setup.");
 
@@ -2005,6 +2120,67 @@ describe("app store orchestration", () => {
     expect(get(copilotThreads).macro.entries).toHaveLength(1);
     expect(get(copilotThreads).macro.entries[0]?.prompt).toBe("Map the active macro setup.");
     expect(get(copilotThreads).macro.entries[0]?.result.message).toContain("Failed to fetch");
+  });
+
+  it("resumes a disconnected copilot stream from the last accepted sequence", async () => {
+    const result = makeCopilotResult("macro", "resp_reconnected", "Reconnected Card");
+    let runId = "";
+    const encoder = new TextEncoder();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce((_url, init) => {
+        const payload = JSON.parse(String(init?.body ?? "{}")) as { run_id: string };
+        runId = payload.run_id;
+        const partial = [
+          JSON.stringify({
+            run_id: runId,
+            sequence: 0,
+            event: "run.created",
+            timestamp: "2026-03-01T00:00:00Z",
+            data: { domain: "macro", provider: "mock" },
+            result: null
+          }),
+          JSON.stringify({
+            run_id: runId,
+            sequence: 1,
+            event: "text.delta",
+            timestamp: "2026-03-01T00:00:01Z",
+            data: { delta: "partial" },
+            result: null
+          })
+        ].join("\n") + "\n";
+        let sent = false;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(encoder.encode(partial));
+              return;
+            }
+            controller.error(new Error("connection dropped"));
+          }
+        });
+        return Promise.resolve(new Response(body, { status: 200 }));
+      })
+      .mockImplementationOnce(() => Promise.resolve(new Response(
+        JSON.stringify({
+          run_id: runId,
+          sequence: 2,
+          event: "completed",
+          timestamp: "2026-03-01T00:00:02Z",
+          data: { status: "ready" },
+          result
+        }) + "\n",
+        { status: 200, headers: { "content-type": "application/x-ndjson" } }
+      )));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const settled = await loadCopilotResearchCard("macro", "Reconnect this run.");
+
+    expect(settled?.response_id).toBe("resp_reconnected");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(`/copilot/runs/${runId}/events?after_sequence=1`);
+    expect(get(copilotThreads).macro.entries).toHaveLength(1);
   });
 
   it("threads previous_response_id through synthesis follow-ups when the grounding scope is unchanged", async () => {
@@ -2042,8 +2218,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("synthesis", "resp_synthesis_2", "Synthesis Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("synthesis", "Connect the loaded portfolio and macro context.", {
@@ -2087,8 +2263,8 @@ describe("app store orchestration", () => {
     const secondResult = makeCopilotResult("synthesis", "resp_synthesis_2", "Synthesis Thread 2");
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(ok(firstResult))
-      .mockResolvedValueOnce(ok(secondResult));
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(firstResult, init)))
+      .mockImplementationOnce((_url, init) => Promise.resolve(copilotStreamOk(secondResult, init)));
     vi.stubGlobal("fetch", fetchMock);
 
     await loadCopilotResearchCard("synthesis", "Connect the loaded portfolio and macro context.", {
@@ -2111,11 +2287,234 @@ describe("app store orchestration", () => {
     expect(get(copilotThreads).synthesis.entries).toHaveLength(1);
     expect(get(copilotThreads).synthesis.entries[0]?.result.response_id).toBe("resp_synthesis_2");
   });
+
+  it("fans a /sitrep/workspace payload out into the per-domain stores", async () => {
+    researchOverview.set(null);
+    sitrepIndicesOverview.set(null);
+    macroSnapshot.set(null);
+    commoditiesWorkspace.set(null);
+    predictionMarketScreener.set(null);
+    newsFeed.set(null);
+    const workspace = {
+      equities_overview: null,
+      indices_overview: null,
+      macro_snapshot: makeMacroSnapshot(),
+      commodities: null,
+      prediction_markets: { markets: [], venues: [], warnings: [] },
+      news: {
+        items: [],
+        source_provider: "sample_news",
+        retrieved_at: "2026-07-12T18:00:00Z",
+        origin: "test",
+        freshness_label: "mocked",
+        warnings: [],
+        transformation_note: null
+      },
+      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
+      section_warnings: ["SITREP section 'commodities' failed to load: boom"],
+      source_provider: "gamma_sitrep",
+      retrieved_at: "2026-07-12T18:00:00Z",
+      origin: "sitrep_service.workspace",
+      transformation_note: null
+    };
+    const fetchMock = vi.fn().mockResolvedValue(ok(workspace));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadSitrepWorkspace();
+
+    expect(result?.source_provider).toBe("gamma_sitrep");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/sitrep/workspace");
+    expect(get(macroSnapshot)).not.toBeNull();
+    expect(get(newsFeed)?.source_provider).toBe("sample_news");
+    expect(get(predictionMarketScreener)).not.toBeNull();
+    expect(get(researchOverview)).toBeNull();
+    expect(get(sitrepIndicesOverview)).toBeNull();
+    expect(get(commoditiesWorkspace)).toBeNull();
+    expect(get(sitrepWorkspaceMeta)).toEqual({
+      retrieved_at: "2026-07-12T18:00:00Z",
+      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
+      section_warnings: ["SITREP section 'commodities' failed to load: boom"]
+    });
+  });
+});
+
+describe("sitrep follow-ups store", () => {
+  function makeLocalStorageStub(initial: Record<string, string> = {}) {
+    const backing = new Map(Object.entries(initial));
+    return {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => void backing.set(key, value),
+      removeItem: (key: string) => void backing.delete(key),
+      clear: () => backing.clear(),
+      key: (index: number) => [...backing.keys()][index] ?? null,
+      get length() {
+        return backing.size;
+      },
+      _backing: backing
+    };
+  }
+
+  const backendFollowUp = {
+    id: "uuid-1",
+    row_id: "evt-cpi",
+    title: "CPI release",
+    source: "Event",
+    tone: "warning",
+    detail: "Inflation / US",
+    meta: "in 3d",
+    note: "",
+    status: "open",
+    handoff: { targetTab: "macro", targetMode: "events_regimes" },
+    saved_at: "2026-07-12T00:00:00Z",
+    updated_at: "2026-07-12T00:00:00Z",
+    resolved_at: null
+  };
+
+  beforeEach(() => {
+    sitrepFollowUps.set([]);
+  });
+
+  it("migrates legacy localStorage follow-ups into the backend before listing", async () => {
+    const storage = makeLocalStorageStub({
+      "gamma.sitrep.follow_ups.v1": JSON.stringify([
+        {
+          id: "evt-cpi",
+          source: "Event",
+          tone: "warning",
+          title: "CPI release",
+          detail: "Inflation / US",
+          meta: "in 3d",
+          handoff: { targetTab: "macro", targetMode: "events_regimes" },
+          saved_at: "2026-07-12T00:00:00Z"
+        }
+      ])
+    });
+    vi.stubGlobal("localStorage", storage);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(ok(backendFollowUp))
+      .mockResolvedValueOnce(ok({ items: [backendFollowUp] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const items = await loadSitrepFollowUps();
+
+    expect(items).toHaveLength(1);
+    expect(get(sitrepFollowUps)[0]?.row_id).toBe("evt-cpi");
+    const createCall = fetchMock.mock.calls[0];
+    expect(String(createCall?.[0])).toContain("/sitrep/follow-ups");
+    expect(createCall?.[1]?.method).toBe("POST");
+    const createBody = JSON.parse(String(createCall?.[1]?.body ?? "{}"));
+    expect(createBody.row_id).toBe("evt-cpi");
+    expect(createBody.saved_at).toBe("2026-07-12T00:00:00Z");
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1")).toBeNull();
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1.migrated")).not.toBeNull();
+  });
+
+  it("keeps the legacy localStorage payload when migration fails", async () => {
+    const legacyRaw = JSON.stringify([{ id: "evt-cpi", title: "CPI release" }]);
+    const storage = makeLocalStorageStub({ "gamma.sitrep.follow_ups.v1": legacyRaw });
+    vi.stubGlobal("localStorage", storage);
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("backend down"))
+      .mockResolvedValueOnce(ok({ items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadSitrepFollowUps();
+
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1")).toBe(legacyRaw);
+    expect(storage.getItem("gamma.sitrep.follow_ups.v1.migrated")).toBeNull();
+  });
+
+  it("toggles a follow-up on and off through the backend endpoints", async () => {
+    vi.stubGlobal("localStorage", makeLocalStorageStub());
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(backendFollowUp));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const created = await toggleSitrepFollowUpItem({
+      id: "evt-cpi",
+      source: "Event",
+      tone: "warning",
+      title: "CPI release",
+      detail: "Inflation / US",
+      meta: "in 3d",
+      handoff: { targetTab: "macro", targetMode: "events_regimes" }
+    });
+
+    expect(created?.id).toBe("uuid-1");
+    expect(get(sitrepFollowUps)).toHaveLength(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+
+    fetchMock.mockResolvedValueOnce(ok({ success: true }));
+    const removed = await toggleSitrepFollowUpItem({
+      id: "evt-cpi",
+      source: "Event",
+      tone: "warning",
+      title: "CPI release",
+      detail: "Inflation / US",
+      meta: "in 3d",
+      handoff: null
+    });
+
+    expect(removed).toBeNull();
+    expect(get(sitrepFollowUps)).toHaveLength(0);
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("DELETE");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/sitrep/follow-ups/uuid-1");
+  });
+
+  it("updates note and resolved state in place", async () => {
+    vi.stubGlobal("localStorage", makeLocalStorageStub());
+    sitrepFollowUps.set([backendFollowUp as never]);
+    const resolved = { ...backendFollowUp, status: "resolved", note: "watch 2s10s", resolved_at: "2026-07-13T00:00:00Z" };
+    const fetchMock = vi.fn().mockResolvedValueOnce(ok(resolved));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const updated = await updateSitrepFollowUpItem("uuid-1", { note: "watch 2s10s", status: "resolved" });
+
+    expect(updated?.status).toBe("resolved");
+    expect(get(sitrepFollowUps)[0]?.note).toBe("watch 2s10s");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PATCH");
+
+    fetchMock.mockResolvedValueOnce(ok({ success: true }));
+    const dismissed = await dismissSitrepFollowUpItem("uuid-1");
+    expect(dismissed).toBe(true);
+    expect(get(sitrepFollowUps)).toHaveLength(0);
+  });
+
+  it("grounds a SITREP research card once the workspace is loaded", async () => {
+    sitrepWorkspaceMeta.set(null);
+    const blocked = await loadCopilotResearchCard("sitrep", "Summarize the situation report.", {
+      workspaceMode: "research"
+    });
+    expect(blocked?.status).toBe("error");
+    expect(blocked?.message).toContain("Load the SITREP workspace");
+
+    sitrepWorkspaceMeta.set({
+      retrieved_at: "2026-07-13T09:00:00Z",
+      sections: ["equities", "indices", "macro", "commodities", "prediction_markets", "news"],
+      section_warnings: []
+    });
+    const sitrepCard = makeCopilotResult("sitrep", "resp_sitrep_1", "SITREP card");
+    const fetchMock = vi.fn().mockImplementation((_url, init) => Promise.resolve(copilotStreamOk(sitrepCard, init)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadCopilotResearchCard("sitrep", "Summarize the situation report.", {
+      workspaceMode: "research"
+    });
+
+    expect(result?.status).toBe("ready");
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(body.domain).toBe("sitrep");
+    expect(body.context.current_tab).toBe("sitrep");
+    expect(get(copilotThreads).sitrep.entries).toHaveLength(1);
+  });
 });
 
 function emptyCopilotCards() {
   return {
     portfolio: null,
+    sitrep: null,
     research: null,
     equity_research: null,
     strategy_lab: null,
@@ -2133,6 +2532,7 @@ function emptyCopilotCards() {
 function emptyCopilotThreads() {
   return {
     portfolio: { domain: "portfolio" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
+    sitrep: { domain: "sitrep" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     research: { domain: "research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     equity_research: { domain: "equity_research" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
     strategy_lab: { domain: "strategy_lab" as const, contextFingerprint: null, latestResponseId: null, entries: [] },
@@ -2504,6 +2904,34 @@ function ok(body: unknown) {
   };
 }
 
+function copilotStreamOk(result: CopilotResearchCardResult, init: RequestInit | undefined) {
+  const payload = JSON.parse(String(init?.body ?? "{}")) as { run_id?: string };
+  const runId = payload.run_id ?? "run_test";
+  const timestamp = "2026-03-01T00:00:00Z";
+  const body = [
+    JSON.stringify({
+      run_id: runId,
+      sequence: 0,
+      event: "run.created",
+      timestamp,
+      data: { domain: result.domain, provider: result.provider, model: result.model },
+      result: null
+    }),
+    JSON.stringify({
+      run_id: runId,
+      sequence: 1,
+      event: "completed",
+      timestamp,
+      data: { status: result.status },
+      result
+    })
+  ].join("\n") + "\n";
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "application/x-ndjson" }
+  });
+}
+
 function notFound(body: unknown) {
   return {
     ok: false,
@@ -2642,6 +3070,7 @@ function makeCryptoToken(tokenId: string): CryptoToken {
 function makeCopilotResult(
   domain:
     | "portfolio"
+    | "sitrep"
     | "research"
     | "equity_research"
     | "strategy_lab"

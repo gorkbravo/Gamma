@@ -831,6 +831,12 @@ class IbkrCommoditiesDataProvider:
             curve_priced_nodes = sum(1 for node in curve.nodes if node.price is not None)
             priced_nodes += curve_priced_nodes
             if curve_priced_nodes >= 2:
+                history = None
+                if self.history_days > 0 and curve.nodes and contracts:
+                    history = self._fetch_front_history(config, contracts[0][0], retrieved_at)
+                    if history.points:
+                        history_by_id[config.instrument_id] = history
+                curve = self._attach_dated_prior_reference(curve, history)
                 curve_by_id[config.instrument_id] = curve
                 ibkr_curve_ids.append(config.instrument_id)
                 self._append_curve_snapshot(curve)
@@ -841,11 +847,6 @@ class IbkrCommoditiesDataProvider:
                 warnings.append(
                     f"IBKR curve for {config.label} had fewer than two priced nodes; keeping fallback curve."
                 )
-
-            if self.history_days > 0 and curve.nodes and contracts:
-                history = self._fetch_front_history(config, contracts[0][0], retrieved_at)
-                if history.points:
-                    history_by_id[config.instrument_id] = history
 
         history_by_id = self._ensure_ibkr_daily_references(
             reference.instruments,
@@ -1231,6 +1232,69 @@ class IbkrCommoditiesDataProvider:
             transformation_note="Gamma maps IBKR front-contract futures bars into the normalized commodity price-history model.",
         )
 
+    @staticmethod
+    def _attach_dated_prior_reference(
+        curve: CommodityCurveSnapshot,
+        history: CommodityPriceHistory | None,
+    ) -> CommodityCurveSnapshot:
+        if (
+            curve.source_provider != "ibkr"
+            or history is None
+            or history.source_provider != "ibkr"
+            or not history.points
+        ):
+            return curve
+        front_index = next(
+            (
+                index
+                for index, node in enumerate(curve.nodes)
+                if node.contract.is_front_month and _valid_positive(node.price)
+            ),
+            None,
+        )
+        if front_index is None:
+            front_index = next(
+                (index for index, node in enumerate(curve.nodes) if _valid_positive(node.price)),
+                None,
+            )
+        if front_index is None:
+            return curve
+        prior_points = [
+            point
+            for point in sorted(history.points, key=lambda item: item.timestamp)
+            if (
+                point.source_provider == "ibkr"
+                and _valid_positive(point.value)
+                and point.timestamp.date() < curve.as_of.date()
+            )
+        ]
+        if not prior_points:
+            return curve
+        prior = prior_points[-1]
+        front = curve.nodes[front_index]
+        if front.price is None:
+            return curve
+        change = float(front.price) - float(prior.value)
+        nodes = list(curve.nodes)
+        nodes[front_index] = replace(
+            front,
+            previous_price=round(float(prior.value), 6),
+            change=round(change, 6),
+            transformation_note=(
+                f"{front.transformation_note or ''} Gamma paired this exact provider-backed quote with "
+                "the dated prior IBKR front-contract close returned by the same fresh request."
+            ).strip(),
+        )
+        return replace(
+            curve,
+            nodes=nodes,
+            previous_as_of=prior.timestamp,
+            transformation_note=(
+                f"{curve.transformation_note or ''} The front quote and dated prior close were cached "
+                "as one coherent provider-backed headline-change context."
+            ).strip(),
+        )
+
     def _curve_history_key(self, instrument_id: str) -> str:
         if self.cache is None:
             return ""
@@ -1250,10 +1314,12 @@ class IbkrCommoditiesDataProvider:
             return
         history = self._load_curve_history(curve.instrument_id)
         curve_date = curve.as_of.date().isoformat()
+        headline_quote_context = self._headline_quote_context(curve)
         entry = {
             "date": curve_date,
             "as_of": curve.as_of.isoformat(),
             "instrument_id": curve.instrument_id,
+            "headline_quote_context": headline_quote_context,
             "nodes": [
                 {
                     "contract_id": node.contract.contract_id,
@@ -1271,6 +1337,45 @@ class IbkrCommoditiesDataProvider:
         deduped.append(entry)
         deduped = sorted(deduped, key=lambda row: str(row.get("date") or ""))[-400:]
         self.cache.set_json(self._curve_history_key(curve.instrument_id), deduped)
+
+    @staticmethod
+    def _headline_quote_context(curve: CommodityCurveSnapshot) -> dict[str, Any] | None:
+        front = next(
+            (
+                node
+                for node in curve.nodes
+                if node.contract.is_front_month and _valid_positive(node.price)
+            ),
+            None,
+        )
+        if front is None:
+            front = next((node for node in curve.nodes if _valid_positive(node.price)), None)
+        if (
+            curve.source_provider != "ibkr"
+            or front is None
+            or front.source_provider != "ibkr"
+            or not _valid_positive(front.previous_price)
+            or curve.previous_as_of is None
+            or curve.previous_as_of.date() >= curve.as_of.date()
+        ):
+            return None
+        expected_change = float(front.price) - float(front.previous_price)
+        if front.change is None or not math.isclose(
+            float(front.change),
+            expected_change,
+            rel_tol=1e-9,
+            abs_tol=1e-6,
+        ):
+            return None
+        return {
+            "current_contract_id": front.contract.contract_id,
+            "current_price": float(front.price),
+            "current_source_provider": "ibkr",
+            "current_source_timestamp": curve.as_of.isoformat(),
+            "prior_value": float(front.previous_price),
+            "prior_source_provider": "ibkr",
+            "prior_source_timestamp": curve.previous_as_of.isoformat(),
+        }
 
     def _cached_curve_snapshot(
         self,
@@ -1333,18 +1438,75 @@ class IbkrCommoditiesDataProvider:
             return None
         if len([node for node in nodes if node.price is not None]) < max(1, int(min_nodes or 1)):
             return None
+        previous_as_of = None
+        context = latest.get("headline_quote_context")
+        if isinstance(context, dict):
+            current_contract_id = str(context.get("current_contract_id") or "").strip()
+            current_price = _float_value(context.get("current_price"))
+            current_timestamp = _parse_datetime(context.get("current_source_timestamp"))
+            prior_value = _float_value(context.get("prior_value"))
+            prior_timestamp = _parse_datetime(context.get("prior_source_timestamp"))
+            front_index = next(
+                (
+                    index
+                    for index, node in enumerate(nodes)
+                    if node.contract.contract_id == current_contract_id and node.contract.is_front_month
+                ),
+                None,
+            )
+            coherent = (
+                context.get("current_source_provider") == "ibkr"
+                and context.get("prior_source_provider") == "ibkr"
+                and current_timestamp == as_of
+                and prior_timestamp is not None
+                and prior_timestamp.date() < as_of.date()
+                and current_price is not None
+                and prior_value is not None
+                and front_index is not None
+                and nodes[front_index].price is not None
+                and math.isclose(
+                    float(nodes[front_index].price),
+                    float(current_price),
+                    rel_tol=1e-12,
+                    abs_tol=1e-9,
+                )
+                and _valid_positive(prior_value)
+            )
+            if coherent and front_index is not None:
+                front = nodes[front_index]
+                change = float(front.price) - float(prior_value)
+                nodes[front_index] = replace(
+                    front,
+                    previous_price=round(float(prior_value), 6),
+                    change=round(change, 6),
+                    transformation_note=(
+                        f"{front.transformation_note or ''} The original dated IBKR prior-close "
+                        "reference was restored with the exact cached quote."
+                    ).strip(),
+                )
+                previous_as_of = prior_timestamp
         return CommodityCurveSnapshot(
             instrument_id=instrument_id,
             as_of=as_of,
             nodes=nodes,
+            previous_as_of=previous_as_of,
             warnings=[
-                "Cached IBKR curve snapshot; refresh or select the commodity to request fresh live/delayed IBKR nodes."
+                (
+                    "Cached IBKR curve snapshot with the original provider-backed quote and dated prior-close reference."
+                    if previous_as_of is not None
+                    else "Cached IBKR curve snapshot; refresh or select the commodity to request fresh live/delayed IBKR nodes."
+                )
             ],
             source_provider="ibkr_cached",
             retrieved_at=retrieved_at,
             origin="ibkr.commodities.curve_history_cache",
             transformation_note=(
-                "Gamma reused a locally cached IBKR futures curve snapshot to avoid repeated contract discovery and quote requests."
+                "Gamma reused a locally cached IBKR futures curve snapshot to avoid repeated contract discovery and quote requests. "
+                + (
+                    "The exact current quote and dated provider-backed prior close were restored as one coherent record."
+                    if previous_as_of is not None
+                    else "No coherent provider-backed prior-close pair was present, so headline change remains unavailable."
+                )
             ),
         )
 

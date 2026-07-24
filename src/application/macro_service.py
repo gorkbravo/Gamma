@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+import logging
 import re
 from typing import Any
 
@@ -41,6 +42,9 @@ from src.services.macro_adapters import (
     USMacroEventsAdapter,
 )
 from src.utils.time import now_utc
+
+
+logger = logging.getLogger(__name__)
 
 
 SERIES_REGISTRY: dict[str, dict[str, Any]] = {
@@ -831,13 +835,19 @@ class MacroService:
         comparison_region = self._normalize_comparison(region, request.comparison_region)
         warnings = self._snapshot_warnings(region=region, requested_comparison=request.comparison_region, comparison_region=comparison_region)
         data_region = self._data_region(region)
-        histories = self._load_histories(self._snapshot_series_ids(data_region, theme), timeframe=timeframe, force_refresh=request.force_refresh)
+        histories = self._load_histories(
+            self._snapshot_series_ids(data_region, theme),
+            timeframe=timeframe,
+            force_refresh=request.force_refresh,
+            warnings=warnings,
+        )
         comparison_histories = self._load_comparison_histories(
             region=data_region,
             comparison_region=comparison_region,
             series_ids=list(histories),
             timeframe=timeframe,
             force_refresh=request.force_refresh,
+            warnings=warnings,
         )
         events = self.get_events(region=region, force_refresh=request.force_refresh)
         linked_markets = self._build_linked_prediction_market_map(
@@ -1438,10 +1448,36 @@ class MacroService:
             transformation_note="Event-reaction signals rank which curated proxies are leading, confirming, or lagging around a scheduled catalyst.",
         ), window_context
 
-    def _load_histories(self, series_ids: list[str], *, timeframe: str, force_refresh: bool) -> dict[str, MacroSeriesHistory]:
+    def _load_histories(
+        self,
+        series_ids: list[str],
+        *,
+        timeframe: str,
+        force_refresh: bool,
+        warnings: list[str] | None = None,
+    ) -> dict[str, MacroSeriesHistory]:
         rows: dict[str, MacroSeriesHistory] = {}
         for series_id in series_ids:
-            history = self._load_history(series_id, timeframe=timeframe, force_refresh=force_refresh)
+            try:
+                history = self._load_history(series_id, timeframe=timeframe, force_refresh=force_refresh)
+            except Exception as exc:
+                provider_label, provider_reference = self._series_provider_reference(series_id)
+                logger.warning(
+                    "Macro series load failed: series=%s provider=%s provider_reference=%s error_type=%s",
+                    series_id,
+                    provider_label,
+                    provider_reference,
+                    type(exc).__name__,
+                )
+                if warnings is not None:
+                    warning = self._series_load_warning(
+                        series_id,
+                        provider_label=provider_label,
+                        provider_reference=provider_reference,
+                    )
+                    if warning not in warnings:
+                        warnings.append(warning)
+                continue
             if history is not None:
                 rows[series_id] = history
         return rows
@@ -1454,6 +1490,7 @@ class MacroService:
         series_ids: list[str],
         timeframe: str,
         force_refresh: bool,
+        warnings: list[str] | None = None,
     ) -> dict[str, MacroSeriesHistory]:
         if comparison_region is None:
             return {}
@@ -1464,7 +1501,46 @@ class MacroService:
                 counterpart_ids.append(counterpart)
         if not counterpart_ids:
             return {}
-        return self._load_histories(counterpart_ids, timeframe=timeframe, force_refresh=force_refresh)
+        return self._load_histories(
+            counterpart_ids,
+            timeframe=timeframe,
+            force_refresh=force_refresh,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _series_provider_reference(series_id: str) -> tuple[str, str]:
+        meta = SERIES_REGISTRY.get(series_id, {})
+        if meta.get("kind") == "fx":
+            base_currency = str(meta.get("base_currency") or "").strip().upper()
+            quote_currency = str(meta.get("quote_currency") or "").strip().upper()
+            pair = "/".join(part for part in (base_currency, quote_currency) if part)
+            return "IBKR", pair or series_id
+        provider_ids = [
+            str(meta.get(key) or "").strip()
+            for key in ("provider_series_id", "left_provider_series_id", "right_provider_series_id")
+        ]
+        references = [provider_id for provider_id in provider_ids if provider_id]
+        return "FRED", " + ".join(references) or series_id
+
+    def _series_load_warning(
+        self,
+        series_id: str,
+        *,
+        provider_label: str,
+        provider_reference: str,
+    ) -> str:
+        meta = SERIES_REGISTRY.get(series_id, {})
+        title = str(meta.get("title") or series_id)
+        warning = (
+            f"{title} could not be loaded from {provider_label} ({provider_reference}). "
+            "Gamma skipped that series and kept the remaining Macro snapshot."
+        )
+        if provider_label == "FRED":
+            client = getattr(self.fred_adapter, "client", None)
+            if client is not None and not getattr(client, "api_key", None):
+                return f"{warning} Configure FRED_API_KEY if uncached FRED requests are unavailable."
+        return f"{warning} Retry refresh or inspect provider diagnostics if the series is required."
 
     def _load_history(self, series_id: str, *, timeframe: str, force_refresh: bool) -> MacroSeriesHistory | None:
         meta = SERIES_REGISTRY.get(series_id)

@@ -109,13 +109,139 @@ describe("CopilotResearchCard", () => {
     expect(body).toContain("Research Agent");
     expect(body).toContain("Research Operator");
     expect(body).toContain("Context");
+    expect(body).toContain('aria-haspopup="listbox"');
+    expect(body).toContain("Portfolio, Macro");
+    expect(body).not.toContain('class="scope-chip');
     expect(body).toContain("Portfolio");
     expect(body).toContain("Macro");
-    // Fingerprint and warning details are surfaced via the chip tooltip.
-    expect(body).toContain("FP a1b2c3d4");
-    expect(body).toContain("1 warning");
+    // Detailed fingerprint and warning metadata moves into the collapsed dropdown.
+    expect(body).not.toContain("FP a1b2c3d4");
     expect(body).toContain("Grounded Research");
     expect(body).toContain("Ask a follow-up grounded in this context scope...");
+  });
+
+  it("renders backend error results with grounding metadata when no card is returned", () => {
+    const { body } = render(CopilotResearchCard, {
+      props: {
+        open: true,
+        available: true,
+        contextLabel: "Context | Equity Research + Macro",
+        domainLabel: "Copilot Context",
+        guidance: "Grounded only in selected Gamma contexts.",
+        placeholder: "Synthesize the setup.",
+        loading: false,
+        selectedScopeDomains: ["equity_research", "macro"],
+        scopeOptions: [
+          {
+            tabId: "strategy_lab",
+            domain: "strategy_lab",
+            label: "Strategy Lab",
+            contextLabel: "Run a Strategy Lab import, composition, comparison, or queue a current Strategy Lab handoff before including it in a synthesis card.",
+            fingerprintLabel: "UNAVAILABLE",
+            freshnessLabel: null,
+            warningLabel: "Context required",
+            supported: false,
+            disabledReason:
+              "Run a Strategy Lab import, composition, comparison, or queue a current Strategy Lab handoff before including it in a synthesis card."
+          }
+        ],
+        thread: {
+          domain: "synthesis",
+          contextFingerprint: "synthesis:equity+macro",
+          latestResponseId: null,
+          entries: [
+            {
+              entryId: "synthesis-error-1",
+              turnIndex: 1,
+              prompt: "Connect the loaded context.",
+              continuedFromResponseId: null,
+              result: {
+                domain: "synthesis",
+                current_tab: "copilot",
+                status: "error",
+                provider: "openai_responses",
+                model: "gpt-5.5",
+                response_id: "resp_error",
+                message: "OpenAI returned no structured research card.",
+                card: null,
+                sources: [
+                  {
+                    source_id: "macro.snapshot",
+                    label: "Macro Snapshot",
+                    kind: "workspace",
+                    provider: "gamma",
+                    origin: "gamma.macro",
+                    description: null,
+                    retrieved_at: null
+                  }
+                ],
+                tool_traces: [
+                  {
+                    tool_name: "get_synthesis_scope_summary",
+                    summary: "Loaded synthesis scope.",
+                    arguments: {},
+                    source_ids: ["macro.snapshot"]
+                  }
+                ],
+                operator_events: [],
+                warnings: []
+              }
+            }
+          ]
+        },
+        onGenerate: vi.fn(),
+        onClose: vi.fn(),
+        onToggleScope: vi.fn()
+      }
+    });
+
+    expect(body).toContain("OpenAI returned no structured research card.");
+    expect(body).toContain("openai_responses");
+    expect(body).toContain("gpt-5.5");
+    expect(body).toContain("Sources (1)");
+    expect(body).toContain("Tools (1)");
+    expect(body).toContain("macro.snapshot");
+    expect(body).toContain("Select context");
+  });
+
+  it("renders distinct domains that share one source tab without duplicate keys", () => {
+    const { body } = render(CopilotResearchCard, {
+      props: {
+        open: true,
+        available: true,
+        selectedScopeDomains: ["research", "equity_research"],
+        scopeOptions: [
+          {
+            tabId: "equity_research",
+            domain: "research",
+            label: "Research Result",
+            contextLabel: "SPY result",
+            fingerprintLabel: "FP result",
+            freshnessLabel: null,
+            warningLabel: null,
+            supported: true,
+            disabledReason: null
+          },
+          {
+            tabId: "equity_research",
+            domain: "equity_research",
+            label: "Equity Research",
+            contextLabel: "SPY overview",
+            fingerprintLabel: "FP overview",
+            freshnessLabel: null,
+            warningLabel: null,
+            supported: true,
+            disabledReason: null
+          }
+        ],
+        onGenerate: vi.fn(),
+        onClose: vi.fn(),
+        onToggleScope: vi.fn()
+      }
+    });
+
+    expect(body).toContain("Research Result");
+    expect(body).toContain("Equity Research");
   });
 });
 

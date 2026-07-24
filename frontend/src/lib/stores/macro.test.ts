@@ -7,6 +7,7 @@ import type {
   MacroSnapshot
 } from "../api/types";
 import {
+  clearFrontendQueryCache,
   lastError,
   loadMacroSeriesHistory,
   loadMacroWorkspace,
@@ -21,6 +22,7 @@ import {
 describe("macro store orchestration", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    clearFrontendQueryCache();
     macroContext.set({
       mode: "snapshot",
       region: "US",
@@ -98,7 +100,7 @@ describe("macro store orchestration", () => {
     const snapshotPayloads = snapshotBodies(fetchMock);
     const firstSnapshotPayload = snapshotPayloads[0] ?? {};
     const secondSnapshotPayload = snapshotPayloads[1] ?? {};
-    const thirdSnapshotPayload = snapshotPayloads[2] ?? {};
+    expect(snapshotPayloads).toHaveLength(2);
     expect(firstSnapshotPayload).toMatchObject({
       region: "Global",
       timeframe: "6M",
@@ -106,12 +108,6 @@ describe("macro store orchestration", () => {
       comparison_region: null
     });
     expect(secondSnapshotPayload).toMatchObject({
-      region: "Global",
-      timeframe: "6M",
-      theme: "inflation",
-      comparison_region: null
-    });
-    expect(thirdSnapshotPayload).toMatchObject({
       region: "Global",
       timeframe: "6M",
       theme: "inflation",
@@ -178,14 +174,8 @@ describe("macro store orchestration", () => {
 
     const snapshotPayloads = snapshotBodies(fetchMock);
     const firstSnapshotPayload = snapshotPayloads[0] ?? {};
-    const secondSnapshotPayload = snapshotPayloads[1] ?? {};
+    expect(snapshotPayloads).toHaveLength(1);
     expect(firstSnapshotPayload).toMatchObject({
-      region: "EU",
-      timeframe: "1Y",
-      theme: "policy",
-      comparison_region: "US"
-    });
-    expect(secondSnapshotPayload).toMatchObject({
       region: "EU",
       timeframe: "1Y",
       theme: "policy",

@@ -22,6 +22,7 @@ from src.models.copilot import (
     ResearchClaim,
     new_copilot_id,
 )
+from src.services.copilot_evidence import resolve_result_evidence
 from src.utils.time import now_utc
 
 
@@ -95,6 +96,7 @@ class CopilotStore:
         result: CopilotResearchCardResult,
     ) -> tuple[CopilotSession, CopilotContextSnapshot, CopilotTurn]:
         now = now_utc()
+        result = resolve_result_evidence(result)
         safe_session_id = self._safe_id(session_id) or new_copilot_id("session")
         with self._lock:
             session = self._load_session_path(self.sessions_dir / f"{safe_session_id}.json")

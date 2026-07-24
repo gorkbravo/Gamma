@@ -93,6 +93,44 @@ describe("FundamentalsView", () => {
     expect(body).toMatch(/sens-heat-neg-strong[^"]*">\$100\.00<\/td>/);
     expect(body).toMatch(/sens-heat-neg[^"]*">\$400\.00<\/td>/);
     expect(body).not.toMatch(/sens-heat-pos[^"]*">\$400\.00<\/td>/);
+    expect(body).toContain("Implied terminal EV / FCF");
+    expect(body).toContain("PV terminal share of EV");
+    expect(body).toContain("not a second valuation method");
+  });
+
+  it("explains when a focused instrument has no SEC company profile", () => {
+    const { body } = render(FundamentalsView, {
+      props: {
+        focusedTicker: "XLE",
+        search: { results: [{ ticker: "XEL", name: "Xcel Energy" }] },
+        selectedTicker: null,
+        overview: null,
+        financials: null,
+        dcfModel: null,
+        peers: null,
+        reverseValuation: null,
+        reference: null,
+        dcfSnapshots: null,
+        searchState: {
+          query: "XLE",
+          loading: false,
+          refreshing: false,
+          stale: false,
+          error: null,
+          requestedAt: null,
+          completedAt: "2026-07-13T00:00:00Z"
+        },
+        onSearch: vi.fn(),
+        onSelectCompany: vi.fn(),
+        onSavePeerBasket: vi.fn(),
+        onSaveDcfModel: vi.fn(),
+        onSaveDcfSnapshot: vi.fn(),
+        onLoadDcfSnapshot: vi.fn()
+      }
+    });
+
+    expect(body).toContain("XLE has no matching SEC company profile");
+    expect(body).toContain("ETFs, funds, and unsupported non-US issuers");
   });
 });
 

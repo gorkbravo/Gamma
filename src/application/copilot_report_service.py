@@ -151,16 +151,17 @@ class CopilotReportService:
     def _source_backed_claims(turns: list[CopilotTurn], sources: list[CopilotSourceRef]) -> list[ResearchClaim]:
         claims: list[ResearchClaim] = []
         seen: set[tuple[str, tuple[str, ...]]] = set()
+        known_source_ids = {source.source_id for source in sources}
         for turn in turns:
             card = turn.result.card
             if card is None:
                 continue
             for claim in card.source_backed_claims:
-                refs = tuple(claim.evidence_refs)
+                refs = tuple(dict.fromkeys(ref for ref in claim.evidence_refs if ref in known_source_ids))
                 key = (claim.claim, refs)
-                if claim.claim and key not in seen:
+                if claim.claim and refs and key not in seen:
                     seen.add(key)
-                    claims.append(claim)
+                    claims.append(ResearchClaim(claim=claim.claim, evidence_refs=list(refs)))
         if not claims and sources:
             claims.append(
                 ResearchClaim(
@@ -177,9 +178,15 @@ class CopilotReportService:
             card = turn.result.card
             if card is None:
                 continue
+            known_source_ids = {source.source_id for source in turn.result.sources}
             if card.hypothesis:
                 claims.append(f"{turn.domain}: {card.hypothesis}")
             claims.extend(card.inferred_claims)
+            claims.extend(
+                claim.claim
+                for claim in card.source_backed_claims
+                if not any(ref in known_source_ids for ref in claim.evidence_refs)
+            )
         return list(dict.fromkeys(item for item in claims if item))
 
     @staticmethod

@@ -227,7 +227,29 @@ describe("risk workspace view-model", () => {
       source_scope: "research_book",
       source_label: "Strategy Lab book: JETS / XLE",
       source_object_id: "strategy_research_book:jets-xle",
-      source_origin: "research_service.strategy_lab.portfolio_compose"
+      source_origin: "research_service.strategy_lab.portfolio_compose",
+      contributions: [
+        {
+          symbol: "XOM",
+          instrument_id: "leg:xom",
+          display_symbol: "XOM",
+          weight: 0.6,
+          daily_vol: 0.01,
+          variance_contribution_pct: 0.7,
+          marginal_contribution_to_risk: 0.01,
+          component_var: 700
+        },
+        {
+          symbol: "AMD",
+          instrument_id: "leg:amd",
+          display_symbol: "AMD",
+          weight: -0.4,
+          daily_vol: 0.02,
+          variance_contribution_pct: 0.3,
+          marginal_contribution_to_risk: -0.01,
+          component_var: 300
+        }
+      ]
     }, {
       sourceScope: "research_book",
       sourceLabel: "Strategy Lab book: JETS / XLE",
@@ -238,6 +260,10 @@ describe("risk workspace view-model", () => {
     expect(model.context.sourceScope).toBe("research_book");
     expect(model.context.sourceLabel).toBe("Strategy Lab book: JETS / XLE");
     expect(model.provenance.join(" ")).toContain("Strategy Lab validated aggregate return stream");
+    expect(model.riskContributors.map((row) => row.symbol)).toEqual(["XOM", "AMD"]);
+    expect(model.holdings).toEqual([]);
+    expect(model.largestMovers).toEqual([]);
+    expect(model.concentrationFlags).toEqual([]);
   });
 
   it("keeps optimization output as diagnostics-only candidate allocations", () => {

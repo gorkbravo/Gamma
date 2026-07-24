@@ -11,7 +11,7 @@ def test_agents_sdk_operator_env_defaults_are_feature_flagged_gpt55(monkeypatch)
     monkeypatch.delenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", raising=False)
     monkeypatch.delenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL", raising=False)
     monkeypatch.delenv("GAMMA_COPILOT_OPERATOR_AGENTS_REASONING_EFFORT", raising=False)
-    monkeypatch.setenv("GAMMA_COPILOT_MODEL", "gpt-5.4")
+    monkeypatch.setenv("GAMMA_COPILOT_MODEL", "gpt-5.5")
     monkeypatch.setenv("GAMMA_COPILOT_REASONING_EFFORT", "medium")
 
     config = CopilotAgentsOperatorConfig.from_env()

@@ -484,6 +484,49 @@ def test_strategy_lab_resolves_equity_research_handoff_to_draft_leg(tmp_path):
     assert any("read-only Strategy Lab analysis" in warning for warning in result.warnings)
 
 
+def test_strategy_lab_resolves_fundamentals_company_with_scenario_context(tmp_path):
+    service = ResearchService(StubListedHistoryProvider(), saved_store=SavedResearchStore(tmp_path / "research"))
+
+    result = service.resolve_strategy_lab_handoff(
+        StrategyLabHandoffResolveRequest(
+            handoff=StrategyLabHandoffEnvelope(
+                source_tab="fundamentals",
+                source_mode="dcf",
+                intended_target_tab="strategy_lab",
+                intended_target_mode="composer",
+                selected_entity=CrossTabHandoffEntity(
+                    entity_type="equity_symbol",
+                    label="Microsoft (MSFT)",
+                    normalized_id="MSFT",
+                    provider_id="MSFT",
+                    native_id="0000789019",
+                    metadata={
+                        "symbol": "MSFT",
+                        "active_dcf_scenario": {"scenario_id": "base", "implied_value_per_share": 510.0},
+                        "peer_tickers": ["AAPL", "GOOGL"],
+                    },
+                ),
+                resolver_capability="return_leg",
+                asset_class="equity",
+                value_kind="return",
+                default_side="long",
+                default_weight=0.1,
+                provider="sec_edgar",
+                normalized_ids={"symbol": "MSFT", "ticker": "MSFT", "cik": "0000789019"},
+                warnings=["DCF scenario is a research assumption, not a recommendation."],
+                timestamp="2026-07-13T00:00:00Z",
+            )
+        )
+    )
+
+    assert result.status == "resolved"
+    assert result.composer_draft_leg is not None
+    assert result.composer_draft_leg.identifier == "MSFT"
+    assert result.envelope.selected_entity.metadata["active_dcf_scenario"]["scenario_id"] == "base"
+    assert "AAPL" in result.envelope.selected_entity.metadata["peer_tickers"]
+    assert any("Fundamentals handoff" in warning for warning in result.warnings)
+
+
 def test_strategy_lab_resolves_commodity_handoff_to_draft_leg(tmp_path):
     service = _service(tmp_path)
     commodities_service = CommoditiesService(provider=SampleCommoditiesDataProvider())
@@ -1085,6 +1128,9 @@ def test_strategy_lab_composes_signed_long_short_weights(tmp_path):
     assert result.alignment_diagnostics["aligned_observation_count"] == 5
     assert result.alignment_diagnostics["legs"][0]["source_provider"] == "strategy_lab"
     assert result.alignment_diagnostics["legs"][1]["normalized_weight"] == pytest.approx(-0.4)
+    assert [leg.label for leg in result.risk_legs] == ["Long Leg", "Short Leg"]
+    assert [leg.weight for leg in result.risk_legs] == pytest.approx([0.6, -0.4])
+    assert all(len(leg.return_points) == 5 for leg in result.risk_legs)
 
 
 def test_strategy_lab_fails_closed_with_alignment_diagnostics_on_thin_overlap(tmp_path):
@@ -1235,6 +1281,8 @@ def test_strategy_lab_composes_duplicate_display_name_legs_without_overwrite(tmp
     assert result.returns.tolist() == pytest.approx([0.02, 0.02, 0.02, 0.02, 0.02])
     assert list(result.leg_contributions.keys()) == ["Same Name", "Same Name (2)"]
     assert len(result.leg_contributions) == 2
+    assert [leg.label for leg in result.risk_legs] == ["Same Name", "Same Name (2)"]
+    assert len({leg.leg_id for leg in result.risk_legs}) == 2
 
 
 def test_strategy_lab_disambiguates_explicit_duplicate_contribution_suffixes(tmp_path):

@@ -23,9 +23,13 @@
     deriveImpliedProbabilitySelection,
     deriveImpliedProbabilitySlice,
     deriveImpliedProbabilitySurface,
+    deriveIvSurfaceAlerts,
+    deriveFittedSmileSamples,
     deriveIvSmile,
     deriveOptionPayoffMatrix,
     deriveOverviewSnapshot,
+    deriveObservedSurfacePoints,
+    deriveObservedTermStructure,
     deriveRealizedVolatility,
     deriveSkewRows,
     deriveStrategyPayoff,
@@ -34,6 +38,7 @@
     deriveSurfaceStats,
     deriveTermCurve,
     deriveTermStructure,
+    hasParametricIvFit,
     nearestStrikeIndex,
     optionsModes,
     selectedExpiryForSurface,
@@ -57,7 +62,7 @@
     type TermCurve,
     type TermCurvePoint,
   } from "../lib/view-models/iv";
-  import Surface3D, { type SurfaceModel } from "../components/Surface3D.svelte";
+  import type { SurfaceModel } from "../components/Surface3D.svelte";
 
   export let mode: OptionsMode = "overview";
   export let status: SystemStatus | null = null;
@@ -95,6 +100,15 @@
     y: 0,
     row: null as ChainRow | null
   };
+  let Surface3DComponent: any = null;
+  let surface3DLoading = false;
+
+  $: if ((mode === "surface" || mode === "distribution") && !Surface3DComponent && !surface3DLoading) {
+    surface3DLoading = true;
+    void import("../components/Surface3D.svelte")
+      .then((module) => { Surface3DComponent = module.default; })
+      .finally(() => { surface3DLoading = false; });
+  }
 
   const fmt = (value: number | null | undefined, digits = 2) =>
     value == null || !Number.isFinite(value)
@@ -151,6 +165,8 @@
   let ivSmile: IvSmile | null = null;
   let hoverSmile: IvSmilePoint | null = null;
   let termCurve: TermCurve | null = null;
+  let hasFittedModel = false;
+  let observedSurfacePoints = deriveObservedSurfacePoints(result);
   let hoverTerm: TermCurvePoint | null = null;
   let hoveredSurface: { row: number; col: number } | null = null;
   let payoffMatrix: OptionPayoffMatrix | null = null;
@@ -180,7 +196,14 @@
   $: overview = deriveOverviewSnapshot(result, activeExpiry);
   $: surfaceStats = deriveSurfaceStats(result);
   $: termStructure = deriveTermStructure(result);
-  $: termCurve = deriveTermCurve(termStructure);
+  $: hasFittedModel = hasParametricIvFit(result);
+  $: observedSurfacePoints = deriveObservedSurfacePoints(result);
+  $: termCurve = deriveTermCurve(
+    termStructure,
+    300,
+    132,
+    hasFittedModel ? deriveObservedTermStructure(result) : []
+  );
   $: skewRows = deriveSkewRows(result);
   $: historySymbol = (result?.symbol ?? requestSymbol).trim().toUpperCase();
   $: optionsHistoryMatches = Boolean(
@@ -214,7 +237,13 @@
   $: strategyPayoff = deriveStrategyPayoff(strategyLegs, result?.spot);
   $: strategyPayoffMatrix = deriveStrategyPayoffMatrix(strategyLegs, chainRows, result?.spot);
   $: strategyGreeks = deriveStrategyGreeks(strategyLegs, result);
-  $: ivSmile = deriveIvSmile(chainRows, overview.atmPair?.strike);
+  $: ivSmile = deriveIvSmile(
+    chainRows,
+    overview.atmPair?.strike,
+    320,
+    150,
+    hasFittedModel ? deriveFittedSmileSamples(result, activeExpiry) : []
+  );
   $: payoffMatrix = deriveOptionPayoffMatrix(chainRows, result?.spot, payoffOptionType);
   $: atmStrikeIndex = nearestStrikeIndex(result);
   $: requestSymbol = symbol.trim().toUpperCase() || result?.symbol?.trim().toUpperCase() || "";
@@ -222,14 +251,15 @@
   $: if (!loading && isSurfaceModel(result?.surface_model) && result?.surface_model !== surfaceModel) {
     surfaceModel = result.surface_model;
   }
-  $: surfaceAlerts = [
-    errorMessage?.trim(),
-    result && !result.snapshot_available ? `No options surface snapshot is available for ${result.symbol}.` : "",
-    ...(result?.warnings ?? []),
-    ...(result?.messages ?? []),
-    session?.status_text?.toLowerCase().startsWith("error") ? session.status_text : "",
-    ...(session?.messages ?? []),
-  ].filter((message): message is string => Boolean(message && message.trim()));
+  $: surfaceAlerts = deriveIvSurfaceAlerts({
+    result,
+    session,
+    status,
+    requestedSymbol: requestSymbol,
+    errorMessage,
+    loading,
+    sessionLoading,
+  });
 
   function normalizedSymbol() {
     return requestSymbol;
@@ -654,6 +684,7 @@
         <article class="panel">
           <h3>
             Front IV Smile
+            {#if ivSmile?.fitPoints.length}<span class="fit-legend"><i></i>Observed <b></b>{result?.surface_model_label ?? "Model fit"}</span>{/if}
             {#if hoverSmile}
               <span class="smile-readout">{fmt(hoverSmile.strike, 0)} · {pct(hoverSmile.iv)}{hoverSmile.isAtm ? " · ATM" : ""}</span>
             {/if}
@@ -673,7 +704,7 @@
                 <path class="smile-area" d={ivSmile.areaPath} />
                 <path class="smile-line" d={ivSmile.linePath} />
                 {#each ivSmile.points as point}
-                  <circle class:atm={point.isAtm} class="smile-dot" cx={point.x} cy={point.y} r={point.isAtm ? 2.6 : 1.6} />
+                  <circle class:atm={point.isAtm} class:observed={ivSmile.fitPoints.length > 0} class="smile-dot" cx={point.x} cy={point.y} r={ivSmile.fitPoints.length ? (point.isAtm ? 3.2 : 2.6) : (point.isAtm ? 2.6 : 1.6)} />
                 {/each}
                 {#if hoverSmile}
                   <line class="smile-guide" x1={hoverSmile.x} y1="10" x2={hoverSmile.x} y2={ivSmile.height - 18} />
@@ -810,10 +841,12 @@
           <div class="panel-head">
             <h3>IV Surface</h3>
           </div>
-          <Surface3D
+          {#if Surface3DComponent}
+          <svelte:component this={Surface3DComponent}
             strikes={result?.strikes ?? []}
             expiries={result?.expiries ?? []}
             grid={result?.iv_grid ?? []}
+            observedPoints={observedSurfacePoints}
             dte={(result?.expiries ?? []).map((expiry) => daysToExpiry(expiry))}
             {atmStrikeIndex}
             {surfaceModel}
@@ -821,6 +854,7 @@
             modelLoading={loading}
             onSurfaceModelChange={chooseSurfaceModel}
           />
+          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
         </article>
 
         <article class="panel table-panel">
@@ -870,6 +904,7 @@
         <article class="panel">
           <h3>
             Term Structure
+            {#if termCurve?.observedPoints.length}<span class="fit-legend"><i></i>Observed <b></b>{result?.surface_model_label ?? "Model fit"}</span>{/if}
             {#if hoverTerm}
               <span class="smile-readout">{hoverTerm.dte}D · {pct(hoverTerm.iv)}</span>
             {/if}
@@ -885,14 +920,14 @@
                 <line class="smile-axis" x1="34" y1={termCurve.height - 20} x2={termCurve.width - 10} y2={termCurve.height - 20} />
                 <path class="smile-area" d={termCurve.areaPath} />
                 <path class="smile-line" d={termCurve.linePath} />
-                {#each termCurve.points as point}
-                  <circle class="smile-dot" cx={point.x} cy={point.y} r="1.8" />
+                {#each termCurve.observedPoints.length ? termCurve.observedPoints : termCurve.points as point}
+                  <circle class:observed={termCurve.observedPoints.length > 0} class="smile-dot" cx={point.x} cy={point.y} r={termCurve.observedPoints.length ? 2.8 : 1.8} />
                 {/each}
                 {#if hoverTerm}
                   <line class="smile-guide" x1={hoverTerm.x} y1="10" x2={hoverTerm.x} y2={termCurve.height - 20} />
                   <circle class="smile-dot hover" cx={hoverTerm.x} cy={hoverTerm.y} r="3.4" />
                 {/if}
-                {#each termCurve.points as point}
+                {#each termCurve.observedPoints.length ? termCurve.observedPoints : termCurve.points as point}
                   <circle
                     class="smile-hit"
                     cx={point.x}
@@ -982,7 +1017,8 @@
           <div class="panel-head">
             <h3>Implied Probability Surface</h3>
           </div>
-          <Surface3D
+          {#if Surface3DComponent}
+          <svelte:component this={Surface3DComponent}
             strikes={probabilitySurface?.strikes ?? []}
             expiries={probabilitySurface?.expiries ?? []}
             grid={probabilitySurface?.densityGrid ?? []}
@@ -996,6 +1032,7 @@
             formatValue={densityPct}
             emptyMessage="Load a max-depth surface to render the implied probability surface."
           />
+          {:else}<div class="chart-empty">LOADING 3D SURFACE...</div>{/if}
         </article>
 
         <article class="panel probability-slice-panel">
@@ -1614,11 +1651,11 @@
   }
 
   .surface-table td.cross {
-    box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--accent) 12%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
   .surface-table td.cell-hi {
-    box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--accent) 26%, transparent);
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
     outline: 1px solid var(--accent);
     outline-offset: -1px;
   }
@@ -1843,6 +1880,12 @@
     fill: var(--chart-primary);
   }
 
+  .smile-dot.observed {
+    fill: var(--text-0);
+    stroke: var(--bg-0);
+    stroke-width: 1.2;
+  }
+
   .smile-dot.atm {
     fill: var(--accent);
   }
@@ -1899,8 +1942,32 @@
   }
 
   .alert-panel {
-    border-color: color-mix(in srgb, var(--warning) 44%, var(--panel-border));
-    background: color-mix(in srgb, var(--warning) 8%, var(--panel-bg));
+    background: var(--panel-bg);
+  }
+
+  .fit-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: var(--space-3);
+    color: var(--text-2);
+    font-family: var(--app-font);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .fit-legend i {
+    width: var(--space-2);
+    height: var(--space-2);
+    background: var(--text-0);
+  }
+
+  .fit-legend b {
+    width: var(--space-5);
+    height: 1px;
+    background: var(--chart-primary);
   }
 
   .alert-panel h3 {

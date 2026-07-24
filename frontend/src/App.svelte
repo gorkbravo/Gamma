@@ -18,6 +18,15 @@
     type NavigationRouteMatch,
   } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
+  import { createRiskHandoffController } from "./lib/risk-handoff";
+  import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
+  import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
+  import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
+  import {
+    loadPersistedWorkspaceState,
+    persistedMode,
+    persistWorkspaceState
+  } from "./lib/shell/workspace-state";
   import {
     activeTab,
     analyzeStrategyLab,
@@ -30,6 +39,7 @@
     diagnostics,
     diagnosticsLog,
     clearPortfolioHistory,
+    cancelIvSessionRequest,
     commoditiesWorkspace,
     activeCopilotSession,
     copilotActionDefinitions,
@@ -48,6 +58,7 @@
     fundamentalsReference,
     fundamentalsReverseValuation,
     fundamentalsSearch,
+    fundamentalsLoadWarnings,
     fundamentalsSearchState,
     cryptoFlowSummary,
     cryptoLiquidity,
@@ -59,6 +70,7 @@
     computeRisk,
     forceAccountSubscribe,
     ivSurface,
+    ivError,
     ivUnderlyingHistory,
     ivSession,
     lastError,
@@ -70,6 +82,13 @@
     loadFundamentalsSearch,
     loadResearchOverview,
     loadSitrepIndicesOverview,
+    loadSitrepWorkspace,
+    loadSitrepFollowUps,
+    toggleSitrepFollowUpItem,
+    updateSitrepFollowUpItem,
+    dismissSitrepFollowUpItem,
+    sitrepFollowUps,
+    sitrepWorkspaceMeta,
     loadSavedResearch,
     macroContext,
     loadMacroSeriesHistory,
@@ -89,6 +108,9 @@
     loadCopilotSession,
     loadCopilotSessions,
     executeCopilotOperatorPlan,
+    streamCopilotResearchCard,
+    cancelCopilotRun,
+    copilotActiveRun,
     macroDivergences,
     macroEvents,
     macroSeriesHistories,
@@ -99,6 +121,7 @@
     portfolioPerformance,
     portfolioSnapshot,
     providerUsage,
+    requestMetrics,
     predictionMarketCalibration,
     predictionMarketDetail,
     predictionMarketHistory,
@@ -201,7 +224,7 @@
   } from "./lib/api/types";
   import type { CryptoMode } from "./lib/view-models/crypto";
   import type { FundamentalsMode } from "./lib/view-models/fundamentals";
-  import type { SitrepHandoffRequest } from "./lib/view-models/sitrep";
+  import type { SitrepHandoffRequest, SitrepWorkspaceMeta } from "./lib/view-models/sitrep";
   import type { OptionsMode } from "./lib/view-models/iv";
   import type { EquityResearchMode, StrategyLabMode } from "./lib/view-models/research";
   import type { RiskMode } from "./lib/risk-workspace";
@@ -232,20 +255,23 @@
     tone: "info" | "warning" | "error" | "action";
   };
 
-  let pollHandle: ReturnType<typeof setInterval> | undefined;
-  let ivPollHandle: ReturnType<typeof setInterval> | undefined;
-  let workspaceMode: WorkspaceMode | null = null;
+  const restoredWorkspaceState = loadPersistedWorkspaceState();
+
+  let systemStatusPoller: AdaptivePoller | null = null;
+  let providerUsagePoller: AdaptivePoller | null = null;
+  let ivSessionPoller: AdaptivePoller | null = null;
+  let workspaceMode: WorkspaceMode | null = restoredWorkspaceState?.workspaceMode ?? null;
   let navigationSearchResetToken = 0;
   let ivRequestedSymbol = "";
   let ivPollingActive = false;
-  let equityResearchMode: EquityResearchMode = "overview";
-  let strategyLabMode: StrategyLabMode = "composer";
-  let cryptoMode: CryptoMode = "overview";
-  let fundamentalsMode: FundamentalsMode = "overview";
-  let commoditiesMode: CommodityMode = "overview";
-  let maritimeMode: MaritimeMode = "live_map";
-  let optionsMode: OptionsMode = "overview";
-  let riskMode: RiskMode = "overview";
+  let equityResearchMode: EquityResearchMode = persistedMode(restoredWorkspaceState, "equity_research", "overview");
+  let strategyLabMode: StrategyLabMode = persistedMode(restoredWorkspaceState, "strategy_lab", "composer");
+  let cryptoMode: CryptoMode = persistedMode(restoredWorkspaceState, "crypto", "overview");
+  let fundamentalsMode: FundamentalsMode = persistedMode(restoredWorkspaceState, "fundamentals", "overview");
+  let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
+  let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
+  let optionsMode: OptionsMode = persistedMode(restoredWorkspaceState, "iv", "overview");
+  let riskMode: RiskMode = persistedMode(restoredWorkspaceState, "risk", "overview");
   let copilotContextTab: TabId = "sitrep";
   let consoleEntries: ConsoleEntry[] = [];
   let diagnosticsOpen = false;
@@ -266,7 +292,12 @@
   let activeViewLoading: TabId | null = null;
   let activeViewLoadError: string | null = null;
   let activeViewLoadSequence = 0;
+  let riskHandoffRunning = false;
   const loadedViewComponents: Partial<Record<TabId, LazyViewComponent>> = {};
+
+  if (restoredWorkspaceState) {
+    activeTab.set(restoredWorkspaceState.activeTab || getWorkspaceHomeTab(restoredWorkspaceState.workspaceMode));
+  }
 
   function normalizeAppTabId(tabId: TabId | "research"): TabId {
     return tabId === "research" ? "equity_research" : tabId;
@@ -287,6 +318,7 @@
     system: $systemStatus,
     portfolio: $portfolioSnapshot,
     portfolioPerformance: $portfolioPerformance,
+    sitrepMeta: $sitrepWorkspaceMeta,
     overview: $researchOverview,
     research: $researchResult,
     strategy: $strategyLabResult,
@@ -355,6 +387,25 @@
     fundamentalsTicker: $selectedFundamentalsTicker,
   });
   $: setRiskWorkspaceMode(riskMode);
+  $: persistWorkspaceState(
+    workspaceMode == null
+      ? null
+      : {
+          workspaceMode,
+          activeTab: isWorkspaceTab(workspaceMode, $activeTab) ? $activeTab : getWorkspaceHomeTab(workspaceMode),
+          modes: {
+            equity_research: equityResearchMode,
+            strategy_lab: strategyLabMode,
+            macro: $macroContext.mode,
+            crypto: cryptoMode,
+            fundamentals: fundamentalsMode,
+            commodities: commoditiesMode,
+            maritime: maritimeMode,
+            iv: optionsMode,
+            risk: riskMode
+          }
+        }
+  );
   $: synthesisCopilotSurface = buildSynthesisCopilotSurface({
     activeTab: $activeTab,
     workspaceMode,
@@ -423,37 +474,11 @@
   }
 
   async function loadSitrepContext(options: { forceRefresh?: boolean } = {}) {
+    // The backend-owned /sitrep/workspace contract composes all six sections
+    // server-side; the store fans them out into the per-domain stores.
     await Promise.allSettled([
-      loadNewsFeed({ limit: 25, forceRefresh: options.forceRefresh }),
-      loadResearchOverview({
-        universeId: "broad_us_market",
-        timeframe: "DoD",
-        benchmarkSymbol: "SPY",
-        forceRefresh: options.forceRefresh
-      }),
-      loadSitrepIndicesOverview({
-        universeId: "global_indices",
-        timeframe: "DoD",
-        benchmarkSymbol: "SPY",
-        forceRefresh: options.forceRefresh
-      }),
-      loadMacroWorkspace({
-        region: "US",
-        timeframe: "3M",
-        theme: "all",
-        mode: "snapshot",
-        forceRefresh: options.forceRefresh
-      }),
-      loadCommoditiesWorkspace({
-        mode: "overview",
-        forceRefresh: options.forceRefresh
-      }),
-      loadPredictionMarketScreener({
-        status: "open",
-        sortBy: "research_rank",
-        limit: 12,
-        forceRefresh: options.forceRefresh
-      })
+      loadSitrepWorkspace({ forceRefresh: options.forceRefresh }),
+      loadSitrepFollowUps(),
     ]);
   }
 
@@ -604,7 +629,7 @@
     unavailableLabel: string;
   }> = [
     { tabId: "portfolio", domain: "portfolio", label: "Portfolio", unavailableLabel: "Load a portfolio snapshot" },
-    { tabId: "sitrep", domain: null, label: "SITREP", unavailableLabel: "SITREP is not a standalone Copilot context" },
+    { tabId: "sitrep", domain: "sitrep", label: "SITREP", unavailableLabel: "Load the SITREP workspace" },
     { tabId: "equity_research", domain: "equity_research", label: "Equity Research", unavailableLabel: "Load Equity Research overview or run Scope Analysis" },
     { tabId: "strategy_lab", domain: "strategy_lab", label: "Strategy Lab", unavailableLabel: "Run a Strategy Lab import, composition, or comparison" },
     { tabId: "macro", domain: "macro", label: "Macro", unavailableLabel: "Load the Macro workspace" },
@@ -629,12 +654,21 @@
     return match?.domain ?? null;
   }
 
+  function describeSitrepCopilotContext(meta: SitrepWorkspaceMeta) {
+    const degraded = meta.section_warnings.length;
+    const sectionLabel = `${meta.sections.length} section${meta.sections.length === 1 ? "" : "s"}`;
+    return degraded
+      ? `SITREP | ${sectionLabel} | ${degraded} degraded`
+      : `SITREP | ${sectionLabel} loaded`;
+  }
+
   function buildSynthesisScopeOptions({
     activeTab,
     workspaceMode,
     system,
     portfolio,
     portfolioPerformance,
+    sitrepMeta,
     overview,
     research,
     strategy,
@@ -657,6 +691,7 @@
     system: SystemStatus | null;
     portfolio: PortfolioSnapshot | null;
     portfolioPerformance: PortfolioPerformanceResponse | null;
+    sitrepMeta: SitrepWorkspaceMeta | null;
     overview: typeof $researchOverview;
     research: ResearchResult | null;
     strategy: typeof $strategyLabResult;
@@ -708,6 +743,17 @@
         formatWarningLabel(
           portfolio.warnings.length + (portfolioPerformance?.warnings.length ?? 0)
         )
+      );
+    }
+
+    if (sitrepMeta) {
+      pushOption(
+        "sitrep",
+        describeSitrepCopilotContext(sitrepMeta),
+        formatShortTimestamp(sitrepMeta.retrieved_at)
+          ? `Workspace ${formatShortTimestamp(sitrepMeta.retrieved_at)}`
+          : null,
+        formatWarningLabel(sitrepMeta.section_warnings.length)
       );
     }
 
@@ -1186,12 +1232,19 @@
     const selectedScopeOptions = scopeOptions.filter((option) =>
       option.domain != null && option.supported && selectedDomains.includes(option.domain)
     );
-    const selectionFingerprint = previewCopilotThreadFingerprint("synthesis", {
+    const resolvedDomain: CopilotDomain =
+      selectedScopeOptions.length === 1
+        ? (selectedScopeOptions[0].domain as CopilotBaseDomain)
+        : "synthesis";
+    const selectionFingerprint = previewCopilotThreadFingerprint(resolvedDomain, {
       workspaceMode,
-      synthesisDomains: selectedScopeOptions.map((option) => option.domain as CopilotBaseDomain),
+      synthesisDomains:
+        resolvedDomain === "synthesis"
+          ? selectedScopeOptions.map((option) => option.domain as CopilotBaseDomain)
+          : undefined,
       activeTabId: activeTab,
     });
-    const storedThread = threads.synthesis;
+    const storedThread = threads[resolvedDomain];
     const scopeChanged =
       storedThread.entries.length > 0 &&
       storedThread.contextFingerprint != null &&
@@ -1218,10 +1271,10 @@
 
     return {
       supported,
-      domain: "synthesis",
+      domain: resolvedDomain,
       triggerLabel: supported ? "Context-grounded Copilot" : "Select context",
       contextLabel: `Context | ${scopeSummary}`,
-      domainLabel: "Copilot Context",
+      domainLabel: selectedScopeOptions.length === 1 ? selectedScopeOptions[0].label : "Copilot Context",
       guidance: supported
         ? "Grounded only in the selected Gamma context tabs. Gamma remains read-only, and Copilot should preserve provenance, warnings, and domain-specific caveats."
         : selectionMessage,
@@ -1236,7 +1289,30 @@
 
   onMount(() => {
     restoreWorkspaceTabOrders();
-    void bootstrapApp();
+    markStartupBegin();
+    void bootstrapApp().finally(() => markStartupUsable(workspaceMode == null ? "landing" : $activeTab));
+    systemStatusPoller = createAdaptivePoller({
+      task: async () => Boolean(await refreshSystemStatus()),
+      baseDelayMs: 15_000,
+      maxDelayMs: 120_000,
+      runImmediately: false
+    });
+    providerUsagePoller = createAdaptivePoller({
+      task: async () => Boolean(await loadProviderUsage()),
+      baseDelayMs: 30_000,
+      maxDelayMs: 180_000,
+      runImmediately: false
+    });
+    ivSessionPoller = createAdaptivePoller({
+      task: async () => {
+        const session = await loadIvSession();
+        return { ok: Boolean(session), nextDelayMs: session?.running ? 1_500 : 10_000 };
+      },
+      baseDelayMs: 1_500,
+      maxDelayMs: 30_000,
+      runImmediately: false
+    });
+    systemStatusPoller.start();
     const handleGlobalKeydown = (event: KeyboardEvent) => {
       void handleAppKeydown(event);
     };
@@ -1244,16 +1320,12 @@
       logger: console,
     });
     window.addEventListener("keydown", handleGlobalKeydown);
-    pollHandle = setInterval(() => {
-      void refreshSystemStatus();
-      void loadProviderUsage();
-    }, 5000);
     return () => {
       uninstallExternalLinkHandler();
       window.removeEventListener("keydown", handleGlobalKeydown);
-      if (pollHandle) {
-        clearInterval(pollHandle);
-      }
+      systemStatusPoller?.stop();
+      providerUsagePoller?.stop();
+      ivSessionPoller?.stop();
       stopIvPolling();
     };
   });
@@ -1272,18 +1344,41 @@
   }
 
   async function bootstrapApp() {
-    const [status] = await Promise.all([
-      refreshSystemStatus(),
-      loadDiagnostics(),
-      loadProviderUsage(),
-      loadCopilotActionDefinitions()
-    ]);
-    if (status?.mock_mode || status?.connection.connected) {
-      await loadPortfolioSnapshot();
-    }
+    const status = await refreshSystemStatus();
+    if (!restoredWorkspaceState) return;
+    await hydrateTab(restoredWorkspaceState.activeTab, status);
   }
 
-  $: {
+  async function hydrateTab(tab: TabId, status: SystemStatus | null = $systemStatus) {
+    await hydrateActiveWorkspace(tab, status, {
+      portfolio: loadPortfolioSnapshot,
+      sitrep: loadSitrepContext,
+      equityResearch: async () => {
+        await Promise.allSettled([loadResearchOverview(), loadSavedResearch()]);
+      },
+      strategyLab: loadSavedResearch,
+      macro: loadMacroWorkspace,
+      commodities: () => loadCommoditiesWorkspace({ mode: commoditiesMode }),
+      predictionMarkets: loadPredictionMarketScreener,
+      crypto: loadCryptoWorkspace,
+      fundamentals: () => loadFundamentalsSearch({ query: $selectedFundamentalsTicker ?? undefined }),
+      maritime: () => loadMaritimeWorkspace({ mode: maritimeMode }),
+      copilot: handleLoadCopilotWorkspaceState,
+      risk: async () => {
+        if (workspaceMode === "portfolio" && (status?.mock_mode || status?.connection.connected)) {
+          await loadPortfolioSnapshot();
+        } else {
+          await applySharedEquityToTab("risk");
+        }
+      },
+      iv: async () => {
+        const autoLoaded = await loadResearchIvContext();
+        if (!autoLoaded) await loadIvSession();
+      }
+    });
+  }
+
+  $: if (ivSessionPoller) {
     const shouldPollIv = workspaceMode != null && $activeTab === "iv";
     if (shouldPollIv && !ivPollingActive) {
       ivPollingActive = true;
@@ -1293,6 +1388,11 @@
       ivPollingActive = false;
       stopIvPolling();
     }
+  }
+
+  $: if (providerUsagePoller) {
+    if (settingsOpen) providerUsagePoller.start();
+    else providerUsagePoller.stop();
   }
 
   $: consoleEntries = (() => {
@@ -1373,14 +1473,7 @@
     copilotOpen = false;
     settingsOpen = false;
     activeTab.set(getWorkspaceHomeTab(mode));
-    const tasks: Array<Promise<unknown>> = [loadDiagnostics(), loadProviderUsage()];
-    if (mode === "portfolio" && ($systemStatus?.mock_mode || $systemStatus?.connection.connected)) {
-      tasks.push(loadPortfolioSnapshot());
-    }
-    if (mode === "research") {
-      tasks.push(loadSitrepContext());
-    }
-    await Promise.allSettled(tasks);
+    await hydrateTab(getWorkspaceHomeTab(mode));
   }
 
   async function switchWorkspace(mode: WorkspaceMode) {
@@ -1403,6 +1496,26 @@
     return $sharedEquitySelection?.symbol.trim().toUpperCase() || null;
   }
 
+  function handoffErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  const riskHandoffController = createRiskHandoffController({
+    getActiveTab: () => $activeTab,
+    getStrategyLabResearchBook: () => $strategyLabResearchBook,
+    getResearchResult: () => $researchResult,
+    setActiveTab: (tab) => activeTab.set(tab),
+    computeRisk,
+    onRunningChange: (running) => {
+      riskHandoffRunning = running;
+    },
+    onError: (error) => {
+      const message = `Risk handoff failed: ${handoffErrorMessage(error)}`;
+      console.error("[Risk handoff]", error);
+      lastError.set(message);
+    }
+  });
+
   function researchResultMatchesSingleEquity(symbol: string) {
     const normalizedSymbol = symbol.trim().toUpperCase();
     return (
@@ -1413,7 +1526,13 @@
     );
   }
 
-  async function ensureSingleEquityResearch(symbol: string) {
+  function sitrepLookbackDays(timeframe: string | null | undefined) {
+    return ({ "1M": 30, "3M": 90, "6M": 180, "1Y": 365, MAX: 1825 } as Record<string, number>)[
+      (timeframe ?? "").trim().toUpperCase()
+    ] ?? $researchDraft.lookbackDays;
+  }
+
+  async function ensureSingleEquityResearch(symbol: string, timeframe?: string | null) {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!normalizedSymbol) {
       return;
@@ -1422,16 +1541,17 @@
       ...$researchDraft,
       scopeType: "single_ticker",
       primarySymbol: normalizedSymbol,
-      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY"
+      benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY",
+      lookbackDays: sitrepLookbackDays(timeframe)
     });
-    if (researchResultMatchesSingleEquity(normalizedSymbol)) {
+    if (researchResultMatchesSingleEquity(normalizedSymbol) && !timeframe) {
       return;
     }
     await runResearch({
       scopeType: "single_ticker",
       primarySymbol: normalizedSymbol,
       benchmarkSymbol: $researchDraft.benchmarkSymbol.trim().toUpperCase() || "SPY",
-      lookbackDays: $researchDraft.lookbackDays
+      lookbackDays: sitrepLookbackDays(timeframe)
     });
   }
 
@@ -1456,11 +1576,12 @@
     }
 
     if (tab === "fundamentals") {
-      await loadFundamentalsSearch({ query: symbol });
-      if ($selectedFundamentalsTicker !== symbol || !$fundamentalsOverview) {
+      const response = await loadFundamentalsSearch({ query: symbol });
+      const exactMatch = response?.results?.some((result) => result.ticker.trim().toUpperCase() === symbol) ?? false;
+      if (exactMatch && ($selectedFundamentalsTicker !== symbol || !$fundamentalsOverview)) {
         await selectFundamentalsCompany(symbol);
       }
-      return true;
+      return exactMatch;
     }
 
     if (tab === "risk") {
@@ -1515,21 +1636,17 @@
       if (!$researchOverview) {
         await loadResearchOverview();
       }
-      if (equityResearchMode === "saved_equity_research") {
-        await loadSavedResearch();
-      }
       if (!$savedResearchItems.length) {
         await loadSavedResearch();
       }
     } else if (nextTab === "strategy_lab") {
-      if (strategyLabMode === "saved_runs") {
-        await loadSavedResearch();
-      }
       if (!$savedResearchItems.length) {
         await loadSavedResearch();
       }
     } else if (nextTab === "macro") {
-      if (!$macroSnapshot) {
+      // A SITREP workspace load fans out the snapshot alone, so check the
+      // divergence/event stores too before skipping the full Macro bundle.
+      if (!$macroSnapshot || !$macroDivergences || !$macroEvents) {
         await loadMacroWorkspace();
       }
     } else if (nextTab === "commodities") {
@@ -1561,33 +1678,7 @@
   }
 
   async function openRiskFromResearch() {
-    if ($activeTab === "strategy_lab" && $strategyLabResearchBook) {
-      const book = $strategyLabResearchBook;
-      activeTab.set("risk");
-      await computeRisk({
-        snapshot: book.snapshot,
-        sourceScope: "research_book",
-        researchBookReturnPoints: book.object.return_points,
-        riskSourceLabel: book.sourceLabel,
-        riskSourceObjectId: book.object.object_id,
-        riskSourceOrigin: String(book.object.provenance.origin ?? "strategy_lab"),
-        alpha: 0.95,
-        lookbackDays: 252,
-        horizonDays: 1,
-        mcHorizonDays: 10,
-        mcSimulationModel: "Gaussian",
-        mcNumSimulations: 2000,
-        betaWindow: 126,
-        benchmarkSymbol: book.benchmarkSymbol || "SPY"
-      });
-      return;
-    }
-    const request = buildRiskRequestFromResearch($researchResult);
-    if (!request) {
-      return;
-    }
-    activeTab.set("risk");
-    await computeRisk(request);
+    await riskHandoffController.open();
   }
 
   async function runResearchFromView(options: Parameters<typeof runResearch>[0]) {
@@ -1611,6 +1702,15 @@
     if (!autoLoaded) {
       await loadIvSession();
     }
+  }
+
+  async function handleLoadIvSurface(options: Parameters<typeof loadIvSurface>[0]) {
+    if (typeof options !== "string") {
+      ivRequestedSymbol = options.symbol.trim().toUpperCase();
+    } else {
+      ivRequestedSymbol = options.trim().toUpperCase();
+    }
+    await loadIvSurface(options);
   }
 
   async function openStrategyLabFromEquityResearch() {
@@ -1774,19 +1874,12 @@
   }
 
   function startIvPolling() {
-    if (ivPollHandle) {
-      return;
-    }
-    ivPollHandle = setInterval(() => {
-      void loadIvSession();
-    }, 1500);
+    ivSessionPoller?.start();
   }
 
   function stopIvPolling() {
-    if (ivPollHandle) {
-      clearInterval(ivPollHandle);
-      ivPollHandle = undefined;
-    }
+    ivSessionPoller?.stop();
+    cancelIvSessionRequest();
   }
 
   function handleToggleSidebar() {
@@ -1880,7 +1973,7 @@
     prompt = "",
     reasoningEffort?: CopilotReasoningEffort
   ) {
-    return loadCopilotResearchCard(domain, prompt, {
+    return streamCopilotResearchCard(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
@@ -1956,6 +2049,15 @@
     sidebarOpen = false;
     settingsOpen = false;
     await handleLoadCopilotWorkspaceState();
+  }
+
+  async function handleFundamentalsRelatedTab(
+    target: "equity_research" | "risk" | "iv",
+    ticker: string,
+    label: string
+  ) {
+    setSharedEquitySelection(ticker, { label, sourceTab: "fundamentals" });
+    await selectTab(target);
   }
 
   async function handleLoadCopilotWorkspaceState() {
@@ -2124,10 +2226,26 @@
     if (targetTab === "equity_research" && handoff.symbol) {
       // An explicit handoff overrides any preserved basket; passive tab returns do not.
       equityResearchMode = "scope_analysis";
-      await ensureSingleEquityResearch(handoff.symbol);
+      await ensureSingleEquityResearch(handoff.symbol, handoff.timeframe);
       if (handoff.targetMode) {
         await selectModeById(targetTab, handoff.targetMode);
       }
+      return;
+    }
+
+    if (targetTab === "equity_research" && handoff.targetMode === "overview") {
+      await loadResearchOverview({ timeframe: handoff.timeframe ?? undefined });
+      await selectModeById(targetTab, "overview");
+      return;
+    }
+
+    if (targetTab === "macro") {
+      await loadMacroWorkspace({
+        mode: (handoff.targetMode ?? "snapshot") as MacroContextState["mode"],
+        region: handoff.region as MacroContextState["region"] | undefined,
+        timeframe: handoff.timeframe as MacroContextState["timeframe"] | undefined,
+        theme: handoff.theme as MacroContextState["theme"] | undefined
+      });
       return;
     }
 
@@ -2308,6 +2426,12 @@
       <StatusRail
         status={$systemStatus}
         providerUsage={$providerUsage}
+        requestMetrics={$requestMetrics}
+        pollingState={{
+          system: true,
+          providerUsage: settingsOpen,
+          iv: ivPollingActive
+        }}
         workspaceMode={workspaceMode}
         busy={$loading.status || $loading.diagnostics || $loading.portfolio || $loading.researchOverview || $loading.macro || $loading.commodities || $loading.prediction || $loading.ivSession}
         settingsOpen={settingsOpen}
@@ -2379,9 +2503,16 @@
             onLoadMacro={loadMacroWorkspace}
             onLoadCommodities={loadCommoditiesWorkspace}
             onLoadPrediction={loadPredictionMarketScreener}
+            onLoadWorkspace={loadSitrepWorkspace}
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
-            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "sitrep")}
+            onSelectEquity={(symbol: string, label?: string | null) => selectSharedEquity(symbol, label, "sitrep")}
             onOpenHandoff={openSitrepHandoff}
+            workspaceMeta={$sitrepWorkspaceMeta}
+            followUps={$sitrepFollowUps}
+            onLoadFollowUps={loadSitrepFollowUps}
+            onToggleFollowUp={toggleSitrepFollowUpItem}
+            onUpdateFollowUp={(id: string, patch: { note?: string; status?: "open" | "resolved" }) => updateSitrepFollowUpItem(id, patch)}
+            onDismissFollowUp={dismissSitrepFollowUpItem}
           />
         {:else if $activeTab === "equity_research"}
           <svelte:component
@@ -2394,19 +2525,17 @@
             savedItems={$savedResearchItems}
             loading={$loading.research}
             overviewLoading={$loading.researchOverview}
-            strategyLoading={$loading.strategyLab}
             compareLoading={$loading.compareScenario}
             savedLoading={$loading.savedResearch}
+            riskHandoffLoading={riskHandoffRunning}
             selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
             onLoadOverview={loadResearchOverview}
             onRun={runResearchFromView}
             onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, $activeTab)}
-            onAnalyzeStrategy={analyzeStrategyLab}
             onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}
             onDeleteSaved={deleteSavedResearchItem}
-            onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
             onOpenIv={openIvFromResearch}
             onOpenStrategyLab={openStrategyLabFromEquityResearch}
@@ -2416,34 +2545,22 @@
           <svelte:component
             this={activeViewComponent}
             bind:mode={strategyLabMode}
-            overview={$researchOverview}
             result={$researchResult}
             strategyResult={$strategyLabResult}
             strategyComposition={$strategyLabComposition}
-            compareResult={$researchCompareResult}
             savedItems={$savedResearchItems}
-            loading={$loading.research}
-            overviewLoading={$loading.researchOverview}
             strategyLoading={$loading.strategyLab}
-            compareLoading={$loading.compareScenario}
             savedLoading={$loading.savedResearch}
-            selectedEquitySymbol={$sharedEquitySelection?.symbol ?? null}
-            onLoadOverview={loadResearchOverview}
-            onRun={runResearchFromView}
-            onSelectEquity={(symbol, label) => selectSharedEquity(symbol, label, "strategy_lab")}
+            riskHandoffLoading={riskHandoffRunning}
             onAnalyzeStrategy={analyzeStrategyLab}
             onComposeStrategy={composeStrategyLab}
             onComposePortfolioStrategy={composeStrategyLabPortfolio}
             onValidatePortfolioStrategy={validateStrategyLabPortfolio}
-            onCompare={compareResearch}
             onLoadSaved={loadSavedResearch}
             onSaveResearch={saveResearchItem}
             onDeleteSaved={deleteSavedResearchItem}
             onRestoreStrategy={restoreStrategyLabResult}
             onOpenRisk={openRiskFromResearch}
-            onOpenIv={openIvFromResearch}
-            onOpenStrategyLab={openStrategyLabFromEquityResearch}
-            onSendToStrategyLab={handleStrategyLabHandoff}
             strategyLabHandoffs={$strategyLabHandoffQueue}
             handoffLoading={$loading.strategyLabHandoff}
             onResolveStrategyLabHandoffs={resolvePendingStrategyLabHandoffs}
@@ -2514,6 +2631,7 @@
             bind:mode={fundamentalsMode}
             search={$fundamentalsSearch}
             selectedTicker={$selectedFundamentalsTicker}
+            focusedTicker={$sharedEquitySelection?.symbol ?? null}
             overview={$fundamentalsOverview}
             financials={$fundamentalsFinancials}
             dcfModel={$fundamentalsDcfModel}
@@ -2523,6 +2641,7 @@
             dcfSnapshots={$fundamentalsDcfSnapshots}
             loading={$loading.fundamentals}
             searchState={$fundamentalsSearchState}
+            loadWarnings={$fundamentalsLoadWarnings}
             saving={$loading.fundamentalsSave}
             onSearch={loadFundamentalsSearch}
             onSelectCompany={selectFundamentalsCompanyFromView}
@@ -2531,6 +2650,8 @@
             onSaveDcfSnapshot={saveFundamentalsDcfSnapshot}
             onLoadDcfSnapshot={loadFundamentalsDcfSnapshot}
             onSendToCopilot={handleSendToCopilot}
+            onSendToStrategyLab={handleStrategyLabHandoff}
+            onOpenRelatedTab={handleFundamentalsRelatedTab}
           />
         {:else if $activeTab === "maritime"}
           <svelte:component
@@ -2552,6 +2673,8 @@
             operatorResult={$copilotOperatorResult}
             latestHandoff={latestCopilotHandoff}
             loading={$loading.copilot}
+            activeRun={$copilotActiveRun}
+            onCancelRun={cancelCopilotRun}
             onGenerate={handleGenerateCopilotWorkspace}
             onPlan={handlePlanCopilotWorkspace}
             onOperatorPlan={handleOperatorPlanCopilotWorkspace}
@@ -2588,8 +2711,8 @@
             researchPrimarySymbol={$researchResult?.primary_symbol ?? null}
             loading={$loading.iv}
             sessionLoading={$loading.ivSession}
-            errorMessage={$lastError}
-            onLoad={loadIvSurface}
+            errorMessage={$ivError}
+            onLoad={handleLoadIvSurface}
             onStopSession={stopIvSession}
             onSendToCopilot={handleSendToCopilot}
             onSendToStrategyLab={handleStrategyLabHandoff}

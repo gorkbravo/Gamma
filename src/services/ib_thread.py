@@ -16,8 +16,31 @@ class _IBTask:
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     done: threading.Event
+    operation: str
     result: Any = None
     error: Exception | None = None
+    started: bool = False
+    cancelled: bool = False
+    caller_timed_out: bool = False
+
+
+class IBThreadBusyError(RuntimeError):
+    """The IB thread is still finishing an operation whose caller timed out."""
+
+    def __init__(self, operation: str) -> None:
+        self.operation = operation
+        self.still_finishing = True
+        super().__init__(f"IB worker busy: still_finishing timed-out operation '{operation}'")
+
+
+class IBTaskTimeoutError(TimeoutError):
+    """A caller deadline expired after the IB task had already started."""
+
+    def __init__(self, operation: str, *, still_finishing: bool) -> None:
+        self.operation = operation
+        self.still_finishing = still_finishing
+        state = "still_finishing" if still_finishing else "cancelled_before_start"
+        super().__init__(f"IB task timed out ({state}): {operation}")
 
 
 class IBThreadRunner:
@@ -29,6 +52,8 @@ class IBThreadRunner:
         self._loop: asyncio.AbstractEventLoop | None = None
         self.ib: IB | None = None
         self.thread_id: int | None = None
+        self._task_lock = threading.RLock()
+        self._active_task: _IBTask | None = None
         self._thread.start()
         self._ready.wait(timeout=ready_timeout)
 
@@ -49,13 +74,24 @@ class IBThreadRunner:
                 if task is None:
                     self._queue.task_done()
                     break
+                with self._task_lock:
+                    if task.cancelled:
+                        task.done.set()
+                        self._queue.task_done()
+                        continue
+                    task.started = True
+                    self._active_task = task
                 try:
                     task.result = task.fn(*task.args, **task.kwargs)
                 except Exception as exc:  # pragma: no cover - surfaced to caller
                     task.error = exc
-                task.done.set()
-                self._queue.task_done()
-                self._pump_events()
+                finally:
+                    task.done.set()
+                    with self._task_lock:
+                        if self._active_task is task:
+                            self._active_task = None
+                    self._queue.task_done()
+                    self._pump_events()
         finally:
             self._stopped.set()
             try:
@@ -92,13 +128,52 @@ class IBThreadRunner:
             raise RuntimeError("IB thread not ready")
         if self.in_thread():
             return fn(*args, **kwargs)
-        task = _IBTask(fn=fn, args=args, kwargs=kwargs, done=threading.Event())
+        with self._task_lock:
+            active = self._active_task
+            if (
+                active is not None
+                and active.caller_timed_out
+                and not active.done.is_set()
+            ):
+                raise IBThreadBusyError(active.operation)
+        operation = str(getattr(fn, "__name__", "") or fn.__class__.__name__ or "ib_operation")
+        task = _IBTask(
+            fn=fn,
+            args=args,
+            kwargs=kwargs,
+            done=threading.Event(),
+            operation=operation,
+        )
         self._queue.put(task)
         if not task.done.wait(timeout):
-            raise TimeoutError("IB task timed out")
+            with self._task_lock:
+                if task.done.is_set():
+                    pass
+                elif task.started:
+                    task.caller_timed_out = True
+                    raise IBTaskTimeoutError(task.operation, still_finishing=True)
+                else:
+                    task.cancelled = True
+                    task.done.set()
+                    raise IBTaskTimeoutError(task.operation, still_finishing=False)
         if task.error is not None:
             raise task.error
         return task.result
+
+    def busy_state(self) -> dict[str, Any]:
+        with self._task_lock:
+            active = self._active_task
+            if active is None or active.done.is_set():
+                return {
+                    "busy": False,
+                    "still_finishing": False,
+                    "operation": None,
+                }
+            return {
+                "busy": True,
+                "still_finishing": bool(active.caller_timed_out),
+                "operation": active.operation,
+            }
 
     def stop(self) -> None:
         if self.thread_id is None:

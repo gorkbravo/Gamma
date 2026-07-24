@@ -54,7 +54,7 @@ Provider adapters, data models, reusable analytics, provenance, cross-tab handof
 
 ## Current App State Snapshot
 
-_Updated: 2026-06-06_
+_Updated: 2026-07-15_
 
 Gamma is now a broad read-only research application with two primary workspaces:
 
@@ -74,7 +74,7 @@ The implemented app state is materially ahead of the original second-pass starti
 - `Fundamentals` is a deep current-roadmap workspace with Overview, Financials, Peers, DCF, Reverse Valuation, and Reference / Filings modes. It uses SEC/EdgarTools ingestion, IBKR market context, local peer/DCF persistence, raw-versus-normalized inspection, DCF snapshots, reverse solves, and Copilot tools.
 - `Commodities` is a first-pass current-roadmap domain tab with six modes, sample/EIA/FRED/IBKR provider paths, curve/spread/inventory/event/cross-domain models, Energy and Metals analytics, and Copilot grounding.
 - `Sealanes` is a paused maritime prototype with normalized maritime models, sample/static context, AISstream server-side websocket proxying, viewport live subscriptions, map overlays, route/chokepoint/port/vessel/event concepts, and clear data-provider limits.
-- `Copilot` now exists both as the shell shelf and as a dedicated no-mode-bar workspace. It supports grounded research cards, read-only domain tools, OpenAI/mock/disabled provider boundaries, local sessions/turns/context snapshots/memos, memo creation, synthesis/active-tab focus, and an NDJSON streaming endpoint wrapper around the current synchronous provider boundary.
+- `Copilot` now exists both as the shell shelf and as a dedicated workspace rebuilt as a standard chat interface: conversation sidebar with search/archive/new-chat, chat transcript, pinned composer, multi-select context-scope dropdown, and Agent/Operator role controls. It supports grounded research cards, read-only domain tools, OpenAI/mock/disabled provider boundaries, local sessions/turns/context snapshots, synthesis/active-tab focus, provider-native Responses streaming through a Gamma run-event contract, cancellation/timeout/idempotent terminal persistence, and typed finalized-result transcript blocks with full current ResearchCard/source/tool/warning rendering in the dedicated tab. Memos were removed from the tab; backend memo/report endpoints remain, but the app does not yet expose a complete artifact editing/export workflow.
 - `System` now exposes health, status, provider capabilities, provider usage diagnostics with activation-aware health labels, read-only boundary metadata, diagnostics, connection toggles, market-data mode, base-currency mutation, and account-subscribe helpers.
 - `News` has a first-pass sample/RSS provider boundary and `/news/latest` feed route for lightweight event context.
 
@@ -82,23 +82,23 @@ The main remaining roadmap gaps are no longer "make the tabs exist." They are li
 
 ### Current Tab Progress Snapshot
 
-This table tracks the visible app tabs as of 2026-06-06. Percentages are pragmatic implementation snapshots, not release promises.
+This table tracks the visible app tabs as of 2026-07-15. Percentages are pragmatic implementation snapshots, not release promises.
 
 | Workspace | Tab | Current completion | What is left |
 | --- | --- | ---: | --- |
-| Portfolio | `Portfolio` | ~72% | Harden account/history persistence, improve first-run provider setup, broaden diagnostics around IBKR subscriptions, and add beta-facing empty/error states. |
-| Portfolio / Research | `Risk` | ~76% | Improve cross-tab handoffs from Research/Portfolio, validate optimization/scenario assumptions more deeply, add richer stress/regime slices, and expand interactive test coverage. |
-| Portfolio / Research | `Options` | ~72% | Harden live-provider smoke coverage, add historical IV/skew persistence, improve expiry/strike and moneyness controls, make source/Greeks assumptions more inspectable, make underlying-history sourcing more durable, and deepen Research/Fundamentals/Copilot handoffs. |
-| Research | `SITREP` | ~62% | Harden the aggregator into a backend-owned SITREP contract over time, improve media/provider resilience, deepen saved triage/follow-up behavior, and expand handoffs beyond the current first-pass row targets. |
-| Research | `Equity Research` | ~78% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, comparables depth, scenario context, and explicit provider selection. |
-| Research | `Strategy Lab` | ~70% | Deepen Gamma object composition, backtest/analyze views, regime/stress lenses, saved-run workflows, and read-only sandbox architecture decisions without arbitrary in-app execution. |
-| Research | `Macro` | ~86% | Deepen Trade Partners and Country Compare beyond first-pass US/curated coverage, expand EU/global official data, improve source citations, and wire real handoffs to Commodities, Sealanes, Prediction Markets, and Copilot memos. |
-| Research | `Prediction Markets` | First-pass complete / targeted hardening | Keep enhancements opportunistic: better event taxonomy, commodity/maritime links, saved market clusters, calibration depth, and Copilot summaries where other tabs need them. |
+| Portfolio | `Portfolio` | ~74% | Harden account/history persistence, improve first-run provider setup, broaden diagnostics around IBKR subscriptions, and add beta-facing empty/error states. Base-currency snapshot handling and OHLCV caching were fixed in July. |
+| Portfolio / Research | `Risk` | ~78% | Separate research-book context from the live account in one screen (audit P1), expand per-leg contribution decomposition for research books, validate optimization/scenario assumptions more deeply, add richer stress/regime slices, and expand interactive test coverage. Strategy Lab book handoff and idempotent auto-compute now work. |
+| Portfolio / Research | `Options` | ~75% | Harden live-provider smoke coverage, add historical IV/skew persistence, improve expiry/strike and moneyness controls, make source/Greeks assumptions more inspectable, make underlying-history sourcing more durable, and deepen Research/Fundamentals/Copilot handoffs. View-scoped adaptive polling, visible-symbol loading, scoped IV errors, and honest empty-surface reasons landed on July 12; SSVI visuals now separate observed option-pair IV points from fitted surface/smile/term geometry. A July 24 live XLE API/browser retest passed with 21 provider-backed points; navigation-away polling remains regression-tested but was not directly instrumented in the browser. |
+| Research | `SITREP` | 100% / Complete for this pass | Closed with backend-persisted triage notes/states and migration, grounded Copilot context, enriched/deduped multi-source news, lens-preserving handoffs, shared provenance/quality badges, per-section age/oldest-section reporting, and verified Bloomberg fallback behavior at the external-embed ceiling. |
+| Research | `Equity Research` | ~80% | Add fuller index/reference universes, broader non-US coverage, richer Fundamentals/Risk/IV/Copilot handoffs, comparables depth, scenario context, explicit provider selection, and a visible warning when synthetic-scope short legs are dropped. Now a self-contained view with latest-day KPIs and price provenance. |
+| Research | `Strategy Lab` | ~78% | Deepen Gamma object composition, saved-run workflows, and read-only sandbox architecture decisions; fix composer state-loss traps (legs reset on tab switch, silent compose no-op before validation). Signed long/short books, all-mode UI polish, the Risk handoff, Copilot grounding, and signed per-leg Risk decomposition with aggregate-metric preservation and legacy-book fallback landed in June/July. |
+| Research | `Macro` | ~86% | Deepen Trade Partners and Country Compare beyond first-pass US/curated coverage, expand EU/global official data, improve source citations, and wire real handoffs to Commodities, Sealanes, Prediction Markets, and Copilot memos. Individual FRED, comparison, and IBKR FX series failures now degrade explicitly without discarding the remaining snapshot. |
+| Research | `Prediction Markets` | First-pass complete / targeted hardening | Keep enhancements opportunistic: better event taxonomy, commodity/maritime links, saved market clusters, calibration depth, and Copilot summaries where other tabs need them. Intent search is now semantically honest and verified as a live corroboration path. |
 | Research | `Crypto` | ~74% | Add real wallet/transfer adapters, persistent narrative baskets, deeper pool monitoring, transaction-level DEX context, derivatives overlays, and saved crypto research sessions. |
-| Research | `Fundamentals` | ~82% | Broaden market/reference providers, improve statement trend overlays and restatement handling, add optional terminal-multiple framing, polish cross-tab handoffs, and harden regional expansion choices. |
-| Research | `Commodities` | ~73% | Add vendor-grade futures-chain history, continuous/roll-adjusted mapping, historical curve snapshots, real metals warehouse data, seasonal inventory surprise models, and live cross-domain handoff flows. |
-| Research | `Sealanes` | Paused ~45% | Evaluate AIS/historical data providers, add durable AIS caching, improve chokepoint baselines, build real event replay, enrich vessel metadata, and avoid risk labels until methodology is validated. |
-| Research | `Copilot` | ~64% | Replace wrapper streaming with provider-level streaming, improve session archive/search/title handling, add memo editing/export, strengthen source-backed versus inferred labels, and expand Sealanes/news drilldowns. |
+| Research | `Fundamentals` | Complete (100% current pass) | Complete-for-now US SEC company research workspace. July 13 completion added exact-match focus continuity with explicit unsupported-instrument states, keyboard/browser-drivable search, Fundamentals-to-Strategy-Lab/Copilot/Equity Research/Risk/Options handoffs, YoY/QoQ statement trends, amendment/restatement context, terminal-value multiple framing, section-level degradation warnings, and targeted browser/reliability coverage. Broader non-US providers and consensus-estimate depth remain optional future expansion, not current-pass blockers. |
+| Research | `Commodities` | ~75% | Add vendor-grade futures-chain history, continuous/roll-adjusted mapping, historical curve snapshots, real metals warehouse data, seasonal inventory surprise models, unit-normalized basis checks, and live cross-domain handoff flows. The `% CHG` prior-close fix, dated daily references, and coherent fresh-to-cached drill retention are verified live; cached change remains `N/A` unless the exact provider current/prior pair is retained. |
+| Research | `Sealanes` | Paused ~45% | Evaluate AIS/historical data providers, add durable AIS caching, keep static chokepoint context rendering when the live sample is empty, improve chokepoint baselines, build real event replay, enrich vessel metadata, and avoid risk labels until methodology is validated. |
+| Research | `Copilot` | 76% | Extend typed transcript blocks to plans/Operator/reports/confirmations, add in-tab memo/report editing and export, finish session lifecycle and retention controls, productionize inline Operator confirmations and Agents SDK live events, validate claim/source resolution, expand Sealanes/news and priority domain drilldowns, add shelf-to-workspace continuity, and pass the Copilot release gate. OpenAI card/stream calls now retain typed terminal status and are verified live under `openai_copilot` with activation-aware Healthy usage diagnostics. |
 
 ### Completion Boundary For The Current Pass
 
@@ -114,7 +114,7 @@ The current pass should be considered complete when:
 - README run commands, validation commands, and provider setup notes are accurate;
 - beta-facing diagnostics, empty states, and first-run guidance are good enough for a trusted tester who has not read the code.
 
-Everything beyond that line should be treated as targeted future deepening, not as required to call the current app "complete for now." In particular, deeper wallet analytics, vendor-grade futures history, full global macro coverage, exhaustive options modeling, broader non-US fundamentals, richer maritime AIS history, and Copilot voice/true provider streaming are valuable future work, but they are not blockers for this completion boundary. A feature that only works through sample data when a real provider path is available should be treated as incomplete or degraded, not as done.
+Everything beyond that line should be treated as targeted future deepening, not as required to call the current app "complete for now." In particular, deeper wallet analytics, vendor-grade futures history, full global macro coverage, exhaustive options modeling, broader non-US fundamentals, richer maritime AIS history, Copilot voice, and optional external deep research are valuable future work, but they are not blockers for this completion boundary. Copilot V2's own 100% gate below is intentionally stricter than the app-wide first-pass completion boundary. A feature that only works through sample data when a real provider path is available should be treated as incomplete or degraded, not as done.
 
 ---
 
@@ -253,10 +253,10 @@ Installer, tutorial, setup flow, mock mode, diagnostics, and clear error states 
 
 ## Workstream 1 - Cross-Cutting Platform Foundation
 
-_Status: In progress (~74%)_
+_Status: In progress (~77%)_
 _Dependency marker: Foundation_
 _Parallelization note: Some pieces are independent, but this workstream should start early because it shapes most V2 tabs._
-_Recent progress: Workstream 1 now has shared provenance/freshness primitives, provider-agnostic cache freshness policies, a generic cross-tab handoff envelope, a compact Copilot context contract, explicit read-only boundary metadata at `/system/read-only-boundary`, hardened provider capability metadata for active/optional/sample/planned providers, an in-memory provider usage ledger exposed through `/system/provider-usage`, activation-condition metadata that distinguishes `idle_by_design`, `not_requested`, `needs_config`, `healthy`, `degraded`, and `unavailable` provider states, a compact provider-usage diagnostics surface in Settings, a reusable frontend mode-registry helper, local saved-research / fundamentals / Copilot persistence stores, first-pass diagnostics routes, a news provider boundary, and broad mode registration across Research, Macro, Crypto, Fundamentals, Commodities, Sealanes, and Options._
+_Recent progress: Workstream 1 now has shared provenance/freshness primitives, provider-agnostic cache freshness policies, a generic cross-tab handoff envelope, a compact Copilot context contract, explicit read-only boundary metadata at `/system/read-only-boundary`, hardened provider capability metadata for active/optional/sample/planned providers, an in-memory provider usage ledger exposed through `/system/provider-usage`, activation-condition metadata that distinguishes `idle_by_design`, `not_requested`, `needs_config`, `healthy`, `degraded`, and `unavailable` provider states, a compact provider-usage diagnostics surface in Settings, a reusable frontend mode-registry helper, local saved-research / fundamentals / Copilot persistence stores, first-pass diagnostics routes, a news provider boundary, and broad mode registration across Research, Macro, Crypto, Fundamentals, Commodities, Sealanes, and Options. Since June it also gained a shared provenance-badge contract adopted across views, cross-tab handoff session expiry with an earlier-sessions queue, a frontend request coordinator and adaptive poller for market-data loading, design type/space/radius token scales migrated across all views, and split runtime/system/portfolio frontend stores._
 
 ### Why this workstream matters
 
@@ -513,9 +513,9 @@ At the end of this workstream, Gamma should have a clearer platform layer for pr
 
 ## Workstream 1A - SITREP
 
-_Status: In progress (~62%)_
+_Status: Complete for this pass (100%)_
 _Dependency marker: Cross-domain aggregator; improves with provider foundation_
-_Recent progress: A first-pass locked `SITREP` tab is now the Research workspace home. It aggregates Research Overview, Macro Snapshot, Commodities Overview, Prediction Markets screener, and News payloads into a dense situation-report surface with a Bloomberg Television YouTube embed, cross-domain change triage, an event/news tape, equities, FX, yields, commodities tables, provider caveats, system/provider mode context, all-uppercase tab navigation labels, and first-pass row handoffs into Research, Macro, Commodities, and Prediction Markets._
+_Recent progress: A first-pass locked `SITREP` tab is now the Research workspace home. It aggregates Research Overview, Macro Snapshot, Commodities Overview, Prediction Markets screener, and News payloads into a dense situation-report surface with a Bloomberg Television embed, cross-domain change triage, equities, FX, yields, commodities tables, provider caveats, system/provider mode context, and row handoffs into Research, Macro, Commodities, and Prediction Markets. The July 12-13 completion passes added the backend-owned concurrent workspace contract, backend-persisted follow-ups with notes/resolved states and localStorage migration, a grounded SITREP Copilot context, RSS breadth plus high-confidence entity/ticker tagging and cross-feed deduplication, source reliability labels, shared provenance badges, per-section age and oldest-section reporting, and target-consumed entity/lens/timeframe handoffs. A live mock/provider-backed browser audit verified one aggregate bootstrap request, all panels populated with honest live/delayed/historical/sample labels, follow-up persistence through reload, SITREP Copilot selection, SPY news handoff, WTI Energy-lens handoff, Bloomberg fallback messaging/links, and no console errors._
 
 ### Why this workstream matters
 
@@ -527,39 +527,42 @@ SITREP is the operating picture for Gamma. It should not replace the domain tabs
 
 This makes it different from `Research`, `Macro`, `Commodities`, or `Prediction Markets`. Those tabs remain analytical domains. SITREP is the entry point and triage layer that compresses signals from them.
 
-### Current first pass
+### Current composition
 
-The first pass deliberately reuses existing payloads rather than adding a new backend service too early:
+The composition reuses existing domain payloads, but since 2026-07-13 the backend owns the aggregate contract (`SitrepService` / `GET /sitrep/workspace`) instead of the frontend firing six separate requests:
 
-- `Research Overview` supplies equity market-map nodes, leaders, laggards, coverage, and freshness labels.
+- `Research Overview` supplies equity market-map nodes, leaders, laggards, coverage, and freshness labels (plus the global-indices board).
 - `Macro Snapshot` supplies focus items, FX/rates metrics, divergences, event windows, and warnings.
 - `Commodities Overview` supplies commodity price, curve, inventory, event, and provider coverage context.
 - `Prediction Markets` supplies open market/event context and freshness warnings.
+- `News` supplies the market-news feed.
 - Bloomberg Television is embedded through the public YouTube channel live-stream endpoint when YouTube/Bloomberg allow embedding.
 
-This is useful immediately, but it is still an aggregator over existing tab data, not a normalized SITREP backend model.
+Sections load concurrently server-side; a failing section degrades into an explicit `section_warnings` entry and a null section rather than failing the report, and the frontend keeps per-panel refresh buttons on the targeted per-domain loaders.
 
 ### Provider and data needs
 
 Required for the next meaningful step:
 
-- `News hardening`: normalized source, URL, publication time, detected tickers/entities, tags, summary snippets, provenance, and RSS/sample fallback behavior are now usable. Remaining work is breadth, resilience, and better source/ticker/entity enrichment rather than making news exist.
-- `SITREP response model`: a backend-owned payload should eventually own the cross-domain situation-report contract. The current Svelte composition is acceptable for the first pass, but a service-owned model would make saved triage, Copilot synthesis, and test coverage cleaner.
+- `News hardening`: complete for this pass. Normalized source, URL, publication time, detected tickers/entities, tags, summary snippets, cross-feed item deduplication, reliability/freshness labels, provenance, expanded curated RSS configuration, and explicit RSS/sample fallback behavior are implemented. Broader institutional-news coverage remains targeted future depth, not a current-pass blocker.
+- `SITREP response model`: complete for this pass. `SitrepService` owns the cross-domain contract behind `GET /sitrep/workspace` with section subsets, force-refresh, concurrent composition, per-section degradation, API coverage, backend follow-up persistence, and grounded Copilot synthesis; embedded section timestamps/freshness drive section-specific age reporting.
 - `Provider-neutral listed-market data`: broader and fresher equity/index/ETF coverage beyond the current narrow Research Overview seeds.
 - `FX and rates freshness policy`: clearer distinction between delayed IBKR, FRED/public daily series, and unavailable intraday context.
-- `Media embed fallback`: YouTube embeds can be blocked by remote policy, so the UI should keep a fallback link and avoid treating the video as guaranteed infrastructure.
-- `Cross-tab handoff wiring`: first-pass row handoffs now open relevant target tabs/modes for listed markets, FX/rates, commodities, Macro triage/events, prediction markets, and equity scope analysis. Remaining work is richer entity/lens preservation and explicit saved handoff history.
-- `Copilot context`: SITREP should eventually provide a compact cross-domain context bundle or launch a synthesis flow from loaded constituent domains.
+- `Media embed fallback`: complete at the external ceiling. Gamma cannot control Bloomberg/YouTube/HLS availability; the player keeps honest loading/unavailable status plus Bloomberg and YouTube fallback links.
+- `Cross-tab handoff wiring`: complete for this pass. Listed-market/news handoffs carry the selected symbol and research timeframe, FX/rates carry region/timeframe/theme, commodities carry mode plus selected instrument, prediction markets carry market ID, and persisted follow-ups preserve the same request for reload/reopen.
+- `Copilot context`: complete for this pass. SITREP is a selectable grounded scope backed by a compact server-built context bundle containing workspace sections, section warnings, and persisted follow-ups.
 
 ### Completion snapshot
 
-- `Locked navigation home`: ~90% complete. SITREP is now pinned as the first Research workspace tab and the old Research tab is no longer the locked home.
-- `Dense visual shell`: ~72% complete. The first pass follows Gamma's flat, dense panel language and now has row-level drilldowns; remaining work is responsive polish, state persistence, and richer action affordances.
-- `Cross-domain aggregation`: ~58% complete. Existing tab payloads are reused effectively and first-pass handoff metadata exists, but there is no dedicated backend SITREP schema yet.
-- `News`: ~62% complete. The News provider boundary and RSS/sample feed path are usable in SITREP. Remaining work is broader source coverage, entity/ticker tagging, deduping, richer summaries, and better source reliability handling.
-- `Bloomberg TV`: ~45% complete. YouTube embed is wired on a best-effort basis, but external embed availability cannot be controlled by Gamma.
-- `Provider transparency`: ~60% complete. Provider caveats, warnings, provider mode, and feed freshness are visible, but SITREP-specific freshness grouping and source quality labels are not yet normalized.
-- `Cross-tab handoffs`: ~55% complete. Tables and triage rows can now route into Research, Macro, Commodities, and Prediction Markets. Remaining work is durable handoff envelopes, richer lens/entity preservation, and saved follow-up actions.
+- `Locked navigation home`: 100% complete for this pass. SITREP is pinned as the first Research workspace tab and remains the locked Research home.
+- `Dense visual shell`: 100% complete for this pass. The tokenized terminal-density shell includes market tables, Events & Markets, saved Follow-Ups, provenance, stable empty/degraded states, and responsive one-column fallback.
+- `Cross-domain aggregation`: 100% complete for this pass. `SitrepService` concurrently composes all six domains behind the single workspace request with section subsets, force refresh, explicit degradation, section-specific clocks, saved triage, and Copilot synthesis on the same contract.
+- `News`: 100% complete for this pass. The RSS/sample boundary now includes expanded curated feeds, headline/snippet entity detection, clickable listed-market chips, item-level cross-feed deduplication, and per-source reliability/freshness labels. Further paid/institutional breadth is future depth.
+- `Bloomberg TV`: 100% at the external ceiling. HLS is best-effort because Gamma cannot control remote embed policy; loading/unavailable messaging and external Bloomberg/YouTube links are verified.
+- `Provider transparency`: 100% complete for this pass. The four market tables and news use the shared provenance badge, source-quality labels are shown where supplied, Provider Status exposes per-section source/freshness/as-of/age, and the header explicitly labels the oldest loaded section.
+- `Cross-tab handoffs`: 100% complete for this pass. Market/news/follow-up handoffs preserve and consume the selected entity, target mode, and available region/timeframe/theme/instrument/market lens.
+- `Saved triage / follow-ups`: 100% complete for this pass. Follow-ups are capped and schema-validated in the backend JSON store with CRUD routes, notes, open/resolved state, persisted handoffs, reload durability, and one-time migration of existing `gamma.sitrep.follow_ups.v1` localStorage data.
+- `Copilot context`: 100% complete for this pass. SITREP is selectable in the dock and grounds synthesis in loaded workspace summaries, section warnings, provenance sources, and saved follow-ups.
 
 ### Deliverable
 
@@ -569,7 +572,7 @@ At the end of SITREP V2, Gamma should open into a credible cross-asset situation
 
 ## Workstream 2 - Research V2
 
-_Status: In progress (~76%)_
+_Status: In progress (~79%)_
 _Dependency marker: Parallelizable, but improved by provider foundation_
 _Parallelization note: The multi-mode UI can begin before all market-data providers are selected, but Strategy Lab and Overview need reliable data contracts._
 
@@ -607,7 +610,7 @@ Suggested modes:
 The current Research tab should become `Scope Analysis`, not be discarded.
 
 Implementation note:
-- The former combined Research tab has been split into two mode-bearing tabs. `Equity Research` owns `Overview`, `Scope Analysis`, `Comparables`, `Scenario / Context`, and `Saved Equity Research`; `Strategy Lab` owns `Composer`, `Backtest / Analyze`, `Regime / Stress`, `Imports`, and `Saved Runs`. Legacy `/Research/*` navigation still maps into the split tabs, and the existing single-ticker and synthetic-portfolio analyzer remains available under `Scope Analysis`.
+- The former combined Research tab has been split into two mode-bearing tabs. `Equity Research` owns `Overview`, `Scope Analysis`, `Comparables`, `Scenario / Context`, and `Saved Equity Research`; `Strategy Lab` owns `Composer`, `Backtest / Analyze`, `Regime / Stress`, `Imports`, and `Saved Runs`. Legacy `/Research/*` navigation still maps into the split tabs, and the existing single-ticker and synthetic-portfolio analyzer remains available under `Scope Analysis`. As of July 2026 the split is physical, not just navigational: the shared 4,825-line `ResearchView.svelte` was deleted and each tab is a self-contained view building as an independent lazy chunk. Strategy Lab additionally supports signed long/short book composition with per-leg validation, an inbound handoff queue with session expiry, a working `Open In Risk` handoff, and verified Copilot grounding.
 
 #### 1. Scope Analysis mode
 
@@ -790,7 +793,7 @@ At the end of Research V2, Gamma should have a genuine research hub that can ins
 _Status: In progress (~86%)_
 _Dependency marker: Parallelizable_
 _Parallelization note: Most Macro workstream scope can proceed independently, but provider foundation helps EU/global expansion and cross-tab handoffs._
-_Recent progress: Macro is now a six-mode workspace with Snapshot, Cross-Asset, Rates & Policy, Events / Regimes, Trade Partners, and Country Compare; FRED, Treasury, DB.nomics, Census trade-partner, IBKR FX proxy, and US event adapters; ranked divergence/coherence and lead-lag interpretation; linked prediction-market context; policy-path and meeting-ladder proxies; event-study framing; bilateral trade-partner context; country-comparison context; deep-link style mode navigation; and Copilot drilldown tools._
+_Recent progress: Macro is now a six-mode workspace with Snapshot, Cross-Asset, Rates & Policy, Events / Regimes, Trade Partners, and Country Compare; FRED, Treasury, DB.nomics, Census trade-partner, IBKR FX proxy, and US event adapters; ranked divergence/coherence and lead-lag interpretation; linked prediction-market context; policy-path and meeting-ladder proxies; event-study framing; bilateral trade-partner context; country-comparison context; deep-link style mode navigation; and Copilot drilldown tools. Per-series loading now isolates FRED, comparison, and IBKR FX failures, preserves the remaining snapshot, and emits safe provider/reference-specific warnings._
 
 #### Completion snapshot
 
@@ -1014,10 +1017,10 @@ At the end of Macro V2, Gamma should have a more globally useful macro workspace
 
 ## Workstream 4 - IV V2
 
-_Status: In progress (~72%)_
+_Status: In progress (~74%)_
 _Dependency marker: Parallelizable, but dependent on IBKR / options data quality_
 _Parallelization note: UI and analytics can progress incrementally, but live coverage depends on options entitlements and provider behavior._
-_Recent progress: The June 5 options pass moved IV V2 from a surface viewer toward a usable volatility lab. Options now has registered modes for Overview, Chain, Surface, Realized vs IV, Implied Probabilities, and Strategies; `/iv/surface`, `/iv/session`, start/stop session routes; live/mock surface collection; market-data mode/depth controls; selectable line/spline/SSVI display-grid fitting with fit/fallback metadata; option-contract, pair, quality, expiry-analytics, model-metadata, and pricing-assumption models; frontend derived surface paths, skew rows, term-structure rows, realized-volatility comparisons, local implied-probability density slices with selectable probability mass, a chain-driven strategy builder with mark-to-model payoff matrix, Gamma-owned Black-Scholes chain and strategy Greeks, and Copilot IV surface/session tools._
+_Recent progress: The June 5 options pass moved IV V2 from a surface viewer toward a usable volatility lab. Options now has registered modes for Overview, Chain, Surface, Realized vs IV, Implied Probabilities, and Strategies; `/iv/surface`, `/iv/session`, start/stop session routes; live/mock surface collection; market-data mode/depth controls; selectable line/spline/SSVI display-grid fitting with fit/fallback metadata; option-contract, pair, quality, expiry-analytics, model-metadata, and pricing-assumption models; frontend derived surface paths, skew rows, term-structure rows, realized-volatility comparisons, local implied-probability density slices with selectable probability mass, a chain-driven strategy builder with mark-to-model payoff matrix, Gamma-owned Black-Scholes chain and strategy Greeks, and Copilot IV surface/session tools. A July 12 reliability pass restricted adaptive polling to the active Options view with failure backoff, stopped idle session checks from repeatedly fetching underlying history without a real surface, persisted the visible input symbol at the app boundary, scoped IV errors so polling cannot erase them, and added explicit disconnected/collecting/entitlement/no-snapshot states. A follow-up visual pass made applied/partial parametric fits analytically honest: SSVI renders the fitted grid as the 3D surface and the actual blended option-pair IV cells as discrete observations, while smile and term visuals use fitted lines with observed markers; linear and spline interpolation views retain their simpler presentation._
 
 #### Completion snapshot
 
@@ -1364,10 +1367,10 @@ At the end of Crypto V2, Gamma should provide a flow-aware crypto research works
 
 ## Workstream 6 - Fundamentals V2
 
-_Status: In progress (~82%)_
+_Status: Complete (100% current pass)_
 _Dependency marker: Parallelizable_
 _Parallelization note: US SEC improvements can progress independently; European/international expansion depends on provider and normalization choices._
-_Recent progress: Fundamentals V2 now has first-class Peers, Reverse Valuation, and Reference / Filings modes; raw-versus-normalized SEC source inspection; service-owned implied-expectation solves; deeper peer diagnostics; DCF model snapshots; and Fundamentals-specific Copilot grounding with read-only tools. Remaining work is mostly regional/provider expansion, richer statement trend overlays, optional terminal multiple framing, cleaner cross-tab handoffs, and additional overview polish._
+_Completion note: Fundamentals V2 now has first-class Overview, Financials, Peers, DCF, Reverse Valuation, and Reference / Filings modes; raw-versus-normalized SEC inspection; service-owned implied-expectation solves; peer diagnostics; DCF snapshots; sector-aware sanity checks; exact-ticker focus continuity; explicit unsupported ETF/fund/non-US states; keyboard-, automation-, and browser-drivable search; reusable company/scenario/peer context handoffs into Strategy Lab and Copilot; selected-company continuation into Equity Research, Risk, and Options; YoY/QoQ statement changes; amendment chronology; terminal-value multiple framing; section-level degraded-state warnings; and browser/reliability coverage. Broader regional/provider expansion is future depth outside the current completion boundary._
 
 ### Why this workstream matters
 
@@ -1519,14 +1522,14 @@ At the end of Fundamentals V2, Gamma should support deeper company research, pee
 
 ## Workstream 7 - Copilot V2
 
-_Status: In progress (~64%)_
+_Status: In progress (76%; checkpoint 1 verified)_
 _Dependency marker: Parallelizable, but quality depends on tab-owned context builders_
 _Parallelization note: Streaming and session persistence can be built early. Deep domain reasoning improves as each tab exposes better context and tools._
-_Recent progress: Copilot now has both the shell shelf and a dedicated Research workspace tab without a registered mode bar. The workspace supports Synthesis and Active Tab focus, domain scope toggles, grounded prompts, session history, persisted turns/context snapshots, memo creation, OpenAI/mock/disabled provider boundaries, read-only internal tools across major domains, and a tested NDJSON streaming endpoint wrapper around the current synchronous provider interface._
+_Recent progress: The dedicated Copilot tab was rebuilt in June 2026 as a standard chat interface with session search/archive/new-chat, a pinned composer, Agent/Operator controls, and multi-select context scope. On July 14, the Agent path gained provider-native Responses streaming behind one Gamma NDJSON run-event contract. On July 15, finalized Agent results gained a discriminated transcript-block model and the dedicated tab reached parity with the shelf for all current ResearchCard fields and evidence. On July 17, checkpoint 1 replaced raw `urllib` transport with the supported OpenAI SDK, made runs server-owned with bounded cursor replay across disconnects, added completed function-argument and provider-error events, moved shelf Agent and custom-loop Operator work onto the shared run/reducer contract, added safe-boundary Operator cancellation, and verified idempotent single-terminal persistence across cancellation, timeout, refusal, incomplete output, provider failure, duplicate/stale/post-terminal events, and reconnect. The detailed engineering spec remains [`docs/copilot_v2_tab_plan.md`](./docs/copilot_v2_tab_plan.md); the milestone sequence and percentage gates below are the authoritative roadmap path to 100%._
 
 ### Why this workstream matters
 
-The current Copilot layer is useful, but it is still a shell-level drawer. This roadmap should keep that quick-assist surface while adding a dedicated Copilot workspace.
+Copilot already spans a quick shell shelf and a dedicated workspace. The remaining work is to turn those implemented surfaces into one reliable, replayable, source-resolved research system rather than two partially overlapping interfaces.
 
 The goal is not to create a generic chatbot. The goal is to create an AI-assisted research layer grounded in Gamma's internal state.
 
@@ -1550,7 +1553,7 @@ Copilot should have two surfaces:
 - shell-level Copilot shelf for quick contextual research cards,
 - dedicated Copilot workspace for persistent sessions, synthesis, workflow planning, and memos.
 
-Current dedicated workspace structure:
+Current and target dedicated workspace structure:
 
 - no global mode bar,
 - a compact focus selector for `Synthesis` versus `Active Tab`,
@@ -1558,21 +1561,22 @@ Current dedicated workspace structure:
 - a composer grounded in Gamma context,
 - an Operator Plan / Run Operator path for ordered app-native tests and confirmed local research-state workflows,
 - session/thread history,
-- memo creation from persisted turns,
+- artifact creation from persisted turns, with complete in-tab memo/report editing still required,
 - scope controls for cross-domain synthesis.
 
 Earlier drafts considered `Ask`, `Synthesize`, `Plan`, `Memo`, `Sessions`, and later `Voice` as separate modes. The implemented direction intentionally keeps Copilot closer to the SITREP pattern: a dedicated workspace with internal focus controls rather than a durable tab-level mode bar. This keeps Copilot from becoming another multi-mode analytical domain while still giving it persistent sessions and memo output.
 
 #### Completion snapshot
 
-- `Shell shelf`: ~82% complete. The existing contextual Copilot card remains live across supported tabs with read-only grounding and provider warnings. Remaining work: richer inline drilldowns and better source navigation.
-- `Dedicated workspace`: ~58% complete. A top-level `COPILOT` tab now exists in Research with no registered mode bar, synthesis/active-tab focus, scope toggles, composer, session list, active-session detail, and memo controls. Remaining work: richer planning workflow, better selected-context management, and more polished session navigation.
-- `Streaming`: ~35% complete. `/copilot/research-card/stream` emits NDJSON status/metadata/result/done events around the current provider result. Remaining work: true token/event streaming through the model provider boundary and frontend incremental rendering.
-- `Session persistence`: ~72% complete. Local JSON persistence stores sessions, turns, context snapshots, and model/card results under the Copilot store. Remaining work: richer session titles, deletion/archive flows, search, and migration/version handling.
-- `Memos`: ~50% complete. Memos can be generated from all or selected persisted turns, linked to sessions, and listed through API/store state. Remaining work: editing, export, stronger source-backed/inferred claim separation, and richer memo templates.
-- `Read-only tools and grounding`: ~78% complete. Copilot has domain context builders and read-only tools for Portfolio, Research, Strategy Lab, Risk, IV, Macro, Commodities, Prediction Markets, Crypto, Fundamentals, and synthesis. Remaining work: Sealanes/news drilldowns, stronger provenance citations, and tool coverage parity across V2 tabs.
-- `Research Operator`: ~60% complete. Backend action registry metadata, operator plan models, `/copilot/actions`, `/copilot/operator-plan`, `/copilot/operator-plan/execute`, progress events, persisted operator traces, typed read-only risk shocks, Strategy Lab backtest summaries, hypothetical portfolio comparison, reverse-valuation tools, DCF confirmation checkpoints, an eval harness, and Agents SDK orchestration behind a feature flag are live. Remaining work: more read-only drilldowns, richer trace/report surfaces, generalized confirmed mutations, and an eval-backed decision before making Agents SDK the default.
-- `Voice`: ~0% complete. Voice remains out of scope until text/session/memo workflows are more mature.
+- `Shell shelf`: ~88% complete. The contextual card remains live across supported tabs with read-only grounding, multi-select scope, full ResearchCard detail, provider warnings, and the same streaming loader/reducer used by the workspace. Remaining work: `Open in Copilot` continuity, source navigation, and reliable promotion of the exact thread/context.
+- `Dedicated workspace`: ~80% complete. The standard chat interface now has sessions/search/archive/new-chat, a pinned composer, Agent/Operator controls, multi-select context scope, real provisional provider deltas, Stop/Retry, typed non-success states, full finalized ResearchCard/evidence parity, and native single-context domain resolution. Remaining work: typed plan/Operator/report/confirmation blocks, support inspector behavior, artifacts, richer session lifecycle, and source navigation.
+- `Streaming and run lifecycle`: checkpoint 1 complete. The supported OpenAI SDK consumes typed Responses events; Agent and custom-loop Operator runs use one server-owned Gamma event contract with monotonic ids, completed function arguments, tools, warnings, confirmations, refusal/incomplete/provider-error/usage states, cancellation, timeout, bounded replay, disconnect survival, and exactly one persisted terminal. UI deltas remain provisional memory state rather than durable truth. Restart replay and richer retained run/session state remain checkpoint 3 work.
+- `Session persistence`: ~80% complete. Local JSON persistence stores sessions, turns, context snapshots, and model/card results, and the chat sidebar now supports session search, archive/unarchive, and new-session flows. Remaining work: richer session titles, deletion, and migration/version handling.
+- `Artifacts, memos, and reports`: ~50% complete. Backend memo/report schemas, persistence, generation, and Markdown export foundations exist, but the app does not yet expose a complete in-tab artifact workflow. Remaining work: source-turn selection, templates, editing, autosave, duplicate/delete, explicit overwrite, preview/export, and exact source/trace linkage.
+- `Read-only tools and grounding`: ~80% complete. Copilot has domain context builders and read-only tools for Portfolio, Research, Strategy Lab, Risk, IV, Macro, Commodities, Prediction Markets, Crypto, Fundamentals, and synthesis, and the June grounding overhaul plus handoff-context coverage improved context fidelity. Remaining work: Sealanes/news drilldowns, stronger provenance citations, and tool coverage parity across V2 tabs.
+- `Research Operator`: ~68% complete. Backend action registry metadata, operator plan models, shared live custom-loop events, safe-step cancellation, persisted progress/traces, typed read-only analyses, DCF confirmation checkpoints, reports, an eval harness, and Agents SDK orchestration behind a feature flag are live. Remaining work: provider-native Agents SDK progress parity, inline confirmations/diffs/rollback context, failure/resume evals, broader read-only drilldowns, and an evidence-backed default-orchestrator decision.
+- `Diagnostics, routing, and release evidence`: ~45% complete. Provider configuration and usage foundations exist, and Agent/Operator test/eval paths are present. Remaining work: versioned model policy, resolved routing/usage/latency visibility, retention controls, structured diagnostic ids, accessibility/responsive coverage, restart replay, and representative live smoke gates.
+- `Voice and optional external deep research`: excluded from Copilot V2 100%. They remain later opt-in extensions after the text workspace passes its release gate.
 
 #### 1. Ask mode
 
@@ -1678,29 +1682,54 @@ Potential infrastructure includes:
 - local session persistence,
 - optional later provider abstraction.
 
-### Progression notes
+### Path from ~72% to 100%
 
-Updated progression:
+Copilot percentage should advance only when a checkpoint's exit criteria are implemented and verified. The target percentage is a completion gate, not an estimate based on code volume. Work inside adjacent checkpoints may overlap, but a later percentage should not be claimed while an earlier blocker remains open.
 
-1. Harden true provider-level streaming beyond the current NDJSON wrapper.
-2. Improve session persistence with archive/delete/search and clearer session naming.
-3. Expand tab context-builder adoption and source-citation paths.
-4. Deepen synthesis and planning workflows inside the dedicated workspace rather than adding a global mode bar.
-5. Improve memo templates, editing, export, and source-backed versus inferred claim labels.
-6. Advance Research Operator with progress events, broader read-only tools, report/trace surfaces, and confirmed local research-state mutations.
-7. Adopt Agents SDK for the Research Operator path behind Gamma's action registry, keeping Gamma's backend permission checks, confirmation tokens, and persistence authoritative.
-8. Add richer domain tools as each V2 tab matures, especially Sealanes/news and deeper IV/Commodities drilldowns.
-9. Consider voice only after the core workspace is stable.
+| Checkpoint | Target | Required delivery | Exit criteria |
+| --- | ---: | --- | --- |
+| Current verified baseline | ~72% | Native Agent streaming first slice, cancellable Gamma run-event contract, finalized-result transcript blocks, dedicated/shelf ResearchCard evidence parity, existing sessions/tools/operator foundations. | Current Copilot backend suites, frontend suites, typecheck, and production build remain green; live-provider failures stay typed rather than becoming neutral empty cards. |
+| 1. Finish transport and run lifecycle | **76% verified 2026-07-17** | Supported OpenAI SDK typed streaming; completed function-call arguments, tool start/result, refusal, incomplete, provider error, usage, and final events; bounded cursor replay; shelf Agent and custom-loop Operator on the shared event/reducer contract. | Agent and Operator each produce one run id and one persisted terminal; pre-first-event and safe-boundary cancellation, timeout, reconnect, disconnect, duplicate/stale/post-terminal, refusal, incomplete, and provider-error tests pass. Focused gate: 85 backend tests; frontend: 259 tests plus typecheck/build/desktop check; desktop and 720px mock Agent/Operator UI inspected with zero console errors. |
+| 2. Complete transcript and evidence contract | 80% | Extend discriminated transcript blocks to plans, Operator steps/results, reports, confirmations, diffs, and typed non-success states; resolve claim evidence to known source ids; add source/context navigation; visibly separate source-backed claims, inference, assumptions, missing data, and warnings. | Every persisted source-backed claim resolves to the turn's context/tool source registry or is reclassified before persistence. Shelf and workspace render equivalent evidence, and supported source refs open the correct Gamma tab/mode/entity without losing lens context. |
+| 3. Finish sessions and in-tab artifacts | 86% | Add session rename, restore, delete, schema versioning/migrations, corrupted-record recovery, and faithful persistence of role/depth/scope/model/run/usage/artifact state. Add memo/report source-turn selection, templates, edit/autosave, preview, duplicate/delete, explicit overwrite, and Markdown export inside the workspace. | Restarting Gamma faithfully reopens transcript, context snapshots, runs, plans, traces, confirmations, memos, and reports. Artifact exports preserve claim labels, inline evidence refs, source metadata, warnings, provider/model metadata, and source-turn links. |
+| 4. Productionize Research Operator | 91% | Stream Operator progress live; cancel only between safe steps; render inline confirmation checkpoints with before/after diff and rollback/snapshot context; retain one authoritative action registry and permission path; expand failure, stale-context, partial-tool, repeated-confirmation, cancellation, and resume evals. | Bounded read-only analyses run automatically, while every durable/non-trivial local research-state mutation stops on the exact active confirmation token. No trade, order, account, rebalance, wallet, or arbitrary-code capability exists. The default-orchestrator decision is backed by permission and quality evals rather than feature-flag availability alone. |
+| 5. Close context and tool-coverage gaps | 94% | Add Sealanes context/read-only drilldowns without invented risk labels; make news item-level context first class; add priority IV, Commodities, and Equity Research drilldowns; implement context-size budgets, deterministic compaction, stale-context invalidation, and navigation mappings/fingerprints for every selectable scope. | Representative NVDA, CPI/Fed, oil-disruption, and portfolio-rate-shock requests select the appropriate domains, explain omissions, preserve freshness/provenance, and degrade explicitly when a provider or context is unavailable. |
+| 6. Finish continuity, model policy, retention, and diagnostics | 97% | Add `Open in Copilot` from the shelf with exact thread/context/entity/lens continuity; add a versioned capability-aware model policy and eval-backed routing; record resolved model, routing reason, effort, latency, usage/cache/provider/tool counts, cancellation outcome, and orchestrator; explain local versus provider retention and support a tested `store: false` path. | Settings and the run inspector expose actionable configuration/provider/model/storage state and copyable safe diagnostic ids without credentials or sensitive payloads. Shelf promotion loses no context. Routing and any Agents SDK default are justified by recorded eval results against the retained baseline. |
+| 7. Pass the Copilot V2 release gate | 100% | Complete accessibility, keyboard, desktop/narrow responsive, first-run, disabled/unconfigured/rate-limit/quota guidance, mock/offline, migration, restart-replay, and live-provider validation. Reconcile roadmap, detailed spec, README, provider setup, and validation commands. | Backend, frontend, build, eval, persistence-replay, and permission-invariant suites pass. Live Agent and Operator smoke passes for the representative research prompts when providers are intentionally configured. Happy, degraded, unavailable, refused, incomplete, cancelled, timeout, and provider-error states are all visible and tested. No execution-capable tool or hidden sample fallback crosses the read-only boundary. |
+
+### Sequencing and dependency rules
+
+1. Checkpoints 1 and 2 are the immediate blockers and may proceed together because the shared run-event and transcript-block contracts constrain all later UI.
+2. Checkpoint 3 should land before broadening durable mutations so sessions and artifacts can replay confirmations and rollback context faithfully.
+3. Checkpoint 4 may deepen read-only Operator coverage while checkpoint 3 is underway, but no new durable mutation family should ship before inline confirmation, persistence, and replay are reliable.
+4. Checkpoint 5 should add backend context/tool contracts before large UI additions; source ids, freshness, fingerprints, and navigation mappings are part of each tool's definition of done.
+5. Checkpoint 6 model routing must remain eval-backed. Do not advance completion by changing model strings alone.
+6. Checkpoint 7 is a hard release gate. Passing unit tests without representative live-provider, restart-replay, accessibility, and permission-boundary evidence is not 100%.
+
+Current model candidates and OpenAI-specific implementation details remain documented in [`docs/copilot_v2_tab_plan.md`](./docs/copilot_v2_tab_plan.md). The roadmap requirement is stable: routing must be capability-aware, versioned, observable, and supported by comparative eval evidence.
+
+### Explicit non-goals for Copilot V2 100%
+
+The following do not block 100%:
+
+- voice input or spoken output,
+- unrestricted web browsing,
+- default long-running external deep research,
+- arbitrary code execution,
+- trading, order routing, account mutation, portfolio rebalancing, wallet connection/signing, or wallet transactions,
+- adding every conceivable domain tool after the representative cross-domain research workflows pass.
+
+Optional external deep research may be added later only as an explicit background job with provider/data-retention disclosure, citations, cancellation, and hard spend/tool limits. Voice remains a later extension after the text workspace is complete.
 
 ### Deliverable
 
-At the end of Copilot V2, Gamma should have a dedicated AI research workspace that can ask, synthesize, plan, and draft memos from grounded Gamma context while preserving the read-only boundary.
+At 100%, Gamma should have one coherent Copilot research system across the shelf and dedicated workspace. It should stream and replay grounded Agent and Operator work; resolve claims to known evidence; run bounded read-only Gamma analyses; stop for visible confirmation before durable local research-state changes; create, edit, save, reopen, and export memos/reports; preserve session, context, trace, artifact, provider, model, usage, and warning state across restart; and expose understandable diagnostics and non-success states while preserving Gamma's read-only market/account/wallet boundary.
 
 ---
 
 ## Workstream 8 - Commodities Tab
 
-_Status: In progress (~73%)_
+_Status: In progress (~75%)_
 _Dependency marker: First-pass sample/EIA/IBKR vertical slice is live; vendor-grade futures-chain history, continuous front-month mapping, real metals warehouse feeds, physical-flow data, and full cross-domain handoffs remain data-provider dependent._
 _Parallelization note: The current tab can be hardened independently across UI, analytics, Copilot grounding, and sample/EIA coverage, but deeper curve history, provider-validated crack spreads, true seasonal inventory models, real warehouse stocks, and maritime links need stronger futures and physical-flow data._
 _Recent progress: Commodities now exists as a first-pass research tab with `Overview`, `Energy`, `Metals`, `Curves & Spreads`, `Inventories & Fundamentals`, and `Events / Cross-Domain` modes; normalized commodity/futures/inventory/event models; `/commodities/*` API routes; a sample provider; optional EIA official energy inventories, storage, production, crude trade, refinery, and product-demand fundamentals with FRED spot/proxy history enrichment; optional IBKR/TWS read-only futures-curve construction from discovered `FUT` contracts; Gamma-owned curve/spread/inventory/overview analytics; expanded sample metals coverage for platinum, aluminum, and zinc; sample COMEX/LME warehouse-stock proxies; Energy crack-spread matrix, term-structure heatmap, inventory seasonality cloud, vessel/flow proxy modules, EIA fundamental stack chart, and fundamental tape with sparklines; Metals macro-driver correlation, precious-ratio gauges, warehouse-stock, and copper/aluminum substitution-spread modules; frontend matrix/chart/ranking/detail panels; mode shortcuts/navigation registration; provider capability metadata; read-only warnings; tests; and Commodities Copilot context._
@@ -1710,7 +1739,7 @@ _Recent progress: Commodities now exists as a first-pass research tab with `Over
 - `Tab shell and mode navigation`: ~78% complete. Commodities is a top-level Research workspace tab with the intended six-mode structure, shared selected-instrument state, refresh behavior, mode shortcut registration, and Copilot shelf integration. Remaining work: durable deep links, richer state persistence, real cross-tab handoff actions, and saved commodity watchlists.
 - `Domain models and API surface`: ~76% complete. Gamma now has normalized instruments, price histories, futures contracts, curve nodes, spreads, inventories/fundamentals, overview analytics, events, cross-domain links, coverage metadata, Pydantic schemas, and `/commodities/*` routes. Recent work added composite crack-spread and substitution-spread definitions without changing the read-only API boundary. Remaining work: durable spread/watchlist entities, a first-class historical curve-snapshot contract, explicit front-month/continuous-futures mapping, richer event-source models, and stronger provider-quality metadata.
 - `Provider layer`: ~68% complete. The tab has an offline sample provider, optional EIA official US energy inventory/storage/production/import/export/refinery/demand enrichment, optional FRED spot/proxy price histories, optional IBKR/TWS futures curves built from read-only contract discovery, market-data snapshots, front-contract history, and local daily curve observations, plus expanded sample platinum/aluminum/zinc and COMEX/LME warehouse-stock proxy rows. Remaining work: vendor-grade futures-chain history, exchange calendar handling, continuous/roll-adjusted histories, regional/PADD-level energy depth, real metals warehouse feeds, and provider quality scoring.
-- `Overview mode`: ~70% complete. The workspace has market breadth, a commodity matrix, selected term-structure stack, momentum/roll scatter, ranked backwardation/contango/inventory/spread/mover panels, event highlights, and cross-domain notes. Remaining work: richer "what changed" windows, stored historical curve-stack comparisons, true inventory-surprise context, alert/watchlist behavior, and cleaner click-through handoffs.
+- `Overview mode`: ~73% complete. The workspace has market breadth, a commodity matrix with dated prior-close `% CHG` (the stale-cached-curve P0 was fixed and verified live), per-row daily price references, price-basis reconciliation, selected term-structure stack, momentum/roll scatter, ranked backwardation/contango/inventory/spread/mover panels, event highlights, and cross-domain notes. Remaining work: retaining freshly fetched quotes across drill interactions (drilling currently reverts to the cached view), richer "what changed" windows, stored historical curve-stack comparisons, true inventory-surprise context, unit-normalized basis checks, alert/watchlist behavior, and cleaner click-through handoffs.
 - `Energy mode`: ~82% complete. WTI, Brent, Henry Hub, gasoline, and heating oil have first-pass summaries, curves, adjacent calendar-spread heatmap, 1-1/2-1-1/3-2-1 crack-spread matrix, selected EIA inventory/storage/production/trade/refinery/demand fundamentals, indexed fundamental-stack charting, fundamental tape sparklines, inventory seasonality-cloud rendering, sample event context, vessel/flow handoff proxy, and optional IBKR roots. Remaining work: provider-validated crack-spread methodology, true seasonal surprise models, better Brent/global handling, regional/PADD-level energy detail, real tanker/floating-storage feeds, and optional LNG/electricity proxies.
 - `Metals mode`: ~60% complete. Gold, silver, platinum, copper, aluminum, and zinc now have first-pass sample/FRED/IBKR-compatible coverage where configured, price histories, curves, gold/silver and gold/platinum ratios, copper/gold and copper/aluminum relative-value spreads, Macro USD/real-yield correlation rendering, and sample COMEX/LME warehouse-stock proxy rows. Remaining work: real exchange/warehouse inventory coverage, stronger China/global demand context, richer industrial-metals breadth, and provider-backed macro/warehouse data-quality labels.
 - `Curves & Spreads mode`: ~68% complete. Current curve charts/tables, contango/backwardation labels, front/M1-M6 spreads, inter-commodity ratios, composite crack proxies, substitution spreads, z-scores, and percentiles exist where history is available. Remaining work: historical futures-curve stacks, provider-backed spread history, curve-change-by-date views, roll calendar handling, seasonality-aware spreads, and saved spread watchlists.
@@ -2160,10 +2189,10 @@ Prediction Markets V2 should remain a targeted enhancement layer, not a major st
 
 ## Workstream 11 - Beta Readiness
 
-_Status: In progress (~22%)_
+_Status: In progress (~25%)_
 _Dependency marker: Parallelizable, but final release polish depends on product stability_
 _Parallelization note: Installer and tutorial planning can begin early; final beta packaging should wait until core workflows are stable._
-_Recent progress: Gamma has mock/demo defaults, system health/status routes, `/diagnostics` and `/diagnostics/run`, `/system/provider-usage`, provider capability metadata, provider usage summaries and activation-aware health labels in Settings, read-only boundary metadata, market-data mode and base-currency controls, account-subscribe diagnostics helpers, local persistence stores for portfolio history/research/fundamentals/Copilot, and clearer provider warnings across several V2 tabs. It is still not packaged as an installer and does not yet have a real first-run setup or guided tutorial._
+_Recent progress: Gamma has mock/demo defaults, system health/status routes, `/diagnostics` and `/diagnostics/run`, `/system/provider-usage`, provider capability metadata, provider usage summaries and activation-aware health labels in Settings, read-only boundary metadata, market-data mode and base-currency controls, account-subscribe diagnostics helpers, local persistence stores for portfolio history/research/fundamentals/Copilot, and clearer provider warnings across several V2 tabs. A recurring live-IBKR usability audit loop (June/July 2026 runs under `docs/audits/usability/`) is now feeding structured findings into hardening passes, and several beta-facing empty/error states and honest cached-vs-fresh labels came out of it. Gamma is still not packaged as an installer and does not yet have a real first-run setup or guided tutorial._
 
 ### Why this workstream matters
 
@@ -2459,7 +2488,7 @@ Likely early wins:
 - Research saved scopes,
 - Macro EU/global/event refinements,
 - Fundamentals raw-versus-normalized inspection,
-- Copilot streaming/session persistence,
+- Copilot run-lifecycle/session persistence hardening,
 - IV source transparency, history, and handoff hardening.
 
 ### First new-domain prototypes
@@ -2483,7 +2512,7 @@ After data shapes are proven:
 - IV skew/term modules and Realized vs IV,
 - Crypto Wallets & Flows,
 - Fundamentals Reverse Valuation,
-- Copilot true streaming, session search/archive, and memo polish,
+- Copilot shared Agent/Operator streaming, typed evidence, complete session/artifact lifecycle, and release validation,
 - Sealanes Chokepoints and Event Replay.
 
 ### Beta readiness
@@ -2531,7 +2560,7 @@ Add raw-versus-normalized inspection, better peer/reference depth, DCF improveme
 
 ### Workstream 7 - Copilot V2
 
-Keep the shell shelf and dedicated no-mode-bar Copilot workspace, then harden true streaming, sessions, synthesis, planning, memos, and later voice.
+Finish the coherent shelf plus dedicated no-mode-bar Copilot system through shared Agent/Operator run lifecycle, typed evidence, source-resolved claims, complete sessions/artifacts, bounded confirmed Operator workflows, context/tool parity, diagnostics, and the release gate. Voice and optional external deep research remain later extensions.
 
 ### Workstream 8 - Commodities
 

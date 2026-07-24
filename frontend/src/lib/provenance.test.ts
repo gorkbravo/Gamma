@@ -71,9 +71,10 @@ describe("toProvenanceBadge", () => {
     const empty = toProvenanceBadge(null);
     expect(empty.provider).toBeNull();
     expect(empty.state).toBe("unknown");
-    const forced = toProvenanceBadge(null, { provider: "ibkr", state: "live" });
+    const forced = toProvenanceBadge(null, { provider: "ibkr", state: "live", qualityLabel: "official" });
     expect(forced.provider).toBe("ibkr");
     expect(forced.state).toBe("live");
+    expect(forced.qualityLabel).toBe("official");
   });
 });
 
@@ -99,10 +100,11 @@ describe("provenanceTitle", () => {
         retrieved_at: "2026-06-01T00:00:00Z",
         transformation_note: "Normalized from 10-K filing.",
         warnings: ["a", "b", "c", "d", "e", "f"]
-      })
+      }, { qualityLabel: "filing-backed" })
     );
     expect(title).toContain("Provider: sec_edgar");
     expect(title).toContain("State: historical");
+    expect(title).toContain("Quality: filing-backed");
     expect(title).toContain("Retrieved: 2026-06-01T00:00:00Z");
     expect(title).toContain("Transformation: Normalized from 10-K filing.");
     expect(title).toContain("+2 more warnings");

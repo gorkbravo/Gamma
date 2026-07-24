@@ -8,11 +8,13 @@ declare global {
   interface Window {
     __gammaDcfSaves: Array<{ ticker: string; payload: FundamentalsDcfSavePayload }>;
     __gammaDcfSnapshotLoads: Array<{ ticker: string; snapshotId: string }>;
+    __gammaFundamentalsSelections: string[];
   }
 }
 
 window.__gammaDcfSaves = [];
 window.__gammaDcfSnapshotLoads = [];
+window.__gammaFundamentalsSelections = [];
 
 mount(FundamentalsView, {
   target: document.getElementById("app")!,
@@ -28,6 +30,16 @@ mount(FundamentalsView, {
           retrieved_at: "2026-06-15T10:00:00Z",
           origin: "playwright.fundamentals.dcf",
           transformation_note: "MSFT-style DCF edit-flow fixture."
+        },
+        {
+          ticker: "AAPL",
+          name: "APPLE INC",
+          cik: "0000320193",
+          exchange: "Nasdaq",
+          source_provider: "sec",
+          retrieved_at: "2026-06-15T10:00:00Z",
+          origin: "playwright.fundamentals.search",
+          transformation_note: "Search interaction fixture."
         }
       ]
     },
@@ -43,7 +55,9 @@ mount(FundamentalsView, {
     saving: false,
     mode: "dcf",
     onSearch: () => {},
-    onSelectCompany: () => {},
+    onSelectCompany: async (ticker: string) => {
+      window.__gammaFundamentalsSelections.push(ticker);
+    },
     onSavePeerBasket: () => {},
     onSaveDcfModel: async (ticker: string, payload: FundamentalsDcfSavePayload) => {
       window.__gammaDcfSaves.push({ ticker, payload });

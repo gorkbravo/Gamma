@@ -43,6 +43,29 @@ def test_series_cache_path_stays_under_base_for_hostile_windows_key(tmp_path):
     assert list(restored.astype(float)) == [1.0, 2.0]
 
 
+def test_frame_cache_roundtrip_preserves_ohlcv_columns(tmp_path):
+    cache = CacheService(base_dir=tmp_path / "cache")
+    index = pd.date_range("2026-01-02", periods=2, freq="B")
+    frame = pd.DataFrame(
+        {
+            "open": [1.0, 2.0],
+            "high": [1.5, 2.5],
+            "low": [0.5, 1.5],
+            "close": [1.2, 2.2],
+            "volume": [100.0, 200.0],
+        },
+        index=index,
+    )
+
+    cache.set_frame("ohlcv_spy", frame)
+
+    restored = cache.get_frame("ohlcv_spy")
+    assert restored is not None
+    assert list(restored.columns) == ["open", "high", "low", "close", "volume"]
+    assert list(restored["close"].astype(float)) == [1.2, 2.2]
+    assert list(restored.index) == list(index)
+
+
 def test_cache_filename_uses_digest_and_bounded_debug_prefix(tmp_path):
     cache = CacheService(base_dir=tmp_path / "cache")
     key = "CON/" + ("nested:" * 80) + r"..\payload"

@@ -1,7 +1,44 @@
 import { get, writable } from "svelte/store";
-import { deleteJson, getJson, getText, patchJson, postJson, postText } from "../api/client";
+import { deleteJson, getJson, getNdjsonStream, getText, patchJson, postJson, postNdjsonStream, postText } from "../api/client";
 import { normalizeCopilotResearchCardResult } from "../copilot-result";
+import {
+  createCopilotRunState,
+  isTerminalCopilotRunEvent,
+  reduceCopilotRunEvent,
+  type CopilotRunState
+} from "../copilot-run";
+import { isAbortError, RequestCoordinator } from "../request-coordinator";
+import { queryCache, stableQueryKey } from "../query-cache";
+export { requestMetrics, resetRequestMetrics } from "../request-metrics";
+export { queryStates } from "../query-cache";
+export function clearFrontendQueryCache() { queryCache.clear(); }
+import { beginLoading, endLoading, lastError, loading, setError, setLoading } from "./runtime";
+export { lastError, loading } from "./runtime";
+import {
+  diagnostics, diagnosticsLog, loadDiagnostics, loadProviderUsage, providerUsage,
+  refreshSystemStatus, setMarketDataMode, systemStatus, toggleConnection
+} from "./system";
+export {
+  diagnostics, diagnosticsLog, loadDiagnostics, loadProviderUsage, providerUsage,
+  refreshSystemStatus, setMarketDataMode, systemStatus, toggleConnection
+} from "./system";
+import {
+  loadPortfolioPerformanceData, loadPortfolioSnapshotData,
+  portfolioHistory, portfolioPerformance, portfolioSnapshot
+} from "./portfolio";
+export { portfolioHistory, portfolioPerformance, portfolioSnapshot } from "./portfolio";
 import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
+import {
+  SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY,
+  SITREP_FOLLOW_UP_STORAGE_KEY,
+  buildSitrepFollowUpCreatePayload,
+  findSitrepFollowUpByRow,
+  parseSitrepFollowUps,
+  type SitrepFollowUp,
+  type SitrepFollowUpStatus,
+  type SitrepTapeHandoffRow,
+  type SitrepWorkspaceMeta
+} from "../view-models/sitrep";
 import type {
   ActionResponse,
   BaseCurrencyResponse,
@@ -16,6 +53,7 @@ import type {
   CopilotResearchActionDefinition,
   CopilotResearchPlan,
   CopilotResearchReport,
+  CopilotRunEvent,
   CopilotSessionDetail,
   CopilotSessionSummary,
   CopilotThreadEntry,
@@ -49,6 +87,7 @@ import type {
   MacroSeriesHistory,
   MacroSnapshot,
   NewsEventFeedResponse,
+  SitrepWorkspaceResponse,
   PredictionCalibrationSummary,
   PredictionMarket,
   PredictionMarketListResponse,
@@ -185,6 +224,7 @@ export interface RiskComputeOptions {
   snapshot?: PortfolioSnapshot | null;
   sourceScope?: "portfolio" | "research" | "research_book";
   researchBookReturnPoints?: Array<{ timestamp: string; value: number }>;
+  researchBookRiskLegs?: NonNullable<GammaResearchObject["risk_legs"]>;
   riskSourceLabel?: string | null;
   riskSourceObjectId?: string | null;
   riskSourceOrigin?: string | null;
@@ -325,6 +365,7 @@ function createEmptyCopilotThread(domain: CopilotDomain): CopilotThreadState {
 function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> {
   return {
     portfolio: createEmptyCopilotThread("portfolio"),
+    sitrep: createEmptyCopilotThread("sitrep"),
     research: createEmptyCopilotThread("research"),
     equity_research: createEmptyCopilotThread("equity_research"),
     strategy_lab: createEmptyCopilotThread("strategy_lab"),
@@ -340,15 +381,10 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
 }
 
 export const activeTab = writable<TabId>("portfolio");
-export const systemStatus = writable<SystemStatus | null>(null);
-export const diagnostics = writable<DiagnosticsResponse | null>(null);
-export const providerUsage = writable<ProviderUsageResponse | null>(null);
-export const diagnosticsLog = writable<string[]>([]);
-export const portfolioSnapshot = writable<PortfolioSnapshot | null>(null);
-export const portfolioHistory = writable<PortfolioHistoryResponse | null>(null);
-export const portfolioPerformance = writable<PortfolioPerformanceResponse | null>(null);
 export const researchOverview = writable<ResearchOverviewResponse | null>(null);
 export const sitrepIndicesOverview = writable<ResearchOverviewResponse | null>(null);
+export const sitrepFollowUps = writable<SitrepFollowUp[]>([]);
+export const sitrepWorkspaceMeta = writable<SitrepWorkspaceMeta | null>(null);
 export const researchResult = writable<ResearchResult | null>(null);
 export const strategyLabResult = writable<StrategyLabResult | null>(null);
 export const strategyLabComposition = writable<StrategyLabCompositionResult | null>(null);
@@ -384,6 +420,7 @@ export const cryptoFlowSummary = writable<CryptoFlowSummary | null>(null);
 export const cryptoComparison = writable<CryptoComparison | null>(null);
 export const cryptoSyntheticPortfolio = writable<CryptoSyntheticPortfolio | null>(null);
 export const fundamentalsSearch = writable<FundamentalsSearchResponse | null>(null);
+export const fundamentalsLoadWarnings = writable<string[]>([]);
 export const fundamentalsSearchState = writable<FundamentalsSearchState>({
   query: "",
   loading: false,
@@ -403,6 +440,7 @@ export const fundamentalsReverseValuation = writable<FundamentalsReverseValuatio
 export const fundamentalsDcfSnapshots = writable<FundamentalsDcfSnapshotList | null>(null);
 export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardResult | null>>({
   portfolio: null,
+  sitrep: null,
   research: null,
   equity_research: null,
   strategy_lab: null,
@@ -423,6 +461,8 @@ export const copilotResearchPlan = writable<CopilotResearchPlan | null>(null);
 export const copilotOperatorPlan = writable<CopilotOperatorPlan | null>(null);
 export const copilotOperatorResult = writable<CopilotResearchCardResult | null>(null);
 export const copilotActionDefinitions = writable<CopilotResearchActionDefinition[]>([]);
+// Live streamed Copilot run state for the dedicated tab; null when idle.
+export const copilotActiveRun = writable<CopilotRunState | null>(null);
 export const researchDraft = writable<ResearchDraftState>({
   scopeType: "single_ticker",
   primarySymbol: "AAPL",
@@ -487,7 +527,7 @@ strategyLabResearchBook.subscribe(persistStrategyLabResearchBook);
 export const ivSurface = writable<IvSurface | null>(null);
 export const ivUnderlyingHistory = writable<IvUnderlyingHistoryResponse | null>(null);
 export const ivSession = writable<IvSessionStatus | null>(null);
-export const lastError = writable<string>("");
+export const ivError = writable("");
 
 export type ChartTheme = "blue" | "amber" | "green";
 export const chartTheme = writable<ChartTheme>("blue");
@@ -512,36 +552,6 @@ export function setFontFamily(family: FontFamily) {
     document.documentElement.style.setProperty("--app-font", `"${family}"`);
   }
 }
-export const loading = writable<Record<string, boolean>>({
-  status: false,
-  diagnostics: false,
-  providerUsage: false,
-  diagnosticsAction: false,
-  portfolio: false,
-  portfolioAction: false,
-  researchOverview: false,
-  research: false,
-  strategyLab: false,
-  strategyLabHandoff: false,
-  compareScenario: false,
-  savedResearch: false,
-  macro: false,
-  macroHistory: false,
-  news: false,
-  commodities: false,
-  maritime: false,
-  prediction: false,
-  predictionDetail: false,
-  crypto: false,
-  cryptoDetail: false,
-  cryptoPortfolio: false,
-  fundamentals: false,
-  fundamentalsSave: false,
-  copilot: false,
-  risk: false,
-  iv: false,
-  ivSession: false
-});
 
 const STRATEGY_LAB_HANDOFF_STORAGE_KEY = "gamma.strategyLab.handoffQueue.v1";
 // Restored handoffs older than this are grouped as an earlier session instead of
@@ -605,8 +615,7 @@ function isStrategyLabHandoffQueueItem(value: unknown): value is StrategyLabHand
 export const strategyLabHandoffQueue = writable<StrategyLabHandoffQueueItem[]>(loadPersistedStrategyLabHandoffQueue());
 strategyLabHandoffQueue.subscribe(persistStrategyLabHandoffQueue);
 
-const macroWorkspaceInflight = new Map<string, Promise<MacroSnapshot | null>>();
-const macroSeriesInflight = new Map<string, Promise<MacroSeriesHistory | null>>();
+const requestCoordinator = new RequestCoordinator();
 const DEFAULT_MACRO_SNAPSHOT_FX_SERIES = [
   "fx-eurusd", "fx-gbpusd", "fx-eurgbp", "fx-eurchf", "fx-usdjpy", "fx-usdchf", "fx-usdcnh",
   "fx-usdcad", "fx-audusd", "fx-nzdusd"
@@ -632,8 +641,18 @@ const MACRO_COMPARISON_SERIES: Record<string, string> = {
   "eu-eurusd": "us-dollar-broad"
 };
 
-function setLoading(key: string, value: boolean) {
-  loading.update((current) => ({ ...current, [key]: value }));
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
 }
 
 function resetCopilotCard(domain: CopilotDomain) {
@@ -693,10 +712,6 @@ export function setMacroContext(nextContext: Partial<MacroContextState>) {
 export function setRiskWorkspaceMode(mode: string) {
   riskWorkspaceMode.set(mode);
   resetCopilotCard("risk");
-}
-
-function setError(error: unknown) {
-  lastError.set(error instanceof Error ? error.message : String(error));
 }
 
 function errorMessage(error: unknown) {
@@ -895,14 +910,12 @@ function hasActiveStrategyLabCopilotContext() {
   );
 }
 
-// Synthesis calls can be slow with several contexts attached, but a hung provider
-// request must surface as a recoverable failure card, not a silent reset.
-const COPILOT_GENERATION_TIMEOUT_MS = 180_000;
 // Operator runs execute multi-step tool plans and can legitimately take longer.
 const COPILOT_OPERATOR_TIMEOUT_MS = 300_000;
 
 const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   portfolio: "Portfolio",
+  sitrep: "SITREP",
   research: "Research",
   equity_research: "Equity Research",
   strategy_lab: "Strategy Lab",
@@ -946,6 +959,28 @@ function buildCopilotContextFingerprint(
       benchmarkSymbol: performance?.benchmark_symbol ?? null,
       performancePoints: performance?.performance_points.length ?? 0,
       performanceTimestamp: lastItem(performance?.performance_points ?? [])?.timestamp ?? null
+    });
+  }
+
+  if (domain === "sitrep") {
+    const meta = get(sitrepWorkspaceMeta);
+    const overview = get(researchOverview);
+    const indices = get(sitrepIndicesOverview);
+    const macro = get(macroSnapshot);
+    const commodities = get(commoditiesWorkspace);
+    const news = get(newsFeed);
+    const followUps = get(sitrepFollowUps);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      workspaceRetrievedAt: meta?.retrieved_at ?? null,
+      sectionWarnings: meta?.section_warnings.length ?? 0,
+      equitiesRetrievedAt: overview?.retrieved_at ?? null,
+      indicesRetrievedAt: indices?.retrieved_at ?? null,
+      macroRetrievedAt: macro?.retrieved_at ?? null,
+      commoditiesRetrievedAt: commodities?.retrieved_at ?? null,
+      newsRetrievedAt: news?.retrieved_at ?? null,
+      followUps: followUps.map((item) => ({ id: item.id, status: item.status }))
     });
   }
 
@@ -1231,91 +1266,6 @@ function appendCopilotThreadResult(
   }));
 }
 
-export async function refreshSystemStatus() {
-  setLoading("status", true);
-  try {
-    const nextStatus = await getJson<SystemStatus>("/system/status");
-    systemStatus.set(nextStatus);
-    lastError.set("");
-    return nextStatus;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("status", false);
-  }
-}
-
-export async function loadDiagnostics() {
-  setLoading("diagnostics", true);
-  try {
-    diagnostics.set(await getJson<DiagnosticsResponse>("/diagnostics"));
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("diagnostics", false);
-  }
-}
-
-export async function loadProviderUsage() {
-  setLoading("providerUsage", true);
-  try {
-    providerUsage.set(await getJson<ProviderUsageResponse>("/system/provider-usage"));
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("providerUsage", false);
-  }
-}
-
-export async function toggleConnection() {
-  setLoading("status", true);
-  try {
-    const nextStatus = await postJson<SystemStatus>("/system/connection/toggle", {});
-    systemStatus.set(nextStatus);
-    diagnostics.update((current) =>
-      current == null
-        ? current
-        : {
-            ...current,
-            connection: nextStatus.connection
-          }
-    );
-    lastError.set("");
-    return nextStatus;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("status", false);
-  }
-}
-
-export async function setMarketDataMode(mode: string) {
-  setLoading("status", true);
-  try {
-    const nextStatus = await postJson<SystemStatus>("/system/market-data-mode", {
-      market_data_mode: mode
-    });
-    systemStatus.set(nextStatus);
-    diagnostics.update((current) =>
-      current == null
-        ? current
-        : {
-            ...current,
-            market_data_mode: nextStatus.market_data_mode
-          }
-    );
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("status", false);
-  }
-}
-
 export async function setBaseCurrency(currency: string) {
   setLoading("status", true);
   try {
@@ -1363,51 +1313,8 @@ export async function setBaseCurrency(currency: string) {
 }
 
 export async function loadPortfolioSnapshot() {
-  setLoading("portfolio", true);
-  try {
-    const [snapshotResult, historyResult] = await Promise.allSettled([
-      getJson<PortfolioSnapshot>("/portfolio/snapshot"),
-      getJson<PortfolioHistoryResponse>("/portfolio/history")
-    ]);
-
-    const errors: unknown[] = [];
-
-    if (snapshotResult.status === "fulfilled") {
-      portfolioSnapshot.set(snapshotResult.value);
-      const performanceResult = await Promise.allSettled([
-        postJson<PortfolioPerformanceResponse>("/portfolio/performance", {
-          snapshot: snapshotResult.value,
-          benchmark_symbol: "SPY",
-          lookback_days: 252
-        })
-      ]);
-      const performance = performanceResult[0];
-      if (performance.status === "fulfilled") {
-        portfolioPerformance.set(performance.value);
-      } else {
-        errors.push(performance.reason);
-      }
-    } else {
-      errors.push(snapshotResult.reason);
-    }
-
-    if (historyResult.status === "fulfilled") {
-      portfolioHistory.set(historyResult.value);
-    } else {
-      errors.push(historyResult.reason);
-    }
-
-    if (errors.length === 0) {
-      resetCopilotCard("portfolio");
-      lastError.set("");
-    } else {
-      setError(errors[0]);
-    }
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("portfolio", false);
-  }
+  const loaded = await loadPortfolioSnapshotData();
+  if (loaded) resetCopilotCard("portfolio");
 }
 
 export async function loadPortfolioPerformance(options?: {
@@ -1415,74 +1322,220 @@ export async function loadPortfolioPerformance(options?: {
   benchmarkSymbol?: string;
   lookbackDays?: number;
 }) {
-  const snapshot = options?.snapshot ?? get(portfolioSnapshot);
-  if (!snapshot) {
-    lastError.set("Load a portfolio snapshot before requesting portfolio performance.");
-    return;
-  }
-  setLoading("portfolio", true);
-  try {
-    portfolioPerformance.set(
-      await postJson<PortfolioPerformanceResponse>("/portfolio/performance", {
-        snapshot,
-        benchmark_symbol: options?.benchmarkSymbol ?? "SPY",
-        lookback_days: options?.lookbackDays ?? 252
-      })
-    );
-    resetCopilotCard("portfolio");
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("portfolio", false);
-  }
+  const loaded = await loadPortfolioPerformanceData(options);
+  if (loaded) resetCopilotCard("portfolio");
 }
 
 export async function loadResearchOverview(options: ResearchOverviewLoadOptions = {}) {
-  setLoading("researchOverview", true);
+  const params = new URLSearchParams({
+    universe_id: options.universeId ?? "broad_us_market",
+    timeframe: options.timeframe ?? "3M",
+    benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+    surface: options.surface ?? "research_overview"
+  });
+  if (options.forceRefresh) params.set("force_refresh", "true");
+  const path = `/research/overview?${params.toString()}`;
+  const key = stableQueryKey("/research/overview", {
+    universe_id: options.universeId ?? "broad_us_market",
+    timeframe: options.timeframe ?? "3M",
+    benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+    surface: options.surface ?? "research_overview"
+  });
+  beginLoading("researchOverview");
   try {
-    const params = new URLSearchParams({
-      universe_id: options.universeId ?? "broad_us_market",
-      timeframe: options.timeframe ?? "3M",
-      benchmark_symbol: options.benchmarkSymbol ?? "SPY",
-      surface: options.surface ?? "research_overview"
+    const overview = await queryCache.query<ResearchOverviewResponse>({
+      scope: "research-overview",
+      key,
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<ResearchOverviewResponse>(path, { signal }),
+      onData: (data) => researchOverview.set(data)
     });
-    if (options.forceRefresh) {
-      params.set("force_refresh", "true");
-    }
-    const overview = await getJson<ResearchOverviewResponse>(`/research/overview?${params.toString()}`);
-    researchOverview.set(overview);
     lastError.set("");
     return overview;
   } catch (error) {
-    setError(error);
+    if (!isAbortError(error)) setError(error);
     return null;
   } finally {
-    setLoading("researchOverview", false);
+    endLoading("researchOverview");
   }
 }
 
 export async function loadSitrepIndicesOverview(options: ResearchOverviewLoadOptions = {}) {
-  setLoading("researchOverview", true);
-  try {
-    const params = new URLSearchParams({
+  const params = new URLSearchParams({
       universe_id: options.universeId ?? "global_indices",
       timeframe: options.timeframe ?? "3M",
       benchmark_symbol: options.benchmarkSymbol ?? "SPY",
       surface: options.surface ?? "sitrep"
     });
-    if (options.forceRefresh) {
-      params.set("force_refresh", "true");
-    }
-    const overview = await getJson<ResearchOverviewResponse>(`/research/overview?${params.toString()}`);
-    sitrepIndicesOverview.set(overview);
+  if (options.forceRefresh) params.set("force_refresh", "true");
+  const path = `/research/overview?${params.toString()}`;
+  const key = stableQueryKey("/research/overview", {
+    universe_id: options.universeId ?? "global_indices",
+    timeframe: options.timeframe ?? "3M",
+    benchmark_symbol: options.benchmarkSymbol ?? "SPY",
+    surface: options.surface ?? "sitrep"
+  });
+  beginLoading("researchOverview");
+  try {
+    const overview = await queryCache.query<ResearchOverviewResponse>({
+      scope: "sitrep-indices-overview",
+      key,
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<ResearchOverviewResponse>(path, { signal }),
+      onData: (data) => sitrepIndicesOverview.set(data)
+    });
     lastError.set("");
     return overview;
   } catch (error) {
-    setError(error);
+    if (!isAbortError(error)) setError(error);
     return null;
   } finally {
-    setLoading("researchOverview", false);
+    endLoading("researchOverview");
+  }
+}
+
+export async function loadSitrepWorkspace(options: { forceRefresh?: boolean } = {}) {
+  const params = new URLSearchParams();
+  if (options.forceRefresh) params.set("force_refresh", "true");
+  const query = params.toString();
+  const path = query ? `/sitrep/workspace?${query}` : "/sitrep/workspace";
+  beginLoading("researchOverview");
+  beginLoading("macro");
+  beginLoading("commodities");
+  setLoading("prediction", true);
+  setLoading("news", true);
+  try {
+    const workspace = await queryCache.query<SitrepWorkspaceResponse>({
+      scope: "sitrep-workspace",
+      key: stableQueryKey("/sitrep/workspace", {}),
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<SitrepWorkspaceResponse>(path, { signal }),
+      onData: (data) => {
+        if (data.equities_overview) researchOverview.set(data.equities_overview);
+        if (data.indices_overview) sitrepIndicesOverview.set(data.indices_overview);
+        if (data.macro_snapshot) macroSnapshot.set(data.macro_snapshot);
+        if (data.commodities) commoditiesWorkspace.set(data.commodities);
+        if (data.prediction_markets) predictionMarketScreener.set(data.prediction_markets);
+        if (data.news) newsFeed.set(data.news);
+        sitrepWorkspaceMeta.set({
+          retrieved_at: data.retrieved_at,
+          sections: data.sections,
+          section_warnings: data.section_warnings
+        });
+        if (data.section_warnings.length) {
+          console.warn("SITREP workspace sections degraded:", data.section_warnings);
+        }
+      }
+    });
+    lastError.set("");
+    return workspace;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return null;
+  } finally {
+    endLoading("researchOverview");
+    endLoading("macro");
+    endLoading("commodities");
+    setLoading("prediction", false);
+    setLoading("news", false);
+  }
+}
+
+interface SitrepFollowUpListResponse {
+  items: SitrepFollowUp[];
+}
+
+/**
+ * One-time migration of pre-backend localStorage follow-ups into the backend
+ * store. On failure the local copy is kept so a later load can retry.
+ */
+async function migrateLegacySitrepFollowUps() {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  const raw = localStorage.getItem(SITREP_FOLLOW_UP_STORAGE_KEY);
+  if (!raw) {
+    return;
+  }
+  const legacy = parseSitrepFollowUps(raw);
+  for (const item of legacy) {
+    try {
+      await postJson<SitrepFollowUp>("/sitrep/follow-ups", {
+        row_id: item.row_id,
+        title: item.title,
+        source: item.source,
+        tone: item.tone,
+        detail: item.detail,
+        meta: item.meta,
+        note: item.note,
+        handoff: item.handoff,
+        saved_at: item.saved_at
+      });
+    } catch {
+      return;
+    }
+  }
+  localStorage.setItem(SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY, raw);
+  localStorage.removeItem(SITREP_FOLLOW_UP_STORAGE_KEY);
+}
+
+export async function loadSitrepFollowUps() {
+  try {
+    await migrateLegacySitrepFollowUps();
+    const response = await getJson<SitrepFollowUpListResponse>("/sitrep/follow-ups");
+    sitrepFollowUps.set(response.items);
+    return response.items;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return null;
+  }
+}
+
+export async function toggleSitrepFollowUpItem(row: SitrepTapeHandoffRow) {
+  const existing = findSitrepFollowUpByRow(get(sitrepFollowUps), row.id);
+  try {
+    if (existing) {
+      await deleteJson<{ success: boolean }>(`/sitrep/follow-ups/${existing.id}`);
+      sitrepFollowUps.update((items) => items.filter((item) => item.id !== existing.id));
+      return null;
+    }
+    const created = await postJson<SitrepFollowUp>(
+      "/sitrep/follow-ups",
+      buildSitrepFollowUpCreatePayload(row)
+    );
+    sitrepFollowUps.update((items) => [created, ...items.filter((item) => item.row_id !== created.row_id)]);
+    return created;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function updateSitrepFollowUpItem(
+  id: string,
+  patch: { note?: string; status?: SitrepFollowUpStatus }
+) {
+  try {
+    const updated = await patchJson<SitrepFollowUp>(`/sitrep/follow-ups/${id}`, patch);
+    sitrepFollowUps.update((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+    return updated;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function dismissSitrepFollowUpItem(id: string) {
+  try {
+    await deleteJson<{ success: boolean }>(`/sitrep/follow-ups/${id}`);
+    sitrepFollowUps.update((items) => items.filter((item) => item.id !== id));
+    return true;
+  } catch (error) {
+    setError(error);
+    return false;
   }
 }
 
@@ -1508,37 +1561,40 @@ export async function loadNewsFeed(options: { limit?: number; forceRefresh?: boo
 }
 
 export async function runResearch(options: ResearchRunOptions) {
-  setLoading("research", true);
-  try {
-    const payload = {
+  const payload = {
       scope_type: options.scopeType,
       primary_symbol: options.primarySymbol ?? "",
       synthetic_positions: options.syntheticPositions ?? [],
       benchmark_symbol: options.benchmarkSymbol,
       lookback_days: options.lookbackDays
-    };
-    const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload);
-    researchResult.set(nextResearchResult);
-    strategyLabComposition.set(null);
-    researchCompareResult.set(null);
-    // Downstream analysis must be recomputed from the latest executed research scope.
-    riskResult.set(null);
-    riskSnapshotBasis.set(null);
-    riskWorkspaceBasis.set(null);
-    resetCopilotCard("research");
-    resetCopilotCard("risk");
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("research", false);
-  }
+  };
+  const key = stableJson(payload);
+  return requestCoordinator.run("research-analysis", key, async (signal) => {
+    setLoading("research", true);
+    try {
+      const nextResearchResult = await postJson<ResearchResult>("/research/analyze", payload, { signal });
+      if (signal.aborted) return null;
+      researchResult.set(nextResearchResult);
+      strategyLabComposition.set(null);
+      researchCompareResult.set(null);
+      riskResult.set(null);
+      riskSnapshotBasis.set(null);
+      riskWorkspaceBasis.set(null);
+      resetCopilotCard("research");
+      resetCopilotCard("risk");
+      lastError.set("");
+      return nextResearchResult;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("research-analysis", signal)) setLoading("research", false);
+    }
+  });
 }
 
 export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabResult>("/research/strategy-lab/analyze", {
+  const payload = {
       name: options.name,
       rows: options.rows,
       date_column: options.dateColumn,
@@ -1547,50 +1603,60 @@ export async function analyzeStrategyLab(options: StrategyLabAnalyzeOptions) {
       benchmark_column: options.benchmarkColumn || null,
       benchmark_value_kind: options.benchmarkValueKind ?? "return",
       min_observations: options.minObservations ?? 5
-    });
-    strategyLabResult.set(result);
-    strategyLabComposition.set(null);
-    researchCompareResult.set(null);
-    resetCopilotCard("research");
-    lastError.set("");
-    return result;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+  };
+  return requestCoordinator.run("strategy-lab-work", `analyze:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabResult>("/research/strategy-lab/analyze", payload, { signal });
+      if (signal.aborted) return null;
+      strategyLabResult.set(result);
+      strategyLabComposition.set(null);
+      researchCompareResult.set(null);
+      resetCopilotCard("research");
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 export async function composeStrategyLab(options: StrategyLabComposeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/compose", {
+  const payload = {
       name: options.name,
       legs: options.legs,
       lenses: options.lenses,
       overlays: options.overlays,
       benchmark_object: options.benchmarkObject ?? null,
       min_observations: options.minObservations ?? 5
-    });
-    strategyLabComposition.set(result);
-    researchCompareResult.set(null);
-    resetCopilotCard("research");
-    lastError.set("");
-    return result;
-  } catch (error) {
-    strategyLabComposition.set(null);
-    setError(error);
-    return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+  };
+  return requestCoordinator.run("strategy-lab-work", `compose:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/compose", payload, { signal });
+      if (signal.aborted) return null;
+      strategyLabComposition.set(result);
+      researchCompareResult.set(null);
+      resetCopilotCard("research");
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) {
+        strategyLabComposition.set(null);
+        setError(error);
+      }
+      return null;
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", {
+  const payload = {
       name: options.name,
       legs: options.legs,
       lenses: options.lenses ?? [],
@@ -1599,7 +1665,12 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
       benchmark_object: options.benchmarkObject ?? null,
       lookback_days: options.lookbackDays ?? 756,
       min_observations: options.minObservations ?? 5
-    });
+  };
+  return requestCoordinator.run("strategy-lab-work", `portfolio-compose:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabCompositionResult>("/research/strategy-lab/portfolio-compose", payload, { signal });
+      if (signal.aborted) return null;
     strategyLabComposition.set(result);
     if (options.validation?.valid) {
       const book = buildStrategyLabResearchBook(result, options.validation, options.benchmarkSymbol ?? null);
@@ -1609,13 +1680,16 @@ export async function composeStrategyLabPortfolio(options: StrategyLabPortfolioC
     resetCopilotCard("research");
     lastError.set("");
     return result;
-  } catch (error) {
-    strategyLabComposition.set(null);
-    setError(error);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        strategyLabComposition.set(null);
+        setError(error);
+      }
     return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 function buildStrategyLabResearchBook(
@@ -1680,9 +1754,7 @@ function buildStrategyLabResearchBook(
 }
 
 export async function validateStrategyLabPortfolio(options: StrategyLabPortfolioComposeOptions) {
-  setLoading("strategyLab", true);
-  try {
-    const result = await postJson<StrategyLabBookValidation>("/research/strategy-lab/portfolio-validate", {
+  const payload = {
       name: options.name,
       legs: options.legs,
       lenses: options.lenses ?? [],
@@ -1691,15 +1763,21 @@ export async function validateStrategyLabPortfolio(options: StrategyLabPortfolio
       benchmark_object: options.benchmarkObject ?? null,
       lookback_days: options.lookbackDays ?? 756,
       min_observations: options.minObservations ?? 5
-    });
-    lastError.set("");
-    return result;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("strategyLab", false);
-  }
+  };
+  return requestCoordinator.run("strategy-lab-work", `portfolio-validate:${stableJson(payload)}`, async (signal) => {
+    beginLoading("strategyLab");
+    try {
+      const result = await postJson<StrategyLabBookValidation>("/research/strategy-lab/portfolio-validate", payload, { signal });
+      if (signal.aborted) return null;
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      endLoading("strategyLab");
+    }
+  });
 }
 
 export function enqueueStrategyLabHandoff(handoff: StrategyLabHandoffEnvelope) {
@@ -1732,7 +1810,11 @@ export function enqueueAndOpenStrategyLab(handoff: StrategyLabHandoffEnvelope) {
   return enqueueStrategyLabHandoff(handoff);
 }
 
-export async function resolvePendingStrategyLabHandoffs() {
+export function resolvePendingStrategyLabHandoffs() {
+  return requestCoordinator.run("strategy-lab-handoff-resolution", "pending", resolvePendingStrategyLabHandoffsImpl);
+}
+
+async function resolvePendingStrategyLabHandoffsImpl(signal: AbortSignal) {
   // Stale earlier-session items stay out of auto-resolution; the user can dismiss
   // them or re-send the handoff from the source tab for fresh data.
   const pending = get(strategyLabHandoffQueue).filter(
@@ -1744,6 +1826,7 @@ export async function resolvePendingStrategyLabHandoffs() {
   setLoading("strategyLabHandoff", true);
   try {
     for (const item of pending) {
+      if (signal.aborted) break;
       strategyLabHandoffQueue.update((current) =>
         current.map((candidate) =>
           candidate.id === item.id
@@ -1754,7 +1837,8 @@ export async function resolvePendingStrategyLabHandoffs() {
       try {
         const resolved = await postJson<StrategyLabResolvedHandoff>("/research/strategy-lab/resolve-handoff", {
           handoff: item.handoff
-        });
+        }, { signal });
+        if (signal.aborted) break;
         strategyLabHandoffQueue.update((current) =>
           current.map((candidate) =>
             candidate.id === item.id
@@ -1769,6 +1853,7 @@ export async function resolvePendingStrategyLabHandoffs() {
           )
         );
       } catch (error) {
+        if (isAbortError(error)) break;
         const message = errorMessage(error);
         strategyLabHandoffQueue.update((current) =>
           current.map((candidate) =>
@@ -1782,7 +1867,9 @@ export async function resolvePendingStrategyLabHandoffs() {
     }
     return get(strategyLabHandoffQueue);
   } finally {
-    setLoading("strategyLabHandoff", false);
+    if (requestCoordinator.isCurrent("strategy-lab-handoff-resolution", signal)) {
+      setLoading("strategyLabHandoff", false);
+    }
   }
 }
 
@@ -1827,22 +1914,25 @@ export function restoreStrategyLabResult(result: StrategyLabResult) {
 }
 
 export async function compareResearch(options: ResearchCompareOptions) {
-  setLoading("compareScenario", true);
-  try {
-    const payload = {
+  const payload = {
       left: serializeCompareLeg(options.left),
       right: serializeCompareLeg(options.right)
-    };
-    const result = await postJson<ResearchCompareResult>("/research/compare-scenario/analyze", payload);
-    researchCompareResult.set(result);
-    lastError.set("");
-    return result;
-  } catch (error) {
-    setError(error);
-    return null;
-  } finally {
-    setLoading("compareScenario", false);
-  }
+  };
+  return requestCoordinator.run("research-compare", stableJson(payload), async (signal) => {
+    setLoading("compareScenario", true);
+    try {
+      const result = await postJson<ResearchCompareResult>("/research/compare-scenario/analyze", payload, { signal });
+      if (signal.aborted) return null;
+      researchCompareResult.set(result);
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("research-compare", signal)) setLoading("compareScenario", false);
+    }
+  });
 }
 
 function serializeCompareLeg(leg: ResearchCompareLegInput) {
@@ -1855,19 +1945,22 @@ function serializeCompareLeg(leg: ResearchCompareLegInput) {
 }
 
 export async function loadSavedResearch() {
-  setLoading("savedResearch", true);
+  beginLoading("savedResearch");
   try {
-    const response = await getJson<SavedResearchListResponse>("/research/saved");
-    const items = Array.isArray(response.items) ? response.items : [];
-    savedResearchItems.set(items);
+    const response = await queryCache.query<SavedResearchListResponse>({
+      scope: "saved-research",
+      key: "/research/saved",
+      staleTimeMs: 60_000,
+      fetcher: (signal) => getJson<SavedResearchListResponse>("/research/saved", { signal }),
+      onData: (data) => savedResearchItems.set(Array.isArray(data.items) ? data.items : [])
+    });
     lastError.set("");
-    return items;
+    return Array.isArray(response.items) ? response.items : [];
   } catch (error) {
-    savedResearchItems.set([]);
-    setError(error);
-    return [];
+    if (!isAbortError(error)) setError(error);
+    return get(savedResearchItems);
   } finally {
-    setLoading("savedResearch", false);
+    endLoading("savedResearch");
   }
 }
 
@@ -1885,6 +1978,7 @@ export async function saveResearchItem(options: SavedResearchCreateOptions) {
       transformation_note: options.transformationNote ?? null
     });
     savedResearchItems.update((current) => [item, ...current.filter((existing) => existing.id !== item.id)]);
+    queryCache.invalidate("/research/saved");
     lastError.set("");
     return item;
   } catch (error) {
@@ -1901,6 +1995,7 @@ export async function deleteSavedResearchItem(itemId: string) {
     const response = await deleteJson<SavedResearchDeleteResponse>(`/research/saved/${encodeURIComponent(itemId)}`);
     if (response.success) {
       savedResearchItems.update((current) => current.filter((item) => item.id !== itemId));
+      queryCache.invalidate("/research/saved");
     }
     lastError.set("");
     return response.success;
@@ -1985,24 +2080,36 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
     resetCopilotCard("macro");
   }
   const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
-  const requestKey = JSON.stringify(payload);
-  const existingRequest = macroWorkspaceInflight.get(requestKey);
-  if (existingRequest) {
-    return existingRequest;
-  }
+  const requestKey = stableQueryKey("/macro/workspace", payload);
   const requestPromise = (async () => {
-    setLoading("macro", true);
+    beginLoading("macro");
     try {
-      const [snapshot, divergences, events] = await Promise.all([
-        postJson<MacroSnapshot>("/macro/snapshot", payload),
-        postJson<MacroDivergenceListResponse>("/macro/divergences", payload),
-        getJson<MacroEventsResponse>(
-          `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
-        )
-        ]);
-        macroSnapshot.set(snapshot);
-        macroDivergences.set(divergences);
-        macroEvents.set(events);
+      const bundle = await queryCache.query<{
+        snapshot: MacroSnapshot;
+        divergences: MacroDivergenceListResponse;
+        events: MacroEventsResponse;
+      }>({
+        scope: "macro-workspace",
+        key: requestKey,
+        staleTimeMs: 10 * 60_000,
+        forceRefresh: options.forceRefresh,
+        fetcher: async (signal) => {
+          const [snapshot, divergences, events] = await Promise.all([
+            postJson<MacroSnapshot>("/macro/snapshot", payload, { signal }),
+            postJson<MacroDivergenceListResponse>("/macro/divergences", payload, { signal }),
+            getJson<MacroEventsResponse>(
+              `/macro/events?region=${encodeURIComponent(payload.region)}&force_refresh=${payload.force_refresh ? "true" : "false"}`,
+              { signal }
+            )
+          ]);
+          return { snapshot, divergences, events };
+        },
+        onData: ({ snapshot, divergences, events }) => {
+          macroSnapshot.set(snapshot);
+          macroDivergences.set(divergences);
+          macroEvents.set(events);
+        }
+      });
         const primarySeries = seriesForMacroMode(nextContext);
         if (primarySeries.length) {
           await prefetchMacroSeries(primarySeries, {
@@ -2024,16 +2131,14 @@ export async function loadMacroWorkspace(options: MacroLoadOptions = {}) {
           });
         }
         lastError.set("");
-        return snapshot;
+        return bundle.snapshot;
       } catch (error) {
       setError(error);
       return null;
     } finally {
-      setLoading("macro", false);
-      macroWorkspaceInflight.delete(requestKey);
+      endLoading("macro");
     }
   })();
-  macroWorkspaceInflight.set(requestKey, requestPromise);
   return requestPromise;
 }
 
@@ -2057,25 +2162,35 @@ export async function loadMaritimeWorkspace(options: MaritimeLoadOptions = {}) {
 }
 
 export async function loadCommoditiesWorkspace(options: CommodityWorkspaceLoadOptions = {}) {
-  setLoading("commodities", true);
+  beginLoading("commodities");
   try {
     const current = get(commoditiesWorkspace);
     const mode = options.mode ?? current?.mode ?? "overview";
-    const response = await postJson<CommodityWorkspaceResponse>("/commodities/workspace", {
+    const payload = {
       mode,
       selected_instrument_id:
         options.selectedInstrumentId ?? resolveCommodityInstrumentForMode(current, mode) ?? "wti",
       force_refresh: options.forceRefresh ?? false
+    };
+    const response = await queryCache.query<CommodityWorkspaceResponse>({
+      scope: "commodities-workspace",
+      key: stableQueryKey("/commodities/workspace", {
+        mode: payload.mode,
+        selected_instrument_id: payload.selected_instrument_id
+      }),
+      staleTimeMs: 5 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => postJson<CommodityWorkspaceResponse>("/commodities/workspace", payload, { signal }),
+      onData: (data) => commoditiesWorkspace.set(data)
     });
-    commoditiesWorkspace.set(response);
     resetCopilotCard("commodities");
     lastError.set("");
     return response;
   } catch (error) {
-    setError(error);
+    if (!isAbortError(error)) setError(error);
     return null;
   } finally {
-    setLoading("commodities", false);
+    endLoading("commodities");
   }
 }
 
@@ -2130,30 +2245,25 @@ export async function loadMacroSeriesHistory(seriesId: string, options: MacroLoa
   });
   const payload = macroPayloadFromContext(nextContext, options.forceRefresh ?? false);
   const cacheKey = macroHistoryKey(seriesId, payload.region, payload.timeframe);
-  const requestKey = `${cacheKey}:${payload.force_refresh ? "refresh" : "cached"}`;
-  const existingRequest = macroSeriesInflight.get(requestKey);
-  if (existingRequest) {
-    return existingRequest;
+  const path = `/macro/series/${encodeURIComponent(seriesId)}/history?region=${encodeURIComponent(payload.region)}&timeframe=${encodeURIComponent(payload.timeframe)}&force_refresh=${payload.force_refresh ? "true" : "false"}`;
+  beginLoading("macroHistory");
+  try {
+    const history = await queryCache.query<MacroSeriesHistory>({
+      scope: `macro-series:${cacheKey}`,
+      key: stableQueryKey(`/macro/series/${seriesId}/history`, { region: payload.region, timeframe: payload.timeframe }),
+      staleTimeMs: 30 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<MacroSeriesHistory>(path, { signal }),
+      onData: (data) => macroSeriesHistories.update((current) => ({ ...current, [cacheKey]: data }))
+    });
+    lastError.set("");
+    return history;
+  } catch (error) {
+    if (!isAbortError(error)) setError(error);
+    return get(macroSeriesHistories)[cacheKey] ?? null;
+  } finally {
+    endLoading("macroHistory");
   }
-  const requestPromise = (async () => {
-    setLoading("macroHistory", true);
-    try {
-      const history = await getJson<MacroSeriesHistory>(
-        `/macro/series/${encodeURIComponent(seriesId)}/history?region=${encodeURIComponent(payload.region)}&timeframe=${encodeURIComponent(payload.timeframe)}&force_refresh=${payload.force_refresh ? "true" : "false"}`
-      );
-      macroSeriesHistories.update((current) => ({ ...current, [cacheKey]: history }));
-      lastError.set("");
-      return history;
-    } catch (error) {
-      setError(error);
-      return null;
-    } finally {
-      setLoading("macroHistory", false);
-      macroSeriesInflight.delete(requestKey);
-    }
-  })();
-  macroSeriesInflight.set(requestKey, requestPromise);
-  return requestPromise;
 }
 
 export async function loadPredictionMarketScreener(options: PredictionMarketScreenerOptions = {}) {
@@ -2425,20 +2535,16 @@ export async function loadFundamentalsSearch(options: FundamentalsSearchOptions 
       requestedAt: null,
       completedAt: new Date().toISOString()
     });
-    const explicitQuery = Boolean(query);
     const currentSelection = get(selectedFundamentalsTicker);
-    const selectedStillVisible = response.results.some((result) => result.ticker === currentSelection);
-    const nextSelection = selectedStillVisible
-      ? currentSelection
-      : explicitQuery
-        ? response.results[0]?.ticker ?? currentSelection
-        : currentSelection;
-    if (nextSelection) {
-      await selectFundamentalsCompany(nextSelection, {
-        resetThread: nextSelection !== currentSelection || get(fundamentalsOverview) == null,
+    const exactTickerMatch = query
+      ? response.results.find((result) => result.ticker.trim().toUpperCase() === query.toUpperCase()) ?? null
+      : null;
+    if (exactTickerMatch && (currentSelection !== exactTickerMatch.ticker || get(fundamentalsOverview) == null)) {
+      await selectFundamentalsCompany(exactTickerMatch.ticker, {
+        resetThread: currentSelection !== exactTickerMatch.ticker || get(fundamentalsOverview) == null,
         forceRefresh: options.forceRefresh
       });
-    } else {
+    } else if (!currentSelection && !query && response.results.length === 0) {
       selectedFundamentalsTicker.set(null);
       fundamentalsOverview.set(null);
       fundamentalsFinancials.set(null);
@@ -2478,6 +2584,7 @@ export async function selectFundamentalsCompany(
     resetCopilotCard("fundamentals");
   }
   setLoading("fundamentals", true);
+  fundamentalsLoadWarnings.set([]);
   try {
     const querySuffix = options.forceRefresh ? "?force_refresh=true" : "";
     const [overviewResult, financialsResult, dcfResult, peersResult, reverseResult, referenceResult, snapshotsResult] = await Promise.allSettled([
@@ -2491,12 +2598,14 @@ export async function selectFundamentalsCompany(
     ]);
 
     const errors: unknown[] = [];
+    const sectionWarnings: string[] = [];
 
     if (overviewResult.status === "fulfilled") {
       fundamentalsOverview.set(overviewResult.value);
     } else {
       fundamentalsOverview.set(null);
       errors.push(overviewResult.reason);
+      sectionWarnings.push(`Overview unavailable: ${errorMessage(overviewResult.reason)}`);
     }
 
     if (financialsResult.status === "fulfilled") {
@@ -2504,6 +2613,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsFinancials.set(null);
       errors.push(financialsResult.reason);
+      sectionWarnings.push(`Financials unavailable: ${errorMessage(financialsResult.reason)}`);
     }
 
     if (dcfResult.status === "fulfilled") {
@@ -2511,6 +2621,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsDcfModel.set(null);
       errors.push(dcfResult.reason);
+      sectionWarnings.push(`DCF unavailable: ${errorMessage(dcfResult.reason)}`);
     }
 
     if (peersResult.status === "fulfilled") {
@@ -2518,6 +2629,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsPeers.set(null);
       errors.push(peersResult.reason);
+      sectionWarnings.push(`Peers unavailable: ${errorMessage(peersResult.reason)}`);
     }
 
     if (reverseResult.status === "fulfilled") {
@@ -2525,6 +2637,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsReverseValuation.set(null);
       errors.push(reverseResult.reason);
+      sectionWarnings.push(`Reverse valuation unavailable: ${errorMessage(reverseResult.reason)}`);
     }
 
     if (referenceResult.status === "fulfilled") {
@@ -2532,6 +2645,7 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsReference.set(null);
       errors.push(referenceResult.reason);
+      sectionWarnings.push(`Reference / filings unavailable: ${errorMessage(referenceResult.reason)}`);
     }
 
     if (snapshotsResult.status === "fulfilled") {
@@ -2539,7 +2653,10 @@ export async function selectFundamentalsCompany(
     } else {
       fundamentalsDcfSnapshots.set(null);
       errors.push(snapshotsResult.reason);
+      sectionWarnings.push(`DCF snapshots unavailable: ${errorMessage(snapshotsResult.reason)}`);
     }
+
+    fundamentalsLoadWarnings.set(sectionWarnings);
 
     if (errors.length === 0) {
       lastError.set("");
@@ -2679,40 +2796,47 @@ export async function computeRisk(options: RiskComputeOptions) {
   const snapshot = options.snapshot ?? get(portfolioSnapshot) ?? get(researchResult)?.snapshot ?? null;
   if (!snapshot) {
     lastError.set("Load or build a snapshot before computing risk.");
-    return;
+    return null;
   }
   const snapshotWorkspace: "portfolio" | "research" | "research_book" =
     options.sourceScope ?? (snapshot === get(researchResult)?.snapshot ? "research" : "portfolio");
-  setLoading("risk", true);
-  try {
-    riskResult.set(
-      await postJson<RiskResult>("/risk/compute", {
-        snapshot,
-        source_scope: snapshotWorkspace,
-        source_label: options.riskSourceLabel ?? null,
-        source_object_id: options.riskSourceObjectId ?? null,
-        source_origin: options.riskSourceOrigin ?? null,
-        research_book_return_points: options.researchBookReturnPoints ?? [],
-        alpha: options.alpha,
-        lookback_days: options.lookbackDays,
-        horizon_days: options.horizonDays,
-        mc_horizon_days: options.mcHorizonDays,
-        mc_simulation_model: options.mcSimulationModel,
-        mc_num_simulations: options.mcNumSimulations,
-        beta_window: options.betaWindow,
-        benchmark_symbol: options.benchmarkSymbol,
-        include_monte_carlo: options.includeMonteCarlo ?? true
-      })
-    );
-    riskSnapshotBasis.set(snapshot);
-    riskWorkspaceBasis.set(snapshotWorkspace);
-    resetCopilotCard("risk");
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("risk", false);
-  }
+  const payload = {
+    snapshot,
+    source_scope: snapshotWorkspace,
+    source_label: options.riskSourceLabel ?? null,
+    source_object_id: options.riskSourceObjectId ?? null,
+    source_origin: options.riskSourceOrigin ?? null,
+    research_book_return_points: options.researchBookReturnPoints ?? [],
+    research_book_legs: options.researchBookRiskLegs ?? [],
+    alpha: options.alpha,
+    lookback_days: options.lookbackDays,
+    horizon_days: options.horizonDays,
+    mc_horizon_days: options.mcHorizonDays,
+    mc_simulation_model: options.mcSimulationModel,
+    mc_num_simulations: options.mcNumSimulations,
+    beta_window: options.betaWindow,
+    benchmark_symbol: options.benchmarkSymbol,
+    include_monte_carlo: options.includeMonteCarlo ?? true
+  };
+  const requestKey = stableJson(payload);
+  return requestCoordinator.run("risk-compute", requestKey, async (signal) => {
+    setLoading("risk", true);
+    try {
+      const result = await postJson<RiskResult>("/risk/compute", payload, { signal });
+      if (signal.aborted) return null;
+      riskResult.set(result);
+      riskSnapshotBasis.set(snapshot);
+      riskWorkspaceBasis.set(snapshotWorkspace);
+      resetCopilotCard("risk");
+      lastError.set("");
+      return result;
+    } catch (error) {
+      if (!isAbortError(error)) setError(error);
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("risk-compute", signal)) setLoading("risk", false);
+    }
+  });
 }
 
 function getCopilotSessionId() {
@@ -2765,6 +2889,13 @@ function normalizeReasoningEffort(effort: CopilotReasoningEffort | undefined) {
 
 function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode | null | undefined) {
   switch (domain) {
+    case "sitrep":
+      // The backend composes the SITREP bundle itself from SitrepService plus
+      // the persisted follow-up store, so only tab/mode routing is sent.
+      return {
+        current_tab: "sitrep",
+        workspace_mode: workspaceMode
+      };
     case "portfolio":
       return {
         current_tab: "portfolio",
@@ -2931,6 +3062,9 @@ function validateSynthesisScopeDomain(
   if (domain === "portfolio" && !get(portfolioSnapshot)) {
     return "Load the Portfolio context before including it in a synthesis card.";
   }
+  if (domain === "sitrep" && !get(sitrepWorkspaceMeta)) {
+    return "Load the SITREP workspace before including it in a synthesis card.";
+  }
   if (domain === "research" && !get(researchResult)) {
     return "Run a Research analysis before including it in a synthesis card.";
   }
@@ -2985,6 +3119,9 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   if (domain === "portfolio" && !get(portfolioSnapshot)) {
     return "Load a portfolio snapshot before generating a research card.";
   }
+  if (domain === "sitrep" && !get(sitrepWorkspaceMeta)) {
+    return "Load the SITREP workspace before generating a research card.";
+  }
   if (domain === "research" && !get(researchResult)) {
     return "Run a research analysis before generating a research card.";
   }
@@ -3017,6 +3154,7 @@ function validateCopilotContext(domain: CopilotDomain, options: CopilotLoadOptio
   }
   if (
     domain === "portfolio" ||
+    domain === "sitrep" ||
     domain === "research" ||
     domain === "equity_research" ||
     domain === "strategy_lab" ||
@@ -3037,6 +3175,99 @@ export async function loadCopilotResearchCard(
   prompt = "",
   options: CopilotLoadOptions = {}
 ) {
+  return streamCopilotResearchCard(domain, prompt, options);
+}
+
+const COPILOT_STREAM_TIMEOUT_MS = 330_000;
+
+let activeCopilotRunId: string | null = null;
+
+function newCopilotRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `run_${crypto.randomUUID().replaceAll("-", "")}`;
+  }
+  return `run_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const COPILOT_RECONNECT_ATTEMPTS = 3;
+
+async function consumeCopilotRun(
+  endpoint: string,
+  payload: Record<string, unknown>,
+  runId: string,
+  domain: CopilotDomain,
+  signal: AbortSignal
+): Promise<{ state: CopilotRunState; result: CopilotResearchCardResult }> {
+  let runState = createCopilotRunState(runId);
+  let finalResult: CopilotResearchCardResult | null = null;
+  let attempt = 0;
+  copilotActiveRun.set(runState);
+
+  const onLine = (line: string) => {
+    let event: CopilotRunEvent;
+    try {
+      event = JSON.parse(line) as CopilotRunEvent;
+    } catch {
+      return;
+    }
+    runState = reduceCopilotRunEvent(runState, event);
+    copilotActiveRun.set(runState);
+    if (finalResult == null && isTerminalCopilotRunEvent(event) && runState.rawResult != null) {
+      finalResult = normalizeCopilotResearchCardResult(domain, runState.rawResult);
+    }
+  };
+
+  while (finalResult == null && attempt < COPILOT_RECONNECT_ATTEMPTS) {
+    try {
+      if (attempt === 0) {
+        await postNdjsonStream(endpoint, payload, onLine, { signal });
+      } else {
+        await getNdjsonStream(
+          `/copilot/runs/${encodeURIComponent(runId)}/events?after_sequence=${runState.lastSequence}`,
+          onLine,
+          { signal }
+        );
+      }
+    } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
+      if (attempt + 1 >= COPILOT_RECONNECT_ATTEMPTS) {
+        throw error;
+      }
+    }
+    attempt += 1;
+  }
+
+  if (finalResult == null) {
+    throw new Error("Copilot stream ended without a replayable terminal result.");
+  }
+  return { state: runState, result: finalResult };
+}
+
+export async function cancelCopilotRun() {
+  const runId = activeCopilotRunId;
+  if (!runId) {
+    return null;
+  }
+  try {
+    // The backend delivers the terminal `cancelled` event through the open
+    // stream, so the stream reader — not this call — settles the run.
+    return await postJson<{ run_id: string; found: boolean; cancelled: boolean }>(
+      `/copilot/runs/${runId}/cancel`,
+      {}
+    );
+  } catch {
+    // The run may already have finished; a failed cancel is not an error state.
+    return null;
+  }
+}
+
+export async function streamCopilotResearchCard(
+  domain: CopilotDomain,
+  prompt = "",
+  options: CopilotLoadOptions = {}
+) {
   setLoading("copilot", true);
   const contextFingerprint = buildCopilotContextFingerprint(domain, options.workspaceMode, {
     synthesisDomains: options.synthesisDomains,
@@ -3046,11 +3277,11 @@ export async function loadCopilotResearchCard(
   if (!activeThread) {
     activeThread = createEmptyCopilotThread(domain);
   }
-  let continuingThread =
+  const continuingThread =
     activeThread.contextFingerprint != null &&
     activeThread.contextFingerprint === contextFingerprint &&
     activeThread.latestResponseId != null;
-  let previousResponseId = continuingThread ? activeThread.latestResponseId : null;
+  const previousResponseId = continuingThread ? activeThread.latestResponseId : null;
   let baseThread =
     continuingThread || !activeThread.entries.length
       ? activeThread
@@ -3090,11 +3321,13 @@ export async function loadCopilotResearchCard(
       baseThread = createEmptyCopilotThread(domain);
     }
 
+    const runId = newCopilotRunId();
     const payload = {
       domain,
       prompt,
       user_session_id: getCopilotSessionId(),
       context_fingerprint: contextFingerprint,
+      run_id: runId,
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
         : {}),
@@ -3103,13 +3336,25 @@ export async function loadCopilotResearchCard(
       ...(synthesis ? { synthesis } : {})
     };
 
-    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/research-card", payload, {
-      timeoutMs: COPILOT_GENERATION_TIMEOUT_MS
-    });
-    const result = normalizeCopilotResearchCardResult(domain, rawResult);
-    appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
-    lastError.set(result.status === "ready" ? "" : result.message ?? "Copilot failed.");
-    return result;
+    const controller = new AbortController();
+    activeCopilotRunId = runId;
+    const timer = setTimeout(() => controller.abort(), COPILOT_STREAM_TIMEOUT_MS);
+    let streamed: { state: CopilotRunState; result: CopilotResearchCardResult };
+    try {
+      streamed = await consumeCopilotRun(
+        "/copilot/research-card/stream",
+        payload,
+        runId,
+        domain,
+        controller.signal
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    const settled = streamed.result;
+    appendCopilotThreadResult(domain, settled, prompt, contextFingerprint, previousResponseId, baseThread);
+    lastError.set(settled.status === "ready" ? "" : settled.message ?? "Copilot failed.");
+    return settled;
   } catch (error) {
     const message = errorMessage(error).includes("timed out")
       ? `${errorMessage(error)}. Your prompt draft is preserved; retry or reduce the synthesis scope.`
@@ -3119,6 +3364,8 @@ export async function loadCopilotResearchCard(
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
     return result;
   } finally {
+    activeCopilotRunId = null;
+    copilotActiveRun.set(null);
     setLoading("copilot", false);
   }
 }
@@ -3255,9 +3502,11 @@ export async function executeCopilotOperatorPlan(
       domain === "synthesis"
         ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
         : null;
+    const runId = newCopilotRunId();
     const payload = {
       domain,
       prompt,
+      run_id: runId,
       user_session_id: getCopilotSessionId(),
       context_fingerprint: contextFingerprint,
       ...(normalizeReasoningEffort(options.reasoningEffort)
@@ -3266,10 +3515,22 @@ export async function executeCopilotOperatorPlan(
       context,
       ...(synthesis ? { synthesis } : {})
     };
-    const rawResult = await postJson<CopilotResearchCardResult>("/copilot/operator-plan/execute", payload, {
-      timeoutMs: COPILOT_OPERATOR_TIMEOUT_MS
-    });
-    const result = normalizeCopilotResearchCardResult(domain, rawResult);
+    const controller = new AbortController();
+    activeCopilotRunId = runId;
+    const timer = setTimeout(() => controller.abort(), COPILOT_OPERATOR_TIMEOUT_MS);
+    let streamed: { state: CopilotRunState; result: CopilotResearchCardResult };
+    try {
+      streamed = await consumeCopilotRun(
+        "/copilot/operator-plan/execute/stream",
+        payload,
+        runId,
+        domain,
+        controller.signal
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    const result = streamed.result;
     copilotOperatorResult.set(result);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
     await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
@@ -3283,6 +3544,8 @@ export async function executeCopilotOperatorPlan(
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
     return result;
   } finally {
+    activeCopilotRunId = null;
+    copilotActiveRun.set(null);
     setLoading("copilot", false);
   }
 }
@@ -3586,17 +3849,28 @@ export async function loadIvUnderlyingHistory(options: { symbol: string; lookbac
   if (current && current.symbol.trim().toUpperCase() !== symbol) {
     ivUnderlyingHistory.set(null);
   }
-  try {
-    const params = new URLSearchParams({
+  const params = new URLSearchParams({
       symbol,
       lookback_days: String(options.lookbackDays ?? 252),
       force_refresh: options.forceRefresh ? "true" : "false"
+  });
+  const path = `/iv/underlying-history?${params.toString()}`;
+  const key = stableQueryKey("/iv/underlying-history", {
+    symbol,
+    lookback_days: options.lookbackDays ?? 252
+  });
+  try {
+    return await queryCache.query<IvUnderlyingHistoryResponse>({
+      scope: "iv-underlying-history",
+      key,
+      staleTimeMs: 15 * 60_000,
+      forceRefresh: options.forceRefresh,
+      fetcher: (signal) => getJson<IvUnderlyingHistoryResponse>(path, { signal }),
+      onData: (history) => ivUnderlyingHistory.set(history)
     });
-    const history = await getJson<IvUnderlyingHistoryResponse>(`/iv/underlying-history?${params.toString()}`);
-    ivUnderlyingHistory.set(history);
-    return history;
   } catch (error) {
-    ivUnderlyingHistory.set({
+    if (isAbortError(error)) return null;
+    if (!get(ivUnderlyingHistory)) ivUnderlyingHistory.set({
       symbol,
       lookback_days: options.lookbackDays ?? 252,
       points: [],
@@ -3655,10 +3929,16 @@ export async function loadIvSurface(options: IvLoadOptions | string = "SPY") {
       lastError.set(message);
     }
     resetCopilotCard("iv");
-    if (shouldReplaceSurface || request.preserveExisting === false) {
+    if (hasRenderableIvSurface(surface)) {
+      ivError.set("");
       lastError.set("");
+    } else {
+      const message = surface.warnings[0] ?? surface.messages[0] ?? `No options surface snapshot available for ${request.symbol}.`;
+      ivError.set(message);
+      lastError.set(message);
     }
   } catch (error) {
+    ivError.set(errorMessage(error));
     setError(error);
   } finally {
     setLoading("iv", false);
@@ -3689,26 +3969,40 @@ export async function clearPortfolioHistory() {
 }
 
 export async function loadIvSession() {
-  setLoading("ivSession", true);
-  try {
-    const session = await getJson<IvSessionStatus>("/iv/session");
-    ivSession.set(session);
-    ivSurface.update((current) => {
-      if (hasRenderableIvSurface(session.surface)) {
-        return session.surface;
+  return requestCoordinator.run("iv-session", "status", async (signal) => {
+    setLoading("ivSession", true);
+    try {
+      const session = await getJson<IvSessionStatus>("/iv/session", { signal });
+      if (signal.aborted) return null;
+      ivSession.set(session);
+      ivSurface.update((current) => (hasRenderableIvSurface(session.surface) ? session.surface : current));
+      const sessionHasSurface = hasRenderableIvSurface(session.surface);
+      const sessionSymbol = String(sessionHasSurface ? session.surface?.symbol : "").trim().toUpperCase();
+      const currentHistory = get(ivUnderlyingHistory);
+      const currentHistorySymbol = String(currentHistory?.symbol ?? "").trim().toUpperCase();
+      if (sessionSymbol && (currentHistorySymbol !== sessionSymbol || !currentHistory?.points.length)) {
+        await loadIvUnderlyingHistory({ symbol: sessionSymbol });
       }
-      return current;
-    });
-    const sessionSymbol = session.surface?.symbol || session.active_symbol;
-    if (sessionSymbol) {
-      await loadIvUnderlyingHistory({ symbol: sessionSymbol });
+      if (signal.aborted) return null;
+      if (sessionHasSurface) {
+        ivError.set("");
+        lastError.set("");
+      }
+      return session;
+    } catch (error) {
+      if (!isAbortError(error)) {
+        ivError.set(errorMessage(error));
+        setError(error);
+      }
+      return null;
+    } finally {
+      if (requestCoordinator.isCurrent("iv-session", signal)) setLoading("ivSession", false);
     }
-    lastError.set("");
-  } catch (error) {
-    setError(error);
-  } finally {
-    setLoading("ivSession", false);
-  }
+  });
+}
+
+export function cancelIvSessionRequest() {
+  requestCoordinator.cancel("iv-session");
 }
 
 export async function startIvSession(options: IvLoadOptions) {
@@ -3727,8 +4021,10 @@ export async function startIvSession(options: IvLoadOptions) {
       await loadIvUnderlyingHistory({ symbol: sessionSymbol });
     }
     resetCopilotCard("iv");
+    ivError.set("");
     lastError.set("");
   } catch (error) {
+    ivError.set(errorMessage(error));
     setError(error);
   } finally {
     setLoading("ivSession", false);
@@ -3746,8 +4042,10 @@ export async function stopIvSession() {
       await loadIvUnderlyingHistory({ symbol: sessionSymbol });
     }
     resetCopilotCard("iv");
+    ivError.set("");
     lastError.set("");
   } catch (error) {
+    ivError.set(errorMessage(error));
     setError(error);
   } finally {
     setLoading("ivSession", false);

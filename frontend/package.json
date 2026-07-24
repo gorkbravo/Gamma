@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
+    "hls.js": "^1.6.16",
     "lightweight-charts": "^5.1.0",
     "maplibre-gl": "^5.23.0"
   }

@@ -16,6 +16,7 @@ from src.application.portfolio_service import (
     PortfolioSnapshotRequest,
 )
 from src.api.schemas.system import ActionResponseModel
+from src.services.ibkr_client import PORTFOLIO_QUOTE_TIMEOUT_MAX_SECONDS
 
 
 router = APIRouter(tags=["portfolio"])
@@ -25,7 +26,11 @@ router = APIRouter(tags=["portfolio"])
 def portfolio_snapshot(
     request: Request,
     quote_mode: str = Query(default="Snapshot"),
-    quote_timeout_seconds: float | None = Query(default=None, ge=0.1, le=30.0),
+    quote_timeout_seconds: float | None = Query(
+        default=None,
+        ge=0.1,
+        le=PORTFOLIO_QUOTE_TIMEOUT_MAX_SECONDS,
+    ),
 ) -> PortfolioSnapshotModel:
     runtime = request.app.state.runtime
     snapshot = runtime.portfolio_service.fetch_snapshot(

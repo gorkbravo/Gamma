@@ -1,4 +1,4 @@
-import type { IvSurface, TimeSeriesPoint } from "../api/types";
+import type { IvSessionStatus, IvSurface, SystemStatus, TimeSeriesPoint } from "../api/types";
 
 export type OptionsMode =
   | "overview"
@@ -16,6 +16,51 @@ export const optionsModes: Array<{ id: OptionsMode; label: string }> = [
   { id: "distribution", label: "Implied Probabilities" },
   { id: "strategies", label: "Strategies" },
 ];
+
+export interface IvSurfaceAlertInput {
+  result: IvSurface | null;
+  session: IvSessionStatus | null;
+  status: SystemStatus | null;
+  requestedSymbol: string;
+  errorMessage?: string | null;
+  loading?: boolean;
+  sessionLoading?: boolean;
+}
+
+export function deriveIvSurfaceAlerts(input: IvSurfaceAlertInput): string[] {
+  const providerMessages = [
+    input.errorMessage?.trim(),
+    ...(input.result?.warnings ?? []),
+    ...(input.result?.messages ?? []),
+    input.session?.status_text?.toLowerCase().startsWith("error") ? input.session.status_text : "",
+    ...(input.session?.messages ?? []),
+  ].filter((message): message is string => Boolean(message?.trim()));
+  const alerts = [...new Set(providerMessages)];
+  const hasSurface = Boolean(
+    input.result?.snapshot_available &&
+      input.result.points > 0 &&
+      input.result.expiries.length > 0 &&
+      input.result.strikes.length > 0
+  );
+  if (hasSurface || input.loading || input.sessionLoading) {
+    return alerts;
+  }
+
+  if (input.errorMessage?.trim() || input.session?.status_text?.toLowerCase().startsWith("error")) {
+    return alerts;
+  }
+
+  const symbol = input.requestedSymbol.trim().toUpperCase() || input.session?.active_symbol || "the selected symbol";
+  let availabilityMessage: string;
+  if (input.status && !input.status.mock_mode && !input.status.connection.connected) {
+    availabilityMessage = `IBKR/TWS is disconnected. Connect it before loading an options surface for ${symbol}.`;
+  } else if (input.session?.running) {
+    availabilityMessage = `The ${symbol} options session is running, but no surface snapshot has been collected yet.`;
+  } else {
+    availabilityMessage = `No options surface snapshot is available for ${symbol}. The provider session is idle; load the surface and check options entitlements if collection remains unavailable.`;
+  }
+  return [availabilityMessage, ...alerts.filter((message) => message !== availabilityMessage)];
+}
 
 export interface SurfaceStats {
   atmStrike: number | null;
@@ -216,6 +261,16 @@ export interface IvSmile {
   maxIv: number;
   minStrike: number;
   maxStrike: number;
+  fitPoints: IvSmilePoint[];
+}
+
+export interface ObservedSurfacePoint {
+  expiry: string;
+  strike: number;
+  dte: number;
+  iv: number;
+  rowIndex: number;
+  colIndex: number;
 }
 
 export interface OptionPayoffCell {
@@ -917,7 +972,8 @@ export function deriveIvSmile(
   rows: ChainRow[],
   atmStrike: number | null | undefined,
   width = 320,
-  height = 150
+  height = 150,
+  fittedSamples: Array<{ strike: number; iv: number }> = []
 ): IvSmile | null {
   const padLeft = 32;
   const padRight = 8;
@@ -938,8 +994,12 @@ export function deriveIvSmile(
     return null;
   }
 
-  const strikes = samples.map((sample) => sample.strike);
-  const ivs = samples.map((sample) => sample.iv);
+  const fitSamples = fittedSamples
+    .filter((sample) => Number.isFinite(sample.strike) && Number.isFinite(sample.iv) && sample.iv > 0)
+    .sort((left, right) => left.strike - right.strike);
+  const scaleSamples = fitSamples.length >= 2 ? [...samples, ...fitSamples] : samples;
+  const strikes = scaleSamples.map((sample) => sample.strike);
+  const ivs = scaleSamples.map((sample) => sample.iv);
   const minStrike = Math.min(...strikes);
   const maxStrike = Math.max(...strikes);
   const rawMinIv = Math.min(...ivs);
@@ -961,11 +1021,20 @@ export function deriveIvSmile(
     isAtm: atmStrike != null && sample.strike === atmStrike,
   }));
 
-  const linePath = points
+  const fitPoints: IvSmilePoint[] = fitSamples.map((sample) => ({
+    strike: sample.strike,
+    iv: sample.iv,
+    x: projectX(sample.strike),
+    y: projectY(sample.iv),
+    isAtm: atmStrike != null && sample.strike === atmStrike,
+  }));
+
+  const lineSeries = fitPoints.length >= 2 ? fitPoints : points;
+  const linePath = lineSeries
     .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`)
     .join(" ");
   const baseline = height - padBottom;
-  const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)} L${points[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
+  const areaPath = `${linePath} L${lineSeries[lineSeries.length - 1].x.toFixed(1)},${baseline.toFixed(1)} L${lineSeries[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
   const atmX = atmStrike != null && Number.isFinite(atmStrike) ? projectX(atmStrike) : null;
 
   return {
@@ -979,6 +1048,7 @@ export function deriveIvSmile(
     maxIv,
     minStrike,
     maxStrike,
+    fitPoints,
   };
 }
 
@@ -998,12 +1068,14 @@ export interface TermCurve {
   areaPath: string;
   minIv: number;
   maxIv: number;
+  observedPoints: TermCurvePoint[];
 }
 
 export function deriveTermCurve(
   term: Array<{ expiry: string; iv: number | null }>,
   width = 300,
-  height = 132
+  height = 132,
+  observedTerm: Array<{ expiry: string; iv: number | null }> = []
 ): TermCurve | null {
   const padLeft = 34;
   const padRight = 10;
@@ -1017,8 +1089,13 @@ export function deriveTermCurve(
     return null;
   }
 
-  const dtes = samples.map((point) => point.dte);
-  const ivs = samples.map((point) => point.iv);
+  const observedSamples = observedTerm
+    .map((point) => ({ expiry: point.expiry, dte: daysToExpiry(point.expiry), iv: point.iv }))
+    .filter((point): point is TermCurvePoint => point.iv != null && Number.isFinite(point.iv))
+    .sort((left, right) => left.dte - right.dte);
+  const scaleSamples = [...samples, ...observedSamples];
+  const dtes = scaleSamples.map((point) => point.dte);
+  const ivs = scaleSamples.map((point) => point.iv);
   const minDte = Math.min(...dtes);
   const maxDte = Math.max(...dtes);
   const rawMinIv = Math.min(...ivs);
@@ -1037,13 +1114,66 @@ export function deriveTermCurve(
     x: projectX(point.dte),
     y: projectY(point.iv),
   }));
+  const observedPoints: TermCurvePoint[] = observedSamples.map((point) => ({
+    ...point,
+    x: projectX(point.dte),
+    y: projectY(point.iv),
+  }));
   const linePath = points
     .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`)
     .join(" ");
   const baseline = height - padBottom;
   const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${baseline.toFixed(1)} L${points[0].x.toFixed(1)},${baseline.toFixed(1)} Z`;
 
-  return { width, height, points, linePath, areaPath, minIv, maxIv };
+  return { width, height, points, linePath, areaPath, minIv, maxIv, observedPoints };
+}
+
+export function hasParametricIvFit(surface: IvSurface | null | undefined): boolean {
+  const model = surface?.surface_model?.trim().toLowerCase();
+  const status = surface?.surface_model_status?.trim().toLowerCase();
+  return Boolean(model && model !== "linear" && model !== "spline" && status !== "fallback" && status !== "unavailable");
+}
+
+export function deriveObservedSurfacePoints(surface: IvSurface | null | undefined): ObservedSurfacePoint[] {
+  if (!surface) return [];
+  const expiryIndex = new Map(surface.expiries.map((expiry, index) => [expiry, index]));
+  const strikeIndex = new Map(surface.strikes.map((strike, index) => [strike, index]));
+  return (surface.pairs ?? [])
+    .map((pair) => {
+      const rowIndex = expiryIndex.get(pair.expiry);
+      const colIndex = strikeIndex.get(pair.strike);
+      const iv = pair.blended_implied_volatility ??
+        (pair.call_implied_volatility != null && pair.put_implied_volatility != null
+          ? (pair.call_implied_volatility + pair.put_implied_volatility) / 2
+          : pair.call_implied_volatility ?? pair.put_implied_volatility);
+      if (rowIndex == null || colIndex == null || iv == null || !Number.isFinite(iv) || iv <= 0) return null;
+      return { expiry: pair.expiry, strike: pair.strike, dte: pair.days_to_expiry, iv, rowIndex, colIndex };
+    })
+    .filter((point): point is ObservedSurfacePoint => point != null);
+}
+
+export function deriveFittedSmileSamples(
+  surface: IvSurface | null | undefined,
+  expiry: string | null | undefined
+): Array<{ strike: number; iv: number }> {
+  if (!surface || !expiry) return [];
+  const rowIndex = surface.expiries.indexOf(expiry);
+  if (rowIndex < 0) return [];
+  return surface.strikes
+    .map((strike, colIndex) => ({ strike, iv: surface.iv_grid[rowIndex]?.[colIndex] }))
+    .filter((sample): sample is { strike: number; iv: number } => sample.iv != null && Number.isFinite(sample.iv) && sample.iv > 0);
+}
+
+export function deriveObservedTermStructure(surface: IvSurface | null | undefined): Array<{ expiry: string; iv: number }> {
+  if (!surface) return [];
+  return surface.expiries.flatMap((expiry) => {
+    const rows = deriveChainRows(surface, expiry).filter((row) => row.blendedIv != null && Number.isFinite(row.blendedIv));
+    if (!rows.length) return [];
+    const nearest = [...rows].sort((left, right) =>
+      Math.abs(left.strike - (surface.spot ?? left.strike)) - Math.abs(right.strike - (surface.spot ?? right.strike))
+    )[0];
+    return nearest.blendedIv == null ? [] : [{ expiry, iv: nearest.blendedIv }];
+  });
 }
 
 export function blackScholesPrice(

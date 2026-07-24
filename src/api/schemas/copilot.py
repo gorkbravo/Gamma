@@ -32,6 +32,7 @@ from src.models.copilot import (
     CopilotResearchReport,
     CopilotReportWarningProvenance,
     CopilotReportToolTraceSummary,
+    CopilotRunEvent,
     CopilotSession,
     CopilotSynthesisRequest,
     CopilotSynthesisScope,
@@ -152,6 +153,11 @@ class CopilotResearchCardRequestModel(BaseModel):
     context_fingerprint: str | None = None
     session_title: str | None = None
     reasoning_effort: str | None = None
+    # Optional client-supplied run id for streamed runs so Stop can target the
+    # run before the first event arrives. The server generates one when omitted.
+    run_id: str | None = None
+    # Reconnect cursor. Only events with a greater sequence are replayed.
+    last_seen_sequence: int | None = Field(default=None, ge=-1)
     context: CopilotRequestContextModel = Field(default_factory=CopilotRequestContextModel)
     synthesis: CopilotSynthesisRequestModel | None = None
 
@@ -293,6 +299,33 @@ class CopilotResearchCardResponseModel(BaseModel):
             operator_events=[CopilotOperatorProgressEventModel.from_domain(item) for item in row.operator_events],
             warnings=list(row.warnings),
         )
+
+
+class CopilotRunEventModel(BaseModel):
+    run_id: str
+    sequence: int
+    event: str
+    timestamp: datetime
+    data: dict[str, object] = Field(default_factory=dict)
+    result: CopilotResearchCardResponseModel | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotRunEvent) -> "CopilotRunEventModel":
+        return cls(
+            run_id=row.run_id,
+            sequence=row.sequence,
+            event=row.event_type,
+            timestamp=row.timestamp,
+            data=dict(row.data),
+            result=CopilotResearchCardResponseModel.from_domain(row.result) if row.result is not None else None,
+        )
+
+
+class CopilotRunCancelResponseModel(BaseModel):
+    run_id: str
+    found: bool
+    cancelled: bool
+    status: str
 
 
 class CopilotResearchPlanEntityModel(BaseModel):

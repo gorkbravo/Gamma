@@ -362,3 +362,103 @@ def test_runtime_can_select_rss_news_provider(tmp_path, monkeypatch):
         assert isinstance(runtime.news_service.providers[0], RssNewsEventProvider)
     finally:
         runtime.shutdown()
+
+
+def test_detect_news_entities_extracts_high_confidence_tickers_and_entities():
+    from src.services.news_adapters import detect_news_entities
+
+    text = (
+        "Nvidia and Apple rally as the Federal Reserve holds rates; "
+        "traders eye $TSLA and (NASDAQ: AMZN) while OPEC+ weighs cuts. $USD stays firm."
+    )
+    entities = {entity.resolved_id(): entity for entity in detect_news_entities(text)}
+
+    assert entities["NVDA"].entity_type == "company"
+    assert entities["AAPL"].symbol == "AAPL"
+    assert entities["fed"].entity_type == "central_bank"
+    assert entities["opec"].entity_type == "organization"
+    assert entities["TSLA"].symbol == "TSLA"
+    assert entities["AMZN"].symbol == "AMZN"
+    # Currency cashtags are not tickers.
+    assert "USD" not in entities
+
+    assert detect_news_entities("Quiet weekend with no market-moving names.") == []
+
+
+def test_rss_items_carry_reliability_and_detected_entities():
+    feed = RssFeedConfig(
+        feed_id="test_feed",
+        source_name="Test Feed",
+        url="https://example.com/feed",
+        tier=2,
+    )
+    xml = b"""<rss version=\"2.0\"><channel><title>Test</title>
+    <item>
+      <title>Tesla shares jump after earnings ($TSLA)</title>
+      <link>https://example.com/tesla-earnings</link>
+      <pubDate>Mon, 13 Jul 2026 08:00:00 GMT</pubDate>
+      <description>Tesla beat estimates while the Federal Reserve stayed on hold.</description>
+    </item>
+    </channel></rss>"""
+
+    provider = RssNewsEventProvider(feeds=[feed], fetcher=lambda *_args: xml)
+    result = provider.latest(limit=5)
+
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.source_reliability == "major_outlet"
+    ids = {entity.resolved_id() for entity in item.detected_entities}
+    assert "TSLA" in ids
+    assert "fed" in ids
+
+
+def test_sample_news_items_are_labeled_sample_reliability():
+    feed = SampleNewsEventProvider().latest(limit=3)
+    assert feed.items
+    assert all(item.source_reliability == "sample" for item in feed.items)
+
+
+def test_news_service_dedupes_identical_cross_feed_headlines():
+    shared_title = "Global markets rally as inflation cools further in June"
+    early = NewsEventItem(
+        normalized_id="rss:feed_a:1",
+        provider_item_id="feed_a:1",
+        title=shared_title,
+        url="https://feed-a.example.com/story-1",
+        source_provider="rss",
+        source_name="Feed A",
+        published_at=datetime(2026, 7, 13, 8, 0),
+        retrieved_at=datetime(2026, 7, 13, 9, 0),
+        origin="rss.feed:feed_a",
+        freshness_label=FreshnessLabel.DELAYED,
+    )
+    late = NewsEventItem(
+        normalized_id="rss:feed_b:9",
+        provider_item_id="feed_b:9",
+        title=shared_title,
+        url="https://feed-b.example.com/story-9",
+        source_provider="rss",
+        source_name="Feed B",
+        published_at=datetime(2026, 7, 13, 8, 30),
+        retrieved_at=datetime(2026, 7, 13, 9, 0),
+        origin="rss.feed:feed_b",
+        freshness_label=FreshnessLabel.DELAYED,
+    )
+    short_a = _item("Update", "https://feed-a.example.com/u1", datetime(2026, 7, 13, 8, 0))
+    short_b = _item("Update", "https://feed-b.example.com/u2", datetime(2026, 7, 13, 8, 5))
+
+    service = NewsService(
+        [
+            _StaticNewsProvider("rss", "Feed A", [early, short_a]),
+            _StaticNewsProvider("rss_b", "Feed B", [late, short_b]),
+        ],
+        cache_ttl_seconds=0,
+    )
+    result = service.latest(limit=10)
+
+    titles = [item.title for item in result.items]
+    assert titles.count(shared_title) == 1
+    kept = next(item for item in result.items if item.title == shared_title)
+    assert kept.normalized_id == "rss:feed_b:9"
+    # Short/generic titles are not merged across feeds.
+    assert titles.count("Update") == 2

@@ -19,6 +19,7 @@ from src.api.routes import (
     prediction_markets_router,
     research_router,
     risk_router,
+    sitrep_router,
     system_router,
 )
 from src.application.runtime import ApplicationRuntime, get_runtime
@@ -68,6 +69,7 @@ def create_app(runtime: ApplicationRuntime | None = None, *, session_token: str 
     app.include_router(fundamentals_router)
     app.include_router(portfolio_router)
     app.include_router(research_router)
+    app.include_router(sitrep_router)
     app.include_router(macro_router)
     app.include_router(maritime_router)
     app.include_router(news_router)

@@ -233,6 +233,8 @@
         sourceScope: activeRiskSourceScope,
         researchBookReturnPoints:
           selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.return_points ?? [] : [],
+        researchBookRiskLegs:
+          selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.risk_legs ?? [] : [],
         riskSourceLabel: activeRiskSourceLabel,
         riskSourceObjectId: selectedSource === "strategy_lab_book" ? strategyLabResearchBook?.object.object_id ?? null : null,
         riskSourceOrigin:

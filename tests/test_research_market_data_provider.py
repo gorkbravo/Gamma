@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import sys
 
 import pandas as pd
 
@@ -209,3 +210,93 @@ def test_yfinance_provider_keeps_dash_class_share_symbol():
     instrument = InstrumentReference(symbol="BRK-B", sec_type="STK", exchange="SMART", currency="USD")
 
     assert YFinanceListedMarketHistoryProvider._provider_symbol(instrument) == "BRK-B"
+
+
+def _yfinance_frame() -> pd.DataFrame:
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    return pd.DataFrame({"Open": [99, 100, 101, 102], "High": [101, 102, 103, 104],
+                         "Low": [98, 99, 100, 101], "Close": [100, 101, 102, 103],
+                         "Volume": [1000, 1001, 1002, 1003]}, index=idx)
+
+
+def test_yfinance_rate_limit_retries_with_bounded_backoff(monkeypatch):
+    calls = 0
+    sleeps: list[float] = []
+
+    def download(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("HTTP Error 429: Too Many Requests")
+        return _yfinance_frame()
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=download))
+    provider = YFinanceListedMarketHistoryProvider(
+        max_retries=2,
+        base_backoff_seconds=0.2,
+        max_backoff_seconds=0.5,
+        sleep=sleeps.append,
+        jitter=lambda _low, _high: 0.0,
+    )
+    result = provider.load_history(InstrumentReference(symbol="AAPL"), 30)
+
+    assert calls == 2
+    assert sleeps == [0.2]
+    assert result.series is not None
+    assert any("rate limit" in warning.lower() and "retry" in warning.lower() for warning in result.warnings)
+
+
+def test_yfinance_circuit_opens_and_skips_followup_requests(monkeypatch):
+    calls = 0
+    now = [100.0]
+
+    def download(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=download))
+    provider = YFinanceListedMarketHistoryProvider(
+        max_retries=5,
+        circuit_rate_limit_threshold=2,
+        circuit_cooldown_seconds=30,
+        sleep=lambda _delay: None,
+        monotonic=lambda: now[0],
+        jitter=lambda _low, _high: 0.0,
+    )
+    first = provider.load_history(InstrumentReference(symbol="AAPL"), 30)
+    second = provider.load_history(InstrumentReference(symbol="MSFT"), 30)
+
+    assert calls == 2
+    assert first.series is None and second.series is None
+    assert any("circuit" in warning.lower() for warning in first.warnings)
+    assert any("request skipped" in warning.lower() for warning in second.warnings)
+
+
+def test_research_provider_uses_stale_cache_after_provider_failure():
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    history = pd.Series([100.0, 101.0, 102.0, 103.0], index=idx)
+    source = _FakeHistoryProvider("yfinance", "Yahoo Finance/yfinance daily history", {"AAPL": history})
+    provider = _provider(source)
+    provider.load_instrument_history_result(InstrumentReference(symbol="AAPL"), 30)
+    source.histories = {}
+
+    fallback = provider.load_instrument_history_result(
+        InstrumentReference(symbol="AAPL"), 30, bypass_cache=True
+    )
+
+    assert fallback.series is not None and fallback.series.equals(history)
+    assert fallback.freshness_label == FreshnessLabel.STALE
+    assert any("preserving stale cached" in warning.lower() for warning in fallback.warnings)
+
+
+def test_research_history_cache_refresh_replaces_overlapping_older_values():
+    cache = ResearchHistoryCache()
+    idx = pd.date_range("2026-01-02", periods=3, freq="B")
+    cache.set("AAPL", pd.Series([100.0, 101.0, 102.0], index=idx), 30)
+    cache.set("AAPL", pd.Series([101.5, 102.5, 103.5], index=idx), 30)
+
+    refreshed = cache.get("AAPL", 30)
+
+    assert refreshed is not None
+    assert refreshed.tolist() == [101.5, 102.5, 103.5]

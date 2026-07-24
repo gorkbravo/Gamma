@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from urllib.error import HTTPError
 
 from fastapi.testclient import TestClient
@@ -682,6 +683,85 @@ def test_macro_service_applies_active_timeframe_to_snapshot_cross_asset_and_dive
     assert divergence_1m[0].metrics[0].delta_value != divergence_1y[0].metrics[0].delta_value
 
 
+def test_macro_snapshot_skips_failed_fred_series_with_safe_actionable_warning(monkeypatch, caplog):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+    service = MacroService(
+        fred_adapter=_PartiallyFailingFredMacroAdapter(
+            _build_series_map(),
+            failing_provider_series_ids={"CPIAUCSL"},
+            api_key=None,
+            error_message="api_key=do-not-leak",
+        ),
+        treasury_adapter=_FakeTreasuryCurveAdapter(),
+        events_adapter=_FakeEventsAdapter(),
+        fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
+        prediction_market_service=_FakePredictionMarketService(),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="src.application.macro_service"):
+        snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
+
+    inflation = next(row for row in snapshot.cross_asset if row.theme == "inflation")
+    assert all(metric.series_id != "us-cpi-yoy" for metric in inflation.metrics)
+    assert any(metric.series_id == "us-core-cpi-yoy" for metric in inflation.metrics)
+    warning = next(message for message in snapshot.warnings if "Headline CPI YoY" in message)
+    assert "FRED (CPIAUCSL)" in warning
+    assert "kept the remaining Macro snapshot" in warning
+    assert "Configure FRED_API_KEY" in warning
+    assert "do-not-leak" not in warning
+    assert "do-not-leak" not in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+
+
+def test_macro_snapshot_skips_failed_comparison_series_without_losing_comparison_lens(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+    service = MacroService(
+        fred_adapter=_PartiallyFailingFredMacroAdapter(
+            _build_series_map(),
+            failing_provider_series_ids={"CP0000EZ19M086NEST"},
+            api_key="configured-key",
+        ),
+        treasury_adapter=_FakeTreasuryCurveAdapter(),
+        events_adapter=_FakeEventsAdapter(),
+        fx_adapter=_FakeFXMacroAdapter(_build_fx_series_map()),
+        prediction_market_service=_FakePredictionMarketService(),
+    )
+
+    snapshot = service.get_snapshot(
+        MacroSnapshotRequest(region="US", timeframe="3M", theme="all", comparison_region="EU")
+    )
+
+    assert snapshot.comparison_region == "EU"
+    assert any("Comparison lens active" in warning for warning in snapshot.warnings)
+    warning = next(message for message in snapshot.warnings if "Euro Area HICP YoY" in message)
+    assert "FRED (CP0000EZ19M086NEST)" in warning
+    assert "Configure FRED_API_KEY" not in warning
+    assert any(row.comparison_summary for row in snapshot.cross_asset)
+
+
+def test_macro_snapshot_skips_failed_ibkr_fx_series_and_keeps_fred_context(monkeypatch):
+    monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
+    service = MacroService(
+        fred_adapter=_FakeFredMacroAdapter(_build_series_map()),
+        treasury_adapter=_FakeTreasuryCurveAdapter(),
+        events_adapter=_FakeEventsAdapter(),
+        fx_adapter=_PartiallyFailingFXMacroAdapter(
+            _build_fx_series_map(),
+            failing_pairs={("EUR", "USD")},
+        ),
+        prediction_market_service=_FakePredictionMarketService(),
+    )
+
+    snapshot = service.get_snapshot(MacroSnapshotRequest(region="US", timeframe="3M", theme="all"))
+
+    assert snapshot.snapshot_cards
+    assert snapshot.rates_policy.policy_metrics
+    warning = next(message for message in snapshot.warnings if "EUR/USD" in message)
+    assert "IBKR (EUR/USD)" in warning
+    assert "kept the remaining Macro snapshot" in warning
+    assert "FRED_API_KEY" not in warning
+
+
 def test_macro_service_snapshot_survives_partial_event_source_failures(tmp_path, monkeypatch):
     monkeypatch.setattr("src.application.macro_service.now_utc", lambda: NOW)
     monkeypatch.setattr("src.services.macro_adapters.now_utc", lambda: EVENTS_RETRIEVED_AT)
@@ -1042,6 +1122,40 @@ class _FakeFredMacroAdapter:
         return rows, FRED_RETRIEVED_AT
 
 
+class _PartiallyFailingFredMacroAdapter:
+    def __init__(
+        self,
+        series_map: dict[str, list[MacroSeriesPoint]],
+        *,
+        failing_provider_series_ids: set[str],
+        api_key: str | None,
+        error_message: str = "provider unavailable",
+    ) -> None:
+        self._delegate = _FakeFredMacroAdapter(series_map)
+        self.failing_provider_series_ids = set(failing_provider_series_ids)
+        self.error_message = error_message
+        self.client = SimpleNamespace(api_key=api_key)
+
+    def get_series(
+        self,
+        provider_series_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        ttl: timedelta,
+        force_refresh: bool = False,
+    ) -> tuple[list[MacroSeriesPoint], datetime]:
+        if provider_series_id in self.failing_provider_series_ids:
+            raise RuntimeError(self.error_message)
+        return self._delegate.get_series(
+            provider_series_id,
+            start=start,
+            end=end,
+            ttl=ttl,
+            force_refresh=force_refresh,
+        )
+
+
 @dataclass
 class _FakeTreasuryCurveAdapter:
     def get_curve_history(
@@ -1165,6 +1279,36 @@ class _FakeFXMacroAdapter:
             if start <= point.timestamp <= end
         ]
         return rows, FX_RETRIEVED_AT
+
+
+class _PartiallyFailingFXMacroAdapter:
+    def __init__(
+        self,
+        series_map: dict[tuple[str, str], list[MacroSeriesPoint]],
+        *,
+        failing_pairs: set[tuple[str, str]],
+    ) -> None:
+        self._delegate = _FakeFXMacroAdapter(series_map)
+        self.failing_pairs = set(failing_pairs)
+
+    def get_series(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        *,
+        start: datetime,
+        end: datetime,
+        force_refresh: bool = False,
+    ) -> tuple[list[MacroSeriesPoint], datetime]:
+        if (base_currency, quote_currency) in self.failing_pairs:
+            raise RuntimeError("IBKR FX unavailable")
+        return self._delegate.get_series(
+            base_currency,
+            quote_currency,
+            start=start,
+            end=end,
+            force_refresh=force_refresh,
+        )
 
 
 @dataclass

@@ -93,9 +93,9 @@ class TraceableProvider:
                 self._ledger.record(
                     provider_id=_provider_id(self._provider),
                     endpoint=self._endpoint(name),
-                    status="error",
+                    status=_exception_status(exc),
                     duration_ms=(time.perf_counter() - started) * 1000,
-                    message=str(exc),
+                    message=_exception_message(exc, redact=self._endpoint_prefix == "copilot"),
                 )
                 raise
             self._ledger.record(
@@ -104,7 +104,7 @@ class TraceableProvider:
                 status=_result_status(result),
                 cache_status=_result_cache_status(result),
                 duration_ms=(time.perf_counter() - started) * 1000,
-                message=_result_message(result),
+                message=_result_message(result, redact=self._endpoint_prefix == "copilot"),
             )
             return result
 
@@ -138,14 +138,26 @@ def _summarize(calls: list[ProviderUsageCall]) -> list[ProviderUsageSummary]:
         durations = [row.duration_ms for row in rows]
         endpoints = sorted({row.endpoint for row in rows})
         last = rows[-1]
-        last_error = next((row.message for row in reversed(rows) if row.status == "error" and row.message), None)
+        last_error = next(
+            (
+                row.message
+                for row in reversed(rows)
+                if row.status in {"error", "refused", "incomplete", "cancelled", "timeout"}
+                and row.message
+            ),
+            None,
+        )
         summaries.append(
             ProviderUsageSummary(
                 provider_id=provider_id,
                 call_count=call_count,
                 success_count=sum(1 for row in rows if row.status == "success"),
                 unavailable_count=sum(1 for row in rows if row.status == "unavailable"),
-                error_count=sum(1 for row in rows if row.status == "error"),
+                error_count=sum(
+                    1
+                    for row in rows
+                    if row.status in {"error", "refused", "incomplete", "cancelled", "timeout"}
+                ),
                 cache_hit_count=sum(1 for row in rows if row.cache_status == "hit"),
                 cache_miss_count=sum(1 for row in rows if row.cache_status == "miss"),
                 average_duration_ms=sum(durations) / call_count if call_count else 0.0,
@@ -206,10 +218,10 @@ def _health_for_summary(
     display_name: str,
     expected_when: str,
 ) -> ProviderUsageHealth:
-    if summary.error_count:
+    if summary.last_status in {"error", "refused", "incomplete", "cancelled", "timeout"}:
         status = "degraded"
         reason = summary.last_error or summary.last_message or "Recent provider request failed."
-    elif summary.unavailable_count and not summary.success_count:
+    elif summary.last_status == "unavailable":
         status = "unavailable"
         reason = summary.last_message or "Provider was requested but returned unavailable data."
     else:
@@ -253,7 +265,12 @@ def _health_sort_rank(status: str) -> int:
 
 
 def _provider_id(provider: Any) -> str:
-    return _clean(getattr(provider, "provider_id", None) or getattr(provider, "source_name", None), "unknown")
+    return _clean(
+        getattr(provider, "provider_id", None)
+        or getattr(provider, "source_name", None)
+        or getattr(provider, "provider_name", None),
+        "unknown",
+    )
 
 
 def _result_provider_id(result: Any) -> str | None:
@@ -262,6 +279,15 @@ def _result_provider_id(result: Any) -> str | None:
 
 
 def _result_status(result: Any) -> str:
+    terminal_status = str(getattr(result, "status", "") or "").strip().lower()
+    if terminal_status in {"ready", "completed", "complete", "success", "ok"}:
+        return "success"
+    if terminal_status in {"unavailable", "disabled", "unconfigured"}:
+        return "unavailable"
+    if terminal_status in {"refused", "incomplete", "cancelled", "canceled", "timeout", "timed_out"}:
+        return _normalize_status(terminal_status)
+    if terminal_status in {"error", "failed", "failure"}:
+        return "error"
     freshness = str(getattr(result, "freshness_label", "") or "").lower()
     source_provider = str(getattr(result, "source_provider", "") or "").lower()
     if source_provider == "unavailable" or "unavailable" in freshness:
@@ -278,11 +304,33 @@ def _result_cache_status(result: Any) -> str | None:
     return None
 
 
-def _result_message(result: Any) -> str | None:
+def _result_message(result: Any, *, redact: bool = False) -> str | None:
+    if redact:
+        status = _result_status(result)
+        model = _clean(getattr(result, "model", None), "")
+        return f"status={status}" + (f"; model={model}" if model else "")
     warnings = getattr(result, "warnings", None)
     if isinstance(warnings, list) and warnings:
         return str(warnings[0])
     return None
+
+
+def _exception_status(exc: Exception) -> str:
+    reason = str(getattr(exc, "reason", "") or "").strip().lower()
+    if reason in {"timeout", "timed_out"}:
+        return "timeout"
+    if exc.__class__.__name__ == "CopilotRunCancelled":
+        return "cancelled"
+    if isinstance(exc, TimeoutError) or "timeout" in exc.__class__.__name__.lower():
+        return "timeout"
+    return "error"
+
+
+def _exception_message(exc: Exception, *, redact: bool = False) -> str:
+    if redact:
+        reason = _clean(getattr(exc, "reason", None), "")
+        return exc.__class__.__name__ + (f": {reason}" if reason else "")
+    return str(exc)
 
 
 def _normalize_status(value: str) -> str:
@@ -293,6 +341,10 @@ def _normalize_status(value: str) -> str:
         return "unavailable"
     if normalized in {"error", "failed", "exception"}:
         return "error"
+    if normalized in {"canceled"}:
+        return "cancelled"
+    if normalized in {"timed_out"}:
+        return "timeout"
     return normalized
 
 

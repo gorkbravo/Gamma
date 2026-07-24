@@ -8,7 +8,7 @@ describe("normalizeCopilotResearchCardResult", () => {
       current_tab: "research",
       status: "ready",
       provider: "openai_responses",
-      model: "gpt-5.4",
+      model: "gpt-5.5",
       response_id: "",
       card: {
         title: "Test card",
@@ -34,9 +34,40 @@ describe("normalizeCopilotResearchCardResult", () => {
       current_tab: "portfolio",
       status: "ready",
       provider: "openai_responses",
-      model: "gpt-5.4"
+      model: "gpt-5.5"
     });
 
+    expect(result.card).toBeNull();
+    expect(result.message).toBe("Copilot returned no renderable card.");
+  });
+
+  it("preserves backend error messages when the backend returns no card", () => {
+    const result = normalizeCopilotResearchCardResult("synthesis", {
+      current_tab: "copilot",
+      status: "error",
+      provider: "openai_responses",
+      model: "gpt-5.5",
+      card: null,
+      message: "OpenAI returned no structured research card."
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.card).toBeNull();
+    expect(result.message).toBe("OpenAI returned no structured research card.");
+    expect(result.provider).toBe("openai_responses");
+    expect(result.model).toBe("gpt-5.5");
+  });
+
+  it("makes ready-without-card distinct from backend errors", () => {
+    const result = normalizeCopilotResearchCardResult("synthesis", {
+      current_tab: "copilot",
+      status: "ready",
+      provider: "openai_responses",
+      model: "gpt-5.5",
+      card: null
+    });
+
+    expect(result.status).toBe("ready");
     expect(result.card).toBeNull();
     expect(result.message).toBe("Copilot returned no renderable card.");
   });

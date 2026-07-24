@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -18,6 +17,8 @@ from src.api.schemas.copilot import (
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
     CopilotResearchActionDefinitionModel,
+    CopilotRunCancelResponseModel,
+    CopilotRunEventModel,
     CopilotResearchPlanModel,
     CopilotResearchReportModel,
     CopilotResearchReportRequestModel,
@@ -70,6 +71,29 @@ def execute_research_operator_plan(
     return CopilotResearchCardResponseModel.from_domain(result)
 
 
+@router.post("/copilot/operator-plan/execute/stream")
+def stream_research_operator_plan(
+    payload: CopilotResearchCardRequestModel,
+    request: Request,
+) -> StreamingResponse:
+    """Stream Agent and Operator work through the same Gamma run envelope."""
+    runtime = request.app.state.runtime
+    try:
+        events = runtime.copilot_service.stream_research_operator_events(
+            payload.to_domain(),
+            run_id=payload.run_id,
+            after_sequence=payload.last_seen_sequence if payload.last_seen_sequence is not None else -1,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def iter_events():
+        for event in events:
+            yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
+
+    return StreamingResponse(iter_events(), media_type="application/x-ndjson")
+
+
 @router.get("/copilot/actions", response_model=list[CopilotResearchActionDefinitionModel])
 def list_copilot_actions(request: Request) -> list[CopilotResearchActionDefinitionModel]:
     runtime = request.app.state.runtime
@@ -94,17 +118,59 @@ def stream_research_card(
     payload: CopilotResearchCardRequestModel,
     request: Request,
 ) -> StreamingResponse:
+    """Stream one research-card run as NDJSON Gamma run events.
+
+    Events arrive as they happen (`run.created`, `text.delta`, `tool.call`,
+    `tool.result`, `warning`, `refusal`, `incomplete`, `usage`) and exactly one
+    terminal event (`completed`, `failed`, or `cancelled`) carries the final
+    persisted result.
+    """
     runtime = request.app.state.runtime
-    result = runtime.copilot_service.generate_research_card(payload.to_domain())
+
+    try:
+        events = runtime.copilot_service.stream_research_card_events(
+            payload.to_domain(),
+            run_id=payload.run_id,
+            after_sequence=payload.last_seen_sequence if payload.last_seen_sequence is not None else -1,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     def iter_events():
-        for event in runtime.copilot_service.stream_events_for_result(result):
-            data = event["data"]
-            if hasattr(data, "__dataclass_fields__"):
-                data = CopilotResearchCardResponseModel.from_domain(data).model_dump(mode="json")
-            yield json.dumps({"event": event["event"], "data": data}, default=str) + "\n"
+        for event in events:
+            yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
 
     return StreamingResponse(iter_events(), media_type="application/x-ndjson")
+
+
+@router.get("/copilot/runs/{run_id}/events")
+def replay_copilot_run_events(
+    run_id: str,
+    request: Request,
+    after_sequence: int = -1,
+) -> StreamingResponse:
+    """Resume an active or recently completed run from a monotonic cursor."""
+    runtime = request.app.state.runtime
+    try:
+        events = runtime.copilot_service.stream_existing_run_events(
+            run_id,
+            after_sequence=max(-1, after_sequence),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    def iter_events():
+        for event in events:
+            yield CopilotRunEventModel.from_domain(event).model_dump_json() + "\n"
+
+    return StreamingResponse(iter_events(), media_type="application/x-ndjson")
+
+
+@router.post("/copilot/runs/{run_id}/cancel", response_model=CopilotRunCancelResponseModel)
+def cancel_copilot_run(run_id: str, request: Request) -> CopilotRunCancelResponseModel:
+    runtime = request.app.state.runtime
+    outcome = runtime.copilot_service.cancel_run(run_id)
+    return CopilotRunCancelResponseModel(**outcome)
 
 
 @router.post("/copilot/mutations/fundamentals/dcf/propose", response_model=CopilotDraftMutationModel)

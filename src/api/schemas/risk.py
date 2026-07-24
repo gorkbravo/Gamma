@@ -4,6 +4,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from src.api.schemas.portfolio import PortfolioSnapshotModel, TimeSeriesPoint, series_to_points
+from src.api.schemas.research import ResearchBookRiskLegModel
 from src.application.instrument_identity import find_identity_by_symbol, snapshot_identity_map
 from src.application.request_limits import (
     MAX_RISK_BETA_WINDOW_DAYS,
@@ -24,6 +25,7 @@ class RiskComputeRequestModel(BaseModel):
     source_object_id: str | None = Field(default=None, max_length=240)
     source_origin: str | None = Field(default=None, max_length=160)
     research_book_return_points: list[TimeSeriesPoint] = Field(default_factory=list, max_length=MAX_STRATEGY_LAB_ROWS)
+    research_book_legs: list[ResearchBookRiskLegModel] = Field(default_factory=list, max_length=100)
     alpha: float = Field(default=0.95, gt=0.0, lt=1.0)
     lookback_days: int = Field(default=252, ge=20, le=MAX_RISK_LOOKBACK_DAYS)
     horizon_days: int = Field(default=1, ge=1, le=MAX_RISK_HORIZON_DAYS)
@@ -206,12 +208,17 @@ class RiskComputeResponseModel(BaseModel):
     def from_service_payload(cls, payload: RiskComputationPayload) -> "RiskComputeResponseModel":
         results = payload.results
         contribution_rows: list[RiskContributionModel] = []
-        symbols = list(payload.returns_df.columns)
+        contribution_returns = (
+            payload.contribution_returns_df
+            if payload.contribution_returns_df is not None
+            else payload.returns_df
+        )
+        symbols = list(contribution_returns.columns)
         if not payload.contributions.empty:
             symbols.sort(key=lambda symbol: float(payload.contributions.get(symbol, np.nan)), reverse=True)
         for symbol in symbols:
-            meta = _position_meta(payload.snapshot, symbol)
-            daily_vol = payload.returns_df[symbol].std() if symbol in payload.returns_df else None
+            meta = (payload.contribution_metadata or {}).get(symbol) or _position_meta(payload.snapshot, symbol)
+            daily_vol = contribution_returns[symbol].std() if symbol in contribution_returns else None
             contribution_rows.append(
                 RiskContributionModel(
                     symbol=meta.get("symbol") or symbol,

@@ -122,7 +122,7 @@ Long energy with a defined de-escalation kill, half-size:
 ### P1 — GUA-20260708-2: Options polling loop + dead load button
 - Problem: 1–2s `/iv/session`+`/iv/underlying-history` polling forever (survives tab switches); load button ignores the typed symbol/focal chip; empty surface carries no explanation.
 - Acceptance: active-view-only polling with backoff; symbol binding fixed; explicit empty-surface reason.
-- Status: **Open.**
+- Status: **Implemented in code 2026-07-12; live IBKR retest recommended.** Adaptive polling is active-view and page-visibility scoped with failure backoff; idle status polls no longer request underlying history without a renderable surface; visible symbol requests persist at the app boundary; and scoped IV errors plus disconnected/collecting/entitlement/no-snapshot messages remain visible until a real surface arrives.
 
 ### P1 — GUA-20260708-3: Copilot returns no card; UI hides the error
 - Problem: `status:"error" / card:null / "OpenAI returned no structured research card"` rendered as a blank neutral card, twice, with healthy grounding.

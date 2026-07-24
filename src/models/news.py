@@ -29,6 +29,14 @@ class NewsEventEntity:
         return self.label.strip().lower().replace(" ", "_")
 
 
+NEWS_SOURCE_RELIABILITY_LABELS = ("official", "major_outlet", "aggregator", "sample", "unknown")
+
+
+def normalize_news_source_reliability(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in NEWS_SOURCE_RELIABILITY_LABELS else "unknown"
+
+
 @dataclass(frozen=True)
 class NewsEventItem:
     normalized_id: str
@@ -45,6 +53,7 @@ class NewsEventItem:
     detected_entities: list[NewsEventEntity] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     freshness_label: FreshnessLabel = FreshnessLabel.UNKNOWN
+    source_reliability: str = "unknown"
     warnings: list[str] = field(default_factory=list)
     transformation_note: str | None = None
 
@@ -60,12 +69,18 @@ class NewsEventItem:
         object.__setattr__(self, "tags", _dedupe_text(self.tags))
         object.__setattr__(self, "warnings", _dedupe_text(self.warnings))
         object.__setattr__(self, "freshness_label", normalize_freshness_label(self.freshness_label))
+        object.__setattr__(self, "source_reliability", normalize_news_source_reliability(self.source_reliability))
 
     def dedupe_key(self) -> str:
         provider_id = str(self.provider_item_id or "").strip()
         if provider_id:
             return f"{self.source_provider}:{provider_id}".lower()
         return canonical_news_url(self.url)
+
+    def title_dedupe_key(self) -> str:
+        """Cross-feed fallback key: the same headline syndicated by two feeds."""
+        normalized = "".join(ch for ch in self.title.lower() if ch.isalnum() or ch == " ")
+        return "title:" + " ".join(normalized.split())
 
 
 @dataclass(frozen=True)

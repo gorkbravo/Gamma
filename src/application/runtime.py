@@ -24,6 +24,7 @@ from src.application.provider_capability_registry import (
 )
 from src.application.research_service import ResearchService
 from src.application.risk_service import RiskService
+from src.application.sitrep_service import SitrepService
 from src.application.system_service import normalize_market_data_mode
 from src.models.instruments import InstrumentDefaults
 from src.models.commodities import (
@@ -67,7 +68,7 @@ from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAda
 from src.services.news_adapters import NewsEventProvider, RssNewsEventProvider, SampleNewsEventProvider
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
-from src.services.ibkr_client import IBKRClient
+from src.services.ibkr_client import IBKRClient, validate_portfolio_quote_timeout
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.services.research_market_data import (
@@ -81,6 +82,7 @@ from src.services.portfolio_history_store import PortfolioHistoryStore
 from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
 from src.services.research_cache import ResearchHistoryCache
 from src.services.saved_research_store import SavedResearchStore
+from src.services.sitrep_follow_up_store import SitrepFollowUpStore
 from src.services.risk_free_rate import RiskFreeRateService
 from src.utils.time import now_utc
 from src.utils.logging_config import setup_logging
@@ -125,6 +127,7 @@ class ApplicationRuntime:
     crypto_service: CryptoService
     fundamentals_service: FundamentalsService
     news_service: NewsService
+    sitrep_service: SitrepService
     copilot_service: CopilotService
     risk_service: RiskService
     iv_service: IVService
@@ -185,7 +188,9 @@ def build_runtime(
     base_currency = os.getenv("BASE_CURRENCY", "EUR")
     auto_refresh = int(os.getenv("AUTO_REFRESH_SECONDS", "60") or 0)
     lookback = int(os.getenv("HIST_LOOKBACK_DAYS_DEFAULT", "252") or 252)
-    quote_timeout = float(os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2") or 2.0)
+    quote_timeout = validate_portfolio_quote_timeout(
+        float(os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2") or 2.0)
+    )
     market_data_mode = normalize_market_data_mode(os.getenv("IB_MARKET_DATA_MODE", "delayed"))
 
     if mock_mode is None:
@@ -351,6 +356,14 @@ def build_runtime(
             for provider in _build_news_providers(live_mode=not bool(mock_mode))
         ]
     )
+    sitrep_service = SitrepService(
+        research_service=research_service,
+        macro_service=macro_service,
+        commodities_service=commodities_service,
+        prediction_market_service=prediction_market_service,
+        news_service=news_service,
+        follow_up_store=SitrepFollowUpStore(base_dir=resolved_history_dir / "sitrep"),
+    )
     risk_service = RiskService(
         client,
         market_data,
@@ -369,6 +382,7 @@ def build_runtime(
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,
         news_service=news_service,
+        sitrep_service=sitrep_service,
         provider=trace_provider(
             _build_copilot_provider(allow_mock=bool(mock_mode)),
             provider_usage,
@@ -408,6 +422,7 @@ def build_runtime(
         crypto_service=crypto_service,
         fundamentals_service=fundamentals_service,
         news_service=news_service,
+        sitrep_service=sitrep_service,
         copilot_service=copilot_service,
         risk_service=risk_service,
         iv_service=iv_service,
@@ -454,20 +469,29 @@ def _build_desktop_state(research_provider: ResearchDataProvider) -> DesktopRunt
 def _build_copilot_provider(*, allow_mock: bool = True):
     provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
     if provider in {"disabled", "none", "off"}:
-        return UnavailableCopilotProvider(message="Gamma Copilot is disabled by configuration.")
+        return UnavailableCopilotProvider(
+            message="Gamma Copilot is disabled by configuration.",
+            provider_name="disabled",
+            provider_id="disabled_copilot",
+        )
     if provider in {"mock", "demo", "offline"}:
         if not allow_mock:
             return UnavailableCopilotProvider(
-                message="Gamma Copilot mock/demo provider is disabled while Gamma is running in live mode."
+                message="Gamma Copilot mock/demo provider is disabled while Gamma is running in live mode.",
+                provider_id="unavailable_copilot",
             )
         return MockCopilotProvider()
     if provider != "openai":
-        return UnavailableCopilotProvider(message=f"Unsupported copilot provider: {provider}")
+        return UnavailableCopilotProvider(
+            message=f"Unsupported copilot provider: {provider}",
+            provider_id="unavailable_copilot",
+        )
 
     api_key = (os.getenv("OPENAI_API_KEY", "") or "").strip()
     if not api_key:
         return UnavailableCopilotProvider(
-            message="Gamma Copilot is unavailable until OPENAI_API_KEY is configured."
+            message="Gamma Copilot is unavailable until OPENAI_API_KEY is configured.",
+            provider_id="unavailable_copilot",
         )
 
     # Stored responses are required for previous_response_id-based continuation.
@@ -479,7 +503,7 @@ def _build_copilot_provider(*, allow_mock: bool = True):
     }
     return OpenAIResponsesCopilotProvider(
         api_key=api_key,
-        model=(os.getenv("GAMMA_COPILOT_MODEL", "gpt-5.4") or "gpt-5.4").strip(),
+        model=(os.getenv("GAMMA_COPILOT_MODEL", "gpt-5.5") or "gpt-5.5").strip(),
         reasoning_effort=(os.getenv("GAMMA_COPILOT_REASONING_EFFORT", "medium") or "medium").strip(),
         api_url=(
             os.getenv("GAMMA_COPILOT_API_URL", "https://api.openai.com/v1/responses")
@@ -509,22 +533,67 @@ def _register_provider_activation_conditions(
         )
     )
     copilot_provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
+    openai_selected = copilot_provider == "openai"
+    openai_configured = bool((os.getenv("OPENAI_API_KEY", "") or "").strip())
     provider_usage.register_activation_condition(
         ProviderActivationCondition(
             provider_id="openai_copilot",
             display_name="OpenAI Copilot",
             expected_when="Copilot research card, follow-up, or synthesis request is submitted.",
-            configured=copilot_provider in {"mock", "demo", "offline"}
-            or (
-                copilot_provider == "openai"
-                and bool((os.getenv("OPENAI_API_KEY", "") or "").strip())
-            ),
+            configured=openai_configured if openai_selected else True,
             active=False,
-            idle_status="not_requested",
-            idle_reason="No Copilot request has been made in this backend session.",
+            idle_status="not_requested" if openai_selected else "idle_by_design",
+            idle_reason=(
+                "No OpenAI Copilot request has been made in this backend session."
+                if openai_selected
+                else f"OpenAI Copilot is not selected; GAMMA_COPILOT_PROVIDER={copilot_provider}."
+            ),
             action_label="Ask Copilot for a grounded research card.",
         )
     )
+    if copilot_provider in {"mock", "demo", "offline"}:
+        provider_usage.register_activation_condition(
+            ProviderActivationCondition(
+                provider_id="mock_copilot",
+                display_name="Mock Copilot",
+                expected_when="Copilot is requested while the explicit mock/demo provider is selected.",
+                configured=mock_mode,
+                active=False,
+                idle_status="not_requested" if mock_mode else "idle_by_design",
+                idle_reason=(
+                    "No mock Copilot request has been made in this backend session."
+                    if mock_mode
+                    else "Mock Copilot is disabled in live mode."
+                ),
+                action_label="Ask Copilot while Gamma is running in mock mode.",
+            )
+        )
+    elif copilot_provider in {"disabled", "none", "off"}:
+        provider_usage.register_activation_condition(
+            ProviderActivationCondition(
+                provider_id="disabled_copilot",
+                display_name="Disabled Copilot",
+                expected_when="A Copilot request is submitted while Copilot is explicitly disabled.",
+                configured=True,
+                active=False,
+                idle_status="idle_by_design",
+                idle_reason="Copilot is intentionally disabled by configuration.",
+                action_label="Set GAMMA_COPILOT_PROVIDER to openai or mock to enable Copilot.",
+            )
+        )
+    elif not openai_selected or not openai_configured:
+        provider_usage.register_activation_condition(
+            ProviderActivationCondition(
+                provider_id="unavailable_copilot",
+                display_name="Unavailable Copilot",
+                expected_when="A Copilot request is submitted without a usable configured provider.",
+                configured=False,
+                active=False,
+                idle_status="not_requested",
+                idle_reason="No usable Copilot provider is configured.",
+                action_label="Configure GAMMA_COPILOT_PROVIDER and its required credentials.",
+            )
+        )
     provider_usage.register_activation_condition(
         ProviderActivationCondition(
             provider_id="yfinance",
@@ -620,7 +689,12 @@ def _build_research_history_providers(
             providers.append(
                 trace_provider(
                     YFinanceListedMarketHistoryProvider(
-                        timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0)
+                        timeout_seconds=float(os.getenv("YFINANCE_TIMEOUT_SECONDS", "10") or 10.0),
+                        max_retries=int(os.getenv("YFINANCE_MAX_RETRIES", "2") or 2),
+                        base_backoff_seconds=float(os.getenv("YFINANCE_BACKOFF_SECONDS", "0.25") or 0.25),
+                        max_backoff_seconds=float(os.getenv("YFINANCE_MAX_BACKOFF_SECONDS", "2") or 2.0),
+                        circuit_rate_limit_threshold=int(os.getenv("YFINANCE_CIRCUIT_THRESHOLD", "3") or 3),
+                        circuit_cooldown_seconds=float(os.getenv("YFINANCE_CIRCUIT_COOLDOWN_SECONDS", "30") or 30.0),
                     ),
                     provider_usage,
                     endpoint_prefix="research_history",
