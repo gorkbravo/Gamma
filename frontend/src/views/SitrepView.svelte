@@ -4,7 +4,8 @@
   import { flashOnMount } from "../lib/flash";
   import SitrepMarketTable from "../components/SitrepMarketTable.svelte";
   import ProvenanceBadge from "../components/ProvenanceBadge.svelte";
-  import { toProvenanceBadge, type ProvenanceBadgeData } from "../lib/provenance";
+  import Tooltip from "../components/Tooltip.svelte";
+  import { toProvenanceBadge } from "../lib/provenance";
   import type {
     CommodityPriceBasis,
     CommodityWorkspaceResponse,
@@ -109,6 +110,12 @@
   };
 
   type RefreshKey = "indices" | "fx" | "rates" | "commodities" | "news";
+
+  /** Detail longer than this is clamped to two lines and moved into a tooltip. */
+  const TAPE_DETAIL_CLAMP = 110;
+
+  /** Provider Status source names past this width ellipsize; the tooltip carries the rest. */
+  const STATUS_SOURCE_CLAMP = 14;
 
   const REFRESH_COOLDOWN_MS = 30_000;
   let refreshing: Record<RefreshKey, boolean> = {
@@ -356,22 +363,6 @@
     return delta / prior;
   }
 
-  function formatDateTime(value: string | null | undefined) {
-    if (!value) {
-      return "N/A";
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return value.slice(0, 16);
-    }
-    return date.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  }
-
   function formatDateTimeWithZone(value: string | null | undefined) {
     if (!value) {
       return "N/A";
@@ -458,10 +449,29 @@
     void onOpenHandoff?.(chip.handoff);
   }
 
-  function newsItemProvenance(item: NewsEventItem): ProvenanceBadgeData {
-    return toProvenanceBadge(item, {
-      qualityLabel: formatNewsReliabilityLabel(item.source_reliability) || null
-    });
+  const NEWS_RELIABILITY_DETAIL: Record<string, string> = {
+    OFFICIAL: "Official source",
+    OUTLET: "Major outlet",
+    AGGR: "Aggregator",
+    SAMPLE: "Sample feed"
+  };
+
+  /**
+   * Per-item provenance used to be rendered inline on every headline, where the
+   * RSS feed stamps every row identically ("DELAYED / rss / OUTLET") and the
+   * column carried no signal at all. It lives on the source link instead.
+   */
+  function newsSourceDetail(item: NewsEventItem): string {
+    const reliability = formatNewsReliabilityLabel(item.source_reliability);
+    const lines = [
+      NEWS_RELIABILITY_DETAIL[reliability] ?? "Reliability unrated",
+      `Published ${formatDateTimeWithZone(item.published_at)}`,
+      `Retrieved ${formatDateTimeWithZone(item.retrieved_at)}`
+    ];
+    if (item.warnings?.length) {
+      lines.push(...item.warnings.slice(0, 3));
+    }
+    return lines.join("\n");
   }
 
   function shortDate(value: string | null | undefined) {
@@ -497,6 +507,10 @@
       return "warning";
     }
     return "";
+  }
+
+  function pluralize(count: number, noun: string) {
+    return `${count} ${noun}${count === 1 ? "" : "s"}`;
   }
 
   function humanize(value: string | null | undefined) {
@@ -764,14 +778,16 @@
     return INDEX_PROXY_BY_SYMBOL[symbol] ?? null;
   }
 
-  function formatIndexPeriodLabel(data: ResearchOverviewResponse | null) {
-    const asOf = (data?.nodes ?? [])
-      .filter((node) => node.level === "instrument")
-      .map((node) => node.metrics.latest_daily_return_at)
-      .filter((value): value is string => Boolean(value))
-      .sort()
-      .at(-1);
-    return `Latest daily close / ${shortDate(asOf)}`;
+  /** Newest close represented on the board — the "as of" behind every index row. */
+  function latestIndexCloseAt(data: ResearchOverviewResponse | null) {
+    return (
+      (data?.nodes ?? [])
+        .filter((node) => node.level === "instrument")
+        .map((node) => node.metrics.latest_daily_return_at)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? null
+    );
   }
 
   function buildCommodityRows(data: CommodityWorkspaceResponse | null): SitrepMarketRow[] {
@@ -1067,25 +1083,80 @@
     return [...divergenceRows, ...equityRows, ...movers].slice(0, 10);
   }
 
-  function warningRows(
-    newsData: NewsEventFeedResponse | null,
+  /**
+   * Groups actionable warnings by the Provider Status domain that produced
+   * them, so each row can own its own incidents instead of the panel carrying
+   * one undifferentiated bullet list.
+   */
+  function sitrepWarningsByDomain(
+    indicesData: ResearchOverviewResponse | null,
     overviewData: ResearchOverviewResponse | null,
     macroData: MacroSnapshot | null,
     commodityData: CommodityWorkspaceResponse | null,
-    predictionData: PredictionMarketListResponse | null
-  ) {
+    predictionData: PredictionMarketListResponse | null,
+    newsData: NewsEventFeedResponse | null,
+    meta: SitrepWorkspaceMeta | null
+  ): Record<string, string[]> {
     const commodityBasisWarnings = (commodityData?.price_reconciliations ?? []).flatMap((row) => row.warnings ?? []);
-    return [
-      ...(overviewData?.warnings ?? []),
-      ...(macroData?.warnings ?? []),
-      ...commodityBasisWarnings,
-      ...(commodityData?.warnings ?? []),
-      ...(commodityData?.coverage.caveats ?? []),
-      ...(predictionData?.warnings ?? []),
-      ...(newsData?.warnings ?? [])
-    ]
-      .filter(isActionableSitrepWarning)
-      .slice(0, 6);
+    const byDomain: Record<string, string[]> = {
+      workspace: meta?.section_warnings ?? [],
+      indices: indicesData?.warnings ?? [],
+      equities: overviewData?.warnings ?? [],
+      macro: macroData?.warnings ?? [],
+      commodities: [
+        ...commodityBasisWarnings,
+        ...(commodityData?.warnings ?? []),
+        ...(commodityData?.coverage.caveats ?? [])
+      ],
+      prediction: predictionData?.warnings ?? [],
+      news: newsData?.warnings ?? []
+    };
+    const grouped: Record<string, string[]> = {};
+    for (const [domain, values] of Object.entries(byDomain)) {
+      const actionable = collapseSitrepWarnings(values.filter(isActionableSitrepWarning));
+      if (actionable.length) {
+        grouped[domain] = actionable;
+      }
+    }
+    return grouped;
+  }
+
+  const SERIES_FAILURE_PATTERN = /^(.+?) series (\S+) failed: (.+?)\.?$/i;
+
+  /** Folds repeated per-series fetch failures into one line and drops duplicates. */
+  function collapseSitrepWarnings(values: string[]): string[] {
+    const seen = new Set<string>();
+    const order: string[] = [];
+    const groups = new Map<string, { provider: string; reason: string; ids: string[] }>();
+
+    for (const raw of values) {
+      const value = raw.trim();
+      if (!value) continue;
+      const match = SERIES_FAILURE_PATTERN.exec(value);
+      if (!match) {
+        if (seen.has(value)) continue;
+        seen.add(value);
+        order.push(value);
+        continue;
+      }
+      const [, provider, seriesId, reason] = match;
+      const key = ` series:${provider.toLowerCase()}:${reason.toLowerCase()}`;
+      const group = groups.get(key);
+      if (group) {
+        if (!group.ids.includes(seriesId)) group.ids.push(seriesId);
+        continue;
+      }
+      groups.set(key, { provider, reason, ids: [seriesId] });
+      order.push(key);
+    }
+
+    return order.map((entry) => {
+      const group = groups.get(entry);
+      if (!group) return entry;
+      return group.ids.length === 1
+        ? `${group.provider} series ${group.ids[0]} failed: ${group.reason}.`
+        : `${group.provider}: ${group.ids.length} series failed (${group.ids.join(", ")}) — ${group.reason}.`;
+    });
   }
 
   onMount(() => {
@@ -1144,6 +1215,7 @@
     asOf: string;
     age: string;
     warn: boolean;
+    warnings: string[];
   };
 
   function providerStatusRow(
@@ -1152,16 +1224,18 @@
     source: string | null | undefined,
     freshness: string | null | undefined,
     asOf: string | null | undefined,
-    warn = false
+    warn = false,
+    warnings: string[] = []
   ): ProviderStatusRow {
     return {
       id,
       domain,
       source: (source ?? "").trim() || "N/A",
-      freshness: ((freshness ?? "").trim() || "N/A").toUpperCase(),
-      asOf: asOf ? formatDateTime(asOf) : "N/A",
+      freshness: compactFreshnessLabel(freshness),
+      asOf: asOf ? formatDateTimeWithZone(asOf) : "N/A",
       age: formatSitrepSectionAge(asOf),
-      warn
+      warn: warn || warnings.length > 0,
+      warnings
     };
   }
 
@@ -1172,22 +1246,24 @@
     commodityData: CommodityWorkspaceResponse | null,
     predictionData: PredictionMarketListResponse | null,
     newsData: NewsEventFeedResponse | null,
-    windowLabel: string
+    windowLabel: string,
+    warningsByDomain: Record<string, string[]>
   ): ProviderStatusRow[] {
+    const incidents = (domain: string) => warningsByDomain[domain] ?? [];
     const rows: ProviderStatusRow[] = [];
     rows.push(
       indicesData
-        ? providerStatusRow("indices", "Indices", indicesData.source_provider, indicesData.freshness_label, indicesData.retrieved_at)
+        ? providerStatusRow("indices", "Indices", indicesData.source_provider, indicesData.freshness_label, indicesData.retrieved_at, false, incidents("indices"))
         : providerStatusRow("indices", "Indices", null, "not loaded", null, true)
     );
     rows.push(
       overviewData
-        ? providerStatusRow("equities", "US Equities", overviewData.source_provider, overviewData.freshness_label, overviewData.retrieved_at)
-        : providerStatusRow("equities", "US Equities", null, "not loaded", null, true)
+        ? providerStatusRow("equities", "Equities", overviewData.source_provider, overviewData.freshness_label, overviewData.retrieved_at, false, incidents("equities"))
+        : providerStatusRow("equities", "Equities", null, "not loaded", null, true)
     );
     rows.push(
       macroData
-        ? providerStatusRow("macro", "FX / Rates", macroData.source_provider, `${windowLabel} window`, macroData.retrieved_at, macroData.warnings.length > 0)
+        ? providerStatusRow("macro", "FX / Rates", macroData.source_provider, `${windowLabel} window`, macroData.retrieved_at, false, incidents("macro"))
         : providerStatusRow("macro", "FX / Rates", null, "not loaded", null, true)
     );
     if (commodityData) {
@@ -1196,10 +1272,11 @@
         providerStatusRow(
           "commodities",
           "Commodities",
-          coverage.provider_label || coverage.source_provider,
+          shortProviderLabel(coverage.provider_label || coverage.source_provider),
           coverage.freshness_label,
           coverage.as_of ?? commodityData.retrieved_at,
-          coverage.coverage_status === "unavailable"
+          coverage.coverage_status === "unavailable",
+          incidents("commodities")
         )
       );
     } else {
@@ -1216,15 +1293,16 @@
       rows.push(
         providerStatusRow(
           "prediction",
-          "Prediction Mkts",
+          "Predictions",
           venues.map((venue) => venue.venue).join(" + ") || "prediction markets",
           stale > 0 ? `${stale} stale` : "open",
           latest ?? null,
-          stale > 0
+          stale > 0,
+          incidents("prediction")
         )
       );
     } else {
-      rows.push(providerStatusRow("prediction", "Prediction Mkts", null, "not loaded", null, true));
+      rows.push(providerStatusRow("prediction", "Predictions", null, "not loaded", null, true));
     }
     rows.push(
       newsData
@@ -1232,45 +1310,89 @@
             "news",
             "News",
             newsData.source_provider,
-            `${newsData.items.length} items / ${newsData.freshness_label}`,
+            newsData.freshness_label,
             newsData.retrieved_at,
-            newsData.items.length === 0
+            newsData.items.length === 0,
+            incidents("news")
           )
         : providerStatusRow("news", "News", null, "not loaded", null, true)
     );
     return rows;
   }
 
+  /** Freshness vocabulary varies per provider; the status column has one line to spend. */
+  function compactFreshnessLabel(value: string | null | undefined) {
+    const normalized = (value ?? "").trim();
+    if (!normalized) return "N/A";
+    return normalized
+      .replace(/^official[_\s-]+/i, "")
+      .replace(/[_-]+/g, " ")
+      .toUpperCase();
+  }
+
+  /** Provider labels are written for prose; the status table needs the identity only. */
+  function shortProviderLabel(value: string | null | undefined) {
+    return (value ?? "")
+      .trim()
+      .replace(/\s+(commodities|markets|data|feed)$/i, "");
+  }
+
+  /**
+   * Provider payloads mix two kinds of "warning": incidents (a fetch failed, a
+   * provider fell back, a market went stale) and permanent capability
+   * disclaimers ("coverage depends on entitlements", "futures curves are
+   * unavailable unless a provider is added"). Disclaimers fire on every single
+   * load regardless of connection health, so surfacing them next to real
+   * incidents trains the user to ignore the warning surface entirely. Only
+   * incidents belong on the Sitrep; the full payload text stays reachable
+   * through each panel's provenance tooltip.
+   */
+  const WARNING_DISCLAIMER_PATTERNS = [
+    /\bdepends on\b/,
+    /\bmay require\b/,
+    /\bcan be delayed\b/,
+    /\bis entitlement\b/,
+    /\bunless a\b/,
+    /\bprovider is added\b/,
+    /\bcoverage for live\b/,
+    /\bin this provider slice\b/,
+    /\bwhere available\b/,
+    /\bwhere configured\b/,
+    /\bshould be treated as\b/,
+    /\bmust not be read as\b/,
+    /\bread-only\b/,
+    /\bheuristic/,
+    /\bsample news\b/,
+    /\bnews provider\b/,
+    /\busing sample data\b/,
+    /\bsample prices\b/,
+    /\bnot an execution\b/,
+    /\bdoes not place orders\b/
+  ];
+
+  const WARNING_INCIDENT_KEYWORDS = [
+    "basis conflict",
+    "unavailable",
+    "failed",
+    "missing",
+    "stale",
+    "cached",
+    "entitlement",
+    "fallback",
+    "not configured",
+    "delayed",
+    "broken",
+    "timeout"
+  ];
+
   function isActionableSitrepWarning(value: string | null | undefined) {
     const text = (value ?? "").trim();
     if (!text) return false;
     const normalized = text.toLowerCase();
-    if (
-      normalized.includes("read-only") ||
-      normalized.includes("heuristic") ||
-      normalized.includes("sample news") ||
-      normalized.includes("news provider") ||
-      normalized.includes("using sample data") ||
-      normalized.includes("sample prices") ||
-      normalized.includes("not an execution") ||
-      normalized.includes("does not place orders")
-    ) {
+    if (WARNING_DISCLAIMER_PATTERNS.some((pattern) => pattern.test(normalized))) {
       return false;
     }
-    return [
-      "basis conflict",
-      "unavailable",
-      "failed",
-      "missing",
-      "stale",
-      "cached",
-      "entitlement",
-      "fallback",
-      "not configured",
-      "delayed",
-      "broken",
-      "timeout"
-    ].some((keyword) => normalized.includes(keyword));
+    return WARNING_INCIDENT_KEYWORDS.some((keyword) => normalized.includes(keyword));
   }
 
   $: equityRows = buildEquityRows(overview);
@@ -1280,12 +1402,27 @@
   $: commodityRows = buildCommodityRows(commodities);
   $: eventRows = buildEventRows(macro, prediction, commodities);
   $: changedRows = buildWhatChangedRows(macro, overview, commodities);
-  $: warnings = [
-    ...(workspaceMeta?.section_warnings ?? []),
-    ...warningRows(news, overview, macro, commodities, prediction)
-  ].slice(0, 6);
+  $: warningsByDomain = sitrepWarningsByDomain(
+    indicesOverview,
+    overview,
+    macro,
+    commodities,
+    prediction,
+    news,
+    workspaceMeta
+  );
+  $: warnings = Object.values(warningsByDomain).flat();
   $: macroWindowLabel = ((macro?.timeframe ?? "3M").trim() || "3M").toUpperCase();
-  $: providerStatusRows = buildProviderStatusRows(indicesOverview, overview, macro, commodities, prediction, news, macroWindowLabel);
+  $: providerStatusRows = buildProviderStatusRows(
+    indicesOverview,
+    overview,
+    macro,
+    commodities,
+    prediction,
+    news,
+    macroWindowLabel,
+    warningsByDomain
+  );
   $: predictionRetrievedAt = (prediction?.venues ?? [])
     .map((venue) => venue.retrieved_at)
     .filter((value): value is string => Boolean(value))
@@ -1299,40 +1436,71 @@
     { id: "prediction", label: "Prediction", retrievedAt: predictionRetrievedAt },
     { id: "news", label: "News", retrievedAt: news?.retrieved_at }
   ]);
+  // Panel badges carry the same filtered incident list as the header WARN chip,
+  // so a panel never flags a count the status line does not corroborate.
   $: indicesProvenance = indicesOverview
-    ? toProvenanceBadge(indicesOverview, { qualityLabel: indicesOverview.coverage_label })
+    ? toProvenanceBadge(indicesOverview, {
+        qualityLabel: indicesOverview.coverage_label,
+        sourceTimestamp: latestIndexCloseAt(indicesOverview),
+        warnings: warningsByDomain.indices ?? []
+      })
     : null;
   $: fxProvenance = macro
     ? toProvenanceBadge(macro, {
         provider: formatFxSourceMix(fxRows, macro),
-        qualityLabel: `${macroWindowLabel} window`
+        qualityLabel: `${macroWindowLabel} window`,
+        warnings: warningsByDomain.macro ?? []
       })
     : null;
   $: ratesProvenance = macro
     ? toProvenanceBadge(macro, {
         provider: macro.rates_policy?.source_provider ?? macro.source_provider,
         retrievedAt: macro.rates_policy?.retrieved_at ?? macro.retrieved_at,
-        qualityLabel: `${macroWindowLabel} window`
+        qualityLabel: `${macroWindowLabel} window`,
+        warnings: warningsByDomain.macro ?? []
       })
     : null;
   $: commoditiesProvenance = commodities
     ? toProvenanceBadge(commodities.coverage, {
         provider: formatCommodityProviderMix(commodities),
-        qualityLabel: commodities.coverage.coverage_status
+        qualityLabel: humanize(commodities.coverage.coverage_status),
+        warnings: warningsByDomain.commodities ?? []
       })
     : null;
-  $: pricedRatio = overview?.coverage.coverage_ratio ?? null;
-  $: highDivergences = (macro?.top_divergences ?? []).filter((item) => item.label === "high").length;
-  $: staleMarkets = (prediction?.venues ?? []).reduce((total, venue) => total + venue.stale_markets + venue.broken_markets, 0);
+  $: newsProvenance = news
+    ? toProvenanceBadge(news, {
+        qualityLabel: pluralize(news.items.length, "headline"),
+        warnings: warningsByDomain.news ?? []
+      })
+    : null;
   $: tvStatus =
     bloombergPlaybackStatus === "ready"
-      ? "BLOOMBERG HLS"
+      ? "LIVE"
       : bloombergPlaybackStatus === "loading"
-        ? "LOADING HLS"
-        : "OPEN EXTERNALLY";
+        ? "LOADING"
+        : "EXTERNAL";
   $: providerMode = system?.mock_mode ? "MOCK" : system?.connection.connected ? system.market_data_mode.toUpperCase() : "OFFLINE";
+  $: providerModeDetail = system?.mock_mode
+    ? "Mock data mode — every price on this page is generated, not traded."
+    : system?.connection.connected
+      ? `IBKR connected. Market data mode: ${system.market_data_mode}.`
+      : "IBKR is not connected. Boards fall back to their public providers (yfinance, FRED, EIA, RSS).";
   $: hasLoadedSitrepData = Boolean(overview || indicesOverview || macro || commodities || news || prediction);
   $: sitrepState = loading && !hasLoadedSitrepData ? "LOADING" : warnings.length ? "DEGRADED" : equityRows.length ? "LIVE" : "PARTIAL";
+  $: sitrepStateDetail =
+    sitrepState === "LOADING"
+      ? "Fetching the Sitrep workspace."
+      : sitrepState === "DEGRADED"
+        ? `${warnings.length} open provider incident${warnings.length === 1 ? "" : "s"}. Data is still shown, but at least one board is running on fallback or partial coverage.`
+        : sitrepState === "PARTIAL"
+          ? "Some boards returned no rows. Reload the affected panel or check Provider Status."
+          : "Every board loaded with no open provider incidents.";
+  $: oldestSectionLabel = oldestSection
+    ? `OLDEST ${oldestSection.label.toUpperCase()} ${formatSitrepSectionAge(oldestSection.retrievedAt).toUpperCase()}`
+    : "OLDEST N/A";
+  $: oldestSectionDetail = oldestSection
+    ? `${oldestSection.label} is the least recently refreshed board on this page, retrieved ${formatDateTimeWithZone(oldestSection.retrievedAt)}.`
+    : "No board has reported a retrieval timestamp yet.";
   $: equityTapeState = equityRows.length
     ? ""
     : overview
@@ -1346,7 +1514,6 @@
   <article class="panel header-panel">
     <div class="header-identity">
       <span class="title">SITREP</span>
-      <span class="subtitle">Situation Report</span>
     </div>
     <div class="equity-strip" aria-label="US equity tape">
       {#if equityRows.length}
@@ -1372,10 +1539,35 @@
       {/if}
     </div>
     <div class="status-line">
-      <span class:warning={sitrepState !== "LIVE"}>{sitrepState}</span>
-      <span>{providerMode}</span>
-      {#if warnings.length > 0}<span class="warning">{warnings.length} WARN</span>{/if}
-      <span>{oldestSection ? `OLDEST ${oldestSection.label.toUpperCase()} ${formatDateTimeWithZone(oldestSection.retrievedAt)}` : "OLDEST N/A"}</span>
+      <span class="status-cell">
+        <Tooltip heading="Sitrep state" text={sitrepStateDetail} placement="bottom" hint>
+          <b class:warning={sitrepState !== "LIVE"}>{sitrepState}</b>
+        </Tooltip>
+      </span>
+      <span class="status-cell">
+        <Tooltip heading="Market data" text={providerModeDetail} placement="bottom" hint>
+          <b>{providerMode}</b>
+        </Tooltip>
+      </span>
+      {#if warnings.length > 0}
+        <span class="status-cell">
+          <Tooltip heading="Open provider incidents" placement="bottom" hint maxWidth="30rem">
+            <b class="warning">{warnings.length} WARN</b>
+            <svelte:fragment slot="content">
+              <ul class="tooltip-list warning-items">
+                {#each warnings as warning}
+                  <li>{warning}</li>
+                {/each}
+              </ul>
+            </svelte:fragment>
+          </Tooltip>
+        </span>
+      {/if}
+      <span class="status-cell">
+        <Tooltip heading="Oldest board" text={oldestSectionDetail} placement="bottom" hint>
+          <b>{oldestSectionLabel}</b>
+        </Tooltip>
+      </span>
     </div>
   </article>
 
@@ -1386,52 +1578,52 @@
           <div class="table-header">
             <div class="table-title">
               <span>Worldwide Indices</span>
-              <small>{formatIndexPeriodLabel(indicesOverview)}</small>
+              <ProvenanceBadge variant="dot" data={indicesProvenance} label={indicesOverview?.source_provider ?? "not loaded"} />
             </div>
             <button type="button" class="reload-button" on:click={refreshIndices} disabled={refreshing.indices || isCoolingDown("indices")} aria-label={refreshTitle("indices")} title={refreshTitle("indices")}>
               <span class:spinning={refreshing.indices} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={indexRows} provenance={indicesProvenance} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
+          <SitrepMarketTable rows={indexRows} profile="indices" hideSource showPctChange changeLabel="Latest Day" pctChangeLabel="Latest Day %" contextLabel="Proxy / As Of" emptyLabel="No index overview loaded." onSelect={(row) => openMarketRow("indices", row)} />
         </article>
 
         <article class="panel table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>FX Pairs</span>
-              <small>{formatFxSourceMix(fxRows, macro)}</small>
+              <ProvenanceBadge variant="dot" data={fxProvenance} label={formatFxSourceMix(fxRows, macro)} />
             </div>
             <button type="button" class="reload-button" on:click={refreshFx} disabled={refreshing.fx || isCoolingDown("fx")} aria-label={refreshTitle("fx")} title={refreshTitle("fx")}>
               <span class:spinning={refreshing.fx} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={fxRows} provenance={fxProvenance} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("CHG", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("%CHG", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
+          <SitrepMarketTable rows={fxRows} profile="fx" hideGroup hideSource hideContext showPctChange changeLabel={formatSitrepWindowLabel("CHG", macroWindowLabel)} pctChangeLabel={formatSitrepWindowLabel("%CHG", macroWindowLabel)} emptyLabel="No FX strip loaded." onSelect={(row) => openMarketRow("fx", row)} />
         </article>
 
         <article class="panel table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Rates</span>
-              <small>{macro?.rates_policy?.source_provider ?? "Treasury / FRED"}</small>
+              <ProvenanceBadge variant="dot" data={ratesProvenance} label={macro?.rates_policy?.source_provider ?? "not loaded"} />
             </div>
             <button type="button" class="reload-button" on:click={refreshRates} disabled={refreshing.rates || isCoolingDown("rates")} aria-label={refreshTitle("rates")} title={refreshTitle("rates")}>
               <span class:spinning={refreshing.rates} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={yieldRows} provenance={ratesProvenance} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
+          <SitrepMarketTable rows={yieldRows} profile="yields" hideGroup hideSource changeLabel={formatSitrepWindowLabel("Move", macroWindowLabel)} contextLabel="Prior" emptyLabel="No rates policy payload loaded." onSelect={(row) => openMarketRow("yields", row)} />
         </article>
 
         <article class="panel table-panel">
           <div class="table-header">
             <div class="table-title">
               <span>Commodities</span>
-              <small>{formatCommodityProviderMix(commodities)}</small>
+              <ProvenanceBadge variant="dot" data={commoditiesProvenance} label={formatCommodityProviderMix(commodities)} />
             </div>
             <button type="button" class="reload-button" on:click={refreshCommodities} disabled={refreshing.commodities || isCoolingDown("commodities")} aria-label={refreshTitle("commodities")} title={refreshTitle("commodities")}>
               <span class:spinning={refreshing.commodities} aria-hidden="true">↻</span>
             </button>
           </div>
-          <SitrepMarketTable rows={commodityRows} provenance={commoditiesProvenance} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG (1D)" pctChangeLabel="%CHG (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
+          <SitrepMarketTable rows={commodityRows} profile="commodities" hideSource showPctChange contextLabel="Basis" changeLabel="CHG (1D)" pctChangeLabel="%CHG (1D)" emptyLabel="No commodities workspace loaded." onSelect={(row) => openMarketRow("commodities", row)} />
         </article>
       </div>
 
@@ -1439,7 +1631,6 @@
         <div class="table-header">
           <div class="table-title">
             <span>What Changed</span>
-            <small>divergences / movers / leaders</small>
           </div>
         </div>
         <div class="tape-list">
@@ -1456,7 +1647,9 @@
                 >
                   <span>{row.source}</span>
                   <strong>{row.title}</strong>
-                  <p>{row.detail}</p>
+                  <Tooltip block focusable={false} text={row.detail} disabled={row.detail.length <= TAPE_DETAIL_CLAMP}>
+                    <span class="tape-detail">{row.detail}</span>
+                  </Tooltip>
                   <small>{row.meta}</small>
                 </button>
                 <button
@@ -1480,7 +1673,6 @@
         <div class="table-header">
           <div class="table-title">
             <span>Events &amp; Markets</span>
-            <small>macro focus / calendar / prediction markets / commodities</small>
           </div>
         </div>
         <div class="tape-list">
@@ -1497,7 +1689,9 @@
                 >
                   <span>{row.source}</span>
                   <strong>{row.title}</strong>
-                  <p>{row.detail}</p>
+                  <Tooltip block focusable={false} text={row.detail} disabled={row.detail.length <= TAPE_DETAIL_CLAMP}>
+                    <span class="tape-detail">{row.detail}</span>
+                  </Tooltip>
                   <small>{row.meta}</small>
                 </button>
                 <button
@@ -1524,7 +1718,7 @@
         <div class="table-header">
           <div class="table-title">
             <span>Bloomberg TV</span>
-            <small>{bloombergPlaybackMessage}</small>
+            {#if bloombergPlaybackStatus !== "ready"}<small class="warning">{bloombergPlaybackMessage}</small>{/if}
           </div>
           <div class="media-links">
             <a href={bloombergWatchUrl} target="_blank" rel="noreferrer">Bloomberg</a>
@@ -1549,7 +1743,7 @@
         <div class="table-header">
           <div class="table-title">
             <span>Market News</span>
-            <small>{news?.freshness_label ?? "not loaded"}</small>
+            <ProvenanceBadge variant="dot" data={newsProvenance} label={news ? pluralize(news.items.length, "headline") : "not loaded"} />
           </div>
           <button type="button" class="reload-button" on:click={refreshNews} disabled={refreshing.news || isCoolingDown("news")} aria-label={refreshTitle("news")} title={refreshTitle("news")}>
             <span class:spinning={refreshing.news} aria-hidden="true">↻</span>
@@ -1576,10 +1770,9 @@
                     </span>
                   {/if}
                 </div>
-                <span class="news-meta">
+                <Tooltip heading={item.source_name} text={newsSourceDetail(item)} focusable={false} maxWidth="22rem">
                   <a class="news-source" href={item.url} target="_blank" rel="noreferrer">{abbreviateSource(item.source_name)}</a>
-                  <ProvenanceBadge data={newsItemProvenance(item)} showTime={false} />
-                </span>
+                </Tooltip>
               </div>
             {/each}
           {:else}
@@ -1592,11 +1785,9 @@
         <div class="table-header">
           <div class="table-title">
             <span>Follow-Ups</span>
-            <small>
-              {followUps.length
-                ? `${openFollowUpCount} open / ${resolvedFollowUpCount} resolved / saved on backend`
-                : "star triage rows to save them"}
-            </small>
+            {#if followUps.length}
+              <small>{openFollowUpCount} open / {resolvedFollowUpCount} resolved</small>
+            {/if}
           </div>
         </div>
         <div class="tape-list">
@@ -1613,10 +1804,10 @@
                 >
                   <span>{item.status === "resolved" ? "RESOLVED" : item.source}</span>
                   <strong>{item.title}</strong>
-                  <p>
-                    {item.detail}
+                  <Tooltip block focusable={false} text={item.detail} disabled={item.detail.length <= TAPE_DETAIL_CLAMP}>
+                    <span class="tape-detail">{item.detail}</span>
                     {#if item.note}<em class="follow-up-note">✎ {item.note}</em>{/if}
-                  </p>
+                  </Tooltip>
                   <small>{shortDate(item.saved_at)}</small>
                 </button>
                 <button
@@ -1659,7 +1850,7 @@
               {/if}
             {/each}
           {:else}
-            <p class="empty-state">NO SAVED FOLLOW-UPS.</p>
+            <p class="empty-state">NO SAVED FOLLOW-UPS — STAR A TRIAGE ROW TO TRACK IT.</p>
           {/if}
         </div>
       </article>
@@ -1668,34 +1859,65 @@
         <div class="table-header">
           <div class="table-title">
             <span>Provider Status</span>
-            <small>source / freshness / as of / age</small>
           </div>
         </div>
-        <div class="status-list">
-          {#each providerStatusRows as row (row.id)}
-            <div class="status-row" class:warn={row.warn}>
-              <strong>{row.domain}</strong>
-              <span class="status-source">{row.source}</span>
-              <span class="status-freshness" class:warning={row.warn}>{row.freshness}</span>
-              <span class="status-asof">{row.asOf}</span>
-              <span class="status-age" class:warning={row.warn}>{row.age}</span>
-            </div>
-          {/each}
-          <div class="status-row" class:warn={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>
-            <strong>TV</strong>
-            <span class="status-source">Bloomberg HLS</span>
-            <span class="status-freshness" class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>{tvStatus}</span>
-            <span class="status-asof">live stream</span>
-            <span class="status-age">external</span>
-          </div>
-        </div>
-        {#if warnings.length}
-          <ul class="warning-list">
-            {#each warnings as warning}
-              <li>{warning}</li>
+        <table class="status-table">
+          <thead>
+            <tr>
+              <th scope="col">Domain</th>
+              <th scope="col">Source</th>
+              <th scope="col">State</th>
+              <th scope="col" class="right">Age</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each providerStatusRows as row (row.id)}
+              <tr class:warn={row.warn}>
+                <th scope="row">{row.domain}</th>
+                <td class="status-source">
+                  {#if row.source.length > STATUS_SOURCE_CLAMP}
+                    <Tooltip text={row.source} focusable={false}><span>{row.source}</span></Tooltip>
+                  {:else}
+                    {row.source}
+                  {/if}
+                </td>
+                <td class="status-state" class:warning={row.warn}>
+                  {#if row.warnings.length}
+                    <Tooltip heading={`${row.domain} incidents`} maxWidth="28rem">
+                      <span class="state-text">{row.freshness}</span>
+                      <span class="warn-flag">!{row.warnings.length}</span>
+                      <svelte:fragment slot="content">
+                        <ul class="tooltip-list warning-items">
+                          {#each row.warnings as warning}
+                            <li>{warning}</li>
+                          {/each}
+                        </ul>
+                      </svelte:fragment>
+                    </Tooltip>
+                  {:else}
+                    <span class="state-text">{row.freshness}</span>
+                  {/if}
+                </td>
+                <td class="right" class:warning={row.warn}>
+                  <Tooltip text={`Retrieved ${row.asOf}`} focusable={false}>
+                    <span>{row.age}</span>
+                  </Tooltip>
+                </td>
+              </tr>
             {/each}
-          </ul>
-        {/if}
+            <tr class:warn={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}>
+              <th scope="row">TV</th>
+              <td class="status-source">Bloomberg HLS</td>
+              <td
+                class="status-state"
+                class:warning={bloombergPlaybackStatus === "error" || bloombergPlaybackStatus === "unsupported"}
+              >
+                <span class="state-text">{tvStatus}</span>
+              </td>
+              <td class="right">external</td>
+            </tr>
+          </tbody>
+        </table>
       </article>
     </aside>
   </div>
@@ -1849,12 +2071,6 @@
     letter-spacing: 0.1em;
   }
 
-  .header-identity .subtitle {
-    color: var(--text-2);
-    font-size: var(--text-xs);
-    letter-spacing: 0.04em;
-  }
-
   p {
     margin: 0;
   }
@@ -1960,9 +2176,26 @@
     white-space: nowrap;
   }
 
-  .status-line span {
+  .status-line .status-cell {
+    display: inline-flex;
+    align-items: center;
     padding: 0 var(--space-4);
     border-left: 1px solid var(--divider);
+  }
+
+  .status-line b {
+    font-weight: inherit;
+  }
+
+  .tooltip-list {
+    margin: 0;
+    padding-left: var(--space-5);
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .tooltip-list.warning-items {
+    color: var(--warning);
   }
 
   .workspace-grid {
@@ -2149,13 +2382,20 @@
   }
 
   .tape-row strong,
-  .tape-row p,
+  .tape-row .tape-detail,
   .tape-row small {
     min-width: 0;
     overflow-wrap: anywhere;
   }
 
-  .tape-row p {
+  /* Divergence and focus rows carry multi-sentence research prose. Two lines is
+     the triage read; the rest lives in the row's tooltip. */
+  .tape-row .tape-detail {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
     color: var(--text-1);
     line-height: 1.35;
   }
@@ -2212,11 +2452,15 @@
 
   .news-row {
     display: grid;
-    grid-template-columns: 3rem minmax(0, 1fr) minmax(4.5rem, max-content);
+    grid-template-columns: 3rem minmax(0, 1fr) max-content;
     gap: 0 var(--space-4);
     align-items: start;
     padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
+  }
+
+  .news-row:last-child {
+    border-bottom: 0;
   }
 
   .news-time {
@@ -2233,15 +2477,10 @@
     margin: 0;
   }
 
-  .news-body,
-  .news-meta {
+  .news-body {
     display: grid;
     gap: var(--space-2);
     min-width: 0;
-  }
-
-  .news-meta {
-    justify-items: end;
   }
 
   .news-chips {
@@ -2299,59 +2538,82 @@
     color: var(--text-0);
   }
 
-  .status-list {
-    display: grid;
-    gap: 0;
+  .status-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
   }
 
-  .status-row {
-    display: grid;
-    grid-template-columns: 7rem minmax(0, 1fr) minmax(5.5rem, max-content) minmax(6rem, max-content) minmax(4rem, max-content);
-    gap: var(--space-4);
-    align-items: baseline;
+  .status-table th,
+  .status-table td {
     padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--divider);
+    text-align: left;
+    vertical-align: baseline;
+    font-size: var(--text-sm);
+    color: var(--text-2);
+    min-width: 0;
   }
 
-  .status-row:last-child {
+  .status-table thead th {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .status-table tbody tr:last-child th,
+  .status-table tbody tr:last-child td {
     border-bottom: 0;
   }
 
-  .status-row strong {
+  .status-table tbody th {
     color: var(--text-1);
-    font-size: var(--text-sm);
+    font-weight: 400;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-  }
-
-  .status-row span {
-    color: var(--text-2);
-    font-size: var(--text-sm);
-    min-width: 0;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-  .status-row .status-freshness {
+  .status-table th:nth-child(1) {
+    width: 24%;
+  }
+
+  .status-table th:nth-child(2) {
+    width: 29%;
+  }
+
+  .status-table th:nth-child(3) {
+    width: 29%;
+  }
+
+  .status-table th:nth-child(4) {
+    width: 18%;
+  }
+
+  .status-table .right {
+    text-align: right;
+  }
+
+  .status-table .status-source {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .status-table .state-text {
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
 
-  .status-row .status-asof {
-    text-align: right;
-  }
-
-  .status-row .status-age {
-    text-align: right;
-  }
-
-  .warning-list {
-    margin: 0;
-    padding: var(--space-3) var(--space-5) var(--space-4) calc(var(--space-5) + var(--space-6));
-    border-top: 1px solid var(--divider);
-    color: var(--text-2);
-    line-height: 1.4;
+  .status-table .warn-flag {
+    margin-left: var(--space-2);
+    color: var(--warning);
+    font-size: var(--text-2xs);
+    font-weight: 700;
   }
 
   .empty-state {
@@ -2408,10 +2670,6 @@
     .tape-row {
       grid-template-columns: minmax(0, 1fr);
       gap: var(--space-1);
-    }
-
-    .status-row {
-      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>

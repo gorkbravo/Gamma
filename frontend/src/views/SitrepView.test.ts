@@ -24,7 +24,6 @@ describe("SitrepView", () => {
       },
     });
 
-    expect(body).toContain("Latest daily close / Jun 26");
     expect(body).toContain("Latest Day");
     expect(body).toContain("Latest Day %");
     expect(body).toContain("Proxy / As Of");
@@ -83,7 +82,10 @@ describe("SitrepView", () => {
     expect(body).toContain("CPI release");
     expect(body).toContain("Save as follow-up");
     expect(body).toContain("Follow-Ups");
-    expect(body).toContain("NO SAVED FOLLOW-UPS.");
+    expect(body).toContain("NO SAVED FOLLOW-UPS — STAR A TRIAGE ROW TO TRACK IT.");
+    // Panel captions restating the column/source structure were cut.
+    expect(body).not.toContain("macro focus / calendar / prediction markets / commodities");
+    expect(body).not.toContain("star triage rows to save them");
   });
 
   it("groups per-domain source, freshness, and as-of in Provider Status", () => {
@@ -106,14 +108,16 @@ describe("SitrepView", () => {
       },
     });
 
-    expect(body).toContain("source / freshness / as of / age");
+    expect(body).toContain("Domain");
     expect(body).toContain("Indices");
     expect(body).toContain("HISTORICAL");
     expect(body).toContain("FX / Rates");
     expect(body).toContain("3M WINDOW");
-    expect(body).toContain("Prediction Mkts");
+    expect(body).toContain("Predictions");
     expect(body).toContain("NOT LOADED");
     expect(body).toContain("OLDEST INDICES");
+    // The column headers carry the structure the caption used to spell out.
+    expect(body).not.toContain("source / freshness / as of / age");
   });
 
   it("renders backend follow-ups with notes, resolved state, and triage actions", () => {
@@ -165,7 +169,7 @@ describe("SitrepView", () => {
       },
     });
 
-    expect(body).toContain("1 open / 1 resolved / saved on backend");
+    expect(body).toContain("1 open / 1 resolved");
     expect(body).toContain("Watch the 2s10s reaction");
     expect(body).toContain("RESOLVED");
     expect(body).toContain("Mark follow-up resolved");
@@ -175,7 +179,7 @@ describe("SitrepView", () => {
     expect(body).toContain("Dismiss follow-up");
   });
 
-  it("renders clickable news ticker chips through the shared provenance badge", () => {
+  it("renders clickable news ticker chips and keeps per-item provenance off the row", () => {
     const { body } = render(SitrepView, {
       props: {
         overview: null,
@@ -223,8 +227,13 @@ describe("SitrepView", () => {
 
     expect(body).toContain("Open Apple in Equity Research");
     expect(body).toContain("AAPL");
-    expect(body).toContain("OUTLET");
-    expect(body).toContain("DELAYED");
+    expect(body).toContain('class="news-source');
+    // RSS stamps every headline identically, so the per-row freshness/reliability
+    // badge carried no signal; it moved into the source link's tooltip and the
+    // feed-level state is stated once, in Provider Status.
+    expect(body).not.toContain("provenance-badge");
+    expect(body).not.toContain("OUTLET");
+    expect(body.match(/>DELAYED</g) ?? []).toHaveLength(1);
   });
 });
 

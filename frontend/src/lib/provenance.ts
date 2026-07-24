@@ -185,6 +185,44 @@ export function shortProvenanceTimestamp(iso: string | null | undefined): string
   return parsed.toISOString().slice(0, 10);
 }
 
+export interface ProvenanceDetail {
+  label: string;
+  value: string;
+}
+
+/**
+ * Structured version of `provenanceTitle` for tooltip rendering. Warnings are
+ * returned separately so the surface can style them as warnings rather than
+ * as another metadata row.
+ */
+export function provenanceDetails(data: ProvenanceBadgeData): ProvenanceDetail[] {
+  const rows: ProvenanceDetail[] = [{ label: "Provider", value: data.provider ?? "unknown" }];
+  const reported =
+    data.rawLabel && normalizeProvenanceState(data.rawLabel) === "unknown" ? data.rawLabel : null;
+  rows.push({ label: "State", value: reported ? `${data.state} (reported: ${reported})` : data.state });
+  if (data.qualityLabel) rows.push({ label: "Coverage", value: data.qualityLabel });
+  if (data.retrievedAt) rows.push({ label: "Retrieved", value: formatProvenanceInstant(data.retrievedAt) });
+  if (data.sourceTimestamp) {
+    rows.push({ label: "Source stamp", value: formatProvenanceInstant(data.sourceTimestamp) });
+  }
+  if (data.transformationNote) rows.push({ label: "Transform", value: data.transformationNote });
+  return rows;
+}
+
+/** Human-readable absolute timestamp; falls back to the raw string when unparseable. */
+export function formatProvenanceInstant(iso: string | null | undefined): string {
+  if (!iso) return "N/A";
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short"
+  });
+}
+
 /** Full multi-line detail used as the badge tooltip. */
 export function provenanceTitle(data: ProvenanceBadgeData): string {
   const lines: string[] = [];
