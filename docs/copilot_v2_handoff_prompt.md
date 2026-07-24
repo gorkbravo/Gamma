@@ -1,4 +1,4 @@
-# Copilot V2 72% To 100% Execution Prompt
+# Copilot V2 80% To 100% Execution Prompt
 
 Copy the text inside the block below into the agent that will complete Copilot V2.
 
@@ -7,7 +7,7 @@ You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot V2 from its verified ~72% baseline to 100% according to the checkpoint gates in `roadmap.md`. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
+Your objective is to take Copilot V2 from its verified 80% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 and 2 are complete; begin with checkpoint 3. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
 
 Do not stop after one convenient slice and do not ask the user to choose the next checkpoint. Follow the roadmap order, make reasonable in-scope decisions, implement coherent vertical slices, verify them, update the active documentation, and continue. Never claim a percentage merely because code was written; a percentage is earned only when that checkpoint's exit criteria pass.
 
@@ -16,7 +16,7 @@ Do not stop after one convenient slice and do not ask the user to choose the nex
 Read these files completely before editing:
 
 1. `AGENTS.md`
-2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from ~72% to 100%`, sequencing rules, non-goals, and deliverable
+2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 80% to 100%`, sequencing rules, non-goals, and deliverable
 3. `docs/copilot_v2_tab_plan.md`, especially the July 2026 completion plan, remaining engineering workstreams, delivery order, and definition of done
 4. `docs/provenance_expectations.md`
 5. `docs/design_principles.md` before changing Svelte/CSS
@@ -30,7 +30,7 @@ Before editing:
 
 - run `git status --short --branch` and inspect recent Copilot commits;
 - inspect all existing uncommitted changes and preserve unrelated user work;
-- treat the current transcript-block, roadmap, and documentation changes as part of the intended ~72% baseline even if they are still uncommitted;
+- treat the current run-lifecycle, transcript/evidence, roadmap, and documentation changes as part of the intended 80% baseline even if they are still uncommitted;
 - run the focused Copilot backend tests, frontend Copilot tests, typecheck, and build to confirm the baseline;
 - inspect the running Copilot UI at desktop and narrow widths when practical;
 - compare code reality with the roadmap and detailed spec, correcting stale documentation without erasing useful implementation history.
@@ -54,7 +54,7 @@ Bounded read-only analysis may run automatically. Every durable or non-trivial l
 
 Gamma backend services remain authoritative for tools, permissions, execution, confirmation tokens, persistence, cancellation, finalization, and mutation rules. The UI may navigate for convenience but must not become the authority for analytical execution.
 
-## Current ~72% baseline
+## Current 80% baseline
 
 The baseline should include:
 
@@ -66,9 +66,10 @@ The baseline should include:
 - direct Responses API Research Agent provider and Agents SDK Operator behind a feature flag;
 - provider-native Agent Responses streaming behind the Gamma NDJSON run-event contract;
 - run ids, monotonic sequences, cancellation, timeout, usage events, idempotent terminal persistence, provisional deltas, Stop/Retry, and typed refusal/incomplete/error/cancelled states;
-- finalized Agent transcript blocks with full current ResearchCard fields, source-backed/inferred claims, sources, tool traces, warnings, and cardless evidence parity.
+- one canonical shelf/workspace transcript renderer covering cards, plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, and typed non-success states;
+- pre-persistence and legacy-read evidence normalization, visibly distinct claim categories, and context-preserving claim-source navigation.
 
-Important current gaps include the supported typed OpenAI client, reconnect/resume, shelf and Operator live-run parity, complete transcript blocks, claim/source resolution, in-tab artifacts, full session lifecycle, inline Operator confirmations, context/tool gaps, versioned model policy, retention/diagnostics, accessibility, restart replay, and full live release evidence.
+Important current gaps begin at checkpoint 3: in-tab artifacts, full session lifecycle and replay, inline Operator confirmation productionization, Agents SDK progress/default evaluation, context/tool gaps, shelf-to-workspace promotion, versioned model policy, retention/diagnostics, accessibility, restart replay, and full live release evidence.
 
 ## Execution method for every checkpoint
 
@@ -85,7 +86,7 @@ For each checkpoint below:
 
 Do not broaden durable mutation families before sessions/artifacts, inline confirmation, replay, cancellation, and permission invariants are reliable.
 
-## Checkpoint 1 — finish transport and run lifecycle (76%)
+## Checkpoint 1 — verified 2026-07-17 (76%)
 
 Required delivery:
 
@@ -104,7 +105,7 @@ Exit evidence:
 - reconnect/replay, duplicate, stale, post-terminal, disconnect, timeout, refusal, incomplete, provider-error, and cancellation tests pass;
 - the shelf and workspace no longer depend on separate incompatible run paths.
 
-## Checkpoint 2 — complete transcript and evidence contract (80%)
+## Checkpoint 2 — verified 2026-07-24 (80%)
 
 Required delivery:
 
@@ -122,6 +123,14 @@ Exit evidence:
 - shelf and dedicated workspace show equivalent evidence for the same result;
 - supported source links open the correct Gamma destination without losing context;
 - card, plan, Operator, report, confirmation, and error block tests pass.
+
+Verified implementation evidence:
+
+- the canonical transcript renderer covers cards, plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, and typed non-success states in both shelf and workspace;
+- result evidence is normalized before return and persistence and revalidated on legacy reads, so unresolved claim refs are reclassified instead of persisted as citations;
+- supported source refs navigate through `CrossTabHandoffEnvelope` with mapped entity, mode, timeframe, and lens context;
+- `86` focused backend tests, `3` Agents SDK/operator eval tests, and `267` frontend tests passed alongside typecheck, production build, and desktop check;
+- live UI inspection covered ready/error/cancelled states and a source handoff to Macro Snapshot retaining the 3M timeframe, with zero console errors.
 
 ## Checkpoint 3 — finish sessions and in-tab artifacts (86%)
 

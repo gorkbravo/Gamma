@@ -2437,6 +2437,7 @@ class CopilotService:
         result: CopilotResearchCardResult,
     ) -> CopilotResearchCardResult:
         """Persist an Operator terminal that did not enter an orchestrator path."""
+        result = self._normalize_result_sources(result)
         if self.store is None:
             return result
         try:
@@ -2471,6 +2472,7 @@ class CopilotService:
         plan: CopilotOperatorPlan,
         result: CopilotResearchCardResult,
     ) -> CopilotResearchCardResult:
+        result = self._normalize_result_sources(result)
         final_payload: dict[str, Any] = {}
         for event in reversed(result.operator_events):
             if event.event_type == "final-report":

@@ -19,6 +19,7 @@
   } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
   import { createRiskHandoffController } from "./lib/risk-handoff";
+  import { buildCopilotSourceHandoff } from "./lib/copilot-source-navigation";
   import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
   import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
   import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
@@ -42,7 +43,6 @@
     cancelIvSessionRequest,
     commoditiesWorkspace,
     activeCopilotSession,
-    copilotActionDefinitions,
     copilotOperatorPlan,
     copilotOperatorResult,
     copilotResearchPlan,
@@ -101,7 +101,6 @@
     loadPortfolioSnapshot,
     loadActiveCopilotSession,
     loadCopilotMemos,
-    loadCopilotActionDefinitions,
     loadCopilotOperatorPlan,
     loadCopilotResearchCard,
     loadCopilotResearchPlan,
@@ -187,6 +186,7 @@
     CopilotBaseDomain,
     CopilotDomain,
     CopilotReasoningEffort,
+    CopilotSourceRef,
     CopilotThreadState,
     CrossTabHandoffEnvelope,
     CommodityMode,
@@ -2051,6 +2051,95 @@
     await handleLoadCopilotWorkspaceState();
   }
 
+  function copilotHandoffId(handoff: CrossTabHandoffEnvelope, keys: string[]) {
+    for (const key of keys) {
+      const value = handoff.normalized_ids[key];
+      if (value?.trim()) return value.trim();
+    }
+    return null;
+  }
+
+  function copilotHandoffMetadata(
+    handoff: CrossTabHandoffEnvelope,
+    key: string
+  ) {
+    const value = handoff.selected_entity?.metadata?.[key];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  }
+
+  function copilotHandoffEquitySymbol(handoff: CrossTabHandoffEnvelope) {
+    return (
+      copilotHandoffId(handoff, ["symbol", "ticker", "equity_symbol"]) ??
+      copilotHandoffMetadata(handoff, "symbol") ??
+      copilotHandoffMetadata(handoff, "ticker") ??
+      (handoff.selected_entity?.entity_type.includes("equity")
+        ? handoff.selected_entity.normalized_id
+        : null)
+    );
+  }
+
+  async function handleOpenCopilotSource(source: CopilotSourceRef) {
+    const handoff = buildCopilotSourceHandoff(source, latestCopilotHandoff);
+    if (!handoff) {
+      return;
+    }
+
+    const targetTab = normalizeAppTabId(handoff.intended_target_tab as TabId | "research");
+    if (!workspaceMode || !isWorkspaceTab(workspaceMode, targetTab)) {
+      workspaceMode = targetTab === "portfolio" ? "portfolio" : "research";
+    }
+    if (!isWorkspaceTab(workspaceMode, targetTab)) {
+      return;
+    }
+
+    const equitySymbol = copilotHandoffEquitySymbol(handoff);
+    if (equitySymbol && ["equity_research", "fundamentals", "risk", "iv"].includes(targetTab)) {
+      selectSharedEquity(equitySymbol, handoff.selected_entity?.label ?? null, "copilot");
+    }
+
+    await selectTab(targetTab);
+
+    if (targetTab === "equity_research" && equitySymbol) {
+      await ensureSingleEquityResearch(equitySymbol, handoff.selected_timeframe?.label);
+    } else if (targetTab === "macro") {
+      const mode = (handoff.intended_target_mode ?? "snapshot") as MacroContextState["mode"];
+      await loadMacroWorkspace({
+        mode,
+        timeframe: handoff.selected_timeframe?.label as MacroContextState["timeframe"] | undefined,
+        region: copilotHandoffMetadata(handoff, "region") as MacroContextState["region"] | undefined,
+        theme: (copilotHandoffMetadata(handoff, "lens") ??
+          copilotHandoffMetadata(handoff, "theme")) as MacroContextState["theme"] | undefined
+      });
+      return;
+    } else if (targetTab === "commodities") {
+      const mode = (handoff.intended_target_mode ?? "overview") as CommodityMode;
+      commoditiesMode = mode;
+      await loadCommoditiesWorkspace({
+        mode,
+        selectedInstrumentId:
+          copilotHandoffId(handoff, ["commodity_id", "instrument_id"]) ??
+          handoff.selected_entity?.normalized_id ??
+          undefined
+      });
+      return;
+    } else if (targetTab === "prediction_markets") {
+      const marketId =
+        copilotHandoffId(handoff, ["market_id", "prediction_market_id"]) ??
+        handoff.selected_entity?.normalized_id;
+      if (marketId) await selectPredictionMarket(marketId);
+      return;
+    } else if (targetTab === "crypto") {
+      const tokenId =
+        copilotHandoffId(handoff, ["token_id", "crypto_token_id"]) ??
+        handoff.selected_entity?.normalized_id;
+      if (tokenId) await selectCryptoToken(tokenId);
+    }
+
+    if (handoff.intended_target_mode) {
+      await selectModeById(targetTab, handoff.intended_target_mode);
+    }
+  }
+
   async function handleFundamentalsRelatedTab(
     target: "equity_research" | "risk" | "iv",
     ticker: string,
@@ -2667,7 +2756,6 @@
             synthesisSurface={synthesisCopilotSurface}
             sessions={$copilotSessions}
             activeSession={$activeCopilotSession}
-            actionDefinitions={$copilotActionDefinitions}
             researchPlan={$copilotResearchPlan}
             operatorPlan={$copilotOperatorPlan}
             operatorResult={$copilotOperatorResult}
@@ -2685,6 +2773,7 @@
             onSelectSession={handleSelectCopilotSession}
             onSearchSessions={handleLoadCopilotSessionsFiltered}
             onToggleScope={handleToggleSynthesisScope}
+            onOpenSource={handleOpenCopilotSource}
           />
         {:else if $activeTab === "risk"}
           <svelte:component
@@ -2736,6 +2825,7 @@
       onGenerate={handleGenerateCopilot}
       onRunOperator={handleRunOperatorCopilot}
       onToggleScope={handleToggleSynthesisScope}
+      onOpenSource={handleOpenCopilotSource}
       onClose={() => copilotOpen = false}
     />
   </Shell>

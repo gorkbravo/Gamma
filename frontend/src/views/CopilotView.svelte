@@ -6,10 +6,10 @@
     CopilotDomain,
     CopilotReasoningEffort,
     CrossTabHandoffEnvelope,
-    CopilotResearchActionDefinition,
     CopilotOperatorPlan,
     CopilotResearchCardResult,
     CopilotResearchPlan,
+    CopilotSourceRef,
     CopilotSessionDetail,
     CopilotSessionSummary,
     CopilotThreadEntry,
@@ -52,7 +52,6 @@
   export let synthesisSurface: CopilotWorkspaceSurface;
   export let sessions: CopilotSessionSummary[] = [];
   export let activeSession: CopilotSessionDetail | null = null;
-  export let actionDefinitions: CopilotResearchActionDefinition[] = [];
   export let researchPlan: CopilotResearchPlan | null = null;
   export let operatorPlan: CopilotOperatorPlan | null = null;
   export let operatorResult: CopilotResearchCardResult | null = null;
@@ -70,6 +69,7 @@
   export let onSearchSessions: (options?: { includeArchived?: boolean; search?: string }) => Promise<unknown> | void = () => {};
   export let onNewSession: () => Promise<unknown> | void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
+  export let onOpenSource: (source: CopilotSourceRef) => Promise<unknown> | void = () => {};
 
   type CopilotRoleMode = "agent" | "operator";
 
@@ -87,58 +87,6 @@
 
   function activeTurns() {
     return activeSession?.turns ?? [];
-  }
-
-  function planEntities() {
-    return researchPlan?.target_entities ?? [];
-  }
-
-  function planDomains() {
-    return researchPlan?.domain_plan ?? [];
-  }
-
-  function planDecisions() {
-    return researchPlan?.domain_decisions ?? [];
-  }
-
-  function planWarnings() {
-    return researchPlan?.warnings ?? [];
-  }
-
-  function operatorSteps() {
-    return operatorPlan?.steps ?? [];
-  }
-
-  function operatorCheckpoints() {
-    return operatorPlan?.confirmation_checkpoints ?? [];
-  }
-
-  function operatorWarnings() {
-    return operatorPlan?.warnings ?? [];
-  }
-
-  function operatorEvents() {
-    return operatorResult?.operator_events ?? [];
-  }
-
-  function operatorEventMeta(eventType: string) {
-    return eventType.replaceAll("-", " ");
-  }
-
-  function actionDefinition(toolId: string | null) {
-    if (!toolId) {
-      return null;
-    }
-    return actionDefinitions.find((definition) => definition.tool_id === toolId) ?? null;
-  }
-
-  function actionPermissionLabel(toolId: string | null, fallback: string) {
-    const definition = actionDefinition(toolId);
-    return definition?.permission_policy ?? fallback;
-  }
-
-  function expectedArtifactsLabel(items: string[]) {
-    return items.length ? items.slice(0, 3).join(" / ") : "trace";
   }
 
   function setRoleMode(nextMode: CopilotRoleMode) {
@@ -232,13 +180,6 @@
 
   function sessionStatusLabel(session: CopilotSessionSummary) {
     return session.archived_at ? "archived" : session.active_domain ?? "mixed";
-  }
-
-  function formatMs(value: number) {
-    if (value >= 1000) {
-      return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}s`;
-    }
-    return `${value}ms`;
   }
 
   onMount(() => {
@@ -467,7 +408,7 @@
             <div class="msg assistant">
               <div class="role-tag">GAMMA</div>
               <div class="assistant-body">
-                <CopilotTranscriptResult result={turn.result} />
+                <CopilotTranscriptResult result={turn.result} {onOpenSource} />
               </div>
             </div>
           {/each}
@@ -476,112 +417,21 @@
             <div class="msg assistant">
               <div class="role-tag">PLAN</div>
               <div class="assistant-body">
-                <div class="plan-block">
-                  <div class="plan-head">
-                    <strong>{researchPlan.intent.replaceAll("_", " ")}</strong>
-                    <span>{researchPlan.depth_profile}</span>
-                  </div>
-                  <div class="plan-budget">
-                    <span>{researchPlan.max_tool_calls} tools</span>
-                    <span>{researchPlan.max_provider_calls} provider calls</span>
-                    <span>{formatMs(researchPlan.max_elapsed_ms)} guard</span>
-                  </div>
-                  {#if planEntities().length}
-                    <div class="chip-row">
-                      {#each planEntities().slice(0, 4) as entity}
-                        <span class="chip">{entity.kind}: {entity.label ?? entity.id}</span>
-                      {/each}
-                    </div>
-                  {/if}
-                  {#if planDomains().length}
-                    <table class="plan-table">
-                      <thead><tr><th>Domain</th><th>Depth</th><th>Reason</th></tr></thead>
-                      <tbody>
-                        {#each planDomains().slice(0, 5) as item}
-                          <tr>
-                            <td>{item.domain.replaceAll("_", " ")}</td>
-                            <td class="muted">{item.depth} · {item.estimated_tool_calls}T/{item.estimated_provider_calls}P</td>
-                            <td>{item.reason}</td>
-                          </tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  {/if}
-                  {#if planDecisions().length}
-                    <div class="decision-row">
-                      {#each planDecisions().slice(0, 6) as decision}
-                        <span class="chip" class:skip={!decision.used}>
-                          {decision.used ? "USE" : "SKIP"} {decision.domain.replaceAll("_", " ")}
-                        </span>
-                      {/each}
-                    </div>
-                  {/if}
-                  {#if planWarnings().length}
-                    <p class="plan-warning">{planWarnings()[0]}</p>
-                  {/if}
-                </div>
+                <CopilotTranscriptResult result={null} {researchPlan} {onOpenSource} />
               </div>
             </div>
           {:else if roleMode === "operator" && operatorPlan}
             <div class="msg assistant">
               <div class="role-tag">OPERATOR PLAN</div>
               <div class="assistant-body">
-                <div class="plan-block">
-                  <div class="plan-head">
-                    <strong>{operatorPlan.intent.replaceAll("_", " ")}</strong>
-                    <span>{operatorPlan.role.replaceAll("_", " ")}</span>
-                  </div>
-                  <div class="plan-budget">
-                    <span>{operatorPlan.max_tool_calls} tools</span>
-                    <span>{operatorPlan.max_provider_calls} provider calls</span>
-                    <span>{formatMs(operatorPlan.max_elapsed_ms)} guard</span>
-                    <span>{operatorCheckpoints().length} checkpoints</span>
-                  </div>
-                  {#if operatorSteps().length}
-                    <table class="plan-table">
-                      <thead><tr><th>#</th><th>Step</th><th>Action</th><th>Policy</th></tr></thead>
-                      <tbody>
-                        {#each operatorSteps() as step (step.step_id)}
-                          <tr class:checkpoint={step.requires_confirmation}>
-                            <td class="muted">{step.order}</td>
-                            <td>{step.title}</td>
-                            <td class="muted">{step.domain.replaceAll("_", " ")} / {step.action_type.replaceAll("_", " ")}</td>
-                            <td class="muted">{actionPermissionLabel(step.tool_id, step.permission_policy)}</td>
-                          </tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  {/if}
-                  {#if operatorWarnings().length}
-                    <p class="plan-warning">{operatorWarnings()[0]}</p>
-                  {/if}
-                </div>
+                <CopilotTranscriptResult result={operatorResult} {operatorPlan} {onOpenSource} />
               </div>
             </div>
-          {/if}
-
-          {#if roleMode === "operator" && operatorResult}
+          {:else if roleMode === "operator" && operatorResult}
             <div class="msg assistant">
               <div class="role-tag">OPERATOR RUN</div>
               <div class="assistant-body">
-                <p class="assistant-text {operatorResult.status}">{operatorResult.message ?? "No operator execution message."}</p>
-                {#if operatorEvents().length}
-                  <table class="plan-table">
-                    <thead><tr><th>#</th><th>Event</th><th>Detail</th></tr></thead>
-                    <tbody>
-                      {#each operatorEvents() as event (event.event_id)}
-                        <tr class:checkpoint={event.event_type === "warning" || event.event_type === "confirmation-needed"}>
-                          <td class="muted">{event.sequence}</td>
-                          <td>{operatorEventMeta(event.event_type)}</td>
-                          <td>{event.message ?? event.title ?? "Operator event recorded."}</td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                {/if}
-                <div class="assistant-meta">
-                  <span>{operatorResult.tool_traces.length} tools · {operatorResult.sources.length} sources · {operatorResult.warnings.length} warnings</span>
-                </div>
+                <CopilotTranscriptResult result={operatorResult} {onOpenSource} />
               </div>
             </div>
           {/if}
@@ -1143,101 +993,6 @@
     50% {
       opacity: 0;
     }
-  }
-
-  /* ---- Plan / operator chat blocks ---- */
-  .plan-block {
-    display: grid;
-    gap: var(--space-4);
-    border: 1px solid var(--panel-border);
-    border-left: 2px solid var(--accent);
-    padding: var(--space-4) var(--space-5);
-  }
-
-  .plan-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-5);
-  }
-
-  .plan-head strong {
-    color: var(--text-0);
-    text-transform: uppercase;
-    font-size: var(--text-sm);
-  }
-
-  .plan-head span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
-  }
-
-  .plan-budget,
-  .chip-row,
-  .decision-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-4);
-  }
-
-  .plan-budget span {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-size: var(--text-2xs);
-  }
-
-  .chip {
-    border: 1px solid var(--divider);
-    padding: var(--space-1) var(--space-3);
-    color: var(--text-1);
-    font-size: var(--text-xs);
-  }
-
-  .chip.skip {
-    color: var(--text-2);
-  }
-
-  .plan-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--text-sm);
-  }
-
-  .plan-table th {
-    text-align: left;
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: var(--text-2xs);
-    font-weight: 500;
-    padding: var(--space-2) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-  }
-
-  .plan-table td {
-    color: var(--text-1);
-    padding: var(--space-2) var(--space-4);
-    border-bottom: 1px solid var(--divider);
-    vertical-align: top;
-    line-height: 1.4;
-  }
-
-  .plan-table td.muted {
-    color: var(--text-2);
-  }
-
-  .plan-table tr.checkpoint td:first-child {
-    border-left: 2px solid var(--warning);
-  }
-
-  .plan-warning {
-    margin: 0;
-    color: var(--warning);
-    font-size: var(--text-sm);
-    line-height: 1.4;
   }
 
   /* ---- Thinking ---- */

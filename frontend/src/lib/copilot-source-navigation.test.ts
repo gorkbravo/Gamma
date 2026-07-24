@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CopilotSourceRef, CrossTabHandoffEnvelope } from "./api/types";
-import { buildCopilotSourceHandoff } from "./copilot-source-navigation";
+import {
+  buildCopilotSourceHandoff,
+  canNavigateCopilotSource,
+  getCopilotSourceTarget
+} from "./copilot-source-navigation";
 
 const source: CopilotSourceRef = {
   source_id: "macro.rates_policy",
@@ -55,7 +59,36 @@ describe("buildCopilotSourceHandoff", () => {
     expect(handoff?.warnings).toEqual(["Delayed series.", "Result warning."]);
   });
 
+  it("preserves an existing intended target mode without borrowing an unrelated source mode", () => {
+    const prior = {
+      source_tab: "sitrep",
+      source_mode: "overview",
+      selected_entity: null,
+      selected_timeframe: { label: "1Y", start: null, end: null },
+      provider: "gamma",
+      source: null,
+      warnings: [],
+      normalized_ids: {},
+      timestamp: "2026-07-17T00:00:00Z",
+      intended_target_tab: "macro",
+      intended_target_mode: "events_regimes"
+    } satisfies CrossTabHandoffEnvelope;
+
+    expect(buildCopilotSourceHandoff(source, prior)?.intended_target_mode).toBe("events_regimes");
+  });
+
   it("does not invent a destination for an unmapped provider source", () => {
     expect(buildCopilotSourceHandoff({ ...source, source_id: "external.unknown", origin: "vendor.feed" })).toBeNull();
+  });
+
+  it("exposes only supported source targets as navigable", () => {
+    expect(canNavigateCopilotSource(source)).toBe(true);
+    expect(getCopilotSourceTarget({ ...source, source_id: "iv.surface", origin: "gamma.iv.surface" })).toEqual({
+      tab: "iv",
+      mode: "surface"
+    });
+    expect(
+      canNavigateCopilotSource({ ...source, source_id: "external.unknown", origin: "vendor.feed" })
+    ).toBe(false);
   });
 });

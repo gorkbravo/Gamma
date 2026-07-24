@@ -507,7 +507,7 @@ class CopilotStore:
 
     @classmethod
     def _result_from_json(cls, payload: dict[str, Any]) -> CopilotResearchCardResult:
-        return CopilotResearchCardResult(
+        result = CopilotResearchCardResult(
             domain=str(payload.get("domain") or "synthesis"),
             current_tab=str(payload.get("current_tab") or payload.get("domain") or "copilot"),
             status=str(payload.get("status") or "ready"),
@@ -525,6 +525,7 @@ class CopilotStore:
             ],
             warnings=list(payload.get("warnings") or []),
         )
+        return resolve_result_evidence(result)
 
     @staticmethod
     def _card_from_json(payload: Any) -> ResearchCard | None:

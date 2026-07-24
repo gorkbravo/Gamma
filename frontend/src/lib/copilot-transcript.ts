@@ -17,16 +17,28 @@ export interface ResolvedTranscriptClaim {
   unresolvedEvidenceRefs: string[];
 }
 
+export interface ResolvedTranscriptReferences {
+  evidence: CopilotSourceRef[];
+  unresolvedEvidenceRefs: string[];
+}
+
 export type CopilotTranscriptBlock =
   | { kind: "message"; status: string; message: string }
   | { kind: "research-card"; card: ResearchCard; claims: ResolvedTranscriptClaim[] }
   | { kind: "research-plan"; plan: CopilotResearchPlan }
   | { kind: "operator-plan"; plan: CopilotOperatorPlan }
-  | { kind: "operator-step"; event: CopilotOperatorProgressEvent }
-  | { kind: "confirmation"; title: string; message: string; sourceIds: string[]; warnings: string[]; payload: Record<string, unknown> }
-  | { kind: "mutation-diff"; mutation: CopilotDraftMutation }
-  | { kind: "artifact"; event: CopilotOperatorProgressEvent }
-  | { kind: "operator-report"; event: CopilotOperatorProgressEvent }
+  | { kind: "operator-step"; event: CopilotOperatorProgressEvent; references: ResolvedTranscriptReferences }
+  | {
+      kind: "confirmation";
+      title: string;
+      message: string;
+      warnings: string[];
+      payload: Record<string, unknown>;
+      references: ResolvedTranscriptReferences;
+    }
+  | { kind: "mutation-diff"; mutation: CopilotDraftMutation; references: ResolvedTranscriptReferences }
+  | { kind: "artifact"; event: CopilotOperatorProgressEvent; references: ResolvedTranscriptReferences }
+  | { kind: "operator-report"; event: CopilotOperatorProgressEvent; references: ResolvedTranscriptReferences }
   | { kind: "report"; report: CopilotResearchReport; claims: ResolvedTranscriptClaim[] }
   | { kind: "status"; status: string; label: string; message: string; providerLabel: string }
   | {
@@ -49,31 +61,41 @@ function providerLabel(result: CopilotResearchCardResult) {
   return result.model ? `${result.provider} / ${result.model}` : result.provider;
 }
 
-function resolveClaims(claims: ResearchClaim[], sources: CopilotSourceRef[]): ResolvedTranscriptClaim[] {
+function resolveReferences(sourceIds: string[], sources: CopilotSourceRef[]): ResolvedTranscriptReferences {
   const registry = new Map(sources.map((source) => [source.source_id, source]));
-  return claims.map((claim) => ({
-    claim: claim.claim,
-    evidence: claim.evidence_refs
+  return {
+    evidence: sourceIds
       .map((ref) => registry.get(ref))
       .filter((source): source is CopilotSourceRef => source != null),
-    unresolvedEvidenceRefs: claim.evidence_refs.filter((ref) => !registry.has(ref))
+    unresolvedEvidenceRefs: sourceIds.filter((ref) => !registry.has(ref))
+  };
+}
+
+function resolveClaims(claims: ResearchClaim[], sources: CopilotSourceRef[]): ResolvedTranscriptClaim[] {
+  return claims.map((claim) => ({
+    claim: claim.claim,
+    ...resolveReferences(claim.evidence_refs, sources)
   }));
 }
 
-function operatorEventBlock(event: CopilotOperatorProgressEvent): CopilotTranscriptBlock {
+function operatorEventBlock(
+  event: CopilotOperatorProgressEvent,
+  sources: CopilotSourceRef[]
+): CopilotTranscriptBlock {
+  const references = resolveReferences(event.source_ids, sources);
   if (event.event_type === "confirmation-needed") {
     return {
       kind: "confirmation",
       title: event.title ?? "Confirmation required",
       message: event.message ?? "This operator step is stopped pending exact confirmation.",
-      sourceIds: event.source_ids,
       warnings: event.warnings,
-      payload: event.payload
+      payload: event.payload,
+      references
     };
   }
-  if (event.event_type === "artifact-created") return { kind: "artifact", event };
-  if (event.event_type === "final-report") return { kind: "operator-report", event };
-  return { kind: "operator-step", event };
+  if (event.event_type === "artifact-created") return { kind: "artifact", event, references };
+  if (event.event_type === "final-report") return { kind: "operator-report", event, references };
+  return { kind: "operator-step", event, references };
 }
 
 export function buildCopilotTranscriptBlocks(
@@ -90,20 +112,24 @@ export function buildCopilotTranscriptBlocks(
         kind: "confirmation",
         title: `Checkpoint after ${checkpoint.after_step_id}`,
         message: checkpoint.reason,
-        sourceIds: [],
         warnings: [],
         payload: {
           checkpoint_id: checkpoint.checkpoint_id,
           required_for_tool_ids: checkpoint.required_for_tool_ids,
           policy: checkpoint.default_policy
-        }
+        },
+        references: { evidence: [], unresolvedEvidenceRefs: [] }
       });
     }
   }
 
   if (result) {
+    const sources = result.sources ?? [];
+    const toolTraces = result.tool_traces ?? [];
+    const operatorEvents = result.operator_events ?? [];
+    const warnings = result.warnings ?? [];
     const provider = providerLabel(result);
-    const hasOperatorContent = result.operator_events.length > 0;
+    const hasOperatorContent = operatorEvents.length > 0;
     if (result.status !== "ready") {
       blocks.push({
         kind: "status",
@@ -120,7 +146,7 @@ export function buildCopilotTranscriptBlocks(
       blocks.push({
         kind: "research-card",
         card: result.card,
-        claims: resolveClaims(result.card.source_backed_claims, result.sources)
+        claims: resolveClaims(result.card.source_backed_claims, sources)
       });
     } else if (result.status === "ready" && !hasOperatorContent) {
       blocks.push({
@@ -132,17 +158,17 @@ export function buildCopilotTranscriptBlocks(
       });
     }
 
-    blocks.push(...result.operator_events.map(operatorEventBlock));
+    blocks.push(...operatorEvents.map((event) => operatorEventBlock(event, sources)));
 
-    if (result.sources.length || result.tool_traces.length || result.warnings.length) {
+    if (sources.length || toolTraces.length || warnings.length) {
       blocks.push({
         kind: "evidence",
         providerLabel: provider,
-        sources: result.sources,
-        toolTraces: result.tool_traces,
-        warnings: result.warnings
+        sources,
+        toolTraces,
+        warnings
       });
-    } else if (result.card || result.operator_events.length) {
+    } else if (result.card || operatorEvents.length) {
       blocks.push({ kind: "provider-meta", providerLabel: provider });
     }
   }
@@ -154,21 +180,28 @@ export function buildCopilotTranscriptBlocks(
       claims: resolveClaims(extras.report.source_backed_claims, extras.report.sources)
     });
   }
+
   if (extras.mutation) {
+    const mutationReferences = resolveReferences(
+      extras.mutation.source_ids,
+      result?.sources ?? extras.report?.sources ?? []
+    );
     blocks.push({
       kind: "confirmation",
       title: `${extras.mutation.action_type.replaceAll("_", " ")} · ${extras.mutation.target_label}`,
-      message: extras.mutation.rationale ?? "Review the exact before/after diff before confirming this local research-state mutation.",
-      sourceIds: extras.mutation.source_ids,
+      message:
+        extras.mutation.rationale ??
+        "Review the exact before/after diff before confirming this local research-state mutation.",
       warnings: extras.mutation.warnings,
       payload: {
         mutation_id: extras.mutation.mutation_id,
         status: extras.mutation.status,
         expires_at: extras.mutation.expires_at,
         rollback_snapshot_id: extras.mutation.rollback_snapshot_id
-      }
+      },
+      references: mutationReferences
     });
-    blocks.push({ kind: "mutation-diff", mutation: extras.mutation });
+    blocks.push({ kind: "mutation-diff", mutation: extras.mutation, references: mutationReferences });
   }
 
   return blocks;

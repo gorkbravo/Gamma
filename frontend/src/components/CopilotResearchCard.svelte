@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import CopilotTranscriptResult from "./CopilotTranscriptResult.svelte";
   import type {
     CopilotBaseDomain,
     CopilotReasoningEffort,
-    CopilotResearchCardResult,
+    CopilotSourceRef,
     CopilotThreadEntry,
     CopilotThreadState
   } from "../lib/api/types";
@@ -36,6 +37,7 @@
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
   export let onGenerate: (prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void;
   export let onRunOperator: (prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
+  export let onOpenSource: (source: CopilotSourceRef) => Promise<unknown> | void = () => {};
 
   let promptText = "";
   let roleMode: CopilotRoleMode = "agent";
@@ -73,32 +75,6 @@
       event.preventDefault();
       void handleGenerate();
     }
-  }
-
-  function providerLabelFor(result: CopilotResearchCardResult) {
-    return result.model ? `${result.provider} · ${result.model}` : result.provider ?? null;
-  }
-
-  function resultMetaParts(result: CopilotResearchCardResult) {
-    const parts: string[] = [];
-    const provider = providerLabelFor(result);
-    if (provider) parts.push(provider);
-    if (result.sources.length) parts.push(`Sources (${result.sources.length})`);
-    if (result.tool_traces.length) parts.push(`Tools (${result.tool_traces.length})`);
-    if (result.warnings.length) parts.push(`Warnings (${result.warnings.length})`);
-    return parts;
-  }
-
-  function hasGroundingMeta(result: CopilotResearchCardResult) {
-    return result.sources.length > 0 || result.tool_traces.length > 0 || result.warnings.length > 0;
-  }
-
-  function cardlessStatusLabel(result: CopilotResearchCardResult) {
-    return result.status === "ready" ? "No renderable card" : result.status.replaceAll("_", " ");
-  }
-
-  function cardLabelFor(entry: CopilotThreadEntry) {
-    return entry.result.domain === "synthesis" ? "Grounded Research" : "Research Card";
   }
 
   function scopeTooltip(option: CopilotGroundingScopeOption) {
@@ -201,175 +177,14 @@
               </div>
             {/if}
 
-            {#if entry.result.message || !entry.result.card}
-              <div class="bubble assistant-bubble status-bubble {entry.result.status}">
-                <div class="bubble-head">
-                  <span class="section-label">{cardlessStatusLabel(entry.result)}</span>
-                  {#if providerLabelFor(entry.result)}
-                    <small title={providerLabelFor(entry.result)}>{providerLabelFor(entry.result)}</small>
-                  {/if}
-                </div>
-                <p>{entry.result.message ?? "Copilot returned no renderable card."}</p>
-                {#if !entry.result.card && hasGroundingMeta(entry.result)}
-                  <details class="meta-details" class:warning={entry.result.warnings?.length}>
-                    <summary>
-                      {#each resultMetaParts(entry.result) as part}<span>{part}</span>{/each}
-                    </summary>
-                    <div class="meta-body">
-                      {#if entry.result.sources?.length}
-                        <div class="meta-group">
-                          <span class="inline-label">Sources</span>
-                          {#each entry.result.sources as source}
-                            <div class="meta-row">
-                              <strong>{source.source_id}</strong>
-                              <small>{source.label} / {source.provider}</small>
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                      {#if entry.result.tool_traces?.length}
-                        <div class="meta-group">
-                          <span class="inline-label">Tools used</span>
-                          {#each entry.result.tool_traces as trace}
-                            <div class="meta-row">
-                              <strong>{trace.tool_name}</strong>
-                              <small>{trace.summary}</small>
-                              {#if trace.source_ids.length}
-                                <small>{trace.source_ids.join(" / ")}</small>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                      {#if entry.result.warnings?.length}
-                        <div class="meta-group">
-                          <span class="inline-label">Warnings</span>
-                          {#each entry.result.warnings as warning}
-                            <small>{warning}</small>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  </details>
-                {/if}
-              </div>
-            {/if}
-
-            {#if entry.result.card}
-              <div class="bubble assistant-bubble" class:first-turn={index === 0}>
-                {#if index === 0}
-                  <div class="bubble-head">
-                    <span class="section-label">{cardLabelFor(entry)}</span>
-                    {#if providerLabelFor(entry.result)}
-                      <small title={providerLabelFor(entry.result)}>{providerLabelFor(entry.result)}</small>
-                    {/if}
-                  </div>
-                {/if}
-                <h3>{entry.result.card.title}</h3>
-
-                <div class="field">
-                  <span class="inline-label">Hypothesis</span>
-                  <p class="emphasis">{entry.result.card.hypothesis}</p>
-                </div>
-
-                <div class="field">
-                  <span class="inline-label">Rationale</span>
-                  <p>{entry.result.card.rationale}</p>
-                </div>
-                <div class="field">
-                  <span class="inline-label">Proposed test</span>
-                  <p>{entry.result.card.proposed_test}</p>
-                </div>
-
-                {#if entry.result.card.required_data.length}
-                  <div class="field">
-                    <span class="inline-label">Required data</span>
-                    <ul>{#each entry.result.card.required_data as item}<li>{item}</li>{/each}</ul>
-                  </div>
-                {/if}
-                {#if entry.result.card.confounders.length}
-                  <div class="field">
-                    <span class="inline-label">Confounders</span>
-                    <ul>{#each entry.result.card.confounders as item}<li>{item}</li>{/each}</ul>
-                  </div>
-                {/if}
-                {#if entry.result.card.next_steps.length}
-                  <div class="field">
-                    <span class="inline-label">Next steps</span>
-                    <ul>{#each entry.result.card.next_steps as item}<li>{item}</li>{/each}</ul>
-                  </div>
-                {/if}
-                {#if entry.result.card.caveats.length}
-                  <div class="field">
-                    <span class="inline-label">Caveats</span>
-                    <ul>{#each entry.result.card.caveats as item}<li>{item}</li>{/each}</ul>
-                  </div>
-                {/if}
-
-                {#if entry.result.card.source_backed_claims.length}
-                  <div class="field">
-                    <span class="inline-label">Source-backed</span>
-                    {#each entry.result.card.source_backed_claims as claim}
-                      <div class="claim-row">
-                        <p>{claim.claim}</p>
-                        <small>{claim.evidence_refs.join(" · ")}</small>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-                {#if entry.result.card.inferred_claims.length}
-                  <div class="field">
-                    <span class="inline-label">Inferred</span>
-                    <ul>{#each entry.result.card.inferred_claims as item}<li>{item}</li>{/each}</ul>
-                  </div>
-                {/if}
-
-                {#if entry.result.sources?.length || entry.result.tool_traces?.length || entry.result.warnings?.length}
-                  <details class="meta-details" class:warning={entry.result.warnings?.length}>
-                    <summary>
-                      {#if entry.result.sources?.length}<span>Sources ({entry.result.sources.length})</span>{/if}
-                      {#if entry.result.tool_traces?.length}<span>Tools ({entry.result.tool_traces.length})</span>{/if}
-                      {#if entry.result.warnings?.length}<span class="warning-label">Warnings ({entry.result.warnings.length})</span>{/if}
-                    </summary>
-                    <div class="meta-body">
-                      {#if entry.result.sources?.length}
-                        <div class="meta-group">
-                          <span class="inline-label">Sources</span>
-                          {#each entry.result.sources as source}
-                            <div class="meta-row">
-                              <strong>{source.source_id}</strong>
-                              <small>{source.label} · {source.provider}</small>
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                      {#if entry.result.tool_traces?.length}
-                        <div class="meta-group">
-                          <span class="inline-label">Tools used</span>
-                          {#each entry.result.tool_traces as trace}
-                            <div class="meta-row">
-                              <strong>{trace.tool_name}</strong>
-                              <small>{trace.summary}</small>
-                              {#if trace.source_ids.length}
-                                <small>{trace.source_ids.join(" · ")}</small>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                      {#if entry.result.warnings?.length}
-                        <div class="meta-group">
-                          <span class="inline-label">Warnings</span>
-                          {#each entry.result.warnings as warning}
-                            <small>{warning}</small>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  </details>
-                {/if}
-              </div>
-            {/if}
+            <div class="bubble assistant-bubble" class:first-turn={index === 0}>
+              <CopilotTranscriptResult
+                result={entry.result}
+                compact
+                cardLabel={index === 0 ? (entry.result.domain === "synthesis" ? "Grounded Research" : "Research Card") : null}
+                {onOpenSource}
+              />
+            </div>
           </div>
         {/each}
       {/if}
@@ -576,127 +391,6 @@
     border-top-left-radius: 2px;
   }
 
-  .status-bubble p {
-    color: var(--text-2);
-    font-size: var(--text-base);
-  }
-
-  .status-bubble.error p {
-    color: var(--negative);
-  }
-
-  .status-bubble.error {
-    border-color: rgba(214, 104, 104, 0.35);
-  }
-
-  .status-bubble.unavailable {
-    border-color: rgba(214, 168, 83, 0.35);
-  }
-
-  .bubble-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-5);
-  }
-
-  .field {
-    display: grid;
-    gap: var(--space-2);
-  }
-
-  .field + .field {
-    padding-top: var(--space-4);
-    border-top: 1px solid rgba(46, 60, 74, 0.42);
-  }
-
-  .bubble .field p.emphasis {
-    color: var(--text-0);
-    font-size: var(--text-base);
-  }
-
-  .meta-details {
-    margin-top: var(--space-3);
-    padding-top: var(--space-4);
-    border-top: 1px solid rgba(46, 60, 74, 0.42);
-  }
-
-  .meta-details summary {
-    cursor: pointer;
-    list-style: none;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-4);
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: var(--text-2xs);
-  }
-
-  .meta-details summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .meta-details summary::before {
-    content: "▸";
-    display: inline-block;
-    width: 0.75rem;
-    transition: transform 120ms ease;
-    color: var(--text-2);
-  }
-
-  .meta-details[open] summary::before {
-    transform: rotate(90deg);
-  }
-
-  .meta-details summary:hover {
-    color: var(--text-1);
-  }
-
-  .meta-details .warning-label {
-    color: rgba(214, 168, 83, 0.85);
-  }
-
-  .meta-body {
-    display: grid;
-    gap: var(--space-4);
-    margin-top: var(--space-4);
-  }
-
-  .meta-group {
-    display: grid;
-    gap: var(--space-2);
-  }
-
-  .claim-row {
-    display: grid;
-    gap: var(--space-2);
-  }
-
-  .claim-row + .claim-row {
-    padding-top: var(--space-4);
-    margin-top: var(--space-2);
-    border-top: 1px solid rgba(46, 60, 74, 0.3);
-  }
-
-  .meta-row {
-    display: grid;
-    gap: var(--space-2);
-  }
-
-  .meta-row strong {
-    color: var(--text-1);
-    font-size: var(--text-sm);
-  }
-
-  .section-label,
-  .inline-label {
-    color: var(--text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: var(--text-2xs);
-  }
-
   .message-card {
     border: 1px solid rgba(122, 166, 200, 0.18);
     background: var(--surface-soft);
@@ -733,36 +427,14 @@
   }
 
   .bubble p,
-  .meta-row small,
-  .composer-footer small,
-  .meta-group small {
+  .composer-footer small {
     color: var(--text-2);
   }
 
-  .bubble h3 {
-    color: var(--text-0);
-    font-size: var(--text-md);
-    font-weight: 600;
-  }
-
-  .bubble .field p,
-  .bubble .field li {
-    color: var(--text-1);
-    font-size: var(--text-base);
-    line-height: 1.45;
-  }
-
   h2,
-  h3,
   p,
-  small,
-  ul,
-  li {
+  small {
     margin: 0;
-  }
-
-  ul {
-    padding-left: var(--space-6);
   }
 
   textarea,
@@ -1023,15 +695,6 @@
   .scope-empty {
     color: var(--text-2);
     font-size: var(--text-sm);
-  }
-
-  .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
   }
 
   @media (max-width: 980px) {

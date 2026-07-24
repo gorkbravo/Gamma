@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-07-15
+Last updated: 2026-07-24
 
 ## Start Here
 
@@ -169,10 +169,8 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The largest gaps are integration and reliability gaps, not missing concepts. Checkpoint 1 is verified at 76%: the supported OpenAI SDK now feeds typed events into server-owned Agent and Operator runs, shelf and workspace Agent calls share that path, and bounded replay survives subscriber disconnects. Remaining gaps are:
+The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 and 2 are verified at 80%: the supported OpenAI SDK feeds typed events into server-owned Agent and Operator runs; bounded replay survives subscriber disconnects; shelf and workspace share one typed transcript/evidence renderer; claim refs are normalized against known turn sources before persistence; and supported evidence links preserve mapped Gamma context. Remaining gaps are:
 
-- transcript blocks do not yet cover every plan, Operator, report, confirmation, mutation diff, artifact, and typed non-success shape;
-- claim/source refs still need server-side resolution plus context navigation before persistence;
 - the memo APIs and report APIs are not a complete in-tab artifact workflow;
 - the custom Operator streams live and cancels at safe step boundaries, but Agents SDK progress parity and inline confirmation/diff/rollback UX remain incomplete;
 - the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5;
@@ -299,18 +297,20 @@ Implementation note (2026-07-17, checkpoint complete):
 - The shelf now calls the same streaming loader as the dedicated workspace. The client retries a disconnected stream from its last accepted sequence; the reducer drops foreign, stale, duplicate, and post-terminal events. One selected context resolves to its native typed domain; two or more resolve to synthesis.
 - Checkpoint evidence: `85 passed` across `tests/test_copilot.py`, Agents SDK smoke, and Operator eval; frontend `41 files / 259 tests` passed; typecheck, build, and desktop check passed. Mock Agent and Operator were inspected at 1440x900 and 720x900 with no console errors. Live-provider release smoke remains intentionally unclaimed.
 
-#### B. Answer contract and evidence UX — blocker
+#### B. Answer contract and evidence UX — checkpoint 2 complete (80%)
 
-- Unify `ResearchCard`, operator result, plan, report, and error rendering around typed transcript block models.
-- Restore dedicated-tab parity with the shelf's full card/source/tool/warning rendering.
-- Add claim-level evidence resolution and deep links through `CrossTabHandoffEnvelope` where possible.
-- Validate every cited source id against the context/tool source registry before persisting a source-backed claim.
-- Keep inference, assumption, missing-data, and warning categories visibly distinct in cards, reports, and exports.
+- [x] Unify `ResearchCard`, operator result, plan, report, confirmation, mutation diff, artifact, and error rendering around typed transcript block models.
+- [x] Restore dedicated-tab parity with the shelf's full card/source/tool/warning rendering.
+- [x] Add claim-level evidence resolution and deep links through `CrossTabHandoffEnvelope` where possible.
+- [x] Validate every cited source id against the context/tool source registry before persisting a source-backed claim.
+- [x] Keep inference, assumption, missing-data, and warning categories visibly distinct in cards and reports. Markdown export preservation remains part of checkpoint 3's artifact workflow.
 
-Implementation note (2026-07-15, first transcript-block slice landed):
-- `frontend/src/lib/copilot-transcript.ts` now maps finalized Agent results into discriminated transcript blocks for messages, structured research cards, typed non-success states, evidence, and provider metadata. `CopilotTranscriptResult.svelte` renders that contract in the dedicated workspace.
-- The dedicated transcript now has parity with the shelf for all current `ResearchCard` fields: required data, confounders, next steps, caveats, source-backed claims with evidence refs, inferred claims, sources, tool traces, and warnings. Cardless error/refused/incomplete/cancelled results retain the same expandable grounding evidence.
-- Still open from this workstream: extending the block contract to plans, live Operator results, reports, and confirmations; claim-level source resolution/deep links; and server-side validation that every source-backed claim resolves to the turn's context/tool source registry before persistence.
+Implementation note (2026-07-24, checkpoint complete):
+- `frontend/src/lib/copilot-transcript.ts` now maps finalized results and transcript extras into discriminated blocks for messages, cards, plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, typed non-success states, evidence, and provider metadata.
+- `CopilotTranscriptResult.svelte` is the canonical shelf/workspace renderer. It presents source-backed claims, inference, assumptions, missing data, and warnings as distinct states and keeps provider/model metadata in secondary provenance details.
+- The backend evidence resolver now runs before service return, before persistence, and when legacy records are read. Unknown refs are removed from source-backed claims and reclassified instead of surviving as citations.
+- Supported evidence refs build `CrossTabHandoffEnvelope` navigation and retain mapped entity, mode, timeframe, region, lens, instrument, market, or token context. Unsupported refs remain inspectable without pretending to be navigable.
+- Checkpoint evidence: `86 passed` in `tests/test_copilot.py`; `3 passed` across Agents SDK smoke and Operator eval; frontend `42 files / 267 tests` passed; typecheck, production build, and desktop check passed. Live UI inspection covered ready/error/cancelled states and a claim-source handoff to Macro Snapshot preserving the 3M timeframe, with zero console errors.
 
 #### C. Context and tool coverage — blocker
 
@@ -369,7 +369,7 @@ Implementation note (2026-07-15, first transcript-block slice landed):
 ### Delivery Order
 
 1. ~~Provider-native streaming, shared run lifecycle, bounded replay, and explicit provider state.~~ Completed 2026-07-17 at checkpoint 1 (76%).
-2. Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.
+2. ~~Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.~~ Completed 2026-07-24 at checkpoint 2 (80%).
 3. In-tab artifacts/memos and session lifecycle completion.
 4. Live operator events, cancellation, and inline confirmations.
 5. Missing context/tool coverage and source navigation.

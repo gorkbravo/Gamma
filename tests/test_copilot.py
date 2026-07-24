@@ -4550,6 +4550,74 @@ def test_copilot_store_defensively_reclassifies_unresolved_claims(tmp_path):
     assert any("Reclassified" in warning for warning in restored.warnings)
 
 
+def test_copilot_store_revalidates_legacy_claims_when_reading_json():
+    restored = CopilotStore._result_from_json(
+        {
+            "domain": "macro",
+            "current_tab": "copilot",
+            "status": "ready",
+            "provider": "legacy",
+            "card": {
+                "title": "Legacy evidence",
+                "hypothesis": "H",
+                "rationale": "R",
+                "proposed_test": "T",
+                "source_backed_claims": [
+                    {"claim": "Known claim.", "evidence_refs": ["macro.known"]},
+                    {"claim": "Stale fake claim.", "evidence_refs": ["removed.source"]},
+                ],
+            },
+            "sources": [
+                {
+                    "source_id": "macro.known",
+                    "label": "Known macro source",
+                    "kind": "workspace",
+                    "provider": "gamma",
+                    "origin": "gamma.macro",
+                }
+            ],
+        }
+    )
+
+    assert restored.card is not None
+    assert [(claim.claim, claim.evidence_refs) for claim in restored.card.source_backed_claims] == [
+        ("Known claim.", ["macro.known"])
+    ]
+    assert restored.card.inferred_claims == ["Stale fake claim."]
+    assert any("removed.source" in warning for warning in restored.warnings)
+
+
+def test_operator_terminal_normalizes_evidence_even_without_store():
+    service = object.__new__(CopilotService)
+    service.store = None
+    result = CopilotResearchCardResult(
+        domain="synthesis",
+        current_tab="copilot",
+        status="cancelled",
+        provider="gamma_operator_executor",
+        card=ResearchCard(
+            title="Cancelled operator",
+            hypothesis="H",
+            rationale="R",
+            proposed_test="T",
+            source_backed_claims=[
+                ResearchClaim(claim="Unsupported terminal claim.", evidence_refs=["missing.source"])
+            ],
+        ),
+    )
+
+    normalized = service._persist_operator_execution_result(
+        CopilotResearchCardRequest(domain="synthesis"),
+        None,
+        result,
+    )
+
+    assert normalized.card is not None
+    assert normalized.card.source_backed_claims == []
+    assert normalized.card.inferred_claims == ["Unsupported terminal claim."]
+    assert any("missing.source" in warning for warning in normalized.warnings)
+
+
 def test_openai_provider_omits_previous_response_id_when_response_storage_is_disabled():
     class CaptureOpenAIProvider(OpenAIResponsesCopilotProvider):
         def __init__(self):

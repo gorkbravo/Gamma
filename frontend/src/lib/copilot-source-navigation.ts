@@ -1,8 +1,8 @@
 import type { CopilotSourceRef, CrossTabHandoffEnvelope, TabId } from "./api/types";
 
-type SourceTarget = { tab: TabId; mode: string | null };
+export type CopilotSourceTarget = { tab: TabId; mode: string | null };
 
-const SOURCE_TARGETS: Array<{ prefixes: string[]; target: SourceTarget }> = [
+const SOURCE_TARGETS: Array<{ prefixes: string[]; target: CopilotSourceTarget }> = [
   { prefixes: ["portfolio."], target: { tab: "portfolio", mode: null } },
   { prefixes: ["risk."], target: { tab: "risk", mode: "overview" } },
   { prefixes: ["iv.", "options."], target: { tab: "iv", mode: "overview" } },
@@ -17,7 +17,7 @@ const SOURCE_TARGETS: Array<{ prefixes: string[]; target: SourceTarget }> = [
   { prefixes: ["sitrep."], target: { tab: "sitrep", mode: null } }
 ];
 
-function sourceTarget(source: CopilotSourceRef): SourceTarget | null {
+export function getCopilotSourceTarget(source: CopilotSourceRef): CopilotSourceTarget | null {
   const identity = `${source.source_id} ${source.origin}`.toLowerCase();
   const mapping = SOURCE_TARGETS.find(({ prefixes }) => prefixes.some((prefix) => identity.includes(prefix)));
   if (!mapping) return null;
@@ -44,16 +44,26 @@ function sourceTarget(source: CopilotSourceRef): SourceTarget | null {
   return { tab: mapping.target.tab, mode };
 }
 
+export function canNavigateCopilotSource(source: CopilotSourceRef): boolean {
+  return getCopilotSourceTarget(source) != null;
+}
+
 export function buildCopilotSourceHandoff(
   source: CopilotSourceRef,
   priorHandoff: CrossTabHandoffEnvelope | null = null,
   warnings: string[] = []
 ): CrossTabHandoffEnvelope | null {
-  const target = sourceTarget(source);
+  const target = getCopilotSourceTarget(source);
   if (!target) return null;
   const priorMatches =
     priorHandoff != null &&
     (priorHandoff.source_tab === target.tab || priorHandoff.intended_target_tab === target.tab);
+  const priorMode =
+    priorHandoff?.source_tab === target.tab
+      ? priorHandoff.source_mode
+      : priorHandoff?.intended_target_tab === target.tab
+        ? priorHandoff.intended_target_mode
+        : null;
 
   return {
     source_tab: "copilot",
@@ -74,6 +84,6 @@ export function buildCopilotSourceHandoff(
     },
     timestamp: new Date().toISOString(),
     intended_target_tab: target.tab,
-    intended_target_mode: priorMatches ? priorHandoff.source_mode ?? target.mode : target.mode
+    intended_target_mode: priorMatches ? priorMode ?? target.mode : target.mode
   };
 }
