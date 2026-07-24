@@ -119,7 +119,7 @@ Gamma mixes broker, public-market, public-macro, on-chain, and filing data. The 
 
 - `IBKR`: portfolio snapshots, security history when explicitly configured or needed as fallback, FX spot/history, IV surfaces, fundamentals market-price context, and commodity futures curves where the user has entitlements
 - `Yahoo Finance / yfinance`: default public live-ish listed-market history for Research Overview and SITREP boards; unofficial and not institutional quote truth
-- `FRED`: macro time series
+- `FRED`: macro time series; configure `FRED_API_KEY` for uncached API requests. Macro snapshots preserve the remaining series and return an explicit warning when an individual FRED series is unavailable.
 - `US Census`: optional live US trade-partner rows for Macro when `CENSUS_API_KEY` is configured
 - `EIA`: optional selected official US energy fundamentals for the Commodities tab when `EIA_API_KEY` is configured
 - `US Treasury`: Treasury curve snapshots for the US rates view
@@ -681,6 +681,16 @@ $env:MOCK_DATA="true"
 $env:GAMMA_SESSION_TOKEN="<dev-only random token>"
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+Optional live FRED-backed Macro series:
+
+```powershell
+$env:FRED_API_KEY="<your key>"
+$env:GAMMA_SESSION_TOKEN="<dev-only random token>"
+.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+If one FRED or IBKR FX series fails, Macro skips that series, keeps the remaining snapshot, and returns a provider/reference-specific warning. Provider exception text and credentials are not copied into the user-facing warning.
 
 Optional Commodities EIA enrichment:
 

@@ -125,6 +125,29 @@ Focused regression counts used while iterating:
 
 The production build retained pre-existing non-fatal warnings for one unused Portfolio selector, IV SVG accessibility annotations, and unused Surface3D exports.
 
+## Post-Remediation Branch Reconciliation
+
+After PR #2 was opened, every local worktree, local branch, Gamma remote branch, stash, and recent unreachable commit was compared with the PR head. No other worktree contained a newer complete app state. Four old divergent branches contained isolated experiments; they were evaluated commit-by-commit rather than merged wholesale.
+
+| Historical commit | Decision | Evidence |
+| --- | --- | --- |
+| `aef7f70` — expand Macro snapshot/cross-asset coherence | Do not port | The current Macro domain has a newer, richer coherence/lead-lag model, linked prediction-market records, policy-expectation overlays, event studies, trade partners, and country comparison. Porting the old model would duplicate and regress current contracts. |
+| `6aaed0a` — survive individual Macro series failures | Port and generalize | The current per-series loop could still abort the full snapshot. The port now isolates FRED, comparison, and IBKR FX failures, preserves remaining series, logs only safe identifiers/error type, and returns actionable warnings without exception text or credentials. |
+| `77a69d1` — replace removed London gold spot with `NASDAQQGLDI` | Do not port | FRED confirms the London spot series was removed, but `NASDAQQGLDI` is a Nasdaq gold index in index points with copyright constraints, not a USD/oz spot reference. Using it in the current Commodities contract would be a unit/basis error. |
+| `c007481` — move Tauri target output | Do not port | The current desktop scripts already isolate `check` and runtime/build targets under ignored Tauri directories, and the documented desktop check passes. The historical path rewrite provides no current correctness gain. |
+
+The reconciliation also corrected the shared test-safety setting from obsolete `COPILOT_PROVIDER=mock` to the runtime-owned `GAMMA_COPILOT_PROVIDER=mock`. Before the correction, a developer `.env` could make a nominal mock test call live OpenAI; the failure was reproduced as a live 429 and the corrected test passed without provider access.
+
+Reconciliation verification:
+
+- focused Macro: `28 passed`;
+- Macro/SITREP/API integration: `57 passed`;
+- complete backend: `425 passed` in 160.08 seconds;
+- frontend typecheck: passed;
+- frontend: `42` files and `263` tests passed;
+- production build: passed;
+- desktop check: passed.
+
 ## Confirmed Regressions Closed or Narrowed
 
 - Options no longer ignores the requested XLE symbol at the API boundary.
