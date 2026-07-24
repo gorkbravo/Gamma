@@ -2,7 +2,7 @@ import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PortfolioSnapshot, RiskResult, TabId } from "./api/types";
 import { activeTab, computeRisk, lastError, loading, riskResult, type RiskComputeOptions, type StrategyLabResearchBook } from "./stores/app";
-import { createRiskHandoffController } from "./risk-handoff";
+import { buildStrategyLabRiskRequest, createRiskHandoffController } from "./risk-handoff";
 
 describe("risk compute idempotency", () => {
   beforeEach(() => {
@@ -125,6 +125,39 @@ describe("risk compute idempotency", () => {
     expect(result).toBeNull();
     expect(get(loading).risk).toBe(false);
     expect(get(lastError)).toBe("network down");
+  });
+
+  it("carries signed per-leg research-book history into Risk", () => {
+    const book = makeStrategyLabResearchBook();
+    book.object.risk_legs = [
+      {
+        leg_id: "1:xom",
+        label: "XOM",
+        symbol: "XOM",
+        instrument_id: "leg:xom",
+        weight: 0.6,
+        return_points: [{ timestamp: "2026-07-07T00:00:00Z", value: 0.01 }],
+        source_provider: "yfinance",
+        warnings: []
+      },
+      {
+        leg_id: "2:amd",
+        label: "AMD",
+        symbol: "AMD",
+        instrument_id: "leg:amd",
+        weight: -0.4,
+        return_points: [{ timestamp: "2026-07-07T00:00:00Z", value: -0.02 }],
+        source_provider: "yfinance",
+        warnings: []
+      }
+    ];
+
+    const request = buildStrategyLabRiskRequest(book);
+
+    expect(request.researchBookRiskLegs?.map((leg) => [leg.symbol, leg.weight])).toEqual([
+      ["XOM", 0.6],
+      ["AMD", -0.4]
+    ]);
   });
 });
 

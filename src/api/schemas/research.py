@@ -26,6 +26,7 @@ from src.models.research_lab import (
     ResearchComparisonLeg,
     ResearchComparisonRequest,
     ResearchComparisonResult,
+    ResearchBookRiskLeg,
     ResearchObjectReturnPoint,
     SavedResearchCreateRequest,
     SavedResearchItem,
@@ -143,6 +144,45 @@ class ResearchObjectReturnPointModel(BaseModel):
         return cls(timestamp=row.timestamp, value=float(row.value))
 
 
+class ResearchBookRiskLegModel(BaseModel):
+    leg_id: str
+    label: str
+    symbol: str
+    instrument_id: str
+    weight: float
+    return_points: list[ResearchObjectReturnPointModel] = Field(
+        default_factory=list,
+        max_length=MAX_STRATEGY_LAB_ROWS,
+    )
+    source_provider: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    def to_domain(self) -> ResearchBookRiskLeg:
+        return ResearchBookRiskLeg(
+            leg_id=self.leg_id,
+            label=self.label,
+            symbol=self.symbol,
+            instrument_id=self.instrument_id,
+            weight=float(self.weight),
+            return_points=[point.to_domain() for point in self.return_points],
+            source_provider=self.source_provider,
+            warnings=list(self.warnings),
+        )
+
+    @classmethod
+    def from_domain(cls, row: ResearchBookRiskLeg) -> "ResearchBookRiskLegModel":
+        return cls(
+            leg_id=row.leg_id,
+            label=row.label,
+            symbol=row.symbol,
+            instrument_id=row.instrument_id,
+            weight=float(row.weight),
+            return_points=[ResearchObjectReturnPointModel.from_domain(point) for point in row.return_points],
+            source_provider=row.source_provider,
+            warnings=list(row.warnings),
+        )
+
+
 class GammaResearchObjectModel(BaseModel):
     object_id: str
     object_type: str
@@ -161,6 +201,7 @@ class GammaResearchObjectModel(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     return_points: list[ResearchObjectReturnPointModel] = Field(default_factory=list)
+    risk_legs: list[ResearchBookRiskLegModel] = Field(default_factory=list, max_length=100)
 
     def to_domain(self) -> GammaResearchObject:
         return GammaResearchObject(
@@ -179,6 +220,7 @@ class GammaResearchObjectModel(BaseModel):
             provenance=dict(self.provenance),
             warnings=list(self.warnings),
             return_points=[point.to_domain() for point in self.return_points],
+            risk_legs=[leg.to_domain() for leg in self.risk_legs],
         )
 
     @classmethod
@@ -199,6 +241,7 @@ class GammaResearchObjectModel(BaseModel):
             provenance=dict(row.provenance),
             warnings=list(row.warnings),
             return_points=[ResearchObjectReturnPointModel.from_domain(point) for point in row.return_points],
+            risk_legs=[ResearchBookRiskLegModel.from_domain(leg) for leg in row.risk_legs],
         )
 
 
@@ -533,6 +576,7 @@ class StrategyLabAnalyzeResponseModel(BaseModel):
 
 class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
     leg_contributions: dict[str, float] = Field(default_factory=dict)
+    risk_legs: list[ResearchBookRiskLegModel] = Field(default_factory=list)
     lenses: list[GammaResearchObjectModel] = Field(default_factory=list)
     overlays: list[GammaResearchObjectModel] = Field(default_factory=list)
     alignment_diagnostics: dict[str, Any] = Field(default_factory=dict)
@@ -543,6 +587,7 @@ class StrategyLabCompositionResponseModel(StrategyLabAnalyzeResponseModel):
         return cls(
             **base.model_dump(),
             leg_contributions=dict(row.leg_contributions),
+            risk_legs=[ResearchBookRiskLegModel.from_domain(leg) for leg in row.risk_legs],
             lenses=[GammaResearchObjectModel.from_domain(item) for item in row.lenses],
             overlays=[GammaResearchObjectModel.from_domain(item) for item in row.overlays],
             alignment_diagnostics=dict(row.alignment_diagnostics),

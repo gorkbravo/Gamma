@@ -12,18 +12,18 @@ Scope: Portfolio, Options, Commodities, Strategy Lab → Risk, Copilot, and prov
 
 The live provider layer is broadly functional. TWS accepted a dedicated Gamma audit connection, live futures and options data built successfully, signed Strategy Lab books reached Risk without account-position leakage at the API contract, and Copilot completed two OpenAI-backed requests.
 
-The pass also confirmed one existing cross-tab data-retention bug and found two diagnostics/timeout-contract gaps.
+The initial pass confirmed five findings. The same-day remediation pass implemented all five, added deterministic regression coverage, passed the complete backend/frontend gates, and repeated the permitted live/browser checks with a dedicated TWS client.
 
 | Surface | Result | Evidence |
 | --- | --- | --- |
 | TWS connection | Pass | `/system/status` reported `Connected` on a dedicated audit client id. |
-| Portfolio snapshot | Pass with timeout-contract caveat | Default-style 2-second quote timeout returned six positions plus cash, NLV, and market value in 12.63s. A 10-second quote timeout exceeded the fixed 20-second worker budget and returned an empty timeout snapshot while the worker continued. |
-| Options / XLE | Pass at API boundary | The visible XLE symbol was accepted; the live session reached `Running (XLE, Live)` with spot 59.50, 21 option points, six expiries, and four strikes. |
-| Commodities / WTI | Fail: fresh state not retained | Force refresh returned WTI 92.10, +5.27 / +6.07%, prior reference 2026-07-22. The immediately following cached/drill request kept 92.10 but cleared the change and prior timestamp to `N/A`. |
+| Portfolio snapshot | Fixed and live-verified | The maximum accepted 10-second quote budget returned six positions and account totals in 11.01s. The partial snapshot retained its bounded quote warning, and an immediate account-subscribe request completed without a false unresponsive-thread result. |
+| Options / XLE | Pass at API and UI boundaries | The live session reached `Running (XLE, Live)` and the Options workspace rendered the provider-backed XLE surface with 21 points. |
+| Commodities / WTI | Fixed and live/browser-verified | A fresh IBKR WTI quote with a dated prior settlement retained price, change, change percent, and both source timestamps after row drill and immediate non-force reload. The reload identified the source honestly as `ibkr_cached`. |
 | Strategy Lab | Pass | XOM and AMD each resolved to 938 yfinance daily return points; the signed 0.6 / -0.4 book validated with 938 aligned observations. |
-| Strategy Lab → Risk | Pass for source isolation; partial for decomposition | Risk returned `source_scope=research_book`, the correct source label, 100% coverage, and no account holdings. Contributions still collapse to one `STRATEGY_BOOK` row instead of XOM and AMD legs. |
-| Copilot streaming | Pass | Explicit run `live-audit-run-20260724` emitted 421 monotonic events (sequence 0–420): `run.created`, 418 `text.delta`, `usage`, and one `completed`. Terminal result was `ready`, had a card, two sources, and model `gpt-5.5-2026-04-23`. |
-| Provider diagnostics | Fail for Copilot attribution | Both Copilot calls succeeded, but provider usage recorded them under `unknown`; `openai_copilot` remained `Not requested`. |
+| Strategy Lab → Risk | Fixed and browser-verified | Risk remained explicitly scoped to `research_book`, retained aggregate-book metrics, rendered separate signed XOM and AMD contribution rows, and showed zero account movers or concentration rows. |
+| Copilot streaming | Pass at API and UI boundaries | The follow-up streamed OpenAI run reached one terminal result and rendered a visible sourced research card in the Copilot transcript. |
+| Provider diagnostics | Fixed and live-verified | `/system/provider-usage` recorded the follow-up as one successful `openai_copilot` call at `copilot.stream_research_card`; OpenAI Copilot health became `Healthy`. |
 
 ## Findings
 
@@ -72,6 +72,59 @@ The successful Portfolio snapshot included five repeated `IBKR error (200): No s
 
 Acceptance: deduplicate identical provider errors, associate them with the affected symbol/contract when known, and keep the human-facing summary concise.
 
+## Remediation Status
+
+### Closed — Fresh WTI change disappears on drill/cached reload
+
+The curve cache now stores an explicit headline context containing the exact current provider quote, current source timestamp, dated prior close/settlement, prior source timestamp, front contract, and source provider. Restoration requires that pair to match the cached front node and contract coherently. Missing or mismatched references still produce `N/A`; unrelated historical curve snapshots are never promoted to prior close.
+
+Regression coverage includes fresh-to-cached retention, durable cache restoration after service restart, missing prior reference, and mismatched current timestamps. The live/browser follow-up retained the WTI price, change, change percent, and dated prior reference through row selection and an immediate non-force request while changing provenance from `ibkr` to `ibkr_cached`.
+
+### Closed — Successful OpenAI calls are attributed to `unknown`
+
+Tracing now takes the provider identity from the concrete Copilot provider boundary. OpenAI card and stream calls use `openai_copilot` with meaningful operation names; mock, disabled, and unavailable providers retain distinct identities. Terminal tracing preserves ready/success, refusal, incomplete, cancellation, timeout, and unavailable outcomes without treating non-success states as success. Recorded metadata is restricted to safe run/model/operation/duration fields.
+
+The live streamed run produced a visible sourced transcript card. `/system/provider-usage` then reported one `openai_copilot` call, one success, endpoint `copilot.stream_research_card`, and `Healthy` activation-aware health. Existing `unknown` calls from unrelated legacy provider boundaries were not relabeled.
+
+### Closed — Portfolio quote timeout can exceed the fixed worker budget
+
+The public quote timeout is explicitly bounded to 10 seconds. The outer worker budget is derived from market-data mode, account/position overhead, and the accepted quote timeout, with a hard 45-second cap. IB worker tasks now distinguish queued, active, cancelled, and `still_finishing` states so a timed-out active operation cannot masquerade as a dead thread. Partial snapshots retain account data and explain quote-budget degradation.
+
+The live maximum-timeout request returned six positions and account totals in 11.01 seconds with a concise partial-quote warning. An immediate account-subscribe request completed normally. Regression coverage exercises the maximum public value, derivation/capping, queued follow-up behavior, and partial-snapshot warnings.
+
+### Closed — Research-book contribution remains aggregate-only
+
+Validated research books now carry stable per-leg identity, signed gross-normalized weight, and aligned return observations alongside the aggregate return stream. Aggregate VaR, CVaR, volatility, drawdown, beta, and Monte Carlo calculations remain based on the validated aggregate stream; covariance decomposition uses the aligned legs. Duplicate labels receive stable disambiguated ids. Missing/thin legs and older persisted books fall back to the aggregate row with an explicit compatibility warning.
+
+The browser follow-up validated and composed the signed 0.6 XOM / -0.4 AMD book with 938 aligned observations, opened it in Risk without a freeze/retry storm, and rendered separate XOM and AMD contribution rows. Account movers and concentration rows remained empty, confirming research-book/account isolation.
+
+### Closed — Repeated raw IBKR contract errors remain noisy
+
+IBKR error records now retain request id, provider code, mapped contract symbol when available, and the raw provider message for diagnostics. Portfolio-facing summaries deduplicate identical errors within the operation and identify the affected symbol when it is known; distinct symbols and materially distinct failures remain separate. The live follow-up Portfolio result contained only the concise quote warning and did not reproduce code 200, so the original provider error itself was not available for another live comparison.
+
+Deterministic coverage verifies repeated code 200 errors, distinct symbols, unknown request ids, operation-level deduplication, and the raw-diagnostics versus user-summary split.
+
+## Verification After Remediation
+
+Complete gates:
+
+- backend: `422 passed` in 183.86 seconds;
+- frontend typecheck: passed;
+- frontend tests: `42` files and `263` tests passed;
+- production build: passed;
+- desktop check: passed in 26.94 seconds.
+
+Focused regression counts used while iterating:
+
+- Commodities: 16 tests;
+- provider usage: 9 tests, plus 7 selected Copilot lifecycle tests;
+- Portfolio timeout/market/snapshot: 19 tests;
+- research/Risk/API: 81 tests;
+- frontend research/Risk handoff and workspace: 34 tests;
+- IBKR error and timeout contracts: 8 tests.
+
+The production build retained pre-existing non-fatal warnings for one unused Portfolio selector, IV SVG accessibility annotations, and unused Surface3D exports.
+
 ## Confirmed Regressions Closed or Narrowed
 
 - Options no longer ignores the requested XLE symbol at the API boundary.
@@ -82,15 +135,15 @@ Acceptance: deduplicate identical provider errors, associate them with the affec
 
 ## UI Verification Boundary
 
-The embedded browser rejected localhost navigation under its security policy, so this pass could not visually verify:
+The remediation pass used a permitted in-app localhost browser and visually verified:
 
-- active-view-only Options polling after navigating away;
-- the Strategy Lab → Risk app-wide freeze fingerprint;
-- visible Risk panel separation and contribution rendering;
-- visible Copilot transcript rendering;
-- the exact Commodities row-click interaction.
+- Commodities refresh → WTI select/drill → change and dated prior reference retained;
+- live/provider-backed XLE Options surface rendering;
+- signed Strategy Lab book → Open in Risk without a freeze/retry storm;
+- separate per-leg Risk contributions with no account movers or concentration rows;
+- OpenAI Copilot completion into a visible sourced transcript card.
 
-Those items still need a desktop/webview or permitted localhost browser run. The provider, persistence, and API contracts above were exercised live rather than mocked.
+The Options adaptive-poller behavior remains covered by frontend regression tests; the browser pass did not instrument network traffic after navigation, so it does not claim a direct observation of request cessation/backoff.
 
 ## Cleanup
 

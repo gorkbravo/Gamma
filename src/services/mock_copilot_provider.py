@@ -27,6 +27,7 @@ from src.services.copilot_provider import (
 class MockCopilotProvider(CopilotProvider):
     model: str = "gamma-mock-research-card-v1"
     provider_name: str = "mock"
+    provider_id: str = "mock_copilot"
 
     def stream_research_card(
         self,

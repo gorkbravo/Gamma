@@ -83,6 +83,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
     timeout_seconds: float = 45.0
     store_responses: bool = False
     provider_name: str = "openai_responses"
+    provider_id: str = "openai_copilot"
 
     @staticmethod
     def _json_default(value: Any) -> str:

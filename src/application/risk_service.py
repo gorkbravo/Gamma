@@ -28,6 +28,7 @@ from src.application.request_limits import (
 )
 from src.models.instruments import InstrumentDefaults, InstrumentReference
 from src.models.portfolio import PortfolioSnapshot, RiskResults
+from src.models.research_lab import ResearchBookRiskLeg
 from src.services.data_providers import (
     AppDataProvider,
     contract_for_instrument,
@@ -60,6 +61,7 @@ class RiskComputeRequest:
     source_object_id: str | None = None
     source_origin: str | None = None
     research_book_returns: pd.Series | None = None
+    research_book_legs: list[ResearchBookRiskLeg] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "alpha", min(max(float(self.alpha), 0.0001), 0.9999))
@@ -102,6 +104,8 @@ class RiskComputationPayload:
     source_label: str | None = None
     source_object_id: str | None = None
     source_origin: str | None = None
+    contribution_returns_df: pd.DataFrame | None = None
+    contribution_metadata: dict[str, dict[str, str | None]] | None = None
 
 
 @dataclass(frozen=True)
@@ -692,19 +696,56 @@ class RiskService:
         contributions = pd.Series(dtype=float)
         marginal_contribution_to_risk = pd.Series(dtype=float)
         component_var = pd.Series(dtype=float)
-        if cov is not None and not weights.empty:
-            contribution_values = risk_contributions(weights.values, cov)
-            if contribution_values.size == weights.size:
-                contributions = pd.Series(contribution_values, index=weights.index)
-            portfolio_sigma = float(np.sqrt(float(weights.values.T @ cov @ weights.values)))
+        contribution_returns_df = returns_df
+        contribution_weights = weights
+        contribution_metadata: dict[str, dict[str, str | None]] | None = None
+        if request.research_book_legs:
+            decomposition = self._research_book_contribution_inputs(
+                request.research_book_legs,
+                aggregate_returns=port_ret,
+            )
+            warnings.extend(decomposition[3])
+            if decomposition[0] is not None and decomposition[1] is not None:
+                contribution_returns_df = decomposition[0]
+                contribution_weights = decomposition[1]
+                contribution_metadata = decomposition[2]
+            else:
+                warnings.append(
+                    "Per-leg research-book risk contribution is unavailable; showing the aggregate compatibility row."
+                )
+        else:
+            warnings.append(
+                "This research book predates per-leg risk history; showing the aggregate compatibility row."
+            )
+
+        contribution_cov = None
+        if not contribution_returns_df.empty and not contribution_weights.empty:
+            contribution_cov_df = contribution_returns_df.cov().reindex(
+                index=contribution_weights.index,
+                columns=contribution_weights.index,
+            )
+            contribution_cov_values = contribution_cov_df.to_numpy(dtype=float, copy=True)
+            if contribution_cov_values.size and np.isfinite(contribution_cov_values).all():
+                contribution_cov = contribution_cov_values
+
+        if contribution_cov is not None and not contribution_weights.empty:
+            contribution_values = risk_contributions(contribution_weights.values, contribution_cov)
+            if contribution_values.size == contribution_weights.size:
+                contributions = pd.Series(contribution_values, index=contribution_weights.index)
+            portfolio_sigma = float(
+                np.sqrt(float(contribution_weights.values.T @ contribution_cov @ contribution_weights.values))
+            )
             if portfolio_sigma > 0:
-                mctr_values = (cov @ weights.values) / portfolio_sigma
-                marginal_contribution_to_risk = pd.Series(mctr_values, index=weights.index)
+                mctr_values = (contribution_cov @ contribution_weights.values) / portfolio_sigma
+                marginal_contribution_to_risk = pd.Series(mctr_values, index=contribution_weights.index)
                 z_score = NormalDist().inv_cdf(request.alpha)
-                component_values = weights.values * mctr_values * z_score
+                component_values = contribution_weights.values * mctr_values * z_score
                 if request.horizon_days > 1:
                     component_values = component_values * (request.horizon_days ** 0.5)
-                component_var = pd.Series(component_values * total_portfolio_value, index=weights.index)
+                component_var = pd.Series(
+                    component_values * total_portfolio_value,
+                    index=contribution_weights.index,
+                )
 
         frontier_universe_returns = None
         risk_free_rate_annual, risk_free_warnings = self._risk_free_rate_for_frontier(
@@ -738,7 +779,7 @@ class RiskService:
             benchmark_returns=benchmark.returns if benchmark.returns is not None else pd.Series(dtype=float),
             returns_df=returns_df,
             contributions=contributions,
-            weights=weights,
+            weights=contribution_weights,
             marginal_contribution_to_risk=marginal_contribution_to_risk,
             component_var=component_var,
             frontier_points=frontier_points,
@@ -748,7 +789,78 @@ class RiskService:
             source_label=request.source_label,
             source_object_id=request.source_object_id,
             source_origin=request.source_origin,
+            contribution_returns_df=contribution_returns_df,
+            contribution_metadata=contribution_metadata,
         )
+
+    @staticmethod
+    def _research_book_contribution_inputs(
+        legs: list[ResearchBookRiskLeg],
+        *,
+        aggregate_returns: pd.Series,
+    ) -> tuple[
+        pd.DataFrame | None,
+        pd.Series | None,
+        dict[str, dict[str, str | None]] | None,
+        list[str],
+    ]:
+        warnings: list[str] = []
+        series_by_leg: dict[str, pd.Series] = {}
+        weights_by_leg: dict[str, float] = {}
+        metadata: dict[str, dict[str, str | None]] = {}
+        for leg in legs:
+            leg_id = str(leg.leg_id or "").strip()
+            label = str(leg.label or leg.symbol or leg_id or "Research-book leg").strip()
+            if not leg_id:
+                warnings.append(f"{label}: missing stable leg identity.")
+                return None, None, None, warnings
+            if leg_id in series_by_leg:
+                warnings.append(f"{label}: duplicate research-book leg identity {leg_id}.")
+                return None, None, None, warnings
+            weight = float(leg.weight)
+            if not np.isfinite(weight) or weight == 0:
+                warnings.append(f"{label}: signed leg weight is missing or invalid.")
+                return None, None, None, warnings
+            rows: dict[pd.Timestamp, float] = {}
+            for point in leg.return_points:
+                try:
+                    timestamp = pd.Timestamp(point.timestamp)
+                    value = float(point.value)
+                except Exception:
+                    continue
+                if timestamp.tzinfo is not None:
+                    timestamp = timestamp.tz_convert(None)
+                if pd.isna(timestamp) or not np.isfinite(value):
+                    continue
+                rows[timestamp] = value
+            leg_returns = pd.Series(rows, dtype=float).sort_index()
+            if len(leg_returns) < 2:
+                warnings.append(f"{label}: fewer than two usable aligned leg returns.")
+                return None, None, None, warnings
+            series_by_leg[leg_id] = leg_returns
+            weights_by_leg[leg_id] = weight
+            metadata[leg_id] = {
+                "instrument_id": str(leg.instrument_id or leg_id),
+                "symbol": str(leg.symbol or label),
+                "display_symbol": label,
+            }
+
+        if not series_by_leg:
+            return None, None, None, ["Research-book leg history is empty."]
+        aggregate = pd.to_numeric(aggregate_returns, errors="coerce").rename("__aggregate__")
+        aligned = pd.DataFrame(series_by_leg).join(aggregate, how="inner").dropna(how="any")
+        if len(aligned) < 2:
+            return None, None, None, [
+                "Research-book legs have fewer than two observations aligned with the validated aggregate stream."
+            ]
+        weights = pd.Series(weights_by_leg, dtype=float).reindex(aligned.columns.drop("__aggregate__"))
+        gross = float(weights.abs().sum())
+        if not np.isfinite(gross) or gross <= 0:
+            return None, None, None, ["Research-book gross signed exposure is unavailable."]
+        if not np.isclose(gross, 1.0, atol=1e-9):
+            warnings.append("Research-book leg weights were re-normalized by gross signed exposure for decomposition.")
+        weights = weights / gross
+        return aligned.drop(columns="__aggregate__"), weights, metadata, warnings
 
     @staticmethod
     def _research_book_instrument_id(snapshot: PortfolioSnapshot, request: RiskComputeRequest) -> str:

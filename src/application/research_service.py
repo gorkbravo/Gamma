@@ -38,6 +38,7 @@ from src.models.research_lab import (
     ResearchComparisonLeg,
     ResearchComparisonRequest,
     ResearchComparisonResult,
+    ResearchBookRiskLeg,
     ResearchObjectReturnPoint,
     SavedResearchCreateRequest,
     SavedResearchItem,
@@ -1375,6 +1376,7 @@ class ResearchService:
         weighted_columns = aligned.mul(pd.Series(leg_weight_map), axis="columns")
         composition_returns = weighted_columns.sum(axis="columns").astype(float)
         contribution_columns = weighted_columns
+        risk_leg_returns = aligned
 
         benchmark_returns = pd.Series(dtype=float)
         benchmark_object = request.benchmark_object
@@ -1402,6 +1404,7 @@ class ResearchService:
                     composition_returns = benchmark_aligned["strategy"]
                     benchmark_returns = benchmark_aligned["benchmark"]
                     contribution_columns = weighted_columns.reindex(benchmark_aligned.index)
+                    risk_leg_returns = aligned.reindex(benchmark_aligned.index)
                     alignment_diagnostics["benchmark_overlap_count"] = int(len(benchmark_aligned))
                     alignment_diagnostics["benchmark_overlap_start"] = self._series_boundary(
                         benchmark_aligned.index,
@@ -1419,6 +1422,33 @@ class ResearchService:
             leg_display_labels[key]: total_return_from_returns(contribution_columns[key].dropna()) or 0.0
             for key in contribution_columns.columns
         }
+        diagnostics_by_key = dict(zip(leg_series, leg_diagnostics, strict=True))
+        risk_legs = [
+            ResearchBookRiskLeg(
+                leg_id=key,
+                label=leg_display_labels[key],
+                symbol=str(
+                    diagnostics_by_key[key].get("identifier")
+                    or leg_display_labels[key]
+                ).strip().upper(),
+                instrument_id=str(
+                    diagnostics_by_key[key].get("object_id")
+                    or key
+                ),
+                weight=float(leg_weight_map[key]),
+                return_points=[
+                    ResearchObjectReturnPoint(timestamp=pd.Timestamp(timestamp).isoformat(), value=float(value))
+                    for timestamp, value in risk_leg_returns[key].dropna().items()
+                ],
+                source_provider=(
+                    str(diagnostics_by_key[key].get("source_provider"))
+                    if diagnostics_by_key[key].get("source_provider")
+                    else None
+                ),
+                warnings=list(diagnostics_by_key[key].get("warnings") or []),
+            )
+            for key in risk_leg_returns.columns
+        ]
 
         try:
             analysis = analyze_return_stream(
@@ -1453,6 +1483,7 @@ class ResearchService:
             ),
             freshness_label=FreshnessLabel.DERIVED.value,
             leg_contributions=leg_contributions,
+            risk_legs=risk_legs,
             lenses=list(request.lenses),
             overlays=list(request.overlays),
             alignment_diagnostics=alignment_diagnostics,
@@ -1534,6 +1565,7 @@ class ResearchService:
             ),
             freshness_label=result.freshness_label,
             leg_contributions=result.leg_contributions,
+            risk_legs=result.risk_legs,
             lenses=result.lenses,
             overlays=result.overlays,
             alignment_diagnostics=result.alignment_diagnostics,

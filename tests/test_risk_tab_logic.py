@@ -4,12 +4,14 @@ import json
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
 from src.analytics.var import parametric_var
 from src.application.portfolio_service import PortfolioPerformanceRequest, PortfolioService
 from src.application.risk_service import RiskComputeRequest, RiskService
 from src.models.instruments import InstrumentDefaults
 from src.models.portfolio import PortfolioSnapshot, PositionItem
+from src.models.research_lab import ResearchBookRiskLeg, ResearchObjectReturnPoint
 from src.services.cache import CacheService
 
 
@@ -228,6 +230,126 @@ def test_compute_research_book_uses_validated_strategy_lab_return_stream_directl
     assert payload.results.risk_coverage_ratio == 1.0
     assert payload.returns_df.columns.tolist() == ["strategy_research_book:jets-xle"]
     assert any("Strategy Lab research book" in warning for warning in payload.results.warnings)
+    assert any("predates per-leg risk history" in warning for warning in payload.results.warnings)
+
+
+def test_compute_research_book_preserves_signed_per_leg_risk_contributions():
+    idx = pd.date_range("2026-01-02", periods=6, freq="B")
+    xom = pd.Series([0.010, -0.006, 0.012, -0.004, 0.009, 0.003], index=idx)
+    amd = pd.Series([-0.008, 0.015, -0.010, 0.018, -0.006, 0.011], index=idx)
+    aggregate = (xom * 0.6) + (amd * -0.4)
+    snapshot = _make_snapshot(
+        [
+            PositionItem(
+                "STRATEGY_BOOK",
+                "BOOK",
+                "USD",
+                1,
+                None,
+                100000,
+                100000,
+                None,
+                weight=1.0,
+                base_market_value=100000.0,
+                instrument_id="strategy_research_book:xom-amd",
+            ),
+        ],
+        net_liq=100000.0,
+    )
+    legs = [
+        ResearchBookRiskLeg(
+            leg_id="1:leg:xom",
+            label="XOM",
+            symbol="XOM",
+            instrument_id="leg:xom",
+            weight=0.6,
+            return_points=[
+                ResearchObjectReturnPoint(timestamp=timestamp.isoformat(), value=float(value))
+                for timestamp, value in xom.items()
+            ],
+        ),
+        ResearchBookRiskLeg(
+            leg_id="2:leg:amd",
+            label="AMD",
+            symbol="AMD",
+            instrument_id="leg:amd",
+            weight=-0.4,
+            return_points=[
+                ResearchObjectReturnPoint(timestamp=timestamp.isoformat(), value=float(value))
+                for timestamp, value in amd.items()
+            ],
+        ),
+    ]
+    service = _make_risk_service()
+    request = RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=3,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        include_monte_carlo=False,
+        recommended_min_obs=3,
+        source_scope="research_book",
+        research_book_returns=aggregate,
+        research_book_legs=legs,
+    )
+
+    payload = service.compute(request)
+
+    pd.testing.assert_series_equal(payload.portfolio_returns, aggregate, check_names=False)
+    assert payload.returns_df.columns.tolist() == ["strategy_research_book:xom-amd"]
+    assert payload.contribution_returns_df is not None
+    assert payload.contribution_returns_df.columns.tolist() == ["1:leg:xom", "2:leg:amd"]
+    assert payload.weights.tolist() == pytest.approx([0.6, -0.4])
+    assert set(payload.contributions.index) == {"1:leg:xom", "2:leg:amd"}
+    assert payload.contribution_metadata["1:leg:xom"]["symbol"] == "XOM"
+    assert payload.contribution_metadata["2:leg:amd"]["symbol"] == "AMD"
+    assert not any("compatibility row" in warning for warning in payload.results.warnings)
+
+
+def test_compute_research_book_thin_leg_history_falls_back_to_aggregate_row():
+    idx = pd.date_range("2026-01-02", periods=4, freq="B")
+    aggregate = pd.Series([0.01, -0.01, 0.005, 0.002], index=idx)
+    snapshot = _make_snapshot(
+        [PositionItem("STRATEGY_BOOK", "BOOK", "USD", 1, None, 100000, 100000, None, base_market_value=100000.0)],
+        net_liq=100000.0,
+    )
+    thin_leg = ResearchBookRiskLeg(
+        leg_id="1:thin",
+        label="Thin",
+        symbol="THIN",
+        instrument_id="leg:thin",
+        weight=1.0,
+        return_points=[ResearchObjectReturnPoint(timestamp=idx[0].isoformat(), value=0.01)],
+    )
+    request = RiskComputeRequest(
+        snapshot=snapshot,
+        alpha=0.95,
+        lookback_days=252,
+        horizon_days=1,
+        mc_horizon_days=10,
+        mc_simulation_model="Gaussian",
+        mc_num_simulations=1000,
+        beta_window=3,
+        benchmark_symbol="SPY",
+        base_currency="USD",
+        include_monte_carlo=False,
+        source_scope="research_book",
+        research_book_returns=aggregate,
+        research_book_legs=[thin_leg],
+    )
+
+    payload = _make_risk_service().compute(request)
+
+    assert payload.returns_df.columns.tolist() == ["STRATEGY_BOOK"]
+    assert payload.contribution_returns_df.columns.tolist() == ["STRATEGY_BOOK"]
+    assert any("fewer than two usable" in warning for warning in payload.results.warnings)
+    assert any("aggregate compatibility row" in warning for warning in payload.results.warnings)
 
 
 def test_portfolio_service_compute_performance_normalizes_mixed_currency_histories():

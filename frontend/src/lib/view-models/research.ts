@@ -1001,6 +1001,11 @@ export function buildResearchBookObjectFromStrategyComposition(
   }));
   const start = returnPoints[0]?.timestamp ?? null;
   const end = returnPoints[returnPoints.length - 1]?.timestamp ?? null;
+  const riskLegs = (result.risk_legs ?? []).map((leg) => ({
+    ...leg,
+    return_points: normalizeResearchObjectReturnPoints(leg.return_points),
+    warnings: [...(leg.warnings ?? [])]
+  }));
   const signature = buildDeterministicSignature({
     name: result.name,
     weights: weights.map((weight) => ({
@@ -1008,6 +1013,11 @@ export function buildResearchBookObjectFromStrategyComposition(
       weight: normalizeSignatureNumber(weight.weight)
     })),
     return_points: normalizeReturnPointSignature(returnPoints),
+    risk_legs: riskLegs.map((leg) => ({
+      leg_id: leg.leg_id,
+      weight: normalizeSignatureNumber(leg.weight),
+      return_points: normalizeReturnPointSignature(leg.return_points)
+    })),
     validation: {
       aligned_observation_count: validation.aligned_observation_count,
       retrieved_at: validation.retrieved_at
@@ -1044,7 +1054,8 @@ export function buildResearchBookObjectFromStrategyComposition(
         "Research book is durable Strategy Lab context for read-only Risk analysis, not a live account portfolio."
       ])
     ),
-    return_points: returnPoints
+    return_points: returnPoints,
+    risk_legs: riskLegs
   };
 }
 

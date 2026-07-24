@@ -1128,6 +1128,9 @@ def test_strategy_lab_composes_signed_long_short_weights(tmp_path):
     assert result.alignment_diagnostics["aligned_observation_count"] == 5
     assert result.alignment_diagnostics["legs"][0]["source_provider"] == "strategy_lab"
     assert result.alignment_diagnostics["legs"][1]["normalized_weight"] == pytest.approx(-0.4)
+    assert [leg.label for leg in result.risk_legs] == ["Long Leg", "Short Leg"]
+    assert [leg.weight for leg in result.risk_legs] == pytest.approx([0.6, -0.4])
+    assert all(len(leg.return_points) == 5 for leg in result.risk_legs)
 
 
 def test_strategy_lab_fails_closed_with_alignment_diagnostics_on_thin_overlap(tmp_path):
@@ -1278,6 +1281,8 @@ def test_strategy_lab_composes_duplicate_display_name_legs_without_overwrite(tmp
     assert result.returns.tolist() == pytest.approx([0.02, 0.02, 0.02, 0.02, 0.02])
     assert list(result.leg_contributions.keys()) == ["Same Name", "Same Name (2)"]
     assert len(result.leg_contributions) == 2
+    assert [leg.label for leg in result.risk_legs] == ["Same Name", "Same Name (2)"]
+    assert len({leg.leg_id for leg in result.risk_legs}) == 2
 
 
 def test_strategy_lab_disambiguates_explicit_duplicate_contribution_suffixes(tmp_path):

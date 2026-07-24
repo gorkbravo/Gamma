@@ -47,6 +47,7 @@ class CopilotProvider(Protocol):
 class UnavailableCopilotProvider:
     message: str
     provider_name: str = "unconfigured"
+    provider_id: str = "unavailable_copilot"
 
     def generate_research_card(
         self,

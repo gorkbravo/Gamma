@@ -68,7 +68,7 @@ from src.services.prediction_market_adapters import KalshiAdapter, PolymarketAda
 from src.services.news_adapters import NewsEventProvider, RssNewsEventProvider, SampleNewsEventProvider
 from src.services.data_providers import PortfolioDataProvider, ResearchDataProvider
 from src.services.fx import FXService
-from src.services.ibkr_client import IBKRClient
+from src.services.ibkr_client import IBKRClient, validate_portfolio_quote_timeout
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.services.research_market_data import (
@@ -188,7 +188,9 @@ def build_runtime(
     base_currency = os.getenv("BASE_CURRENCY", "EUR")
     auto_refresh = int(os.getenv("AUTO_REFRESH_SECONDS", "60") or 0)
     lookback = int(os.getenv("HIST_LOOKBACK_DAYS_DEFAULT", "252") or 252)
-    quote_timeout = float(os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2") or 2.0)
+    quote_timeout = validate_portfolio_quote_timeout(
+        float(os.getenv("IB_SNAPSHOT_TIMEOUT_SECONDS", "2") or 2.0)
+    )
     market_data_mode = normalize_market_data_mode(os.getenv("IB_MARKET_DATA_MODE", "delayed"))
 
     if mock_mode is None:
@@ -467,20 +469,29 @@ def _build_desktop_state(research_provider: ResearchDataProvider) -> DesktopRunt
 def _build_copilot_provider(*, allow_mock: bool = True):
     provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
     if provider in {"disabled", "none", "off"}:
-        return UnavailableCopilotProvider(message="Gamma Copilot is disabled by configuration.")
+        return UnavailableCopilotProvider(
+            message="Gamma Copilot is disabled by configuration.",
+            provider_name="disabled",
+            provider_id="disabled_copilot",
+        )
     if provider in {"mock", "demo", "offline"}:
         if not allow_mock:
             return UnavailableCopilotProvider(
-                message="Gamma Copilot mock/demo provider is disabled while Gamma is running in live mode."
+                message="Gamma Copilot mock/demo provider is disabled while Gamma is running in live mode.",
+                provider_id="unavailable_copilot",
             )
         return MockCopilotProvider()
     if provider != "openai":
-        return UnavailableCopilotProvider(message=f"Unsupported copilot provider: {provider}")
+        return UnavailableCopilotProvider(
+            message=f"Unsupported copilot provider: {provider}",
+            provider_id="unavailable_copilot",
+        )
 
     api_key = (os.getenv("OPENAI_API_KEY", "") or "").strip()
     if not api_key:
         return UnavailableCopilotProvider(
-            message="Gamma Copilot is unavailable until OPENAI_API_KEY is configured."
+            message="Gamma Copilot is unavailable until OPENAI_API_KEY is configured.",
+            provider_id="unavailable_copilot",
         )
 
     # Stored responses are required for previous_response_id-based continuation.
@@ -522,22 +533,67 @@ def _register_provider_activation_conditions(
         )
     )
     copilot_provider = (os.getenv("GAMMA_COPILOT_PROVIDER", "openai") or "openai").strip().lower()
+    openai_selected = copilot_provider == "openai"
+    openai_configured = bool((os.getenv("OPENAI_API_KEY", "") or "").strip())
     provider_usage.register_activation_condition(
         ProviderActivationCondition(
             provider_id="openai_copilot",
             display_name="OpenAI Copilot",
             expected_when="Copilot research card, follow-up, or synthesis request is submitted.",
-            configured=copilot_provider in {"mock", "demo", "offline"}
-            or (
-                copilot_provider == "openai"
-                and bool((os.getenv("OPENAI_API_KEY", "") or "").strip())
-            ),
+            configured=openai_configured if openai_selected else True,
             active=False,
-            idle_status="not_requested",
-            idle_reason="No Copilot request has been made in this backend session.",
+            idle_status="not_requested" if openai_selected else "idle_by_design",
+            idle_reason=(
+                "No OpenAI Copilot request has been made in this backend session."
+                if openai_selected
+                else f"OpenAI Copilot is not selected; GAMMA_COPILOT_PROVIDER={copilot_provider}."
+            ),
             action_label="Ask Copilot for a grounded research card.",
         )
     )
+    if copilot_provider in {"mock", "demo", "offline"}:
+        provider_usage.register_activation_condition(
+            ProviderActivationCondition(
+                provider_id="mock_copilot",
+                display_name="Mock Copilot",
+                expected_when="Copilot is requested while the explicit mock/demo provider is selected.",
+                configured=mock_mode,
+                active=False,
+                idle_status="not_requested" if mock_mode else "idle_by_design",
+                idle_reason=(
+                    "No mock Copilot request has been made in this backend session."
+                    if mock_mode
+                    else "Mock Copilot is disabled in live mode."
+                ),
+                action_label="Ask Copilot while Gamma is running in mock mode.",
+            )
+        )
+    elif copilot_provider in {"disabled", "none", "off"}:
+        provider_usage.register_activation_condition(
+            ProviderActivationCondition(
+                provider_id="disabled_copilot",
+                display_name="Disabled Copilot",
+                expected_when="A Copilot request is submitted while Copilot is explicitly disabled.",
+                configured=True,
+                active=False,
+                idle_status="idle_by_design",
+                idle_reason="Copilot is intentionally disabled by configuration.",
+                action_label="Set GAMMA_COPILOT_PROVIDER to openai or mock to enable Copilot.",
+            )
+        )
+    elif not openai_selected or not openai_configured:
+        provider_usage.register_activation_condition(
+            ProviderActivationCondition(
+                provider_id="unavailable_copilot",
+                display_name="Unavailable Copilot",
+                expected_when="A Copilot request is submitted without a usable configured provider.",
+                configured=False,
+                active=False,
+                idle_status="not_requested",
+                idle_reason="No usable Copilot provider is configured.",
+                action_label="Configure GAMMA_COPILOT_PROVIDER and its required credentials.",
+            )
+        )
     provider_usage.register_activation_condition(
         ProviderActivationCondition(
             provider_id="yfinance",

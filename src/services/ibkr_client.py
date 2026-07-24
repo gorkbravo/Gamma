@@ -14,7 +14,7 @@ from ib_insync import IB, Contract
 from src.models.instruments import build_instrument_id
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.services.fx import FXService
-from src.services.ib_thread import IBThreadRunner
+from src.services.ib_thread import IBTaskTimeoutError, IBThreadBusyError, IBThreadRunner
 from src.services.market_data import MarketDataService
 from src.services.mock_data import MockDataService
 from src.utils.time import now_utc
@@ -23,12 +23,50 @@ from src.utils.time import now_utc
 logger = logging.getLogger(__name__)
 
 
+PORTFOLIO_QUOTE_TIMEOUT_MIN_SECONDS = 0.1
+PORTFOLIO_QUOTE_TIMEOUT_MAX_SECONDS = 10.0
+PORTFOLIO_SNAPSHOT_BASE_WORK_SECONDS = 15.0
+PORTFOLIO_SNAPSHOT_COMPLETION_MARGIN_SECONDS = 3.0
+PORTFOLIO_SNAPSHOT_WORKER_TIMEOUT_CAP_SECONDS = 45.0
+
+
+def validate_portfolio_quote_timeout(value: float) -> float:
+    timeout = float(value)
+    if not PORTFOLIO_QUOTE_TIMEOUT_MIN_SECONDS <= timeout <= PORTFOLIO_QUOTE_TIMEOUT_MAX_SECONDS:
+        raise ValueError(
+            "Portfolio quote timeout must be between "
+            f"{PORTFOLIO_QUOTE_TIMEOUT_MIN_SECONDS:.1f} and "
+            f"{PORTFOLIO_QUOTE_TIMEOUT_MAX_SECONDS:.1f} seconds."
+        )
+    return timeout
+
+
+def derive_portfolio_snapshot_worker_timeout(
+    quote_timeout_seconds: float,
+    market_data_mode: str,
+) -> float:
+    quote_timeout = validate_portfolio_quote_timeout(quote_timeout_seconds)
+    quote_passes = 2.0 if str(market_data_mode or "").strip().lower() in {"auto", "live"} else 1.0
+    derived = (
+        PORTFOLIO_SNAPSHOT_BASE_WORK_SECONDS
+        + (quote_timeout * quote_passes)
+        + PORTFOLIO_SNAPSHOT_COMPLETION_MARGIN_SECONDS
+    )
+    if derived > PORTFOLIO_SNAPSHOT_WORKER_TIMEOUT_CAP_SECONDS:
+        raise ValueError(
+            f"Portfolio quote timeout {quote_timeout:.1f}s cannot fit the "
+            f"{PORTFOLIO_SNAPSHOT_WORKER_TIMEOUT_CAP_SECONDS:.1f}s IB worker budget."
+        )
+    return derived
+
+
 @dataclass
 class IBErrorRecord:
     timestamp: datetime
     req_id: int
     code: int
     message: str
+    contract_symbol: str | None = None
 
 
 @dataclass
@@ -169,14 +207,15 @@ class IBKRClient:
         lines: List[str] = []
         for record in records:
             ts = record.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-            lines.append(f"[{ts}] reqId={record.req_id} code={record.code} {record.message}")
+            contract = f" symbol={record.contract_symbol}" if record.contract_symbol else ""
+            lines.append(f"[{ts}] reqId={record.req_id} code={record.code}{contract} {record.message}")
         return lines
 
     def drain_errors(self) -> List[str]:
         with self._error_lock:
             errors = list(self._errors)
             self._errors.clear()
-        return errors
+        return list(dict.fromkeys(errors))
 
     def _register_events(self) -> None:
         if self._events_registered:
@@ -218,8 +257,15 @@ class IBKRClient:
             self._debug_log("callback positionEvent received")
         self._positions_ready_event.set()
 
-    def _on_ib_error(self, req_id: int, error_code: int, error_msg: str, _contract) -> None:
-        record = IBErrorRecord(timestamp=datetime.utcnow(), req_id=req_id, code=error_code, message=error_msg)
+    def _on_ib_error(self, req_id: int, error_code: int, error_msg: str, contract) -> None:
+        contract_symbol = self._contract_warning_symbol(contract)
+        record = IBErrorRecord(
+            timestamp=datetime.utcnow(),
+            req_id=req_id,
+            code=error_code,
+            message=error_msg,
+            contract_symbol=contract_symbol,
+        )
         with self._error_records_lock:
             self._error_records.append(record)
             if len(self._error_records) > 200:
@@ -233,16 +279,32 @@ class IBKRClient:
         noisy_codes = {2104, 2106, 2158, 300, 322}
         if error_code in noisy_codes:
             return
-        if error_code in {354, 10167, 10168}:
-            message = f"Market data warning ({error_code}): {error_msg}"
+        if error_code == 200:
+            message = (
+                f"{contract_symbol}: IBKR could not resolve the security definition."
+                if contract_symbol
+                else "IBKR could not resolve a security definition for an unattributed request."
+            )
+        elif error_code in {354, 10167, 10168}:
+            message = f"{contract_symbol + ': ' if contract_symbol else ''}Market data unavailable: {error_msg}"
         elif error_code in {162, 366}:
-            message = f"Historical data pacing warning ({error_code}): {error_msg}"
+            message = f"{contract_symbol + ': ' if contract_symbol else ''}Historical data request warning: {error_msg}"
         elif error_code in {1100, 1101, 1102}:
-            message = f"Connection warning ({error_code}): {error_msg}"
+            message = f"IBKR connection warning: {error_msg}"
         else:
-            message = f"IBKR error ({error_code}): {error_msg}"
+            message = f"{contract_symbol + ': ' if contract_symbol else ''}IBKR request failed: {error_msg}"
         with self._error_lock:
             self._errors.append(message)
+
+    @staticmethod
+    def _contract_warning_symbol(contract) -> str | None:
+        if contract is None:
+            return None
+        for attribute in ("localSymbol", "symbol"):
+            value = str(getattr(contract, attribute, "") or "").strip().upper()
+            if value:
+                return value
+        return None
 
     def _connect_impl(self) -> bool:
         self._ensure_event_loop()
@@ -667,6 +729,11 @@ class IBKRClient:
         quote_mode: str = "Snapshot",
         quote_timeout_seconds: float = 2.0,
     ) -> PortfolioSnapshot:
+        quote_timeout_seconds = validate_portfolio_quote_timeout(quote_timeout_seconds)
+        if not self.mock:
+            # Primary warnings are scoped to this snapshot operation. Raw records remain
+            # available in diagnostics across operations.
+            self.drain_errors()
         snapshot = PortfolioSnapshot(
             timestamp=now_utc(),
             base_currency=base_currency,
@@ -677,6 +744,10 @@ class IBKRClient:
         if self.mock:
             snapshot = self.mock_service.load_snapshot(base_currency)
         else:
+            worker_timeout = derive_portfolio_snapshot_worker_timeout(
+                quote_timeout_seconds,
+                getattr(market_data, "market_data_mode", self.market_data_mode),
+            )
             try:
                 snapshot = self._run_ib(
                     self._fetch_snapshot_impl,
@@ -685,8 +756,18 @@ class IBKRClient:
                     market_data,
                     quote_mode,
                     quote_timeout_seconds,
-                    timeout=20.0,
+                    timeout=worker_timeout,
                 )
+            except IBTaskTimeoutError as exc:
+                message = str(exc) or "IBKR request timed out"
+                snapshot.warnings.append(message)
+                if exc.still_finishing:
+                    snapshot.warnings.append(
+                        "IB worker state: still_finishing the timed-out portfolio snapshot; "
+                        "follow-up broker requests will report busy until it completes."
+                    )
+            except IBThreadBusyError as exc:
+                snapshot.warnings.append(str(exc))
             except TimeoutError as exc:
                 message = str(exc) or "IBKR request timed out"
                 snapshot.warnings.append(message)
@@ -703,6 +784,7 @@ class IBKRClient:
             snapshot.warnings.append(f"Snapshot totals failed: {detail}")
         snapshot.warnings.extend(self.drain_warnings())
         snapshot.warnings.extend(self.drain_errors())
+        snapshot.warnings = list(dict.fromkeys(snapshot.warnings))
         return snapshot
 
     def _fetch_snapshot_impl(
@@ -755,8 +837,10 @@ class IBKRClient:
                 return snapshot
             try:
                 contracts = [contract for _, contract in positions_with_contracts]
-                quotes, quote_warnings = market_data.fetch_snapshot_quotes(
-                    contracts, timeout_seconds=quote_timeout_seconds
+                quotes, quote_warnings = market_data.fetch_snapshot_quotes_batch(
+                    contracts,
+                    timeout_seconds=quote_timeout_seconds,
+                    batch_size=max(1, len(contracts)),
                 )
                 snapshot.warnings.extend(quote_warnings)
                 for pos, contract in positions_with_contracts:
@@ -768,7 +852,10 @@ class IBKRClient:
                     pos.market_value = float(quote.price) * pos.quantity
             except Exception as exc:
                 logger.error("Snapshot quote fetch failed: %s", exc)
-                snapshot.warnings.append("Snapshot quote fetch failed")
+                snapshot.warnings.append(
+                    "Snapshot quote fetch failed; account and position data were retained "
+                    f"({type(exc).__name__})."
+                )
 
         self._apply_unrealized_pnl_fallback(snapshot)
         return snapshot
@@ -1568,6 +1655,16 @@ class IBKRClient:
             return [self._stamp("Mock mode enabled: account subscribe skipped")]
         try:
             return list(self._run_ib(self._force_account_subscribe_impl, timeout=12.0))
+        except IBThreadBusyError as exc:
+            return [self._stamp(str(exc))]
+        except IBTaskTimeoutError as exc:
+            if exc.still_finishing:
+                return [
+                    self._stamp(
+                        "Force subscribe caller timed out; IB worker is still_finishing the subscribe operation"
+                    )
+                ]
+            return [self._stamp("Force subscribe timed out before the queued task started; task cancelled")]
         except TimeoutError:
             return [self._stamp("Force subscribe timed out; IB thread unresponsive")]
 

@@ -224,6 +224,7 @@ export interface RiskComputeOptions {
   snapshot?: PortfolioSnapshot | null;
   sourceScope?: "portfolio" | "research" | "research_book";
   researchBookReturnPoints?: Array<{ timestamp: string; value: number }>;
+  researchBookRiskLegs?: NonNullable<GammaResearchObject["risk_legs"]>;
   riskSourceLabel?: string | null;
   riskSourceObjectId?: string | null;
   riskSourceOrigin?: string | null;
@@ -2806,6 +2807,7 @@ export async function computeRisk(options: RiskComputeOptions) {
     source_object_id: options.riskSourceObjectId ?? null,
     source_origin: options.riskSourceOrigin ?? null,
     research_book_return_points: options.researchBookReturnPoints ?? [],
+    research_book_legs: options.researchBookRiskLegs ?? [],
     alpha: options.alpha,
     lookback_days: options.lookbackDays,
     horizon_days: options.horizonDays,

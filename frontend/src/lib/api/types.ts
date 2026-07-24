@@ -590,6 +590,17 @@ export interface ResearchObjectReturnPoint {
   value: number;
 }
 
+export interface ResearchBookRiskLeg {
+  leg_id: string;
+  label: string;
+  symbol: string;
+  instrument_id: string;
+  weight: number;
+  return_points: ResearchObjectReturnPoint[];
+  source_provider: string | null;
+  warnings: string[];
+}
+
 export interface GammaResearchObject {
   object_id: string;
   object_type: string;
@@ -606,6 +617,7 @@ export interface GammaResearchObject {
   provenance: Record<string, unknown>;
   warnings: string[];
   return_points: ResearchObjectReturnPoint[];
+  risk_legs?: ResearchBookRiskLeg[];
 }
 
 export interface StrategyLabCompositionLegInput {
@@ -634,6 +646,7 @@ export interface StrategyLabPortfolioLegInput {
 
 export interface StrategyLabCompositionResult extends StrategyLabResult {
   leg_contributions: Record<string, number>;
+  risk_legs?: ResearchBookRiskLeg[];
   lenses: GammaResearchObject[];
   overlays: GammaResearchObject[];
   alignment_diagnostics: Record<string, unknown>;

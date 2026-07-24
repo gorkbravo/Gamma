@@ -622,6 +622,34 @@ describe("research view model helpers", () => {
         ]
       },
       leg_contributions: { JETS: 0.01, XLE: -0.004 },
+      risk_legs: [
+        {
+          leg_id: "1:leg:jets",
+          label: "JETS",
+          symbol: "JETS",
+          instrument_id: "leg:jets",
+          weight: 0.7,
+          return_points: [
+            { timestamp: "2026-03-01T00:00:00Z", value: 0.01 },
+            { timestamp: "2026-03-02T00:00:00Z", value: -0.004 }
+          ],
+          source_provider: "yfinance",
+          warnings: []
+        },
+        {
+          leg_id: "2:leg:xle",
+          label: "XLE",
+          symbol: "XLE",
+          instrument_id: "leg:xle",
+          weight: -0.3,
+          return_points: [
+            { timestamp: "2026-03-01T00:00:00Z", value: -0.004 },
+            { timestamp: "2026-03-02T00:00:00Z", value: 0.006 }
+          ],
+          source_provider: "yfinance",
+          warnings: []
+        }
+      ],
       lenses: [],
       overlays: []
     };
@@ -647,6 +675,7 @@ describe("research view model helpers", () => {
       expect.objectContaining({ symbol: "XLE", weight: -0.3 })
     ]);
     expect(object?.return_points).toEqual(composition.returns_points);
+    expect(object?.risk_legs).toEqual(composition.risk_legs);
     expect(object?.provenance).toMatchObject({
       origin: "research_service.strategy_lab.portfolio_compose",
       validation_origin: "research_service.strategy_lab.validate_book",

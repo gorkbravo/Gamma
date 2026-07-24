@@ -12,6 +12,7 @@ export function buildStrategyLabRiskRequest(book: StrategyLabResearchBook): Risk
     snapshot: book.snapshot,
     sourceScope: "research_book",
     researchBookReturnPoints: book.object.return_points,
+    researchBookRiskLegs: book.object.risk_legs ?? [],
     riskSourceLabel: book.sourceLabel,
     riskSourceObjectId: book.object.object_id,
     riskSourceOrigin: String(book.object.provenance.origin ?? "strategy_lab"),

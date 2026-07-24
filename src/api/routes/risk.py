@@ -39,6 +39,7 @@ def compute_risk(
             source_object_id=payload.source_object_id,
             source_origin=payload.source_origin,
             research_book_returns=research_book_returns,
+            research_book_legs=[leg.to_domain() for leg in payload.research_book_legs],
         ),
         data_provider=data_provider,
     )

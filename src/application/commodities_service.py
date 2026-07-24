@@ -922,16 +922,37 @@ def _curve_front_basis(
         previous_timestamp = prior_close.timestamp if prior_close is not None else None
         change = front_node.price - previous_value if front_node.price is not None and previous_value is not None else None
     elif provider == "ibkr_cached":
-        previous_value = None
-        previous_timestamp = None
-        change = None
+        coherent_cached_pair = (
+            previous_value is not None
+            and previous_timestamp is not None
+            and previous_timestamp.date() < curve.as_of.date()
+            and front_node.price is not None
+            and change is not None
+            and math.isclose(
+                float(change),
+                float(front_node.price) - float(previous_value),
+                rel_tol=1e-9,
+                abs_tol=1e-6,
+            )
+        )
+        if not coherent_cached_pair:
+            previous_value = None
+            previous_timestamp = None
+            change = None
     change_pct = change / previous_value if change is not None and previous_value else None
     basis_type = "sample_generated" if provider == "sample_data" else "front_future"
     display = _basis_display_label(basis_type, provider, contract_month=contract.contract_month)
     warnings = []
     if provider == "ibkr_cached":
         warnings.append("Front futures quote uses a cached IBKR curve node.")
-        warnings.append("Headline % CHG is N/A because cached IBKR curve nodes are not prior-close observations.")
+        if previous_value is not None and previous_timestamp is not None:
+            warnings.append(
+                "Headline % CHG reuses the dated provider-backed prior close cached with this exact IBKR quote."
+            )
+        else:
+            warnings.append(
+                "Headline % CHG is N/A because this cached IBKR quote has no coherent dated prior-close reference."
+            )
     elif provider == "ibkr" and previous_value is None:
         warnings.append("Headline % CHG is N/A because no dated IBKR front-contract prior close was loaded.")
     if provider == "sample_data":

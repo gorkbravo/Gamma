@@ -454,19 +454,40 @@ class MarketDataService:
                 lambda chunk=chunk: self._request_snapshot_batch(chunk, timeout),
                 timeout=timeout + 5.0,
             )
-            for contract, snapshot in chunk_results:
-                key = self.quote_key(contract)
-                if snapshot.price is None and prefer_live:
+            snapshots_by_key = {
+                self.quote_key(contract): snapshot for contract, snapshot in chunk_results
+            }
+            if prefer_live:
+                missing_contracts = [
+                    contract
+                    for contract in chunk
+                    if snapshots_by_key[self.quote_key(contract)].price is None
+                ]
+                if missing_contracts:
                     self._set_market_data_type(live=False)
-                    delayed_snapshot = self._run_ib(
-                        lambda contract=contract: self._request_snapshot(contract, timeout),
+                    delayed_results = self._run_ib(
+                        lambda missing_contracts=missing_contracts: self._request_snapshot_batch(
+                            missing_contracts,
+                            timeout,
+                        ),
                         timeout=timeout + 5.0,
                     )
                     self._set_market_data_type(live=True)
-                    price, field, delayed = delayed_snapshot
-                    snapshot = QuoteSnapshot(price, field, delayed or self.market_data_mode == "delayed")
+                    for contract, delayed_snapshot in delayed_results:
+                        if delayed_snapshot.price is not None:
+                            snapshots_by_key[self.quote_key(contract)] = QuoteSnapshot(
+                                delayed_snapshot.price,
+                                delayed_snapshot.field,
+                                True,
+                            )
+
+            missing_symbols: list[str] = []
+            for contract in chunk:
+                key = self.quote_key(contract)
+                snapshot = snapshots_by_key[key]
 
                 if snapshot.price is None:
+                    missing_symbols.append(contract.symbol)
                     cached = self._quote_cache.get(key)
                     if cached is not None:
                         snapshot = QuoteSnapshot(cached, "cached", snapshot.delayed)
@@ -480,6 +501,12 @@ class MarketDataService:
                 if snapshot.delayed:
                     warnings.append(f"Delayed market data for {contract.symbol}")
                 results[key] = snapshot
+            if missing_symbols:
+                warnings.append(
+                    "Quote collection reached its "
+                    f"{timeout:.1f}s market-data budget for {', '.join(dict.fromkeys(missing_symbols))}; "
+                    "the account/position snapshot was retained with available prices."
+                )
 
         return results, list(dict.fromkeys(warnings))
 

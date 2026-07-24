@@ -146,7 +146,7 @@ export function buildRiskWorkspaceModel(
 ): RiskWorkspaceModel {
   const portfolioValue = result?.metrics.portfolio_value ?? snapshotValue(snapshot);
   const coverage = result?.metrics.risk_coverage_ratio ?? null;
-  const holdings = buildHoldings(snapshot, result);
+  const holdings = options.sourceScope === "research_book" ? [] : buildHoldings(snapshot, result);
   const riskContributors = buildRiskContributors(result);
   const exposureBreakdown = buildExposureBreakdown(holdings);
   const returns = result?.portfolio_return_points ?? [];

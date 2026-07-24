@@ -39,6 +39,18 @@ class ResearchObjectReturnPoint:
 
 
 @dataclass(frozen=True)
+class ResearchBookRiskLeg:
+    leg_id: str
+    label: str
+    symbol: str
+    instrument_id: str
+    weight: float
+    return_points: list[ResearchObjectReturnPoint] = field(default_factory=list)
+    source_provider: str | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class GammaResearchObject:
     object_id: str
     object_type: str
@@ -55,6 +67,7 @@ class GammaResearchObject:
     provenance: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     return_points: list[ResearchObjectReturnPoint] = field(default_factory=list)
+    risk_legs: list[ResearchBookRiskLeg] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -111,6 +124,7 @@ class StrategyLabCompositionRequest:
 @dataclass(frozen=True)
 class StrategyLabCompositionResult(StrategyLabAnalysisResult):
     leg_contributions: dict[str, float] = field(default_factory=dict)
+    risk_legs: list[ResearchBookRiskLeg] = field(default_factory=list)
     lenses: list[GammaResearchObject] = field(default_factory=list)
     overlays: list[GammaResearchObject] = field(default_factory=list)
     alignment_diagnostics: dict[str, Any] = field(default_factory=dict)

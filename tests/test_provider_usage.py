@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import create_app
-from src.application.runtime import build_runtime
+from src.application.runtime import _build_copilot_provider, build_runtime
+from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
 from src.services.provider_usage import ProviderActivationCondition, ProviderUsageLedger, trace_provider
 
 
@@ -128,6 +129,110 @@ def test_provider_usage_health_marks_recent_errors_as_degraded():
     assert snapshot.health[0].health_status == "degraded"
     assert snapshot.health[0].error_count == 1
     assert snapshot.health[0].reason == "rate limited"
+
+
+def test_openai_copilot_sync_and_stream_calls_use_explicit_provider_identity():
+    class StubOpenAIProvider(OpenAIResponsesCopilotProvider):
+        def generate_research_card(self, **kwargs):
+            del kwargs
+            return type(
+                "Result",
+                (),
+                {"status": "ready", "model": "gpt-test", "warnings": ["private context warning"]},
+            )()
+
+        def stream_research_card(self, **kwargs):
+            emit = kwargs["emit"]
+            emit("text.delta", {"delta": "done"})
+            return type(
+                "Result",
+                (),
+                {"status": "ready", "model": "gpt-test", "warnings": ["private context warning"]},
+            )()
+
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    ledger.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="openai_copilot",
+            display_name="OpenAI Copilot",
+            expected_when="Copilot is requested.",
+            configured=True,
+        )
+    )
+    provider = trace_provider(
+        StubOpenAIProvider(api_key="test-key", model="gpt-test", reasoning_effort="low"),
+        ledger,
+        endpoint_prefix="copilot",
+    )
+
+    assert provider.generate_research_card().status == "ready"
+    emitted = []
+    assert provider.stream_research_card(emit=lambda *event: emitted.append(event)).status == "ready"
+
+    snapshot = ledger.snapshot()
+    summary = next(row for row in snapshot.providers if row.provider_id == "openai_copilot")
+    health = next(row for row in snapshot.health if row.provider_id == "openai_copilot")
+    assert summary.call_count == 2
+    assert summary.success_count == 2
+    assert summary.endpoints == [
+        "copilot.generate_research_card",
+        "copilot.stream_research_card",
+    ]
+    assert health.health_status == "healthy"
+    assert health.health_label == "Healthy"
+    assert {call.provider_id for call in snapshot.recent_calls} == {"openai_copilot"}
+    assert all(call.message == "status=success; model=gpt-test" for call in snapshot.recent_calls)
+    assert all("private context warning" not in (call.message or "") for call in snapshot.recent_calls)
+    assert emitted == [("text.delta", {"delta": "done"})]
+
+
+def test_openai_copilot_incomplete_terminal_is_typed_and_not_successful():
+    class IncompleteOpenAIProvider(OpenAIResponsesCopilotProvider):
+        def stream_research_card(self, **kwargs):
+            del kwargs
+            return type(
+                "Result",
+                (),
+                {"status": "incomplete", "model": "gpt-test", "warnings": []},
+            )()
+
+    ledger = ProviderUsageLedger(clock=lambda: datetime(2026, 5, 16, 12, 0, tzinfo=timezone.utc))
+    ledger.register_activation_condition(
+        ProviderActivationCondition(
+            provider_id="openai_copilot",
+            display_name="OpenAI Copilot",
+            expected_when="Copilot is requested.",
+            configured=True,
+        )
+    )
+    provider = trace_provider(
+        IncompleteOpenAIProvider(api_key="test-key", model="gpt-test", reasoning_effort="low"),
+        ledger,
+        endpoint_prefix="copilot",
+    )
+
+    assert provider.stream_research_card().status == "incomplete"
+
+    snapshot = ledger.snapshot()
+    summary = next(row for row in snapshot.providers if row.provider_id == "openai_copilot")
+    health = next(row for row in snapshot.health if row.provider_id == "openai_copilot")
+    assert summary.success_count == 0
+    assert summary.error_count == 1
+    assert summary.last_status == "incomplete"
+    assert snapshot.recent_calls[0].status == "incomplete"
+    assert health.health_status == "degraded"
+
+
+def test_copilot_provider_modes_keep_distinct_diagnostic_identities(monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "mock")
+    assert _build_copilot_provider(allow_mock=True).provider_id == "mock_copilot"
+
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "disabled")
+    assert _build_copilot_provider(allow_mock=True).provider_id == "disabled_copilot"
+
+    monkeypatch.setenv("GAMMA_COPILOT_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert _build_copilot_provider(allow_mock=True).provider_id == "unavailable_copilot"
 
 
 def test_provider_usage_system_api_returns_runtime_ledger(tmp_path):
