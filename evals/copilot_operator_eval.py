@@ -25,9 +25,12 @@ class CopilotOperatorEvalCase:
     prompt: str
     context: dict[str, Any]
     expected_tools: tuple[str, ...] = ()
+    expected_any_tools: tuple[str, ...] = ()
     forbidden_tools: tuple[str, ...] = ()
     expected_events: tuple[str, ...] = ("plan", "final-report")
     expected_warning_terms: tuple[str, ...] = ()
+    expected_domains: tuple[str, ...] = ()
+    expected_omitted_domains: tuple[str, ...] = ()
     require_confirmation_checkpoint: bool = False
     require_report: bool = False
     current_gap: str | None = None
@@ -51,6 +54,8 @@ class CopilotOperatorEvalOutcome:
     tool_traces: list[str] = field(default_factory=list)
     event_types: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    selected_domains: list[str] = field(default_factory=list)
+    omitted_domains: list[str] = field(default_factory=list)
     current_gap: str | None = None
     report_generated: bool = False
 
@@ -129,6 +134,46 @@ def default_operator_eval_cases(
             context=portfolio_context,
             expected_tools=("run_risk_contribution_analysis", "run_risk_scenario_analysis"),
             expected_events=("plan", "step-start", "tool-result", "final-report"),
+            expected_domains=("portfolio", "risk", "macro"),
+            expected_omitted_domains=("commodities", "maritime", "external_context"),
+        ),
+        CopilotOperatorEvalCase(
+            case_id="checkpoint5_nvda_research",
+            prompt="Research NVDA using the relevant Gamma domains.",
+            context=copilot_context,
+            expected_any_tools=(
+                "get_fundamentals_company_context",
+                "inspect_equity_research_context",
+                "inspect_options_structure",
+                "get_news_items_context",
+            ),
+            expected_events=("plan", "tool-result", "final-report"),
+            expected_domains=("fundamentals", "equity_research", "iv", "external_context"),
+            expected_omitted_domains=("portfolio", "commodities", "maritime"),
+        ),
+        CopilotOperatorEvalCase(
+            case_id="checkpoint5_cpi_fed_research",
+            prompt="Research CPI and the next Fed decision using relevant Gamma domains.",
+            context=copilot_context,
+            expected_tools=("get_macro_workspace_drilldown",),
+            expected_events=("plan", "tool-result", "final-report"),
+            expected_domains=("macro", "prediction_markets", "external_context"),
+            expected_omitted_domains=("portfolio", "commodities", "maritime"),
+        ),
+        CopilotOperatorEvalCase(
+            case_id="checkpoint5_oil_disruption",
+            prompt="Research an oil supply disruption using relevant Gamma domains.",
+            context=copilot_context,
+            expected_tools=("get_commodities_workspace_summary",),
+            expected_events=("plan", "tool-result", "final-report"),
+            expected_domains=(
+                "commodities",
+                "maritime",
+                "macro",
+                "prediction_markets",
+                "external_context",
+            ),
+            expected_omitted_domains=("portfolio", "risk", "iv"),
         ),
         CopilotOperatorEvalCase(
             case_id="hypothetical_portfolio_comparison",
@@ -193,6 +238,26 @@ def _run_eval_case(
     orchestrator: str,
 ) -> CopilotOperatorEvalOutcome:
     started_at = perf_counter()
+    plan_response = client.post(
+        "/copilot/research-plan",
+        json={"domain": "synthesis", "prompt": case.prompt, "context": case.context},
+    )
+    plan_payload = plan_response.json()
+    selected_domains = [
+        str(item.get("domain"))
+        for item in list(plan_payload.get("domain_plan") or [])
+        if isinstance(item, dict) and item.get("domain")
+    ]
+    domain_decisions = {
+        str(item.get("domain")): item
+        for item in list(plan_payload.get("domain_decisions") or [])
+        if isinstance(item, dict) and item.get("domain")
+    }
+    omitted_domains = [
+        domain
+        for domain, decision in domain_decisions.items()
+        if not bool(decision.get("used"))
+    ]
     response = client.post(
         "/copilot/operator-plan/execute",
         json={"domain": "synthesis", "prompt": case.prompt, "context": case.context},
@@ -208,6 +273,10 @@ def _run_eval_case(
         "http_ok": response.status_code == 200,
         "status_ready_or_gap": payload.get("status") == "ready" or bool(case.current_gap),
         "expected_tools": all(tool in tool_traces for tool in case.expected_tools),
+        "expected_any_tools": (
+            not case.expected_any_tools
+            or any(tool in tool_traces for tool in case.expected_any_tools)
+        ),
         "forbidden_tools_absent": not any(tool in tool_traces for tool in case.forbidden_tools),
         "expected_events": all(event in event_types for event in case.expected_events),
         "permission_compliance": not any(tool in tool_traces for tool in case.forbidden_tools),
@@ -225,6 +294,21 @@ def _run_eval_case(
             not case.expected_tools
             or bool(final_payload.get("output_summaries"))
             or any(event.get("event_type") == "confirmation-needed" for event in payload.get("operator_events", []))
+        ),
+        "routing_http_ok": plan_response.status_code == 200,
+        "selected_domains": (
+            not case.expected_domains
+            or set(selected_domains) == set(case.expected_domains)
+        ),
+        "omission_reasons": (
+            not case.expected_omitted_domains
+            or all(
+                domain in domain_decisions
+                and not bool(domain_decisions[domain].get("used"))
+                and bool(str(domain_decisions[domain].get("classification") or "").strip())
+                and bool(str(domain_decisions[domain].get("reason") or "").strip())
+                for domain in case.expected_omitted_domains
+            )
         ),
     }
     if case.current_gap:
@@ -261,6 +345,8 @@ def _run_eval_case(
         tool_traces=tool_traces,
         event_types=event_types,
         warnings=warnings,
+        selected_domains=selected_domains,
+        omitted_domains=omitted_domains,
         current_gap=case.current_gap,
         report_generated=report_generated,
     )

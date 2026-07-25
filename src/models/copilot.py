@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from src.models.copilot_context import default_copilot_read_only_safety
+from src.models.copilot_context import CopilotScopeContextContract, default_copilot_read_only_safety
 from src.utils.time import now_utc
 
 
@@ -33,6 +33,7 @@ class CopilotRequestContext:
     strategy_lab_state: dict[str, Any] | None = None
     risk_state: dict[str, Any] | None = None
     iv_state: dict[str, Any] | None = None
+    maritime_state: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,9 @@ class CopilotResearchPlanDomainDecision:
     domain: str
     used: bool
     reason: str
+    classification: str = "irrelevant"
+    selected_depth: str | None = None
+    planned_tools: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -260,6 +264,13 @@ class CopilotSourceRef:
     origin: str
     description: str | None = None
     retrieved_at: datetime | None = None
+    provider_native_id: str | None = None
+    url: str | None = None
+    navigation_supported: bool | None = None
+    navigation_reason: str | None = None
+    navigation_tab: str | None = None
+    navigation_mode: str | None = None
+    navigation_context: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -299,6 +310,7 @@ class CopilotContextBundle:
     sources: list[CopilotSourceRef] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     read_only_safety: dict[str, Any] = field(default_factory=default_copilot_read_only_safety)
+    context_contract: CopilotScopeContextContract | None = None
 
 
 @dataclass(frozen=True)
@@ -322,6 +334,9 @@ class CopilotResearchCardResult:
     tool_traces: list[CopilotToolTrace] = field(default_factory=list)
     operator_events: list[CopilotOperatorProgressEvent] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    research_plan: CopilotResearchPlan | None = None
+    context_contracts: list[CopilotScopeContextContract] = field(default_factory=list)
+    context_budget: dict[str, Any] = field(default_factory=dict)
 
 
 COPILOT_RUN_EVENT_TYPES = {
@@ -383,6 +398,7 @@ class CopilotContextSnapshot:
     warnings: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=now_utc)
     read_only_safety: dict[str, Any] = field(default_factory=default_copilot_read_only_safety)
+    context_contract: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

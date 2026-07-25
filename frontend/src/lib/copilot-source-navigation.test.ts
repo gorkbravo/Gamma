@@ -3,7 +3,8 @@ import type { CopilotSourceRef, CrossTabHandoffEnvelope } from "./api/types";
 import {
   buildCopilotSourceHandoff,
   canNavigateCopilotSource,
-  getCopilotSourceTarget
+  getCopilotSourceTarget,
+  validatedExternalSourceUrl
 } from "./copilot-source-navigation";
 
 const source: CopilotSourceRef = {
@@ -90,5 +91,98 @@ describe("buildCopilotSourceHandoff", () => {
     expect(
       canNavigateCopilotSource({ ...source, source_id: "external.unknown", origin: "vendor.feed" })
     ).toBe(false);
+  });
+
+  it.each([
+    [
+      {
+        ...source,
+        source_id: "equity_research.scope.nvda",
+        navigation_tab: "equity_research",
+        navigation_mode: "single_name",
+        navigation_context: { symbol: "NVDA", timeframe: "252" }
+      },
+      "equity_research",
+      "single_name",
+      "NVDA"
+    ],
+    [
+      {
+        ...source,
+        source_id: "commodities.inventory.eia_crude",
+        navigation_tab: "commodities",
+        navigation_mode: "inventories_fundamentals",
+        navigation_context: { instrument_id: "wti", series_id: "eia-crude" }
+      },
+      "commodities",
+      "inventories_fundamentals",
+      "wti"
+    ],
+    [
+      {
+        ...source,
+        source_id: "maritime.chokepoint.strait_of_hormuz",
+        navigation_tab: "maritime",
+        navigation_mode: "chokepoints",
+        navigation_context: { chokepoint_id: "strait-of-hormuz" }
+      },
+      "maritime",
+      "chokepoints",
+      "strait-of-hormuz"
+    ],
+    [
+      {
+        ...source,
+        source_id: "iv.expiry.nvda.2026_08_21",
+        navigation_tab: "iv",
+        navigation_mode: "surface",
+        navigation_context: {
+          symbol: "NVDA",
+          expiry: "2026-08-21",
+          contract_id: "NVDA-20260821-C-125"
+        }
+      },
+      "iv",
+      "surface",
+      "NVDA"
+    ]
+  ])(
+    "uses authoritative navigation metadata for %s sources",
+    (mappedSource, expectedTab, expectedMode, expectedEntityId) => {
+      const handoff = buildCopilotSourceHandoff(mappedSource as CopilotSourceRef);
+      expect(handoff?.intended_target_tab).toBe(expectedTab);
+      expect(handoff?.intended_target_mode).toBe(expectedMode);
+      expect(handoff?.selected_entity?.normalized_id).toBe(expectedEntityId);
+      expect(handoff?.normalized_ids).toMatchObject(mappedSource.navigation_context ?? {});
+    }
+  );
+
+  it("treats inspectable non-navigable sources honestly", () => {
+    const coverage = {
+      ...source,
+      source_id: "maritime.coverage",
+      navigation_supported: false,
+      navigation_reason: "Coverage metadata has no standalone destination."
+    } satisfies CopilotSourceRef;
+    expect(canNavigateCopilotSource(coverage)).toBe(false);
+    expect(getCopilotSourceTarget(coverage)).toBeNull();
+    expect(buildCopilotSourceHandoff(coverage)).toBeNull();
+  });
+
+  it("accepts only credential-free HTTP(S) news targets", () => {
+    const news = {
+      ...source,
+      source_id: "external_context.news_item.feed_1",
+      kind: "news_item",
+      url: "https://news.example.com/events/oil-disruption",
+      navigation_supported: true,
+      navigation_context: { news_item_id: "feed:1" }
+    } satisfies CopilotSourceRef;
+    expect(canNavigateCopilotSource(news)).toBe(true);
+    expect(validatedExternalSourceUrl(news.url)).toBe(
+      "https://news.example.com/events/oil-disruption"
+    );
+    expect(validatedExternalSourceUrl("javascript:alert(1)")).toBeNull();
+    expect(validatedExternalSourceUrl("https://user:secret@example.com/news")).toBeNull();
   });
 });

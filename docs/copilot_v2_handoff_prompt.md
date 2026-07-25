@@ -1,4 +1,4 @@
-# Copilot V2 91% To 100% Execution Prompt
+# Copilot V2 94% To 100% Execution Prompt
 
 Copy the text inside the block below into the agent that will complete Copilot V2.
 
@@ -7,7 +7,7 @@ You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot V2 from its verified 91% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 through 4 are complete. Begin with Checkpoint 5. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
+Your objective is to take Copilot V2 from its verified 94% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 through 5 are complete. Begin with Checkpoint 6. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
 
 Do not stop after one convenient slice and do not ask the user to choose the next checkpoint. Follow the roadmap order, make reasonable in-scope decisions, implement coherent vertical slices, verify them, update the active documentation, and continue. Never claim a percentage merely because code was written; a percentage is earned only when that checkpoint's exit criteria pass.
 
@@ -16,7 +16,7 @@ Do not stop after one convenient slice and do not ask the user to choose the nex
 Read these files completely before editing:
 
 1. `AGENTS.md`
-2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 91% to 100%`, sequencing rules, non-goals, and deliverable
+2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 94% to 100%`, sequencing rules, non-goals, and deliverable
 3. `docs/copilot_v2_tab_plan.md`, especially the July 2026 completion plan, remaining engineering workstreams, delivery order, and definition of done
 4. `docs/provenance_expectations.md`
 5. `docs/design_principles.md` before changing Svelte/CSS
@@ -30,7 +30,7 @@ Before editing:
 
 - run `git status --short --branch` and inspect recent Copilot commits;
 - inspect all existing uncommitted changes and preserve unrelated user work;
-- treat the current run-lifecycle, transcript/evidence, session/artifact, Operator authority, roadmap, and documentation changes as part of the verified 91% baseline;
+- treat the current run-lifecycle, transcript/evidence, session/artifact, Operator authority, context-contract/tool-coverage, roadmap, and documentation changes as part of the verified 94% baseline;
 - run the focused Copilot backend tests, frontend Copilot tests, typecheck, and build to confirm the baseline;
 - inspect the running Copilot UI at desktop and narrow widths when practical;
 - compare code reality with the roadmap and detailed spec, correcting stale documentation without erasing useful implementation history.
@@ -54,7 +54,7 @@ Bounded read-only analysis may run automatically. Every durable or non-trivial l
 
 Gamma backend services remain authoritative for tools, permissions, execution, confirmation tokens, persistence, cancellation, finalization, and mutation rules. The UI may navigate for convenience but must not become the authority for analytical execution.
 
-## Current 91% baseline
+## Current 94% baseline
 
 The baseline should include:
 
@@ -75,8 +75,13 @@ The baseline should include:
 - durable single-use DCF confirmation tokens bound to tool, session, context fingerprint, and proposal hash, with persisted expiry, reject/apply resolution, restart recovery, and pre-change rollback snapshots;
 - exact inline Operator mutation/diff/snapshot-policy rendering with apply/reject controls and live/replayed turn reconciliation;
 - Agents SDK `Runner.run_streamed` progress mapped into the Gamma run contract and cancellation at the SDK `after_turn` boundary; durable mutation drafting remains in Gamma's deterministic authority path even when SDK orchestration is enabled.
+- typed `copilot.context.v2` contracts for every selectable scope, with canonical fingerprints, freshness/source-version inputs, explicit per-scope and 96 KB aggregate budgets, deterministic compaction, omission disclosure, sensitive-key redaction, and replay-safe diagnostics;
+- persisted product-level domain decisions that distinguish selected, irrelevant, unavailable-data, missing-provider, stale-context, unsupported-scope, and budget-omission reasons without storing private reasoning;
+- bounded registry-owned Maritime route/chokepoint and item-level news drilldowns with typed degradation, provider/freshness/provenance metadata, stable identifiers, validated news URLs, and deterministic cross-feed deduplication;
+- bounded `inspect_options_structure`, `inspect_commodity_curve_fundamentals`, and `inspect_equity_research_context` tools through Gamma's authoritative domain services;
+- evidence validation and frontend navigation that preserve supported instrument, contract, route, chokepoint, and news-item context while treating unknown or inspectable-only refs honestly.
 
-Important current gaps begin with checkpoint 5: context/tool coverage, news/Sealanes depth, context budgets and stale invalidation, then shelf-to-workspace promotion, versioned model policy, retention/diagnostics, accessibility, and full live release evidence.
+Important current gaps begin with checkpoint 6: shelf-to-workspace promotion, versioned model policy, retention/diagnostics, then accessibility and full live release evidence. Do not reopen Checkpoint 5 contracts or broaden tools without evidence that a Checkpoint 6/7 requirement needs it.
 
 ## Execution method for every checkpoint
 
@@ -200,7 +205,7 @@ Verified implementation evidence:
 - checkpoint evidence: 104 backend/eval tests and 309 frontend tests passed with typecheck, production build, and desktop check.
 - an authorized bounded live Agents SDK smoke reached the real Responses API and emitted `provider.progress`, but OpenAI quota exhaustion occurred before any tool call; no successful live Operator result is claimed.
 
-## Checkpoint 5 — close context and tool-coverage gaps (94%)
+## Checkpoint 5 — verified 2026-07-25 (94%)
 
 Required delivery:
 
@@ -215,7 +220,11 @@ Exit evidence:
 
 - representative NVDA, CPI/Fed, oil-disruption, and portfolio-rate-shock prompts choose appropriate domains, explain skipped domains, preserve provenance/freshness, and degrade explicitly when data/providers are unavailable;
 - provider absence never becomes fabricated evidence or a neutral blank result;
-- tool contracts and representative planner/eval cases pass.
+- tool contracts and representative planner/eval cases pass;
+- 209 focused backend tests and the full 461-test backend suite passed;
+- 315 frontend tests, typecheck, production build, and desktop check passed;
+- the supported eval CLI passed 22/22 deterministic outcomes across the four representative scenarios;
+- eval provider coverage used explicitly configured sample maritime/commodities/news providers and a mock Copilot provider. No new live-provider success is claimed, and the prior OpenAI quota limitation remains external evidence only.
 
 ## Checkpoint 6 — finish continuity, model policy, retention, and diagnostics (97%)
 
@@ -279,6 +288,7 @@ Backend and provider:
 
 - `src/models/copilot.py`
 - `src/models/copilot_context.py`
+- `src/application/copilot_context_contracts.py`
 - `src/services/copilot_provider.py`
 - `src/services/openai_copilot_provider.py`
 - `src/services/mock_copilot_provider.py`
@@ -286,6 +296,11 @@ Backend and provider:
 - `src/application/copilot_service.py`
 - `src/application/copilot_agents_operator.py`
 - `src/application/research_action_registry.py`
+- `src/application/maritime_service.py`
+- `src/application/news_service.py`
+- `src/application/iv_service.py`
+- `src/application/commodities_service.py`
+- `src/application/research_service.py`
 - `src/application/copilot_report_service.py`
 - `src/application/runtime.py`
 - `src/api/routes/copilot.py`

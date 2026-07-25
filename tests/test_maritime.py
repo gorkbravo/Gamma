@@ -43,6 +43,13 @@ def test_maritime_service_builds_sample_workspace_with_caveats():
     assert result.flow_summaries
     assert all(summary.coverage_status == "sample" for summary in result.chokepoint_summaries)
     assert any(summary.total_vessel_count > 0 for summary in result.chokepoint_summaries)
+    assert all(summary.baseline_vessel_count is None for summary in result.chokepoint_summaries)
+    assert all(summary.congestion_score is None for summary in result.chokepoint_summaries)
+    assert all(summary.congestion_label == "unavailable" for summary in result.chokepoint_summaries)
+    assert all(
+        "No congestion baseline or operational-risk label is computed" in summary.methodology
+        for summary in result.chokepoint_summaries
+    )
     assert all(flow.inference_caveat and "AIS does not report cargo" in flow.inference_caveat for flow in result.flow_summaries)
     assert any("not live global AIS" in warning for warning in result.warnings)
     assert any("Risk Signals are not enabled" in warning for warning in result.warnings)

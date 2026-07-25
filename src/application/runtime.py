@@ -381,6 +381,9 @@ def build_runtime(
         iv_service=iv_service,
         portfolio_provider=portfolio_provider,
         research_provider=research_provider,
+        research_service=research_service,
+        commodities_service=commodities_service,
+        maritime_service=maritime_service,
         news_service=news_service,
         sitrep_service=sitrep_service,
         provider=trace_provider(

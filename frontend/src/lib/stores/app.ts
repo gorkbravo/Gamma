@@ -376,6 +376,7 @@ function createEmptyCopilotThreads(): Record<CopilotDomain, CopilotThreadState> 
     strategy_lab: createEmptyCopilotThread("strategy_lab"),
     macro: createEmptyCopilotThread("macro"),
     commodities: createEmptyCopilotThread("commodities"),
+    maritime: createEmptyCopilotThread("maritime"),
     prediction_markets: createEmptyCopilotThread("prediction_markets"),
     crypto: createEmptyCopilotThread("crypto"),
     fundamentals: createEmptyCopilotThread("fundamentals"),
@@ -451,6 +452,7 @@ export const copilotCards = writable<Record<CopilotDomain, CopilotResearchCardRe
   strategy_lab: null,
   macro: null,
   commodities: null,
+  maritime: null,
   prediction_markets: null,
   crypto: null,
   fundamentals: null,
@@ -721,6 +723,7 @@ function resetAllCopilotThreads() {
     strategy_lab: null,
     macro: null,
     commodities: null,
+    maritime: null,
     prediction_markets: null,
     crypto: null,
     fundamentals: null,
@@ -978,6 +981,7 @@ const COPILOT_DOMAIN_LABELS: Record<CopilotBaseDomain, string> = {
   strategy_lab: "Strategy Lab",
   macro: "Macro",
   commodities: "Commodities",
+  maritime: "Sealanes",
   prediction_markets: "Prediction Markets",
   crypto: "Crypto",
   fundamentals: "Fundamentals",
@@ -1158,6 +1162,33 @@ function buildCopilotContextFingerprint(
       summaries: workspace?.market_summaries.length ?? 0,
       spreads: workspace?.spreads.length ?? 0,
       inventories: workspace?.inventories.length ?? 0
+    });
+  }
+
+  if (domain === "maritime") {
+    const workspace = get(maritimeWorkspace);
+    return JSON.stringify({
+      domain,
+      workspaceMode,
+      mode: workspace?.mode ?? null,
+      providerId: workspace?.coverage.provider_id ?? null,
+      coverageStatus: workspace?.coverage.coverage_status ?? "unavailable",
+      freshnessLabel: workspace?.coverage.freshness_label ?? "unavailable",
+      sourceTimestamp: workspace?.coverage.source_timestamp ?? null,
+      retrievedAt: workspace?.retrieved_at ?? null,
+      supportsHistorical: workspace?.coverage.supports_historical ?? false,
+      positions: workspace?.positions.length ?? 0,
+      tracks: workspace?.tracks.length ?? 0,
+      chokepoints: workspace?.chokepoint_summaries.map((row) => ({
+        id: row.chokepoint_id,
+        retrievedAt: row.retrieved_at,
+        vesselCount: row.total_vessel_count
+      })) ?? [],
+      routes: workspace?.flow_summaries.map((row) => ({
+        id: row.flow_id,
+        retrievedAt: row.retrieved_at,
+        vesselCount: row.vessel_count
+      })) ?? []
     });
   }
 
@@ -3066,6 +3097,14 @@ function buildCopilotContext(domain: CopilotDomain, workspaceMode: WorkspaceMode
           workspace: get(commoditiesWorkspace)
         }
       };
+    case "maritime":
+      return {
+        current_tab: "maritime",
+        workspace_mode: workspaceMode,
+        maritime_state: {
+          workspace: get(maritimeWorkspace)
+        }
+      };
     case "prediction_markets":
       return {
         current_tab: "prediction_markets",
@@ -3188,6 +3227,9 @@ function validateSynthesisScopeDomain(
   }
   if (domain === "commodities" && !get(commoditiesWorkspace)) {
     return "Load the Commodities workspace before including it in a synthesis card.";
+  }
+  if (domain === "maritime" && !get(maritimeWorkspace)) {
+    return "Load the Sealanes workspace before including it in a synthesis card.";
   }
   if (domain === "prediction_markets" && !get(predictionMarketDetail)) {
     return "Select and load a Prediction Markets contract before including it in a synthesis card.";

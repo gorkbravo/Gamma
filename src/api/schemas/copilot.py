@@ -110,6 +110,7 @@ class CopilotRequestContextModel(BaseModel):
     strategy_lab_state: dict[str, object] | None = None
     risk_state: CopilotRiskStateModel | None = None
     iv_state: CopilotIvStateModel | None = None
+    maritime_state: dict[str, object] | None = None
 
     def to_domain(self) -> CopilotRequestContext:
         return CopilotRequestContext(
@@ -126,6 +127,7 @@ class CopilotRequestContextModel(BaseModel):
             strategy_lab_state=self.strategy_lab_state,
             risk_state=self.risk_state.model_dump(mode="python") if self.risk_state is not None else None,
             iv_state=self.iv_state.model_dump(mode="python") if self.iv_state is not None else None,
+            maritime_state=self.maritime_state,
         )
 
 
@@ -201,6 +203,13 @@ class CopilotSourceRefModel(BaseModel):
     origin: str
     description: str | None = None
     retrieved_at: datetime | None = None
+    provider_native_id: str | None = None
+    url: str | None = None
+    navigation_supported: bool | None = None
+    navigation_reason: str | None = None
+    navigation_tab: str | None = None
+    navigation_mode: str | None = None
+    navigation_context: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
     def from_domain(cls, row: CopilotSourceRef) -> "CopilotSourceRefModel":
@@ -300,6 +309,9 @@ class CopilotResearchCardResponseModel(BaseModel):
     tool_traces: list[CopilotToolTraceModel] = Field(default_factory=list)
     operator_events: list[CopilotOperatorProgressEventModel] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    research_plan: dict[str, object] | None = None
+    context_contracts: list[dict[str, object]] = Field(default_factory=list)
+    context_budget: dict[str, object] = Field(default_factory=dict)
 
     @classmethod
     def from_domain(cls, row: CopilotResearchCardResult) -> "CopilotResearchCardResponseModel":
@@ -316,6 +328,13 @@ class CopilotResearchCardResponseModel(BaseModel):
             tool_traces=[CopilotToolTraceModel.from_domain(item) for item in row.tool_traces],
             operator_events=[CopilotOperatorProgressEventModel.from_domain(item) for item in row.operator_events],
             warnings=list(row.warnings),
+            research_plan=(
+                CopilotResearchPlanModel.from_domain(row.research_plan).model_dump(mode="json")
+                if row.research_plan is not None
+                else None
+            ),
+            context_contracts=[item.to_dict() for item in row.context_contracts],
+            context_budget=dict(row.context_budget),
         )
 
 
@@ -387,6 +406,9 @@ class CopilotResearchPlanDomainDecisionModel(BaseModel):
     domain: str
     used: bool
     reason: str
+    classification: str = "irrelevant"
+    selected_depth: str | None = None
+    planned_tools: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, row: CopilotResearchPlanDomainDecision) -> "CopilotResearchPlanDomainDecisionModel":
@@ -742,6 +764,7 @@ class CopilotContextSnapshotModel(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     created_at: datetime
     read_only_safety: dict[str, object] = Field(default_factory=dict)
+    context_contract: dict[str, object] = Field(default_factory=dict)
 
     @classmethod
     def from_domain(cls, row: CopilotContextSnapshot) -> "CopilotContextSnapshotModel":

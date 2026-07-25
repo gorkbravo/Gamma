@@ -32,7 +32,7 @@ The target is a **Gamma research agent**:
 
 - It can understand broad research requests such as "Research NVDA", "what is going on in oil?", or "is my portfolio exposed to a rate shock?"
 - It can decide which Gamma domains are relevant and how deep to go in each one.
-- It can run analyses through typed Gamma tools across Equity Research, Strategy Lab, Risk, Options, Fundamentals, Macro, Commodities, Prediction Markets, Crypto, Portfolio, and later Sealanes/news.
+- It can run analyses through typed Gamma tools across Equity Research, Strategy Lab, Risk, Options, Fundamentals, Macro, Commodities, Prediction Markets, Crypto, Portfolio, Sealanes, and item-level news.
 - It can fetch limited outside context, such as recent news, analyst expectations, transcripts, filings, and official events, through approved read-only adapters.
 - It can save research sessions, source snapshots, DCF/model snapshots where applicable, memos, and final reports.
 - It can propose local research-state edits and apply them only after explicit user confirmation.
@@ -169,10 +169,10 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 through 4 are verified at 91%: the 86% run/transcript/session/artifact foundation is now joined by one authoritative Operator permission registry, restart-safe context-bound single-use DCF confirmations, inline exact mutation/diff/snapshot/apply/reject UX, persisted resolution replay, Agents SDK live progress, and safe-turn cancellation. Remaining gaps are:
+The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 through 5 are verified at 94%: the shared run/transcript/session/artifact and Operator-authority foundation now includes typed `copilot.context.v2` contracts for every selectable scope, deterministic fingerprinting and compaction, replayable domain-selection/omission reasons, first-class Sealanes and item-level news context, and bounded IV, Commodities, and Equity Research drilldowns. Remaining gaps are:
 
 - the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5; the custom loop remains the measured default until a future live comparison shows a quality or latency advantage;
-- Sealanes, news, and some deeper IV/Commodities drilldowns do not yet have tool parity;
+- exact shelf-to-workspace thread/context promotion remains incomplete;
 - privacy, retention, cost, usage, and model-routing diagnostics are not yet understandable from the Copilot workspace.
 
 ### Completion Boundary
@@ -310,13 +310,23 @@ Implementation note (2026-07-24, checkpoint complete):
 - Supported evidence refs build `CrossTabHandoffEnvelope` navigation and retain mapped entity, mode, timeframe, region, lens, instrument, market, or token context. Unsupported refs remain inspectable without pretending to be navigable.
 - Checkpoint evidence: `86 passed` in `tests/test_copilot.py`; `3 passed` across Agents SDK smoke and Operator eval; frontend `42 files / 267 tests` passed; typecheck, production build, and desktop check passed. Live UI inspection covered ready/error/cancelled states and a claim-source handoff to Macro Snapshot preserving the 3M timeframe, with zero console errors.
 
-#### C. Context and tool coverage — blocker
+#### C. Context and tool coverage — checkpoint 5 complete (94%)
 
-- Finish Sealanes context and read-only drilldowns without inventing risk labels.
-- Make news a first-class external-context drilldown with item-level source/freshness refs.
-- Add the highest-value missing IV, Commodities, Equity Research, and cross-tab drilldowns identified in their roadmap sections.
-- Add context-size budgets, deterministic compaction/summaries, and stale-context invalidation.
-- Add source navigation mappings and context fingerprints for every selectable scope.
+- [x] Finish Sealanes context and bounded read-only route/chokepoint drilldowns without inventing congestion, cargo, sanctions, ownership, operational-risk, or vessel-risk labels.
+- [x] Make news a first-class external-context drilldown with stable item ids, validated URLs, publication/retrieval/freshness metadata, deterministic deduplication, and cross-feed provenance.
+- [x] Add complete, registry-owned IV structure, commodity curve/fundamentals, and equity-research drilldowns through Gamma's authoritative domain services.
+- [x] Add typed, versioned contracts, per-scope and aggregate context budgets, deterministic compaction/summaries, omission disclosure, and freshness-based invalidation.
+- [x] Add source navigation mappings and canonical context fingerprints for every selectable scope.
+- [x] Persist concise selected/omitted-domain reasons and context diagnostics through restart replay without exposing private reasoning or provider payloads.
+- [x] Validate every claim reference against the active source registry and represent inspectable-but-nonnavigable sources honestly.
+
+Implementation note (2026-07-25, checkpoint complete):
+- Every selectable scope emits `copilot.context.v2` metadata. Fingerprints use canonical domain/entity/mode/timeframe/lens/object/source-version/retrieval inputs; equivalent inputs remain stable while materially changed or stale inputs invalidate. Sensitive keys are redacted.
+- Per-scope budgets are explicit and the aggregate synthesis ceiling is 96 KB. Compaction is deterministic, preserves protected facts/source refs/warnings/freshness, and reports summarized or omitted material rather than silently truncating it.
+- Maritime context reuses `MaritimeService`; sparse AIS and unavailable historical routes return typed degraded/unavailable results. News keeps normalized item-level provenance across deduplicated reporting sources and rejects unsafe navigation URLs.
+- `inspect_options_structure`, `inspect_commodity_curve_fundamentals`, and `inspect_equity_research_context`, plus the maritime and news drilldowns, are bounded read-only registry actions with typed unavailable/degraded states and explicit navigation support.
+- NVDA, CPI/Fed, oil-disruption, and portfolio-rate-shock planner/eval cases select the expected domains and retain compact omission reasons. The oil case never fabricates maritime cargo or risk facts, and the portfolio case remains confined to Portfolio/Risk/Macro with no mutation capability.
+- Evidence: 209 focused backend tests, the full 461-test backend suite, 315 frontend tests, typecheck, production build, desktop check, and 22/22 deterministic eval outcomes passed. The eval used explicit sample maritime/commodities/news providers and a mock Copilot provider. No new live-provider success is claimed; the earlier OpenAI quota limitation remains external.
 
 #### D. Research Operator productionization — checkpoint 4 complete (91%)
 
@@ -388,7 +398,7 @@ Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint
 3. ~~In-tab artifacts/memos and session lifecycle completion.~~ Completed 2026-07-25 at checkpoint 3 (86%).
 4. ~~Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in `docs/copilot_v2_checkpoint3_prompt.md`.~~ Completed 2026-07-25 (see the note under workstream F).
 5. ~~Live operator events, cancellation, and inline confirmations.~~ Completed 2026-07-25 at checkpoint 4 (91%).
-6. Missing context/tool coverage and source navigation.
+6. ~~Missing context/tool coverage and source navigation.~~ Completed 2026-07-25 at checkpoint 5 (94%).
 7. GPT-5.6 eval-backed model policy and routing rollout.
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
 9. Diagnostics, first-run guidance, accessibility, and full release gate.
@@ -419,8 +429,8 @@ Example depth behavior:
 |---|---|
 | "Research NVDA" | Deep Fundamentals and Equity Research, medium Options/news/estimates, light Macro unless relevant. |
 | "Research NVDA into CPI/Fed week" | Medium Fundamentals, deep Macro/Rates and Options event risk, recent news/context. |
-| "What is going on in oil?" | Deep Commodities, Macro, relevant Prediction Markets/news; no DCF. |
-| "Is my portfolio exposed to rate shock?" | Deep Portfolio/Risk/Macro, optional Options; no company memo unless a position dominates. |
+| "What is going on in oil?" | Deep Commodities and relevant Sealanes, Macro, Prediction Markets, and news context; explicit degradation when AIS, curves, inventories, routes, or feeds are unavailable; no DCF or invented maritime risk. |
+| "Is my portfolio exposed to rate shock?" | Deep Portfolio/Risk/Macro within the selected account or research-book boundary; no rebalance, trade, order, or company memo unless separately requested. |
 | "Stress my AI basket if front-end rates rise 100 bps" | Deep Strategy Lab/Research/Risk/Macro; light Fundamentals/Options only for major constituents if requested. |
 
 Depth profiles:

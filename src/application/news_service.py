@@ -43,9 +43,22 @@ class NewsService:
                 continue
             warnings.extend(feed.warnings)
             items.extend(feed.items)
+        if not self.providers:
+            warnings.append("No news/event providers are configured; item-level news context is unavailable.")
+        elif not items:
+            warnings.append(
+                "Configured news/event providers returned no usable items; the feed is unavailable rather than neutral."
+            )
 
         deduped = _dedupe_items(items)
-        deduped.sort(key=lambda item: item.published_at, reverse=True)
+        deduped.sort(
+            key=lambda item: (
+                item.published_at,
+                item.normalized_id,
+                item.source_provider,
+            ),
+            reverse=True,
+        )
         if requested_limit:
             deduped = deduped[:requested_limit]
         source_provider = _source_provider_label(deduped)
@@ -72,26 +85,67 @@ def _dedupe_items(items: list[NewsEventItem]) -> list[NewsEventItem]:
     for item in items:
         keys = _dedupe_keys(item)
         existing = next((by_key[key] for key in keys if key in by_key), None)
-        if existing is None or item.published_at > existing.published_at:
-            replacement_keys = set(keys)
-            if existing is not None:
-                replacement_keys.update(key for key, value in by_key.items() if value is existing)
-            for key in replacement_keys:
+        if existing is None:
+            for key in keys:
                 by_key[key] = item
-        elif item.published_at == existing.published_at:
-            merged = replace(
-                existing,
-                warnings=list(dict.fromkeys([*existing.warnings, *item.warnings])),
-                tags=list(dict.fromkeys([*existing.tags, *item.tags])),
-            )
-            merge_keys = set(keys)
-            merge_keys.update(key for key, value in by_key.items() if value is existing)
-            for key in merge_keys:
-                by_key[key] = merged
+            continue
+        winner, alternate = _deterministic_news_winner(existing, item)
+        merged = replace(
+            winner,
+            warnings=list(dict.fromkeys([*winner.warnings, *alternate.warnings])),
+            tags=list(dict.fromkeys([*winner.tags, *alternate.tags])),
+            detected_entities=_merge_entities(winner.detected_entities, alternate.detected_entities),
+            reporting_sources=[
+                *winner.reporting_sources,
+                *alternate.reporting_sources,
+            ],
+            transformation_note=(
+                "Gamma deterministically deduplicated matching normalized news items and retained "
+                "all reporting feed provenance."
+            ),
+        )
+        merge_keys = set(keys)
+        merge_keys.update(key for key, value in by_key.items() if value is existing)
+        merge_keys.update(_dedupe_keys(merged))
+        for key in merge_keys:
+            by_key[key] = merged
     unique: dict[tuple[str, str | None, str, str], NewsEventItem] = {}
     for item in by_key.values():
         unique[(item.source_provider, item.provider_item_id, canonical_news_url(item.url), item.normalized_id)] = item
     return list(unique.values())
+
+
+def _deterministic_news_winner(
+    left: NewsEventItem,
+    right: NewsEventItem,
+) -> tuple[NewsEventItem, NewsEventItem]:
+    left_key = (
+        left.published_at,
+        left.retrieved_at,
+        left.normalized_id,
+        left.source_provider,
+        canonical_news_url(left.url),
+    )
+    right_key = (
+        right.published_at,
+        right.retrieved_at,
+        right.normalized_id,
+        right.source_provider,
+        canonical_news_url(right.url),
+    )
+    return (left, right) if left_key >= right_key else (right, left)
+
+
+def _merge_entities(left: list, right: list) -> list:
+    merged = {
+        (
+            entity.entity_type,
+            entity.resolved_id(),
+            entity.label,
+        ): entity
+        for entity in [*left, *right]
+    }
+    return [merged[key] for key in sorted(merged)]
 
 
 def _dedupe_keys(item: NewsEventItem) -> list[str]:

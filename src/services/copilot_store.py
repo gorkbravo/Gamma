@@ -44,6 +44,7 @@ from src.models.copilot import (
     ResearchClaim,
     new_copilot_id,
 )
+from src.models.copilot_context import CopilotScopeContextContract
 from src.services.copilot_evidence import resolve_result_evidence
 from src.utils.time import now_utc
 
@@ -270,6 +271,22 @@ class CopilotStore:
                 source_ids=[source.source_id for source in result.sources],
                 warnings=list(result.warnings),
                 created_at=now,
+                context_contract=(
+                    dict(context_summary.get("context_contract") or {})
+                    or (
+                        {
+                            "contract_version": "copilot.context.collection.v1",
+                            "contexts": list(context_summary.get("context_contracts") or []),
+                            "total_budget": dict(
+                                context_summary.get("context_budget")
+                                or result.context_budget
+                                or {}
+                            ),
+                        }
+                        if context_summary.get("context_contracts")
+                        else {}
+                    )
+                ),
             )
             turn = CopilotTurn(
                 turn_id=new_copilot_id("turn"),
@@ -1055,6 +1072,7 @@ class CopilotStore:
             warnings=list(payload.get("warnings") or []),
             created_at=self._parse_datetime(payload.get("created_at")) or now_utc(),
             read_only_safety=dict(payload.get("read_only_safety") or {}),
+            context_contract=dict(payload.get("context_contract") or {}),
         )
 
     def _load_turn_path(self, path: Path) -> CopilotTurn | None:
@@ -1638,6 +1656,11 @@ class CopilotStore:
                 for event in result.operator_events
             ],
             "warnings": list(result.warnings),
+            "research_plan": CopilotStore._dataclass_to_json(result.research_plan),
+            "context_contracts": [
+                item.to_dict() for item in result.context_contracts
+            ],
+            "context_budget": dict(result.context_budget),
         }
 
     @staticmethod
@@ -1667,6 +1690,13 @@ class CopilotStore:
                 if isinstance(item, dict)
             ],
             warnings=list(payload.get("warnings") or []),
+            research_plan=cls._research_plan_from_json(payload.get("research_plan")),
+            context_contracts=[
+                CopilotScopeContextContract.from_dict(item)
+                for item in list(payload.get("context_contracts") or [])
+                if isinstance(item, dict)
+            ],
+            context_budget=dict(payload.get("context_budget") or {}),
         )
         return resolve_result_evidence(result)
 
@@ -1701,6 +1731,17 @@ class CopilotStore:
             origin=str(payload.get("origin") or ""),
             description=payload.get("description"),
             retrieved_at=cls._parse_datetime(payload.get("retrieved_at")),
+            provider_native_id=payload.get("provider_native_id"),
+            url=payload.get("url"),
+            navigation_supported=payload.get("navigation_supported"),
+            navigation_reason=payload.get("navigation_reason"),
+            navigation_tab=payload.get("navigation_tab"),
+            navigation_mode=payload.get("navigation_mode"),
+            navigation_context={
+                str(key): str(value)
+                for key, value in dict(payload.get("navigation_context") or {}).items()
+                if str(key).strip() and value is not None
+            },
         )
 
     @staticmethod
@@ -1766,6 +1807,12 @@ class CopilotStore:
                     domain=str(item.get("domain") or ""),
                     used=bool(item.get("used")),
                     reason=str(item.get("reason") or ""),
+                    classification=str(
+                        item.get("classification")
+                        or ("selected" if item.get("used") else "irrelevant")
+                    ),
+                    selected_depth=item.get("selected_depth"),
+                    planned_tools=list(item.get("planned_tools") or []),
                 )
                 for item in list(payload.get("domain_decisions") or [])
                 if isinstance(item, dict)

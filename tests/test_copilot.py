@@ -5,12 +5,17 @@ import re
 import time
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
+from src.application.copilot_context_contracts import (
+    COPILOT_SCOPE_CONTEXT_BUDGET_BYTES,
+    COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
+    finalize_context_bundle,
+)
 from src.application.research_action_registry import (
     ResearchActionPermissionError,
     ResearchActionRegistry,
@@ -32,6 +37,7 @@ from src.models.copilot import (
     CopilotResearchActionDefinition,
     CopilotResearchPlan,
     CopilotResearchPlanDomain,
+    CopilotResearchPlanDomainDecision,
     CopilotRunEvent,
     CopilotSourceRef,
     CopilotToolExecution,
@@ -2909,10 +2915,12 @@ def test_copilot_research_plan_oil_prompt(tmp_path, monkeypatch):
         assert payload["intent"] == "commodity_macro_research"
         assert payload["target_entities"][0]["kind"] == "commodity"
         assert payload["target_entities"][0]["id"] == "oil"
-        assert [item["domain"] for item in payload["domain_plan"][:3]] == [
+        assert [item["domain"] for item in payload["domain_plan"][:5]] == [
             "commodities",
+            "maritime",
             "macro",
             "prediction_markets",
+            "external_context",
         ]
     finally:
         runtime.shutdown()
@@ -4895,7 +4903,7 @@ def test_copilot_plan_execution_runs_external_context_provider(tmp_path, monkeyp
         payload = response.json()
         assert payload["status"] == "ready"
         assert any(
-            trace["tool_name"] == "get_external_context_summary"
+            trace["tool_name"] == "get_news_items_context"
             for trace in payload["tool_traces"]
         )
         assert any(
@@ -4903,10 +4911,13 @@ def test_copilot_plan_execution_runs_external_context_provider(tmp_path, monkeyp
             and source["provider"] == "sample_news"
             for source in payload["sources"]
         )
-        assert any(
-            "Skipped commodities" in warning
-            for warning in payload["warnings"]
+        commodity_decision = next(
+            item for item in payload["research_plan"]["domain_decisions"]
+            if item["domain"] == "commodities"
         )
+        assert commodity_decision["used"] is False
+        assert commodity_decision["classification"] == "irrelevant"
+        assert "explicitly limited" in commodity_decision["reason"].lower()
     finally:
         runtime.shutdown()
 
@@ -6347,5 +6358,969 @@ def test_create_session_route_is_authoritative_and_idempotent(tmp_path):
 
         rejected = client.post("/copilot/sessions", json={"session_id": "///"})
         assert rejected.status_code == 400
+    finally:
+        runtime.shutdown()
+
+
+def _checkpoint5_context_request(
+    *,
+    supplied_fingerprint: str | None = None,
+) -> CopilotResearchCardRequest:
+    return CopilotResearchCardRequest(
+        domain="portfolio",
+        prompt="Inspect this read-only research book.",
+        context_fingerprint=supplied_fingerprint,
+        context=CopilotRequestContext(
+            current_tab="portfolio",
+            workspace_mode="research_book",
+            portfolio_state={
+                "account_scope": "research-book-alpha",
+                "selected_entity": "NVDA",
+            },
+        ),
+    )
+
+
+def _checkpoint5_context_bundle(
+    *,
+    retrieved_at: datetime,
+    summary: dict | None = None,
+    warnings: list[str] | None = None,
+) -> CopilotContextBundle:
+    return CopilotContextBundle(
+        domain="portfolio",
+        current_tab="portfolio",
+        summary_data=summary
+        or {
+            "workspace_mode": "research_book",
+            "account_scope": "research-book-alpha",
+            "selected_entity": "NVDA",
+            "timeframe": "1Y",
+            "coverage": {"status": "ready"},
+        },
+        sources=[
+            CopilotSourceRef(
+                source_id="portfolio.snapshot",
+                label="Research-book snapshot",
+                kind="workspace",
+                provider="gamma",
+                origin="gamma.portfolio.snapshot",
+                retrieved_at=retrieved_at,
+                navigation_supported=True,
+                navigation_tab="portfolio",
+                navigation_mode="research_book",
+                navigation_context={
+                    "account_scope": "research-book-alpha",
+                    "symbol": "NVDA",
+                },
+            )
+        ],
+        warnings=list(warnings or ["Research-book boundary preserved."]),
+    )
+
+
+def test_checkpoint5_context_fingerprint_is_canonical_and_invalidates_on_change():
+    retrieved_at = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
+    request = _checkpoint5_context_request()
+    first = finalize_context_bundle(
+        _checkpoint5_context_bundle(
+            retrieved_at=retrieved_at,
+            summary={
+                "selected_entity": "NVDA",
+                "coverage": {"status": "ready", "provider": "gamma"},
+                "timeframe": "1Y",
+                "workspace_mode": "research_book",
+                "account_scope": "research-book-alpha",
+            },
+        ),
+        request,
+    )
+    equivalent = finalize_context_bundle(
+        _checkpoint5_context_bundle(
+            retrieved_at=retrieved_at,
+            summary={
+                "account_scope": "research-book-alpha",
+                "workspace_mode": "research_book",
+                "timeframe": "1Y",
+                "coverage": {"provider": "gamma", "status": "ready"},
+                "selected_entity": "NVDA",
+            },
+        ),
+        request,
+    )
+
+    assert first.context_contract is not None
+    assert equivalent.context_contract is not None
+    assert (
+        first.context_contract.context_fingerprint
+        == equivalent.context_contract.context_fingerprint
+    )
+    changed = finalize_context_bundle(
+        _checkpoint5_context_bundle(
+            retrieved_at=retrieved_at + timedelta(minutes=5),
+            summary={
+                **first.summary_data,
+                "timeframe": "3M",
+            },
+        ),
+        _checkpoint5_context_request(
+            supplied_fingerprint=first.context_contract.context_fingerprint,
+        ),
+    )
+    assert changed.context_contract is not None
+    assert (
+        changed.context_contract.context_fingerprint
+        != first.context_contract.context_fingerprint
+    )
+    assert changed.context_contract.freshness.status == "invalidated"
+    assert (
+        changed.context_contract.freshness.invalidated_fingerprint
+        == first.context_contract.context_fingerprint
+    )
+
+
+def test_checkpoint5_context_budget_compacts_deterministically_and_discloses_omissions():
+    retrieved_at = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
+    oversized = {
+        "workspace_mode": "research_book",
+        "account_scope": "research-book-alpha",
+        "selected_entity": "NVDA",
+        "timeframe": "1Y",
+        "warnings_detail": {
+            f"row_{index:04d}": {
+                "status": "degraded" if index % 5 == 0 else "ready",
+                "source_ids": [f"source.{index}"],
+                "transformation_note": "normalized " + ("x" * 260),
+            }
+            for index in range(700)
+        },
+        "api_key": "must-not-survive",
+    }
+    request = _checkpoint5_context_request()
+    first = finalize_context_bundle(
+        _checkpoint5_context_bundle(
+            retrieved_at=retrieved_at,
+            summary=oversized,
+            warnings=["Sparse provider coverage.", "Freshness is delayed."],
+        ),
+        request,
+    )
+    second = finalize_context_bundle(
+        _checkpoint5_context_bundle(
+            retrieved_at=retrieved_at,
+            summary=deepcopy(oversized),
+            warnings=["Sparse provider coverage.", "Freshness is delayed."],
+        ),
+        request,
+    )
+
+    assert first.context_contract is not None
+    assert second.context_contract is not None
+    contract = first.context_contract
+    assert contract.compaction.applied is True
+    assert contract.compaction.omitted_sections
+    assert contract.budget.original_bytes > contract.budget.scope_budget_bytes
+    assert contract.budget.final_bytes <= COPILOT_SCOPE_CONTEXT_BUDGET_BYTES["portfolio"]
+    assert contract.budget.within_scope_budget is True
+    assert first.summary_data == second.summary_data
+    assert contract.context_fingerprint == second.context_contract.context_fingerprint
+    assert "api_key" not in json.dumps(first.summary_data)
+    assert any("compacted deterministically" in warning for warning in first.warnings)
+    assert first.sources[0].source_id == "portfolio.snapshot"
+
+
+def test_checkpoint5_context_plan_and_omission_contract_survive_restart(tmp_path):
+    finalized = finalize_context_bundle(
+        _checkpoint5_context_bundle(
+            retrieved_at=datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc),
+        ),
+        _checkpoint5_context_request(),
+    )
+    assert finalized.context_contract is not None
+    plan = CopilotResearchPlan(
+        intent="portfolio_rate_shock",
+        domain_plan=[
+            CopilotResearchPlanDomain(
+                domain="portfolio",
+                depth="deep",
+                reason="The active research-book exposure is first-order.",
+                planned_tools=["get_portfolio_positions_summary"],
+            )
+        ],
+        domain_decisions=[
+            CopilotResearchPlanDomainDecision(
+                domain="portfolio",
+                used=True,
+                reason="Selected for bounded exposure context.",
+                classification="selected",
+                selected_depth="deep",
+                planned_tools=["get_portfolio_positions_summary"],
+            ),
+            CopilotResearchPlanDomainDecision(
+                domain="iv",
+                used=False,
+                reason="Options context is irrelevant to this bounded rate-shock request.",
+                classification="irrelevant",
+            ),
+        ],
+    )
+    result = CopilotResearchCardResult(
+        domain="portfolio",
+        current_tab="portfolio",
+        status="ready",
+        provider="gamma_executor",
+        card=ResearchCard(
+            title="Rate shock",
+            hypothesis="Research-book duration exposure is material.",
+            rationale="Read-only portfolio and macro context.",
+            required_data=[],
+            proposed_test="Run the bounded scenario.",
+            confounders=[],
+            next_steps=[],
+            caveats=[],
+        ),
+        sources=list(finalized.sources),
+        warnings=list(finalized.warnings),
+        research_plan=plan,
+        context_contracts=[finalized.context_contract],
+        context_budget={
+            "total_budget_bytes": COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
+            "used_bytes": finalized.context_contract.budget.final_bytes,
+            "within_total_budget": True,
+            "omitted_domains": [],
+        },
+    )
+    store_dir = tmp_path / "copilot-checkpoint5"
+    store = CopilotStore(store_dir)
+    session, snapshot, _turn = store.record_turn(
+        session_id="session_checkpoint5",
+        title="Checkpoint 5 replay",
+        domain="portfolio",
+        current_tab="portfolio",
+        workspace_mode="research_book",
+        prompt="Portfolio rate shock",
+        context_fingerprint=finalized.context_contract.context_fingerprint,
+        context_summary={
+            "context_contract": finalized.context_contract.to_dict(),
+            "account_scope": "research-book-alpha",
+        },
+        request_context={"account_scope": "research-book-alpha"},
+        selected_scope_domains=["portfolio", "risk", "macro"],
+        research_plan=plan,
+        result=result,
+    )
+
+    restarted = CopilotStore(store_dir)
+    restored = restarted.list_turns(session.session_id)[0]
+    restored_snapshot = restarted.get_context_snapshot(snapshot.snapshot_id)
+    assert restored.research_plan == plan
+    assert restored.result.research_plan == plan
+    assert (
+        restored.result.context_contracts[0].context_fingerprint
+        == finalized.context_contract.context_fingerprint
+    )
+    assert restored.result.context_budget["within_total_budget"] is True
+    assert restored_snapshot is not None
+    assert (
+        restored_snapshot.context_contract["context_fingerprint"]
+        == finalized.context_contract.context_fingerprint
+    )
+
+
+def test_checkpoint5_total_context_budget_omits_low_priority_domain_deterministically(
+    tmp_path,
+    monkeypatch,
+):
+    client, runtime = _build_test_client(tmp_path)
+    del client
+    try:
+        service = runtime.copilot_service
+        request = CopilotResearchCardRequest(
+            domain="synthesis",
+            prompt="Run a bounded four-domain context test.",
+            context=CopilotRequestContext(
+                current_tab="copilot",
+                workspace_mode="research",
+            ),
+        )
+        domain_tools = {
+            "portfolio": "get_portfolio_positions_summary",
+            "risk": "run_risk_contribution_analysis",
+            "iv": "inspect_options_structure",
+            "macro": "get_macro_workspace_drilldown",
+        }
+        payload_sizes = {
+            "portfolio": 24_000,
+            "risk": 30_000,
+            "iv": 30_000,
+            "macro": 20_000,
+        }
+        bundles = {
+            domain: finalize_context_bundle(
+                CopilotContextBundle(
+                    domain=domain,
+                    current_tab=domain,
+                    summary_data={
+                        "workspace_mode": "research",
+                        "status": "ready",
+                        "payload": character * payload_sizes[domain],
+                    },
+                    sources=[
+                        CopilotSourceRef(
+                            source_id=f"{domain}.budget_fixture",
+                            label=f"{domain} budget fixture",
+                            kind="workspace",
+                            provider="fixture",
+                            origin=f"tests.{domain}.budget",
+                            retrieved_at=datetime(
+                                2026,
+                                7,
+                                25,
+                                10,
+                                0,
+                                tzinfo=timezone.utc,
+                            ),
+                            navigation_supported=False,
+                            navigation_reason="Synthetic budget fixture.",
+                        )
+                    ],
+                ),
+                replace(request, domain=domain),
+            )
+            for domain, character in zip(
+                domain_tools,
+                ("p", "r", "i", "m"),
+                strict=True,
+            )
+        }
+        plan_domains = [
+            CopilotResearchPlanDomain(
+                domain=domain,
+                depth="medium",
+                reason=f"{domain} is relevant to the bounded fixture.",
+                planned_tools=[tool_id],
+            )
+            for domain, tool_id in domain_tools.items()
+        ]
+        plan = CopilotResearchPlan(
+            intent="checkpoint5_total_budget",
+            domain_plan=plan_domains,
+            domain_decisions=[
+                CopilotResearchPlanDomainDecision(
+                    domain=item.domain,
+                    used=True,
+                    reason=item.reason,
+                    classification="selected",
+                    selected_depth=item.depth,
+                    planned_tools=list(item.planned_tools),
+                )
+                for item in plan_domains
+            ],
+            max_tool_calls=10,
+            max_provider_calls=1,
+            max_elapsed_ms=12_000,
+        )
+        monkeypatch.setattr(service, "plan_research", lambda _request: plan)
+        monkeypatch.setattr(
+            service,
+            "_build_plan_execution_context",
+            lambda _request, domain: bundles[domain],
+        )
+
+        def execute_fixture(tool_id, arguments, context):
+            source = context.sources[0]
+            return CopilotToolExecution(
+                output={
+                    "status": "ready",
+                    "domain": context.domain,
+                    "source_ids": [source.source_id],
+                    "warnings": [],
+                },
+                trace=CopilotToolTrace(
+                    tool_name=tool_id,
+                    summary=f"Executed {context.domain} budget fixture.",
+                    arguments=arguments,
+                    source_ids=[source.source_id],
+                ),
+                sources=[source],
+            )
+
+        monkeypatch.setattr(service, "_execute_tool", execute_fixture)
+        result = service.execute_research_plan(request)
+        assert result.status == "ready"
+        assert result.context_budget["within_total_budget"] is True
+        assert result.context_budget["used_bytes"] <= COPILOT_TOTAL_CONTEXT_BUDGET_BYTES
+        assert result.context_budget["omitted_domains"] == [
+            {"domain": "macro", "reason": "budget_omission"}
+        ]
+        assert result.research_plan is not None
+        macro = next(
+            decision
+            for decision in result.research_plan.domain_decisions
+            if decision.domain == "macro"
+        )
+        assert macro.used is False
+        assert macro.classification == "budget_omission"
+        assert all(
+            contract.budget.within_scope_budget
+            for contract in result.context_contracts
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint5_new_drilldowns_are_registry_authorized_read_only_actions(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        definitions = {
+            item.tool_id: item
+            for item in runtime.copilot_service.list_research_action_definitions()
+        }
+        tool_ids = {
+            "inspect_equity_research_context",
+            "inspect_commodity_curve_fundamentals",
+            "get_maritime_chokepoint_context",
+            "get_maritime_route_context",
+            "inspect_options_structure",
+            "get_news_items_context",
+        }
+        assert tool_ids <= definitions.keys()
+        for tool_id in tool_ids:
+            definition = definitions[tool_id]
+            assert definition.read_only is True
+            assert definition.mutates_local_state is False
+            assert definition.requires_confirmation is False
+            assert definition.permission_policy == "automatic"
+            assert definition.input_schema["type"] == "object"
+            assert definition.output_schema["type"] == "object"
+            assert definition.provenance_behavior
+            assert definition.failure_modes
+            authorized = (
+                runtime.copilot_service.action_registry.authorize_automatic(tool_id)
+            )
+            assert authorized.tool_id == tool_id
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint5_maritime_and_news_provider_absence_are_typed_unavailable(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.maritime_service = None
+        maritime_request = CopilotResearchCardRequest(
+            domain="maritime",
+            prompt="Inspect Hormuz and do not infer cargo or operational risk.",
+            context=CopilotRequestContext(
+                current_tab="maritime",
+                workspace_mode="chokepoints",
+            ),
+        )
+        maritime_context = runtime.copilot_service._build_plan_execution_context(
+            maritime_request,
+            "maritime",
+        )
+        chokepoints = runtime.copilot_service._execute_tool(
+            "get_maritime_chokepoint_context",
+            {"chokepoint_id": "strait-of-hormuz", "max_rows": 4},
+            maritime_context,
+        )
+        routes = runtime.copilot_service._execute_tool(
+            "get_maritime_route_context",
+            {"route_id": None, "max_rows": 4},
+            maritime_context,
+        )
+        assert chokepoints.output["status"] == "unavailable"
+        assert chokepoints.output["chokepoints"] == []
+        assert routes.output["status"] == "unavailable"
+        assert routes.output["routes"] == []
+        assert all(source.navigation_supported is False for source in maritime_context.sources)
+        assert any("not inferred" in warning.lower() for warning in maritime_context.warnings)
+
+        runtime.copilot_service.news_service = None
+        news_request = CopilotResearchCardRequest(
+            domain="external_context",
+            prompt="Recent oil-disruption news.",
+            context=CopilotRequestContext(
+                current_tab="copilot",
+                workspace_mode="research",
+            ),
+        )
+        news_context = runtime.copilot_service._build_plan_execution_context(
+            news_request,
+            "external_context",
+        )
+        news = runtime.copilot_service._execute_tool(
+            "get_news_items_context",
+            {"limit": 8},
+            news_context,
+        )
+        assert news.output["status"] == "unavailable"
+        assert news.output["items"] == []
+        assert any(
+            "missing coverage" in warning.lower()
+            or "no newsservice" in warning.lower()
+            for warning in news.output["warnings"]
+        )
+        unavailable_source = next(
+            source
+            for source in news.sources
+            if source.source_id == "external_context.news_feed"
+        )
+        assert unavailable_source.provider == "unavailable"
+        assert unavailable_source.navigation_supported is False
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint5_priority_drilldowns_preserve_provenance_and_navigation(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    del client
+    try:
+        retrieved_at = "2026-07-25T10:00:00+00:00"
+        equity_request = CopilotResearchCardRequest(
+            domain="equity_research",
+            prompt="Research NVDA",
+            context=CopilotRequestContext(
+                current_tab="equity_research",
+                workspace_mode="research",
+                research_state={
+                    "result": {
+                        "scope_type": "single_ticker",
+                        "primary_symbol": "NVDA",
+                        "benchmark_symbol": "SPY",
+                        "lookback_days": 252,
+                        "observations_count": 252,
+                        "summary": {"total_return": 0.18},
+                        "structure": {"position_count": 1},
+                        "coverage": {"missing_symbols": []},
+                        "weights": [{"symbol": "NVDA", "weight": 1.0}],
+                        "constituents": [
+                            {
+                                "symbol": "NVDA",
+                                "weight": 1.0,
+                                "total_return": 0.18,
+                                "weighted_return": 0.18,
+                            }
+                        ],
+                        "performance_points": [{"timestamp": retrieved_at, "value": 1.18}],
+                        "source_provider": "mock_research",
+                        "origin": "gamma.research.analyze",
+                        "warnings": [],
+                    }
+                },
+            ),
+        )
+        equity_context = runtime.copilot_service._build_plan_execution_context(
+            equity_request,
+            "equity_research",
+        )
+        equity = runtime.copilot_service._execute_tool(
+            "inspect_equity_research_context",
+            {"symbol": "NVDA", "max_rows": 6},
+            equity_context,
+        )
+        assert equity.output["status"] == "ready"
+        assert equity.output["symbol"] == "NVDA"
+        assert equity.output["timeframe"] == 252
+        assert equity.sources[0].provider == "mock_research"
+        assert equity.sources[0].provider_native_id == "NVDA"
+        assert equity.sources[0].navigation_supported is True
+        assert equity.sources[0].navigation_context == {
+            "symbol": "NVDA",
+            "timeframe": "252",
+        }
+
+        commodities_workspace = {
+            "mode": "curves_spreads",
+            "selected_instrument_id": "wti",
+            "source_provider": "mock_commodities",
+            "origin": "gamma.commodities.workspace",
+            "retrieved_at": retrieved_at,
+            "coverage": {
+                "provider_id": "mock_commodities",
+                "provider_label": "Mock commodities",
+                "coverage_status": "live",
+                "freshness_label": "live",
+                "source_timestamp": retrieved_at,
+                "retrieved_at": retrieved_at,
+                "caveats": [],
+            },
+            "instruments": [{"instrument_id": "wti"}],
+            "market_summaries": [],
+            "spreads": [],
+            "curves": [
+                {
+                    "instrument_id": "wti",
+                    "as_of": retrieved_at,
+                    "shape_label": "backwardation",
+                    "front_spread": 1.2,
+                    "nodes": [
+                        {
+                            "contract": {
+                                "contract_id": "CL-2026-09",
+                                "symbol": "CLU6",
+                                "contract_month": "2026-09",
+                                "expiry_date": "2026-08-20",
+                                "is_front_month": True,
+                            },
+                            "price": 82.5,
+                            "days_to_expiry": 26,
+                            "source_provider": "mock_commodities",
+                            "retrieved_at": retrieved_at,
+                            "origin": "mock.curve",
+                            "transformation_note": "Normalized provider contract.",
+                        }
+                    ],
+                    "source_provider": "mock_commodities",
+                    "retrieved_at": retrieved_at,
+                    "origin": "gamma.commodities.curve_analytics",
+                    "transformation_note": "Existing Gamma curve analytics.",
+                    "warnings": [],
+                }
+            ],
+            "inventories": [
+                {
+                    "metadata": {
+                        "series_id": "eia-crude-stocks",
+                        "provider_series_id": "PET.WCESTUS1.W",
+                        "instrument_id": "wti",
+                        "label": "US crude stocks",
+                        "unit": "thousand barrels",
+                        "frequency": "weekly",
+                        "source_provider": "eia",
+                        "retrieved_at": retrieved_at,
+                        "origin": "gamma.commodities.inventory",
+                    },
+                    "latest_value": 420000,
+                    "points": [
+                        {"timestamp": "2026-07-18T00:00:00+00:00", "value": 420000}
+                    ],
+                    "source_provider": "eia",
+                    "retrieved_at": retrieved_at,
+                    "origin": "gamma.commodities.inventory",
+                    "transformation_note": "Provider-native weekly series.",
+                    "warnings": [],
+                }
+            ],
+            "events": [
+                {
+                    "event_id": "eia-weekly",
+                    "title": "EIA weekly petroleum status",
+                    "category": "inventory",
+                    "scheduled_at": "2026-07-29T14:30:00+00:00",
+                    "importance": "high",
+                    "linked_instrument_ids": ["wti"],
+                    "source_provider": "eia",
+                    "retrieved_at": retrieved_at,
+                    "origin": "gamma.commodities.events",
+                }
+            ],
+            "cross_domain_links": [],
+            "price_reconciliations": [
+                {
+                    "instrument_id": "wti",
+                    "status": "aligned",
+                    "warnings": [],
+                }
+            ],
+            "warnings": [],
+        }
+        commodities_request = CopilotResearchCardRequest(
+            domain="commodities",
+            prompt="Inspect WTI curve and inventories.",
+            context=CopilotRequestContext(
+                current_tab="commodities",
+                workspace_mode="curves_spreads",
+                commodities_state={"workspace": commodities_workspace},
+            ),
+        )
+        commodities_context = runtime.copilot_service._build_plan_execution_context(
+            commodities_request,
+            "commodities",
+        )
+        commodities = runtime.copilot_service._execute_tool(
+            "inspect_commodity_curve_fundamentals",
+            {
+                "instrument_id": "wti",
+                "max_curve_nodes": 6,
+                "max_inventory_points": 4,
+            },
+            commodities_context,
+        )
+        assert commodities.output["status"] == "ready"
+        assert commodities.output["curve"]["nodes"][0]["contract_id"] == "CL-2026-09"
+        assert (
+            commodities.output["inventories"][0]["provider_series_id"]
+            == "PET.WCESTUS1.W"
+        )
+        assert commodities.output["assumptions"]
+        assert any(
+            source.provider_native_id == "PET.WCESTUS1.W"
+            and source.navigation_mode == "inventories_fundamentals"
+            for source in commodities.sources
+        )
+
+        iv_surface = {
+            "symbol": "NVDA",
+            "timestamp": retrieved_at,
+            "retrieved_at": retrieved_at,
+            "snapshot_available": True,
+            "spot": 125.0,
+            "expiries": ["2026-08-21"],
+            "strikes": [120.0, 125.0, 130.0],
+            "iv_grid": [[0.42, 0.40, 0.41]],
+            "delayed": False,
+            "warnings": [],
+            "source_provider": "mock_options",
+            "origin": "gamma.iv.surface",
+            "freshness_label": "live",
+            "surface_model": "linear",
+            "surface_model_status": "applied",
+            "surface_model_notes": ["No extrapolation beyond quoted strikes."],
+            "pricing_assumptions": {
+                "risk_free_rate": 0.04,
+                "dividend_yield": 0.0,
+            },
+            "expiry_analytics": [
+                {
+                    "expiry": "2026-08-21",
+                    "atm_strike": 125.0,
+                    "atm_blended_implied_volatility": 0.40,
+                    "historical_volatility": 0.32,
+                    "implied_move": 0.08,
+                    "quality": "complete",
+                    "source_provider": "mock_options",
+                    "retrieved_at": retrieved_at,
+                    "origin": "gamma.iv.expiry_analytics",
+                    "transformation_note": "Normalized listed contracts.",
+                    "warnings": [],
+                }
+            ],
+            "contracts": [
+                {
+                    "contract_id": "NVDA-20260821-C-125",
+                    "provider_contract_id": "conid-123",
+                    "expiry": "2026-08-21",
+                    "strike": 125.0,
+                    "right": "C",
+                }
+            ],
+        }
+        iv_request = CopilotResearchCardRequest(
+            domain="iv",
+            prompt="Inspect NVDA options structure.",
+            context=CopilotRequestContext(
+                current_tab="iv",
+                workspace_mode="surface",
+                iv_state={
+                    "target_symbol": "NVDA",
+                    "surface": iv_surface,
+                    "session": {"market_data_mode": "live"},
+                },
+            ),
+        )
+        iv_context = runtime.copilot_service._build_plan_execution_context(
+            iv_request,
+            "iv",
+        )
+        iv = runtime.copilot_service._execute_tool(
+            "inspect_options_structure",
+            {"symbol": "NVDA", "expiry": None, "max_expiries": 4},
+            iv_context,
+        )
+        assert iv.output["status"] == "ready"
+        assert iv.output["surface_model"] == "linear"
+        assert iv.output["pricing_assumptions"]["risk_free_rate"] == 0.04
+        assert iv.output["expiries"][0]["provider_contract_ids"] == ["conid-123"]
+        expiry_source = next(
+            source for source in iv.sources if source.kind == "iv_expiry"
+        )
+        assert expiry_source.navigation_supported is True
+        assert expiry_source.navigation_context["contract_id"] == "NVDA-20260821-C-125"
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint5_new_source_types_resolve_evidence_and_reject_unknown_refs():
+    sources = [
+        CopilotSourceRef(
+            source_id="equity_research.scope.nvda",
+            label="NVDA Equity Research",
+            kind="equity_research",
+            provider="mock_research",
+            origin="gamma.research.analyze",
+            navigation_supported=True,
+            navigation_tab="equity_research",
+            navigation_mode="single_name",
+            navigation_context={"symbol": "NVDA"},
+        ),
+        CopilotSourceRef(
+            source_id="commodities.curve.wti",
+            label="WTI curve",
+            kind="commodity_curve",
+            provider="mock_commodities",
+            origin="gamma.commodities.curve_analytics",
+            navigation_supported=True,
+            navigation_tab="commodities",
+            navigation_mode="curves_spreads",
+            navigation_context={"instrument_id": "wti"},
+        ),
+        CopilotSourceRef(
+            source_id="maritime.chokepoint.strait_of_hormuz",
+            label="Strait of Hormuz",
+            kind="maritime_chokepoint",
+            provider="sample_maritime",
+            origin="gamma.maritime.chokepoint_summary",
+            navigation_supported=True,
+            navigation_tab="maritime",
+            navigation_mode="chokepoints",
+            navigation_context={"chokepoint_id": "strait-of-hormuz"},
+        ),
+        CopilotSourceRef(
+            source_id="iv.expiry.nvda.2026_08_21",
+            label="NVDA IV expiry",
+            kind="iv_expiry",
+            provider="mock_options",
+            origin="gamma.iv.expiry_analytics",
+            navigation_supported=True,
+            navigation_tab="iv",
+            navigation_mode="surface",
+            navigation_context={"symbol": "NVDA", "expiry": "2026-08-21"},
+        ),
+        CopilotSourceRef(
+            source_id="external_context.news_item.feed_1",
+            label="Oil disruption headline",
+            kind="news_item",
+            provider="sample_news",
+            origin="sample.news.item",
+            url="https://news.example.com/oil-disruption",
+            navigation_supported=True,
+            navigation_context={"news_item_id": "feed:1"},
+        ),
+        CopilotSourceRef(
+            source_id="maritime.coverage",
+            label="Maritime coverage",
+            kind="provenance",
+            provider="sample_maritime",
+            origin="gamma.maritime.coverage",
+            navigation_supported=False,
+            navigation_reason="Coverage has no standalone destination.",
+        ),
+    ]
+    valid_ids = [source.source_id for source in sources[:5]]
+    result = CopilotResearchCardResult(
+        domain="synthesis",
+        current_tab="copilot",
+        status="ready",
+        provider="gamma_executor",
+        card=ResearchCard(
+            title="Checkpoint 5 evidence",
+            hypothesis="Each supported domain can ground a bounded claim.",
+            rationale="Registry-backed source references.",
+            required_data=[],
+            proposed_test="Resolve all evidence references.",
+            confounders=[],
+            next_steps=[],
+            caveats=[],
+            source_backed_claims=[
+                *[
+                    ResearchClaim(
+                        claim=f"Claim grounded by {source_id}.",
+                        evidence_refs=[source_id],
+                    )
+                    for source_id in valid_ids
+                ],
+                ResearchClaim(
+                    claim="Claim with a fabricated source.",
+                    evidence_refs=["unknown.checkpoint5.source"],
+                ),
+            ],
+        ),
+        sources=sources,
+    )
+
+    normalized = CopilotService._normalize_result_sources(result)
+    assert normalized.card is not None
+    assert {
+        ref
+        for claim in normalized.card.source_backed_claims
+        for ref in claim.evidence_refs
+    } == set(valid_ids)
+    assert "Claim with a fabricated source." in normalized.card.inferred_claims
+    assert all(
+        "unknown.checkpoint5.source" not in claim.evidence_refs
+        for claim in normalized.card.source_backed_claims
+    )
+    coverage = next(
+        source for source in normalized.sources if source.source_id == "maritime.coverage"
+    )
+    assert coverage.navigation_supported is False
+    assert coverage.navigation_reason
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_domains", "expected_omissions"),
+    [
+        (
+            "Research NVDA using the relevant Gamma domains.",
+            {"fundamentals", "equity_research", "iv", "external_context"},
+            {"portfolio", "commodities", "maritime"},
+        ),
+        (
+            "Research CPI and the next Fed decision using relevant Gamma domains.",
+            {"macro", "prediction_markets", "external_context"},
+            {"portfolio", "commodities", "maritime"},
+        ),
+        (
+            "Research an oil supply disruption using relevant Gamma domains.",
+            {
+                "commodities",
+                "maritime",
+                "macro",
+                "prediction_markets",
+                "external_context",
+            },
+            {"portfolio", "iv"},
+        ),
+        (
+            "Is my portfolio exposed to a 100 basis-point rate shock?",
+            {"portfolio", "risk", "macro"},
+            {"commodities", "maritime", "external_context"},
+        ),
+    ],
+)
+def test_checkpoint5_representative_plans_select_domains_and_explain_omissions(
+    tmp_path,
+    prompt,
+    expected_domains,
+    expected_omissions,
+):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/research-plan",
+            json={
+                "domain": "synthesis",
+                "prompt": prompt,
+                "context": {
+                    "current_tab": "copilot",
+                    "workspace_mode": "research_book",
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        selected = {item["domain"] for item in payload["domain_plan"]}
+        assert selected == expected_domains
+        decisions = {item["domain"]: item for item in payload["domain_decisions"]}
+        assert all(decisions[domain]["used"] is True for domain in expected_domains)
+        assert all(
+            decisions[domain]["classification"] == "selected"
+            for domain in expected_domains
+        )
+        for domain in expected_omissions:
+            assert decisions[domain]["used"] is False
+            assert decisions[domain]["classification"] == "irrelevant"
+            assert decisions[domain]["reason"]
     finally:
         runtime.shutdown()

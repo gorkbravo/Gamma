@@ -25,6 +25,15 @@ function asStringArray(value: unknown) {
     .map((item) => item.trim());
 }
 
+function asStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => typeof item === "string")
+      .map(([key, item]) => [key, item as string])
+  );
+}
+
 function normalizeClaim(value: unknown): ResearchClaim | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -71,7 +80,15 @@ function normalizeSource(value: unknown): CopilotSourceRef | null {
     provider: asString(row.provider),
     origin: asString(row.origin),
     description: asOptionalString(row.description),
-    retrieved_at: asOptionalString(row.retrieved_at)
+    retrieved_at: asOptionalString(row.retrieved_at),
+    provider_native_id: asOptionalString(row.provider_native_id),
+    url: asOptionalString(row.url),
+    navigation_supported:
+      typeof row.navigation_supported === "boolean" ? row.navigation_supported : null,
+    navigation_reason: asOptionalString(row.navigation_reason),
+    navigation_tab: asOptionalString(row.navigation_tab) as CopilotSourceRef["navigation_tab"],
+    navigation_mode: asOptionalString(row.navigation_mode),
+    navigation_context: asStringRecord(row.navigation_context)
   };
 }
 

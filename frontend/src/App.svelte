@@ -5,7 +5,7 @@
   import Shell from "./components/Shell.svelte";
   import StatusRail from "./components/StatusRail.svelte";
   import TabBar, { type TabBarItem } from "./components/TabBar.svelte";
-  import { installExternalLinkHandler } from "./lib/external-links";
+  import { installExternalLinkHandler, openExternalUrl } from "./lib/external-links";
   import { matchesActionKeybinding, isEditableEventTarget } from "./lib/keybindings";
   import { openKeyBindingsWindow } from "./lib/keybindings-window";
   import {
@@ -19,7 +19,10 @@
   } from "./lib/navigation";
   import { buildIvRequestFromResearch, buildRiskRequestFromResearch } from "./lib/workspace";
   import { createRiskHandoffController } from "./lib/risk-handoff";
-  import { buildCopilotSourceHandoff } from "./lib/copilot-source-navigation";
+  import {
+    buildCopilotSourceHandoff,
+    validatedExternalSourceUrl,
+  } from "./lib/copilot-source-navigation";
   import { createAdaptivePoller, type AdaptivePoller } from "./lib/adaptive-poller";
   import { hydrateActiveWorkspace } from "./lib/shell/bootstrap";
   import { markStartupBegin, markStartupUsable } from "./lib/request-metrics";
@@ -232,6 +235,7 @@
     MacroContextState,
     MacroSnapshot,
     MaritimeMode,
+    MaritimeWorkspaceResponse,
     PortfolioPerformanceResponse,
     PortfolioSnapshot,
     PredictionMarket,
@@ -349,6 +353,7 @@
     macro: $macroContext,
     macroSnapshot: $macroSnapshot,
     commodities: $commoditiesWorkspace,
+    maritime: $maritimeWorkspace,
     prediction: $predictionMarketDetail,
     crypto: $cryptoTokenDetail,
     fundamentals: $fundamentalsOverview,
@@ -402,6 +407,7 @@
     ivSession: $ivSession,
     macro: $macroContext,
     commodities: $commoditiesWorkspace,
+    maritime: $maritimeWorkspace,
     prediction: $predictionMarketDetail,
     crypto: $cryptoTokenDetail,
     fundamentals: $fundamentalsOverview,
@@ -658,7 +664,7 @@
     { tabId: "crypto", domain: "crypto", label: "Crypto", unavailableLabel: "Select and load a crypto token" },
     { tabId: "fundamentals", domain: "fundamentals", label: "Fundamentals", unavailableLabel: "Select and load a Fundamentals company" },
     { tabId: "commodities", domain: "commodities", label: "Commodities", unavailableLabel: "Load the Commodities workspace" },
-    { tabId: "maritime", domain: null, label: "Sealanes", unavailableLabel: "Sealanes Copilot grounding is not implemented yet" },
+    { tabId: "maritime", domain: "maritime", label: "Sealanes", unavailableLabel: "Load the Sealanes workspace" },
     { tabId: "risk", domain: "risk", label: "Risk", unavailableLabel: "Run a Risk computation" },
     { tabId: "iv", domain: "iv", label: "Options", unavailableLabel: "Load an options surface" },
   ];
@@ -699,6 +705,7 @@
     macro,
     macroSnapshot,
     commodities,
+    maritime,
     prediction,
     crypto,
     fundamentals,
@@ -722,6 +729,7 @@
     macro: MacroContextState;
     macroSnapshot: MacroSnapshot | null;
     commodities: CommodityWorkspaceResponse | null;
+    maritime: MaritimeWorkspaceResponse | null;
     prediction: PredictionMarket | null;
     crypto: CryptoToken | null;
     fundamentals: FundamentalsOverview | null;
@@ -861,6 +869,17 @@
       );
     }
 
+    if (maritime) {
+      pushOption(
+        "maritime",
+        `Sealanes | ${maritime.mode.replaceAll("_", " ")} | ${maritime.coverage.coverage_status}`,
+        formatShortTimestamp(maritime.coverage.source_timestamp ?? maritime.retrieved_at)
+          ? `Data ${formatShortTimestamp(maritime.coverage.source_timestamp ?? maritime.retrieved_at)}`
+          : `Freshness ${maritime.coverage.freshness_label}`,
+        formatWarningLabel(maritime.warnings.length + maritime.coverage.caveats.length)
+      );
+    }
+
     if (prediction) {
       pushOption(
         "prediction_markets",
@@ -975,6 +994,7 @@
     ivSession,
     macro,
     commodities,
+    maritime,
     prediction,
     crypto,
     fundamentals,
@@ -998,6 +1018,7 @@
     ivSession: IvSessionStatus | null;
     macro: MacroContextState;
     commodities: CommodityWorkspaceResponse | null;
+    maritime: MaritimeWorkspaceResponse | null;
     prediction: PredictionMarket | null;
     crypto: CryptoToken | null;
     fundamentals: FundamentalsOverview | null;
@@ -1116,6 +1137,28 @@
         placeholder:
           "Pressure-test the selected commodity setup, compare curve and inventory context, or frame the cleanest cross-domain handoff.",
         thread: threads.commodities,
+        scopeOptions: [],
+        selectedScopeDomains: [],
+        selectionMessage: null,
+      };
+    }
+
+    if (tab === "maritime") {
+      return {
+        supported: maritime != null,
+        domain: "maritime",
+        triggerLabel: maritime ? "Sealanes context" : "Load workspace",
+        contextLabel: maritime
+          ? `Sealanes | ${maritime.mode.replaceAll("_", " ")} | ${maritime.coverage.coverage_status}`
+          : "No Sealanes context",
+        domainLabel: "Sealanes",
+        guidance:
+          maritime != null
+            ? "Grounded in normalized MaritimeService route and chokepoint context with explicit AIS, historical-coverage, inference, and provider caveats. Gamma does not invent congestion or maritime risk labels."
+            : "Load the Sealanes workspace before generating a research card.",
+        placeholder:
+          "Inspect a chokepoint observation, trace a supported route context, or enumerate the missing AIS and historical coverage.",
+        thread: threads.maritime,
         scopeOptions: [],
         selectedScopeDomains: [],
         selectionMessage: null,
@@ -2153,6 +2196,11 @@
   }
 
   async function handleOpenCopilotSource(source: CopilotSourceRef) {
+    const externalUrl = validatedExternalSourceUrl(source.url);
+    if (externalUrl) {
+      await openExternalUrl(externalUrl);
+      return;
+    }
     const handoff = buildCopilotSourceHandoff(source, latestCopilotHandoff);
     if (!handoff) {
       return;
@@ -2195,6 +2243,11 @@
           handoff.selected_entity?.normalized_id ??
           undefined
       });
+      return;
+    } else if (targetTab === "maritime") {
+      const mode = (handoff.intended_target_mode ?? "live_map") as MaritimeMode;
+      maritimeMode = mode;
+      await loadMaritimeWorkspace({ mode });
       return;
     } else if (targetTab === "prediction_markets") {
       const marketId =

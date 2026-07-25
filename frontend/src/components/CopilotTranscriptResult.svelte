@@ -209,7 +209,10 @@
           <div class="decision-list">
             {#each block.plan.domain_decisions as decision}
               <div class:skip={!decision.used}>
-                <strong>{decision.used ? "Use" : "Skip"} {decision.domain.replaceAll("_", " ")}</strong>
+                <strong>
+                  {decision.used ? "Use" : "Skip"} {decision.domain.replaceAll("_", " ")}
+                  · {(decision.classification ?? (decision.used ? "selected" : "irrelevant")).replaceAll("_", " ")}
+                </strong>
                 <span>{decision.reason}</span>
               </div>
             {/each}
@@ -468,6 +471,9 @@
                   </div>
                   <small>{source.source_id} / {source.kind || "source"}</small>
                   {#if source.description}<p>{source.description}</p>{/if}
+                  {#if !sourceIsNavigable(source) && source.navigation_reason}
+                    <small>{source.navigation_reason}</small>
+                  {/if}
                 </div>
               {/each}
             </section>

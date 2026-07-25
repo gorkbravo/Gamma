@@ -88,8 +88,6 @@ class MaritimeService:
                 vessel = vessel_index.get(position.vessel_id)
                 by_type[_display_vessel_type(vessel)] += 1
             total = sum(by_type.values())
-            baseline = _baseline_for_chokepoint(chokepoint.chokepoint_id)
-            congestion_score = _congestion_score(total, baseline)
             summaries.append(
                 MaritimeChokepointSummary(
                     chokepoint_id=chokepoint.chokepoint_id,
@@ -98,13 +96,13 @@ class MaritimeService:
                     coverage_status=snapshot.coverage.coverage_status,
                     total_vessel_count=total,
                     vessel_count_by_type=dict(sorted(by_type.items())),
-                    baseline_vessel_count=baseline,
-                    congestion_score=congestion_score,
-                    congestion_label=_congestion_label(congestion_score, total),
+                    baseline_vessel_count=None,
+                    congestion_score=None,
+                    congestion_label="unavailable",
                     commodity_links=list(chokepoint.strategic_commodities),
                     methodology=(
-                        "Counts use latest sample AIS-like points inside each chokepoint bounding box; "
-                        "baseline counts are static sample references, not operational traffic baselines."
+                        "Counts use latest normalized AIS-like points inside each chokepoint bounding box. "
+                        "No congestion baseline or operational-risk label is computed."
                     ),
                     caveats=[
                         "Coverage is sample/partial and cannot measure true chokepoint congestion.",
@@ -118,7 +116,7 @@ class MaritimeService:
                     ),
                 )
             )
-        summaries.sort(key=lambda row: (-(row.congestion_score or 0.0), row.name))
+        summaries.sort(key=lambda row: (-row.total_vessel_count, row.name))
         return summaries
 
     def _build_flow_summaries(

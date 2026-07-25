@@ -130,7 +130,11 @@ class CopilotAgentsOperatorService:
         events: list[CopilotOperatorProgressEvent] = []
         sources: dict[str, CopilotSourceRef] = {}
         tool_traces: list[CopilotToolTrace] = []
-        warnings: list[str] = list(plan.warnings)
+        warnings: list[str] = [
+            warning
+            for warning in plan.warnings
+            if not warning.startswith("Planner-only prototype")
+        ]
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
         failed_steps: list[str] = []
@@ -213,7 +217,7 @@ class CopilotAgentsOperatorService:
                 "allowed_tool_ids": list(allowed_tool_ids),
             },
         )
-        for warning in plan.warnings:
+        for warning in warnings:
             record_event("warning", title="Plan warning", message=warning, event_warnings=[warning])
 
         if not allowed_tool_ids and not plan.confirmation_checkpoints:

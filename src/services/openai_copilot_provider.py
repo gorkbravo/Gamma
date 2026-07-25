@@ -681,6 +681,9 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             "prediction_markets": "Generate a concise research card for the selected Gamma prediction market.",
             "risk": "Generate a concise research card for the active Gamma risk workspace.",
             "iv": "Generate a concise research card for the active Gamma IV workspace.",
+            "commodities": "Generate a concise research card for the active Gamma commodities workspace.",
+            "maritime": "Generate a concise research card for the active Gamma Sealanes workspace.",
+            "external_context": "Generate a concise research card from the approved item-level news context.",
             "synthesis": "Generate a concise cross-context research synthesis for the selected Gamma domains.",
         }.get(request.domain, "Generate a concise research card for the current Gamma workspace.")
         requested_prompt = (request.prompt or "").strip() or default_prompt
@@ -695,11 +698,20 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                     "label": source.label,
                     "kind": source.kind,
                     "provider": source.provider,
+                    "provider_native_id": source.provider_native_id,
+                    "url": source.url,
+                    "navigation_supported": source.navigation_supported,
+                    "navigation_reason": source.navigation_reason,
                 }
                 for source in context.sources
             ],
             "warnings": context.warnings,
             "read_only_safety": context.read_only_safety,
+            "context_contract": (
+                context.context_contract.to_dict()
+                if context.context_contract is not None
+                else None
+            ),
         }
         return {
             "role": "user",

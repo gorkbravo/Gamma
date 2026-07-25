@@ -52,6 +52,29 @@ def test_news_event_item_requires_core_provenance_fields():
         )
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "javascript:alert(1)",
+        "file:///tmp/news.html",
+        "https://user:password@example.com/news",
+        "https:///missing-host",
+    ],
+)
+def test_news_event_item_rejects_unsafe_navigation_urls(url):
+    with pytest.raises(ValueError, match="navigable http/https URL"):
+        NewsEventItem(
+            normalized_id="unsafe",
+            title="Unsafe URL",
+            url=url,
+            source_provider="rss",
+            source_name="Example",
+            published_at=datetime(2026, 4, 22),
+            retrieved_at=datetime(2026, 4, 22),
+            origin="test",
+        )
+
+
 @dataclass
 class _StaticNewsProvider:
     provider_id: str
@@ -89,6 +112,68 @@ def _item(
         origin="test.provider",
         freshness_label=FreshnessLabel.DELAYED,
     )
+
+
+def test_news_service_dedupes_cross_feed_event_and_preserves_reporting_provenance():
+    published_at = datetime(2026, 4, 22, 10, 0)
+    first = NewsEventItem(
+        normalized_id="feed-a:oil-disruption",
+        provider_item_id="a-1",
+        title="Oil shipping disruption raises supply concerns",
+        url="https://alpha.example.com/oil-disruption",
+        source_provider="feed_a",
+        source_name="Alpha News",
+        published_at=published_at,
+        retrieved_at=datetime(2026, 4, 22, 10, 5),
+        origin="feed_a.latest",
+        tags=["oil"],
+        warnings=["Feed A is delayed."],
+        freshness_label=FreshnessLabel.DELAYED,
+    )
+    second = NewsEventItem(
+        normalized_id="feed-b:oil-disruption",
+        provider_item_id="b-9",
+        title="Oil shipping disruption raises supply concerns",
+        url="https://beta.example.com/world/oil-disruption",
+        source_provider="feed_b",
+        source_name="Beta Wire",
+        published_at=published_at,
+        retrieved_at=datetime(2026, 4, 22, 10, 7),
+        origin="feed_b.latest",
+        tags=["shipping"],
+        warnings=["Feed B metadata is incomplete."],
+        freshness_label=FreshnessLabel.DELAYED,
+    )
+    forward = NewsService(
+        [
+            _StaticNewsProvider("feed_a", "Alpha News", [first]),
+            _StaticNewsProvider("feed_b", "Beta Wire", [second]),
+        ],
+        cache_ttl_seconds=0,
+    ).latest(limit=10)
+    reverse = NewsService(
+        [
+            _StaticNewsProvider("feed_b", "Beta Wire", [second]),
+            _StaticNewsProvider("feed_a", "Alpha News", [first]),
+        ],
+        cache_ttl_seconds=0,
+    ).latest(limit=10)
+
+    assert len(forward.items) == 1
+    assert len(reverse.items) == 1
+    merged = forward.items[0]
+    assert merged.normalized_id == reverse.items[0].normalized_id
+    assert merged.normalized_id == "feed-b:oil-disruption"
+    assert {source.source_provider for source in merged.reporting_sources} == {
+        "feed_a",
+        "feed_b",
+    }
+    assert merged.tags == ["shipping", "oil"]
+    assert set(merged.warnings) == {
+        "Feed A is delayed.",
+        "Feed B metadata is incomplete.",
+    }
+    assert "retained all reporting feed provenance" in merged.transformation_note
 
 
 class _ChangingNewsProvider:

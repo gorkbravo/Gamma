@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.models.news import NewsEventEntity, NewsEventFeed, NewsEventItem
+from src.models.news import NewsEventEntity, NewsEventFeed, NewsEventItem, NewsReportingSource
 from src.models.provenance import FreshnessLabel
 
 
@@ -18,6 +18,22 @@ class NewsEventEntityModel(BaseModel):
 
     @classmethod
     def from_domain(cls, row: NewsEventEntity) -> "NewsEventEntityModel":
+        return cls(**row.__dict__)
+
+
+class NewsReportingSourceModel(BaseModel):
+    normalized_id: str
+    source_provider: str
+    source_name: str
+    url: str
+    published_at: datetime
+    retrieved_at: datetime
+    origin: str
+    provider_item_id: str | None = None
+    source_domain: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: NewsReportingSource) -> "NewsReportingSourceModel":
         return cls(**row.__dict__)
 
 
@@ -39,6 +55,7 @@ class NewsEventItemModel(BaseModel):
     source_reliability: str = "unknown"
     warnings: list[str] = Field(default_factory=list)
     transformation_note: str | None = None
+    reporting_sources: list[NewsReportingSourceModel] = Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, row: NewsEventItem) -> "NewsEventItemModel":
@@ -47,6 +64,10 @@ class NewsEventItemModel(BaseModel):
                 **row.__dict__,
                 "detected_entities": [
                     NewsEventEntityModel.from_domain(entity) for entity in row.detected_entities
+                ],
+                "reporting_sources": [
+                    NewsReportingSourceModel.from_domain(source)
+                    for source in row.reporting_sources
                 ],
             }
         )

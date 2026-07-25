@@ -26,11 +26,18 @@ from src.application.copilot_context_helpers import (
 )
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
 from src.application.copilot_confirmation_service import CopilotConfirmationService
+from src.application.copilot_context_contracts import (
+    COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
+    aggregate_context_fingerprint,
+    finalize_context_bundle,
+)
 from src.application.copilot_report_service import CopilotReportService
+from src.application.commodities_service import CommoditiesService, CommodityWorkspaceRequest
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
 from src.application.iv_service import IVService, IVSurfaceRequest
 from src.application.macro_service import MacroSnapshotRequest, MacroService
+from src.application.maritime_service import MaritimeService
 from src.application.news_service import NewsService
 from src.application.prediction_market_service import PredictionMarketService
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
@@ -186,6 +193,9 @@ class CopilotService:
         iv_service: IVService | None = None,
         portfolio_provider: Any | None = None,
         research_provider: Any | None = None,
+        research_service: ResearchService | None = None,
+        commodities_service: CommoditiesService | None = None,
+        maritime_service: MaritimeService | None = None,
         news_service: NewsService | None = None,
         sitrep_service: SitrepService | None = None,
         provider: CopilotProvider,
@@ -199,6 +209,9 @@ class CopilotService:
         self.iv_service = iv_service
         self.portfolio_provider = portfolio_provider
         self.research_provider = research_provider
+        self.research_service = research_service
+        self.commodities_service = commodities_service
+        self.maritime_service = maritime_service
         self.news_service = news_service
         self.sitrep_service = sitrep_service
         self.provider = provider
@@ -210,13 +223,14 @@ class CopilotService:
         self._runs: dict[str, _CopilotRunHandle] = {}
         self._pending_run_cancellations: dict[str, float] = {}
         self._runs_lock = threading.Lock()
-        self._context_builders = {
+        raw_context_builders = {
             "portfolio": self._build_portfolio_context,
             "research": self._build_research_context,
             "equity_research": self._build_equity_research_context,
             "strategy_lab": self._build_strategy_lab_context,
             "macro": self._build_macro_context,
             "commodities": self._build_commodities_context,
+            "maritime": self._build_maritime_context,
             "sitrep": self._build_sitrep_context,
             "prediction_markets": self._build_prediction_market_context,
             "crypto": self._build_crypto_context,
@@ -225,6 +239,15 @@ class CopilotService:
             "iv": self._build_iv_context,
             "external_context": self._build_external_context,
             "synthesis": self._build_synthesis_context,
+        }
+        self._context_builders = {
+            domain: (
+                lambda request, builder=builder: finalize_context_bundle(
+                    builder(request),
+                    request,
+                )
+            )
+            for domain, builder in raw_context_builders.items()
         }
         self._tools = {
             definition.name: definition
@@ -276,6 +299,51 @@ class CopilotService:
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_research_coverage_context,
+                ),
+                _CopilotToolDefinition(
+                    name="inspect_equity_research_context",
+                    description=(
+                        "Inspect a bounded read-only Equity Research package for the selected company or active overview, "
+                        "including benchmark, coverage, peer/constituent rankings, freshness, assumptions, and warnings."
+                    ),
+                    domains=("equity_research", "research"),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": ["string", "null"],
+                                "description": "Optional listed-equity symbol. Null keeps the active single-name/overview selection.",
+                            },
+                            "max_rows": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum peer or constituent rows, bounded to 1-12.",
+                            },
+                        },
+                        "required": ["symbol", "max_rows"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_inspect_equity_research_context,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "status": {"type": "string"},
+                            "scope": {"type": ["object", "null"]},
+                            "overview": {"type": ["object", "null"]},
+                            "source_ids": {"type": "array", "items": {"type": "string"}},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["status", "scope", "overview", "source_ids", "warnings"],
+                    },
+                    timeout_seconds=12.0,
+                    provenance_behavior=(
+                        "Uses the active normalized Research result/overview or Gamma ResearchService, preserving "
+                        "instrument ids, benchmark, timeframe, provider timestamps, coverage, transformation notes, and warnings."
+                    ),
+                    failure_modes=(
+                        "No active Equity Research context and no resolvable symbol.",
+                        "History or benchmark coverage is incomplete.",
+                        "Provider access is unavailable; the result is typed unavailable instead of synthesized.",
+                    ),
                 ),
                 _CopilotToolDefinition(
                     name="run_research_scope_analysis",
@@ -542,6 +610,145 @@ class CopilotService:
                         "additionalProperties": False,
                     },
                     handler=self._tool_get_commodities_workspace_summary,
+                ),
+                _CopilotToolDefinition(
+                    name="inspect_commodity_curve_fundamentals",
+                    description=(
+                        "Inspect one bounded read-only commodity instrument package with normalized price basis, "
+                        "curve nodes, calendar spreads, inventory series, events, freshness, and coverage gaps."
+                    ),
+                    domains=("commodities",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "instrument_id": {
+                                "type": ["string", "null"],
+                                "description": "Normalized Gamma commodity instrument id. Null keeps the active selection.",
+                            },
+                            "max_curve_nodes": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum curve nodes, bounded to 1-12.",
+                            },
+                            "max_inventory_points": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum recent inventory points per matching series, bounded to 1-12.",
+                            },
+                        },
+                        "required": ["instrument_id", "max_curve_nodes", "max_inventory_points"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_inspect_commodity_curve_fundamentals,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "status": {"type": "string"},
+                            "instrument_id": {"type": "string"},
+                            "curve": {"type": ["object", "null"]},
+                            "inventories": {"type": "array"},
+                            "events": {"type": "array"},
+                            "source_ids": {"type": "array", "items": {"type": "string"}},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["status", "instrument_id", "curve", "inventories", "events", "source_ids", "warnings"],
+                    },
+                    timeout_seconds=10.0,
+                    provenance_behavior=(
+                        "Uses the normalized CommoditiesService workspace and preserves contract ids, provider-native "
+                        "series ids, price basis, retrieval timestamps, assumptions, transformation notes, and warnings."
+                    ),
+                    failure_modes=(
+                        "Selected instrument has no curve coverage.",
+                        "Inventory or event coverage is unavailable.",
+                        "Provider is absent or failed; each missing component is explicit.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="get_maritime_chokepoint_context",
+                    description=(
+                        "Return a bounded read-only Sealanes chokepoint observation with provider coverage, "
+                        "latest normalized vessel counts, freshness, methodology, and explicit unsupported labels."
+                    ),
+                    domains=("maritime",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "chokepoint_id": {
+                                "type": ["string", "null"],
+                                "description": "Normalized chokepoint id. Null returns the bounded available set.",
+                            },
+                            "max_rows": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum chokepoint rows, bounded to 1-12.",
+                            },
+                        },
+                        "required": ["chokepoint_id", "max_rows"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_maritime_chokepoint_context,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "status": {"type": "string"},
+                            "coverage": {"type": "object"},
+                            "chokepoints": {"type": "array"},
+                            "source_ids": {"type": "array", "items": {"type": "string"}},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["status", "coverage", "chokepoints", "source_ids", "warnings"],
+                    },
+                    provenance_behavior=(
+                        "Uses MaritimeService-normalized data and preserves provider, retrieval time, coverage status, "
+                        "chokepoint ids, methodology, caveats, and inspectable sources."
+                    ),
+                    failure_modes=(
+                        "AIS positions are sparse or unavailable.",
+                        "Requested chokepoint is outside provider coverage.",
+                        "Congestion, sanctions, ownership, cargo, operational-risk, and vessel-risk labels are unsupported.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="get_maritime_route_context",
+                    description=(
+                        "Return bounded read-only normalized Sealanes route/flow and track coverage with route ids, "
+                        "linked chokepoints, freshness, inference caveats, and explicit historical-data gaps."
+                    ),
+                    domains=("maritime",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "route_id": {
+                                "type": ["string", "null"],
+                                "description": "Normalized flow/route id. Null returns the bounded available set.",
+                            },
+                            "max_rows": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum route rows, bounded to 1-12.",
+                            },
+                        },
+                        "required": ["route_id", "max_rows"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_maritime_route_context,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "status": {"type": "string"},
+                            "coverage": {"type": "object"},
+                            "routes": {"type": "array"},
+                            "source_ids": {"type": "array", "items": {"type": "string"}},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["status", "coverage", "routes", "source_ids", "warnings"],
+                    },
+                    provenance_behavior=(
+                        "Uses MaritimeService-normalized route/flow summaries; any commodity association remains "
+                        "explicitly inferential with its source caveat and confidence."
+                    ),
+                    failure_modes=(
+                        "Historical route coverage is unavailable.",
+                        "No normalized route/flow rows exist for sparse AIS data.",
+                        "AIS does not report cargo and Gamma does not invent it.",
+                    ),
                 ),
                 _CopilotToolDefinition(
                     name="get_prediction_market_history_summary",
@@ -879,6 +1086,56 @@ class CopilotService:
                     handler=self._tool_get_iv_surface_context,
                 ),
                 _CopilotToolDefinition(
+                    name="inspect_options_structure",
+                    description=(
+                        "Inspect a bounded read-only Options/IV structure for the selected symbol, including "
+                        "surface model, ATM term structure, skew slices, contract identifiers, quality, assumptions, and warnings."
+                    ),
+                    domains=("iv",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": ["string", "null"],
+                                "description": "Optional listed-equity symbol. Null keeps the active Options symbol.",
+                            },
+                            "expiry": {
+                                "type": ["string", "null"],
+                                "description": "Optional ISO expiry to prioritize. Null keeps the active/front expiry.",
+                            },
+                            "max_expiries": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum expiry slices, bounded to 1-8.",
+                            },
+                        },
+                        "required": ["symbol", "expiry", "max_expiries"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_inspect_options_structure,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "status": {"type": "string"},
+                            "symbol": {"type": ["string", "null"]},
+                            "surface_model": {"type": ["string", "null"]},
+                            "expiries": {"type": "array"},
+                            "source_ids": {"type": "array", "items": {"type": "string"}},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["status", "symbol", "surface_model", "expiries", "source_ids", "warnings"],
+                    },
+                    timeout_seconds=15.0,
+                    provenance_behavior=(
+                        "Uses IVService/active normalized surface records and preserves option contract ids, "
+                        "market-data mode, retrieval timestamps, surface quality, assumptions, transformations, and warnings."
+                    ),
+                    failure_modes=(
+                        "No symbol or surface is available.",
+                        "Sparse/delayed chains yield a typed degraded result.",
+                        "Requested expiry is not covered and is reported unavailable rather than extrapolated.",
+                    ),
+                ),
+                _CopilotToolDefinition(
                     name="get_iv_session_status",
                     description="Return a read-only session and market-data-mode summary for the active Gamma Options context.",
                     domains=("iv",),
@@ -908,6 +1165,48 @@ class CopilotService:
                         "No news/event provider is configured.",
                         "Configured provider returned no matching items.",
                         "Estimate, transcript, or filing-delta adapters are not configured.",
+                    ),
+                ),
+                _CopilotToolDefinition(
+                    name="get_news_items_context",
+                    description=(
+                        "Return bounded first-class item-level news context with stable ids, validated URLs, "
+                        "publisher/provider provenance, publication and retrieval times, freshness, entities, tags, and warnings."
+                    ),
+                    domains=("external_context",),
+                    parameters_schema={
+                        "type": "object",
+                        "properties": {
+                            "limit": {
+                                "type": ["integer", "null"],
+                                "description": "Maximum matched items, bounded to 1-12.",
+                            }
+                        },
+                        "required": ["limit"],
+                        "additionalProperties": False,
+                    },
+                    handler=self._tool_get_news_items_context,
+                    action_type="fetch_external_context",
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "status": {"type": "string"},
+                            "items": {"type": "array"},
+                            "source_ids": {"type": "array", "items": {"type": "string"}},
+                            "warnings": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["status", "items", "source_ids", "warnings"],
+                    },
+                    external_provider="news",
+                    timeout_seconds=8.0,
+                    provenance_behavior=(
+                        "Uses NewsService normalized/deduplicated records, preserves all reporting feed provenance, "
+                        "and exposes only validated http/https navigation URLs."
+                    ),
+                    failure_modes=(
+                        "No provider is configured.",
+                        "Feed is stale, failed, or contains no matching items.",
+                        "Incomplete item metadata is explicit and invalid URLs are rejected.",
                     ),
                 ),
                 _CopilotToolDefinition(
@@ -1084,7 +1383,11 @@ class CopilotService:
                 current_tab=context.current_tab,
                 workspace_mode=normalized_request.context.workspace_mode,
                 prompt=normalized_request.prompt,
-                context_fingerprint=normalized_request.context_fingerprint,
+                context_fingerprint=(
+                    context.context_contract.context_fingerprint
+                    if context.context_contract is not None
+                    else normalized_request.context_fingerprint
+                ),
                 context_summary=self._context_summary_for_persistence(context),
                 result=result,
                 role=normalized_request.role,
@@ -2058,6 +2361,9 @@ class CopilotService:
         remaining_tools = budget.max_tool_calls
         provider_calls_used = 0
         started_at = time.perf_counter()
+        built_contexts: list[CopilotContextBundle] = []
+        context_bytes_used = 0
+        context_budget_omitted_domains: list[str] = []
 
         for planned_domain in plan.domain_plan[: budget.max_domains]:
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -2074,6 +2380,23 @@ class CopilotService:
                 skipped_domains.append(domain)
                 warnings.append(f"Skipped {domain}: {exc}")
                 continue
+            context_bytes = (
+                context.context_contract.budget.final_bytes
+                if context.context_contract is not None
+                else 0
+            )
+            if (
+                context_bytes_used + context_bytes
+                > COPILOT_TOTAL_CONTEXT_BUDGET_BYTES
+            ):
+                context_budget_omitted_domains.append(domain)
+                warnings.append(
+                    f"Skipped {domain} because its compacted context would exceed the "
+                    f"{COPILOT_TOTAL_CONTEXT_BUDGET_BYTES}-byte total context budget."
+                )
+                continue
+            context_bytes_used += context_bytes
+            built_contexts.append(context)
 
             for source in context.sources:
                 sources[source.source_id] = source
@@ -2145,6 +2468,31 @@ class CopilotService:
                 f"Plan execution was bounded to {budget.max_domains} domains for the {plan.depth_profile} profile."
             )
 
+        domain_budget_omitted = list(
+            dict.fromkeys(
+                [
+                    *context_budget_omitted_domains,
+                    *[
+                        item.domain
+                        for item in plan.domain_plan[budget.max_domains :]
+                    ],
+                ]
+            )
+        )
+        plan = replace(
+            plan,
+            domain_decisions=self._execution_domain_decisions(
+                plan=plan,
+                executed_domains=executed_domains,
+                skipped_domains=skipped_domains,
+                budget_omitted_domains=domain_budget_omitted,
+                tool_outputs=tool_outputs,
+            ),
+            transformation_note=(
+                "Deterministic bounded read-only Copilot plan with concise product-level "
+                "selected/omitted domain outcomes; no private reasoning is stored."
+            ),
+        )
         warnings = dedupe_warnings(warnings)
         result = CopilotResearchCardResult(
             domain="synthesis",
@@ -2167,6 +2515,30 @@ class CopilotService:
             sources=list(sources.values()),
             tool_traces=tool_traces,
             warnings=warnings,
+            research_plan=plan,
+            context_contracts=[
+                context.context_contract
+                for context in built_contexts
+                if context.context_contract is not None
+            ],
+            context_budget={
+                "contract_version": "copilot.context.total.v1",
+                "total_budget_bytes": COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
+                "used_bytes": context_bytes_used,
+                "within_total_budget": (
+                    context_bytes_used <= COPILOT_TOTAL_CONTEXT_BUDGET_BYTES
+                ),
+                "included_domains": [
+                    context.domain for context in built_contexts
+                ],
+                "omitted_domains": [
+                    {
+                        "domain": domain,
+                        "reason": "budget_omission",
+                    }
+                    for domain in domain_budget_omitted
+                ],
+            },
         )
         result = self._normalize_result_sources(result)
 
@@ -2179,7 +2551,11 @@ class CopilotService:
                     current_tab=request.context.current_tab or "copilot",
                     workspace_mode=request.context.workspace_mode,
                     prompt=request.prompt,
-                    context_fingerprint=request.context_fingerprint,
+                    context_fingerprint=aggregate_context_fingerprint(
+                        built_contexts,
+                        selected_domains=[item.domain for item in plan.domain_plan],
+                    )
+                    or request.context_fingerprint,
                     context_summary={
                         "plan": asdict(plan),
                         "executed_domains": executed_domains,
@@ -2188,6 +2564,11 @@ class CopilotService:
                             domain: list(outputs)
                             for domain, outputs in tool_outputs.items()
                         },
+                        "context_contracts": [
+                            context.context_contract.to_dict()
+                            for context in built_contexts
+                            if context.context_contract is not None
+                        ],
                     },
                     result=result,
                     role=request.role,
@@ -2260,13 +2641,21 @@ class CopilotService:
         response_id = new_copilot_id("opexec")
         sources: dict[str, CopilotSourceRef] = {}
         tool_traces: list[CopilotToolTrace] = []
-        warnings = list(plan.warnings)
+        warnings = [
+            warning
+            for warning in plan.warnings
+            if not warning.startswith("Planner-only prototype")
+        ]
         events: list[CopilotOperatorProgressEvent] = []
         executed_steps: list[str] = []
         skipped_steps: list[str] = []
         failed_steps: list[str] = []
         outputs: dict[str, Any] = {}
         output_summaries: dict[str, Any] = {}
+        context_by_domain: dict[str, CopilotContextBundle] = {}
+        built_contexts: list[CopilotContextBundle] = []
+        context_bytes_used = 0
+        context_budget_omitted_domains: list[str] = []
         remaining_tools = plan.max_tool_calls
         provider_calls_used = 0
         started_at = time.perf_counter()
@@ -2324,7 +2713,7 @@ class CopilotService:
                 "max_elapsed_ms": plan.max_elapsed_ms,
             },
         )
-        for warning in plan.warnings:
+        for warning in warnings:
             record_event("warning", title="Plan warning", message=warning, event_warnings=[warning])
 
         for step in plan.steps:
@@ -2536,14 +2925,56 @@ class CopilotService:
                     continue
                 provider_calls_used += 1
 
-            try:
-                context = self._build_plan_execution_context(request, step.domain)
-            except ValueError as exc:
-                skipped_steps.append(step.step_id)
-                message = f"Skipped {step.step_id}: {exc}"
-                record_warning(message, step=step)
-                record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
-                continue
+            context = context_by_domain.get(step.domain)
+            if context is None:
+                if step.domain in context_budget_omitted_domains:
+                    skipped_steps.append(step.step_id)
+                    message = (
+                        f"Skipped {step.step_id}: {step.domain} was omitted by the "
+                        f"{COPILOT_TOTAL_CONTEXT_BUDGET_BYTES}-byte total context budget."
+                    )
+                    record_warning(message, step=step)
+                    record_event(
+                        "tool-result",
+                        step=step,
+                        message=message,
+                        payload={"status": "skipped", "reason": "budget_omission"},
+                    )
+                    continue
+                try:
+                    context = self._build_plan_execution_context(request, step.domain)
+                except ValueError as exc:
+                    skipped_steps.append(step.step_id)
+                    message = f"Skipped {step.step_id}: {exc}"
+                    record_warning(message, step=step)
+                    record_event("tool-result", step=step, message=message, payload={"status": "skipped"})
+                    continue
+                context_bytes = (
+                    context.context_contract.budget.final_bytes
+                    if context.context_contract is not None
+                    else 0
+                )
+                if (
+                    context_bytes_used + context_bytes
+                    > COPILOT_TOTAL_CONTEXT_BUDGET_BYTES
+                ):
+                    context_budget_omitted_domains.append(step.domain)
+                    skipped_steps.append(step.step_id)
+                    message = (
+                        f"Skipped {step.step_id}: compacted {step.domain} context would exceed "
+                        f"the {COPILOT_TOTAL_CONTEXT_BUDGET_BYTES}-byte total context budget."
+                    )
+                    record_warning(message, step=step)
+                    record_event(
+                        "tool-result",
+                        step=step,
+                        message=message,
+                        payload={"status": "skipped", "reason": "budget_omission"},
+                    )
+                    continue
+                context_bytes_used += context_bytes
+                context_by_domain[step.domain] = context
+                built_contexts.append(context)
             for source in context.sources:
                 sources[source.source_id] = source
             for warning in context.warnings:
@@ -2605,6 +3036,10 @@ class CopilotService:
                     },
                     source_ids=list(execution.trace.source_ids),
                 )
+
+        budget_warning = f"Stopped operator execution after {plan.max_tool_calls} tools."
+        if remaining_tools <= 0 and budget_warning not in warnings:
+            record_warning(budget_warning)
 
         if plan.confirmation_checkpoints and not cancelled_at_boundary:
             message = "Operator plan includes confirmation checkpoints that were not applied by automatic execution."
@@ -2672,6 +3107,57 @@ class CopilotService:
             source_ids=[source.source_id for source in list(sources.values())[:10]],
             event_warnings=warnings,
         )
+        step_by_id = {step.step_id: step for step in plan.steps}
+        executed_domains = list(
+            dict.fromkeys(
+                step_by_id[step_id].domain
+                for step_id in executed_steps
+                if step_id in step_by_id
+            )
+        )
+        skipped_domains = list(
+            dict.fromkeys(
+                step_by_id[step_id].domain
+                for step_id in skipped_steps
+                if step_id in step_by_id
+                and step_by_id[step_id].domain not in executed_domains
+            )
+        )
+        domain_outputs: dict[str, dict[str, Any]] = {}
+        for step_id, output in outputs.items():
+            step = step_by_id.get(step_id)
+            if step is None or not step.tool_id:
+                continue
+            domain_outputs.setdefault(step.domain, {})[step.tool_id] = output
+        resolved_research_plan = plan.research_plan
+        if resolved_research_plan is not None:
+            resolved_research_plan = replace(
+                resolved_research_plan,
+                domain_decisions=self._execution_domain_decisions(
+                    plan=resolved_research_plan,
+                    executed_domains=executed_domains,
+                    skipped_domains=skipped_domains,
+                    budget_omitted_domains=context_budget_omitted_domains,
+                    tool_outputs=domain_outputs,
+                ),
+                transformation_note=(
+                    "Deterministic bounded read-only Research Operator routing outcomes; "
+                    "only concise product-level selected/omitted reasons are retained."
+                ),
+            )
+        context_budget = {
+            "contract_version": "copilot.context.total.v1",
+            "total_budget_bytes": COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
+            "used_bytes": context_bytes_used,
+            "within_total_budget": (
+                context_bytes_used <= COPILOT_TOTAL_CONTEXT_BUDGET_BYTES
+            ),
+            "included_domains": [context.domain for context in built_contexts],
+            "omitted_domains": [
+                {"domain": domain, "reason": "budget_omission"}
+                for domain in context_budget_omitted_domains
+            ],
+        }
         result = CopilotResearchCardResult(
             domain="synthesis",
             current_tab=request.context.current_tab or "copilot",
@@ -2697,6 +3183,13 @@ class CopilotService:
             tool_traces=tool_traces,
             operator_events=events,
             warnings=warnings,
+            research_plan=resolved_research_plan,
+            context_contracts=[
+                context.context_contract
+                for context in built_contexts
+                if context.context_contract is not None
+            ],
+            context_budget=context_budget,
         )
         result = self._normalize_result_sources(result)
 
@@ -2709,7 +3202,20 @@ class CopilotService:
                     current_tab=request.context.current_tab or "copilot",
                     workspace_mode=request.context.workspace_mode,
                     prompt=request.prompt,
-                    context_fingerprint=request.context_fingerprint,
+                    context_fingerprint=(
+                        aggregate_context_fingerprint(
+                            built_contexts,
+                            selected_domains=[
+                                item.domain
+                                for item in (
+                                    resolved_research_plan.domain_plan
+                                    if resolved_research_plan is not None
+                                    else []
+                                )
+                            ],
+                        )
+                        or request.context_fingerprint
+                    ),
                     context_summary={
                         "operator_plan": {
                             "intent": plan.intent,
@@ -2723,6 +3229,12 @@ class CopilotService:
                             "outputs": final_outputs,
                         },
                         "operator_events": [asdict(event) for event in events],
+                        "context_contracts": [
+                            context.context_contract.to_dict()
+                            for context in built_contexts
+                            if context.context_contract is not None
+                        ],
+                        "context_budget": context_budget,
                     },
                     result=result,
                     role="research_operator",
@@ -2737,6 +3249,7 @@ class CopilotService:
                     run_id=resolved_run_id,
                     terminal_status=result.status,
                     cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                    research_plan=resolved_research_plan,
                     operator_plan=plan,
                 )
             except Exception:
@@ -2779,6 +3292,8 @@ class CopilotService:
         result: CopilotResearchCardResult,
     ) -> CopilotResearchCardResult:
         """Persist an Operator terminal that did not enter an orchestrator path."""
+        if result.research_plan is None and plan is not None:
+            result = replace(result, research_plan=plan.research_plan)
         result = self._normalize_result_sources(result)
         if self.store is None:
             return result
@@ -2809,6 +3324,7 @@ class CopilotService:
                 run_id=(result.operator_events[0].run_id if result.operator_events else result.response_id),
                 terminal_status=result.status,
                 cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                research_plan=result.research_plan,
                 operator_plan=plan,
             )
         except Exception:
@@ -2827,12 +3343,52 @@ class CopilotService:
         plan: CopilotOperatorPlan,
         result: CopilotResearchCardResult,
     ) -> CopilotResearchCardResult:
-        result = self._normalize_result_sources(result)
+        step_by_id = {step.step_id: step for step in plan.steps}
         final_payload: dict[str, Any] = {}
         for event in reversed(result.operator_events):
             if event.event_type == "final-report":
                 final_payload = dict(event.payload)
                 break
+        executed_step_ids = [
+            str(item) for item in list(final_payload.get("executed_steps") or [])
+        ]
+        skipped_step_ids = [
+            str(item) for item in list(final_payload.get("skipped_steps") or [])
+        ]
+        resolved_research_plan = plan.research_plan
+        if resolved_research_plan is not None:
+            executed_domains = list(
+                dict.fromkeys(
+                    step_by_id[step_id].domain
+                    for step_id in executed_step_ids
+                    if step_id in step_by_id
+                )
+            )
+            skipped_domains = list(
+                dict.fromkeys(
+                    step_by_id[step_id].domain
+                    for step_id in skipped_step_ids
+                    if step_id in step_by_id
+                    and step_by_id[step_id].domain not in executed_domains
+                )
+            )
+            resolved_research_plan = replace(
+                resolved_research_plan,
+                domain_decisions=self._execution_domain_decisions(
+                    plan=resolved_research_plan,
+                    executed_domains=executed_domains,
+                    skipped_domains=skipped_domains,
+                    budget_omitted_domains=[],
+                    tool_outputs={},
+                ),
+                transformation_note=(
+                    "Agents SDK bounded read-only Research Operator routing outcomes; "
+                    "only concise product-level selected/omitted reasons are retained."
+                ),
+            )
+        if result.research_plan is None:
+            result = replace(result, research_plan=resolved_research_plan)
+        result = self._normalize_result_sources(result)
         if self.store is not None:
             try:
                 self.store.record_turn(
@@ -2857,6 +3413,11 @@ class CopilotService:
                             "outputs": dict(final_payload.get("outputs") or {}),
                         },
                         "operator_events": [asdict(event) for event in result.operator_events],
+                        "research_plan": (
+                            asdict(resolved_research_plan)
+                            if resolved_research_plan is not None
+                            else None
+                        ),
                     },
                     result=result,
                     role="research_operator",
@@ -2871,6 +3432,7 @@ class CopilotService:
                     run_id=(result.operator_events[0].run_id if result.operator_events else result.response_id),
                     terminal_status=result.status,
                     cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                    research_plan=resolved_research_plan,
                     operator_plan=plan,
                 )
             except Exception:
@@ -2978,6 +3540,17 @@ class CopilotService:
             return {"result_kind": "auto"}
         if tool_name == "run_research_scope_analysis":
             return self._default_research_scope_analysis_arguments(context)
+        if tool_name == "inspect_equity_research_context":
+            research = context.summary_data.get("research")
+            operator = context.summary_data.get("research_operator")
+            symbol = None
+            if isinstance(research, dict):
+                symbol = research.get("primary_symbol") or (
+                    research.get("scope") or {}
+                ).get("primary_symbol")
+            if not symbol and isinstance(operator, dict):
+                symbol = (operator.get("scope") or {}).get("primary_symbol")
+            return {"symbol": symbol, "max_rows": 8}
         if tool_name == "run_hypothetical_portfolio_comparison":
             return self._default_hypothetical_portfolio_arguments(context)
         if tool_name == "run_options_realized_implied_comparison":
@@ -2987,6 +3560,29 @@ class CopilotService:
                 "depth_preset": "compact",
                 "market_data_mode": None,
             }
+        if tool_name == "inspect_options_structure":
+            return {
+                "symbol": context.summary_data.get("target_symbol"),
+                "expiry": None,
+                "max_expiries": 6,
+            }
+        if tool_name == "inspect_commodity_curve_fundamentals":
+            commodity_summary = context.summary_data.get("commodities")
+            return {
+                "instrument_id": (
+                    commodity_summary.get("selected_instrument_id")
+                    if isinstance(commodity_summary, dict)
+                    else context.summary_data.get("selected_instrument_id")
+                ),
+                "max_curve_nodes": 8,
+                "max_inventory_points": 6,
+            }
+        if tool_name == "get_maritime_chokepoint_context":
+            return {"chokepoint_id": None, "max_rows": 8}
+        if tool_name == "get_maritime_route_context":
+            return {"route_id": None, "max_rows": 8}
+        if tool_name == "get_news_items_context":
+            return {"limit": 8}
         if tool_name == "run_risk_contribution_analysis":
             return {
                 "source_scope": context.summary_data.get("workspace_mode"),
@@ -3639,7 +4235,10 @@ class CopilotService:
         prompt = prompt.lower()
         if not prompt.strip():
             return []
-        if re.search(r"\buse\s+(the\s+)?relevant\s+gamma\s+domains?\b", prompt):
+        if re.search(
+            r"\b(?:use|using)\s+(the\s+)?relevant\s+gamma\s+domains?\b",
+            prompt,
+        ):
             return []
         explicit_markers = (
             "use ",
@@ -3658,6 +4257,7 @@ class CopilotService:
             "risk": ("risk", "var", "cvar", "scenario"),
             "macro": ("macro", "rates", "fed", "cpi", "inflation"),
             "commodities": ("commodities", "commodity", "oil", "crude", "gold", "copper"),
+            "maritime": ("sealanes", "maritime", "shipping", "route", "chokepoint", "ais"),
             "prediction_markets": ("prediction market", "prediction markets", "polymarket", "kalshi"),
             "crypto": ("crypto", "token", "dex", "on-chain", "onchain"),
             "research": ("scope", "scope analysis", "research scope"),
@@ -3667,6 +4267,22 @@ class CopilotService:
             "iv": ("options", "iv", "vol", "skew"),
             "external_context": ("external context", "news", "recent news", "headlines"),
         }
+        only_match = re.search(
+            r"\bonly\s+(.+?)(?=\s+(?:for|about|on|to)\b|$)",
+            prompt,
+        )
+        if only_match:
+            selected_text = only_match.group(1)
+            directed = [
+                domain
+                for domain, terms in domain_terms.items()
+                if any(
+                    re.search(rf"\b{re.escape(term)}\b", selected_text)
+                    for term in terms
+                )
+            ]
+            if directed:
+                return directed
         domains: list[str] = []
         for domain, terms in domain_terms.items():
             if any(re.search(rf"\b{re.escape(term)}\b", prompt) for term in terms):
@@ -3680,7 +4296,9 @@ class CopilotService:
         context: CopilotRequestContext,
     ) -> str:
         has_ticker = any(entity.kind == "ticker" for entity in entities)
-        has_rate_context = any(term in prompt for term in ("rate", "rates", "fed", "cpi", "inflation", "yield"))
+        has_rate_context = bool(
+            re.search(r"\b(?:rate|rates|fed|cpi|inflation|yield)\b", prompt)
+        )
         has_portfolio_context = "portfolio" in prompt or context.current_tab == "portfolio"
         has_oil_context = any(term in prompt for term in ("oil", "crude", "brent", "wti"))
 
@@ -3694,6 +4312,8 @@ class CopilotService:
             return "single_company_event_research"
         if has_ticker:
             return "single_company_research"
+        if has_rate_context:
+            return "macro_event_research"
         if context.current_tab and context.current_tab not in {"copilot", "synthesis"}:
             return "active_context_research"
         return "cross_domain_research"
@@ -3755,8 +4375,25 @@ class CopilotService:
             add("iv", "deep", "Options term structure and implied move context are central to event-risk framing.")
             add("equity_research", "medium", "Benchmark and peer-relative behavior help separate company-specific movement from macro beta.")
             add("external_context", "medium", "Recent news, calendar, estimates, and filings should be fetched only through approved read-only providers.")
+        elif intent == "macro_event_research":
+            add("macro", "deep", "Official macro series, rates, policy, and event context are first-order for CPI/Fed research.")
+            add(
+                "prediction_markets",
+                "medium",
+                "Supported event-probability venues can add a separately labeled expectation signal when a related market is available.",
+            )
+            add(
+                "external_context",
+                "medium",
+                "Item-level news provides time-stamped event context and remains distinct from official macro data and inference.",
+            )
         elif intent == "commodity_macro_research":
             add("commodities", "deep", "Commodity workspace data should anchor the price, curve, spread, inventory, and event read.")
+            add(
+                "maritime",
+                "deep",
+                "Sealanes provides bounded route and chokepoint observations with explicit AIS and historical-coverage limits.",
+            )
             add("macro", "medium", "Macro context helps separate demand, inflation, USD, and rates effects from commodity-specific supply signals.")
             add("prediction_markets", "medium", "Related event contracts can provide cross-market expectations around geopolitics, policy, or supply disruptions.")
             add("external_context", "medium", "Recent commodity and official event context can add freshness when provider-backed.")
@@ -3764,7 +4401,6 @@ class CopilotService:
             add("portfolio", "deep", "Portfolio exposure, concentration, cash, and position context are required before interpreting rate sensitivity.")
             add("risk", "deep", "Risk contribution, coverage, correlation, and scenario tools should quantify the shock path.")
             add("macro", "deep", "Rates, policy path, curve, breakeven, and event context define the rate-shock scenario.")
-            add("iv", "light", "Options context is optional and only useful if active surfaces exist for dominant exposures.")
         elif intent == "hypothetical_portfolio_comparison":
             add(
                 "research",
@@ -3799,11 +4435,12 @@ class CopilotService:
     def _default_plan_tools(domain: str) -> list[str]:
         return {
             "portfolio": ["get_portfolio_positions_summary", "get_portfolio_performance_context"],
-            "equity_research": ["run_research_scope_analysis", "get_research_scope_summary", "get_research_coverage_context"],
+            "equity_research": ["inspect_equity_research_context"],
             "research": ["run_research_scope_analysis", "get_research_scope_summary", "get_research_coverage_context"],
             "strategy_lab": ["run_strategy_lab_backtest"],
             "macro": ["get_macro_workspace_drilldown", "get_macro_series_history_summary"],
-            "commodities": ["get_commodities_workspace_summary"],
+            "commodities": ["get_commodities_workspace_summary", "inspect_commodity_curve_fundamentals"],
+            "maritime": ["get_maritime_chokepoint_context", "get_maritime_route_context"],
             "prediction_markets": ["get_prediction_market_history_summary", "get_prediction_market_flow_context"],
             "crypto": ["get_crypto_price_history_summary", "get_crypto_liquidity_context", "get_crypto_comparison_context"],
             "fundamentals": [
@@ -3814,8 +4451,8 @@ class CopilotService:
                 "run_fundamentals_reverse_valuation",
             ],
             "risk": ["run_risk_contribution_analysis", "run_risk_scenario_analysis"],
-            "iv": ["run_options_realized_implied_comparison", "get_iv_surface_context", "get_iv_session_status"],
-            "external_context": ["get_external_context_summary"],
+            "iv": ["inspect_options_structure", "run_options_realized_implied_comparison"],
+            "external_context": ["get_news_items_context"],
             "synthesis": ["get_synthesis_scope_summary", "get_synthesis_domain_context"],
         }.get(domain, [])
 
@@ -3949,10 +4586,10 @@ class CopilotService:
                 max_elapsed_ms=2_500,
             ),
             "standard": _CopilotExecutionBudget(
-                max_domains=4,
-                max_tool_calls=8,
+                max_domains=5,
+                max_tool_calls=10,
                 max_provider_calls=1,
-                max_elapsed_ms=8_000,
+                max_elapsed_ms=12_000,
             ),
             "deep": _CopilotExecutionBudget(
                 max_domains=6,
@@ -3969,10 +4606,10 @@ class CopilotService:
         }.get(
             depth_profile,
             _CopilotExecutionBudget(
-                max_domains=4,
-                max_tool_calls=8,
+                max_domains=5,
+                max_tool_calls=10,
                 max_provider_calls=1,
-                max_elapsed_ms=8_000,
+                max_elapsed_ms=12_000,
             ),
         )
 
@@ -3989,20 +4626,147 @@ class CopilotService:
                 domain=item.domain,
                 used=True,
                 reason=item.reason,
+                classification="selected",
+                selected_depth=item.depth,
+                planned_tools=list(item.planned_tools),
             )
             for item in domain_plan
         ]
         omitted_reasons = CopilotService._omitted_domain_reasons(intent, request)
+        prompt_lower = str(request.prompt or "").lower()
+        explicitly_bounded = any(
+            marker in prompt_lower
+            for marker in ("use only", "only use", "just use", "only run", "run only")
+        )
         for domain in CopilotService._known_research_domains():
             if domain in selected:
                 continue
+            reason = omitted_reasons.get(
+                domain,
+                "Not selected because the prompt did not make this domain material to the bounded plan.",
+            )
+            if explicitly_bounded:
+                reason = (
+                    f"{domain.replace('_', ' ').title()} was omitted because the user explicitly "
+                    "limited this request to the selected domain set."
+                )
+            classification = "irrelevant"
+            if domain == "synthesis":
+                classification = "unsupported_scope"
+                reason = (
+                    "Synthesis is the orchestration envelope for this plan and is not a nested "
+                    "evidence scope; only its selected Gamma domains are executed."
+                )
             decisions.append(
                 CopilotResearchPlanDomainDecision(
                     domain=domain,
                     used=False,
-                    reason=omitted_reasons.get(domain, "Not selected because the prompt did not make this domain material to the bounded plan."),
+                    reason=reason,
+                    classification=classification,
                 )
             )
+        return decisions
+
+    @staticmethod
+    def _execution_domain_decisions(
+        *,
+        plan: CopilotResearchPlan,
+        executed_domains: list[str],
+        skipped_domains: list[str],
+        budget_omitted_domains: list[str],
+        tool_outputs: dict[str, dict[str, Any]],
+    ) -> list[CopilotResearchPlanDomainDecision]:
+        executed = set(executed_domains)
+        skipped = set(skipped_domains)
+        budget_omitted = set(budget_omitted_domains)
+        by_domain = {
+            item.domain: item
+            for item in plan.domain_plan
+        }
+        decisions: list[CopilotResearchPlanDomainDecision] = []
+        for decision in plan.domain_decisions:
+            planned = by_domain.get(decision.domain)
+            if decision.domain in budget_omitted:
+                decisions.append(
+                    replace(
+                        decision,
+                        used=False,
+                        classification="budget_omission",
+                        reason=(
+                            f"{decision.domain.replace('_', ' ').title()} was relevant but omitted "
+                            "by the bounded domain budget."
+                        ),
+                    )
+                )
+                continue
+            if decision.domain in skipped:
+                decisions.append(
+                    replace(
+                        decision,
+                        used=False,
+                        classification="unavailable_data",
+                        reason=(
+                            f"{decision.domain.replace('_', ' ').title()} was selected but its "
+                            "required normalized context was unavailable."
+                        ),
+                    )
+                )
+                continue
+            if decision.domain in executed:
+                domain_outputs = tool_outputs.get(decision.domain, {})
+                statuses = {
+                    str(output.get("status") or "").lower()
+                    for output in domain_outputs.values()
+                    if isinstance(output, dict) and output.get("status")
+                }
+                output_text = " ".join(
+                    str(output).lower()
+                    for output in domain_outputs.values()
+                )
+                if "unavailable" in statuses:
+                    if any(
+                        marker in output_text
+                        for marker in (
+                            "no provider is configured",
+                            "no newsservice is configured",
+                            "no maritimeservice is configured",
+                            "no commoditiesservice is configured",
+                            "provider access",
+                            "unconfigured",
+                        )
+                    ):
+                        classification = "missing_provider_access"
+                        reason = (
+                            f"{decision.domain.replace('_', ' ').title()} was selected, but "
+                            "the required approved provider is not configured."
+                        )
+                    else:
+                        classification = "unavailable_data"
+                        reason = (
+                            f"{decision.domain.replace('_', ' ').title()} was selected and inspected, "
+                            "but required provider/data coverage was unavailable."
+                        )
+                elif "stale" in statuses:
+                    classification = "stale_context"
+                    reason = (
+                        f"{decision.domain.replace('_', ' ').title()} was selected, but its "
+                        "available provider context was explicitly stale."
+                    )
+                else:
+                    classification = "selected"
+                    reason = decision.reason
+                decisions.append(
+                    replace(
+                        decision,
+                        used=True,
+                        classification=classification,
+                        reason=reason,
+                        selected_depth=planned.depth if planned is not None else decision.selected_depth,
+                        planned_tools=list(planned.planned_tools) if planned is not None else list(decision.planned_tools),
+                    )
+                )
+                continue
+            decisions.append(decision)
         return decisions
 
     @staticmethod
@@ -4014,6 +4778,7 @@ class CopilotService:
             "strategy_lab",
             "macro",
             "commodities",
+            "maritime",
             "prediction_markets",
             "crypto",
             "fundamentals",
@@ -4034,6 +4799,7 @@ class CopilotService:
             "strategy_lab": "Strategy Lab is omitted unless the request asks about imported strategies, compositions, or backtests.",
             "macro": "Macro is omitted unless rates, inflation, policy, growth, FX, or regime context is material.",
             "commodities": "Commodities is omitted unless the request names a commodity, curve, inventory, spread, or supply/demand theme.",
+            "maritime": "Sealanes is omitted unless shipping routes, chokepoints, AIS observations, or physical disruption context are material.",
             "prediction_markets": "Prediction Markets is omitted unless event probabilities or venue expectations add useful context.",
             "crypto": "Crypto is omitted unless the request names a token, crypto sector, DEX/liquidity, or on-chain flow.",
             "fundamentals": "Fundamentals is omitted unless a company, filing, DCF, financial statement, or valuation question is central.",
@@ -4066,6 +4832,11 @@ class CopilotService:
             "source_ids": [source.source_id for source in context.sources],
             "warnings": list(context.warnings),
             "read_only_safety": context.read_only_safety,
+            "context_contract": (
+                context.context_contract.to_dict()
+                if context.context_contract is not None
+                else {}
+            ),
         }
 
     def _execute_tool(
@@ -4160,7 +4931,7 @@ class CopilotService:
                     provider="gamma",
                     origin="gamma.copilot.external_context",
                     description="Gamma-approved read-only external-context boundary for Copilot plan execution.",
-                    retrieved_at=now_utc(),
+                    retrieved_at=None,
                 )
             ],
             warnings=warnings,
@@ -4201,7 +4972,17 @@ class CopilotService:
                 {
                     "domain": domain,
                     "label": scope.label or domain.replace("_", " ").title(),
-                    "context_fingerprint": scope.context_fingerprint,
+                    "context_fingerprint": (
+                        bundle.context_contract.context_fingerprint
+                        if bundle.context_contract is not None
+                        else scope.context_fingerprint
+                    ),
+                    "supplied_context_fingerprint": scope.context_fingerprint,
+                    "context_contract": (
+                        bundle.context_contract.to_dict()
+                        if bundle.context_contract is not None
+                        else None
+                    ),
                     "current_tab": bundle.current_tab,
                     "summary": bundle.summary_data,
                     "source_ids": [source.source_id for source in bundle.sources],
@@ -4376,14 +5157,130 @@ class CopilotService:
         state = request.context.research_state or {}
         result = state.get("result")
         overview = state.get("overview")
+        operator_analysis: dict[str, Any] | None = None
         if not isinstance(result, dict) and not isinstance(overview, dict):
-            raise ValueError("Equity Research copilot requires an active overview or research result.")
+            ticker = next(
+                (
+                    entity.id
+                    for entity in self._extract_plan_entities(
+                        str(request.prompt or ""),
+                        request.context,
+                    )
+                    if entity.kind == "ticker"
+                ),
+                None,
+            )
+            research_service = self.research_service
+            if research_service is None and self.research_provider is not None:
+                research_service = ResearchService(self.research_provider)
+            if ticker and research_service is not None:
+                try:
+                    analysis = research_service.analyze(
+                        ResearchAnalysisRequest(
+                            scope_type=ResearchScopeType.SINGLE_TICKER,
+                            primary_symbol=str(ticker).upper(),
+                            benchmark_symbol="SPY",
+                            lookback_days=252,
+                        )
+                    )
+                    operator_analysis = self._research_scope_analysis_operator_summary(
+                        analysis,
+                        normalized={
+                            "scope_type": ResearchScopeType.SINGLE_TICKER,
+                            "primary_symbol": str(ticker).upper(),
+                            "benchmark_symbol": "SPY",
+                            "lookback_days": 252,
+                            "synthetic_positions": [],
+                        },
+                    )
+                except Exception as exc:
+                    operator_analysis = {
+                        "status": "unavailable",
+                        "scope": {
+                            "scope_type": "single_ticker",
+                            "primary_symbol": str(ticker).upper(),
+                            "benchmark_symbol": "SPY",
+                            "lookback_days": 252,
+                        },
+                        "warnings": [
+                            f"Equity Research provider failed for {str(ticker).upper()}: {exc}"
+                        ],
+                    }
+            if operator_analysis is None:
+                warning = (
+                    "Equity Research context is unavailable: no active normalized overview/result "
+                    "and no resolvable backend ResearchService scope."
+                )
+                return CopilotContextBundle(
+                    domain="equity_research",
+                    current_tab=request.context.current_tab or "equity_research",
+                    summary_data={
+                        "workspace_mode": request.context.workspace_mode or "research",
+                        "status": "unavailable",
+                        "research": None,
+                        "overview": None,
+                    },
+                    sources=[
+                        CopilotSourceRef(
+                            source_id="equity_research.unavailable",
+                            label="Equity Research context unavailable",
+                            kind="provider_boundary",
+                            provider="unavailable",
+                            origin="gamma.copilot.equity_research",
+                            description=warning,
+                            navigation_supported=False,
+                            navigation_reason=warning,
+                        )
+                    ],
+                    warnings=[warning],
+                )
         summary_data: dict[str, Any] = {
             "workspace_mode": request.context.workspace_mode or "research",
         }
         warnings: list[str] = []
         sources: list[CopilotSourceRef] = []
         tool_state: dict[str, Any] = {}
+        if operator_analysis is not None:
+            summary_data["status"] = str(operator_analysis.get("status") or "degraded")
+            summary_data["research_operator"] = operator_analysis
+            warnings.extend(dedupe_warnings(operator_analysis.get("warnings", [])))
+            operator_scope = (
+                operator_analysis.get("scope")
+                if isinstance(operator_analysis.get("scope"), dict)
+                else {}
+            )
+            ticker = str(operator_scope.get("primary_symbol") or "").strip().upper()
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"equity_research.scope.{self._safe_source_id(ticker or 'active')}",
+                    label=f"{ticker or 'Active'} Equity Research scope",
+                    kind="equity_research",
+                    provider=str(
+                        (
+                            (operator_analysis.get("provenance") or {}).get("source_provider")
+                            if isinstance(operator_analysis.get("provenance"), dict)
+                            else None
+                        )
+                        or "gamma"
+                    ),
+                    origin="gamma.research.analyze",
+                    description="Read-only normalized Equity ResearchService single-name analysis.",
+                    retrieved_at=(
+                        operator_analysis.get("provenance") or {}
+                    ).get("retrieved_at")
+                    if isinstance(operator_analysis.get("provenance"), dict)
+                    else None,
+                    provider_native_id=ticker or None,
+                    navigation_supported=True,
+                    navigation_tab="equity_research",
+                    navigation_mode="single_name",
+                    navigation_context={
+                        "symbol": ticker,
+                        "timeframe": str(operator_scope.get("lookback_days") or "252"),
+                    },
+                )
+            )
+            tool_state["operator_analysis"] = operator_analysis
         if isinstance(result, dict):
             summary_data["research"] = summarize_research_result(result)
             warnings.extend(dedupe_warnings(result.get("warnings", [])))
@@ -4397,6 +5294,15 @@ class CopilotService:
                     origin="gamma.research.analyze",
                     description="Active Equity Research analysis result returned by Gamma.",
                     retrieved_at=performance_points[-1].get("timestamp") if performance_points else None,
+                    provider_native_id=str(
+                        result.get("primary_symbol")
+                        or (result.get("scope") or {}).get("primary_symbol")
+                        or ""
+                    )
+                    or None,
+                    navigation_supported=True,
+                    navigation_tab="equity_research",
+                    navigation_mode="single_name",
                 )
             )
             tool_state["result"] = result
@@ -4417,8 +5323,12 @@ class CopilotService:
                     origin="gamma.research.overview",
                     description="Active Equity Research market-map overview.",
                     retrieved_at=overview.get("retrieved_at"),
+                    navigation_supported=True,
+                    navigation_tab="equity_research",
+                    navigation_mode="overview",
                 )
             )
+            tool_state["overview"] = overview
         return CopilotContextBundle(
             domain="equity_research",
             current_tab=request.context.current_tab or "equity_research",
@@ -4720,6 +5630,13 @@ class CopilotService:
                 "snapshot_available": False,
                 "warnings": ["No active Options surface is loaded; operator tools may request a bounded service snapshot."],
             }
+        summary["status"] = (
+            "ready"
+            if bool(summary.get("snapshot_available")) and not summary.get("delayed")
+            else "degraded"
+            if bool(summary.get("snapshot_available"))
+            else "unavailable"
+        )
         warnings = dedupe_warnings(summary.get("warnings", []))
         sources = []
         if isinstance(active_surface, dict):
@@ -4731,7 +5648,12 @@ class CopilotService:
                     provider="gamma",
                     origin="gamma.iv.surface",
                     description="Loaded options implied-volatility surface payload from Gamma.",
-                    retrieved_at=active_surface.get("timestamp"),
+                    retrieved_at=active_surface.get("retrieved_at") or active_surface.get("timestamp"),
+                    provider_native_id=target_symbol,
+                    navigation_supported=True,
+                    navigation_tab="iv",
+                    navigation_mode="surface",
+                    navigation_context={"symbol": target_symbol},
                 )
             )
         if session is not None:
@@ -4743,7 +5665,11 @@ class CopilotService:
                     provider="gamma",
                     origin="gamma.iv.session",
                     description="Current Options session state from Gamma.",
-                    retrieved_at=active_surface.get("timestamp"),
+                    retrieved_at=(active_surface or {}).get("timestamp"),
+                    navigation_supported=True,
+                    navigation_tab="iv",
+                    navigation_mode="surface",
+                    navigation_context={"symbol": target_symbol},
                 )
             )
         return CopilotContextBundle(
@@ -4888,12 +5814,83 @@ class CopilotService:
         state = request.context.commodities_state or {}
         workspace = state.get("workspace")
         if not isinstance(workspace, dict):
-            raise ValueError("Commodities copilot requires a loaded commodities workspace.")
+            selected_instrument_id = self._commodity_instrument_for_request(request)
+            if self.commodities_service is None:
+                warning = (
+                    "Commodities context is unavailable because no CommoditiesService is configured; "
+                    "curves, inventories, spreads, and events were not inferred."
+                )
+                return CopilotContextBundle(
+                    domain="commodities",
+                    current_tab=request.context.current_tab or "commodities",
+                    summary_data={
+                        "workspace_mode": request.context.workspace_mode or "research",
+                        "status": "unavailable",
+                        "selected_instrument_id": selected_instrument_id,
+                        "commodities": None,
+                    },
+                    sources=[
+                        CopilotSourceRef(
+                            source_id="commodities.unavailable",
+                            label="Commodities provider unavailable",
+                            kind="provider_boundary",
+                            provider="unavailable",
+                            origin="gamma.copilot.commodities",
+                            description=warning,
+                            retrieved_at=None,
+                            navigation_supported=False,
+                            navigation_reason="No CommoditiesService is configured.",
+                        )
+                    ],
+                    warnings=[warning],
+                )
+            try:
+                loaded = self.commodities_service.get_workspace(
+                    CommodityWorkspaceRequest(
+                        mode="curves_spreads",
+                        selected_instrument_id=selected_instrument_id,
+                        force_refresh=False,
+                    )
+                )
+                workspace = asdict(loaded)
+            except Exception as exc:
+                warning = (
+                    "Commodities provider failed while loading bounded read-only context: "
+                    f"{exc}"
+                )
+                return CopilotContextBundle(
+                    domain="commodities",
+                    current_tab=request.context.current_tab or "commodities",
+                    summary_data={
+                        "workspace_mode": request.context.workspace_mode or "research",
+                        "status": "unavailable",
+                        "selected_instrument_id": selected_instrument_id,
+                        "commodities": None,
+                    },
+                    sources=[
+                        CopilotSourceRef(
+                            source_id="commodities.provider_failure",
+                            label="Commodities provider failure",
+                            kind="provider_boundary",
+                            provider="unavailable",
+                            origin="gamma.copilot.commodities",
+                            description=warning,
+                            retrieved_at=None,
+                            navigation_supported=False,
+                            navigation_reason="The configured commodities provider failed.",
+                        )
+                    ],
+                    warnings=[warning],
+                )
         summary = summarize_commodities_workspace(workspace)
         if summary is None:
-            raise ValueError("Commodities copilot requires a loaded commodities workspace.")
+            raise ValueError("Commodities workspace did not contain a normalized summary.")
         coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
         warnings = dedupe_warnings(workspace.get("warnings", []), coverage.get("caveats", []))
+        coverage_status = str(coverage.get("coverage_status") or "unknown")
+        status = "ready" if coverage_status in {"live"} else (
+            "unavailable" if coverage_status == "unavailable" else "degraded"
+        )
         sources = [
             CopilotSourceRef(
                 source_id="commodities.workspace",
@@ -4903,6 +5900,12 @@ class CopilotService:
                 origin=str(workspace.get("origin") or "gamma.commodities.workspace"),
                 description="Loaded Commodities workspace payload assembled by Gamma.",
                 retrieved_at=workspace.get("retrieved_at") or coverage.get("retrieved_at"),
+                navigation_supported=True,
+                navigation_tab="commodities",
+                navigation_mode=str(workspace.get("mode") or "overview"),
+                navigation_context={
+                    "instrument_id": str(workspace.get("selected_instrument_id") or "wti"),
+                },
             )
         ]
         source_timestamp = coverage.get("source_timestamp")
@@ -4916,16 +5919,300 @@ class CopilotService:
                     origin=str(coverage.get("origin") or "gamma.commodities.coverage"),
                     description="Provider coverage, freshness, and caveats for the loaded Commodities workspace.",
                     retrieved_at=coverage.get("retrieved_at") or source_timestamp,
+                    provider_native_id=str(coverage.get("provider_id") or "") or None,
+                    navigation_supported=False,
+                    navigation_reason="Provider coverage metadata is inspectable in the Commodities workspace but has no standalone destination.",
                 )
             )
         return CopilotContextBundle(
             domain="commodities",
             current_tab=request.context.current_tab or "commodities",
-            summary_data={"workspace_mode": request.context.workspace_mode or "research", "commodities": summary},
+            summary_data={
+                "workspace_mode": request.context.workspace_mode or "research",
+                "status": status,
+                "selected_instrument_id": workspace.get("selected_instrument_id"),
+                "commodities": summary,
+            },
             tool_state={"workspace": workspace},
             sources=sources,
             warnings=warnings,
         )
+
+    def _build_maritime_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
+        state = request.context.maritime_state or {}
+        workspace = state.get("workspace")
+        requested_mode = str(
+            (workspace or {}).get("mode")
+            if isinstance(workspace, dict)
+            else request.context.workspace_mode or "chokepoints"
+        )
+        if requested_mode not in {
+            "live_map",
+            "chokepoints",
+            "trade_flows",
+            "fleet_monitoring",
+            "event_replay",
+        }:
+            requested_mode = "chokepoints"
+        if not isinstance(workspace, dict):
+            if self.maritime_service is None:
+                return self._unavailable_maritime_context(
+                    request,
+                    "Sealanes context is unavailable because no MaritimeService is configured; "
+                    "AIS, route, chokepoint, and historical coverage were not inferred.",
+                    requested_mode,
+                )
+            try:
+                workspace = asdict(
+                    self.maritime_service.get_workspace(
+                        mode=requested_mode,
+                        force_refresh=False,
+                    )
+                )
+            except Exception as exc:
+                return self._unavailable_maritime_context(
+                    request,
+                    f"Sealanes provider failed while loading bounded read-only context: {exc}",
+                    requested_mode,
+                )
+
+        coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
+        coverage_status = str(coverage.get("coverage_status") or "unavailable")
+        freshness_label = str(coverage.get("freshness_label") or "unknown")
+        status = "ready" if coverage_status == "live" else (
+            "unavailable" if coverage_status == "unavailable" else "degraded"
+        )
+        warnings = dedupe_warnings(
+            workspace.get("warnings", []),
+            coverage.get("caveats", []),
+        )
+        if not coverage.get("supports_historical"):
+            warnings.append(
+                "Historical AIS/route coverage is unavailable; event replay and historical transit claims are unsupported."
+            )
+        if not workspace.get("positions"):
+            warnings.append(
+                "No AIS positions are available; vessel-density and chokepoint observations are unavailable."
+            )
+        summary = {
+            "status": status,
+            "mode": workspace.get("mode") or requested_mode,
+            "coverage": {
+                "coverage_status": coverage_status,
+                "freshness_label": freshness_label,
+                "provider_id": coverage.get("provider_id"),
+                "provider_label": coverage.get("provider_label"),
+                "regions": list(coverage.get("regions") or []),
+                "as_of": coverage.get("as_of"),
+                "source_timestamp": coverage.get("source_timestamp"),
+                "retrieved_at": coverage.get("retrieved_at"),
+                "supports_live": bool(coverage.get("supports_live")),
+                "supports_historical": bool(coverage.get("supports_historical")),
+                "caveats": list(coverage.get("caveats") or []),
+            },
+            "counts": {
+                "vessels": len(workspace.get("vessels") or []),
+                "positions": len(workspace.get("positions") or []),
+                "tracks": len(workspace.get("tracks") or []),
+                "chokepoints": len(workspace.get("chokepoints") or []),
+                "flow_summaries": len(workspace.get("flow_summaries") or []),
+            },
+            "chokepoints": [
+                {
+                    "chokepoint_id": row.get("chokepoint_id"),
+                    "name": row.get("name"),
+                    "region": row.get("region"),
+                    "coverage_status": row.get("coverage_status"),
+                    "total_vessel_count": row.get("total_vessel_count"),
+                    "vessel_count_by_type": row.get("vessel_count_by_type"),
+                    "congestion_label": "unavailable",
+                    "congestion_score": None,
+                    "baseline_vessel_count": None,
+                    "commodity_links": list(row.get("commodity_links") or []),
+                    "methodology": row.get("methodology"),
+                    "caveats": list(row.get("caveats") or []),
+                    "retrieved_at": row.get("retrieved_at"),
+                    "source_provider": row.get("source_provider"),
+                }
+                for row in list(workspace.get("chokepoint_summaries") or [])[:12]
+                if isinstance(row, dict)
+            ],
+            "routes": [
+                {
+                    "route_id": row.get("flow_id"),
+                    "label": row.get("label"),
+                    "vessel_type": row.get("vessel_type"),
+                    "route_label": row.get("route_label"),
+                    "coverage_status": row.get("coverage_status"),
+                    "vessel_count": row.get("vessel_count"),
+                    "affected_chokepoint_ids": list(row.get("affected_chokepoint_ids") or []),
+                    "inferred_commodity": row.get("inferred_commodity"),
+                    "inference_confidence": row.get("inference_confidence"),
+                    "inference_caveat": row.get("inference_caveat"),
+                    "retrieved_at": row.get("retrieved_at"),
+                    "source_provider": row.get("source_provider"),
+                }
+                for row in list(workspace.get("flow_summaries") or [])[:12]
+                if isinstance(row, dict)
+            ],
+            "warnings": warnings,
+        }
+        sources: list[CopilotSourceRef] = [
+            CopilotSourceRef(
+                source_id="maritime.workspace",
+                label="Sealanes workspace",
+                kind="maritime_workspace",
+                provider=str(workspace.get("source_provider") or coverage.get("source_provider") or "gamma"),
+                origin=str(workspace.get("origin") or "gamma.maritime.workspace"),
+                description=(
+                    "Normalized maritime workspace with explicit sample/live coverage; "
+                    "no congestion, sanctions, cargo, ownership, or vessel-risk label is implied."
+                ),
+                retrieved_at=workspace.get("retrieved_at") or coverage.get("retrieved_at"),
+                navigation_supported=True,
+                navigation_tab="maritime",
+                navigation_mode=str(workspace.get("mode") or requested_mode),
+            ),
+            CopilotSourceRef(
+                source_id="maritime.coverage",
+                label="Sealanes provider coverage",
+                kind="provenance",
+                provider=str(coverage.get("source_provider") or coverage.get("provider_id") or "unavailable"),
+                origin=str(coverage.get("origin") or "gamma.maritime.coverage"),
+                description=(
+                    f"coverage={coverage_status}; freshness={freshness_label}; "
+                    f"historical={bool(coverage.get('supports_historical'))}."
+                ),
+                retrieved_at=coverage.get("retrieved_at") or coverage.get("source_timestamp"),
+                provider_native_id=str(coverage.get("provider_id") or "") or None,
+                navigation_supported=False,
+                navigation_reason="Coverage metadata is inspectable in Sealanes but has no standalone navigation target.",
+            ),
+        ]
+        for row in summary["chokepoints"]:
+            chokepoint_id = str(row.get("chokepoint_id") or "").strip()
+            if not chokepoint_id:
+                continue
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"maritime.chokepoint.{self._safe_source_id(chokepoint_id)}",
+                    label=str(row.get("name") or chokepoint_id),
+                    kind="maritime_chokepoint",
+                    provider=str(row.get("source_provider") or sources[0].provider),
+                    origin="gamma.maritime.chokepoint_summary",
+                    description=(
+                        "Latest bounded chokepoint vessel-density observation; congestion and operational risk are unavailable."
+                    ),
+                    retrieved_at=row.get("retrieved_at"),
+                    provider_native_id=chokepoint_id,
+                    navigation_supported=True,
+                    navigation_tab="maritime",
+                    navigation_mode="chokepoints",
+                    navigation_context={"chokepoint_id": chokepoint_id},
+                )
+            )
+        for row in summary["routes"]:
+            route_id = str(row.get("route_id") or "").strip()
+            if not route_id:
+                continue
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"maritime.route.{self._safe_source_id(route_id)}",
+                    label=str(row.get("label") or route_id),
+                    kind="maritime_route",
+                    provider=str(row.get("source_provider") or sources[0].provider),
+                    origin="gamma.maritime.flow_summary",
+                    description=(
+                        "Normalized sample route/flow grouping. Any commodity value is explicitly inferential and caveated."
+                    ),
+                    retrieved_at=row.get("retrieved_at"),
+                    provider_native_id=route_id,
+                    navigation_supported=True,
+                    navigation_tab="maritime",
+                    navigation_mode="trade_flows",
+                    navigation_context={"route_id": route_id},
+                )
+            )
+        return CopilotContextBundle(
+            domain="maritime",
+            current_tab=request.context.current_tab or "maritime",
+            summary_data={
+                "workspace_mode": request.context.workspace_mode or "research",
+                "maritime": summary,
+            },
+            tool_state={"workspace": workspace},
+            sources=sources,
+            warnings=dedupe_warnings(warnings),
+        )
+
+    def _unavailable_maritime_context(
+        self,
+        request: CopilotResearchCardRequest,
+        warning: str,
+        mode: str,
+    ) -> CopilotContextBundle:
+        return CopilotContextBundle(
+            domain="maritime",
+            current_tab=request.context.current_tab or "maritime",
+            summary_data={
+                "workspace_mode": request.context.workspace_mode or "research",
+                "maritime": {
+                    "status": "unavailable",
+                    "mode": mode,
+                    "coverage": {
+                        "coverage_status": "unavailable",
+                        "freshness_label": "unavailable",
+                        "supports_live": False,
+                        "supports_historical": False,
+                    },
+                    "counts": {
+                        "vessels": 0,
+                        "positions": 0,
+                        "tracks": 0,
+                        "chokepoints": 0,
+                        "flow_summaries": 0,
+                    },
+                    "chokepoints": [],
+                    "routes": [],
+                    "warnings": [warning],
+                },
+            },
+            sources=[
+                CopilotSourceRef(
+                    source_id="maritime.unavailable",
+                    label="Sealanes provider unavailable",
+                    kind="provider_boundary",
+                    provider="unavailable",
+                    origin="gamma.copilot.maritime",
+                    description=warning,
+                    retrieved_at=None,
+                    navigation_supported=False,
+                    navigation_reason=warning,
+                )
+            ],
+            warnings=[warning],
+        )
+
+    @staticmethod
+    def _commodity_instrument_for_request(request: CopilotResearchCardRequest) -> str:
+        prompt = str(request.prompt or "").lower()
+        by_term = {
+            "brent": "brent",
+            "wti": "wti",
+            "oil": "wti",
+            "crude": "wti",
+            "natural gas": "henry_hub",
+            "copper": "copper",
+            "gold": "gold",
+        }
+        for term, instrument_id in by_term.items():
+            if term in prompt:
+                return instrument_id
+        state = request.context.commodities_state or {}
+        workspace = state.get("workspace") if isinstance(state, dict) else None
+        if isinstance(workspace, dict) and workspace.get("selected_instrument_id"):
+            return str(workspace["selected_instrument_id"])
+        return "wti"
 
     def _build_sitrep_context(self, request: CopilotResearchCardRequest) -> CopilotContextBundle:
         if self.sitrep_service is None:
@@ -5715,6 +7002,229 @@ class CopilotService:
             sources=[source],
         )
 
+    def _tool_inspect_equity_research_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        max_rows = max(1, min(12, int(self._optional_float(arguments.get("max_rows")) or 8)))
+        result = context.tool_state.get("result")
+        overview = context.tool_state.get("overview")
+        operator_analysis = context.tool_state.get("operator_analysis")
+        symbol = str(arguments.get("symbol") or "").strip().upper()
+        if not symbol and isinstance(result, dict):
+            symbol = str(
+                result.get("primary_symbol")
+                or (result.get("scope") or {}).get("primary_symbol")
+                or ""
+            ).strip().upper()
+        scope_summary = (
+            summarize_research_result(
+                result,
+                weight_limit=max_rows,
+                constituent_limit=max_rows,
+            )
+            if isinstance(result, dict)
+            else None
+        )
+        if scope_summary is None and isinstance(operator_analysis, dict):
+            scope_summary = operator_analysis
+        overview_summary = self._equity_research_overview_drilldown(overview, max_rows=max_rows)
+        warnings = dedupe_warnings(
+            result.get("warnings", []) if isinstance(result, dict) else [],
+            overview.get("warnings", []) if isinstance(overview, dict) else [],
+            operator_analysis.get("warnings", [])
+            if isinstance(operator_analysis, dict)
+            else [],
+        )
+        if scope_summary is None and overview_summary is None:
+            warnings.append(
+                "Equity Research context is unavailable: no normalized scope or overview was loaded."
+            )
+        status = "ready"
+        if scope_summary is None and overview_summary is None:
+            status = "unavailable"
+        elif warnings or self._research_summary_degraded(scope_summary):
+            status = "degraded"
+
+        sources: list[CopilotSourceRef] = []
+        retrieved_at = None
+        if isinstance(result, dict):
+            points = result.get("performance_points") or []
+            retrieved_at = (
+                points[-1].get("timestamp")
+                if points and isinstance(points[-1], dict)
+                else result.get("retrieved_at")
+            )
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"equity_research.scope.{self._safe_source_id(symbol or 'active')}",
+                    label=f"{symbol or 'Active'} Equity Research scope",
+                    kind="equity_research",
+                    provider=str(result.get("source_provider") or "gamma"),
+                    origin=str(result.get("origin") or "gamma.research.analyze"),
+                    description="Bounded normalized Equity Research scope, benchmark, coverage, and constituent analytics.",
+                    retrieved_at=retrieved_at,
+                    provider_native_id=symbol or None,
+                    navigation_supported=True,
+                    navigation_tab="equity_research",
+                    navigation_mode="single_name" if symbol else "overview",
+                    navigation_context={
+                        key: value
+                        for key, value in {
+                            "symbol": symbol,
+                            "timeframe": str(
+                                result.get("lookback_days")
+                                or (result.get("scope") or {}).get("lookback_days")
+                                or ""
+                            ),
+                        }.items()
+                        if value
+                    },
+                )
+            )
+        elif isinstance(operator_analysis, dict):
+            operator_scope = (
+                operator_analysis.get("scope")
+                if isinstance(operator_analysis.get("scope"), dict)
+                else {}
+            )
+            symbol = symbol or str(operator_scope.get("primary_symbol") or "").strip().upper()
+            provenance = (
+                operator_analysis.get("provenance")
+                if isinstance(operator_analysis.get("provenance"), dict)
+                else {}
+            )
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"equity_research.scope.{self._safe_source_id(symbol or 'active')}",
+                    label=f"{symbol or 'Active'} Equity Research scope",
+                    kind="equity_research",
+                    provider=str(provenance.get("source_provider") or "gamma"),
+                    origin="gamma.research.analyze",
+                    description="Bounded normalized Equity ResearchService single-name analysis.",
+                    retrieved_at=provenance.get("retrieved_at"),
+                    provider_native_id=symbol or None,
+                    navigation_supported=True,
+                    navigation_tab="equity_research",
+                    navigation_mode="single_name",
+                    navigation_context={
+                        "symbol": symbol,
+                        "timeframe": str(operator_scope.get("lookback_days") or "252"),
+                    },
+                )
+            )
+        if isinstance(overview, dict):
+            sources.append(
+                CopilotSourceRef(
+                    source_id="equity_research.overview.drilldown",
+                    label="Equity Research market overview",
+                    kind="equity_research_overview",
+                    provider=str(overview.get("source_provider") or "gamma"),
+                    origin=str(overview.get("origin") or "gamma.research.overview"),
+                    description="Bounded normalized Equity Research market map, rankings, coverage, and benchmark context.",
+                    retrieved_at=overview.get("retrieved_at"),
+                    navigation_supported=True,
+                    navigation_tab="equity_research",
+                    navigation_mode="overview",
+                )
+            )
+        output = {
+            "status": status,
+            "scope": scope_summary,
+            "overview": overview_summary,
+            "symbol": symbol or None,
+            "timeframe": (
+                (result or {}).get("lookback_days")
+                if isinstance(result, dict)
+                else (
+                    (operator_analysis.get("scope") or {}).get("lookback_days")
+                    if isinstance(operator_analysis, dict)
+                    else (overview or {}).get("timeframe")
+                    if isinstance(overview, dict)
+                    else None
+                )
+            ),
+            "assumptions": [
+                "Benchmark-relative fields use the benchmark carried by the normalized Research result.",
+                "Missing history or peer coverage remains missing and is not imputed.",
+            ],
+            "source_ids": [source.source_id for source in sources],
+            "warnings": warnings,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="inspect_equity_research_context",
+                summary=(
+                    f"Inspected bounded Equity Research context for {symbol or 'the active overview'}; "
+                    f"status={status}."
+                ),
+                arguments={"symbol": symbol or None, "max_rows": max_rows},
+                source_ids=output["source_ids"],
+            ),
+            sources=sources,
+        )
+
+    @staticmethod
+    def _equity_research_overview_drilldown(
+        overview: Any,
+        *,
+        max_rows: int,
+    ) -> dict[str, Any] | None:
+        if not isinstance(overview, dict):
+            return None
+        nodes = [row for row in overview.get("nodes", []) if isinstance(row, dict)]
+        rankings = overview.get("rankings") if isinstance(overview.get("rankings"), dict) else {}
+        return {
+            "universe_id": overview.get("universe_id"),
+            "universe_label": overview.get("universe_label"),
+            "benchmark_symbol": overview.get("benchmark_symbol"),
+            "timeframe": overview.get("timeframe"),
+            "coverage": overview.get("coverage"),
+            "freshness_label": overview.get("freshness_label"),
+            "leaders": list(rankings.get("leaders") or [])[:max_rows],
+            "laggards": list(rankings.get("laggards") or [])[:max_rows],
+            "nodes": [
+                {
+                    key: row.get(key)
+                    for key in (
+                        "instrument_id",
+                        "symbol",
+                        "display_symbol",
+                        "name",
+                        "sector",
+                        "industry",
+                        "return_value",
+                        "volatility",
+                        "market_cap",
+                        "freshness_label",
+                        "source_provider",
+                        "retrieved_at",
+                        "origin",
+                        "transformation_note",
+                    )
+                    if key in row
+                }
+                for row in nodes[:max_rows]
+            ],
+            "source_provider": overview.get("source_provider"),
+            "retrieved_at": overview.get("retrieved_at"),
+            "origin": overview.get("origin"),
+            "transformation_note": overview.get("transformation_note"),
+            "warnings": list(overview.get("warnings") or []),
+        }
+
+    @staticmethod
+    def _research_summary_degraded(summary: dict[str, Any] | None) -> bool:
+        if not isinstance(summary, dict):
+            return True
+        coverage = summary.get("coverage")
+        if isinstance(coverage, dict):
+            missing = coverage.get("missing_symbols") or coverage.get("missing")
+            return bool(missing)
+        return False
+
     def _tool_run_research_scope_analysis(
         self,
         arguments: dict[str, Any],
@@ -6067,6 +7577,422 @@ class CopilotService:
                 source_ids=[source.source_id],
             ),
             sources=[source],
+        )
+
+    def _tool_inspect_commodity_curve_fundamentals(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        workspace = self._commodities_workspace_from_bundle(context)
+        instrument_id = str(
+            arguments.get("instrument_id")
+            or workspace.get("selected_instrument_id")
+            or "wti"
+        ).strip().lower()
+        max_curve_nodes = max(
+            1,
+            min(12, int(self._optional_float(arguments.get("max_curve_nodes")) or 8)),
+        )
+        max_inventory_points = max(
+            1,
+            min(12, int(self._optional_float(arguments.get("max_inventory_points")) or 6)),
+        )
+        coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
+        curves = [
+            row
+            for row in workspace.get("curves", [])
+            if isinstance(row, dict) and str(row.get("instrument_id") or "") == instrument_id
+        ]
+        inventories = [
+            row
+            for row in workspace.get("inventories", [])
+            if isinstance(row, dict)
+            and str(
+                (
+                    row.get("metadata")
+                    if isinstance(row.get("metadata"), dict)
+                    else {}
+                ).get("instrument_id")
+                or ""
+            )
+            in {instrument_id, ""}
+        ]
+        events = [
+            row
+            for row in workspace.get("events", [])
+            if isinstance(row, dict)
+            and (
+                instrument_id in list(row.get("linked_instrument_ids") or [])
+                or not row.get("linked_instrument_ids")
+            )
+        ]
+        reconciliations = [
+            row
+            for row in workspace.get("price_reconciliations", [])
+            if isinstance(row, dict) and str(row.get("instrument_id") or "") == instrument_id
+        ]
+        curve = curves[0] if curves else None
+        curve_output = None
+        if curve is not None:
+            curve_output = {
+                "instrument_id": instrument_id,
+                "as_of": curve.get("as_of"),
+                "shape_label": curve.get("shape_label"),
+                "front_spread": curve.get("front_spread"),
+                "front_spread_pct": curve.get("front_spread_pct"),
+                "m1_m6_spread": curve.get("m1_m6_spread"),
+                "curve_slope": curve.get("curve_slope"),
+                "roll_yield_proxy_pct": curve.get("roll_yield_proxy_pct"),
+                "summary": curve.get("summary"),
+                "nodes": [
+                    {
+                        "contract_id": (node.get("contract") or {}).get("contract_id"),
+                        "contract_symbol": (node.get("contract") or {}).get("symbol"),
+                        "contract_month": (node.get("contract") or {}).get("contract_month"),
+                        "expiry_date": (node.get("contract") or {}).get("expiry_date"),
+                        "is_front_month": (node.get("contract") or {}).get("is_front_month"),
+                        "price": node.get("price"),
+                        "previous_price": node.get("previous_price"),
+                        "change": node.get("change"),
+                        "days_to_expiry": node.get("days_to_expiry"),
+                        "source_provider": node.get("source_provider"),
+                        "retrieved_at": node.get("retrieved_at"),
+                        "origin": node.get("origin"),
+                        "transformation_note": node.get("transformation_note"),
+                    }
+                    for node in list(curve.get("nodes") or [])[:max_curve_nodes]
+                    if isinstance(node, dict) and isinstance(node.get("contract"), dict)
+                ],
+                "source_provider": curve.get("source_provider"),
+                "retrieved_at": curve.get("retrieved_at"),
+                "origin": curve.get("origin"),
+                "transformation_note": curve.get("transformation_note"),
+                "warnings": list(curve.get("warnings") or []),
+            }
+        inventory_output = []
+        for row in inventories[:6]:
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            points = [point for point in row.get("points", []) if isinstance(point, dict)]
+            inventory_output.append(
+                {
+                    "series_id": metadata.get("series_id"),
+                    "provider_series_id": metadata.get("provider_series_id"),
+                    "instrument_id": metadata.get("instrument_id"),
+                    "label": metadata.get("label"),
+                    "unit": metadata.get("unit"),
+                    "frequency": metadata.get("frequency"),
+                    "latest_value": row.get("latest_value"),
+                    "latest_change": row.get("latest_change"),
+                    "seasonal_percentile": row.get("seasonal_percentile"),
+                    "points": points[-max_inventory_points:],
+                    "source_provider": row.get("source_provider") or metadata.get("source_provider"),
+                    "retrieved_at": row.get("retrieved_at") or metadata.get("retrieved_at"),
+                    "origin": row.get("origin") or metadata.get("origin"),
+                    "transformation_note": row.get("transformation_note") or metadata.get("transformation_note"),
+                    "warnings": list(row.get("warnings") or []),
+                }
+            )
+        event_output = [
+            {
+                key: row.get(key)
+                for key in (
+                    "event_id",
+                    "title",
+                    "category",
+                    "scheduled_at",
+                    "importance",
+                    "linked_instrument_ids",
+                    "summary",
+                    "source_provider",
+                    "retrieved_at",
+                    "origin",
+                    "transformation_note",
+                )
+                if key in row
+            }
+            for row in events[:8]
+        ]
+        warnings = dedupe_warnings(
+            workspace.get("warnings", []),
+            coverage.get("caveats", []),
+            curve.get("warnings", []) if isinstance(curve, dict) else [],
+            *(row.get("warnings", []) for row in inventories),
+        )
+        if curve is None:
+            warnings.append(f"Curve coverage is unavailable for `{instrument_id}`.")
+        if not inventories:
+            warnings.append(f"Inventory/fundamentals coverage is unavailable for `{instrument_id}`.")
+        if not events:
+            warnings.append(f"Commodity event coverage is unavailable for `{instrument_id}`.")
+        status = "ready"
+        if str(coverage.get("coverage_status") or "") == "unavailable":
+            status = "unavailable"
+        elif curve is None or not inventories or warnings:
+            status = "degraded"
+
+        sources = [
+            CopilotSourceRef(
+                source_id=f"commodities.instrument.{self._safe_source_id(instrument_id)}",
+                label=f"{instrument_id.upper()} commodity context",
+                kind="commodity_instrument",
+                provider=str(workspace.get("source_provider") or coverage.get("source_provider") or "gamma"),
+                origin=str(workspace.get("origin") or "gamma.commodities.workspace"),
+                description="Bounded normalized commodity curve, inventory, event, and price-basis context.",
+                retrieved_at=workspace.get("retrieved_at") or coverage.get("retrieved_at"),
+                provider_native_id=instrument_id,
+                navigation_supported=True,
+                navigation_tab="commodities",
+                navigation_mode="curves_spreads",
+                navigation_context={"instrument_id": instrument_id},
+            )
+        ]
+        if curve is not None:
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"commodities.curve.{self._safe_source_id(instrument_id)}",
+                    label=f"{instrument_id.upper()} futures curve",
+                    kind="commodity_curve",
+                    provider=str(curve.get("source_provider") or sources[0].provider),
+                    origin=str(curve.get("origin") or "gamma.commodities.curve_analytics"),
+                    description="Normalized futures curve with provider contract identifiers and transparent roll-yield heuristic.",
+                    retrieved_at=curve.get("retrieved_at") or curve.get("as_of"),
+                    provider_native_id=instrument_id,
+                    navigation_supported=True,
+                    navigation_tab="commodities",
+                    navigation_mode="curves_spreads",
+                    navigation_context={"instrument_id": instrument_id},
+                )
+            )
+        for row in inventory_output:
+            series_id = str(row.get("series_id") or "").strip()
+            if not series_id:
+                continue
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"commodities.inventory.{self._safe_source_id(series_id)}",
+                    label=str(row.get("label") or series_id),
+                    kind="commodity_inventory",
+                    provider=str(row.get("source_provider") or sources[0].provider),
+                    origin=str(row.get("origin") or "gamma.commodities.inventory"),
+                    description="Normalized commodity inventory/fundamentals series.",
+                    retrieved_at=row.get("retrieved_at"),
+                    provider_native_id=str(row.get("provider_series_id") or series_id),
+                    navigation_supported=True,
+                    navigation_tab="commodities",
+                    navigation_mode="inventories_fundamentals",
+                    navigation_context={
+                        "instrument_id": instrument_id,
+                        "series_id": series_id,
+                    },
+                )
+            )
+        output = {
+            "status": status,
+            "instrument_id": instrument_id,
+            "coverage": coverage,
+            "price_reconciliation": reconciliations[0] if reconciliations else None,
+            "curve": curve_output,
+            "inventories": inventory_output,
+            "events": event_output,
+            "assumptions": [
+                "Curve shape and roll-yield fields are Gamma's existing transparent first-pass heuristics.",
+                "Absent curve, inventory, or event records remain unavailable and are not imputed.",
+            ],
+            "source_ids": [source.source_id for source in sources],
+            "warnings": warnings,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="inspect_commodity_curve_fundamentals",
+                summary=f"Inspected bounded commodity curve/fundamentals context for {instrument_id}; status={status}.",
+                arguments={
+                    "instrument_id": instrument_id,
+                    "max_curve_nodes": max_curve_nodes,
+                    "max_inventory_points": max_inventory_points,
+                },
+                source_ids=output["source_ids"],
+            ),
+            sources=sources,
+        )
+
+    def _tool_get_maritime_chokepoint_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        return self._maritime_context_execution(
+            arguments,
+            context,
+            row_key="chokepoint_summaries",
+            requested_key="chokepoint_id",
+            tool_name="get_maritime_chokepoint_context",
+        )
+
+    def _tool_get_maritime_route_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        return self._maritime_context_execution(
+            arguments,
+            context,
+            row_key="flow_summaries",
+            requested_key="route_id",
+            tool_name="get_maritime_route_context",
+        )
+
+    def _maritime_context_execution(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+        *,
+        row_key: str,
+        requested_key: str,
+        tool_name: str,
+    ) -> CopilotToolExecution:
+        workspace = context.tool_state.get("workspace")
+        if not isinstance(workspace, dict):
+            warning = "Normalized Sealanes workspace is unavailable."
+            return CopilotToolExecution(
+                output={
+                    "status": "unavailable",
+                    "coverage": {
+                        "coverage_status": "unavailable",
+                        "freshness_label": "unavailable",
+                    },
+                    "chokepoints" if row_key == "chokepoint_summaries" else "routes": [],
+                    "source_ids": [source.source_id for source in context.sources],
+                    "warnings": dedupe_warnings(context.warnings, [warning]),
+                },
+                trace=CopilotToolTrace(
+                    tool_name=tool_name,
+                    summary=warning,
+                    arguments=dict(arguments),
+                    source_ids=[source.source_id for source in context.sources],
+                ),
+                sources=list(context.sources),
+            )
+        max_rows = max(1, min(12, int(self._optional_float(arguments.get("max_rows")) or 8)))
+        requested_id = str(arguments.get(requested_key) or "").strip()
+        id_field = "chokepoint_id" if row_key == "chokepoint_summaries" else "flow_id"
+        rows = [row for row in workspace.get(row_key, []) if isinstance(row, dict)]
+        if requested_id:
+            rows = [row for row in rows if str(row.get(id_field) or "") == requested_id]
+        rows = rows[:max_rows]
+        coverage = workspace.get("coverage") if isinstance(workspace.get("coverage"), dict) else {}
+        warnings = dedupe_warnings(
+            context.warnings,
+            workspace.get("warnings", []),
+            coverage.get("caveats", []),
+        )
+        if requested_id and not rows:
+            warnings.append(
+                f"Requested Sealanes {requested_key.replace('_', ' ')} `{requested_id}` is unavailable in active provider coverage."
+            )
+        if not rows:
+            warnings.append(
+                "No normalized Sealanes chokepoint observations are available."
+                if row_key == "chokepoint_summaries"
+                else "No normalized Sealanes route/flow observations are available; historical routes were not inferred."
+            )
+        supports_historical = bool(coverage.get("supports_historical"))
+        if row_key == "flow_summaries" and not supports_historical:
+            warnings.append(
+                "Historical AIS/route coverage is unavailable; returned flow rows are bounded current/sample groupings only."
+            )
+        output_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if row_key == "chokepoint_summaries":
+                output_rows.append(
+                    {
+                        "chokepoint_id": row.get("chokepoint_id"),
+                        "name": row.get("name"),
+                        "region": row.get("region"),
+                        "coverage_status": row.get("coverage_status"),
+                        "total_vessel_count": row.get("total_vessel_count"),
+                        "vessel_count_by_type": row.get("vessel_count_by_type"),
+                        "baseline_vessel_count": None,
+                        "congestion_score": None,
+                        "congestion_label": "unavailable",
+                        "operational_risk": "unsupported",
+                        "sanctions_status": "unsupported",
+                        "ownership_risk": "unsupported",
+                        "commodity_links": list(row.get("commodity_links") or []),
+                        "methodology": row.get("methodology"),
+                        "caveats": list(row.get("caveats") or []),
+                        "source_provider": row.get("source_provider"),
+                        "retrieved_at": row.get("retrieved_at"),
+                        "origin": row.get("origin"),
+                        "transformation_note": row.get("transformation_note"),
+                    }
+                )
+            else:
+                output_rows.append(
+                    {
+                        "route_id": row.get("flow_id"),
+                        "label": row.get("label"),
+                        "vessel_type": row.get("vessel_type"),
+                        "route_label": row.get("route_label"),
+                        "coverage_status": row.get("coverage_status"),
+                        "vessel_count": row.get("vessel_count"),
+                        "affected_chokepoint_ids": list(row.get("affected_chokepoint_ids") or []),
+                        "inferred_commodity": row.get("inferred_commodity"),
+                        "inference_confidence": row.get("inference_confidence"),
+                        "inference_caveat": row.get("inference_caveat"),
+                        "cargo_fact": "unsupported",
+                        "vessel_risk": "unsupported",
+                        "source_provider": row.get("source_provider"),
+                        "retrieved_at": row.get("retrieved_at"),
+                        "origin": row.get("origin"),
+                        "transformation_note": row.get("transformation_note"),
+                    }
+                )
+        coverage_status = str(coverage.get("coverage_status") or "unavailable")
+        status = "unavailable" if not rows or coverage_status == "unavailable" else (
+            "ready" if coverage_status == "live" else "degraded"
+        )
+        source_prefix = "maritime.chokepoint." if row_key == "chokepoint_summaries" else "maritime.route."
+        row_ids = {
+            str(row.get(id_field) or "")
+            for row in rows
+        }
+        sources = [
+            source
+            for source in context.sources
+            if source.source_id in {"maritime.workspace", "maritime.coverage"}
+            or (
+                source.source_id.startswith(source_prefix)
+                and str(source.provider_native_id or "") in row_ids
+            )
+        ]
+        output_key = "chokepoints" if row_key == "chokepoint_summaries" else "routes"
+        output = {
+            "status": status,
+            "coverage": {
+                "coverage_status": coverage_status,
+                "freshness_label": coverage.get("freshness_label"),
+                "provider_id": coverage.get("provider_id"),
+                "source_timestamp": coverage.get("source_timestamp"),
+                "retrieved_at": coverage.get("retrieved_at"),
+                "supports_live": bool(coverage.get("supports_live")),
+                "supports_historical": supports_historical,
+                "caveats": list(coverage.get("caveats") or []),
+            },
+            output_key: output_rows,
+            "source_ids": [source.source_id for source in sources],
+            "warnings": warnings,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name=tool_name,
+                summary=f"Inspected {len(rows)} bounded Sealanes {output_key}; status={status}.",
+                arguments={requested_key: requested_id or None, "max_rows": max_rows},
+                source_ids=output["source_ids"],
+            ),
+            sources=sources,
         )
 
     def _tool_get_prediction_market_history_summary(
@@ -6975,6 +8901,233 @@ class CopilotService:
             sources=[source],
         )
 
+    def _tool_inspect_options_structure(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        max_expiries = max(
+            1,
+            min(8, int(self._optional_float(arguments.get("max_expiries")) or 6)),
+        )
+        symbol = str(
+            arguments.get("symbol")
+            or context.summary_data.get("target_symbol")
+            or context.tool_state.get("target_symbol")
+            or ""
+        ).strip().upper()
+        normalized = self._normalize_options_realized_implied_arguments(
+            {
+                "symbol": symbol or None,
+                "max_expiries": max_expiries,
+                "depth_preset": "compact",
+                "market_data_mode": None,
+            },
+            context,
+        )
+        try:
+            surface, service_warnings, service_messages = self._options_surface_for_operator(
+                normalized,
+                context,
+            )
+        except Exception as exc:
+            warning = f"Options structure is unavailable: {exc}"
+            return CopilotToolExecution(
+                output={
+                    "status": "unavailable",
+                    "symbol": symbol or None,
+                    "surface_model": None,
+                    "expiries": [],
+                    "source_ids": [],
+                    "warnings": [warning],
+                },
+                trace=CopilotToolTrace(
+                    tool_name="inspect_options_structure",
+                    summary=warning,
+                    arguments={
+                        "symbol": symbol or None,
+                        "expiry": arguments.get("expiry"),
+                        "max_expiries": max_expiries,
+                    },
+                    source_ids=[],
+                ),
+                sources=[],
+            )
+        symbol = str(surface.get("symbol") or normalized["symbol"]).strip().upper()
+        requested_expiry = str(arguments.get("expiry") or "").strip()
+        warnings = dedupe_warnings(
+            surface.get("warnings", []),
+            service_warnings,
+            service_messages,
+        )
+        if not surface.get("snapshot_available", True):
+            warnings.append("No normalized IV surface snapshot is available.")
+        expiry_analytics = [
+            row
+            for row in surface.get("expiry_analytics", [])
+            if isinstance(row, dict)
+        ]
+        contracts = [
+            row
+            for row in surface.get("contracts", [])
+            if isinstance(row, dict)
+        ]
+        surface_expiries = [str(value) for value in surface.get("expiries", [])]
+        expiry_ids = [
+            str(row.get("expiry") or "")
+            for row in expiry_analytics
+            if str(row.get("expiry") or "")
+        ] or surface_expiries
+        expiry_ids = list(dict.fromkeys(expiry_ids))
+        if requested_expiry:
+            expiry_ids = [expiry for expiry in expiry_ids if expiry == requested_expiry]
+            if not expiry_ids:
+                warnings.append(
+                    f"Requested Options expiry `{requested_expiry}` is unavailable in the normalized surface."
+                )
+        expiry_outputs: list[dict[str, Any]] = []
+        for expiry in expiry_ids[:max_expiries]:
+            analytics = next(
+                (
+                    row
+                    for row in expiry_analytics
+                    if str(row.get("expiry") or "") == expiry
+                ),
+                {},
+            )
+            expiry_contracts = [
+                row
+                for row in contracts
+                if str(row.get("expiry") or row.get("last_trade_date") or "")[:10] == expiry[:10]
+            ]
+            expiry_outputs.append(
+                {
+                    "expiry": expiry,
+                    "atm_strike": analytics.get("atm_strike"),
+                    "atm_call_implied_volatility": analytics.get("atm_call_implied_volatility"),
+                    "atm_put_implied_volatility": analytics.get("atm_put_implied_volatility"),
+                    "atm_blended_implied_volatility": analytics.get("atm_blended_implied_volatility"),
+                    "historical_volatility": analytics.get("historical_volatility"),
+                    "implied_move": analytics.get("implied_move"),
+                    "skew_25_delta": analytics.get("skew_25_delta"),
+                    "term_slope": analytics.get("term_slope"),
+                    "quality": analytics.get("quality"),
+                    "contract_ids": [
+                        str(row.get("contract_id"))
+                        for row in expiry_contracts[:24]
+                        if row.get("contract_id")
+                    ],
+                    "provider_contract_ids": [
+                        str(
+                            row.get("provider_contract_id")
+                            or row.get("con_id")
+                            or row.get("contract_id")
+                        )
+                        for row in expiry_contracts[:24]
+                        if row.get("provider_contract_id")
+                        or row.get("con_id")
+                        or row.get("contract_id")
+                    ],
+                    "source_provider": analytics.get("source_provider") or surface.get("source_provider"),
+                    "retrieved_at": analytics.get("retrieved_at") or surface.get("retrieved_at"),
+                    "origin": analytics.get("origin") or surface.get("origin"),
+                    "transformation_note": analytics.get("transformation_note"),
+                    "warnings": list(analytics.get("warnings") or []),
+                }
+            )
+        status = "ready"
+        if not surface.get("snapshot_available", True) or not expiry_outputs:
+            status = "unavailable"
+        elif surface.get("delayed") or warnings or str(surface.get("freshness_label") or "") in {
+            "delayed",
+            "stale",
+            "unknown",
+        }:
+            status = "degraded"
+        surface_model = str(
+            surface.get("surface_model")
+            or (surface.get("surface_model_metadata") or {}).get("model")
+            or "linear"
+        )
+        sources = [
+            CopilotSourceRef(
+                source_id=f"iv.structure.{self._safe_source_id(symbol)}",
+                label=f"{symbol} Options/IV structure",
+                kind="iv_structure",
+                provider=str(surface.get("source_provider") or "gamma"),
+                origin=str(surface.get("origin") or "gamma.iv.surface"),
+                description="Bounded normalized Options surface, expiry analytics, contract identifiers, assumptions, and quality.",
+                retrieved_at=surface.get("retrieved_at") or surface.get("timestamp"),
+                provider_native_id=symbol,
+                navigation_supported=True,
+                navigation_tab="iv",
+                navigation_mode="surface",
+                navigation_context={"symbol": symbol},
+            )
+        ]
+        for expiry_row in expiry_outputs:
+            expiry = str(expiry_row["expiry"])
+            first_contract_id = next(
+                iter(expiry_row.get("contract_ids") or []),
+                None,
+            )
+            navigation_context = {"symbol": symbol, "expiry": expiry}
+            if first_contract_id:
+                navigation_context["contract_id"] = str(first_contract_id)
+            sources.append(
+                CopilotSourceRef(
+                    source_id=f"iv.expiry.{self._safe_source_id(symbol)}.{self._safe_source_id(expiry)}",
+                    label=f"{symbol} {expiry} IV slice",
+                    kind="iv_expiry",
+                    provider=str(expiry_row.get("source_provider") or sources[0].provider),
+                    origin=str(expiry_row.get("origin") or sources[0].origin),
+                    description="Normalized expiry slice with ATM, skew, quality, and provider contract identifiers.",
+                    retrieved_at=expiry_row.get("retrieved_at") or surface.get("retrieved_at"),
+                    provider_native_id=first_contract_id or f"{symbol}:{expiry}",
+                    navigation_supported=True,
+                    navigation_tab="iv",
+                    navigation_mode="surface",
+                    navigation_context=navigation_context,
+                )
+            )
+        output = {
+            "status": status,
+            "symbol": symbol,
+            "surface_model": surface_model,
+            "surface_model_status": surface.get("surface_model_status"),
+            "surface_model_notes": list(surface.get("surface_model_notes") or []),
+            "market_data_mode": (
+                (context.tool_state.get("session") or {}).get("market_data_mode")
+                if isinstance(context.tool_state.get("session"), dict)
+                else normalized.get("market_data_mode")
+            ),
+            "timestamp": self._iso_or_value(surface.get("timestamp")),
+            "retrieved_at": self._iso_or_value(surface.get("retrieved_at")),
+            "freshness_label": surface.get("freshness_label"),
+            "delayed": surface.get("delayed"),
+            "spot": surface.get("spot"),
+            "quality": surface.get("quality"),
+            "collection": surface.get("collection"),
+            "pricing_assumptions": surface.get("pricing_assumptions"),
+            "expiries": expiry_outputs,
+            "source_ids": [source.source_id for source in sources],
+            "warnings": warnings,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="inspect_options_structure",
+                summary=f"Inspected {len(expiry_outputs)} bounded IV expiry slice(s) for {symbol}; status={status}.",
+                arguments={
+                    "symbol": symbol,
+                    "expiry": requested_expiry or None,
+                    "max_expiries": max_expiries,
+                },
+                source_ids=output["source_ids"],
+            ),
+            sources=sources,
+        )
+
     def _tool_run_options_realized_implied_comparison(
         self,
         arguments: dict[str, Any],
@@ -7074,6 +9227,8 @@ class CopilotService:
                 origin="gamma.copilot.external_context.news",
                 description="No approved news/event provider is configured for Copilot external context.",
                 retrieved_at=now_utc(),
+                navigation_supported=False,
+                navigation_reason="No approved news/event provider is configured.",
             )
             sources[source.source_id] = source
             warnings.append("Skipped news/event external context because no NewsService is configured.")
@@ -7110,6 +9265,8 @@ class CopilotService:
                 origin="gamma.copilot.external_context.news",
                 description="The configured news/event provider failed while serving Copilot external context.",
                 retrieved_at=now_utc(),
+                navigation_supported=False,
+                navigation_reason="The configured news/event provider failed.",
             )
             sources[source.source_id] = source
             warnings.append(f"News/event external context provider failed: {exc}")
@@ -7151,6 +9308,8 @@ class CopilotService:
             origin=feed.origin,
             description=f"Approved read-only news/event feed for Copilot external context; freshness={feed.freshness_label.value}.",
             retrieved_at=feed.retrieved_at,
+            navigation_supported=False,
+            navigation_reason="The feed aggregate is inspectable through item sources but has no standalone destination.",
         )
         sources[feed_source.source_id] = feed_source
         item_source_ids: list[str] = []
@@ -7165,6 +9324,11 @@ class CopilotService:
                 origin=item.origin,
                 description=f"{item.source_name}; freshness={item.freshness_label.value}.",
                 retrieved_at=item.retrieved_at,
+                provider_native_id=item.provider_item_id or item.normalized_id,
+                url=item.url,
+                navigation_supported=True,
+                navigation_reason=None,
+                navigation_context={"news_item_id": item.normalized_id},
             )
 
         output = self._external_context_output(
@@ -7190,6 +9354,69 @@ class CopilotService:
                 source_ids=list(sources),
             ),
             sources=list(sources.values()),
+        )
+
+    def _tool_get_news_items_context(
+        self,
+        arguments: dict[str, Any],
+        context: CopilotContextBundle,
+    ) -> CopilotToolExecution:
+        limit = max(1, min(12, int(self._optional_float(arguments.get("limit")) or 8)))
+        execution = self._tool_get_external_context_summary({}, context)
+        base_output = execution.output if isinstance(execution.output, dict) else {}
+        news = base_output.get("news") if isinstance(base_output.get("news"), dict) else {}
+        items = [
+            item
+            for item in list(news.get("items") or [])[:limit]
+            if isinstance(item, dict)
+        ]
+        freshness = str(news.get("freshness_label") or "unavailable").lower()
+        warnings = dedupe_warnings(base_output.get("warnings", []))
+        if not items:
+            status = "unavailable"
+            warnings.append(
+                "No usable item-level news records matched the active context; this is missing coverage, not a neutral result."
+            )
+        elif freshness in {"stale", "unavailable", "unknown"}:
+            status = "stale" if freshness == "stale" else "degraded"
+        elif warnings or freshness in {"delayed", "historical", "mocked"}:
+            status = "degraded"
+        else:
+            status = "ready"
+        item_source_ids = {
+            str(item.get("source_id") or "")
+            for item in items
+            if item.get("source_id")
+        }
+        sources = [
+            source
+            for source in execution.sources
+            if source.source_id in item_source_ids
+            or source.source_id in {
+                "external_context.boundary",
+                "external_context.news_feed",
+            }
+        ]
+        output = {
+            "status": status,
+            "source_provider": news.get("source_provider"),
+            "origin": news.get("origin"),
+            "retrieved_at": news.get("retrieved_at"),
+            "freshness_label": freshness,
+            "items": items,
+            "provider_boundaries": list(base_output.get("provider_boundaries") or []),
+            "source_ids": [source.source_id for source in sources],
+            "warnings": warnings,
+        }
+        return CopilotToolExecution(
+            output=output,
+            trace=CopilotToolTrace(
+                tool_name="get_news_items_context",
+                summary=f"Loaded {len(items)} bounded item-level news record(s); status={status}.",
+                arguments={"limit": limit},
+                source_ids=output["source_ids"],
+            ),
+            sources=sources,
         )
 
     def _tool_get_synthesis_scope_summary(
@@ -7309,7 +9536,14 @@ class CopilotService:
                 "run_strategy_lab_backtest",
             ),
             "macro": ("get_macro_workspace_drilldown",),
-            "commodities": ("get_commodities_workspace_summary",),
+            "commodities": (
+                "get_commodities_workspace_summary",
+                "inspect_commodity_curve_fundamentals",
+            ),
+            "maritime": (
+                "get_maritime_chokepoint_context",
+                "get_maritime_route_context",
+            ),
             "prediction_markets": (
                 "get_prediction_market_history_summary",
                 "get_prediction_market_flow_context",
@@ -7331,10 +9565,12 @@ class CopilotService:
                 "get_risk_contribution_summary",
             ),
             "iv": (
+                "inspect_options_structure",
                 "run_options_realized_implied_comparison",
                 "get_iv_surface_context",
                 "get_iv_session_status",
             ),
+            "external_context": ("get_news_items_context",),
         }.get(domain, ())
 
     @staticmethod
@@ -7603,6 +9839,20 @@ class CopilotService:
                         "origin": item.origin,
                         "transformation_note": item.transformation_note,
                         "warnings": list(item.warnings),
+                        "reporting_sources": [
+                            {
+                                "normalized_id": source.normalized_id,
+                                "source_provider": source.source_provider,
+                                "source_name": source.source_name,
+                                "source_domain": source.source_domain,
+                                "url": source.url,
+                                "published_at": source.published_at.isoformat(),
+                                "retrieved_at": source.retrieved_at.isoformat(),
+                                "origin": source.origin,
+                                "provider_item_id": source.provider_item_id,
+                            }
+                            for source in item.reporting_sources
+                        ],
                     }
                     for index, item in enumerate(items)
                 ],
@@ -9037,6 +11287,10 @@ class CopilotService:
             "pairs": [asdict(item) for item in snapshot.pairs],
             "collection": asdict(snapshot.collection) if snapshot.collection is not None else None,
             "quality": asdict(snapshot.quality) if snapshot.quality is not None else None,
+            "surface_model": snapshot.surface_model.model if snapshot.surface_model is not None else "linear",
+            "surface_model_label": snapshot.surface_model.label if snapshot.surface_model is not None else "Line interpolation",
+            "surface_model_status": snapshot.surface_model.status if snapshot.surface_model is not None else "applied",
+            "surface_model_notes": list(snapshot.surface_model.notes) if snapshot.surface_model is not None else [],
             "expiry_analytics": [asdict(item) for item in snapshot.expiry_analytics],
             "pricing_assumptions": asdict(snapshot.pricing_assumptions) if snapshot.pricing_assumptions is not None else None,
         }, list(result.warnings), list(result.messages)

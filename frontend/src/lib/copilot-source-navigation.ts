@@ -18,6 +18,13 @@ const SOURCE_TARGETS: Array<{ prefixes: string[]; target: CopilotSourceTarget }>
 ];
 
 export function getCopilotSourceTarget(source: CopilotSourceRef): CopilotSourceTarget | null {
+  if (source.navigation_supported === false) return null;
+  if (source.navigation_tab) {
+    return {
+      tab: source.navigation_tab,
+      mode: source.navigation_mode ?? null,
+    };
+  }
   const identity = `${source.source_id} ${source.origin}`.toLowerCase();
   const mapping = SOURCE_TARGETS.find(({ prefixes }) => prefixes.some((prefix) => identity.includes(prefix)));
   if (!mapping) return null;
@@ -45,7 +52,8 @@ export function getCopilotSourceTarget(source: CopilotSourceRef): CopilotSourceT
 }
 
 export function canNavigateCopilotSource(source: CopilotSourceRef): boolean {
-  return getCopilotSourceTarget(source) != null;
+  if (source.navigation_supported === false) return false;
+  return validatedExternalSourceUrl(source.url) != null || getCopilotSourceTarget(source) != null;
 }
 
 export function buildCopilotSourceHandoff(
@@ -55,6 +63,7 @@ export function buildCopilotSourceHandoff(
 ): CrossTabHandoffEnvelope | null {
   const target = getCopilotSourceTarget(source);
   if (!target) return null;
+  const navigationContext = source.navigation_context ?? {};
   const priorMatches =
     priorHandoff != null &&
     (priorHandoff.source_tab === target.tab || priorHandoff.intended_target_tab === target.tab);
@@ -64,12 +73,23 @@ export function buildCopilotSourceHandoff(
       : priorHandoff?.intended_target_tab === target.tab
         ? priorHandoff.intended_target_mode
         : null;
+  const selectedEntity = buildSourceEntity(navigationContext) ?? (priorMatches ? priorHandoff.selected_entity : null);
+  const selectedTimeframe =
+    navigationContext.timeframe || navigationContext.expiry
+      ? {
+          label: navigationContext.timeframe ?? navigationContext.expiry,
+          start: null,
+          end: null,
+        }
+      : priorMatches
+        ? priorHandoff.selected_timeframe
+        : null;
 
   return {
     source_tab: "copilot",
     source_mode: "evidence",
-    selected_entity: priorMatches ? priorHandoff.selected_entity : null,
-    selected_timeframe: priorMatches ? priorHandoff.selected_timeframe : null,
+    selected_entity: selectedEntity,
+    selected_timeframe: selectedTimeframe,
     provider: source.provider,
     source: {
       source_provider: source.provider,
@@ -80,10 +100,54 @@ export function buildCopilotSourceHandoff(
     warnings: [...(priorMatches ? priorHandoff.warnings : []), ...warnings],
     normalized_ids: {
       ...(priorMatches ? priorHandoff.normalized_ids : {}),
+      ...navigationContext,
       copilot_source_id: source.source_id
     },
     timestamp: new Date().toISOString(),
     intended_target_tab: target.tab,
     intended_target_mode: priorMatches ? priorMode ?? target.mode : target.mode
+  };
+}
+
+export function validatedExternalSourceUrl(rawUrl: string | null | undefined): string | null {
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function buildSourceEntity(
+  context: Record<string, string>
+): CrossTabHandoffEnvelope["selected_entity"] {
+  const candidates: Array<{
+    key: string;
+    entityType: string;
+    label: string;
+  }> = [
+    { key: "symbol", entityType: "equity", label: "Equity" },
+    { key: "ticker", entityType: "equity", label: "Equity" },
+    { key: "instrument_id", entityType: "commodity", label: "Commodity" },
+    { key: "contract_id", entityType: "option_contract", label: "Option contract" },
+    { key: "chokepoint_id", entityType: "maritime_chokepoint", label: "Chokepoint" },
+    { key: "route_id", entityType: "maritime_route", label: "Route" },
+    { key: "market_id", entityType: "prediction_market", label: "Prediction market" },
+    { key: "news_item_id", entityType: "news_item", label: "News item" },
+  ];
+  const match = candidates.find((candidate) => context[candidate.key]?.trim());
+  if (!match) return null;
+  const normalizedId = context[match.key].trim();
+  return {
+    entity_type: match.entityType,
+    label: `${match.label} ${normalizedId}`,
+    normalized_id: normalizedId,
+    provider_id: null,
+    native_id: normalizedId,
+    metadata: { ...context },
   };
 }

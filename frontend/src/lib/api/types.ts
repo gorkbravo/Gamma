@@ -7,6 +7,7 @@ export type TabId =
   | "strategy_lab"
   | "macro"
   | "commodities"
+  | "maritime"
   | "prediction_markets"
   | "crypto"
   | "fundamentals"
@@ -183,6 +184,18 @@ export interface NewsEventEntity {
   metadata: Record<string, unknown>;
 }
 
+export interface NewsReportingSource {
+  normalized_id: string;
+  source_provider: string;
+  source_name: string;
+  url: string;
+  published_at: string;
+  retrieved_at: string;
+  origin: string;
+  provider_item_id: string | null;
+  source_domain: string | null;
+}
+
 export interface NewsEventItem {
   normalized_id: string;
   title: string;
@@ -201,6 +214,7 @@ export interface NewsEventItem {
   source_reliability?: string;
   warnings: string[];
   transformation_note: string | null;
+  reporting_sources?: NewsReportingSource[];
 }
 
 export interface NewsEventFeedResponse {
@@ -2910,6 +2924,7 @@ export type CopilotBaseDomain =
   | "strategy_lab"
   | "macro"
   | "commodities"
+  | "maritime"
   | "prediction_markets"
   | "crypto"
   | "fundamentals"
@@ -2926,6 +2941,13 @@ export interface CopilotSourceRef {
   origin: string;
   description: string | null;
   retrieved_at: string | null;
+  provider_native_id?: string | null;
+  url?: string | null;
+  navigation_supported?: boolean | null;
+  navigation_reason?: string | null;
+  navigation_tab?: TabId | null;
+  navigation_mode?: string | null;
+  navigation_context?: Record<string, string>;
 }
 
 export interface CopilotToolTrace {
@@ -2989,6 +3011,9 @@ export interface CopilotResearchCardResult {
   tool_traces: CopilotToolTrace[];
   operator_events: CopilotOperatorProgressEvent[];
   warnings: string[];
+  research_plan?: CopilotResearchPlan | null;
+  context_contracts?: Array<Record<string, unknown>>;
+  context_budget?: Record<string, unknown>;
 }
 
 export interface CopilotResearchPlanEntity {
@@ -3014,6 +3039,17 @@ export interface CopilotResearchPlanDomainDecision {
   domain: string;
   used: boolean;
   reason: string;
+  classification?:
+    | "selected"
+    | "irrelevant"
+    | "unavailable_data"
+    | "missing_provider_access"
+    | "stale_context"
+    | "unsupported_scope"
+    | "budget_omission"
+    | string;
+  selected_depth?: string | null;
+  planned_tools?: string[];
 }
 
 export interface CopilotResearchPlan {
@@ -3365,6 +3401,7 @@ export interface CopilotContextSnapshot {
   warnings: string[];
   created_at: string;
   read_only_safety: Record<string, unknown>;
+  context_contract: Record<string, unknown>;
 }
 
 export interface CopilotArtifactProviderMetadata {
