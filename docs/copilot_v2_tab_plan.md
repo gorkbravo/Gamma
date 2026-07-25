@@ -169,9 +169,9 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 and 2 are verified at 80%: the supported OpenAI SDK feeds typed events into server-owned Agent and Operator runs; bounded replay survives subscriber disconnects; shelf and workspace share one typed transcript/evidence renderer; claim refs are normalized against known turn sources before persistence; and supported evidence links preserve mapped Gamma context. Remaining gaps are:
+The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 through 3 are verified at 86%: the supported OpenAI SDK feeds typed events into server-owned Agent and Operator runs; bounded replay survives subscriber disconnects; shelf and workspace share one typed transcript/evidence renderer; claim refs are normalized against known turn sources before persistence; supported evidence links preserve mapped Gamma context; sessions have a typed lifecycle and schema-v3 migration/recovery contract; restart replay retains the complete turn contract; and the dedicated workspace owns memo/report creation, editing, preview, duplication, deletion, and Markdown export. Remaining gaps are:
 
-- the memo APIs and report APIs are not a complete in-tab artifact workflow;
+- a focused post-checkpoint pass must fix New Chat reconciliation, clear accepted prompts from the composer, and move the storage-recovery warning out of the action area;
 - the custom Operator streams live and cancels at safe step boundaries, but Agents SDK progress parity and inline confirmation/diff/rollback UX remain incomplete;
 - the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5;
 - Sealanes, news, and some deeper IV/Commodities drilldowns do not yet have tool parity;
@@ -303,7 +303,7 @@ Implementation note (2026-07-17, checkpoint complete):
 - [x] Restore dedicated-tab parity with the shelf's full card/source/tool/warning rendering.
 - [x] Add claim-level evidence resolution and deep links through `CrossTabHandoffEnvelope` where possible.
 - [x] Validate every cited source id against the context/tool source registry before persisting a source-backed claim.
-- [x] Keep inference, assumption, missing-data, and warning categories visibly distinct in cards and reports. Markdown export preservation remains part of checkpoint 3's artifact workflow.
+- [x] Keep inference, assumption, missing-data, and warning categories visibly distinct in cards and reports. Checkpoint 3 preserves those categories in artifact editing, replay, duplication, reopen, and Markdown export.
 
 Implementation note (2026-07-24, checkpoint complete):
 - `frontend/src/lib/copilot-transcript.ts` now maps finalized results and transcript extras into discriminated blocks for messages, cards, plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, typed non-success states, evidence, and provider metadata.
@@ -329,18 +329,18 @@ Implementation note (2026-07-24, checkpoint complete):
 - Keep one server-side action registry, permission policy, confirmation-token service, and persistence path for both custom and Agents SDK orchestrators.
 - Do not broaden durable mutations until the read-only operator and inline confirmation UI are reliable.
 
-#### E. Artifacts, memos, and reports — blocker
+#### E. Artifacts, memos, and reports — checkpoint 3 complete (86%)
 
-- Bring memo/report creation into the dedicated workspace instead of relying on backend-only endpoints or a separate floating surface.
-- Add template choice, source-turn selection, title/body editing, autosave state, explicit overwrite confirmation, duplicate, and delete.
-- Add preview and export for Markdown first; add PDF/DOCX only if a real use case justifies the formatting surface.
-- Preserve claim labels, inline citations, source metadata, warnings, model/provider metadata, context snapshots, and tool-trace summary in exports.
-- Link artifacts back to the exact source turns and show artifacts in the session rail/inspector.
+- [x] Bring memo/report creation into the dedicated workspace instead of relying on backend-only endpoints or a separate floating surface.
+- [x] Add template choice, source-turn selection, title/body editing, autosave state, explicit overwrite confirmation, duplicate, and delete.
+- [x] Add canonical preview and Markdown export; PDF/DOCX remain excluded without a real requirement.
+- [x] Preserve claim labels, inline citations, source metadata, warnings, model/provider metadata, context snapshots, and tool-trace summary in exports.
+- [x] Link artifacts back to the exact source turns and show artifacts in the selected-session inspector.
 
-#### F. Sessions, retention, and model policy — blocker
+#### F. Sessions, retention, and model policy — session lifecycle/replay complete; retention/model policy still required
 
-- Add session rename, restore, delete, schema versioning, migrations, and corrupted-record recovery.
-- Persist role, depth, model profile/resolution, selected scopes, context fingerprints, run status, usage, and artifacts.
+- [x] Add session rename, archive/restore, delete, schema versioning, migrations, and non-destructive corrupted-record recovery.
+- [x] Persist role, depth, requested/resolved provider/model metadata, selected scopes, context fingerprints/snapshots, run status, cancellation, usage, plans, events, confirmations, warnings, sources, traces, and artifacts.
 - Add a visible retention control explaining Gamma-local storage versus OpenAI stored responses.
 - Support a `store: false` path without breaking local continuation, including encrypted reasoning replay only if it is intentionally adopted and tested.
 - Put model aliases, allowed efforts/modes, routing rules, and fallbacks in a versioned policy object with capability validation.
@@ -370,13 +370,14 @@ Implementation note (2026-07-24, checkpoint complete):
 
 1. ~~Provider-native streaming, shared run lifecycle, bounded replay, and explicit provider state.~~ Completed 2026-07-17 at checkpoint 1 (76%).
 2. ~~Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.~~ Completed 2026-07-24 at checkpoint 2 (80%).
-3. In-tab artifacts/memos and session lifecycle completion.
-4. Live operator events, cancellation, and inline confirmations.
-5. Missing context/tool coverage and source navigation.
-6. GPT-5.6 eval-backed model policy and routing rollout.
-7. Agents SDK default decision.
-8. Diagnostics, first-run guidance, accessibility, and full release gate.
-9. Optional external deep research; later voice.
+3. ~~In-tab artifacts/memos and session lifecycle completion.~~ Completed 2026-07-25 at checkpoint 3 (86%).
+4. Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in `docs/copilot_v2_checkpoint3_prompt.md`.
+5. Live operator events, cancellation, and inline confirmations.
+6. Missing context/tool coverage and source navigation.
+7. GPT-5.6 eval-backed model policy and routing rollout.
+8. Agents SDK default decision.
+9. Diagnostics, first-run guidance, accessibility, and full release gate.
+10. Optional external deep research; later voice.
 
 Do not start with model-string replacement alone. The GPT-5.6 migration should land with provider streaming, capability-aware configuration, usage instrumentation, and eval evidence so the model change improves the product rather than merely changing metadata.
 

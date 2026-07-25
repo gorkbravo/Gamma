@@ -1,4 +1,4 @@
-# Copilot V2 80% To 100% Execution Prompt
+# Copilot V2 86% To 100% Execution Prompt
 
 Copy the text inside the block below into the agent that will complete Copilot V2.
 
@@ -7,7 +7,7 @@ You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot V2 from its verified 80% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 and 2 are complete; begin with checkpoint 3. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
+Your objective is to take Copilot V2 from its verified 86% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 through 3 are complete. First finish the focused post-Checkpoint 3 regressions in `docs/copilot_v2_checkpoint3_prompt.md`, then begin Checkpoint 4. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
 
 Do not stop after one convenient slice and do not ask the user to choose the next checkpoint. Follow the roadmap order, make reasonable in-scope decisions, implement coherent vertical slices, verify them, update the active documentation, and continue. Never claim a percentage merely because code was written; a percentage is earned only when that checkpoint's exit criteria pass.
 
@@ -16,7 +16,7 @@ Do not stop after one convenient slice and do not ask the user to choose the nex
 Read these files completely before editing:
 
 1. `AGENTS.md`
-2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 80% to 100%`, sequencing rules, non-goals, and deliverable
+2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 86% to 100%`, sequencing rules, non-goals, and deliverable
 3. `docs/copilot_v2_tab_plan.md`, especially the July 2026 completion plan, remaining engineering workstreams, delivery order, and definition of done
 4. `docs/provenance_expectations.md`
 5. `docs/design_principles.md` before changing Svelte/CSS
@@ -30,7 +30,7 @@ Before editing:
 
 - run `git status --short --branch` and inspect recent Copilot commits;
 - inspect all existing uncommitted changes and preserve unrelated user work;
-- treat the current run-lifecycle, transcript/evidence, roadmap, and documentation changes as part of the intended 80% baseline even if they are still uncommitted;
+- treat the current run-lifecycle, transcript/evidence, session/artifact, roadmap, and documentation changes as part of the verified 86% baseline;
 - run the focused Copilot backend tests, frontend Copilot tests, typecheck, and build to confirm the baseline;
 - inspect the running Copilot UI at desktop and narrow widths when practical;
 - compare code reality with the roadmap and detailed spec, correcting stale documentation without erasing useful implementation history.
@@ -54,7 +54,7 @@ Bounded read-only analysis may run automatically. Every durable or non-trivial l
 
 Gamma backend services remain authoritative for tools, permissions, execution, confirmation tokens, persistence, cancellation, finalization, and mutation rules. The UI may navigate for convenience but must not become the authority for analytical execution.
 
-## Current 80% baseline
+## Current 86% baseline
 
 The baseline should include:
 
@@ -68,8 +68,11 @@ The baseline should include:
 - run ids, monotonic sequences, cancellation, timeout, usage events, idempotent terminal persistence, provisional deltas, Stop/Retry, and typed refusal/incomplete/error/cancelled states;
 - one canonical shelf/workspace transcript renderer covering cards, plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, and typed non-success states;
 - pre-persistence and legacy-read evidence normalization, visibly distinct claim categories, and context-preserving claim-source navigation.
+- schema-v3 session/turn/context/artifact persistence with deterministic legacy migration, atomic writes, future-version preservation, and non-destructive corrupted-record recovery;
+- typed session rename, archive/restore, delete, search, stale-id reconciliation, and complete restart replay of role, effort, scopes, fingerprints, provider/model metadata, plans, events, confirmations, usage, traces, warnings, sources, and artifact links;
+- in-tab memo/report source-turn selection, concise/full templates, editable title/body, autosave state, canonical evidence preview, duplication, delete confirmation, overwrite confirmation, stable selection, and provenance-preserving Markdown export.
 
-Important current gaps begin at checkpoint 3: in-tab artifacts, full session lifecycle and replay, inline Operator confirmation productionization, Agents SDK progress/default evaluation, context/tool gaps, shelf-to-workspace promotion, versioned model policy, retention/diagnostics, accessibility, restart replay, and full live release evidence.
+Important current gaps begin with the focused New Chat/composer/storage-warning regression pass, followed by checkpoint 4: inline Operator confirmation productionization, Agents SDK progress/default evaluation, context/tool gaps, shelf-to-workspace promotion, versioned model policy, retention/diagnostics, accessibility, and full live release evidence.
 
 ## Execution method for every checkpoint
 
@@ -132,7 +135,7 @@ Verified implementation evidence:
 - `86` focused backend tests, `3` Agents SDK/operator eval tests, and `267` frontend tests passed alongside typecheck, production build, and desktop check;
 - live UI inspection covered ready/error/cancelled states and a source handoff to Macro Snapshot retaining the 3M timeframe, with zero console errors.
 
-## Checkpoint 3 — finish sessions and in-tab artifacts (86%)
+## Checkpoint 3 — verified 2026-07-25 (86%)
 
 Required delivery:
 
@@ -150,6 +153,16 @@ Exit evidence:
 - migrations and corrupted-record recovery have tests;
 - export snapshots preserve claim categories and evidence refs;
 - editing/autosave/overwrite/duplicate/delete flows have frontend and persistence coverage.
+
+Verified implementation evidence:
+
+- schema-v3 migration covers supported legacy versions 0, 1, and 2; repeated migration is idempotent; future versions are preserved; malformed, partial, mixed, and interrupted-write cases recover without deleting the only copy;
+- complete restart fixtures replay role, effort, scopes, fingerprints/snapshots, requested/resolved provider and model, run/terminal/cancellation state, usage, research and Operator plans, events, confirmations, traces, warnings, sources, mutation/artifact references, memos, reports, and exact source-turn links;
+- the dedicated support inspector exposes selected-session artifacts, source-turn counts, concise memo and research-report templates, edit/autosave/retry, canonical preview, duplicate/delete, overwrite confirmation, and Markdown download;
+- exports preserve claim categories, evidence refs, source metadata, warning provenance, context/provider/model metadata, trace summary, timestamps, transformation note, and source-turn links;
+- `92` focused backend tests, `3` Agents SDK/operator eval tests, and `274` frontend tests passed alongside typecheck, production build, and desktop check;
+- user-supplied desktop and narrow-width inspection confirmed session lifecycle controls and confirmations, artifact editing, duplication/deletion, source-turn controls, and responsive inspector behavior;
+- the live Agent response reached an honest OpenAI quota-exhausted terminal state because no provider credits were available; the SITREP Operator honestly reported zero registered automatic tools. Neither outcome is claimed as successful provider-backed research output.
 
 ## Checkpoint 4 — productionize Research Operator (91%)
 
