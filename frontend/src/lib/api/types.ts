@@ -3230,8 +3230,52 @@ export interface CopilotSessionSummary {
   active_context_fingerprint: string | null;
   turn_count: number;
   memo_count: number;
+  report_count: number;
+  artifact_count: number;
   warnings: string[];
   archived_at: string | null;
+}
+
+export interface CopilotUsageRecord {
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  provider_calls: number;
+  tool_calls: number;
+  raw: Record<string, unknown>;
+}
+
+export interface CopilotConfirmationState {
+  checkpoint_id: string;
+  status: string;
+  required_for_tool_ids: string[];
+  mutation_id: string | null;
+  confirmation_token: string | null;
+  rollback_snapshot_id: string | null;
+  created_at: string | null;
+  resolved_at: string | null;
+  warnings: string[];
+}
+
+export interface CopilotArtifactReference {
+  artifact_id: string;
+  artifact_type: string;
+  status: string;
+  mutation_id: string | null;
+  rollback_snapshot_id: string | null;
+}
+
+export interface CopilotTraceState {
+  event_count: number;
+  tool_trace_count: number;
+  operator_event_count: number;
+  source_count: number;
+  warning_count: number;
+  bounded: boolean;
+  replay_complete: boolean;
 }
 
 export interface CopilotTurnRecord {
@@ -3243,6 +3287,25 @@ export interface CopilotTurnRecord {
   context_snapshot_id: string;
   result: CopilotResearchCardResult;
   created_at: string;
+  role: string;
+  reasoning_effort: string | null;
+  selected_scope_domains: string[];
+  context_fingerprint: string | null;
+  requested_provider: string | null;
+  requested_model: string | null;
+  resolved_provider: string | null;
+  resolved_model: string | null;
+  run_id: string | null;
+  terminal_status: string | null;
+  cancellation_outcome: string | null;
+  usage: CopilotUsageRecord;
+  research_plan: CopilotResearchPlan | null;
+  operator_plan: CopilotOperatorPlan | null;
+  run_events: CopilotRunEvent[];
+  confirmations: CopilotConfirmationState[];
+  artifact_refs: CopilotArtifactReference[];
+  mutation_refs: CopilotArtifactReference[];
+  trace_state: CopilotTraceState;
 }
 
 export interface CopilotMemo {
@@ -3264,6 +3327,87 @@ export interface CopilotSessionDetail {
   session: CopilotSessionSummary;
   turns: CopilotTurnRecord[];
   memos: CopilotMemo[];
+  context_snapshots: CopilotContextSnapshot[];
+  artifacts: CopilotArtifact[];
+  storage_warnings: CopilotStorageWarning[];
+}
+
+export interface CopilotContextSnapshot {
+  snapshot_id: string;
+  domain: string;
+  context_fingerprint: string | null;
+  current_tab: string;
+  workspace_mode: string | null;
+  summary: Record<string, unknown>;
+  request_context: Record<string, unknown>;
+  selected_scope_domains: string[];
+  source_ids: string[];
+  warnings: string[];
+  created_at: string;
+  read_only_safety: Record<string, unknown>;
+}
+
+export interface CopilotArtifactProviderMetadata {
+  turn_id: string;
+  role: string;
+  reasoning_effort: string | null;
+  requested_provider: string | null;
+  requested_model: string | null;
+  resolved_provider: string | null;
+  resolved_model: string | null;
+  run_id: string | null;
+  terminal_status: string | null;
+}
+
+export interface CopilotArtifact {
+  artifact_id: string;
+  session_id: string;
+  artifact_type: "memo" | "report" | string;
+  template: "concise_memo" | "research_report" | string;
+  title: string;
+  body: string;
+  source_turn_ids: string[];
+  source_memo_ids: string[];
+  source_snapshot_ids: string[];
+  unavailable_source_turn_ids: string[];
+  context_fingerprints: string[];
+  source_backed_claims: ResearchClaim[];
+  inferred_claims: string[];
+  assumptions: string[];
+  missing_data: string[];
+  warnings: string[];
+  warning_provenance: CopilotReportWarningProvenance[];
+  tool_trace_summary: CopilotReportToolTraceSummary[];
+  sources: CopilotSourceRef[];
+  provider_metadata: CopilotArtifactProviderMetadata[];
+  created_at: string;
+  updated_at: string;
+  source_provider: string;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface CopilotStorageWarning {
+  warning_id: string;
+  record_type: string;
+  action: string;
+  message: string;
+  path: string;
+  created_at: string;
+}
+
+export interface CopilotStorageStatus {
+  current_schema_version: number;
+  supported_legacy_versions: number[];
+  warnings: CopilotStorageWarning[];
+}
+
+export interface CopilotDeleteResult {
+  deleted_id: string;
+  deleted_type: string;
+  recoverable: boolean;
+  archived_path: string | null;
+  deleted_counts: Record<string, number>;
 }
 
 export interface CrossTabHandoffEntity {

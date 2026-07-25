@@ -13,6 +13,12 @@ from src.api.schemas.portfolio import (
 from src.api.schemas.research import ResearchAnalyzeResponseModel
 from src.api.schemas.risk import RiskComputeResponseModel
 from src.models.copilot import (
+    CopilotArtifact,
+    CopilotArtifactProviderMetadata,
+    CopilotArtifactReference,
+    CopilotConfirmationState,
+    CopilotContextSnapshot,
+    CopilotDeleteResult,
     CopilotDraftMutation,
     CopilotMemo,
     CopilotMutationApplyResult,
@@ -34,14 +40,18 @@ from src.models.copilot import (
     CopilotReportToolTraceSummary,
     CopilotRunEvent,
     CopilotSession,
+    CopilotStorageStatus,
+    CopilotStorageWarning,
     CopilotSynthesisRequest,
     CopilotSynthesisScope,
     CopilotSourceRef,
     CopilotTurn,
     CopilotToolTrace,
+    CopilotTraceState,
     MacroCopilotContext,
     ResearchCard,
     ResearchClaim,
+    CopilotUsageRecord,
 )
 
 
@@ -153,6 +163,10 @@ class CopilotResearchCardRequestModel(BaseModel):
     context_fingerprint: str | None = None
     session_title: str | None = None
     reasoning_effort: str | None = None
+    role: str = "research_agent"
+    selected_scope_domains: list[str] = Field(default_factory=list)
+    requested_provider: str | None = None
+    requested_model: str | None = None
     # Optional client-supplied run id for streamed runs so Stop can target the
     # run before the first event arrives. The server generates one when omitted.
     run_id: str | None = None
@@ -170,6 +184,10 @@ class CopilotResearchCardRequestModel(BaseModel):
             context_fingerprint=self.context_fingerprint,
             session_title=self.session_title,
             reasoning_effort=self.reasoning_effort,
+            role=self.role,
+            selected_scope_domains=list(self.selected_scope_domains),
+            requested_provider=self.requested_provider,
+            requested_model=self.requested_model,
             context=self.context.to_domain(),
             synthesis=self.synthesis.to_domain() if self.synthesis is not None else None,
         )
@@ -568,6 +586,8 @@ class CopilotSessionModel(BaseModel):
     active_context_fingerprint: str | None = None
     turn_count: int = 0
     memo_count: int = 0
+    report_count: int = 0
+    artifact_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     archived_at: datetime | None = None
 
@@ -585,6 +605,25 @@ class CopilotTurnModel(BaseModel):
     context_snapshot_id: str
     result: CopilotResearchCardResponseModel
     created_at: datetime
+    role: str = "research_agent"
+    reasoning_effort: str | None = None
+    selected_scope_domains: list[str] = Field(default_factory=list)
+    context_fingerprint: str | None = None
+    requested_provider: str | None = None
+    requested_model: str | None = None
+    resolved_provider: str | None = None
+    resolved_model: str | None = None
+    run_id: str | None = None
+    terminal_status: str | None = None
+    cancellation_outcome: str | None = None
+    usage: "CopilotUsageRecordModel" = Field(default_factory=lambda: CopilotUsageRecordModel())
+    research_plan: CopilotResearchPlanModel | None = None
+    operator_plan: CopilotOperatorPlanModel | None = None
+    run_events: list[CopilotRunEventModel] = Field(default_factory=list)
+    confirmations: list["CopilotConfirmationStateModel"] = Field(default_factory=list)
+    artifact_refs: list["CopilotArtifactReferenceModel"] = Field(default_factory=list)
+    mutation_refs: list["CopilotArtifactReferenceModel"] = Field(default_factory=list)
+    trace_state: "CopilotTraceStateModel" = Field(default_factory=lambda: CopilotTraceStateModel())
 
     @classmethod
     def from_domain(cls, row: CopilotTurn) -> "CopilotTurnModel":
@@ -597,6 +636,25 @@ class CopilotTurnModel(BaseModel):
             context_snapshot_id=row.context_snapshot_id,
             result=CopilotResearchCardResponseModel.from_domain(row.result),
             created_at=row.created_at,
+            role=row.role,
+            reasoning_effort=row.reasoning_effort,
+            selected_scope_domains=list(row.selected_scope_domains),
+            context_fingerprint=row.context_fingerprint,
+            requested_provider=row.requested_provider,
+            requested_model=row.requested_model,
+            resolved_provider=row.resolved_provider,
+            resolved_model=row.resolved_model,
+            run_id=row.run_id,
+            terminal_status=row.terminal_status,
+            cancellation_outcome=row.cancellation_outcome,
+            usage=CopilotUsageRecordModel.from_domain(row.usage),
+            research_plan=CopilotResearchPlanModel.from_domain(row.research_plan) if row.research_plan else None,
+            operator_plan=CopilotOperatorPlanModel.from_domain(row.operator_plan) if row.operator_plan else None,
+            run_events=[CopilotRunEventModel.from_domain(item) for item in row.run_events],
+            confirmations=[CopilotConfirmationStateModel.from_domain(item) for item in row.confirmations],
+            artifact_refs=[CopilotArtifactReferenceModel.from_domain(item) for item in row.artifact_refs],
+            mutation_refs=[CopilotArtifactReferenceModel.from_domain(item) for item in row.mutation_refs],
+            trace_state=CopilotTraceStateModel.from_domain(row.trace_state),
         )
 
 
@@ -604,6 +662,235 @@ class CopilotSessionDetailModel(BaseModel):
     session: CopilotSessionModel
     turns: list[CopilotTurnModel] = Field(default_factory=list)
     memos: list["CopilotMemoModel"] = Field(default_factory=list)
+    context_snapshots: list["CopilotContextSnapshotModel"] = Field(default_factory=list)
+    artifacts: list["CopilotArtifactModel"] = Field(default_factory=list)
+    storage_warnings: list["CopilotStorageWarningModel"] = Field(default_factory=list)
+
+
+class CopilotUsageRecordModel(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    total_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    provider_calls: int = 0
+    tool_calls: int = 0
+    raw: dict[str, object] = Field(default_factory=dict)
+
+    @classmethod
+    def from_domain(cls, row: CopilotUsageRecord) -> "CopilotUsageRecordModel":
+        return cls(**row.__dict__)
+
+
+class CopilotConfirmationStateModel(BaseModel):
+    checkpoint_id: str
+    status: str
+    required_for_tool_ids: list[str] = Field(default_factory=list)
+    mutation_id: str | None = None
+    confirmation_token: str | None = None
+    rollback_snapshot_id: str | None = None
+    created_at: datetime | None = None
+    resolved_at: datetime | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotConfirmationState) -> "CopilotConfirmationStateModel":
+        return cls(**row.__dict__)
+
+
+class CopilotArtifactReferenceModel(BaseModel):
+    artifact_id: str
+    artifact_type: str
+    status: str = "created"
+    mutation_id: str | None = None
+    rollback_snapshot_id: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotArtifactReference) -> "CopilotArtifactReferenceModel":
+        return cls(**row.__dict__)
+
+
+class CopilotTraceStateModel(BaseModel):
+    event_count: int = 0
+    tool_trace_count: int = 0
+    operator_event_count: int = 0
+    source_count: int = 0
+    warning_count: int = 0
+    bounded: bool = True
+    replay_complete: bool = True
+
+    @classmethod
+    def from_domain(cls, row: CopilotTraceState) -> "CopilotTraceStateModel":
+        return cls(**row.__dict__)
+
+
+class CopilotContextSnapshotModel(BaseModel):
+    snapshot_id: str
+    domain: str
+    context_fingerprint: str | None = None
+    current_tab: str
+    workspace_mode: str | None = None
+    summary: dict[str, object] = Field(default_factory=dict)
+    request_context: dict[str, object] = Field(default_factory=dict)
+    selected_scope_domains: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    created_at: datetime
+    read_only_safety: dict[str, object] = Field(default_factory=dict)
+
+    @classmethod
+    def from_domain(cls, row: CopilotContextSnapshot) -> "CopilotContextSnapshotModel":
+        return cls(**row.__dict__)
+
+
+class CopilotArtifactProviderMetadataModel(BaseModel):
+    turn_id: str
+    role: str
+    reasoning_effort: str | None = None
+    requested_provider: str | None = None
+    requested_model: str | None = None
+    resolved_provider: str | None = None
+    resolved_model: str | None = None
+    run_id: str | None = None
+    terminal_status: str | None = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotArtifactProviderMetadata,
+    ) -> "CopilotArtifactProviderMetadataModel":
+        return cls(**row.__dict__)
+
+
+class CopilotArtifactModel(BaseModel):
+    artifact_id: str
+    session_id: str
+    artifact_type: str
+    template: str
+    title: str
+    body: str
+    source_turn_ids: list[str] = Field(default_factory=list)
+    source_memo_ids: list[str] = Field(default_factory=list)
+    source_snapshot_ids: list[str] = Field(default_factory=list)
+    unavailable_source_turn_ids: list[str] = Field(default_factory=list)
+    context_fingerprints: list[str] = Field(default_factory=list)
+    source_backed_claims: list[ResearchClaimModel] = Field(default_factory=list)
+    inferred_claims: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    missing_data: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    warning_provenance: list["CopilotReportWarningProvenanceModel"] = Field(default_factory=list)
+    tool_trace_summary: list["CopilotReportToolTraceSummaryModel"] = Field(default_factory=list)
+    sources: list[CopilotSourceRefModel] = Field(default_factory=list)
+    provider_metadata: list[CopilotArtifactProviderMetadataModel] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    source_provider: str
+    origin: str
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotArtifact) -> "CopilotArtifactModel":
+        return cls(
+            artifact_id=row.artifact_id,
+            session_id=row.session_id,
+            artifact_type=row.artifact_type,
+            template=row.template,
+            title=row.title,
+            body=row.body,
+            source_turn_ids=list(row.source_turn_ids),
+            source_memo_ids=list(row.source_memo_ids),
+            source_snapshot_ids=list(row.source_snapshot_ids),
+            unavailable_source_turn_ids=list(row.unavailable_source_turn_ids),
+            context_fingerprints=list(row.context_fingerprints),
+            source_backed_claims=[ResearchClaimModel.from_domain(item) for item in row.source_backed_claims],
+            inferred_claims=list(row.inferred_claims),
+            assumptions=list(row.assumptions),
+            missing_data=list(row.missing_data),
+            warnings=list(row.warnings),
+            warning_provenance=[
+                CopilotReportWarningProvenanceModel.from_domain(item)
+                for item in row.warning_provenance
+            ],
+            tool_trace_summary=[
+                CopilotReportToolTraceSummaryModel.from_domain(item)
+                for item in row.tool_trace_summary
+            ],
+            sources=[CopilotSourceRefModel.from_domain(item) for item in row.sources],
+            provider_metadata=[
+                CopilotArtifactProviderMetadataModel.from_domain(item)
+                for item in row.provider_metadata
+            ],
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            source_provider=row.source_provider,
+            origin=row.origin,
+            transformation_note=row.transformation_note,
+        )
+
+
+class CopilotStorageWarningModel(BaseModel):
+    warning_id: str
+    record_type: str
+    action: str
+    message: str
+    path: str
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, row: CopilotStorageWarning) -> "CopilotStorageWarningModel":
+        return cls(**row.__dict__)
+
+
+class CopilotStorageStatusModel(BaseModel):
+    current_schema_version: int
+    supported_legacy_versions: list[int] = Field(default_factory=list)
+    warnings: list[CopilotStorageWarningModel] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, row: CopilotStorageStatus) -> "CopilotStorageStatusModel":
+        return cls(
+            current_schema_version=row.current_schema_version,
+            supported_legacy_versions=list(row.supported_legacy_versions),
+            warnings=[CopilotStorageWarningModel.from_domain(item) for item in row.warnings],
+        )
+
+
+class CopilotDeleteResultModel(BaseModel):
+    deleted_id: str
+    deleted_type: str
+    recoverable: bool
+    archived_path: str | None = None
+    deleted_counts: dict[str, int] = Field(default_factory=dict)
+
+    @classmethod
+    def from_domain(cls, row: CopilotDeleteResult) -> "CopilotDeleteResultModel":
+        return cls(**row.__dict__)
+
+
+class CopilotSessionUpdateRequestModel(BaseModel):
+    title: str = Field(min_length=1, max_length=96)
+    expected_updated_at: datetime | None = None
+
+
+class CopilotArtifactCreateRequestModel(BaseModel):
+    artifact_type: str
+    template: str
+    title: str | None = Field(default=None, max_length=140)
+    body: str | None = None
+    source_turn_ids: list[str] = Field(default_factory=list)
+    source_memo_ids: list[str] = Field(default_factory=list)
+
+
+class CopilotArtifactUpdateRequestModel(BaseModel):
+    title: str | None = Field(default=None, max_length=140)
+    body: str | None = None
+    expected_updated_at: datetime | None = None
+
+
+class CopilotArtifactDuplicateRequestModel(BaseModel):
+    title: str | None = Field(default=None, max_length=140)
 
 
 class CopilotMemoModel(BaseModel):

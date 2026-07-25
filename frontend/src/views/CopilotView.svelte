@@ -1,7 +1,9 @@
 <script lang="ts">
   import { afterUpdate, onMount } from "svelte";
+  import CopilotArtifactsPanel from "../components/CopilotArtifactsPanel.svelte";
   import CopilotTranscriptResult from "../components/CopilotTranscriptResult.svelte";
   import type {
+    CopilotArtifact,
     CopilotBaseDomain,
     CopilotDomain,
     CopilotReasoningEffort,
@@ -12,6 +14,7 @@
     CopilotSourceRef,
     CopilotSessionDetail,
     CopilotSessionSummary,
+    CopilotStorageStatus,
     CopilotThreadEntry,
     CopilotThreadState
   } from "../lib/api/types";
@@ -52,6 +55,10 @@
   export let synthesisSurface: CopilotWorkspaceSurface;
   export let sessions: CopilotSessionSummary[] = [];
   export let activeSession: CopilotSessionDetail | null = null;
+  export let artifacts: CopilotArtifact[] = [];
+  export let activeArtifact: CopilotArtifact | null = null;
+  export let artifactSaveState: "idle" | "saving" | "saved" | "error" = "idle";
+  export let storageStatus: CopilotStorageStatus | null = null;
   export let researchPlan: CopilotResearchPlan | null = null;
   export let operatorPlan: CopilotOperatorPlan | null = null;
   export let operatorResult: CopilotResearchCardResult | null = null;
@@ -64,12 +71,38 @@
   export let onOperatorPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
   export let onRunOperator: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
   export let onArchiveSession: (sessionId: string) => Promise<unknown> | void = () => {};
+  export let onRestoreSession: (sessionId: string) => Promise<unknown> | void = () => {};
+  export let onRenameSession: (
+    sessionId: string,
+    title: string,
+    expectedUpdatedAt?: string | null
+  ) => Promise<unknown> | void = () => {};
+  export let onDeleteSession: (sessionId: string) => Promise<unknown> | void = () => {};
   export let onLoadSessions: () => Promise<unknown> | void = () => {};
   export let onSelectSession: (sessionId: string) => Promise<unknown> | void = () => {};
   export let onSearchSessions: (options?: { includeArchived?: boolean; search?: string }) => Promise<unknown> | void = () => {};
   export let onNewSession: () => Promise<unknown> | void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
   export let onOpenSource: (source: CopilotSourceRef) => Promise<unknown> | void = () => {};
+  export let onSelectArtifact: (artifactId: string | null) => unknown = () => {};
+  export let onCreateArtifact: (
+    options: {
+      artifactType: "memo" | "report";
+      template: "concise_memo" | "research_report";
+      title?: string | null;
+      sourceTurnIds: string[];
+    }
+  ) => Promise<CopilotArtifact | null> | CopilotArtifact | null = () => null;
+  export let onUpdateArtifact: (
+    artifactId: string,
+    options: { title?: string; body?: string; expectedUpdatedAt?: string | null }
+  ) => Promise<CopilotArtifact | null> | CopilotArtifact | null = () => null;
+  export let onDuplicateArtifact: (
+    artifactId: string,
+    title?: string | null
+  ) => Promise<CopilotArtifact | null> | CopilotArtifact | null = () => null;
+  export let onDeleteArtifact: (artifactId: string) => Promise<unknown> | unknown = () => {};
+  export let onExportArtifact: (artifactId: string) => Promise<string | null> | string | null = () => null;
 
   type CopilotRoleMode = "agent" | "operator";
 
@@ -84,6 +117,11 @@
   let contextEl: HTMLDivElement | null = null;
   let scrollEl: HTMLDivElement | null = null;
   let shouldScroll = false;
+  let artifactInspectorOpen = false;
+  let renamingSessionId: string | null = null;
+  let renameTitle = "";
+  let deleteSessionId: string | null = null;
+  let restoredSessionId: string | null = null;
 
   function activeTurns() {
     return activeSession?.turns ?? [];
@@ -160,6 +198,49 @@
     }
   }
 
+  async function handleRestoreSession(sessionId: string, event: MouseEvent) {
+    event.stopPropagation();
+    if (!sessionId || loading) return;
+    const result = await onRestoreSession(sessionId);
+    if (result != null) {
+      await onSearchSessions({ includeArchived: includeArchivedSessions, search: sessionSearch });
+    }
+  }
+
+  function beginRenameSession(session: CopilotSessionSummary, event: MouseEvent) {
+    event.stopPropagation();
+    renamingSessionId = session.session_id;
+    renameTitle = session.title;
+  }
+
+  async function finishRenameSession(session: CopilotSessionSummary) {
+    const title = renameTitle.trim();
+    if (!title || title === session.title) {
+      renamingSessionId = null;
+      return;
+    }
+    const result = await onRenameSession(session.session_id, title, session.updated_at);
+    if (result != null) {
+      renamingSessionId = null;
+      await onSearchSessions({ includeArchived: includeArchivedSessions, search: sessionSearch });
+    }
+  }
+
+  function requestDeleteSession(sessionId: string, event: MouseEvent) {
+    event.stopPropagation();
+    deleteSessionId = sessionId;
+  }
+
+  async function confirmDeleteSession() {
+    if (!deleteSessionId) return;
+    const sessionId = deleteSessionId;
+    deleteSessionId = null;
+    const result = await onDeleteSession(sessionId);
+    if (result != null) {
+      await onSearchSessions({ includeArchived: includeArchivedSessions, search: sessionSearch });
+    }
+  }
+
   async function handleSearchSessions() {
     await onSearchSessions({ includeArchived: includeArchivedSessions, search: sessionSearch });
   }
@@ -191,6 +272,8 @@
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         contextMenuOpen = false;
+        renamingSessionId = null;
+        deleteSessionId = null;
       }
     };
     document.addEventListener("click", onDocClick);
@@ -234,6 +317,14 @@
         ? selectedScopeOptions.map((option) => option.label).join(", ")
         : `${selectedScopeOptions[0].label} +${selectedScopeOptions.length - 1}`;
   $: activeSessionId = activeSession?.session.session_id ?? null;
+  $: if (activeSessionId && restoredSessionId !== activeSessionId) {
+    restoredSessionId = activeSessionId;
+    const persistedTurn = activeSession?.turns[activeSession.turns.length - 1];
+    if (persistedTurn) {
+      roleMode = persistedTurn.role === "research_operator" ? "operator" : "agent";
+      reasoningEffort = (persistedTurn.reasoning_effort as CopilotReasoningEffort | null) ?? "medium";
+    }
+  }
   $: hasPlanMessage =
     (roleMode === "agent" && researchPlan != null) ||
     (roleMode === "operator" && (operatorPlan != null || operatorResult != null));
@@ -263,7 +354,7 @@
   }
 </script>
 
-<section class="copilot">
+<section class="copilot" class:inspector-open={artifactInspectorOpen}>
   <aside class="sidebar">
     <div class="sidebar-head">
       <button type="button" class="new-chat" on:click={handleNewSession} disabled={loading}>
@@ -284,28 +375,39 @@
     <div class="session-list">
       {#if sessions.length}
         {#each sessions as session (session.session_id)}
-          <button
-            type="button"
+          <div
             class="session-row"
             class:active={session.session_id === activeSessionId}
             class:archived={session.archived_at != null}
-            on:click={() => handleSelectSession(session.session_id)}
           >
-            <span class="session-title">{session.title}</span>
-            <span class="session-meta">
-              {session.turn_count} turn{session.turn_count === 1 ? "" : "s"} · {sessionStatusLabel(session)}
-            </span>
-            {#if session.archived_at == null}
-              <span
-                class="session-archive"
-                role="button"
-                tabindex="0"
-                title="Archive conversation"
-                on:click={(event) => handleArchiveSession(session.session_id, event)}
-                on:keydown={(event) => event.key === "Enter" && handleArchiveSession(session.session_id, event as unknown as MouseEvent)}
-              >Archive</span>
+            {#if renamingSessionId === session.session_id}
+              <form class="session-rename" on:submit|preventDefault={() => finishRenameSession(session)}>
+                <input bind:value={renameTitle} aria-label="Session title" maxlength="96" />
+                <button type="submit">Save</button>
+                <button type="button" on:click={() => (renamingSessionId = null)}>Cancel</button>
+              </form>
+            {:else}
+              <button
+                type="button"
+                class="session-select"
+                on:click={() => handleSelectSession(session.session_id)}
+              >
+                <span class="session-title">{session.title}</span>
+                <span class="session-meta">
+                  {session.turn_count} turn{session.turn_count === 1 ? "" : "s"} · {session.artifact_count} artifact{session.artifact_count === 1 ? "" : "s"} · {sessionStatusLabel(session)}
+                </span>
+              </button>
+              <div class="session-actions">
+                <button type="button" on:click={(event) => beginRenameSession(session, event)}>Rename</button>
+                {#if session.archived_at == null}
+                  <button type="button" on:click={(event) => handleArchiveSession(session.session_id, event)}>Archive</button>
+                {:else}
+                  <button type="button" on:click={(event) => handleRestoreSession(session.session_id, event)}>Restore</button>
+                {/if}
+                <button type="button" class="danger-link" on:click={(event) => requestDeleteSession(session.session_id, event)}>Delete</button>
+              </div>
             {/if}
-          </button>
+          </div>
         {/each}
       {:else}
         <p class="sidebar-empty">No conversations yet.</p>
@@ -360,6 +462,15 @@
       </div>
 
       <div class="head-controls">
+        <button
+          type="button"
+          class="artifact-trigger"
+          class:active={artifactInspectorOpen}
+          on:click={() => (artifactInspectorOpen = !artifactInspectorOpen)}
+          aria-expanded={artifactInspectorOpen}
+        >
+          Artifacts <span>{artifacts.length}</span>
+        </button>
         {#if latestHandoff}
           <span class="handoff-chip" title="Opened from a cross-tab handoff">
             {latestHandoff.source_tab} → {latestHandoff.intended_target_tab}
@@ -522,10 +633,48 @@
       </div>
     </footer>
   </main>
+
+  {#if artifactInspectorOpen}
+    <CopilotArtifactsPanel
+      sessionId={activeSessionId}
+      turns={activeSession?.turns ?? []}
+      {artifacts}
+      {activeArtifact}
+      saveState={artifactSaveState}
+      onSelect={onSelectArtifact}
+      onCreate={onCreateArtifact}
+      onUpdate={onUpdateArtifact}
+      onDuplicate={onDuplicateArtifact}
+      onDelete={onDeleteArtifact}
+      onExport={onExportArtifact}
+      {onOpenSource}
+      onClose={() => (artifactInspectorOpen = false)}
+    />
+  {/if}
+
+  {#if deleteSessionId}
+    <div class="session-confirm-backdrop">
+      <div class="session-confirm" role="alertdialog" aria-label="Confirm session deletion">
+        <strong>Delete this Copilot session?</strong>
+        <p>The transcript, snapshots, and artifacts move to recoverable local trash. Archiving is a separate, non-destructive action.</p>
+        <div>
+          <button type="button" on:click={() => (deleteSessionId = null)}>Cancel</button>
+          <button type="button" class="danger-confirm-button" on:click={confirmDeleteSession}>Confirm delete</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if storageStatus?.warnings.length}
+    <div class="storage-warning" role="status">
+      Copilot preserved {storageStatus.warnings.length} skipped or recovered storage record{storageStatus.warnings.length === 1 ? "" : "s"} for inspection.
+    </div>
+  {/if}
 </section>
 
 <style>
   .copilot {
+    position: relative;
     display: grid;
     grid-template-columns: 16rem minmax(0, 1fr);
     gap: var(--space-4);
@@ -535,6 +684,10 @@
     height: calc(100vh - 5.5rem);
     min-height: 32rem;
     min-width: 0;
+  }
+
+  .copilot.inspector-open {
+    grid-template-columns: 14rem minmax(28rem, 1fr) minmax(18rem, 22rem);
   }
 
   /* ---- Sidebar ---- */
@@ -622,24 +775,20 @@
   }
 
   .session-row {
-    position: relative;
     display: grid;
     gap: var(--space-1);
     width: 100%;
-    padding: var(--space-4) var(--space-4);
-    border: 0;
     border-bottom: 1px solid var(--divider);
     background: transparent;
-    text-align: left;
-    cursor: pointer;
   }
 
-  .session-row:hover {
-    background: rgba(122, 166, 200, 0.06);
+  .session-row:hover,
+  .session-row.active {
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 
   .session-row.active {
-    background: rgba(122, 166, 200, 0.12);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
   }
 
   .session-row.active .session-title {
@@ -648,6 +797,17 @@
 
   .session-row.archived .session-title {
     color: var(--text-2);
+  }
+
+  .session-select {
+    display: grid;
+    gap: var(--space-1);
+    width: 100%;
+    padding: var(--space-4);
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
   }
 
   .session-title {
@@ -665,24 +825,50 @@
     font-size: var(--text-2xs);
   }
 
-  .session-archive {
-    position: absolute;
-    top: 0.45rem;
-    right: 0.5rem;
-    display: none;
+  .session-actions,
+  .session-rename {
+    display: flex;
+    gap: var(--space-2);
+    padding: 0 var(--space-4) var(--space-3);
+  }
+
+  .session-actions button,
+  .session-rename button {
+    padding: 0;
+    border: 0;
+    background: transparent;
     color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    font-size: var(--text-2xs);
     cursor: pointer;
   }
 
-  .session-archive:hover {
+  .session-actions button:hover,
+  .session-rename button:hover {
     color: var(--accent);
   }
 
-  .session-row:hover .session-archive {
-    display: inline;
+  .session-actions .danger-link {
+    color: var(--negative);
+    margin-left: auto;
+  }
+
+  .session-rename {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    padding-top: var(--space-3);
+  }
+
+  .session-rename input {
+    min-width: 0;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-0);
+    font: inherit;
+    font-size: var(--text-sm);
+    padding: var(--space-2);
   }
 
   .sidebar-empty,
@@ -849,6 +1035,30 @@
     align-items: center;
     gap: var(--space-4);
     flex-wrap: wrap;
+  }
+
+  .artifact-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 28px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .artifact-trigger span {
+    color: var(--accent);
+    font-size: var(--text-xs);
+  }
+
+  .artifact-trigger.active {
+    border-color: var(--accent);
+    color: var(--text-0);
   }
 
   .handoff-chip {
@@ -1162,6 +1372,84 @@
     cursor: default;
   }
 
+  .session-confirm-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    padding: var(--space-5);
+    background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  }
+
+  .session-confirm {
+    display: grid;
+    gap: var(--space-4);
+    width: min(28rem, 100%);
+    padding: var(--space-5);
+    border: 1px solid color-mix(in srgb, var(--negative) 52%, var(--panel-strong));
+    background: var(--bg-1);
+  }
+
+  .session-confirm strong {
+    color: var(--text-0);
+  }
+
+  .session-confirm p {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+  }
+
+  .session-confirm > div {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+  }
+
+  .session-confirm button {
+    min-height: 1.8rem;
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--text-xs);
+    padding: 0 var(--space-4);
+  }
+
+  .session-confirm .danger-confirm-button {
+    color: var(--negative);
+    border-color: color-mix(in srgb, var(--negative) 48%, var(--panel-strong));
+  }
+
+  .storage-warning {
+    position: absolute;
+    right: var(--space-4);
+    bottom: var(--space-4);
+    z-index: 30;
+    max-width: 28rem;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--warning);
+    background: var(--bg-1);
+    color: var(--warning);
+    font-size: var(--text-xs);
+  }
+
+  @media (max-width: 1180px) {
+    .copilot.inspector-open {
+      grid-template-columns: 16rem minmax(0, 1fr);
+    }
+
+    .copilot.inspector-open :global(.artifact-panel) {
+      position: absolute;
+      inset: 0 0 0 auto;
+      z-index: 35;
+      width: min(24rem, calc(100% - 2rem));
+      background: var(--bg-1);
+    }
+  }
+
   @media (max-width: 820px) {
     .copilot {
       grid-template-columns: minmax(0, 1fr);
@@ -1180,6 +1468,11 @@
 
     .composer-hint {
       display: none;
+    }
+
+    .copilot.inspector-open :global(.artifact-panel) {
+      inset: 0;
+      width: 100%;
     }
   }
 </style>

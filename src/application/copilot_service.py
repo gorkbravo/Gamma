@@ -39,7 +39,9 @@ from src.application.risk_service import RiskComputeRequest, RiskService
 from src.application.sitrep_service import SitrepService, SitrepWorkspaceRequest
 from src.models.app_mode import ResearchScopeType, SyntheticPosition
 from src.models.copilot import (
+    CopilotArtifact,
     CopilotContextBundle,
+    CopilotDeleteResult,
     CopilotDraftMutation,
     CopilotMemo,
     CopilotMutationApplyResult,
@@ -60,6 +62,7 @@ from src.models.copilot import (
     CopilotRunEvent,
     COPILOT_RUN_EVENT_TYPES,
     CopilotSession,
+    CopilotStorageStatus,
     CopilotSourceRef,
     CopilotTurn,
     CopilotToolExecution,
@@ -1056,6 +1059,13 @@ class CopilotService:
         resolved_domain: str,
         context: CopilotContextBundle,
         result: CopilotResearchCardResult,
+        *,
+        run_id: str | None = None,
+        terminal_status: str | None = None,
+        cancellation_outcome: str | None = None,
+        run_events: list[CopilotRunEvent] | None = None,
+        research_plan: CopilotResearchPlan | None = None,
+        operator_plan: CopilotOperatorPlan | None = None,
     ) -> CopilotResearchCardResult:
         if self.store is None:
             return result
@@ -1070,6 +1080,22 @@ class CopilotService:
                 context_fingerprint=normalized_request.context_fingerprint,
                 context_summary=self._context_summary_for_persistence(context),
                 result=result,
+                role=normalized_request.role,
+                reasoning_effort=normalized_request.reasoning_effort,
+                selected_scope_domains=self._selected_scope_domains(normalized_request, resolved_domain),
+                request_context={
+                    "context": asdict(normalized_request.context),
+                    "synthesis": asdict(normalized_request.synthesis) if normalized_request.synthesis else None,
+                },
+                requested_provider=normalized_request.requested_provider
+                or getattr(self.provider, "provider_name", None),
+                requested_model=normalized_request.requested_model,
+                run_id=run_id,
+                terminal_status=terminal_status,
+                cancellation_outcome=cancellation_outcome,
+                run_events=run_events,
+                research_plan=research_plan,
+                operator_plan=operator_plan,
             )
         except Exception:
             logger.exception("Copilot persistence failed for domain %s", resolved_domain)
@@ -1083,6 +1109,21 @@ class CopilotService:
                 ),
             )
         return result
+
+    @staticmethod
+    def _selected_scope_domains(
+        request: CopilotResearchCardRequest,
+        resolved_domain: str,
+    ) -> list[str]:
+        if request.selected_scope_domains:
+            return list(dict.fromkeys(request.selected_scope_domains))
+        if request.synthesis is not None:
+            return list(
+                dict.fromkeys(
+                    scope.domain for scope in request.synthesis.included_scopes if scope.domain
+                )
+            )
+        return [resolved_domain] if resolved_domain else []
 
     @staticmethod
     def _run_request_fingerprint(request: CopilotResearchCardRequest, run_kind: str) -> str:
@@ -1309,7 +1350,39 @@ class CopilotService:
                     return terminal or result
                 handle.finalized = True
             normalized = self._normalize_result_sources(result)
-            normalized = self._persist_result_turn(request, resolved_domain, context, normalized)
+            terminal_event_type = (
+                "cancelled"
+                if normalized.status == "cancelled"
+                else "failed"
+                if normalized.status in {"error", "unavailable"}
+                else "completed"
+            )
+            persisted_events = [
+                *handle.events,
+                CopilotRunEvent(
+                    run_id=handle.run_id,
+                    sequence=handle.next_sequence,
+                    event_type=terminal_event_type,
+                    data={"status": normalized.status},
+                ),
+            ]
+            normalized = self._persist_result_turn(
+                request,
+                resolved_domain,
+                context,
+                normalized,
+                run_id=handle.run_id,
+                terminal_status=normalized.status,
+                cancellation_outcome=(
+                    "timeout"
+                    if normalized.status == "cancelled"
+                    and "timed out" in str(normalized.message or "").lower()
+                    else "user_cancelled"
+                    if normalized.status == "cancelled"
+                    else None
+                ),
+                run_events=persisted_events,
+            )
             return normalized
 
         def cancelled(reason: str) -> None:
@@ -2016,6 +2089,18 @@ class CopilotService:
                         },
                     },
                     result=result,
+                    role=request.role,
+                    reasoning_effort=request.reasoning_effort,
+                    selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
+                    request_context={
+                        "context": asdict(request.context),
+                        "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                    },
+                    requested_provider=request.requested_provider,
+                    requested_model=request.requested_model,
+                    run_id=result.response_id,
+                    terminal_status=result.status,
+                    research_plan=plan,
                 )
             except Exception:
                 logger.exception("Copilot plan execution persistence failed")
@@ -2382,6 +2467,19 @@ class CopilotService:
                         "operator_events": [asdict(event) for event in events],
                     },
                     result=result,
+                    role="research_operator",
+                    reasoning_effort=request.reasoning_effort,
+                    selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
+                    request_context={
+                        "context": asdict(request.context),
+                        "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                    },
+                    requested_provider=request.requested_provider,
+                    requested_model=request.requested_model,
+                    run_id=resolved_run_id,
+                    terminal_status=result.status,
+                    cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                    operator_plan=plan,
                 )
             except Exception:
                 logger.exception("Copilot operator execution persistence failed")
@@ -2455,6 +2553,19 @@ class CopilotService:
                     "terminal_status": result.status,
                 },
                 result=result,
+                role="research_operator",
+                reasoning_effort=request.reasoning_effort,
+                selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
+                request_context={
+                    "context": asdict(request.context),
+                    "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                },
+                requested_provider=request.requested_provider,
+                requested_model=request.requested_model,
+                run_id=(result.operator_events[0].run_id if result.operator_events else result.response_id),
+                terminal_status=result.status,
+                cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                operator_plan=plan,
             )
         except Exception:
             logger.exception("Copilot Operator terminal persistence failed")
@@ -2504,6 +2615,19 @@ class CopilotService:
                         "operator_events": [asdict(event) for event in result.operator_events],
                     },
                     result=result,
+                    role="research_operator",
+                    reasoning_effort=request.reasoning_effort,
+                    selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
+                    request_context={
+                        "context": asdict(request.context),
+                        "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                    },
+                    requested_provider=request.requested_provider,
+                    requested_model=request.requested_model,
+                    run_id=(result.operator_events[0].run_id if result.operator_events else result.response_id),
+                    terminal_status=result.status,
+                    cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                    operator_plan=plan,
                 )
             except Exception:
                 logger.exception("Copilot Agents SDK operator execution persistence failed")
@@ -2983,8 +3107,19 @@ class CopilotService:
     def list_turns(self, session_id: str) -> list[CopilotTurn]:
         return self.store.list_turns(session_id) if self.store is not None else []
 
+    def list_context_snapshots(self, session_id: str):
+        return self.store.list_context_snapshots(session_id) if self.store is not None else []
+
     def list_memos(self, session_id: str | None = None) -> list[CopilotMemo]:
         return self.store.list_memos(session_id) if self.store is not None else []
+
+    def list_artifacts(self, session_id: str | None = None) -> list[CopilotArtifact]:
+        return self.store.list_artifacts(session_id) if self.store is not None else []
+
+    def storage_status(self) -> CopilotStorageStatus:
+        if self.store is None:
+            return CopilotStorageStatus(current_schema_version=0)
+        return self.store.storage_status()
 
     def create_memo(
         self,
@@ -3008,6 +3143,86 @@ class CopilotService:
             raise ValueError("Copilot persistence is not configured.")
         return self.store.archive_session(session_id)
 
+    def restore_session(self, session_id: str) -> CopilotSession:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.restore_session(session_id)
+
+    def rename_session(
+        self,
+        session_id: str,
+        *,
+        title: str,
+        expected_updated_at: datetime | None = None,
+    ) -> CopilotSession:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.rename_session(
+            session_id,
+            title=title,
+            expected_updated_at=expected_updated_at,
+        )
+
+    def delete_session(self, session_id: str, *, confirmation: str) -> CopilotDeleteResult:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.delete_session(session_id, confirmation=confirmation)
+
+    def create_artifact(
+        self,
+        *,
+        session_id: str,
+        artifact_type: str,
+        template: str,
+        title: str | None = None,
+        body: str | None = None,
+        source_turn_ids: list[str] | None = None,
+        source_memo_ids: list[str] | None = None,
+    ) -> CopilotArtifact:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.create_artifact(
+            session_id=session_id,
+            artifact_type=artifact_type,
+            template=template,
+            title=title,
+            body=body,
+            source_turn_ids=source_turn_ids,
+            source_memo_ids=source_memo_ids,
+        )
+
+    def update_artifact(
+        self,
+        artifact_id: str,
+        *,
+        title: str | None = None,
+        body: str | None = None,
+        expected_updated_at: datetime | None = None,
+    ) -> CopilotArtifact:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.update_artifact(
+            artifact_id,
+            title=title,
+            body=body,
+            expected_updated_at=expected_updated_at,
+        )
+
+    def duplicate_artifact(self, artifact_id: str, *, title: str | None = None) -> CopilotArtifact:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.duplicate_artifact(artifact_id, title=title)
+
+    def delete_artifact(self, artifact_id: str, *, confirmation: str) -> CopilotDeleteResult:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.delete_artifact(artifact_id, confirmation=confirmation)
+
+    def export_artifact_markdown(self, artifact_id: str) -> str:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.export_artifact_markdown(artifact_id)
+
     def update_memo(self, memo_id: str, *, title: str | None = None, body: str | None = None) -> CopilotMemo:
         if self.store is None:
             raise ValueError("Copilot persistence is not configured.")
@@ -3016,18 +3231,7 @@ class CopilotService:
     def export_memo_markdown(self, memo_id: str) -> str:
         if self.store is None:
             raise ValueError("Copilot persistence is not configured.")
-        memo = self.store.get_memo(memo_id)
-        if memo is None:
-            raise ValueError(f"Copilot memo not found: {memo_id}")
-        meta = [
-            f"Session: {memo.session_id}",
-            f"Memo: {memo.memo_id}",
-            f"Updated: {memo.updated_at.isoformat()}",
-            f"Source turns: {', '.join(memo.source_turn_ids) if memo.source_turn_ids else 'none'}",
-        ]
-        if memo.warnings:
-            meta.extend(["", "Warnings:", *[f"- {warning}" for warning in memo.warnings]])
-        return "\n".join([memo.body.strip(), "", "---", *meta]).strip() + "\n"
+        return self.store.export_artifact_markdown(memo_id)
 
     def generate_research_report(
         self,

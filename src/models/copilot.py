@@ -58,6 +58,10 @@ class CopilotResearchCardRequest:
     context_fingerprint: str | None = None
     session_title: str | None = None
     reasoning_effort: str | None = None
+    role: str = "research_agent"
+    selected_scope_domains: list[str] = field(default_factory=list)
+    requested_provider: str | None = None
+    requested_model: str | None = None
     context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
     synthesis: CopilotSynthesisRequest | None = None
 
@@ -363,6 +367,8 @@ class CopilotContextSnapshot:
     current_tab: str
     workspace_mode: str | None
     summary: dict[str, Any] = field(default_factory=dict)
+    request_context: dict[str, Any] = field(default_factory=dict)
+    selected_scope_domains: list[str] = field(default_factory=list)
     source_ids: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=now_utc)
@@ -379,6 +385,25 @@ class CopilotTurn:
     context_snapshot_id: str
     result: CopilotResearchCardResult
     created_at: datetime = field(default_factory=now_utc)
+    role: str = "research_agent"
+    reasoning_effort: str | None = None
+    selected_scope_domains: list[str] = field(default_factory=list)
+    context_fingerprint: str | None = None
+    requested_provider: str | None = None
+    requested_model: str | None = None
+    resolved_provider: str | None = None
+    resolved_model: str | None = None
+    run_id: str | None = None
+    terminal_status: str | None = None
+    cancellation_outcome: str | None = None
+    usage: "CopilotUsageRecord" = field(default_factory=lambda: CopilotUsageRecord())
+    research_plan: CopilotResearchPlan | None = None
+    operator_plan: CopilotOperatorPlan | None = None
+    run_events: list[CopilotRunEvent] = field(default_factory=list)
+    confirmations: list["CopilotConfirmationState"] = field(default_factory=list)
+    artifact_refs: list["CopilotArtifactReference"] = field(default_factory=list)
+    mutation_refs: list["CopilotArtifactReference"] = field(default_factory=list)
+    trace_state: "CopilotTraceState" = field(default_factory=lambda: CopilotTraceState())
 
 
 @dataclass(frozen=True)
@@ -391,8 +416,56 @@ class CopilotSession:
     active_context_fingerprint: str | None = None
     turn_count: int = 0
     memo_count: int = 0
+    report_count: int = 0
+    artifact_count: int = 0
     warnings: list[str] = field(default_factory=list)
     archived_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class CopilotUsageRecord:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    total_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    provider_calls: int = 0
+    tool_calls: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CopilotConfirmationState:
+    checkpoint_id: str
+    status: str
+    required_for_tool_ids: list[str] = field(default_factory=list)
+    mutation_id: str | None = None
+    confirmation_token: str | None = None
+    rollback_snapshot_id: str | None = None
+    created_at: datetime | None = None
+    resolved_at: datetime | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotArtifactReference:
+    artifact_id: str
+    artifact_type: str
+    status: str = "created"
+    mutation_id: str | None = None
+    rollback_snapshot_id: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotTraceState:
+    event_count: int = 0
+    tool_trace_count: int = 0
+    operator_event_count: int = 0
+    source_count: int = 0
+    warning_count: int = 0
+    bounded: bool = True
+    replay_complete: bool = True
 
 
 @dataclass(frozen=True)
@@ -409,6 +482,52 @@ class CopilotMemo:
     source_provider: str = "gamma_copilot"
     origin: str = "copilot_store.memo"
     transformation_note: str | None = "Gamma memo generated from persisted read-only Copilot turns."
+
+
+@dataclass(frozen=True)
+class CopilotArtifactProviderMetadata:
+    turn_id: str
+    role: str
+    reasoning_effort: str | None = None
+    requested_provider: str | None = None
+    requested_model: str | None = None
+    resolved_provider: str | None = None
+    resolved_model: str | None = None
+    run_id: str | None = None
+    terminal_status: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotArtifact:
+    """One authoritative persisted memo/report artifact contract."""
+
+    artifact_id: str
+    session_id: str
+    artifact_type: str
+    template: str
+    title: str
+    body: str
+    source_turn_ids: list[str] = field(default_factory=list)
+    source_memo_ids: list[str] = field(default_factory=list)
+    source_snapshot_ids: list[str] = field(default_factory=list)
+    unavailable_source_turn_ids: list[str] = field(default_factory=list)
+    context_fingerprints: list[str] = field(default_factory=list)
+    source_backed_claims: list[ResearchClaim] = field(default_factory=list)
+    inferred_claims: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
+    missing_data: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    warning_provenance: list["CopilotReportWarningProvenance"] = field(default_factory=list)
+    tool_trace_summary: list["CopilotReportToolTraceSummary"] = field(default_factory=list)
+    sources: list[CopilotSourceRef] = field(default_factory=list)
+    provider_metadata: list[CopilotArtifactProviderMetadata] = field(default_factory=list)
+    created_at: datetime = field(default_factory=now_utc)
+    updated_at: datetime = field(default_factory=now_utc)
+    source_provider: str = "gamma_copilot"
+    origin: str = "copilot_store.artifact"
+    transformation_note: str | None = (
+        "Gamma artifact generated from persisted read-only Copilot turns; edits preserve the source snapshot."
+    )
 
 
 @dataclass(frozen=True)
@@ -453,6 +572,32 @@ class CopilotResearchReport:
     source_provider: str = "gamma_copilot"
     origin: str = "copilot_report_service.generate_report"
     transformation_note: str | None = "Gamma research report generated from persisted read-only Copilot session traces."
+
+
+@dataclass(frozen=True)
+class CopilotStorageWarning:
+    warning_id: str
+    record_type: str
+    action: str
+    message: str
+    path: str
+    created_at: datetime = field(default_factory=now_utc)
+
+
+@dataclass(frozen=True)
+class CopilotStorageStatus:
+    current_schema_version: int
+    supported_legacy_versions: list[int] = field(default_factory=list)
+    warnings: list[CopilotStorageWarning] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CopilotDeleteResult:
+    deleted_id: str
+    deleted_type: str
+    recoverable: bool
+    archived_path: str | None = None
+    deleted_counts: dict[str, int] = field(default_factory=dict)
 
 
 def new_copilot_id(prefix: str) -> str:

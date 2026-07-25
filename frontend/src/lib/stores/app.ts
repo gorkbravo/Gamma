@@ -44,7 +44,9 @@ import type {
   BaseCurrencyResponse,
   CommodityMode,
   CommodityWorkspaceResponse,
+  CopilotArtifact,
   CopilotBaseDomain,
+  CopilotDeleteResult,
   CopilotDomain,
   CopilotMemo,
   CopilotOperatorPlan,
@@ -56,6 +58,7 @@ import type {
   CopilotRunEvent,
   CopilotSessionDetail,
   CopilotSessionSummary,
+  CopilotStorageStatus,
   CopilotThreadEntry,
   CopilotThreadState,
   CryptoComparison,
@@ -457,6 +460,10 @@ export const copilotThreads = writable<Record<CopilotDomain, CopilotThreadState>
 export const copilotSessions = writable<CopilotSessionSummary[]>([]);
 export const activeCopilotSession = writable<CopilotSessionDetail | null>(null);
 export const copilotMemos = writable<CopilotMemo[]>([]);
+export const copilotArtifacts = writable<CopilotArtifact[]>([]);
+export const activeCopilotArtifact = writable<CopilotArtifact | null>(null);
+export const copilotStorageStatus = writable<CopilotStorageStatus | null>(null);
+export const copilotArtifactSaveState = writable<"idle" | "saving" | "saved" | "error">("idle");
 export const copilotResearchPlan = writable<CopilotResearchPlan | null>(null);
 export const copilotOperatorPlan = writable<CopilotOperatorPlan | null>(null);
 export const copilotOperatorResult = writable<CopilotResearchCardResult | null>(null);
@@ -2861,6 +2868,37 @@ function setCopilotSessionId(sessionId: string) {
   }
 }
 
+function copilotArtifactStorageKey(sessionId: string) {
+  return `gamma.copilot.artifact.${sessionId}`;
+}
+
+function getCopilotArtifactId(sessionId: string) {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(copilotArtifactStorageKey(sessionId));
+}
+
+function setCopilotArtifactId(sessionId: string, artifactId: string | null) {
+  if (typeof localStorage === "undefined") return;
+  const key = copilotArtifactStorageKey(sessionId);
+  if (artifactId) {
+    localStorage.setItem(key, artifactId);
+  } else {
+    localStorage.removeItem(key);
+  }
+}
+
+function reconcileCopilotArtifacts(sessionId: string, artifacts: CopilotArtifact[]) {
+  copilotArtifacts.set(artifacts);
+  const preferredId = getCopilotArtifactId(sessionId);
+  const selected =
+    artifacts.find((artifact) => artifact.artifact_id === preferredId) ??
+    artifacts[0] ??
+    null;
+  activeCopilotArtifact.set(selected);
+  setCopilotArtifactId(sessionId, selected?.artifact_id ?? null);
+  return selected;
+}
+
 type CopilotLoadOptions = {
   workspaceMode?: WorkspaceMode | null;
   synthesisDomains?: CopilotBaseDomain[];
@@ -3322,9 +3360,13 @@ export async function streamCopilotResearchCard(
     }
 
     const runId = newCopilotRunId();
+    const selectedScopeDomains =
+      domain === "synthesis" ? options.synthesisDomains ?? [] : [domain];
     const payload = {
       domain,
       prompt,
+      role: "research_agent",
+      selected_scope_domains: selectedScopeDomains,
       user_session_id: getCopilotSessionId(),
       context_fingerprint: contextFingerprint,
       run_id: runId,
@@ -3391,6 +3433,9 @@ export async function loadCopilotResearchPlan(
     const payload = {
       domain,
       prompt,
+      role: "research_agent",
+      selected_scope_domains:
+        domain === "synthesis" ? options.synthesisDomains ?? [] : [domain],
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
         : {}),
@@ -3448,6 +3493,9 @@ export async function loadCopilotOperatorPlan(
     const payload = {
       domain,
       prompt,
+      role: "research_operator",
+      selected_scope_domains:
+        domain === "synthesis" ? options.synthesisDomains ?? [] : [domain],
       user_session_id: getCopilotSessionId(),
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
@@ -3506,6 +3554,9 @@ export async function executeCopilotOperatorPlan(
     const payload = {
       domain,
       prompt,
+      role: "research_operator",
+      selected_scope_domains:
+        domain === "synthesis" ? options.synthesisDomains ?? [] : [domain],
       run_id: runId,
       user_session_id: getCopilotSessionId(),
       context_fingerprint: contextFingerprint,
@@ -3656,15 +3707,38 @@ export async function loadCopilotSessions(options: { includeArchived?: boolean; 
 }
 
 export async function loadActiveCopilotSession() {
+  const sessionId = getCopilotSessionId();
   try {
-    const sessionId = getCopilotSessionId();
     const detail = await getJson<CopilotSessionDetail>(`/copilot/sessions/${encodeURIComponent(sessionId)}`);
     activeCopilotSession.set(detail);
     copilotMemos.set(detail.memos);
+    reconcileCopilotArtifacts(sessionId, detail.artifacts ?? []);
     lastError.set("");
     return detail;
   } catch (error) {
-    setError(error);
+    const sessions = await loadCopilotSessions();
+    const fallback = sessions.find((session) => session.archived_at == null) ?? sessions[0] ?? null;
+    if (fallback && fallback.session_id !== sessionId) {
+      setCopilotSessionId(fallback.session_id);
+      try {
+        const detail = await getJson<CopilotSessionDetail>(
+          `/copilot/sessions/${encodeURIComponent(fallback.session_id)}`
+        );
+        activeCopilotSession.set(detail);
+        copilotMemos.set(detail.memos);
+        reconcileCopilotArtifacts(fallback.session_id, detail.artifacts ?? []);
+        lastError.set("");
+        return detail;
+      } catch (fallbackError) {
+        setError(fallbackError);
+      }
+    } else {
+      activeCopilotSession.set(null);
+      copilotMemos.set([]);
+      copilotArtifacts.set([]);
+      activeCopilotArtifact.set(null);
+      setError(error);
+    }
     return null;
   }
 }
@@ -3677,6 +3751,7 @@ export async function loadCopilotSession(sessionId: string, options: { makeActiv
     }
     activeCopilotSession.set(detail);
     copilotMemos.set(detail.memos);
+    reconcileCopilotArtifacts(sessionId, detail.artifacts ?? []);
     lastError.set("");
     return detail;
   } catch (error) {
@@ -3693,6 +3768,9 @@ export function startNewCopilotSession() {
   setCopilotSessionId(nextId);
   activeCopilotSession.set(null);
   copilotMemos.set([]);
+  copilotArtifacts.set([]);
+  activeCopilotArtifact.set(null);
+  copilotArtifactSaveState.set("idle");
   resetCopilotCard("synthesis");
   return nextId;
 }
@@ -3707,6 +3785,243 @@ export async function loadCopilotMemos(sessionId?: string | null) {
   } catch (error) {
     setError(error);
     return [];
+  }
+}
+
+export async function loadCopilotStorageStatus() {
+  try {
+    const status = await getJson<CopilotStorageStatus>("/copilot/storage-status");
+    copilotStorageStatus.set(status);
+    lastError.set("");
+    return status;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function renameCopilotSession(
+  sessionId: string,
+  title: string,
+  expectedUpdatedAt?: string | null
+) {
+  try {
+    const session = await patchJson<CopilotSessionSummary>(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        title,
+        expected_updated_at: expectedUpdatedAt ?? null
+      }
+    );
+    copilotSessions.update((items) =>
+      items.map((item) => (item.session_id === session.session_id ? session : item))
+    );
+    activeCopilotSession.update((detail) =>
+      detail?.session.session_id === session.session_id ? { ...detail, session } : detail
+    );
+    lastError.set("");
+    return session;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function restoreCopilotSession(sessionId: string) {
+  try {
+    const session = await postJson<CopilotSessionSummary>(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}/restore`,
+      {}
+    );
+    copilotSessions.update((items) =>
+      items.map((item) => (item.session_id === session.session_id ? session : item))
+    );
+    activeCopilotSession.update((detail) =>
+      detail?.session.session_id === session.session_id ? { ...detail, session } : detail
+    );
+    lastError.set("");
+    return session;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function deleteCopilotSession(sessionId: string) {
+  try {
+    const result = await deleteJson<CopilotDeleteResult>(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}?confirm_session_id=${encodeURIComponent(sessionId)}`
+    );
+    const remaining = get(copilotSessions).filter((item) => item.session_id !== sessionId);
+    copilotSessions.set(remaining);
+    if (getCopilotSessionId() === sessionId) {
+      const fallback = remaining.find((session) => session.archived_at == null) ?? remaining[0] ?? null;
+      if (fallback) {
+        await loadCopilotSession(fallback.session_id, { makeActive: true });
+      } else {
+        startNewCopilotSession();
+      }
+    }
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function loadCopilotArtifacts(sessionId = getCopilotSessionId()) {
+  try {
+    const artifacts = await getJson<CopilotArtifact[]>(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}/artifacts`
+    );
+    reconcileCopilotArtifacts(sessionId, artifacts);
+    lastError.set("");
+    return artifacts;
+  } catch (error) {
+    setError(error);
+    return [];
+  }
+}
+
+export function selectCopilotArtifact(artifactId: string | null) {
+  const sessionId = getCopilotSessionId();
+  const selected = artifactId
+    ? get(copilotArtifacts).find((artifact) => artifact.artifact_id === artifactId) ?? null
+    : null;
+  activeCopilotArtifact.set(selected);
+  setCopilotArtifactId(sessionId, selected?.artifact_id ?? null);
+  copilotArtifactSaveState.set("idle");
+  return selected;
+}
+
+export async function createCopilotArtifact(options: {
+  artifactType: "memo" | "report";
+  template: "concise_memo" | "research_report";
+  title?: string | null;
+  body?: string | null;
+  sourceTurnIds?: string[];
+  sourceMemoIds?: string[];
+}) {
+  const sessionId = getCopilotSessionId();
+  try {
+    const artifact = await postJson<CopilotArtifact>(
+      `/copilot/sessions/${encodeURIComponent(sessionId)}/artifacts`,
+      {
+        artifact_type: options.artifactType,
+        template: options.template,
+        title: options.title ?? null,
+        body: options.body ?? null,
+        source_turn_ids: options.sourceTurnIds ?? [],
+        source_memo_ids: options.sourceMemoIds ?? []
+      }
+    );
+    const detail = await loadCopilotSession(sessionId);
+    if (!detail) {
+      const next = [...get(copilotArtifacts).filter((item) => item.artifact_id !== artifact.artifact_id), artifact];
+      reconcileCopilotArtifacts(sessionId, next);
+    }
+    selectCopilotArtifact(artifact.artifact_id);
+    lastError.set("");
+    return artifact;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function updateCopilotArtifact(
+  artifactId: string,
+  options: { title?: string; body?: string; expectedUpdatedAt?: string | null }
+) {
+  copilotArtifactSaveState.set("saving");
+  try {
+    const artifact = await patchJson<CopilotArtifact>(
+      `/copilot/artifacts/${encodeURIComponent(artifactId)}`,
+      {
+        title: options.title,
+        body: options.body,
+        expected_updated_at: options.expectedUpdatedAt ?? null
+      }
+    );
+    copilotArtifacts.update((items) =>
+      items.map((item) => (item.artifact_id === artifact.artifact_id ? artifact : item))
+    );
+    activeCopilotArtifact.set(artifact);
+    activeCopilotSession.update((detail) =>
+      detail
+        ? {
+            ...detail,
+            artifacts: detail.artifacts.map((item) =>
+              item.artifact_id === artifact.artifact_id ? artifact : item
+            )
+          }
+        : detail
+    );
+    setCopilotArtifactId(artifact.session_id, artifact.artifact_id);
+    copilotArtifactSaveState.set("saved");
+    lastError.set("");
+    return artifact;
+  } catch (error) {
+    const currentArtifact = get(activeCopilotArtifact);
+    if (currentArtifact?.artifact_id === artifactId) {
+      await loadCopilotSession(currentArtifact.session_id);
+      selectCopilotArtifact(artifactId);
+    }
+    copilotArtifactSaveState.set("error");
+    setError(error);
+    return null;
+  }
+}
+
+export async function duplicateCopilotArtifact(artifactId: string, title?: string | null) {
+  try {
+    const artifact = await postJson<CopilotArtifact>(
+      `/copilot/artifacts/${encodeURIComponent(artifactId)}/duplicate`,
+      { title: title ?? null }
+    );
+    const detail = await loadCopilotSession(artifact.session_id);
+    if (!detail) {
+      const next = [...get(copilotArtifacts), artifact];
+      reconcileCopilotArtifacts(artifact.session_id, next);
+    }
+    selectCopilotArtifact(artifact.artifact_id);
+    lastError.set("");
+    return artifact;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function deleteCopilotArtifact(artifactId: string) {
+  try {
+    const artifact = get(copilotArtifacts).find((item) => item.artifact_id === artifactId) ?? null;
+    const result = await deleteJson<CopilotDeleteResult>(
+      `/copilot/artifacts/${encodeURIComponent(artifactId)}?confirm_artifact_id=${encodeURIComponent(artifactId)}`
+    );
+    const sessionId = artifact?.session_id ?? getCopilotSessionId();
+    const remaining = get(copilotArtifacts).filter((item) => item.artifact_id !== artifactId);
+    reconcileCopilotArtifacts(sessionId, remaining);
+    activeCopilotSession.update((detail) =>
+      detail ? { ...detail, artifacts: detail.artifacts.filter((item) => item.artifact_id !== artifactId) } : detail
+    );
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function exportCopilotArtifact(artifactId: string) {
+  try {
+    const markdown = await getText(`/copilot/artifacts/${encodeURIComponent(artifactId)}/export`);
+    lastError.set("");
+    return markdown;
+  } catch (error) {
+    setError(error);
+    return null;
   }
 }
 
@@ -3735,24 +4050,22 @@ export async function createCopilotMemo(options: {
 }
 
 export async function archiveCopilotSession(sessionId: string) {
-  setLoading("copilot", true);
   try {
     const session = await postJson<CopilotSessionSummary>(
       `/copilot/sessions/${encodeURIComponent(sessionId)}/archive`,
       {}
     );
-    if (sessionId === getCopilotSessionId()) {
-      activeCopilotSession.set(null);
-      copilotMemos.set([]);
-    }
-    await loadCopilotSessions();
+    copilotSessions.update((items) =>
+      items.map((item) => (item.session_id === session.session_id ? session : item))
+    );
+    activeCopilotSession.update((detail) =>
+      detail?.session.session_id === session.session_id ? { ...detail, session } : detail
+    );
     lastError.set("");
     return session;
   } catch (error) {
     setError(error);
     return null;
-  } finally {
-    setLoading("copilot", false);
   }
 }
 

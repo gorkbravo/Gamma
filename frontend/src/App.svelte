@@ -42,13 +42,22 @@
     clearPortfolioHistory,
     cancelIvSessionRequest,
     commoditiesWorkspace,
+    activeCopilotArtifact,
     activeCopilotSession,
+    copilotArtifacts,
+    copilotArtifactSaveState,
     copilotOperatorPlan,
     copilotOperatorResult,
     copilotResearchPlan,
     copilotSessions,
+    copilotStorageStatus,
     copilotThreads,
     archiveCopilotSession,
+    createCopilotArtifact,
+    deleteCopilotArtifact,
+    deleteCopilotSession,
+    duplicateCopilotArtifact,
+    exportCopilotArtifact,
     cryptoComparison,
     fundamentalsDcfSnapshots,
     fundamentalsDcfModel,
@@ -101,11 +110,16 @@
     loadPortfolioSnapshot,
     loadActiveCopilotSession,
     loadCopilotMemos,
+    loadCopilotStorageStatus,
     loadCopilotOperatorPlan,
     loadCopilotResearchCard,
     loadCopilotResearchPlan,
     loadCopilotSession,
     loadCopilotSessions,
+    renameCopilotSession,
+    restoreCopilotSession,
+    selectCopilotArtifact,
+    updateCopilotArtifact,
     executeCopilotOperatorPlan,
     streamCopilotResearchCard,
     cancelCopilotRun,
@@ -2024,6 +2038,22 @@
     return archiveCopilotSession(sessionId);
   }
 
+  async function handleRestoreCopilotSession(sessionId: string) {
+    return restoreCopilotSession(sessionId);
+  }
+
+  async function handleRenameCopilotSession(
+    sessionId: string,
+    title: string,
+    expectedUpdatedAt?: string | null
+  ) {
+    return renameCopilotSession(sessionId, title, expectedUpdatedAt);
+  }
+
+  async function handleDeleteCopilotSession(sessionId: string) {
+    return deleteCopilotSession(sessionId);
+  }
+
   async function handleNewCopilotSession() {
     startNewCopilotSession();
     return handleLoadCopilotWorkspaceState();
@@ -2034,7 +2064,29 @@
   }
 
   async function handleSelectCopilotSession(sessionId: string) {
-    return loadCopilotSession(sessionId, { makeActive: true });
+    const detail = await loadCopilotSession(sessionId, { makeActive: true });
+    restoreCopilotScopeFromSession(detail);
+    return detail;
+  }
+
+  function restoreCopilotScopeFromSession(detail: typeof $activeCopilotSession) {
+    const latestTurn = detail?.turns[detail.turns.length - 1];
+    if (!latestTurn?.selected_scope_domains.length) return;
+    const available = new Set(
+      synthesisScopeOptions
+        .map((option) => option.domain)
+        .filter((domain): domain is CopilotBaseDomain => domain != null && optionDomainSupported(domain))
+    );
+    const restored = latestTurn.selected_scope_domains.filter(
+      (domain): domain is CopilotBaseDomain => available.has(domain as CopilotBaseDomain)
+    );
+    if (restored.length) {
+      selectedSynthesisDomains = restored;
+    }
+  }
+
+  function optionDomainSupported(domain: CopilotBaseDomain) {
+    return synthesisScopeOptions.some((option) => option.domain === domain && option.supported);
   }
 
   async function handleSendToCopilot(handoff: CrossTabHandoffEnvelope) {
@@ -2150,7 +2202,10 @@
   }
 
   async function handleLoadCopilotWorkspaceState() {
-    await Promise.allSettled([loadCopilotSessions(), loadActiveCopilotSession(), loadCopilotMemos()]);
+    await loadCopilotSessions();
+    const detail = await loadActiveCopilotSession();
+    restoreCopilotScopeFromSession(detail);
+    await loadCopilotStorageStatus();
   }
 
   async function handleOpenKeyBindings() {
@@ -2756,6 +2811,10 @@
             synthesisSurface={synthesisCopilotSurface}
             sessions={$copilotSessions}
             activeSession={$activeCopilotSession}
+            artifacts={$copilotArtifacts}
+            activeArtifact={$activeCopilotArtifact}
+            artifactSaveState={$copilotArtifactSaveState}
+            storageStatus={$copilotStorageStatus}
             researchPlan={$copilotResearchPlan}
             operatorPlan={$copilotOperatorPlan}
             operatorResult={$copilotOperatorResult}
@@ -2768,12 +2827,21 @@
             onOperatorPlan={handleOperatorPlanCopilotWorkspace}
             onRunOperator={handleRunOperatorCopilotWorkspace}
             onArchiveSession={handleArchiveCopilotSession}
+            onRestoreSession={handleRestoreCopilotSession}
+            onRenameSession={handleRenameCopilotSession}
+            onDeleteSession={handleDeleteCopilotSession}
             onNewSession={handleNewCopilotSession}
             onLoadSessions={handleLoadCopilotWorkspaceState}
             onSelectSession={handleSelectCopilotSession}
             onSearchSessions={handleLoadCopilotSessionsFiltered}
             onToggleScope={handleToggleSynthesisScope}
             onOpenSource={handleOpenCopilotSource}
+            onSelectArtifact={selectCopilotArtifact}
+            onCreateArtifact={createCopilotArtifact}
+            onUpdateArtifact={updateCopilotArtifact}
+            onDuplicateArtifact={duplicateCopilotArtifact}
+            onDeleteArtifact={deleteCopilotArtifact}
+            onExportArtifact={exportCopilotArtifact}
           />
         {:else if $activeTab === "risk"}
           <svelte:component

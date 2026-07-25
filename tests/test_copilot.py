@@ -15,12 +15,21 @@ from src.application.copilot_service import CopilotService
 from src.application.runtime import build_runtime
 from src.models.copilot import (
     CopilotContextBundle,
+    CopilotArtifactReference,
+    CopilotConfirmationState,
+    CopilotOperatorPlan,
+    CopilotOperatorPlanStep,
+    CopilotOperatorProgressEvent,
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotResearchPlan,
+    CopilotResearchPlanDomain,
+    CopilotRunEvent,
     CopilotSourceRef,
     CopilotToolExecution,
     CopilotToolTrace,
+    CopilotUsageRecord,
     ResearchCard,
     ResearchClaim,
 )
@@ -74,7 +83,12 @@ from src.models.macro import (
 from src.models.portfolio import PortfolioSnapshot, PositionItem
 from src.services.mock_copilot_provider import MockCopilotProvider
 from src.services.openai_copilot_provider import OpenAIResponsesCopilotProvider
-from src.services.copilot_store import CopilotStore
+from src.services.copilot_store import (
+    CURRENT_COPILOT_STORE_SCHEMA_VERSION,
+    CopilotStore,
+    CopilotStoreConflictError,
+    CopilotStoreNotFoundError,
+)
 
 
 class _StubCopilotProvider:
@@ -4980,3 +4994,651 @@ def test_sitrep_copilot_context_builder_summary_shape(tmp_path):
         assert summary["section_warnings"] == []
     finally:
         runtime.shutdown()
+
+
+def _checkpoint3_persisted_result() -> CopilotResearchCardResult:
+    source = CopilotSourceRef(
+        source_id="macro.checkpoint3",
+        label="Checkpoint 3 macro snapshot",
+        kind="workspace_context",
+        provider="gamma",
+        origin="gamma.macro.snapshot",
+        description="Persisted source used by the Checkpoint 3 restart fixture.",
+        retrieved_at=datetime(2026, 7, 24, 10, 30),
+    )
+    return CopilotResearchCardResult(
+        domain="macro",
+        current_tab="macro",
+        status="ready",
+        provider="stub_provider",
+        model="stub-model-v3",
+        response_id="resp_checkpoint3",
+        card=ResearchCard(
+            title="Checkpoint 3 replay",
+            hypothesis="A complete Copilot turn can be reconstructed after restart.",
+            rationale="The record owns its plan, trace, usage, evidence, warning, and artifact links.",
+            required_data=["Persisted macro snapshot"],
+            proposed_test="Restart the store and compare every typed field.",
+            confounders=["Legacy records contain fewer fields."],
+            next_steps=["Export the linked report."],
+            caveats=["Fixture data only."],
+            source_backed_claims=[
+                ResearchClaim(
+                    claim="The macro snapshot is preserved.",
+                    evidence_refs=[source.source_id],
+                )
+            ],
+            inferred_claims=["Restart fidelity is proven by typed equality assertions."],
+        ),
+        sources=[source],
+        tool_traces=[
+            CopilotToolTrace(
+                tool_name="get_macro_workspace_drilldown",
+                summary="Loaded the persisted macro snapshot.",
+                arguments={"theme": "inflation"},
+                source_ids=[source.source_id],
+            )
+        ],
+        operator_events=[
+            CopilotOperatorProgressEvent(
+                run_id="run_checkpoint3",
+                event_id="evt_warning",
+                sequence=2,
+                event_type="warning",
+                tool_id="get_macro_workspace_drilldown",
+                message="One series is delayed.",
+                source_ids=[source.source_id],
+                warnings=["One series is delayed."],
+            )
+        ],
+        warnings=["One series is delayed."],
+    )
+
+
+def test_checkpoint3_session_lifecycle_and_artifact_api_contract(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        created_turn = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Persist a lifecycle fixture.",
+                "user_session_id": "session_checkpoint3_lifecycle",
+                "role": "research_agent",
+                "reasoning_effort": "high",
+                "selected_scope_domains": ["macro"],
+                "context": {
+                    "current_tab": "macro",
+                    "workspace_mode": "research",
+                    "macro": {"mode": "snapshot", "region": "US", "timeframe": "3M", "theme": "inflation"},
+                },
+            },
+        )
+        assert created_turn.status_code == 200
+        detail = client.get("/copilot/sessions/session_checkpoint3_lifecycle").json()
+        original_updated_at = detail["session"]["updated_at"]
+        turn_id = detail["turns"][0]["turn_id"]
+
+        renamed = client.patch(
+            "/copilot/sessions/session_checkpoint3_lifecycle",
+            json={"title": "Renamed lifecycle session", "expected_updated_at": original_updated_at},
+        )
+        assert renamed.status_code == 200
+        assert renamed.json()["title"] == "Renamed lifecycle session"
+        stale_rename = client.patch(
+            "/copilot/sessions/session_checkpoint3_lifecycle",
+            json={"title": "Stale rename", "expected_updated_at": original_updated_at},
+        )
+        assert stale_rename.status_code == 409
+
+        archived = client.post("/copilot/sessions/session_checkpoint3_lifecycle/archive")
+        assert archived.status_code == 200
+        assert archived.json()["archived_at"] is not None
+        restored = client.post("/copilot/sessions/session_checkpoint3_lifecycle/restore")
+        assert restored.status_code == 200
+        assert restored.json()["archived_at"] is None
+
+        artifact = client.post(
+            "/copilot/sessions/session_checkpoint3_lifecycle/artifacts",
+            json={
+                "artifact_type": "report",
+                "template": "research_report",
+                "title": "Lifecycle report",
+                "source_turn_ids": [turn_id],
+            },
+        )
+        assert artifact.status_code == 200
+        artifact_payload = artifact.json()
+        assert artifact_payload["source_turn_ids"] == [turn_id]
+        assert artifact_payload["provider_metadata"][0]["reasoning_effort"] == "high"
+
+        edited = client.patch(
+            f"/copilot/artifacts/{artifact_payload['artifact_id']}",
+            json={
+                "title": "Edited lifecycle report",
+                "body": "# Edited\n\nPersisted body.",
+                "expected_updated_at": artifact_payload["updated_at"],
+            },
+        )
+        assert edited.status_code == 200
+        assert edited.json()["body"].endswith("Persisted body.")
+        stale_edit = client.patch(
+            f"/copilot/artifacts/{artifact_payload['artifact_id']}",
+            json={"title": "Stale artifact edit", "expected_updated_at": artifact_payload["updated_at"]},
+        )
+        assert stale_edit.status_code == 409
+
+        duplicate = client.post(
+            f"/copilot/artifacts/{artifact_payload['artifact_id']}/duplicate",
+            json={"title": "Lifecycle report copy"},
+        )
+        assert duplicate.status_code == 200
+        duplicate_payload = duplicate.json()
+        assert duplicate_payload["source_turn_ids"] == [turn_id]
+        assert duplicate_payload["sources"] == artifact_payload["sources"]
+
+        markdown = client.get(f"/copilot/artifacts/{artifact_payload['artifact_id']}/export")
+        assert markdown.status_code == 200
+        assert "## Source-Backed Claims" in markdown.text
+        assert "## Provider and Model Metadata" in markdown.text
+        assert f"- Source turns: {turn_id}" in markdown.text
+
+        missing_confirmation = client.delete(f"/copilot/artifacts/{duplicate_payload['artifact_id']}")
+        assert missing_confirmation.status_code == 422
+        deleted_artifact = client.delete(
+            f"/copilot/artifacts/{duplicate_payload['artifact_id']}",
+            params={"confirm_artifact_id": duplicate_payload["artifact_id"]},
+        )
+        assert deleted_artifact.status_code == 200
+        assert deleted_artifact.json()["recoverable"] is True
+
+        wrong_session_confirmation = client.delete(
+            "/copilot/sessions/session_checkpoint3_lifecycle",
+            params={"confirm_session_id": "wrong"},
+        )
+        assert wrong_session_confirmation.status_code == 409
+        deleted_session = client.delete(
+            "/copilot/sessions/session_checkpoint3_lifecycle",
+            params={"confirm_session_id": "session_checkpoint3_lifecycle"},
+        )
+        assert deleted_session.status_code == 200
+        assert deleted_session.json()["deleted_counts"]["turns"] == 1
+        assert client.get("/copilot/sessions/session_checkpoint3_lifecycle").status_code == 404
+        assert client.get("/copilot/sessions/stale-session-id").status_code == 404
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint3_restart_replays_complete_turn_and_artifact_contract(tmp_path):
+    store_dir = tmp_path / "copilot"
+    store = CopilotStore(store_dir)
+    result = _checkpoint3_persisted_result()
+    research_plan = CopilotResearchPlan(
+        intent="Replay all persisted research metadata.",
+        domain_plan=[
+            CopilotResearchPlanDomain(
+                domain="macro",
+                depth="deep",
+                reason="Macro context is selected.",
+                planned_tools=["get_macro_workspace_drilldown"],
+                required_context=["macro"],
+                estimated_tool_calls=1,
+                estimated_provider_calls=1,
+                estimated_latency_ms=25,
+            )
+        ],
+        expected_artifacts=["research_report"],
+    )
+    operator_plan = CopilotOperatorPlan(
+        intent="Persist an operator plan without broadening mutations.",
+        research_plan=research_plan,
+        steps=[
+            CopilotOperatorPlanStep(
+                step_id="step_1",
+                order=1,
+                title="Read macro context",
+                domain="macro",
+                action_type="read_context",
+                tool_id="get_macro_workspace_drilldown",
+                expected_artifacts=["research_report"],
+            )
+        ],
+        max_tool_calls=1,
+        max_provider_calls=1,
+        max_elapsed_ms=100,
+        expected_artifacts=["research_report"],
+    )
+    run_events = [
+        CopilotRunEvent(
+            run_id="run_checkpoint3",
+            sequence=0,
+            event_type="run.created",
+            data={"role": "research_operator"},
+        ),
+        CopilotRunEvent(
+            run_id="run_checkpoint3",
+            sequence=1,
+            event_type="usage",
+            data={"input_tokens": 31, "output_tokens": 17, "total_tokens": 48},
+        ),
+        CopilotRunEvent(
+            run_id="run_checkpoint3",
+            sequence=2,
+            event_type="completed",
+            data={"status": "ready"},
+            result=result,
+        ),
+    ]
+    session, snapshot, turn = store.record_turn(
+        session_id="session_checkpoint3_restart",
+        title="Checkpoint 3 restart",
+        domain="macro",
+        current_tab="macro",
+        workspace_mode="research",
+        prompt="Prove restart fidelity.",
+        context_fingerprint="fp_checkpoint3_macro",
+        context_summary={"lens": "inflation"},
+        request_context={"macro": {"theme": "inflation"}},
+        selected_scope_domains=["macro", "prediction_markets"],
+        role="research_operator",
+        reasoning_effort="xhigh",
+        requested_provider="openai",
+        requested_model="requested-model",
+        run_id="run_checkpoint3",
+        terminal_status="ready",
+        cancellation_outcome="not_cancelled",
+        usage=CopilotUsageRecord(
+            input_tokens=31,
+            output_tokens=17,
+            reasoning_tokens=5,
+            total_tokens=53,
+            provider_calls=1,
+            tool_calls=1,
+            raw={"provider_request_id": "redacted"},
+        ),
+        research_plan=research_plan,
+        operator_plan=operator_plan,
+        run_events=run_events,
+        confirmations=[
+            CopilotConfirmationState(
+                checkpoint_id="confirm_1",
+                status="pending",
+                required_for_tool_ids=["local.memo.update"],
+                mutation_id="mutation_1",
+                confirmation_token="confirmation_local_only",
+                rollback_snapshot_id="snapshot_rollback_1",
+                warnings=["Local research-state confirmation only."],
+            )
+        ],
+        artifact_refs=[
+            CopilotArtifactReference(
+                artifact_id="artifact_trace_1",
+                artifact_type="research_report",
+                status="created",
+                mutation_id="mutation_1",
+                rollback_snapshot_id="snapshot_rollback_1",
+            )
+        ],
+        mutation_refs=[
+            CopilotArtifactReference(
+                artifact_id="mutation_1",
+                artifact_type="local_research_mutation",
+                status="pending",
+                mutation_id="mutation_1",
+                rollback_snapshot_id="snapshot_rollback_1",
+            )
+        ],
+        result=result,
+    )
+    memo = store.create_artifact(
+        session_id=session.session_id,
+        artifact_type="memo",
+        template="concise_memo",
+        title="Restart memo",
+        source_turn_ids=[turn.turn_id],
+    )
+    edited_memo = store.update_artifact(
+        memo.artifact_id,
+        title="Edited restart memo",
+        body="# Edited restart memo\n\nThe exact edited body survives.",
+        expected_updated_at=memo.updated_at,
+    )
+    report = store.create_artifact(
+        session_id=session.session_id,
+        artifact_type="report",
+        template="research_report",
+        title="Restart report",
+        source_turn_ids=[turn.turn_id],
+        source_memo_ids=[memo.artifact_id],
+    )
+
+    restarted = CopilotStore(store_dir)
+    restored_turn = restarted.list_turns(session.session_id)[0]
+    restored_snapshot = restarted.get_context_snapshot(snapshot.snapshot_id)
+    restored_artifacts = {item.artifact_id: item for item in restarted.list_artifacts(session.session_id)}
+
+    assert restored_turn.role == "research_operator"
+    assert restored_turn.reasoning_effort == "xhigh"
+    assert restored_turn.selected_scope_domains == ["macro", "prediction_markets"]
+    assert restored_turn.context_fingerprint == "fp_checkpoint3_macro"
+    assert restored_turn.requested_provider == "openai"
+    assert restored_turn.requested_model == "requested-model"
+    assert restored_turn.resolved_provider == "stub_provider"
+    assert restored_turn.resolved_model == "stub-model-v3"
+    assert restored_turn.run_id == "run_checkpoint3"
+    assert restored_turn.terminal_status == "ready"
+    assert restored_turn.cancellation_outcome == "not_cancelled"
+    assert restored_turn.usage.total_tokens == 53
+    assert restored_turn.research_plan == research_plan
+    assert restored_turn.operator_plan == operator_plan
+    assert [event.event_type for event in restored_turn.run_events] == [
+        "run.created",
+        "usage",
+        "completed",
+    ]
+    assert restored_turn.run_events[-1].result == result
+    assert restored_turn.confirmations[0].status == "pending"
+    assert restored_turn.confirmations[0].rollback_snapshot_id == "snapshot_rollback_1"
+    assert restored_turn.artifact_refs[0].artifact_id == "artifact_trace_1"
+    assert restored_turn.mutation_refs[0].mutation_id == "mutation_1"
+    assert restored_turn.trace_state.replay_complete is True
+    assert restored_snapshot is not None
+    assert restored_snapshot.request_context == {"macro": {"theme": "inflation"}}
+    assert restored_snapshot.selected_scope_domains == ["macro", "prediction_markets"]
+    assert restored_artifacts[memo.artifact_id].body == edited_memo.body
+    assert restored_artifacts[report.artifact_id].source_memo_ids == [memo.artifact_id]
+    assert restored_artifacts[report.artifact_id].source_turn_ids == [turn.turn_id]
+    assert restored_artifacts[report.artifact_id].source_backed_claims[0].evidence_refs == [
+        "macro.checkpoint3"
+    ]
+    assert restored_artifacts[report.artifact_id].warnings == ["One series is delayed."]
+    assert restored_artifacts[report.artifact_id].provider_metadata[0].requested_model == "requested-model"
+    markdown = restarted.export_artifact_markdown(report.artifact_id)
+    assert "The macro snapshot is preserved. [macro.checkpoint3]" in markdown
+    assert "One series is delayed." in markdown
+    assert "requested-model" in markdown
+    assert "get_macro_workspace_drilldown" in markdown
+    assert turn.turn_id in markdown
+    assert memo.artifact_id in markdown
+
+
+def test_checkpoint3_migrates_every_legacy_version_idempotently(tmp_path):
+    base_dir = tmp_path / "copilot"
+    store = CopilotStore(base_dir)
+    timestamp = "2026-07-24T10:00:00"
+    for version in (0, 1, 2):
+        session_id = f"legacy_session_v{version}"
+        payload = {
+            "schema_version": version,
+            "session_id": session_id,
+            "title": f"Legacy {version}",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "turn_count": 0,
+            "memo_count": version,
+            "warnings": [],
+            "unknown_safe_field": {"preserved": version},
+        }
+        (store.sessions_dir / f"{session_id}.json").write_text(
+            json.dumps(payload),
+            encoding="utf-8",
+        )
+
+    migrated_store = CopilotStore(base_dir)
+    migrated = migrated_store.list_sessions(include_archived=True)
+    assert {item.session_id for item in migrated} == {
+        "legacy_session_v0",
+        "legacy_session_v1",
+        "legacy_session_v2",
+    }
+    first_bytes: dict[str, str] = {}
+    for version in (0, 1, 2):
+        path = migrated_store.sessions_dir / f"legacy_session_v{version}.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["schema_version"] == CURRENT_COPILOT_STORE_SCHEMA_VERSION
+        assert payload["report_count"] == 0
+        assert payload["artifact_count"] == version
+        assert payload["unknown_safe_field"] == {"preserved": version}
+        first_bytes[path.name] = path.read_text(encoding="utf-8")
+
+    repeated_store = CopilotStore(base_dir)
+    repeated_store.list_sessions(include_archived=True)
+    for name, content in first_bytes.items():
+        assert (repeated_store.sessions_dir / name).read_text(encoding="utf-8") == content
+
+
+def test_checkpoint3_migrates_nested_replay_and_artifact_records_from_every_legacy_version(tmp_path):
+    base_dir = tmp_path / "copilot"
+    store = CopilotStore(base_dir)
+    fixtures: list[tuple[int, str, str, str]] = []
+    replay_fields = {
+        "role",
+        "reasoning_effort",
+        "selected_scope_domains",
+        "context_fingerprint",
+        "requested_provider",
+        "requested_model",
+        "resolved_provider",
+        "resolved_model",
+        "run_id",
+        "terminal_status",
+        "cancellation_outcome",
+        "usage",
+        "research_plan",
+        "operator_plan",
+        "run_events",
+        "confirmations",
+        "artifact_refs",
+        "mutation_refs",
+        "trace_state",
+    }
+    artifact_provenance_fields = {
+        "source_memo_ids",
+        "unavailable_source_turn_ids",
+        "context_fingerprints",
+        "source_backed_claims",
+        "inferred_claims",
+        "assumptions",
+        "missing_data",
+        "warning_provenance",
+        "tool_trace_summary",
+        "sources",
+        "provider_metadata",
+    }
+    for version in (0, 1, 2):
+        session, snapshot, turn = store.record_turn(
+            session_id=f"nested_legacy_v{version}",
+            title=f"Nested legacy {version}",
+            domain="macro",
+            current_tab="macro",
+            workspace_mode="research",
+            prompt="Migrate nested replay fields.",
+            context_fingerprint=f"fp-v{version}",
+            context_summary={},
+            request_context={"macro": {"theme": "all"}},
+            selected_scope_domains=["macro"],
+            result=_checkpoint3_persisted_result(),
+        )
+        report = store.create_artifact(
+            session_id=session.session_id,
+            artifact_type="report",
+            template="research_report",
+            source_turn_ids=[turn.turn_id],
+        )
+        turn_path = store.turns_dir / session.session_id / f"{turn.turn_id}.json"
+        snapshot_path = store.snapshots_dir / f"{snapshot.snapshot_id}.json"
+        artifact_path = store.artifacts_dir / f"{report.artifact_id}.json"
+        for path, removed_fields in (
+            (turn_path, replay_fields),
+            (snapshot_path, {"request_context", "selected_scope_domains"}),
+            (artifact_path, artifact_provenance_fields),
+        ):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["schema_version"] = version
+            for field in removed_fields:
+                payload.pop(field, None)
+            path.write_text(json.dumps(payload), encoding="utf-8")
+        fixtures.append((version, session.session_id, turn.turn_id, report.artifact_id))
+
+    migrated = CopilotStore(base_dir)
+    for version, session_id, turn_id, artifact_id in fixtures:
+        restored_turn = migrated.list_turns(session_id)[0]
+        restored_snapshot = migrated.get_context_snapshot(restored_turn.context_snapshot_id)
+        restored_artifact = migrated.get_artifact(artifact_id)
+        assert restored_turn.turn_id == turn_id
+        assert restored_turn.role == "research_operator"
+        assert restored_turn.usage.total_tokens == 0
+        assert restored_turn.research_plan is None
+        assert restored_turn.operator_plan is None
+        assert restored_turn.run_events == []
+        assert restored_turn.confirmations == []
+        assert restored_turn.artifact_refs == []
+        assert restored_turn.mutation_refs == []
+        assert restored_turn.trace_state.replay_complete is True
+        assert restored_snapshot is not None
+        assert restored_snapshot.request_context == {}
+        assert restored_snapshot.selected_scope_domains == []
+        assert restored_artifact is not None
+        assert restored_artifact.artifact_type == "report"
+        assert restored_artifact.provider_metadata == []
+        for path in (
+            migrated.turns_dir / session_id / f"{turn_id}.json",
+            migrated.snapshots_dir / f"{restored_turn.context_snapshot_id}.json",
+            migrated.artifacts_dir / f"{artifact_id}.json",
+        ):
+            assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == (
+                CURRENT_COPILOT_STORE_SCHEMA_VERSION
+            ), version
+
+
+def test_checkpoint3_recovers_mixed_corruption_future_and_interrupted_writes(tmp_path):
+    base_dir = tmp_path / "copilot"
+    store = CopilotStore(base_dir)
+    timestamp = "2026-07-24T10:00:00"
+    healthy_payload = {
+        "schema_version": CURRENT_COPILOT_STORE_SCHEMA_VERSION,
+        "session_id": "healthy_session",
+        "title": "Healthy session",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "turn_count": 0,
+        "memo_count": 0,
+        "report_count": 0,
+        "artifact_count": 0,
+        "warnings": [],
+    }
+    (store.sessions_dir / "healthy_session.json").write_text(
+        json.dumps(healthy_payload),
+        encoding="utf-8",
+    )
+    malformed_path = store.sessions_dir / "malformed_session.json"
+    malformed_path.write_text('{"schema_version": 1,', encoding="utf-8")
+    future_path = store.sessions_dir / "future_session.json"
+    future_payload = {
+        **healthy_payload,
+        "schema_version": CURRENT_COPILOT_STORE_SCHEMA_VERSION + 1,
+        "session_id": "future_session",
+        "title": "Future session",
+    }
+    future_text = json.dumps(future_payload)
+    future_path.write_text(future_text, encoding="utf-8")
+    partial_payload = {
+        **healthy_payload,
+        "session_id": "partial_session",
+    }
+    partial_payload.pop("title")
+    (store.sessions_dir / "partial_session.json").write_text(
+        json.dumps(partial_payload),
+        encoding="utf-8",
+    )
+    interrupted_payload = {
+        **healthy_payload,
+        "session_id": "interrupted_session",
+        "title": "Recovered interrupted session",
+    }
+    interrupted_temp = store.sessions_dir / "interrupted_session.json.tmp"
+    interrupted_temp.write_text(json.dumps(interrupted_payload), encoding="utf-8")
+
+    recovered = CopilotStore(base_dir)
+    loaded_ids = {
+        item.session_id for item in recovered.list_sessions(include_archived=True)
+    }
+    assert loaded_ids == {"healthy_session", "interrupted_session", "partial_session"}
+    assert recovered.get_session("partial_session").title == "Copilot Session"
+    assert not malformed_path.exists()
+    quarantine_files = list((base_dir / "quarantine" / "session").glob("malformed_session.json.*.preserved"))
+    assert quarantine_files
+    assert quarantine_files[0].read_text(encoding="utf-8") == '{"schema_version": 1,'
+    assert future_path.exists()
+    assert future_path.read_text(encoding="utf-8") == future_text
+    assert not interrupted_temp.exists()
+    assert (store.sessions_dir / "interrupted_session.json").exists()
+    actions = {warning.action for warning in recovered.storage_status().warnings}
+    assert "recovered_interrupted_write" in actions
+    assert "quarantined" in actions
+    assert "skipped_future_version" in actions
+    assert "recovered_partial_record" in actions
+
+
+def test_checkpoint3_artifact_reopen_never_resurrects_invalid_evidence_and_flags_missing_turns(tmp_path):
+    base_dir = tmp_path / "copilot"
+    store = CopilotStore(base_dir)
+    session, _snapshot, turn = store.record_turn(
+        session_id="session_evidence_reopen",
+        title="Evidence reopen",
+        domain="macro",
+        current_tab="macro",
+        workspace_mode="research",
+        prompt="Preserve only valid evidence.",
+        context_fingerprint="fp-evidence",
+        context_summary={},
+        selected_scope_domains=["macro"],
+        result=_checkpoint3_persisted_result(),
+    )
+    artifact = store.create_artifact(
+        session_id=session.session_id,
+        artifact_type="report",
+        template="research_report",
+        source_turn_ids=[turn.turn_id],
+    )
+    artifact_path = store.artifacts_dir / f"{artifact.artifact_id}.json"
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    payload["source_backed_claims"].append(
+        {"claim": "This claim has a fabricated citation.", "evidence_refs": ["fake.source"]}
+    )
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    reopened = CopilotStore(base_dir)
+    normalized = reopened.get_artifact(artifact.artifact_id)
+    assert normalized is not None
+    assert all(
+        "fake.source" not in claim.evidence_refs
+        for claim in normalized.source_backed_claims
+    )
+    assert "This claim has a fabricated citation." in normalized.inferred_claims
+    assert any("Reclassified artifact claim" in warning for warning in normalized.warnings)
+    edited = reopened.update_artifact(
+        artifact.artifact_id,
+        title="Normalized evidence report",
+        body="# Normalized\n\nEdited without changing provenance.",
+        expected_updated_at=normalized.updated_at,
+    )
+    duplicated = reopened.duplicate_artifact(edited.artifact_id)
+    assert all(
+        "fake.source" not in claim.evidence_refs
+        for claim in duplicated.source_backed_claims
+    )
+    assert "fake.source" not in reopened.export_artifact_markdown(duplicated.artifact_id)
+
+    turn_path = reopened.turns_dir / session.session_id / f"{turn.turn_id}.json"
+    turn_path.unlink()
+    unavailable = reopened.get_artifact(artifact.artifact_id)
+    assert unavailable is not None
+    assert unavailable.unavailable_source_turn_ids == [turn.turn_id]
+    assert artifact_path.exists()

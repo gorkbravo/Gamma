@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime
+import re
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.api.schemas.copilot import (
+    CopilotArtifactCreateRequestModel,
+    CopilotArtifactDuplicateRequestModel,
+    CopilotArtifactModel,
+    CopilotArtifactUpdateRequestModel,
+    CopilotContextSnapshotModel,
+    CopilotDeleteResultModel,
     CopilotDraftMutationModel,
     CopilotFundamentalsDcfMutationRequestModel,
     CopilotMemoCreateRequestModel,
@@ -24,11 +30,29 @@ from src.api.schemas.copilot import (
     CopilotResearchReportRequestModel,
     CopilotSessionDetailModel,
     CopilotSessionModel,
+    CopilotSessionUpdateRequestModel,
+    CopilotStorageStatusModel,
+    CopilotStorageWarningModel,
     CopilotTurnModel,
 )
+from src.services.copilot_store import CopilotStoreConflictError, CopilotStoreNotFoundError
 
 
 router = APIRouter(tags=["copilot"])
+
+
+def _raise_store_error(exc: ValueError) -> None:
+    if isinstance(exc, CopilotStoreNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, CopilotStoreConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _markdown_download_headers(title: str, artifact_id: str) -> dict[str, str]:
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", title.strip()).strip("-._")[:80]
+    safe_stem = safe_stem or artifact_id
+    return {"Content-Disposition": f'attachment; filename="{safe_stem}.md"'}
 
 
 @router.post("/copilot/research-card", response_model=CopilotResearchCardResponseModel)
@@ -228,22 +252,72 @@ def get_copilot_session(session_id: str, request: Request) -> CopilotSessionDeta
     runtime = request.app.state.runtime
     session = runtime.copilot_store.get_session(session_id)
     if session is None:
-        return CopilotSessionDetailModel(
-            session=CopilotSessionModel(
-                session_id=session_id,
-                title="Missing Copilot Session",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                warnings=[f"Copilot session not found: {session_id}"],
-            ),
-            turns=[],
-            memos=[],
-        )
+        raise HTTPException(status_code=404, detail=f"Copilot session not found: {session_id}")
+    storage_status = runtime.copilot_service.storage_status()
     return CopilotSessionDetailModel(
         session=CopilotSessionModel.from_domain(session),
         turns=[CopilotTurnModel.from_domain(item) for item in runtime.copilot_service.list_turns(session_id)],
         memos=[CopilotMemoModel.from_domain(item) for item in runtime.copilot_service.list_memos(session_id)],
+        context_snapshots=[
+            CopilotContextSnapshotModel.from_domain(item)
+            for item in runtime.copilot_service.list_context_snapshots(session_id)
+        ],
+        artifacts=[
+            CopilotArtifactModel.from_domain(item)
+            for item in runtime.copilot_service.list_artifacts(session_id)
+        ],
+        storage_warnings=[
+            CopilotStorageWarningModel.from_domain(item)
+            for item in storage_status.warnings
+        ],
     )
+
+
+@router.get("/copilot/storage-status", response_model=CopilotStorageStatusModel)
+def get_copilot_storage_status(request: Request) -> CopilotStorageStatusModel:
+    return CopilotStorageStatusModel.from_domain(request.app.state.runtime.copilot_service.storage_status())
+
+
+@router.patch("/copilot/sessions/{session_id}", response_model=CopilotSessionModel)
+def rename_copilot_session(
+    session_id: str,
+    payload: CopilotSessionUpdateRequestModel,
+    request: Request,
+) -> CopilotSessionModel:
+    try:
+        session = request.app.state.runtime.copilot_service.rename_session(
+            session_id,
+            title=payload.title,
+            expected_updated_at=payload.expected_updated_at,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotSessionModel.from_domain(session)
+
+
+@router.post("/copilot/sessions/{session_id}/restore", response_model=CopilotSessionModel)
+def restore_copilot_session(session_id: str, request: Request) -> CopilotSessionModel:
+    try:
+        session = request.app.state.runtime.copilot_service.restore_session(session_id)
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotSessionModel.from_domain(session)
+
+
+@router.delete("/copilot/sessions/{session_id}", response_model=CopilotDeleteResultModel)
+def delete_copilot_session(
+    session_id: str,
+    request: Request,
+    confirm_session_id: str,
+) -> CopilotDeleteResultModel:
+    try:
+        result = request.app.state.runtime.copilot_service.delete_session(
+            session_id,
+            confirmation=confirm_session_id,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotDeleteResultModel.from_domain(result)
 
 
 @router.get("/copilot/memos", response_model=list[CopilotMemoModel])
@@ -252,18 +326,117 @@ def list_copilot_memos(request: Request, session_id: str | None = None) -> list[
     return [CopilotMemoModel.from_domain(item) for item in runtime.copilot_service.list_memos(session_id)]
 
 
+@router.get("/copilot/sessions/{session_id}/artifacts", response_model=list[CopilotArtifactModel])
+def list_copilot_artifacts(session_id: str, request: Request) -> list[CopilotArtifactModel]:
+    runtime = request.app.state.runtime
+    if runtime.copilot_store.get_session(session_id) is None:
+        raise HTTPException(status_code=404, detail=f"Copilot session not found: {session_id}")
+    return [
+        CopilotArtifactModel.from_domain(item)
+        for item in runtime.copilot_service.list_artifacts(session_id)
+    ]
+
+
+@router.post("/copilot/sessions/{session_id}/artifacts", response_model=CopilotArtifactModel)
+def create_copilot_artifact(
+    session_id: str,
+    payload: CopilotArtifactCreateRequestModel,
+    request: Request,
+) -> CopilotArtifactModel:
+    try:
+        artifact = request.app.state.runtime.copilot_service.create_artifact(
+            session_id=session_id,
+            artifact_type=payload.artifact_type,
+            template=payload.template,
+            title=payload.title,
+            body=payload.body,
+            source_turn_ids=payload.source_turn_ids,
+            source_memo_ids=payload.source_memo_ids,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotArtifactModel.from_domain(artifact)
+
+
+@router.patch("/copilot/artifacts/{artifact_id}", response_model=CopilotArtifactModel)
+def update_copilot_artifact(
+    artifact_id: str,
+    payload: CopilotArtifactUpdateRequestModel,
+    request: Request,
+) -> CopilotArtifactModel:
+    try:
+        artifact = request.app.state.runtime.copilot_service.update_artifact(
+            artifact_id,
+            title=payload.title,
+            body=payload.body,
+            expected_updated_at=payload.expected_updated_at,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotArtifactModel.from_domain(artifact)
+
+
+@router.post("/copilot/artifacts/{artifact_id}/duplicate", response_model=CopilotArtifactModel)
+def duplicate_copilot_artifact(
+    artifact_id: str,
+    payload: CopilotArtifactDuplicateRequestModel,
+    request: Request,
+) -> CopilotArtifactModel:
+    try:
+        artifact = request.app.state.runtime.copilot_service.duplicate_artifact(
+            artifact_id,
+            title=payload.title,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotArtifactModel.from_domain(artifact)
+
+
+@router.delete("/copilot/artifacts/{artifact_id}", response_model=CopilotDeleteResultModel)
+def delete_copilot_artifact(
+    artifact_id: str,
+    request: Request,
+    confirm_artifact_id: str,
+) -> CopilotDeleteResultModel:
+    try:
+        result = request.app.state.runtime.copilot_service.delete_artifact(
+            artifact_id,
+            confirmation=confirm_artifact_id,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotDeleteResultModel.from_domain(result)
+
+
+@router.get("/copilot/artifacts/{artifact_id}/export")
+def export_copilot_artifact(artifact_id: str, request: Request) -> Response:
+    runtime = request.app.state.runtime
+    artifact = runtime.copilot_store.get_artifact(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"Copilot artifact not found: {artifact_id}")
+    markdown = runtime.copilot_service.export_artifact_markdown(artifact_id)
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers=_markdown_download_headers(artifact.title, artifact.artifact_id),
+    )
+
+
 @router.post("/copilot/memos", response_model=CopilotMemoModel)
 def create_copilot_memo(
     payload: CopilotMemoCreateRequestModel,
     request: Request,
 ) -> CopilotMemoModel:
     runtime = request.app.state.runtime
-    memo = runtime.copilot_service.create_memo(
-        session_id=payload.session_id,
-        title=payload.title,
-        notes=payload.notes,
-        source_turn_ids=payload.source_turn_ids,
-    )
+    try:
+        memo = runtime.copilot_service.create_memo(
+            session_id=payload.session_id,
+            title=payload.title,
+            notes=payload.notes,
+            source_turn_ids=payload.source_turn_ids,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
     return CopilotMemoModel.from_domain(memo)
 
 
@@ -273,7 +446,7 @@ def archive_copilot_session(session_id: str, request: Request) -> CopilotSession
     try:
         session = runtime.copilot_service.archive_session(session_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_store_error(exc)
     return CopilotSessionModel.from_domain(session)
 
 
@@ -287,7 +460,7 @@ def update_copilot_memo(
     try:
         memo = runtime.copilot_service.update_memo(memo_id, title=payload.title, body=payload.body)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_store_error(exc)
     return CopilotMemoModel.from_domain(memo)
 
 
@@ -328,14 +501,27 @@ def export_copilot_research_report(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return Response(content=markdown, media_type="text/markdown; charset=utf-8")
+    session = runtime.copilot_store.get_session(session_id)
+    export_title = payload.title or (f"{session.title} Research Report" if session else "copilot-report")
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers=_markdown_download_headers(export_title, session_id),
+    )
 
 
 @router.get("/copilot/memos/{memo_id}/export")
 def export_copilot_memo(memo_id: str, request: Request) -> Response:
     runtime = request.app.state.runtime
+    memo = runtime.copilot_store.get_memo(memo_id)
+    if memo is None:
+        raise HTTPException(status_code=404, detail=f"Copilot memo not found: {memo_id}")
     try:
         markdown = runtime.copilot_service.export_memo_markdown(memo_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return Response(content=markdown, media_type="text/markdown; charset=utf-8")
+    return Response(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers=_markdown_download_headers(memo.title, memo.memo_id),
+    )
