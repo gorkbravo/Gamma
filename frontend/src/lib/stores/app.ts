@@ -47,8 +47,10 @@ import type {
   CopilotArtifact,
   CopilotBaseDomain,
   CopilotDeleteResult,
+  CopilotDraftMutation,
   CopilotDomain,
   CopilotMemo,
+  CopilotMutationApplyResult,
   CopilotOperatorPlan,
   CopilotReasoningEffort,
   CopilotResearchCardResult,
@@ -3750,7 +3752,11 @@ export async function executeCopilotOperatorPlan(
       appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
     }
     await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
-    lastError.set(result.status === "ready" ? "" : result.message ?? "Research Operator failed.");
+    lastError.set(
+      ["ready", "awaiting_confirmation"].includes(result.status)
+        ? ""
+        : result.message ?? "Research Operator failed."
+    );
     return result;
   } catch (error) {
     const message = errorMessage(error);
@@ -3764,6 +3770,131 @@ export async function executeCopilotOperatorPlan(
     activeCopilotRunId = null;
     copilotActiveRun.set(null);
     setLoading("copilot", false);
+  }
+}
+
+function resultWithResolvedMutation(
+  result: CopilotResearchCardResult,
+  mutation: CopilotDraftMutation
+): CopilotResearchCardResult {
+  let matched = false;
+  const operatorEvents = (result.operator_events ?? []).map((event) => {
+    if (event.payload?.mutation_id !== mutation.mutation_id) return event;
+    matched = true;
+    return {
+      ...event,
+      payload: {
+        ...event.payload,
+        status: mutation.status,
+        rollback_snapshot_id: mutation.rollback_snapshot_id,
+        mutation
+      }
+    };
+  });
+  if (!matched) return result;
+  const status =
+    result.status === "awaiting_confirmation"
+      ? ["failed", "expired"].includes(mutation.status)
+        ? "error"
+        : mutation.status === "pending"
+          ? result.status
+          : "ready"
+      : result.status;
+  const message =
+    mutation.status === "applied"
+      ? `Confirmed mutation applied to ${mutation.target_label}.`
+      : mutation.status === "rejected"
+        ? `Mutation rejected for ${mutation.target_label}; no local research state changed.`
+        : mutation.status === "failed"
+          ? `Confirmed mutation failed for ${mutation.target_label}.`
+          : mutation.status === "expired"
+            ? `Mutation confirmation expired for ${mutation.target_label}.`
+          : result.message;
+  return { ...result, status, message, operator_events: operatorEvents };
+}
+
+function reconcileResolvedCopilotMutation(mutation: CopilotDraftMutation) {
+  copilotOperatorResult.update((result) =>
+    result ? resultWithResolvedMutation(result, mutation) : result
+  );
+  copilotThreads.update((threads) =>
+    Object.fromEntries(
+      Object.entries(threads).map(([domain, thread]) => [
+        domain,
+        {
+          ...thread,
+          entries: thread.entries.map((entry) => ({
+            ...entry,
+            result: resultWithResolvedMutation(entry.result, mutation)
+          }))
+        }
+      ])
+    ) as Record<CopilotDomain, CopilotThreadState>
+  );
+  activeCopilotSession.update((detail) =>
+    detail == null
+      ? detail
+      : {
+          ...detail,
+          mutations: (detail.mutations ?? []).map((item) =>
+            item.mutation_id === mutation.mutation_id ? mutation : item
+          ),
+          turns: detail.turns.map((turn) => ({
+            ...turn,
+            result: resultWithResolvedMutation(turn.result, mutation),
+            confirmations: turn.confirmations.map((confirmation) =>
+              confirmation.mutation_id === mutation.mutation_id
+                ? {
+                    ...confirmation,
+                    status: mutation.status,
+                    rollback_snapshot_id: mutation.rollback_snapshot_id,
+                    resolved_at:
+                      mutation.applied_at
+                      ?? mutation.rejected_at
+                      ?? mutation.confirmed_at
+                      ?? confirmation.resolved_at
+                  }
+                : confirmation
+            )
+          }))
+        }
+  );
+}
+
+export async function confirmCopilotMutation(mutation: CopilotDraftMutation) {
+  try {
+    const result = await postJson<CopilotMutationApplyResult>(
+      `/copilot/mutations/${encodeURIComponent(mutation.mutation_id)}/apply`,
+      {
+        confirmation_token: mutation.confirmation_token,
+        user_session_id: mutation.session_id ?? null,
+        context_fingerprint: mutation.context_fingerprint ?? null,
+        proposal_hash: mutation.proposal_hash ?? null
+      }
+    );
+    reconcileResolvedCopilotMutation(result.mutation);
+    await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
+    lastError.set("");
+    return result;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
+}
+
+export async function rejectCopilotMutation(mutation: CopilotDraftMutation) {
+  try {
+    const rejected = await postJson<CopilotDraftMutation>(
+      `/copilot/mutations/${encodeURIComponent(mutation.mutation_id)}/reject`,
+      { user_session_id: mutation.session_id ?? null }
+    );
+    reconcileResolvedCopilotMutation(rejected);
+    await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
+    lastError.set("");
+    return rejected;
+  } catch (error) {
+    setError(error);
+    return null;
   }
 }
 

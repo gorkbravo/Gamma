@@ -1,4 +1,4 @@
-# Copilot V2 86% To 100% Execution Prompt
+# Copilot V2 91% To 100% Execution Prompt
 
 Copy the text inside the block below into the agent that will complete Copilot V2.
 
@@ -7,7 +7,7 @@ You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot V2 from its verified 86% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 through 3 are complete. First finish the focused post-Checkpoint 3 regressions in `docs/copilot_v2_checkpoint3_prompt.md`, then begin Checkpoint 4. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
+Your objective is to take Copilot V2 from its verified 91% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 through 4 are complete. Begin with Checkpoint 5. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
 
 Do not stop after one convenient slice and do not ask the user to choose the next checkpoint. Follow the roadmap order, make reasonable in-scope decisions, implement coherent vertical slices, verify them, update the active documentation, and continue. Never claim a percentage merely because code was written; a percentage is earned only when that checkpoint's exit criteria pass.
 
@@ -16,7 +16,7 @@ Do not stop after one convenient slice and do not ask the user to choose the nex
 Read these files completely before editing:
 
 1. `AGENTS.md`
-2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 86% to 100%`, sequencing rules, non-goals, and deliverable
+2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 91% to 100%`, sequencing rules, non-goals, and deliverable
 3. `docs/copilot_v2_tab_plan.md`, especially the July 2026 completion plan, remaining engineering workstreams, delivery order, and definition of done
 4. `docs/provenance_expectations.md`
 5. `docs/design_principles.md` before changing Svelte/CSS
@@ -30,7 +30,7 @@ Before editing:
 
 - run `git status --short --branch` and inspect recent Copilot commits;
 - inspect all existing uncommitted changes and preserve unrelated user work;
-- treat the current run-lifecycle, transcript/evidence, session/artifact, roadmap, and documentation changes as part of the verified 86% baseline;
+- treat the current run-lifecycle, transcript/evidence, session/artifact, Operator authority, roadmap, and documentation changes as part of the verified 91% baseline;
 - run the focused Copilot backend tests, frontend Copilot tests, typecheck, and build to confirm the baseline;
 - inspect the running Copilot UI at desktop and narrow widths when practical;
 - compare code reality with the roadmap and detailed spec, correcting stale documentation without erasing useful implementation history.
@@ -54,7 +54,7 @@ Bounded read-only analysis may run automatically. Every durable or non-trivial l
 
 Gamma backend services remain authoritative for tools, permissions, execution, confirmation tokens, persistence, cancellation, finalization, and mutation rules. The UI may navigate for convenience but must not become the authority for analytical execution.
 
-## Current 86% baseline
+## Current 91% baseline
 
 The baseline should include:
 
@@ -71,8 +71,12 @@ The baseline should include:
 - schema-v3 session/turn/context/artifact persistence with deterministic legacy migration, atomic writes, future-version preservation, and non-destructive corrupted-record recovery;
 - typed session rename, archive/restore, delete, search, stale-id reconciliation, and complete restart replay of role, effort, scopes, fingerprints, provider/model metadata, plans, events, confirmations, usage, traces, warnings, sources, and artifact links;
 - in-tab memo/report source-turn selection, concise/full templates, editable title/body, autosave state, canonical evidence preview, duplication, delete confirmation, overwrite confirmation, stable selection, and provenance-preserving Markdown export.
+- one authoritative validated action registry for automatic reads, automatic drafts, and confirmed local mutations, with prohibited execution-capable action families rejected at startup;
+- durable single-use DCF confirmation tokens bound to tool, session, context fingerprint, and proposal hash, with persisted expiry, reject/apply resolution, restart recovery, and pre-change rollback snapshots;
+- exact inline Operator mutation/diff/snapshot-policy rendering with apply/reject controls and live/replayed turn reconciliation;
+- Agents SDK `Runner.run_streamed` progress mapped into the Gamma run contract and cancellation at the SDK `after_turn` boundary; durable mutation drafting remains in Gamma's deterministic authority path even when SDK orchestration is enabled.
 
-Important current gaps begin with the focused New Chat/composer/storage-warning regression pass, followed by checkpoint 4: inline Operator confirmation productionization, Agents SDK progress/default evaluation, context/tool gaps, shelf-to-workspace promotion, versioned model policy, retention/diagnostics, accessibility, and full live release evidence.
+Important current gaps begin with checkpoint 5: context/tool coverage, news/Sealanes depth, context budgets and stale invalidation, then shelf-to-workspace promotion, versioned model policy, retention/diagnostics, accessibility, and full live release evidence.
 
 ## Execution method for every checkpoint
 
@@ -164,7 +168,7 @@ Verified implementation evidence:
 - user-supplied desktop and narrow-width inspection confirmed session lifecycle controls and confirmations, artifact editing, duplication/deletion, source-turn controls, and responsive inspector behavior;
 - the live Agent response reached an honest OpenAI quota-exhausted terminal state because no provider credits were available; the SITREP Operator honestly reported zero registered automatic tools. Neither outcome is claimed as successful provider-backed research output.
 
-## Checkpoint 4 — productionize Research Operator (91%)
+## Checkpoint 4 — verified 2026-07-25 (91%)
 
 Required delivery:
 
@@ -183,6 +187,18 @@ Exit evidence:
 - expired/replayed/wrong-session tokens cannot apply;
 - no execution/account/wallet/arbitrary-code tool exists in the registry;
 - custom-loop versus Agents SDK comparison is recorded and the default decision is documented.
+
+Verified implementation evidence:
+
+- registry validation and runtime authorization reject unknown, non-automatic, mutating-without-confirmation, and trade/order/account/rebalance/wallet/arbitrary-code action families;
+- explicit DCF requests draft the exact supported percentages, persist the mutation and confirmation state, render the diff and pre-change snapshot policy inline, and never call the apply action automatically;
+- apply requires the active token plus matching session, context fingerprint, proposal hash, and apply tool; wrong, expired, rejected, replayed, or restart-resumed mismatches cannot apply;
+- apply/reject/expiry reconciliation updates the persisted turn, confirmation state, mutation reference, embedded Operator event, terminal status, and session mutation list;
+- custom-loop cancellation remains safe-step bounded; Agents SDK now uses `Runner.run_streamed`, emits `provider.progress`, and cancels with `after_turn`;
+- provider failure, partial tool failure, tool-budget enforcement, cancellation, forbidden action, expiry/replay, stale context, and restart-resume cases have focused coverage;
+- the custom loop remains the default. The offline custom-versus-SDK eval retains permission and trace parity, while no new measured live quality or latency advantage justifies switching defaults;
+- checkpoint evidence: 104 backend/eval tests and 309 frontend tests passed with typecheck, production build, and desktop check.
+- an authorized bounded live Agents SDK smoke reached the real Responses API and emitted `provider.progress`, but OpenAI quota exhaustion occurred before any tool call; no successful live Operator result is claimed.
 
 ## Checkpoint 5 — close context and tool-coverage gaps (94%)
 

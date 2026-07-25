@@ -664,6 +664,7 @@ class CopilotSessionDetailModel(BaseModel):
     memos: list["CopilotMemoModel"] = Field(default_factory=list)
     context_snapshots: list["CopilotContextSnapshotModel"] = Field(default_factory=list)
     artifacts: list["CopilotArtifactModel"] = Field(default_factory=list)
+    mutations: list["CopilotDraftMutationModel"] = Field(default_factory=list)
     storage_warnings: list["CopilotStorageWarningModel"] = Field(default_factory=list)
 
 
@@ -690,7 +691,10 @@ class CopilotConfirmationStateModel(BaseModel):
     mutation_id: str | None = None
     confirmation_token: str | None = None
     rollback_snapshot_id: str | None = None
+    context_fingerprint: str | None = None
+    proposal_hash: str | None = None
     created_at: datetime | None = None
+    expires_at: datetime | None = None
     resolved_at: datetime | None = None
     warnings: list[str] = Field(default_factory=list)
 
@@ -1039,6 +1043,13 @@ class CopilotDraftMutationModel(BaseModel):
     status: str
     requires_confirmation: bool
     confirmation_token: str
+    apply_tool_id: str | None = None
+    session_id: str | None = None
+    workflow_id: str | None = None
+    run_id: str | None = None
+    checkpoint_id: str | None = None
+    context_fingerprint: str | None = None
+    proposal_hash: str | None = None
     diff: list[CopilotMutationDiffEntryModel] = Field(default_factory=list)
     rendered_diff: list[str] = Field(default_factory=list)
     proposed_payload: dict[str, object] = Field(default_factory=dict)
@@ -1048,6 +1059,8 @@ class CopilotDraftMutationModel(BaseModel):
     rollback_snapshot_id: str | None = None
     created_at: datetime
     expires_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    rejected_at: datetime | None = None
     applied_at: datetime | None = None
     source_provider: str
     origin: str
@@ -1065,6 +1078,13 @@ class CopilotDraftMutationModel(BaseModel):
             status=row.status,
             requires_confirmation=row.requires_confirmation,
             confirmation_token=row.confirmation_token,
+            apply_tool_id=row.apply_tool_id,
+            session_id=row.session_id,
+            workflow_id=row.workflow_id,
+            run_id=row.run_id,
+            checkpoint_id=row.checkpoint_id,
+            context_fingerprint=row.context_fingerprint,
+            proposal_hash=row.proposal_hash,
             diff=[CopilotMutationDiffEntryModel.from_domain(item) for item in row.diff],
             rendered_diff=list(row.rendered_diff),
             proposed_payload=dict(row.proposed_payload),
@@ -1074,6 +1094,8 @@ class CopilotDraftMutationModel(BaseModel):
             rollback_snapshot_id=row.rollback_snapshot_id,
             created_at=row.created_at,
             expires_at=row.expires_at,
+            confirmed_at=row.confirmed_at,
+            rejected_at=row.rejected_at,
             applied_at=row.applied_at,
             source_provider=row.source_provider,
             origin=row.origin,
@@ -1093,10 +1115,22 @@ class CopilotFundamentalsDcfMutationRequestModel(BaseModel):
     assumptions: dict[str, object] = Field(default_factory=dict)
     overrides: dict[str, list[float | None]] = Field(default_factory=dict)
     rationale: str | None = None
+    user_session_id: str | None = None
+    workflow_id: str | None = None
+    run_id: str | None = None
+    checkpoint_id: str | None = None
+    context_fingerprint: str | None = None
 
 
 class CopilotMutationApplyRequestModel(BaseModel):
     confirmation_token: str
+    user_session_id: str | None = None
+    context_fingerprint: str | None = None
+    proposal_hash: str | None = None
+
+
+class CopilotMutationRejectRequestModel(BaseModel):
+    user_session_id: str | None = None
 
 
 class CopilotMutationApplyResultModel(BaseModel):

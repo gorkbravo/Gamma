@@ -3160,6 +3160,13 @@ export interface CopilotDraftMutation {
   status: string;
   requires_confirmation: boolean;
   confirmation_token: string;
+  apply_tool_id?: string | null;
+  session_id?: string | null;
+  workflow_id?: string | null;
+  run_id?: string | null;
+  checkpoint_id?: string | null;
+  context_fingerprint?: string | null;
+  proposal_hash?: string | null;
   diff: CopilotMutationDiffEntry[];
   rendered_diff: string[];
   proposed_payload: Record<string, unknown>;
@@ -3169,6 +3176,8 @@ export interface CopilotDraftMutation {
   rollback_snapshot_id: string | null;
   created_at: string;
   expires_at: string | null;
+  confirmed_at?: string | null;
+  rejected_at?: string | null;
   applied_at: string | null;
   source_provider: string;
   origin: string;
@@ -3189,6 +3198,7 @@ export type CopilotRunEventType =
   | "refusal"
   | "incomplete"
   | "provider.error"
+  | "provider.progress"
   | "usage"
   | "cancelled"
   | "failed"
@@ -3236,6 +3246,12 @@ export interface CopilotSessionSummary {
   archived_at: string | null;
 }
 
+export interface CopilotMutationApplyResult {
+  mutation: CopilotDraftMutation;
+  artifact: Record<string, unknown>;
+  warnings: string[];
+}
+
 export interface CopilotUsageRecord {
   input_tokens: number;
   output_tokens: number;
@@ -3255,7 +3271,10 @@ export interface CopilotConfirmationState {
   mutation_id: string | null;
   confirmation_token: string | null;
   rollback_snapshot_id: string | null;
+  context_fingerprint?: string | null;
+  proposal_hash?: string | null;
   created_at: string | null;
+  expires_at?: string | null;
   resolved_at: string | null;
   warnings: string[];
 }
@@ -3329,6 +3348,7 @@ export interface CopilotSessionDetail {
   memos: CopilotMemo[];
   context_snapshots: CopilotContextSnapshot[];
   artifacts: CopilotArtifact[];
+  mutations?: CopilotDraftMutation[];
   storage_warnings: CopilotStorageWarning[];
 }
 

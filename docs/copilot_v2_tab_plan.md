@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
 ## Start Here
 
@@ -169,11 +169,9 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 through 3 are verified at 86%: the supported OpenAI SDK feeds typed events into server-owned Agent and Operator runs; bounded replay survives subscriber disconnects; shelf and workspace share one typed transcript/evidence renderer; claim refs are normalized against known turn sources before persistence; supported evidence links preserve mapped Gamma context; sessions have a typed lifecycle and schema-v3 migration/recovery contract; restart replay retains the complete turn contract; and the dedicated workspace owns memo/report creation, editing, preview, duplication, deletion, and Markdown export. Remaining gaps are:
+The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 through 4 are verified at 91%: the 86% run/transcript/session/artifact foundation is now joined by one authoritative Operator permission registry, restart-safe context-bound single-use DCF confirmations, inline exact mutation/diff/snapshot/apply/reject UX, persisted resolution replay, Agents SDK live progress, and safe-turn cancellation. Remaining gaps are:
 
-- ~~a focused post-checkpoint pass must fix New Chat reconciliation, clear accepted prompts from the composer, and move the storage-recovery warning out of the action area;~~ completed 2026-07-25;
-- the custom Operator streams live and cancels at safe step boundaries, but Agents SDK progress parity and inline confirmation/diff/rollback UX remain incomplete;
-- the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5;
+- the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5; the custom loop remains the measured default until a future live comparison shows a quality or latency advantage;
 - Sealanes, news, and some deeper IV/Commodities drilldowns do not yet have tool parity;
 - privacy, retention, cost, usage, and model-routing diagnostics are not yet understandable from the Copilot workspace.
 
@@ -320,14 +318,23 @@ Implementation note (2026-07-24, checkpoint complete):
 - Add context-size budgets, deterministic compaction/summaries, and stale-context invalidation.
 - Add source navigation mappings and context fingerprints for every selectable scope.
 
-#### D. Research Operator productionization — blocker
+#### D. Research Operator productionization — checkpoint 4 complete (91%)
 
-- Stream operator events live and support cancellation between safe steps.
-- Expand the eval set before switching the feature flag: provider failure, stale/missing context, partial tool failure, cancellation, repeated confirmation, and resume-after-restart.
-- Run GPT-5.6 Terra/Sol comparisons against the existing GPT-5.5 baseline.
-- Promote Agents SDK only if it passes all permission gates and improves a measured dimension such as tool selection, trace quality, resumability, latency, or maintainability.
-- Keep one server-side action registry, permission policy, confirmation-token service, and persistence path for both custom and Agents SDK orchestrators.
-- Do not broaden durable mutations until the read-only operator and inline confirmation UI are reliable.
+- [x] Stream custom and Agents SDK plan/provider/step/tool/warning/artifact/final progress through the shared run contract.
+- [x] Cancel the custom loop between tools and the Agents SDK at its `after_turn` safe boundary.
+- [x] Keep one validated server-side registry and permission path for automatic reads, automatic drafts, and confirmed mutations.
+- [x] Bind durable confirmations to tool, session, context fingerprint, proposal hash, expiry, and single-use persisted state.
+- [x] Render exact DCF proposals, rationale/warnings/source ids, before/after diff, pre-change snapshot policy, and apply/reject controls inline.
+- [x] Reconcile apply/reject/expiry into persisted confirmations, mutation refs, embedded events, turn terminal status, and restart replay.
+- [x] Cover provider failure, stale context, partial tool failure, budget enforcement, cancellation, forbidden actions, repeated/expired confirmation, and restart resume.
+
+Implementation note (2026-07-25):
+- Explicit DCF mutation prompts are intentionally routed through Gamma's deterministic authority path even when Agents SDK orchestration is enabled. The SDK can coordinate bounded read-only actions, but it cannot mint, consume, or bypass a local mutation confirmation.
+- `CopilotConfirmationService` atomically consumes a single active token and durably marks expiry. Applying DCF saves a pre-change Fundamentals snapshot and replaying the token fails.
+- The Agents SDK branch now uses the maintained `Runner.run_streamed` interface, emits bounded provider-progress events, retains the non-streaming fallback for compatible test doubles, and calls `cancel(mode="after_turn")`.
+- The custom loop remains default. The retained custom-versus-offline-SDK benchmark passes both permission/trace paths; no new live quality or latency result justifies changing the default.
+- Evidence: 104 backend/eval tests and 309 frontend tests passed with typecheck, production build, and desktop check.
+- A bounded authorized live smoke reached the real Agents SDK/Responses transport and emitted `provider.progress`, then terminated through Gamma's typed failure path because the configured OpenAI account was quota exhausted before any tool call. It is not counted as a successful live Operator run.
 
 #### E. Artifacts, memos, and reports — checkpoint 3 complete (86%)
 
@@ -380,10 +387,10 @@ Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint
 2. ~~Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.~~ Completed 2026-07-24 at checkpoint 2 (80%).
 3. ~~In-tab artifacts/memos and session lifecycle completion.~~ Completed 2026-07-25 at checkpoint 3 (86%).
 4. ~~Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in `docs/copilot_v2_checkpoint3_prompt.md`.~~ Completed 2026-07-25 (see the note under workstream F).
-5. Live operator events, cancellation, and inline confirmations.
+5. ~~Live operator events, cancellation, and inline confirmations.~~ Completed 2026-07-25 at checkpoint 4 (91%).
 6. Missing context/tool coverage and source navigation.
 7. GPT-5.6 eval-backed model policy and routing rollout.
-8. Agents SDK default decision.
+8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
 9. Diagnostics, first-run guidance, accessibility, and full release gate.
 10. Optional external deep research; later voice.
 
@@ -946,7 +953,7 @@ Future agents should update this section.
 
 | Decision | Current stance | Notes |
 |---|---|---|
-| Direct Responses API vs Agents SDK | Adopt Agents SDK for the Research Operator path behind Gamma's action registry. | User approved the direction on 2026-05-27. Keep the Research Agent path on the current Responses/provider wrapper until a separate migration is justified. |
+| Direct Responses API vs Agents SDK | Keep Agents SDK as the maintained, feature-flagged Research Operator orchestration path behind Gamma's registry; keep the deterministic custom loop as the product default. | User approved using the SDK. Checkpoint 4 established live progress, safe-turn cancellation, and permission parity, but the retained offline comparison does not show a new live quality/latency advantage sufficient to switch defaults. |
 | UI control vs backend tools | Backend tools are authoritative; UI navigation is convenience only. | This preserves auditability and avoids fragile DOM automation. |
 | Outside info | Provider adapters first; general web search only as fallback or explicit mode. | News and estimates are context, not execution. |
 | Copilot roles | Research Agent plus Research Operator. | Research Agent structures theses from context; Research Operator runs app-native tests and confirmed local research-state workflows. |

@@ -200,6 +200,45 @@ function mutation(): CopilotDraftMutation {
 }
 
 describe("buildCopilotTranscriptBlocks", () => {
+  it("promotes an operator confirmation payload into an actionable mutation diff", () => {
+    const value = result();
+    const draft = { ...mutation(), status: "pending" };
+    value.status = "awaiting_confirmation";
+    value.operator_events = [
+      {
+        run_id: "run_1",
+        event_id: "event_confirmation",
+        sequence: 1,
+        event_type: "confirmation-needed",
+        timestamp: "2026-07-24T00:00:00Z",
+        step_id: "step_draft",
+        tool_id: "fundamentals.propose_dcf_update",
+        title: "Review DCF update",
+        message: "Review the exact diff.",
+        payload: {
+          mutation_id: draft.mutation_id,
+          confirmation_token: draft.confirmation_token,
+          proposal_hash: "proposal-hash",
+          mutation: draft
+        },
+        source_ids: [],
+        warnings: []
+      }
+    ];
+
+    const blocks = buildCopilotTranscriptBlocks(value);
+    const confirmation = blocks.find((block) => block.kind === "confirmation");
+    expect(blocks.map((block) => block.kind)).toContain("mutation-diff");
+    expect(confirmation).toMatchObject({
+      kind: "confirmation",
+      mutation: { mutation_id: "mutation_1", status: "pending" }
+    });
+    if (confirmation?.kind === "confirmation") {
+      expect(confirmation.payload).not.toHaveProperty("confirmation_token");
+      expect(confirmation.payload).not.toHaveProperty("mutation");
+    }
+  });
+
   it("maps a ready card into typed message, card, and provider blocks", () => {
     expect(buildCopilotTranscriptBlocks(result()).map((block) => block.kind)).toEqual([
       "message",

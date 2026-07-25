@@ -81,6 +81,7 @@
     cryptoWorkspace,
     clearCryptoSyntheticPortfolio,
     computeRisk,
+    confirmCopilotMutation,
     forceAccountSubscribe,
     ivSurface,
     ivError,
@@ -121,6 +122,7 @@
     loadCopilotSession,
     loadCopilotSessions,
     renameCopilotSession,
+    rejectCopilotMutation,
     restoreCopilotSession,
     selectCopilotArtifact,
     updateCopilotArtifact,
@@ -203,6 +205,7 @@
   import type {
     CopilotBaseDomain,
     CopilotDomain,
+    CopilotDraftMutation,
     CopilotReasoningEffort,
     CopilotSourceRef,
     CopilotThreadState,
@@ -2038,6 +2041,14 @@
     });
   }
 
+  async function handleConfirmCopilotMutation(mutation: CopilotDraftMutation) {
+    return confirmCopilotMutation(mutation);
+  }
+
+  async function handleRejectCopilotMutation(mutation: CopilotDraftMutation) {
+    return rejectCopilotMutation(mutation);
+  }
+
   async function handleArchiveCopilotSession(sessionId: string) {
     return archiveCopilotSession(sessionId);
   }
@@ -2851,6 +2862,8 @@
             onSearchSessions={handleLoadCopilotSessionsFiltered}
             onToggleScope={handleToggleSynthesisScope}
             onOpenSource={handleOpenCopilotSource}
+            onConfirmMutation={handleConfirmCopilotMutation}
+            onRejectMutation={handleRejectCopilotMutation}
             onSelectArtifact={selectCopilotArtifact}
             onCreateArtifact={createCopilotArtifact}
             onUpdateArtifact={updateCopilotArtifact}

@@ -5,11 +5,17 @@ import re
 import time
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
+from src.application.research_action_registry import (
+    ResearchActionPermissionError,
+    ResearchActionRegistry,
+    ResearchActionRegistryError,
+)
 from src.api.main import create_app
 from src.application.copilot_service import CopilotService
 from src.application.runtime import build_runtime
@@ -23,6 +29,7 @@ from src.models.copilot import (
     CopilotRequestContext,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
+    CopilotResearchActionDefinition,
     CopilotResearchPlan,
     CopilotResearchPlanDomain,
     CopilotRunEvent,
@@ -3879,7 +3886,289 @@ def test_copilot_operator_execution_can_use_agents_sdk_orchestrator(tmp_path, mo
         runtime.shutdown()
 
 
-def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, monkeypatch):
+def test_agents_sdk_operator_streams_provider_and_tool_progress_live(tmp_path, monkeypatch):
+    from src.application import copilot_agents_operator as agents_operator
+
+    class _FakeAgent:
+        def __init__(self, *, name, model, instructions, tools):
+            del name
+            del model
+            del instructions
+            self.tools = tools
+
+    class _FakeSdkEvent:
+        def __init__(self, event_type):
+            self.type = event_type
+
+    class _FakeStreamResult:
+        def __init__(self, agent):
+            self.agent = agent
+            self.cancel_mode = None
+
+        async def stream_events(self):
+            yield _FakeSdkEvent("agent_updated_stream_event")
+            self.agent.tools[0]("run_risk_scenario_analysis", "{}")
+            yield _FakeSdkEvent("run_item_stream_event")
+
+        def cancel(self, mode="immediate"):
+            self.cancel_mode = mode
+
+    class _FakeRunner:
+        @staticmethod
+        def run_streamed(agent, prompt, max_turns):
+            assert max_turns >= 1
+            assert "run_risk_scenario_analysis" in prompt
+            return _FakeStreamResult(agent)
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        agents_operator,
+        "_load_agents_sdk",
+        lambda: agents_operator._AgentsSdkModule(
+            Agent=_FakeAgent,
+            Runner=_FakeRunner,
+            function_tool=lambda func: func,
+        ),
+    )
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        response = client.post(
+            "/copilot/operator-plan/execute/stream",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "run_id": "run_agents_sdk_stream",
+                "user_session_id": "session_agents_sdk_stream",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        events = [
+            json.loads(line)
+            for line in response.text.splitlines()
+            if line.strip()
+        ]
+        event_types = [event["event"] for event in events]
+        assert "provider.progress" in event_types, json.dumps(events, indent=2)
+        assert "tool.call" in event_types
+        assert "tool.result" in event_types
+        assert event_types.index("provider.progress") < event_types.index("tool.result")
+        assert events[-1]["event"] == "completed"
+        assert events[-1]["result"]["provider"] == "openai_agents_sdk_operator"
+        assert [event["sequence"] for event in events] == list(range(len(events)))
+    finally:
+        runtime.shutdown()
+
+
+def test_agents_sdk_operator_cancels_after_current_safe_turn(tmp_path, monkeypatch):
+    from src.application import copilot_agents_operator as agents_operator
+
+    streams = []
+
+    class _FakeAgent:
+        def __init__(self, *, name, model, instructions, tools):
+            del name
+            del model
+            del instructions
+            self.tools = tools
+
+    class _FakeSdkEvent:
+        type = "run_item_stream_event"
+
+    class _FakeStreamResult:
+        def __init__(self, agent):
+            self.agent = agent
+            self.cancel_mode = None
+            streams.append(self)
+
+        async def stream_events(self):
+            self.agent.tools[0]("run_risk_scenario_analysis", "{}")
+            yield _FakeSdkEvent()
+
+        def cancel(self, mode="immediate"):
+            self.cancel_mode = mode
+
+    class _FakeRunner:
+        @staticmethod
+        def run_streamed(agent, prompt, max_turns):
+            del prompt
+            del max_turns
+            return _FakeStreamResult(agent)
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        agents_operator,
+        "_load_agents_sdk",
+        lambda: agents_operator._AgentsSdkModule(
+            Agent=_FakeAgent,
+            Runner=_FakeRunner,
+            function_tool=lambda func: func,
+        ),
+    )
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        snapshot = client.get("/portfolio/snapshot").json()
+        service = runtime.copilot_service
+        original_append = service._append_run_event
+        cancellation_sent = False
+
+        def append_and_cancel(handle, event_type, data=None, *, result=None):
+            nonlocal cancellation_sent
+            event = original_append(handle, event_type, data, result=result)
+            if event_type == "tool.result" and not cancellation_sent:
+                cancellation_sent = True
+                assert service.cancel_run(handle.run_id)["cancelled"] is True
+            return event
+
+        service._append_run_event = append_and_cancel
+        response = client.post(
+            "/copilot/operator-plan/execute/stream",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "run_id": "run_agents_sdk_cancel",
+                "context": {
+                    "current_tab": "portfolio",
+                    "workspace_mode": "portfolio",
+                    "portfolio_state": {"snapshot": snapshot},
+                },
+            },
+        )
+        events = [
+            json.loads(line)
+            for line in response.text.splitlines()
+            if line.strip()
+        ]
+        assert cancellation_sent is True
+        assert streams and streams[0].cancel_mode == "after_turn"
+        assert events[-1]["event"] == "cancelled"
+        assert events[-1]["result"]["status"] == "cancelled"
+    finally:
+        runtime.shutdown()
+
+
+def test_agents_sdk_operator_surfaces_provider_failure_as_typed_terminal(tmp_path, monkeypatch):
+    from src.application import copilot_agents_operator as agents_operator
+
+    class _FakeAgent:
+        def __init__(self, *, name, model, instructions, tools):
+            del name
+            del model
+            del instructions
+            del tools
+
+    class _FakeRunner:
+        @staticmethod
+        def run_streamed(agent, prompt, max_turns):
+            del agent
+            del prompt
+            del max_turns
+            raise RuntimeError("provider unavailable")
+
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        agents_operator,
+        "_load_agents_sdk",
+        lambda: agents_operator._AgentsSdkModule(
+            Agent=_FakeAgent,
+            Runner=_FakeRunner,
+            function_tool=lambda func: func,
+        ),
+    )
+
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {"current_tab": "portfolio", "workspace_mode": "portfolio"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "error"
+        assert payload["provider"] == "openai_agents_sdk_operator"
+        assert any(
+            "Agents SDK operator run failed: RuntimeError: provider unavailable" in warning
+            for warning in payload["warnings"]
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_custom_operator_records_partial_tool_failure_and_enforces_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "custom")
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        service = runtime.copilot_service
+        original_execute = service._execute_tool
+        original_plan = service.plan_research_operator
+        execution_count = 0
+
+        def execute_with_one_failure(tool_id, arguments, context):
+            nonlocal execution_count
+            execution_count += 1
+            if execution_count == 1:
+                return CopilotToolExecution(
+                    output={"error": "fixture partial failure"},
+                    trace=CopilotToolTrace(
+                        tool_name=tool_id,
+                        summary="Fixture partial tool failure.",
+                        arguments=arguments,
+                        source_ids=[],
+                    ),
+                )
+            return original_execute(tool_id, arguments, context)
+
+        service._execute_tool = execute_with_one_failure
+        service.plan_research_operator = lambda request: replace(
+            original_plan(request),
+            max_tool_calls=2,
+        )
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Is my portfolio exposed to rate shock?",
+                "context": {"current_tab": "portfolio", "workspace_mode": "portfolio"},
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        final_report = next(
+            item
+            for item in payload["operator_events"]
+            if item["event_type"] == "final-report"
+        )
+        assert final_report["payload"]["failed_steps"], payload
+        assert any(
+            item["payload"].get("status") == "failed"
+            for item in payload["operator_events"]
+            if item["event_type"] == "tool-result"
+        )
+        assert len(payload["tool_traces"]) == 2
+        assert any(
+            "Stopped operator execution after 2 tools." in warning
+            for warning in payload["warnings"]
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_agents_sdk_configuration_cannot_bypass_local_mutation_authority(tmp_path, monkeypatch):
     from src.application import copilot_agents_operator as agents_operator
 
     class _FakeAgent:
@@ -3892,10 +4181,10 @@ def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, mon
     class _FakeRunner:
         @staticmethod
         async def run(agent, prompt, max_turns):
+            del agent
+            del prompt
             del max_turns
-            assert "fundamentals.apply_dcf_update" in prompt
-            agent.tools[0]("fundamentals.apply_dcf_update", "{}")
-            return type("_FakeRunResult", (), {"final_output": "ok"})()
+            raise AssertionError("Local mutation authority must not delegate to the Agents SDK.")
 
     monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -3925,9 +4214,9 @@ def test_agents_sdk_operator_rejects_actions_outside_registry_plan(tmp_path, mon
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["provider"] == "openai_agents_sdk_operator"
+        assert payload["provider"] == "gamma_operator_executor"
         assert not any(trace["tool_name"] == "fundamentals.apply_dcf_update" for trace in payload["tool_traces"])
-        assert any("outside the operator plan" in warning for warning in payload["warnings"])
+        assert any("explicit supported percentage" in warning for warning in payload["warnings"])
         assert any(
             event["event_type"] == "confirmation-needed"
             and "fundamentals.apply_dcf_update" in event["payload"]["required_for_tool_ids"]
@@ -4090,6 +4379,291 @@ def test_copilot_confirmed_dcf_mutation_propose_and_apply_flow(tmp_path):
             snapshot.snapshot_id == payload["mutation"]["rollback_snapshot_id"]
             for snapshot in fundamentals_service.list_dcf_snapshots("AAPL")
         )
+    finally:
+        runtime.shutdown()
+
+
+def test_research_action_registry_rejects_unsafe_or_unauthorized_actions():
+    with pytest.raises(ResearchActionRegistryError, match="prohibited"):
+        ResearchActionRegistry(
+            [
+                CopilotResearchActionDefinition(
+                    tool_id="portfolio.execute_trade",
+                    domains=["portfolio"],
+                    action_type="apply_change",
+                    description="Unsafe execution action.",
+                    input_schema={},
+                    read_only=False,
+                    mutates_local_state=True,
+                    requires_confirmation=True,
+                    permission_policy="confirmation_required",
+                )
+            ]
+        )
+
+    with pytest.raises(ResearchActionRegistryError, match="must require confirmation"):
+        ResearchActionRegistry(
+            [
+                CopilotResearchActionDefinition(
+                    tool_id="fundamentals.apply_local_change",
+                    domains=["fundamentals"],
+                    action_type="apply_change",
+                    description="Invalid ungated mutation.",
+                    input_schema={},
+                    read_only=False,
+                    mutates_local_state=True,
+                    requires_confirmation=False,
+                    permission_policy="automatic",
+                )
+            ]
+        )
+
+    registry = ResearchActionRegistry(
+        [
+            CopilotResearchActionDefinition(
+                tool_id="fundamentals.apply_local_change",
+                domains=["fundamentals"],
+                action_type="apply_change",
+                description="Valid confirmation-gated local mutation.",
+                input_schema={},
+                read_only=False,
+                mutates_local_state=True,
+                requires_confirmation=True,
+                permission_policy="confirmation_required",
+            )
+        ]
+    )
+    with pytest.raises(ResearchActionPermissionError, match="not automatic"):
+        registry.authorize_automatic("fundamentals.apply_local_change")
+
+
+def test_copilot_operator_drafts_exact_context_bound_dcf_mutation(tmp_path, monkeypatch):
+    # Even when Agents SDK orchestration is enabled, local mutation drafting stays
+    # in Gamma's deterministic confirmation authority path.
+    monkeypatch.setenv("GAMMA_COPILOT_OPERATOR_ORCHESTRATOR", "agents_sdk")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+        response = client.post(
+            "/copilot/operator-plan/execute",
+            json={
+                "domain": "synthesis",
+                "prompt": "Set AAPL base DCF WACC to 9%",
+                "run_id": "run_context_bound_dcf",
+                "user_session_id": "session_context_bound_dcf",
+                "context_fingerprint": "context-v1",
+                "context": {"current_tab": "copilot", "workspace_mode": "research"},
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "awaiting_confirmation", payload
+        event = next(
+            item
+            for item in payload["operator_events"]
+            if item["event_type"] == "confirmation-needed"
+            and item["payload"].get("mutation_id")
+        )
+        mutation = event["payload"]["mutation"]
+        assert mutation["session_id"] == "session_context_bound_dcf"
+        assert mutation["run_id"] == "run_context_bound_dcf"
+        assert mutation["context_fingerprint"] == "context-v1"
+        assert mutation["proposal_hash"]
+        assert mutation["expires_at"]
+        assert any(
+            item["path"] == "scenarios.base.assumptions.wacc_pct"
+            and item["after"] == 0.09
+            for item in mutation["diff"]
+        )
+        assert not any(
+            trace["tool_name"] == "fundamentals.apply_dcf_update"
+            for trace in payload["tool_traces"]
+        )
+        final_report = next(
+            item
+            for item in payload["operator_events"]
+            if item["event_type"] == "final-report"
+        )
+        assert mutation["confirmation_token"] not in json.dumps(final_report["payload"])
+
+        detail_response = client.get("/copilot/sessions/session_context_bound_dcf")
+        assert detail_response.status_code == 200
+        detail = detail_response.json()
+        assert [item["mutation_id"] for item in detail["mutations"]] == [
+            mutation["mutation_id"]
+        ]
+        assert detail["turns"][-1]["confirmations"][-1]["status"] == "pending"
+        assert detail["turns"][-1]["confirmations"][-1]["proposal_hash"] == mutation["proposal_hash"]
+
+        applied_response = client.post(
+            f"/copilot/mutations/{mutation['mutation_id']}/apply",
+            json={
+                "confirmation_token": mutation["confirmation_token"],
+                "user_session_id": mutation["session_id"],
+                "context_fingerprint": mutation["context_fingerprint"],
+                "proposal_hash": mutation["proposal_hash"],
+            },
+        )
+        assert applied_response.status_code == 200
+        resolved_detail = client.get(
+            "/copilot/sessions/session_context_bound_dcf"
+        ).json()
+        assert resolved_detail["turns"][-1]["result"]["status"] == "ready"
+        assert resolved_detail["turns"][-1]["terminal_status"] == "ready"
+        assert resolved_detail["turns"][-1]["confirmations"][-1]["status"] == "applied"
+        assert resolved_detail["turns"][-1]["mutation_refs"] == [
+            {
+                "artifact_id": mutation["mutation_id"],
+                "artifact_type": "mutation",
+                "status": "applied",
+                "mutation_id": mutation["mutation_id"],
+                "rollback_snapshot_id": applied_response.json()["mutation"]["rollback_snapshot_id"],
+            }
+        ]
+        resolved_confirmation = next(
+            item
+            for item in resolved_detail["turns"][-1]["result"]["operator_events"]
+            if item["event_type"] == "confirmation-needed"
+            and item["payload"].get("mutation_id") == mutation["mutation_id"]
+        )
+        assert resolved_confirmation["payload"]["mutation"]["status"] == "applied"
+    finally:
+        runtime.shutdown()
+
+
+def test_context_bound_dcf_confirmation_survives_restart_and_is_single_use(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+        proposal = client.post(
+            "/copilot/mutations/fundamentals/dcf/propose",
+            json={
+                "ticker": "AAPL",
+                "scenario_id": "base",
+                "assumptions": {"wacc": 0.09},
+                "user_session_id": "session_restart_dcf",
+                "run_id": "run_restart_dcf",
+                "context_fingerprint": "context-v1",
+            },
+        )
+        assert proposal.status_code == 200
+        draft = proposal.json()
+    finally:
+        runtime.shutdown()
+
+    restarted_client, restarted_runtime = _build_test_client(tmp_path)
+    try:
+        restarted_runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+        wrong_session = restarted_client.post(
+            f"/copilot/mutations/{draft['mutation_id']}/apply",
+            json={
+                "confirmation_token": draft["confirmation_token"],
+                "user_session_id": "session-other",
+                "context_fingerprint": "context-v1",
+                "proposal_hash": draft["proposal_hash"],
+            },
+        )
+        assert wrong_session.status_code == 400
+
+        wrong_context = restarted_client.post(
+            f"/copilot/mutations/{draft['mutation_id']}/apply",
+            json={
+                "confirmation_token": draft["confirmation_token"],
+                "user_session_id": "session_restart_dcf",
+                "context_fingerprint": "context-v2",
+                "proposal_hash": draft["proposal_hash"],
+            },
+        )
+        assert wrong_context.status_code == 400
+
+        wrong_hash = restarted_client.post(
+            f"/copilot/mutations/{draft['mutation_id']}/apply",
+            json={
+                "confirmation_token": draft["confirmation_token"],
+                "user_session_id": "session_restart_dcf",
+                "context_fingerprint": "context-v1",
+                "proposal_hash": "tampered-proposal",
+            },
+        )
+        assert wrong_hash.status_code == 400
+
+        applied = restarted_client.post(
+            f"/copilot/mutations/{draft['mutation_id']}/apply",
+            json={
+                "confirmation_token": draft["confirmation_token"],
+                "user_session_id": "session_restart_dcf",
+                "context_fingerprint": "context-v1",
+                "proposal_hash": draft["proposal_hash"],
+            },
+        )
+        assert applied.status_code == 200
+        assert applied.json()["mutation"]["status"] == "applied"
+
+        replay = restarted_client.post(
+            f"/copilot/mutations/{draft['mutation_id']}/apply",
+            json={
+                "confirmation_token": draft["confirmation_token"],
+                "user_session_id": "session_restart_dcf",
+                "context_fingerprint": "context-v1",
+                "proposal_hash": draft["proposal_hash"],
+            },
+        )
+        assert replay.status_code == 400
+        assert "not active" in replay.json()["detail"]
+    finally:
+        restarted_runtime.shutdown()
+
+
+def test_copilot_mutation_reject_and_expiry_are_enforced(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        runtime.copilot_service.fundamentals_service = _StubFundamentalsService()
+        rejected_draft = client.post(
+            "/copilot/mutations/fundamentals/dcf/propose",
+            json={
+                "ticker": "AAPL",
+                "assumptions": {"wacc": 0.09},
+                "user_session_id": "session_reject_dcf",
+            },
+        ).json()
+        rejected = client.post(
+            f"/copilot/mutations/{rejected_draft['mutation_id']}/reject",
+            json={"user_session_id": "session_reject_dcf"},
+        )
+        assert rejected.status_code == 200
+        assert rejected.json()["status"] == "rejected"
+
+        apply_rejected = client.post(
+            f"/copilot/mutations/{rejected_draft['mutation_id']}/apply",
+            json={
+                "confirmation_token": rejected_draft["confirmation_token"],
+                "user_session_id": "session_reject_dcf",
+                "proposal_hash": rejected_draft["proposal_hash"],
+            },
+        )
+        assert apply_rejected.status_code == 400
+
+        expired_draft = client.post(
+            "/copilot/mutations/fundamentals/dcf/propose",
+            json={"ticker": "AAPL", "assumptions": {"wacc": 0.1}},
+        ).json()
+        runtime.copilot_store.update_mutation(
+            expired_draft["mutation_id"],
+            lambda item: replace(item, expires_at=datetime.utcnow() - timedelta(seconds=1)),
+        )
+        expired = client.post(
+            f"/copilot/mutations/{expired_draft['mutation_id']}/apply",
+            json={"confirmation_token": expired_draft["confirmation_token"]},
+        )
+        assert expired.status_code == 400
+        assert "expired" in expired.json()["detail"]
+        expired_state = client.get(
+            f"/copilot/mutations/{expired_draft['mutation_id']}"
+        )
+        assert expired_state.status_code == 200
+        assert expired_state.json()["status"] == "expired"
     finally:
         runtime.shutdown()
 

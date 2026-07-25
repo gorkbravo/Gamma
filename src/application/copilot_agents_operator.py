@@ -32,6 +32,8 @@ SUPPORTED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
 ContextBuilder = Callable[[str], CopilotContextBundle]
 DefaultArgumentBuilder = Callable[[str, CopilotContextBundle], dict[str, Any] | None]
 RegisteredActionExecutor = Callable[[str, dict[str, Any], CopilotContextBundle], CopilotToolExecution]
+OperatorEventEmitter = Callable[[CopilotOperatorProgressEvent], None]
+CancellationCheck = Callable[[], bool]
 CardBuilder = Callable[
     [CopilotOperatorPlan, list[str], list[str], list[CopilotSourceRef], list[str]],
     ResearchCard,
@@ -119,8 +121,11 @@ class CopilotAgentsOperatorService:
         default_arguments: DefaultArgumentBuilder,
         execute_action: RegisteredActionExecutor,
         build_card: CardBuilder,
+        run_id: str | None = None,
+        emit_event: OperatorEventEmitter | None = None,
+        should_cancel: CancellationCheck | None = None,
     ) -> CopilotResearchCardResult:
-        run_id = new_copilot_id("oprun")
+        run_id = str(run_id or "").strip() or new_copilot_id("oprun")
         response_id = new_copilot_id("opexec")
         events: list[CopilotOperatorProgressEvent] = []
         sources: dict[str, CopilotSourceRef] = {}
@@ -135,6 +140,8 @@ class CopilotAgentsOperatorService:
         provider_calls_used = 0
         sdk_duration_ms: int | None = None
         model_usage: dict[str, Any] = {}
+        cancelled_at_boundary = False
+        provider_progress_count = 0
 
         def record_event(
             event_type: str,
@@ -146,8 +153,7 @@ class CopilotAgentsOperatorService:
             source_ids: list[str] | None = None,
             event_warnings: list[str] | None = None,
         ) -> None:
-            events.append(
-                CopilotOperatorProgressEvent(
+            event = CopilotOperatorProgressEvent(
                     run_id=run_id,
                     event_id=new_copilot_id("opevent"),
                     sequence=len(events) + 1,
@@ -161,7 +167,13 @@ class CopilotAgentsOperatorService:
                     source_ids=source_ids or [],
                     warnings=event_warnings or [],
                 )
-            )
+            events.append(event)
+            if emit_event is not None:
+                try:
+                    emit_event(event)
+                except Exception:
+                    # Event delivery must not change operator authority or tool execution.
+                    pass
 
         def record_warning(message: str, *, step: CopilotOperatorPlanStep | None = None) -> None:
             warnings.append(message)
@@ -222,6 +234,7 @@ class CopilotAgentsOperatorService:
                 build_card=build_card,
                 status="error",
                 reasoning_effort=reasoning_effort,
+                emit_event=emit_event,
             )
 
         try:
@@ -242,14 +255,24 @@ class CopilotAgentsOperatorService:
                 build_card=build_card,
                 status="error",
                 reasoning_effort=reasoning_effort,
+                emit_event=emit_event,
             )
 
         def execute_registered_action(tool_id: str, arguments_json: str = "{}") -> str:
             """Execute one approved Gamma Research Action Registry tool by id."""
+            nonlocal cancelled_at_boundary
             nonlocal provider_calls_used
             nonlocal remaining_tool_calls
             normalized_tool_id = str(tool_id or "").strip()
             step = step_by_tool.get(normalized_tool_id)
+            if should_cancel is not None and should_cancel():
+                cancelled_at_boundary = True
+                message = (
+                    "Research Operator cancellation took effect before the next "
+                    "Agents SDK tool boundary."
+                )
+                record_warning(message, step=step)
+                return self._json_dumps({"status": "cancelled", "warning": message})
             if step is None:
                 message = f"Agents SDK requested an action outside the operator plan: `{normalized_tool_id}`."
                 record_warning(message)
@@ -392,15 +415,72 @@ class CopilotAgentsOperatorService:
         agent = sdk.Agent(**agent_kwargs)
         prompt = self._operator_prompt(request, plan, allowed_tool_ids)
 
+        async def run_agents_operator() -> Any:
+            nonlocal cancelled_at_boundary
+            nonlocal provider_progress_count
+            run_streamed = getattr(sdk.Runner, "run_streamed", None)
+            if not callable(run_streamed):
+                return await sdk.Runner.run(
+                    agent,
+                    prompt,
+                    max_turns=self.config.max_turns,
+                )
+            streamed = run_streamed(
+                agent,
+                prompt,
+                max_turns=self.config.max_turns,
+            )
+            if asyncio.iscoroutine(streamed):
+                streamed = await streamed
+            async for sdk_event in streamed.stream_events():
+                event_type = str(
+                    getattr(sdk_event, "type", None)
+                    or sdk_event.__class__.__name__
+                )
+                if (
+                    event_type not in {"raw_response_event", "RawResponsesStreamEvent"}
+                    and provider_progress_count < 24
+                ):
+                    provider_progress_count += 1
+                    record_event(
+                        "provider-progress",
+                        title="Agents SDK progress",
+                        message=f"Agents SDK emitted {event_type.replace('_', ' ')}.",
+                        payload={
+                            "orchestrator": self.provider_name,
+                            "sdk_event_type": event_type,
+                        },
+                    )
+                if (
+                    not cancelled_at_boundary
+                    and should_cancel is not None
+                    and should_cancel()
+                ):
+                    cancelled_at_boundary = True
+                    streamed.cancel(mode="after_turn")
+                    record_warning(
+                        "Research Operator cancellation was requested; the Agents SDK "
+                        "will stop after the current safe turn boundary."
+                    )
+            return streamed
+
         try:
             started_at = perf_counter()
-            run_result = asyncio.run(sdk.Runner.run(agent, prompt, max_turns=self.config.max_turns))
+            if should_cancel is not None and should_cancel():
+                cancelled_at_boundary = True
+                record_warning(
+                    "Research Operator was cancelled before Agents SDK orchestration began."
+                )
+                run_result = None
+            else:
+                run_result = asyncio.run(run_agents_operator())
             sdk_duration_ms = int((perf_counter() - started_at) * 1000)
-            model_usage = self._extract_run_usage(run_result)
+            if run_result is not None:
+                model_usage = self._extract_run_usage(run_result)
         except Exception as exc:
             record_warning(f"Agents SDK operator run failed: {exc.__class__.__name__}: {exc}")
 
-        if plan.confirmation_checkpoints:
+        if plan.confirmation_checkpoints and not cancelled_at_boundary:
             message = "Operator plan includes confirmation checkpoints that were not applied by automatic execution."
             warnings.append(message)
             for checkpoint in plan.confirmation_checkpoints:
@@ -429,12 +509,19 @@ class CopilotAgentsOperatorService:
             skipped_steps=skipped_steps,
             failed_steps=failed_steps,
             build_card=build_card,
-            status="ready" if executed_steps else "error",
+            status=(
+                "cancelled"
+                if cancelled_at_boundary
+                else "ready"
+                if executed_steps
+                else "error"
+            ),
             outputs=outputs,
             output_summaries=output_summaries,
             sdk_duration_ms=sdk_duration_ms,
             model_usage=model_usage,
             reasoning_effort=reasoning_effort,
+            emit_event=emit_event,
         )
 
     def _finalize_result(
@@ -457,43 +544,46 @@ class CopilotAgentsOperatorService:
         sdk_duration_ms: int | None = None,
         model_usage: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
+        emit_event: OperatorEventEmitter | None = None,
     ) -> CopilotResearchCardResult:
         warnings = dedupe_warnings(warnings)
         run_id = events[0].run_id if events else new_copilot_id("oprun")
         final_outputs, output_retention = self._bounded_outputs(outputs or {}, output_summaries or {})
-        events.append(
+        next_sequence = len(events) + 1
+        final_message = (
+            "Research Operator stopped at the current Agents SDK turn boundary."
+            if status == "cancelled"
+            else f"Executed {len(executed_steps)} Agents SDK-selected operator step(s)."
+        )
+        final_events = [
             CopilotOperatorProgressEvent(
                 run_id=run_id,
                 event_id=new_copilot_id("opevent"),
-                sequence=len(events) + 1,
+                sequence=next_sequence,
                 event_type="artifact-created",
                 timestamp=now_utc(),
                 title="Operator trace",
                 message="Created an operator event trace for this run.",
                 payload={"artifact_type": "operator_trace", "artifact_id": run_id, "event_count": len(events) + 3},
-            )
-        )
-        events.append(
+            ),
             CopilotOperatorProgressEvent(
                 run_id=run_id,
                 event_id=new_copilot_id("opevent"),
-                sequence=len(events) + 1,
+                sequence=next_sequence + 1,
                 event_type="artifact-created",
                 timestamp=now_utc(),
                 title="Operator report",
                 message="Created the final Research Operator result card.",
                 payload={"artifact_type": "operator_report", "artifact_id": response_id},
-            )
-        )
-        events.append(
+            ),
             CopilotOperatorProgressEvent(
                 run_id=run_id,
                 event_id=new_copilot_id("opevent"),
-                sequence=len(events) + 1,
+                sequence=next_sequence + 2,
                 event_type="final-report",
                 timestamp=now_utc(),
                 title="Final operator report",
-                message=f"Executed {len(executed_steps)} Agents SDK-selected operator step(s).",
+                message=final_message,
                 payload={
                     "status": status,
                     "orchestrator": self.provider_name,
@@ -514,8 +604,15 @@ class CopilotAgentsOperatorService:
                 },
                 source_ids=[source.source_id for source in list(sources.values())[:10]],
                 warnings=warnings,
-            )
-        )
+            ),
+        ]
+        for event in final_events:
+            events.append(event)
+            if emit_event is not None:
+                try:
+                    emit_event(event)
+                except Exception:
+                    pass
         return CopilotResearchCardResult(
             domain="synthesis",
             current_tab=request.context.current_tab or "copilot",
@@ -523,7 +620,7 @@ class CopilotAgentsOperatorService:
             provider=self.provider_name,
             model=self.config.model,
             response_id=response_id,
-            message=f"Executed {len(executed_steps)} Agents SDK-selected operator step(s).",
+            message=final_message,
             card=build_card(plan, executed_steps, skipped_steps, list(sources.values()), warnings),
             sources=list(sources.values()),
             tool_traces=tool_traces,

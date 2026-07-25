@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import os
 import threading
-from dataclasses import asdict
-from datetime import datetime
+from collections.abc import Callable
+from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -748,6 +749,137 @@ class CopilotStore:
         with self._lock:
             return self._load_mutation_path(self.mutations_dir / f"{safe_mutation_id}.json")
 
+    def list_mutations(self, session_id: str | None = None) -> list[CopilotDraftMutation]:
+        safe_session_id = self._safe_id(session_id) if session_id else None
+        with self._lock:
+            mutations = [
+                item
+                for path in self.mutations_dir.glob("*.json")
+                if (item := self._load_mutation_path(path)) is not None
+            ]
+        if safe_session_id is not None:
+            mutations = [
+                mutation
+                for mutation in mutations
+                if mutation.session_id == safe_session_id
+            ]
+        return sorted(mutations, key=lambda item: item.created_at, reverse=True)
+
+    def update_mutation(
+        self,
+        mutation_id: str,
+        transform: Callable[[CopilotDraftMutation], CopilotDraftMutation],
+    ) -> CopilotDraftMutation:
+        """Atomically validate and replace one mutation record."""
+        safe_mutation_id = self._safe_id(mutation_id)
+        if not safe_mutation_id:
+            raise CopilotStoreError("mutation_id is required.")
+        path = self.mutations_dir / f"{safe_mutation_id}.json"
+        with self._lock:
+            mutation = self._load_mutation_path(path)
+            if mutation is None:
+                raise CopilotStoreNotFoundError(f"Copilot mutation not found: {mutation_id}")
+            updated = transform(mutation)
+            if updated.mutation_id != mutation.mutation_id:
+                raise CopilotStoreConflictError("Mutation transform cannot change mutation_id.")
+            self._write_json(path, self._mutation_to_json(updated))
+        return updated
+
+    def sync_mutation_resolution(self, mutation: CopilotDraftMutation) -> None:
+        """Project a mutation's resolved state into persisted turn replay records."""
+        resolved_at = (
+            mutation.applied_at
+            or mutation.rejected_at
+            or mutation.confirmed_at
+            or now_utc()
+        )
+        with self._lock:
+            for path in self.turns_dir.rglob("*.json"):
+                turn = self._load_turn_path(path)
+                if turn is None:
+                    continue
+                matching = any(
+                    item.mutation_id == mutation.mutation_id
+                    for item in [*turn.confirmations, *turn.mutation_refs]
+                )
+                if not matching:
+                    continue
+                confirmations = [
+                    replace(
+                        item,
+                        status=mutation.status,
+                        confirmation_token=mutation.confirmation_token,
+                        rollback_snapshot_id=mutation.rollback_snapshot_id,
+                        context_fingerprint=mutation.context_fingerprint,
+                        proposal_hash=mutation.proposal_hash,
+                        expires_at=mutation.expires_at,
+                        resolved_at=resolved_at,
+                        warnings=list(dict.fromkeys([*item.warnings, *mutation.warnings])),
+                    )
+                    if item.mutation_id == mutation.mutation_id
+                    else item
+                    for item in turn.confirmations
+                ]
+                mutation_refs = [
+                    replace(
+                        item,
+                        status=mutation.status,
+                        rollback_snapshot_id=mutation.rollback_snapshot_id,
+                    )
+                    if item.mutation_id == mutation.mutation_id
+                    else item
+                    for item in turn.mutation_refs
+                ]
+                operator_events = []
+                for event in turn.result.operator_events:
+                    payload = dict(event.payload)
+                    if payload.get("mutation_id") == mutation.mutation_id:
+                        payload.update(
+                            {
+                                "status": mutation.status,
+                                "rollback_snapshot_id": mutation.rollback_snapshot_id,
+                                "mutation": self._mutation_to_json(mutation),
+                            }
+                        )
+                    operator_events.append(replace(event, payload=payload))
+                result_status = turn.result.status
+                result_message = turn.result.message
+                if turn.result.status == "awaiting_confirmation":
+                    if mutation.status == "applied":
+                        result_status = "ready"
+                        result_message = (
+                            f"Confirmed mutation applied to {mutation.target_label}."
+                        )
+                    elif mutation.status == "rejected":
+                        result_status = "ready"
+                        result_message = (
+                            f"Mutation rejected for {mutation.target_label}; no local research state changed."
+                        )
+                    elif mutation.status == "failed":
+                        result_status = "error"
+                        result_message = (
+                            f"Confirmed mutation failed for {mutation.target_label}."
+                        )
+                    elif mutation.status == "expired":
+                        result_status = "error"
+                        result_message = (
+                            f"Mutation confirmation expired for {mutation.target_label}."
+                        )
+                result = replace(
+                    turn.result,
+                    status=result_status,
+                    message=result_message,
+                    operator_events=operator_events,
+                )
+                updated_turn = replace(
+                    turn,
+                    result=result,
+                    terminal_status=result_status,
+                    confirmations=confirmations,
+                    mutation_refs=mutation_refs,
+                )
+                self._write_json(path, self._turn_to_json(updated_turn))
+
     def get_memo(self, memo_id: str) -> CopilotMemo | None:
         artifact = self.get_artifact(memo_id)
         if artifact is None or artifact.artifact_type != "memo":
@@ -1080,6 +1212,13 @@ class CopilotStore:
             status=str(payload.get("status") or "pending"),
             requires_confirmation=bool(payload.get("requires_confirmation", True)),
             confirmation_token=str(payload.get("confirmation_token") or ""),
+            apply_tool_id=payload.get("apply_tool_id"),
+            session_id=payload.get("session_id"),
+            workflow_id=payload.get("workflow_id"),
+            run_id=payload.get("run_id"),
+            checkpoint_id=payload.get("checkpoint_id"),
+            context_fingerprint=payload.get("context_fingerprint"),
+            proposal_hash=payload.get("proposal_hash"),
             diff=[
                 CopilotMutationDiffEntry(
                     path=str(item.get("path") or ""),
@@ -1100,6 +1239,8 @@ class CopilotStore:
             rollback_snapshot_id=payload.get("rollback_snapshot_id"),
             created_at=self._parse_datetime(payload.get("created_at")) or now_utc(),
             expires_at=self._parse_datetime(payload.get("expires_at")),
+            confirmed_at=self._parse_datetime(payload.get("confirmed_at")),
+            rejected_at=self._parse_datetime(payload.get("rejected_at")),
             applied_at=self._parse_datetime(payload.get("applied_at")),
             source_provider=str(payload.get("source_provider") or "gamma_copilot"),
             origin=str(payload.get("origin") or "copilot_store.mutation"),
@@ -1446,6 +1587,13 @@ class CopilotStore:
             "status": mutation.status,
             "requires_confirmation": mutation.requires_confirmation,
             "confirmation_token": mutation.confirmation_token,
+            "apply_tool_id": mutation.apply_tool_id,
+            "session_id": mutation.session_id,
+            "workflow_id": mutation.workflow_id,
+            "run_id": mutation.run_id,
+            "checkpoint_id": mutation.checkpoint_id,
+            "context_fingerprint": mutation.context_fingerprint,
+            "proposal_hash": mutation.proposal_hash,
             "diff": [asdict(item) for item in mutation.diff],
             "rendered_diff": list(mutation.rendered_diff),
             "proposed_payload": mutation.proposed_payload,
@@ -1455,6 +1603,8 @@ class CopilotStore:
             "rollback_snapshot_id": mutation.rollback_snapshot_id,
             "created_at": mutation.created_at.isoformat(),
             "expires_at": mutation.expires_at.isoformat() if mutation.expires_at else None,
+            "confirmed_at": mutation.confirmed_at.isoformat() if mutation.confirmed_at else None,
+            "rejected_at": mutation.rejected_at.isoformat() if mutation.rejected_at else None,
             "applied_at": mutation.applied_at.isoformat() if mutation.applied_at else None,
             "source_provider": mutation.source_provider,
             "origin": mutation.origin,
@@ -1718,7 +1868,10 @@ class CopilotStore:
             mutation_id=payload.get("mutation_id"),
             confirmation_token=payload.get("confirmation_token"),
             rollback_snapshot_id=payload.get("rollback_snapshot_id"),
+            context_fingerprint=payload.get("context_fingerprint"),
+            proposal_hash=payload.get("proposal_hash"),
             created_at=cls._parse_datetime(payload.get("created_at")),
+            expires_at=cls._parse_datetime(payload.get("expires_at")),
             resolved_at=cls._parse_datetime(payload.get("resolved_at")),
             warnings=list(payload.get("warnings") or []),
         )
@@ -1850,7 +2003,10 @@ class CopilotStore:
                     mutation_id=event.payload.get("mutation_id"),
                     confirmation_token=event.payload.get("confirmation_token"),
                     rollback_snapshot_id=event.payload.get("rollback_snapshot_id"),
+                    context_fingerprint=event.payload.get("context_fingerprint"),
+                    proposal_hash=event.payload.get("proposal_hash"),
                     created_at=event.timestamp,
+                    expires_at=cls._parse_datetime(event.payload.get("expires_at")),
                     warnings=list(event.warnings),
                 )
             )
@@ -1879,21 +2035,20 @@ class CopilotStore:
     def _mutation_refs_from_result(
         result: CopilotResearchCardResult,
     ) -> list[CopilotArtifactReference]:
-        refs: list[CopilotArtifactReference] = []
+        refs: dict[str, CopilotArtifactReference] = {}
         for event in result.operator_events:
             mutation_id = event.payload.get("mutation_id")
             if not mutation_id:
                 continue
-            refs.append(
-                CopilotArtifactReference(
-                    artifact_id=str(event.payload.get("artifact_id") or mutation_id),
-                    artifact_type="mutation",
-                    status=str(event.payload.get("status") or "pending"),
-                    mutation_id=str(mutation_id),
-                    rollback_snapshot_id=event.payload.get("rollback_snapshot_id"),
-                )
+            normalized_id = str(mutation_id)
+            refs[normalized_id] = CopilotArtifactReference(
+                artifact_id=str(event.payload.get("artifact_id") or normalized_id),
+                artifact_type="mutation",
+                status=str(event.payload.get("status") or "pending"),
+                mutation_id=normalized_id,
+                rollback_snapshot_id=event.payload.get("rollback_snapshot_id"),
             )
-        return refs
+        return list(refs.values())
 
     @classmethod
     def _research_plan_from_summary(cls, summary: dict[str, Any]) -> CopilotResearchPlan | None:
@@ -2402,13 +2557,17 @@ class CopilotStore:
     @staticmethod
     def _parse_datetime(value: Any) -> datetime | None:
         if isinstance(value, datetime):
-            return value
-        if not value:
+            parsed = value
+        elif not value:
             return None
-        try:
-            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
-        except ValueError:
-            return None
+        else:
+            try:
+                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
 
     @staticmethod
     def _safe_id(value: str | None) -> str:

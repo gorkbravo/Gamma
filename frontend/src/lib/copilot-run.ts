@@ -163,6 +163,10 @@ export function reduceCopilotRunEvent(state: CopilotRunState, event: CopilotRunE
     case "provider.error":
       next.statusDetail = asString(data.message) ?? "Copilot provider failed.";
       return next;
+    case "provider.progress":
+      next.phase = "streaming";
+      next.statusDetail = asString(data.message) ?? "Copilot provider is working.";
+      return next;
     case "confirmation.needed":
       next.statusDetail = asString(data.message) ?? "Confirmation required before continuing.";
       return next;

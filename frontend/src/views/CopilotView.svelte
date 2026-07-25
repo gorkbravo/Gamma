@@ -5,6 +5,7 @@
   import type {
     CopilotArtifact,
     CopilotBaseDomain,
+    CopilotDraftMutation,
     CopilotDomain,
     CopilotReasoningEffort,
     CrossTabHandoffEnvelope,
@@ -100,6 +101,12 @@
     | null = () => null;
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
   export let onOpenSource: (source: CopilotSourceRef) => Promise<unknown> | void = () => {};
+  export let onConfirmMutation:
+    | ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown)
+    | null = null;
+  export let onRejectMutation:
+    | ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown)
+    | null = null;
   export let onSelectArtifact: (artifactId: string | null) => unknown = () => {};
   export let onCreateArtifact: (
     options: {
@@ -660,7 +667,12 @@
             <div class="msg assistant">
               <div class="role-tag">GAMMA</div>
               <div class="assistant-body">
-                <CopilotTranscriptResult result={turn.result} {onOpenSource} />
+                <CopilotTranscriptResult
+                  result={turn.result}
+                  {onOpenSource}
+                  {onConfirmMutation}
+                  {onRejectMutation}
+                />
               </div>
             </div>
           {/each}
@@ -669,21 +681,38 @@
             <div class="msg assistant">
               <div class="role-tag">PLAN</div>
               <div class="assistant-body">
-                <CopilotTranscriptResult result={null} {researchPlan} {onOpenSource} />
+                <CopilotTranscriptResult
+                  result={null}
+                  {researchPlan}
+                  {onOpenSource}
+                  {onConfirmMutation}
+                  {onRejectMutation}
+                />
               </div>
             </div>
           {:else if roleMode === "operator" && operatorPlan}
             <div class="msg assistant">
               <div class="role-tag">OPERATOR PLAN</div>
               <div class="assistant-body">
-                <CopilotTranscriptResult result={operatorResult} {operatorPlan} {onOpenSource} />
+                <CopilotTranscriptResult
+                  result={operatorResult}
+                  {operatorPlan}
+                  {onOpenSource}
+                  {onConfirmMutation}
+                  {onRejectMutation}
+                />
               </div>
             </div>
           {:else if roleMode === "operator" && operatorResult}
             <div class="msg assistant">
               <div class="role-tag">OPERATOR RUN</div>
               <div class="assistant-body">
-                <CopilotTranscriptResult result={operatorResult} {onOpenSource} />
+                <CopilotTranscriptResult
+                  result={operatorResult}
+                  {onOpenSource}
+                  {onConfirmMutation}
+                  {onRejectMutation}
+                />
               </div>
             </div>
           {/if}

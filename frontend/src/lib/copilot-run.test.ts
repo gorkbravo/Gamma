@@ -145,7 +145,14 @@ describe("reduceCopilotRunEvent", () => {
 
     state = reduceCopilotRunEvent(
       state,
-      event({ sequence: 4, event: "failed", data: { message: "Provider transport failed." } })
+      event({ sequence: 4, event: "provider.progress", data: { message: "Agents SDK selected a tool." } })
+    );
+    expect(state.phase).toBe("streaming");
+    expect(state.statusDetail).toBe("Agents SDK selected a tool.");
+
+    state = reduceCopilotRunEvent(
+      state,
+      event({ sequence: 5, event: "failed", data: { message: "Provider transport failed." } })
     );
     expect(state.phase).toBe("failed");
     expect(state.statusDetail).toBe("Provider transport failed.");

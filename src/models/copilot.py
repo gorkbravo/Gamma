@@ -220,6 +220,13 @@ class CopilotDraftMutation:
     status: str
     requires_confirmation: bool
     confirmation_token: str
+    apply_tool_id: str | None = None
+    session_id: str | None = None
+    workflow_id: str | None = None
+    run_id: str | None = None
+    checkpoint_id: str | None = None
+    context_fingerprint: str | None = None
+    proposal_hash: str | None = None
     diff: list[CopilotMutationDiffEntry] = field(default_factory=list)
     rendered_diff: list[str] = field(default_factory=list)
     proposed_payload: dict[str, Any] = field(default_factory=dict)
@@ -229,6 +236,8 @@ class CopilotDraftMutation:
     rollback_snapshot_id: str | None = None
     created_at: datetime = field(default_factory=now_utc)
     expires_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    rejected_at: datetime | None = None
     applied_at: datetime | None = None
     source_provider: str = "gamma_copilot"
     origin: str = "copilot_service.mutation"
@@ -329,6 +338,7 @@ COPILOT_RUN_EVENT_TYPES = {
     "refusal",
     "incomplete",
     "provider.error",
+    "provider.progress",
     "usage",
     "cancelled",
     "failed",
@@ -443,7 +453,10 @@ class CopilotConfirmationState:
     mutation_id: str | None = None
     confirmation_token: str | None = None
     rollback_snapshot_id: str | None = None
+    context_fingerprint: str | None = None
+    proposal_hash: str | None = None
     created_at: datetime | None = None
+    expires_at: datetime | None = None
     resolved_at: datetime | None = None
     warnings: list[str] = field(default_factory=list)
 

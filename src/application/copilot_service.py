@@ -25,6 +25,7 @@ from src.application.copilot_context_helpers import (
     summarize_risk_result,
 )
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
+from src.application.copilot_confirmation_service import CopilotConfirmationService
 from src.application.copilot_report_service import CopilotReportService
 from src.application.crypto_service import CryptoService
 from src.application.fundamentals_service import FundamentalsService
@@ -33,7 +34,10 @@ from src.application.macro_service import MacroSnapshotRequest, MacroService
 from src.application.news_service import NewsService
 from src.application.prediction_market_service import PredictionMarketService
 from src.application.research_service import ResearchAnalysisRequest, ResearchService
-from src.application.research_action_registry import ResearchActionRegistry
+from src.application.research_action_registry import (
+    ResearchActionPermissionError,
+    ResearchActionRegistry,
+)
 from src.application.request_limits import MAX_RISK_LOOKBACK_DAYS
 from src.application.risk_service import RiskComputeRequest, RiskService
 from src.application.sitrep_service import SitrepService, SitrepWorkspaceRequest
@@ -199,6 +203,9 @@ class CopilotService:
         self.sitrep_service = sitrep_service
         self.provider = provider
         self.store = store
+        self.confirmation_service = (
+            CopilotConfirmationService(store) if store is not None else None
+        )
         self.agents_operator_service = CopilotAgentsOperatorService()
         self._runs: dict[str, _CopilotRunHandle] = {}
         self._pending_run_cancellations: dict[str, float] = {}
@@ -1600,6 +1607,7 @@ class CopilotService:
                 "tool_name": event.tool_id,
                 "title": event.title,
                 "message": event.message,
+                "summary": event.message,
                 "payload": event.payload,
                 "source_ids": list(event.source_ids),
                 "warnings": list(event.warnings),
@@ -1609,6 +1617,7 @@ class CopilotService:
                 "step-start": "tool.call",
                 "tool-result": "tool.result",
                 "warning": "warning",
+                "provider-progress": "provider.progress",
                 "confirmation-needed": "confirmation.needed",
                 "artifact-created": "artifact.created",
                 "final-report": "report",
@@ -1773,7 +1782,10 @@ class CopilotService:
                         "Draft does not change supported DCF fields.",
                     ],
                 )
-                steps.append(draft_step)
+                # The requested draft is the primary action. Put it before broad
+                # read-only research so the confirmation boundary cannot be
+                # starved by the automatic tool-call budget.
+                steps.insert(0, draft_step)
                 step_index += 1
                 if apply_definition is not None:
                     checkpoints.append(
@@ -1784,6 +1796,30 @@ class CopilotService:
                             required_for_tool_ids=[apply_definition.tool_id],
                         )
                     )
+
+        if steps:
+            step_id_remap: dict[str, str] = {}
+            renumbered_steps: list[CopilotOperatorPlanStep] = []
+            for order, step in enumerate(steps, start=1):
+                new_step_id = (
+                    f"step_{order:02d}_"
+                    f"{self._safe_source_id(step.tool_id or step.step_id).lower()}"
+                )
+                step_id_remap[step.step_id] = new_step_id
+                renumbered_steps.append(
+                    replace(step, order=order, step_id=new_step_id)
+                )
+            steps = renumbered_steps
+            checkpoints = [
+                replace(
+                    checkpoint,
+                    after_step_id=step_id_remap.get(
+                        checkpoint.after_step_id,
+                        checkpoint.after_step_id,
+                    ),
+                )
+                for checkpoint in checkpoints
+            ]
 
         expected_artifacts = ["operator_trace", "operator_report", *research_plan.expected_artifacts]
         if checkpoints:
@@ -1822,9 +1858,15 @@ class CopilotService:
         assumptions: dict[str, Any] | None = None,
         overrides: dict[str, list[float | None]] | None = None,
         rationale: str | None = None,
+        session_id: str | None = None,
+        workflow_id: str | None = None,
+        run_id: str | None = None,
+        checkpoint_id: str | None = None,
+        context_fingerprint: str | None = None,
     ) -> CopilotDraftMutation:
         if self.store is None:
             raise ValueError("Copilot mutation proposals require local Copilot persistence.")
+        self.action_registry.authorize_draft("fundamentals.propose_dcf_update")
         normalized_ticker = str(ticker or "").strip().upper()
         normalized_scenario = str(scenario_id or "base").strip().lower()
         if not normalized_ticker:
@@ -1864,6 +1906,12 @@ class CopilotService:
             status="pending",
             requires_confirmation=True,
             confirmation_token=new_copilot_id("confirm"),
+            apply_tool_id="fundamentals.apply_dcf_update",
+            session_id=str(session_id or "").strip() or None,
+            workflow_id=str(workflow_id or "").strip() or None,
+            run_id=str(run_id or "").strip() or None,
+            checkpoint_id=str(checkpoint_id or "").strip() or None,
+            context_fingerprint=str(context_fingerprint or "").strip() or None,
             diff=diff,
             rendered_diff=self._render_mutation_diff(diff),
             proposed_payload=proposed_payload,
@@ -1876,37 +1924,68 @@ class CopilotService:
                 "No DCF state is changed until the confirmation token is submitted."
             ),
         )
-        self.store.save_mutation(mutation)
-        return mutation
+        if self.confirmation_service is None:
+            self.store.save_mutation(mutation)
+            return mutation
+        return self.confirmation_service.bind(mutation)
 
     def apply_fundamentals_dcf_update(
         self,
         *,
         mutation_id: str,
         confirmation_token: str,
+        session_id: str | None = None,
+        context_fingerprint: str | None = None,
+        proposal_hash: str | None = None,
     ) -> CopilotMutationApplyResult:
         if self.store is None:
             raise ValueError("Copilot mutation application requires local Copilot persistence.")
-        mutation = self.store.get_mutation(mutation_id)
-        if mutation is None:
+        if self.confirmation_service is None:
+            raise ValueError("Copilot confirmation service is unavailable.")
+        self.action_registry.authorize_confirmed_mutation(
+            "fundamentals.apply_dcf_update"
+        )
+        existing = self.store.get_mutation(mutation_id)
+        if existing is None:
             raise ValueError(f"Copilot mutation not found: {mutation_id}")
-        if mutation.tool_id != "fundamentals.propose_dcf_update" or mutation.domain != "fundamentals":
-            raise ValueError(f"Unsupported Copilot mutation: {mutation.tool_id}")
-        if mutation.status != "pending":
-            raise ValueError(f"Copilot mutation is not pending: {mutation.status}")
-        if not confirmation_token or confirmation_token != mutation.confirmation_token:
-            raise ValueError("Confirmation token does not match the pending Copilot mutation.")
+        if (
+            existing.domain != "fundamentals"
+            or existing.apply_tool_id != "fundamentals.apply_dcf_update"
+        ):
+            raise ValueError(f"Unsupported Copilot mutation: {existing.tool_id}")
+        mutation = self.confirmation_service.consume(
+            mutation_id=mutation_id,
+            confirmation_token=confirmation_token,
+            session_id=str(session_id or "").strip() or None,
+            context_fingerprint=str(context_fingerprint or "").strip() or None,
+            proposal_hash=str(proposal_hash or "").strip() or None,
+            apply_tool_id="fundamentals.apply_dcf_update",
+        )
         ticker = mutation.target_id.split(":", 1)[0].strip().upper()
         if not ticker:
             raise ValueError("Pending Copilot mutation is missing a Fundamentals ticker.")
 
-        snapshot = self.fundamentals_service.save_dcf_snapshot(
-            ticker,
-            name=f"Pre-Copilot DCF update {mutation.mutation_id[-8:]}",
-        )
-        model = self.fundamentals_service.save_dcf_model(ticker, mutation.proposed_payload)
-        if model is None:
-            raise ValueError(f"Fundamentals DCF model could not be saved: {ticker}")
+        try:
+            snapshot = self.fundamentals_service.save_dcf_snapshot(
+                ticker,
+                name=f"Pre-Copilot DCF update {mutation.mutation_id[-8:]}",
+            )
+            model = self.fundamentals_service.save_dcf_model(ticker, mutation.proposed_payload)
+            if model is None:
+                raise ValueError(f"Fundamentals DCF model could not be saved: {ticker}")
+        except Exception as exc:
+            failed = self.store.update_mutation(
+                mutation.mutation_id,
+                lambda item: replace(
+                    item,
+                    status="failed",
+                    warnings=dedupe_warnings(
+                        [*item.warnings, f"Confirmed DCF update failed: {exc}"]
+                    ),
+                ),
+            )
+            self.store.sync_mutation_resolution(failed)
+            raise
         applied = replace(
             mutation,
             status="applied",
@@ -1930,6 +2009,7 @@ class CopilotService:
             ),
         )
         self.store.save_mutation(applied)
+        self.store.sync_mutation_resolution(applied)
         return CopilotMutationApplyResult(
             mutation=applied,
             artifact={
@@ -1940,6 +2020,27 @@ class CopilotService:
             },
             warnings=list(applied.warnings),
         )
+
+    def reject_copilot_mutation(
+        self,
+        *,
+        mutation_id: str,
+        session_id: str | None = None,
+    ) -> CopilotDraftMutation:
+        if self.confirmation_service is None or self.store is None:
+            raise ValueError("Copilot confirmation service is unavailable.")
+        mutation = self.confirmation_service.reject(
+            mutation_id=mutation_id,
+            session_id=str(session_id or "").strip() or None,
+        )
+        self.store.sync_mutation_resolution(mutation)
+        return mutation
+
+    def get_copilot_mutation(self, mutation_id: str) -> CopilotDraftMutation | None:
+        return self.store.get_mutation(mutation_id) if self.store is not None else None
+
+    def list_copilot_mutations(self, session_id: str | None = None) -> list[CopilotDraftMutation]:
+        return self.store.list_mutations(session_id) if self.store is not None else []
 
     def execute_research_plan(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
         plan = self.plan_research(request)
@@ -2124,7 +2225,11 @@ class CopilotService:
         should_cancel: Callable[[], bool] | None = None,
     ) -> CopilotResearchCardResult:
         plan = self.plan_research_operator(request)
-        if self.agents_operator_service.config.enabled:
+        has_draft_change = any(
+            step.action_type == "draft_change"
+            for step in plan.steps
+        )
+        if self.agents_operator_service.config.enabled and not has_draft_change:
             if should_cancel is not None and should_cancel():
                 result = CopilotResearchCardResult(
                     domain="synthesis",
@@ -2143,12 +2248,12 @@ class CopilotService:
                 default_arguments=self._default_plan_execution_arguments,
                 execute_action=self._execute_registered_operator_action,
                 build_card=self._build_operator_execution_card,
+                run_id=run_id,
+                emit_event=emit_event,
+                should_cancel=should_cancel,
             )
             result = self._normalize_result_sources(result)
             result = self._persist_agents_operator_execution_result(request, plan, result)
-            if emit_event is not None:
-                for event in result.operator_events:
-                    emit_event(event)
             return result
 
         resolved_run_id = (run_id or "").strip() or new_copilot_id("oprun")
@@ -2166,6 +2271,8 @@ class CopilotService:
         provider_calls_used = 0
         started_at = time.perf_counter()
         cancelled_at_boundary = False
+        pending_mutation: CopilotDraftMutation | None = None
+        emitted_checkpoint_ids: set[str] = set()
 
         def record_event(
             event_type: str,
@@ -2257,6 +2364,145 @@ class CopilotService:
                     message=message,
                     payload={"required_for_tool_ids": [step.tool_id] if step.tool_id else []},
                     event_warnings=[message],
+                )
+                break
+            if step.action_type == "draft_change":
+                try:
+                    self.action_registry.authorize_draft(step.tool_id or "")
+                except ResearchActionPermissionError as exc:
+                    skipped_steps.append(step.step_id)
+                    message = str(exc)
+                    record_warning(message, step=step)
+                    record_event(
+                        "tool-result",
+                        step=step,
+                        message=message,
+                        payload={"status": "blocked"},
+                    )
+                    continue
+                arguments = self._explicit_dcf_mutation_arguments(request)
+                if arguments is None:
+                    skipped_steps.append(step.step_id)
+                    message = (
+                        "DCF update drafting needs an explicit supported percentage, "
+                        "for example `Set AAPL base WACC to 9%`."
+                    )
+                    record_warning(message, step=step)
+                    record_event(
+                        "tool-result",
+                        step=step,
+                        message=message,
+                        payload={"status": "needs_input"},
+                    )
+                    continue
+                try:
+                    context = self._build_plan_execution_context(request, step.domain)
+                    mutation = self.propose_fundamentals_dcf_update(
+                        **arguments,
+                        session_id=request.user_session_id,
+                        workflow_id=resolved_run_id,
+                        run_id=resolved_run_id,
+                        checkpoint_id=next(
+                            (
+                                checkpoint.checkpoint_id
+                                for checkpoint in plan.confirmation_checkpoints
+                                if checkpoint.after_step_id == step.step_id
+                            ),
+                            None,
+                        ),
+                        context_fingerprint=request.context_fingerprint,
+                    )
+                except ValueError as exc:
+                    skipped_steps.append(step.step_id)
+                    failed_steps.append(step.step_id)
+                    message = f"{step.tool_id} failed: {exc}"
+                    record_warning(message, step=step)
+                    record_event(
+                        "tool-result",
+                        step=step,
+                        message=message,
+                        payload={"status": "failed"},
+                        event_warnings=[message],
+                    )
+                    continue
+                remaining_tools -= 1
+                pending_mutation = mutation
+                for source in context.sources:
+                    sources[source.source_id] = source
+                trace = CopilotToolTrace(
+                    tool_name=step.tool_id or "fundamentals.propose_dcf_update",
+                    summary=f"Drafted {mutation.target_label} and stopped before applying it.",
+                    arguments=arguments,
+                    source_ids=list(mutation.source_ids),
+                )
+                tool_traces.append(trace)
+                mutation_output = asdict(mutation)
+                mutation_output.pop("confirmation_token", None)
+                outputs[step.step_id] = mutation_output
+                output_summaries[step.step_id] = {
+                    "status": mutation.status,
+                    "mutation_id": mutation.mutation_id,
+                    "target_label": mutation.target_label,
+                    "diff_count": len(mutation.diff),
+                    "proposal_hash": mutation.proposal_hash,
+                }
+                executed_steps.append(step.step_id)
+                record_event(
+                    "tool-result",
+                    step=step,
+                    message=trace.summary,
+                    payload={
+                        "status": "drafted",
+                        "mutation_id": mutation.mutation_id,
+                        "output_summary": output_summaries[step.step_id],
+                    },
+                    source_ids=list(mutation.source_ids),
+                    event_warnings=list(mutation.warnings),
+                )
+                checkpoint = next(
+                    (
+                        item
+                        for item in plan.confirmation_checkpoints
+                        if item.after_step_id == step.step_id
+                    ),
+                    None,
+                )
+                checkpoint_id = (
+                    checkpoint.checkpoint_id
+                    if checkpoint is not None
+                    else mutation.checkpoint_id or f"confirm_{mutation.mutation_id}"
+                )
+                emitted_checkpoint_ids.add(checkpoint_id)
+                record_event(
+                    "confirmation-needed",
+                    step=step,
+                    title="Review DCF update",
+                    message=(
+                        "Review the exact before/after DCF diff. Gamma will not apply "
+                        "this local research-state change without the active confirmation."
+                    ),
+                    payload={
+                        "checkpoint_id": checkpoint_id,
+                        "after_step_id": step.step_id,
+                        "required_for_tool_ids": [
+                            mutation.apply_tool_id or "fundamentals.apply_dcf_update"
+                        ],
+                        "default_policy": "confirmation_required",
+                        "status": mutation.status,
+                        "mutation_id": mutation.mutation_id,
+                        "confirmation_token": mutation.confirmation_token,
+                        "context_fingerprint": mutation.context_fingerprint,
+                        "proposal_hash": mutation.proposal_hash,
+                        "expires_at": (
+                            mutation.expires_at.isoformat()
+                            if mutation.expires_at is not None
+                            else None
+                        ),
+                        "rollback_snapshot_id": mutation.rollback_snapshot_id,
+                        "mutation": asdict(mutation),
+                    },
+                    source_ids=list(mutation.source_ids),
+                    event_warnings=list(mutation.warnings),
                 )
                 break
             if step.action_type not in {"read_context", "run_analysis", "fetch_external_context"}:
@@ -2364,6 +2610,8 @@ class CopilotService:
             message = "Operator plan includes confirmation checkpoints that were not applied by automatic execution."
             warnings.append(message)
             for checkpoint in plan.confirmation_checkpoints:
+                if checkpoint.checkpoint_id in emitted_checkpoint_ids:
+                    continue
                 record_event(
                     "confirmation-needed",
                     title="Confirmation checkpoint",
@@ -2377,7 +2625,13 @@ class CopilotService:
                     event_warnings=[message],
                 )
 
-        status = "cancelled" if cancelled_at_boundary else ("ready" if executed_steps else "error")
+        status = (
+            "cancelled"
+            if cancelled_at_boundary
+            else "awaiting_confirmation"
+            if pending_mutation is not None
+            else ("ready" if executed_steps else "error")
+        )
 
         warnings = dedupe_warnings(warnings)
         record_event(
@@ -2399,6 +2653,8 @@ class CopilotService:
             message=(
                 "Research Operator stopped at a safe step boundary."
                 if cancelled_at_boundary
+                else f"Awaiting confirmation for {pending_mutation.target_label}."
+                if pending_mutation is not None
                 else f"Executed {len(executed_steps)} automatic operator step(s)."
             ),
             payload={
@@ -2426,6 +2682,8 @@ class CopilotService:
             message=(
                 "Research Operator stopped at a safe step boundary."
                 if cancelled_at_boundary
+                else f"Awaiting confirmation for {pending_mutation.target_label}."
+                if pending_mutation is not None
                 else f"Executed {len(executed_steps)} automatic operator step(s)."
             ),
             card=self._build_operator_execution_card(
@@ -2500,28 +2758,14 @@ class CopilotService:
         arguments: dict[str, Any],
         context: CopilotContextBundle,
     ) -> CopilotToolExecution:
-        definition = self.action_registry.get(tool_id)
-        if definition is None:
+        try:
+            self.action_registry.authorize_automatic(tool_id)
+        except ResearchActionPermissionError as exc:
             return CopilotToolExecution(
-                output={"error": f"Unsupported Research Action Registry tool: {tool_id}"},
+                output={"error": str(exc)},
                 trace=CopilotToolTrace(
                     tool_name=tool_id,
-                    summary="Gamma rejected an action that is not registered.",
-                    arguments=arguments,
-                    source_ids=[],
-                ),
-            )
-        if (
-            definition.action_type not in {"read_context", "run_analysis", "fetch_external_context"}
-            or not definition.read_only
-            or definition.mutates_local_state
-            or definition.requires_confirmation
-        ):
-            return CopilotToolExecution(
-                output={"error": f"Action is not automatic read-only work: {tool_id}"},
-                trace=CopilotToolTrace(
-                    tool_name=tool_id,
-                    summary="Gamma blocked a non-automatic or state-changing operator action.",
+                    summary="Gamma blocked an unsupported or non-automatic operator action.",
                     arguments=arguments,
                     source_ids=[],
                 ),
@@ -2761,6 +3005,46 @@ class CopilotService:
                 "symbol_shocks": [],
             }
         return {}
+
+    def _explicit_dcf_mutation_arguments(
+        self,
+        request: CopilotResearchCardRequest,
+    ) -> dict[str, Any] | None:
+        """Extract only explicit supported percentages from a DCF mutation prompt."""
+        prompt = str(request.prompt or "").strip()
+        ticker = self._first_plan_entity_id(request, "ticker")
+        if not prompt or not ticker:
+            return None
+        normalized = prompt.lower()
+        scenario_id = next(
+            (scenario for scenario in ("bear", "base", "bull") if re.search(rf"\b{scenario}\b", normalized)),
+            "base",
+        )
+        field_patterns = {
+            "revenue_growth_pct": r"\brevenue\s+growth(?:\s+assumption)?",
+            "wacc_pct": r"\b(?:wacc|discount\s+rate)",
+            "terminal_growth_pct": r"\bterminal\s+growth(?:\s+rate)?",
+            "tax_rate_pct": r"\btax\s+rate",
+            "ebit_margin_pct": r"\bebit\s+margin",
+        }
+        assumptions: dict[str, float] = {}
+        for key, label_pattern in field_patterns.items():
+            match = re.search(
+                rf"{label_pattern}\s*(?:to|at|=|of)?\s*(-?\d+(?:\.\d+)?)\s*%",
+                normalized,
+            )
+            if match:
+                assumptions[key] = float(match.group(1)) / 100.0
+        if not assumptions:
+            return None
+        return {
+            "ticker": ticker,
+            "scenario_id": scenario_id,
+            "active_scenario_id": None,
+            "assumptions": assumptions,
+            "overrides": {},
+            "rationale": prompt,
+        }
 
     @staticmethod
     def _dcf_payload_from_model(model: Any) -> dict[str, Any]:
@@ -3597,6 +3881,7 @@ class CopilotService:
             "edit",
             "modify",
             "raise",
+            "set",
             "lower",
             "update",
             "cell",

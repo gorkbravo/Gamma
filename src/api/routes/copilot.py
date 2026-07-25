@@ -19,6 +19,7 @@ from src.api.schemas.copilot import (
     CopilotMemoUpdateRequestModel,
     CopilotMutationApplyRequestModel,
     CopilotMutationApplyResultModel,
+    CopilotMutationRejectRequestModel,
     CopilotOperatorPlanModel,
     CopilotResearchCardRequestModel,
     CopilotResearchCardResponseModel,
@@ -92,7 +93,10 @@ def execute_research_operator_plan(
     request: Request,
 ) -> CopilotResearchCardResponseModel:
     runtime = request.app.state.runtime
-    result = runtime.copilot_service.execute_research_operator_plan(payload.to_domain())
+    result = runtime.copilot_service.execute_research_operator_plan(
+        payload.to_domain(),
+        run_id=payload.run_id,
+    )
     return CopilotResearchCardResponseModel.from_domain(result)
 
 
@@ -212,6 +216,11 @@ def propose_fundamentals_dcf_mutation(
             assumptions=payload.assumptions,
             overrides=payload.overrides,
             rationale=payload.rationale,
+            session_id=payload.user_session_id,
+            workflow_id=payload.workflow_id,
+            run_id=payload.run_id,
+            checkpoint_id=payload.checkpoint_id,
+            context_fingerprint=payload.context_fingerprint,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -229,10 +238,40 @@ def apply_copilot_mutation(
         result = runtime.copilot_service.apply_fundamentals_dcf_update(
             mutation_id=mutation_id,
             confirmation_token=payload.confirmation_token,
+            session_id=payload.user_session_id,
+            context_fingerprint=payload.context_fingerprint,
+            proposal_hash=payload.proposal_hash,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CopilotMutationApplyResultModel.from_domain(result)
+
+
+@router.get("/copilot/mutations/{mutation_id}", response_model=CopilotDraftMutationModel)
+def get_copilot_mutation(
+    mutation_id: str,
+    request: Request,
+) -> CopilotDraftMutationModel:
+    mutation = request.app.state.runtime.copilot_service.get_copilot_mutation(mutation_id)
+    if mutation is None:
+        raise HTTPException(status_code=404, detail=f"Copilot mutation not found: {mutation_id}")
+    return CopilotDraftMutationModel.from_domain(mutation)
+
+
+@router.post("/copilot/mutations/{mutation_id}/reject", response_model=CopilotDraftMutationModel)
+def reject_copilot_mutation(
+    mutation_id: str,
+    payload: CopilotMutationRejectRequestModel,
+    request: Request,
+) -> CopilotDraftMutationModel:
+    try:
+        mutation = request.app.state.runtime.copilot_service.reject_copilot_mutation(
+            mutation_id=mutation_id,
+            session_id=payload.user_session_id,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotDraftMutationModel.from_domain(mutation)
 
 
 @router.get("/copilot/sessions", response_model=list[CopilotSessionModel])
@@ -282,6 +321,10 @@ def get_copilot_session(session_id: str, request: Request) -> CopilotSessionDeta
         artifacts=[
             CopilotArtifactModel.from_domain(item)
             for item in runtime.copilot_service.list_artifacts(session_id)
+        ],
+        mutations=[
+            CopilotDraftMutationModel.from_domain(item)
+            for item in runtime.copilot_service.list_copilot_mutations(session_id)
         ],
         storage_warnings=[
             CopilotStorageWarningModel.from_domain(item)

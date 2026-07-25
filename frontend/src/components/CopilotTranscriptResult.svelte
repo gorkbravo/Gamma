@@ -21,8 +21,16 @@
   export let compact = false;
   export let cardLabel: string | null = "Research Card";
   export let onOpenSource: ((source: CopilotSourceRef) => Promise<unknown> | void) | null = null;
+  export let onConfirmMutation:
+    | ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown)
+    | null = null;
+  export let onRejectMutation:
+    | ((mutation: CopilotDraftMutation) => Promise<unknown> | unknown)
+    | null = null;
 
   let blocks: CopilotTranscriptBlock[] = [];
+  let resolvingMutationId: string | null = null;
+  let mutationResolutionError = "";
 
   function formatMs(value: number) {
     return value >= 1000 ? `${Math.round(value / 100) / 10}s` : `${value}ms`;
@@ -45,6 +53,33 @@
 
   function sourceIsNavigable(source: CopilotSourceRef) {
     return onOpenSource != null && canNavigateCopilotSource(source);
+  }
+
+  function rollbackLabel(mutation: CopilotDraftMutation) {
+    if (mutation.rollback_snapshot_id) return `rollback ${mutation.rollback_snapshot_id}`;
+    if (mutation.status === "pending") return "pre-change snapshot on apply";
+    return "rollback unavailable";
+  }
+
+  async function resolveMutation(
+    action: "confirm" | "reject",
+    mutation: CopilotDraftMutation
+  ) {
+    const callback = action === "confirm" ? onConfirmMutation : onRejectMutation;
+    if (!callback || resolvingMutationId) return;
+    resolvingMutationId = mutation.mutation_id;
+    mutationResolutionError = "";
+    try {
+      const resolved = await callback(mutation);
+      if (resolved == null) {
+        mutationResolutionError = `Could not ${action} this mutation.`;
+      }
+    } catch (error) {
+      mutationResolutionError =
+        error instanceof Error ? error.message : `Could not ${action} this mutation.`;
+    } finally {
+      resolvingMutationId = null;
+    }
   }
 
   $: blocks = buildCopilotTranscriptBlocks(result, { researchPlan, operatorPlan, report, mutation });
@@ -273,13 +308,36 @@
         {#if block.warnings.length}
           <ul class="warnings">{#each block.warnings as warning}<li>{warning}</li>{/each}</ul>
         {/if}
+        {#if block.mutation && block.mutation.status === "pending"}
+          <div class="confirmation-actions" aria-label="Mutation confirmation actions">
+            <button
+              type="button"
+              class="confirm-action"
+              disabled={resolvingMutationId != null || onConfirmMutation == null}
+              on:click={() => resolveMutation("confirm", block.mutation)}
+            >
+              {resolvingMutationId === block.mutation.mutation_id ? "Applying…" : "Confirm and apply"}
+            </button>
+            <button
+              type="button"
+              class="reject-action"
+              disabled={resolvingMutationId != null || onRejectMutation == null}
+              on:click={() => resolveMutation("reject", block.mutation)}
+            >
+              Reject
+            </button>
+          </div>
+          {#if mutationResolutionError}
+            <p class="mutation-error" role="alert">{mutationResolutionError}</p>
+          {/if}
+        {/if}
       </section>
 
     {:else if block.kind === "mutation-diff"}
       <section class="block mutation" aria-label="Copilot mutation diff">
         <header class="block-head">
           <h4>{block.mutation.target_label}</h4>
-          <span>{block.mutation.status} · rollback {block.mutation.rollback_snapshot_id ? "available" : "unavailable"}</span>
+          <span>{block.mutation.status} · {rollbackLabel(block.mutation)}</span>
         </header>
         <div class="table-wrap">
           <table>
@@ -772,6 +830,43 @@
 
   .secondary {
     color: var(--text-2);
+    font-size: var(--text-xs);
+  }
+
+  .confirmation-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .confirmation-actions button {
+    min-height: 28px;
+    padding: 0 var(--space-4);
+    border: 1px solid var(--panel-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-1);
+    color: var(--text-1);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--text-xs);
+  }
+
+  .confirmation-actions .confirm-action {
+    background: var(--active-bg);
+    color: var(--text-0);
+  }
+
+  .confirmation-actions button:not(:disabled):hover {
+    background: var(--hover-bg);
+  }
+
+  .confirmation-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .mutation-error {
+    color: var(--negative);
     font-size: var(--text-xs);
   }
 

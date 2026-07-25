@@ -207,6 +207,51 @@ const typedMutation: CopilotDraftMutation = {
 };
 
 describe("CopilotTranscriptResult", () => {
+  it("renders inline apply and reject controls for a pending operator mutation", () => {
+    const operatorResult = result();
+    const pendingMutation = {
+      ...typedMutation,
+      status: "pending",
+      rollback_snapshot_id: null
+    };
+    operatorResult.status = "awaiting_confirmation";
+    operatorResult.operator_events = [
+      {
+        run_id: "run_1",
+        event_id: "event_confirmation",
+        sequence: 1,
+        event_type: "confirmation-needed",
+        timestamp: "2026-07-24T00:00:00Z",
+        step_id: "step_draft",
+        tool_id: "fundamentals.propose_dcf_update",
+        title: "Review DCF update",
+        message: "Review the exact before and after values.",
+        payload: {
+          mutation_id: pendingMutation.mutation_id,
+          confirmation_token: pendingMutation.confirmation_token,
+          mutation: pendingMutation
+        },
+        source_ids: [],
+        warnings: []
+      }
+    ];
+
+    const { body } = render(CopilotTranscriptResult, {
+      props: {
+        result: operatorResult,
+        onConfirmMutation: () => pendingMutation,
+        onRejectMutation: () => pendingMutation
+      }
+    });
+
+    expect(body).toContain("Confirm and apply");
+    expect(body).toContain("Reject");
+    expect(body).toContain("Before");
+    expect(body).toContain("After");
+    expect(body).toContain("pre-change snapshot on apply");
+    expect(body).not.toContain("confirm-token");
+  });
+
   it("renders the complete research card and its grounding evidence", () => {
     const { body } = render(CopilotTranscriptResult, { props: { result: result() } });
 

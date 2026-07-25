@@ -34,6 +34,7 @@ export type CopilotTranscriptBlock =
       message: string;
       warnings: string[];
       payload: Record<string, unknown>;
+      mutation: CopilotDraftMutation | null;
       references: ResolvedTranscriptReferences;
     }
   | { kind: "mutation-diff"; mutation: CopilotDraftMutation; references: ResolvedTranscriptReferences }
@@ -84,18 +85,45 @@ function operatorEventBlock(
 ): CopilotTranscriptBlock {
   const references = resolveReferences(event.source_ids, sources);
   if (event.event_type === "confirmation-needed") {
+    const mutation = mutationFromPayload(event.payload);
+    const payload = Object.fromEntries(
+      Object.entries(event.payload).filter(
+        ([key]) => !["confirmation_token", "mutation", "proposed_payload"].includes(key)
+      )
+    );
     return {
       kind: "confirmation",
       title: event.title ?? "Confirmation required",
       message: event.message ?? "This operator step is stopped pending exact confirmation.",
       warnings: event.warnings,
-      payload: event.payload,
+      payload,
+      mutation,
       references
     };
   }
   if (event.event_type === "artifact-created") return { kind: "artifact", event, references };
   if (event.event_type === "final-report") return { kind: "operator-report", event, references };
   return { kind: "operator-step", event, references };
+}
+
+function mutationFromPayload(payload: Record<string, unknown>): CopilotDraftMutation | null {
+  const candidate = payload.mutation;
+  if (
+    candidate == null
+    || typeof candidate !== "object"
+    || Array.isArray(candidate)
+  ) {
+    return null;
+  }
+  const mutation = candidate as Partial<CopilotDraftMutation>;
+  if (
+    typeof mutation.mutation_id !== "string"
+    || typeof mutation.confirmation_token !== "string"
+    || !Array.isArray(mutation.diff)
+  ) {
+    return null;
+  }
+  return mutation as CopilotDraftMutation;
 }
 
 export function buildCopilotTranscriptBlocks(
@@ -118,6 +146,7 @@ export function buildCopilotTranscriptBlocks(
           required_for_tool_ids: checkpoint.required_for_tool_ids,
           policy: checkpoint.default_policy
         },
+        mutation: null,
         references: { evidence: [], unresolvedEvidenceRefs: [] }
       });
     }
@@ -158,7 +187,17 @@ export function buildCopilotTranscriptBlocks(
       });
     }
 
-    blocks.push(...operatorEvents.map((event) => operatorEventBlock(event, sources)));
+    for (const event of operatorEvents) {
+      const block = operatorEventBlock(event, sources);
+      blocks.push(block);
+      if (block.kind === "confirmation" && block.mutation) {
+        blocks.push({
+          kind: "mutation-diff",
+          mutation: block.mutation,
+          references: block.references
+        });
+      }
+    }
 
     if (sources.length || toolTraces.length || warnings.length) {
       blocks.push({
@@ -199,6 +238,7 @@ export function buildCopilotTranscriptBlocks(
         expires_at: extras.mutation.expires_at,
         rollback_snapshot_id: extras.mutation.rollback_snapshot_id
       },
+      mutation: extras.mutation,
       references: mutationReferences
     });
     blocks.push({ kind: "mutation-diff", mutation: extras.mutation, references: mutationReferences });
