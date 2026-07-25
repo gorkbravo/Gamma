@@ -3138,6 +3138,16 @@ class CopilotService:
             source_turn_ids=source_turn_ids,
         )
 
+    def create_session(
+        self,
+        *,
+        title: str | None = None,
+        session_id: str | None = None,
+    ) -> CopilotSession:
+        if self.store is None:
+            raise ValueError("Copilot persistence is not configured.")
+        return self.store.create_session(title=title, session_id=session_id)
+
     def archive_session(self, session_id: str) -> CopilotSession:
         if self.store is None:
             raise ValueError("Copilot persistence is not configured.")

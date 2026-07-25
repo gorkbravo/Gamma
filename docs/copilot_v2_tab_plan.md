@@ -171,7 +171,7 @@ Gamma already has more than a chat shell:
 
 The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 through 3 are verified at 86%: the supported OpenAI SDK feeds typed events into server-owned Agent and Operator runs; bounded replay survives subscriber disconnects; shelf and workspace share one typed transcript/evidence renderer; claim refs are normalized against known turn sources before persistence; supported evidence links preserve mapped Gamma context; sessions have a typed lifecycle and schema-v3 migration/recovery contract; restart replay retains the complete turn contract; and the dedicated workspace owns memo/report creation, editing, preview, duplication, deletion, and Markdown export. Remaining gaps are:
 
-- a focused post-checkpoint pass must fix New Chat reconciliation, clear accepted prompts from the composer, and move the storage-recovery warning out of the action area;
+- ~~a focused post-checkpoint pass must fix New Chat reconciliation, clear accepted prompts from the composer, and move the storage-recovery warning out of the action area;~~ completed 2026-07-25;
 - the custom Operator streams live and cancels at safe step boundaries, but Agents SDK progress parity and inline confirmation/diff/rollback UX remain incomplete;
 - the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5;
 - Sealanes, news, and some deeper IV/Commodities drilldowns do not yet have tool parity;
@@ -341,9 +341,17 @@ Implementation note (2026-07-24, checkpoint complete):
 
 - [x] Add session rename, archive/restore, delete, schema versioning, migrations, and non-destructive corrupted-record recovery.
 - [x] Persist role, depth, requested/resolved provider/model metadata, selected scopes, context fingerprints/snapshots, run status, cancellation, usage, plans, events, confirmations, warnings, sources, traces, and artifacts.
+- [x] Create each new conversation as one authoritative empty session and keep selected, inactive, running, and archived states distinct.
 - Add a visible retention control explaining Gamma-local storage versus OpenAI stored responses.
 - Support a `store: false` path without breaking local continuation, including encrypted reasoning replay only if it is intentionally adopted and tested.
 - Put model aliases, allowed efforts/modes, routing rules, and fallbacks in a versioned policy object with capability validation.
+
+Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint percentage is unchanged):
+- `POST /copilot/sessions` creates one authoritative empty session. Passing an explicit `session_id` is idempotent, so a double activation reattaches instead of creating a duplicate. `New chat` now creates the session before selecting it, which removes the not-found reconciliation that made it silently open an existing conversation.
+- The client no longer mints a session id just to read state. An unselected workspace is a real state: with no persisted selection Gamma adopts the newest unarchived session, or shows an honest empty workspace when none exists, instead of surfacing a not-found error.
+- `selected`, `inactive`, `running`, and `archived` are independent facts in `frontend/src/lib/copilot-workspace.ts`. Selection is not proof of an active run; switching conversations or starting a new chat does not cancel a server-owned run, the source conversation keeps a running indicator, and the settled turn stays with its own session rather than being appended to the transcript now on screen.
+- Composer clearing is driven by run acceptance (`CopilotRunState.accepted`, set on the first acknowledged run event), not by the final status. Quota, provider-error, refusal, incomplete, cancellation, timeout, and zero-tool Operator outcomes all clear the composer because the turn is already persisted; a submission rejected before acceptance preserves the draft, and Retry resends the persisted turn prompt.
+- The storage-recovery warning is now an in-flow status strip in the chat column with a `RECOVERY` badge, a plain-language explanation that originals were preserved, an inspectable list of safe record details (record type, recovery action, store-relative path, message), a session-scoped dismiss, and a `Storage` header control for rediscovery. It is statically positioned with no `z-index`, so it cannot cover the composer, artifact controls, or confirmation dialogs at desktop or narrow widths.
 
 #### G. Shelf/full-workspace continuity — required
 
@@ -371,7 +379,7 @@ Implementation note (2026-07-24, checkpoint complete):
 1. ~~Provider-native streaming, shared run lifecycle, bounded replay, and explicit provider state.~~ Completed 2026-07-17 at checkpoint 1 (76%).
 2. ~~Typed transcript blocks, validated claim/source resolution, and dedicated-tab evidence parity.~~ Completed 2026-07-24 at checkpoint 2 (80%).
 3. ~~In-tab artifacts/memos and session lifecycle completion.~~ Completed 2026-07-25 at checkpoint 3 (86%).
-4. Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in `docs/copilot_v2_checkpoint3_prompt.md`.
+4. ~~Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in `docs/copilot_v2_checkpoint3_prompt.md`.~~ Completed 2026-07-25 (see the note under workstream F).
 5. Live operator events, cancellation, and inline confirmations.
 6. Missing context/tool coverage and source navigation.
 7. GPT-5.6 eval-backed model policy and routing rollout.

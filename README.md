@@ -601,6 +601,10 @@ Current behavior:
 - exposes scope, provenance, warnings, and tool traces in generated outputs
 - supports first-pass cross-context synthesis across loaded Gamma domains
 - stores local sessions, turns, context snapshots, and first-pass memos
+- creates each `New chat` as an authoritative empty session through `POST /copilot/sessions`, so a new conversation is selectable even while other conversations exist and survives refresh, search, and restart
+- distinguishes selected, inactive, running, and archived conversations; switching away from a streaming run does not cancel it
+- clears the composer once a submission is accepted and keeps the draft when it is rejected before acceptance, with Retry driven by the persisted turn
+- reports non-destructive storage recovery in an in-flow, dismissible status strip that stays rediscoverable from the workspace `Storage` control
 - exposes a feature-flagged operator path for bounded read-only research actions
 
 Important caveats:

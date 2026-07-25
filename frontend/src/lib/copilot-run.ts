@@ -16,6 +16,12 @@ export interface CopilotRunFunctionArguments {
 
 export interface CopilotRunState {
   runId: string;
+  /**
+   * True once the server has acknowledged this run with at least one event.
+   * From that point a turn is persisted for the submission, so the composer
+   * draft is no longer the only copy of the prompt.
+   */
+  accepted: boolean;
   phase: CopilotRunPhase;
   domain: string | null;
   provider: string | null;
@@ -39,6 +45,7 @@ const TERMINAL_EVENTS = new Set(["completed", "failed", "cancelled"]);
 export function createCopilotRunState(runId: string): CopilotRunState {
   return {
     runId,
+    accepted: false,
     phase: "pending",
     domain: null,
     provider: null,
@@ -78,7 +85,7 @@ export function reduceCopilotRunEvent(state: CopilotRunState, event: CopilotRunE
     return state;
   }
 
-  const next: CopilotRunState = { ...state, lastSequence: event.sequence };
+  const next: CopilotRunState = { ...state, lastSequence: event.sequence, accepted: true };
   const data = event.data ?? {};
 
   switch (event.event) {

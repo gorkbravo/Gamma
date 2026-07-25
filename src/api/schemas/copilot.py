@@ -874,6 +874,17 @@ class CopilotSessionUpdateRequestModel(BaseModel):
     expected_updated_at: datetime | None = None
 
 
+class CopilotSessionCreateRequestModel(BaseModel):
+    """Request one authoritative empty session.
+
+    `session_id` is optional and idempotent: repeating the same id reattaches to
+    the blank session instead of creating a duplicate.
+    """
+
+    title: str | None = Field(default=None, max_length=96)
+    session_id: str | None = Field(default=None, max_length=128)
+
+
 class CopilotArtifactCreateRequestModel(BaseModel):
     artifact_type: str
     template: str

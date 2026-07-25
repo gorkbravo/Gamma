@@ -120,6 +120,39 @@ class CopilotStore:
         with self._lock:
             return self._load_session_path(self.sessions_dir / f"{safe_id}.json")
 
+    def create_session(
+        self,
+        *,
+        title: str | None = None,
+        session_id: str | None = None,
+    ) -> CopilotSession:
+        """Create one authoritative empty session record.
+
+        `New chat` needs a persisted session before it can be selected, otherwise
+        the client holds an id the store has never seen and normal reconciliation
+        treats it as stale. Passing an explicit `session_id` is idempotent so a
+        double activation reattaches to the same blank session instead of
+        creating a second one.
+        """
+        safe_session_id = self._safe_id(session_id) if session_id else ""
+        if session_id and not safe_session_id:
+            raise CopilotStoreError("session_id contains no usable characters.")
+        safe_session_id = safe_session_id or new_copilot_id("session")
+        now = now_utc()
+        with self._lock:
+            session_path = self.sessions_dir / f"{safe_session_id}.json"
+            existing = self._load_session_path(session_path)
+            if existing is not None:
+                return existing
+            session = CopilotSession(
+                session_id=safe_session_id,
+                title=(str(title or "").strip() or "New Copilot Session")[:96],
+                created_at=now,
+                updated_at=now,
+            )
+            self._write_json(session_path, self._session_to_json(session))
+        return session
+
     def storage_status(self) -> CopilotStorageStatus:
         with self._lock:
             warnings = list(self._storage_warnings)

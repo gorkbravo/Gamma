@@ -464,6 +464,27 @@ export const copilotArtifacts = writable<CopilotArtifact[]>([]);
 export const activeCopilotArtifact = writable<CopilotArtifact | null>(null);
 export const copilotStorageStatus = writable<CopilotStorageStatus | null>(null);
 export const copilotArtifactSaveState = writable<"idle" | "saving" | "saved" | "error">("idle");
+/** True while an authoritative `New chat` create is in flight. */
+export const copilotSessionCreating = writable(false);
+/** Sessions with a non-terminal run, whether or not they are the selected one. */
+export const copilotRunningSessionIds = writable<string[]>([]);
+/** Set when the last `New chat` activation failed, so the UI can be honest. */
+export const copilotSessionCreateError = writable<string | null>(null);
+/**
+ * The most recent composer submission and whether the server accepted it.
+ * `accepted` flips as soon as the run is acknowledged, which is the point where
+ * a turn is persisted and the composer draft stops being the only copy.
+ */
+export const copilotLastSubmission = writable<CopilotSubmissionRecord | null>(null);
+
+export type CopilotSubmissionRecord = {
+  submissionId: number;
+  sessionId: string | null;
+  role: "research_agent" | "research_operator";
+  prompt: string;
+  accepted: boolean;
+  rejectedReason: string | null;
+};
 export const copilotResearchPlan = writable<CopilotResearchPlan | null>(null);
 export const copilotOperatorPlan = writable<CopilotOperatorPlan | null>(null);
 export const copilotOperatorResult = writable<CopilotResearchCardResult | null>(null);
@@ -679,6 +700,33 @@ function resetCopilotCard(domain: CopilotDomain) {
     }
     return next;
   });
+}
+
+/**
+ * Drop every in-memory Copilot thread and card.
+ *
+ * Threads are conversation-scoped scratch state. The workspace renders the
+ * thread of whichever domain the selected scope resolves to, so switching
+ * conversations must clear all of them or the previous conversation's turns
+ * keep rendering under the newly selected session.
+ */
+function resetAllCopilotThreads() {
+  copilotCards.set({
+    portfolio: null,
+    sitrep: null,
+    research: null,
+    equity_research: null,
+    strategy_lab: null,
+    macro: null,
+    commodities: null,
+    prediction_markets: null,
+    crypto: null,
+    fundamentals: null,
+    risk: null,
+    iv: null,
+    synthesis: null
+  });
+  copilotThreads.set(createEmptyCopilotThreads());
 }
 
 export function setResearchDraft(nextDraft: ResearchDraftState) {
@@ -2846,11 +2894,26 @@ export async function computeRisk(options: RiskComputeOptions) {
   });
 }
 
+const COPILOT_SESSION_STORAGE_KEY = "gamma.copilot.session";
+
+/**
+ * The session the workspace currently displays, or `null` when nothing has been
+ * selected yet. Never mints an id — an unselected workspace is a real state, not
+ * a stale persisted id to reconcile away.
+ */
+function getSelectedCopilotSessionId(): string | null {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+  const existing = localStorage.getItem(COPILOT_SESSION_STORAGE_KEY);
+  return existing && existing.trim() ? existing : null;
+}
+
 function getCopilotSessionId() {
   if (typeof localStorage === "undefined") {
     return "gamma-copilot-session";
   }
-  const existing = localStorage.getItem("gamma.copilot.session");
+  const existing = getSelectedCopilotSessionId();
   if (existing) {
     return existing;
   }
@@ -2858,13 +2921,19 @@ function getCopilotSessionId() {
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `gamma-${Date.now()}`;
-  localStorage.setItem("gamma.copilot.session", nextId);
+  localStorage.setItem(COPILOT_SESSION_STORAGE_KEY, nextId);
   return nextId;
 }
 
 function setCopilotSessionId(sessionId: string) {
   if (typeof localStorage !== "undefined") {
-    localStorage.setItem("gamma.copilot.session", sessionId);
+    localStorage.setItem(COPILOT_SESSION_STORAGE_KEY, sessionId);
+  }
+}
+
+function clearSelectedCopilotSessionId() {
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem(COPILOT_SESSION_STORAGE_KEY);
   }
 }
 
@@ -3229,12 +3298,83 @@ function newCopilotRunId(): string {
 
 const COPILOT_RECONNECT_ATTEMPTS = 3;
 
+/**
+ * Track which conversation owns a non-terminal run.
+ *
+ * Switching sessions or starting a new chat does not cancel the run, so the
+ * source conversation keeps a visible running indicator until it settles.
+ */
+/**
+ * True when a settled run still belongs to the displayed conversation.
+ *
+ * If the user started a new chat or switched sessions mid-run, the result stays
+ * with its own session on the server and replays there; it must not be appended
+ * to the transcript now on screen.
+ */
+function isCopilotRunSessionStillSelected(runSessionId: string) {
+  const selected = getSelectedCopilotSessionId();
+  return selected == null || selected === runSessionId;
+}
+
+function markCopilotSessionRunning(sessionId: string | null, running: boolean) {
+  if (!sessionId) {
+    return;
+  }
+  copilotRunningSessionIds.update((items) => {
+    const without = items.filter((item) => item !== sessionId);
+    return running ? [...without, sessionId] : without;
+  });
+}
+
+let copilotSubmissionSequence = 0;
+
+/** Record a composer submission before any network work happens. */
+function beginCopilotSubmission(
+  role: CopilotSubmissionRecord["role"],
+  prompt: string,
+  sessionId: string | null
+): CopilotSubmissionRecord {
+  copilotSubmissionSequence += 1;
+  const record: CopilotSubmissionRecord = {
+    submissionId: copilotSubmissionSequence,
+    sessionId,
+    role,
+    prompt,
+    accepted: false,
+    rejectedReason: null
+  };
+  copilotLastSubmission.set(record);
+  return record;
+}
+
+function acceptCopilotSubmission(record: CopilotSubmissionRecord) {
+  if (record.accepted) {
+    return;
+  }
+  record.accepted = true;
+  copilotLastSubmission.update((current) =>
+    current?.submissionId === record.submissionId ? { ...current, accepted: true } : current
+  );
+}
+
+/** Mark a submission the server never accepted, so the draft is preserved. */
+function rejectCopilotSubmission(record: CopilotSubmissionRecord, reason: string) {
+  if (record.accepted) {
+    return;
+  }
+  record.rejectedReason = reason;
+  copilotLastSubmission.update((current) =>
+    current?.submissionId === record.submissionId ? { ...current, rejectedReason: reason } : current
+  );
+}
+
 async function consumeCopilotRun(
   endpoint: string,
   payload: Record<string, unknown>,
   runId: string,
   domain: CopilotDomain,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onAccepted: () => void = () => {}
 ): Promise<{ state: CopilotRunState; result: CopilotResearchCardResult }> {
   let runState = createCopilotRunState(runId);
   let finalResult: CopilotResearchCardResult | null = null;
@@ -3248,8 +3388,12 @@ async function consumeCopilotRun(
     } catch {
       return;
     }
+    const previouslyAccepted = runState.accepted;
     runState = reduceCopilotRunEvent(runState, event);
     copilotActiveRun.set(runState);
+    if (!previouslyAccepted && runState.accepted) {
+      onAccepted();
+    }
     if (finalResult == null && isTerminalCopilotRunEvent(event) && runState.rawResult != null) {
       finalResult = normalizeCopilotResearchCardResult(domain, runState.rawResult);
     }
@@ -3324,11 +3468,13 @@ export async function streamCopilotResearchCard(
     continuingThread || !activeThread.entries.length
       ? activeThread
       : createEmptyCopilotThread(domain);
+  const submission = beginCopilotSubmission("research_agent", prompt, getSelectedCopilotSessionId());
 
   try {
     const validationError = validateCopilotContext(domain, options);
     if (validationError) {
       lastError.set(validationError);
+      rejectCopilotSubmission(submission, validationError);
       const result = buildCopilotFailureResult(domain, validationError);
       appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
       return result;
@@ -3337,6 +3483,7 @@ export async function streamCopilotResearchCard(
     if (!context) {
       const message = "The active Copilot context is unavailable.";
       lastError.set(message);
+      rejectCopilotSubmission(submission, message);
       const result = buildCopilotFailureResult(domain, message);
       appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
       return result;
@@ -3349,6 +3496,7 @@ export async function streamCopilotResearchCard(
     if (domain === "synthesis" && !synthesis) {
       const message = "The active synthesis scope is unavailable.";
       lastError.set(message);
+      rejectCopilotSubmission(submission, message);
       const result = buildCopilotFailureResult(domain, message);
       appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
       return result;
@@ -3362,12 +3510,14 @@ export async function streamCopilotResearchCard(
     const runId = newCopilotRunId();
     const selectedScopeDomains =
       domain === "synthesis" ? options.synthesisDomains ?? [] : [domain];
+    const runSessionId = getCopilotSessionId();
+    submission.sessionId = runSessionId;
     const payload = {
       domain,
       prompt,
       role: "research_agent",
       selected_scope_domains: selectedScopeDomains,
-      user_session_id: getCopilotSessionId(),
+      user_session_id: runSessionId,
       context_fingerprint: contextFingerprint,
       run_id: runId,
       ...(normalizeReasoningEffort(options.reasoningEffort)
@@ -3380,6 +3530,7 @@ export async function streamCopilotResearchCard(
 
     const controller = new AbortController();
     activeCopilotRunId = runId;
+    markCopilotSessionRunning(runSessionId, true);
     const timer = setTimeout(() => controller.abort(), COPILOT_STREAM_TIMEOUT_MS);
     let streamed: { state: CopilotRunState; result: CopilotResearchCardResult };
     try {
@@ -3388,13 +3539,17 @@ export async function streamCopilotResearchCard(
         payload,
         runId,
         domain,
-        controller.signal
+        controller.signal,
+        () => acceptCopilotSubmission(submission)
       );
     } finally {
       clearTimeout(timer);
+      markCopilotSessionRunning(runSessionId, false);
     }
     const settled = streamed.result;
-    appendCopilotThreadResult(domain, settled, prompt, contextFingerprint, previousResponseId, baseThread);
+    if (isCopilotRunSessionStillSelected(runSessionId)) {
+      appendCopilotThreadResult(domain, settled, prompt, contextFingerprint, previousResponseId, baseThread);
+    }
     lastError.set(settled.status === "ready" ? "" : settled.message ?? "Copilot failed.");
     return settled;
   } catch (error) {
@@ -3402,6 +3557,7 @@ export async function streamCopilotResearchCard(
       ? `${errorMessage(error)}. Your prompt draft is preserved; retry or reduce the synthesis scope.`
       : errorMessage(error);
     lastError.set(message);
+    rejectCopilotSubmission(submission, message);
     const result = buildCopilotFailureResult(domain, message);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, previousResponseId, baseThread);
     return result;
@@ -3535,12 +3691,14 @@ export async function executeCopilotOperatorPlan(
     activeThread.contextFingerprint === contextFingerprint
       ? activeThread
       : createEmptyCopilotThread(domain);
+  const submission = beginCopilotSubmission("research_operator", prompt, getSelectedCopilotSessionId());
 
   try {
     const context = buildCopilotContext(domain, options.workspaceMode);
     if (!context) {
       const message = "The active Copilot context is unavailable.";
       lastError.set(message);
+      rejectCopilotSubmission(submission, message);
       const result = buildCopilotFailureResult(domain, message);
       copilotOperatorResult.set(result);
       appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
@@ -3551,6 +3709,8 @@ export async function executeCopilotOperatorPlan(
         ? buildCopilotSynthesisPayload(options.synthesisDomains, options.workspaceMode, options.activeTabId)
         : null;
     const runId = newCopilotRunId();
+    const runSessionId = getCopilotSessionId();
+    submission.sessionId = runSessionId;
     const payload = {
       domain,
       prompt,
@@ -3558,7 +3718,7 @@ export async function executeCopilotOperatorPlan(
       selected_scope_domains:
         domain === "synthesis" ? options.synthesisDomains ?? [] : [domain],
       run_id: runId,
-      user_session_id: getCopilotSessionId(),
+      user_session_id: runSessionId,
       context_fingerprint: contextFingerprint,
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
@@ -3568,6 +3728,7 @@ export async function executeCopilotOperatorPlan(
     };
     const controller = new AbortController();
     activeCopilotRunId = runId;
+    markCopilotSessionRunning(runSessionId, true);
     const timer = setTimeout(() => controller.abort(), COPILOT_OPERATOR_TIMEOUT_MS);
     let streamed: { state: CopilotRunState; result: CopilotResearchCardResult };
     try {
@@ -3576,20 +3737,25 @@ export async function executeCopilotOperatorPlan(
         payload,
         runId,
         domain,
-        controller.signal
+        controller.signal,
+        () => acceptCopilotSubmission(submission)
       );
     } finally {
       clearTimeout(timer);
+      markCopilotSessionRunning(runSessionId, false);
     }
     const result = streamed.result;
-    copilotOperatorResult.set(result);
-    appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
+    if (isCopilotRunSessionStillSelected(runSessionId)) {
+      copilotOperatorResult.set(result);
+      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
+    }
     await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
     lastError.set(result.status === "ready" ? "" : result.message ?? "Research Operator failed.");
     return result;
   } catch (error) {
     const message = errorMessage(error);
     lastError.set(message);
+    rejectCopilotSubmission(submission, message);
     const result = buildCopilotFailureResult(domain, message);
     copilotOperatorResult.set(result);
     appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
@@ -3706,8 +3872,27 @@ export async function loadCopilotSessions(options: { includeArchived?: boolean; 
   }
 }
 
+function clearActiveCopilotSessionState() {
+  activeCopilotSession.set(null);
+  copilotMemos.set([]);
+  copilotArtifacts.set([]);
+  activeCopilotArtifact.set(null);
+  copilotArtifactSaveState.set("idle");
+}
+
 export async function loadActiveCopilotSession() {
-  const sessionId = getCopilotSessionId();
+  const sessionId = getSelectedCopilotSessionId();
+  if (!sessionId) {
+    // Nothing is selected yet. Adopt the newest unarchived conversation when one
+    // exists; otherwise stay on an honest empty workspace instead of erroring.
+    const sessions = await loadCopilotSessions();
+    const fallback = sessions.find((session) => session.archived_at == null) ?? null;
+    if (!fallback) {
+      clearActiveCopilotSessionState();
+      return null;
+    }
+    return loadCopilotSession(fallback.session_id, { makeActive: true });
+  }
   try {
     const detail = await getJson<CopilotSessionDetail>(`/copilot/sessions/${encodeURIComponent(sessionId)}`);
     activeCopilotSession.set(detail);
@@ -3733,10 +3918,7 @@ export async function loadActiveCopilotSession() {
         setError(fallbackError);
       }
     } else {
-      activeCopilotSession.set(null);
-      copilotMemos.set([]);
-      copilotArtifacts.set([]);
-      activeCopilotArtifact.set(null);
+      clearActiveCopilotSessionState();
       setError(error);
     }
     return null;
@@ -3744,10 +3926,20 @@ export async function loadActiveCopilotSession() {
 }
 
 export async function loadCopilotSession(sessionId: string, options: { makeActive?: boolean } = {}) {
+  const switchingSession = options.makeActive === true && getSelectedCopilotSessionId() !== sessionId;
   try {
     const detail = await getJson<CopilotSessionDetail>(`/copilot/sessions/${encodeURIComponent(sessionId)}`);
     if (options.makeActive) {
       setCopilotSessionId(sessionId);
+    }
+    if (switchingSession) {
+      // The in-memory thread belongs to the conversation being left; the newly
+      // selected session must render from its own persisted turns.
+      resetAllCopilotThreads();
+      copilotResearchPlan.set(null);
+      copilotOperatorPlan.set(null);
+      copilotOperatorResult.set(null);
+      copilotLastSubmission.set(null);
     }
     activeCopilotSession.set(detail);
     copilotMemos.set(detail.memos);
@@ -3760,19 +3952,75 @@ export async function loadCopilotSession(sessionId: string, options: { makeActiv
   }
 }
 
-export function startNewCopilotSession() {
-  const nextId =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `gamma-${Date.now()}`;
-  setCopilotSessionId(nextId);
-  activeCopilotSession.set(null);
-  copilotMemos.set([]);
-  copilotArtifacts.set([]);
-  activeCopilotArtifact.set(null);
+function emptyCopilotSessionDetail(session: CopilotSessionSummary): CopilotSessionDetail {
+  return {
+    session,
+    turns: [],
+    memos: [],
+    context_snapshots: [],
+    artifacts: [],
+    storage_warnings: []
+  };
+}
+
+/** Select an authoritative session and reset every per-conversation surface. */
+function selectCopilotSessionLocally(session: CopilotSessionSummary, detail: CopilotSessionDetail | null = null) {
+  setCopilotSessionId(session.session_id);
+  activeCopilotSession.set(detail ?? emptyCopilotSessionDetail(session));
+  copilotMemos.set(detail?.memos ?? []);
+  reconcileCopilotArtifacts(session.session_id, detail?.artifacts ?? []);
   copilotArtifactSaveState.set("idle");
-  resetCopilotCard("synthesis");
-  return nextId;
+  copilotResearchPlan.set(null);
+  copilotOperatorPlan.set(null);
+  copilotOperatorResult.set(null);
+  copilotLastSubmission.set(null);
+  resetAllCopilotThreads();
+}
+
+let copilotSessionCreateInFlight: Promise<CopilotSessionSummary | null> | null = null;
+
+async function requestNewCopilotSession(title: string | null): Promise<CopilotSessionSummary | null> {
+  copilotSessionCreating.set(true);
+  copilotSessionCreateError.set(null);
+  try {
+    const session = await postJson<CopilotSessionSummary>("/copilot/sessions", {
+      title,
+      session_id: null
+    });
+    copilotSessions.update((items) => [
+      session,
+      ...items.filter((item) => item.session_id !== session.session_id)
+    ]);
+    selectCopilotSessionLocally(session);
+    lastError.set("");
+    return session;
+  } catch (error) {
+    // An unusable New chat must say so rather than silently doing nothing.
+    copilotSessionCreateError.set(errorMessage(error));
+    setError(error);
+    return null;
+  } finally {
+    copilotSessionCreating.set(false);
+  }
+}
+
+/**
+ * Create exactly one authoritative blank session and select it.
+ *
+ * Concurrent activations (double click, Enter plus click) share the in-flight
+ * request so a second empty session is never created.
+ */
+export async function startNewCopilotSession(options: { title?: string | null } = {}) {
+  if (copilotSessionCreateInFlight) {
+    return copilotSessionCreateInFlight;
+  }
+  const request = requestNewCopilotSession(options.title ?? null);
+  copilotSessionCreateInFlight = request;
+  try {
+    return await request;
+  } finally {
+    copilotSessionCreateInFlight = null;
+  }
 }
 
 export async function loadCopilotMemos(sessionId?: string | null) {
@@ -3854,12 +4102,17 @@ export async function deleteCopilotSession(sessionId: string) {
     );
     const remaining = get(copilotSessions).filter((item) => item.session_id !== sessionId);
     copilotSessions.set(remaining);
-    if (getCopilotSessionId() === sessionId) {
+    copilotRunningSessionIds.update((items) => items.filter((item) => item !== sessionId));
+    if (getSelectedCopilotSessionId() === sessionId) {
       const fallback = remaining.find((session) => session.archived_at == null) ?? remaining[0] ?? null;
       if (fallback) {
         await loadCopilotSession(fallback.session_id, { makeActive: true });
       } else {
-        startNewCopilotSession();
+        // Nothing left to select. Stay on an empty workspace; `New chat` is the
+        // explicit action that creates the next authoritative session.
+        clearSelectedCopilotSessionId();
+        clearActiveCopilotSessionState();
+        resetAllCopilotThreads();
       }
     }
     lastError.set("");
@@ -3885,12 +4138,14 @@ export async function loadCopilotArtifacts(sessionId = getCopilotSessionId()) {
 }
 
 export function selectCopilotArtifact(artifactId: string | null) {
-  const sessionId = getCopilotSessionId();
   const selected = artifactId
     ? get(copilotArtifacts).find((artifact) => artifact.artifact_id === artifactId) ?? null
     : null;
+  const sessionId = selected?.session_id ?? getSelectedCopilotSessionId();
   activeCopilotArtifact.set(selected);
-  setCopilotArtifactId(sessionId, selected?.artifact_id ?? null);
+  if (sessionId) {
+    setCopilotArtifactId(sessionId, selected?.artifact_id ?? null);
+  }
   copilotArtifactSaveState.set("idle");
   return selected;
 }

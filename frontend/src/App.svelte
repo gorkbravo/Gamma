@@ -46,9 +46,13 @@
     activeCopilotSession,
     copilotArtifacts,
     copilotArtifactSaveState,
+    copilotLastSubmission,
     copilotOperatorPlan,
     copilotOperatorResult,
     copilotResearchPlan,
+    copilotRunningSessionIds,
+    copilotSessionCreateError,
+    copilotSessionCreating,
     copilotSessions,
     copilotStorageStatus,
     copilotThreads,
@@ -2055,8 +2059,15 @@
   }
 
   async function handleNewCopilotSession() {
-    startNewCopilotSession();
-    return handleLoadCopilotWorkspaceState();
+    // The session is created server-side first, so selecting it cannot 404 into
+    // an existing conversation.
+    const created = await startNewCopilotSession();
+    if (created == null) {
+      return null;
+    }
+    await loadCopilotSessions();
+    await loadCopilotStorageStatus();
+    return created;
   }
 
   async function handleLoadCopilotSessionsFiltered(options: { includeArchived?: boolean; search?: string } = {}) {
@@ -2821,6 +2832,10 @@
             latestHandoff={latestCopilotHandoff}
             loading={$loading.copilot}
             activeRun={$copilotActiveRun}
+            runningSessionIds={$copilotRunningSessionIds}
+            lastSubmission={$copilotLastSubmission}
+            creatingSession={$copilotSessionCreating}
+            sessionCreateError={$copilotSessionCreateError}
             onCancelRun={cancelCopilotRun}
             onGenerate={handleGenerateCopilotWorkspace}
             onPlan={handlePlanCopilotWorkspace}

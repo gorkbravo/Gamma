@@ -19,6 +19,13 @@
     CopilotThreadState
   } from "../lib/api/types";
   import type { CopilotRunState } from "../lib/copilot-run";
+  import {
+    describeCopilotSession,
+    resolveComposerDraft,
+    resolveInFlightPrompt,
+    summarizeCopilotStorageRecovery,
+    type CopilotComposerSubmission
+  } from "../lib/copilot-workspace";
 
   type CopilotGroundingScopeOption = {
     tabId: string;
@@ -65,6 +72,12 @@
   export let latestHandoff: CrossTabHandoffEnvelope | null = null;
   export let loading = false;
   export let activeRun: CopilotRunState | null = null;
+  /** Sessions with a non-terminal run, including ones the user switched away from. */
+  export let runningSessionIds: string[] = [];
+  /** The latest composer submission and whether the server accepted it. */
+  export let lastSubmission: CopilotComposerSubmission | null = null;
+  export let creatingSession = false;
+  export let sessionCreateError: string | null = null;
   export let onCancelRun: () => Promise<unknown> | void = () => {};
   export let onGenerate: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void;
   export let onPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
@@ -81,7 +94,10 @@
   export let onLoadSessions: () => Promise<unknown> | void = () => {};
   export let onSelectSession: (sessionId: string) => Promise<unknown> | void = () => {};
   export let onSearchSessions: (options?: { includeArchived?: boolean; search?: string }) => Promise<unknown> | void = () => {};
-  export let onNewSession: () => Promise<unknown> | void = () => {};
+  export let onNewSession: () =>
+    | Promise<CopilotSessionSummary | null>
+    | CopilotSessionSummary
+    | null = () => null;
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
   export let onOpenSource: (source: CopilotSourceRef) => Promise<unknown> | void = () => {};
   export let onSelectArtifact: (artifactId: string | null) => unknown = () => {};
@@ -122,9 +138,15 @@
   let renameTitle = "";
   let deleteSessionId: string | null = null;
   let restoredSessionId: string | null = null;
+  let newSessionPending = false;
+  let handledSubmissionId = 0;
+  let storageNoticeDismissed = false;
+  let storageDetailsOpen = false;
 
-  function activeTurns() {
-    return activeSession?.turns ?? [];
+  function applyAcceptedSubmission(submission: CopilotComposerSubmission | null) {
+    const resolved = resolveComposerDraft({ draft: promptText, handledSubmissionId }, submission);
+    promptText = resolved.draft;
+    handledSubmissionId = resolved.handledSubmissionId;
   }
 
   function setRoleMode(nextMode: CopilotRoleMode) {
@@ -136,12 +158,11 @@
     if (!surface.supported || !surface.domain || loading) {
       return;
     }
+    // The composer is cleared by the accepted-submission contract below, not by
+    // the final status: a quota, refusal, or provider failure after acceptance
+    // is already persisted as a retryable turn.
     const result = await onGenerate(surface.domain, promptText.trim(), reasoningEffort);
     if (result != null) {
-      const status = (result as { status?: string }).status;
-      if (status === "ready") {
-        promptText = "";
-      }
       await onLoadSessions();
     }
   }
@@ -163,10 +184,6 @@
     }
     const result = await onRunOperator(surface.domain, promptText.trim(), reasoningEffort);
     if (result != null) {
-      const status = (result as { status?: string }).status;
-      if (status === "ready") {
-        promptText = "";
-      }
       await onLoadSessions();
     }
   }
@@ -180,11 +197,23 @@
   }
 
   async function handleNewSession() {
-    if (loading) {
+    // A running conversation must not block a new one, and a second activation
+    // while the create is in flight must not produce a second blank session.
+    if (creatingSession || newSessionPending) {
       return;
     }
-    await onNewSession();
-    await onLoadSessions();
+    newSessionPending = true;
+    try {
+      const created = await onNewSession();
+      if (created == null) {
+        return;
+      }
+      promptText = "";
+      sessionSearch = "";
+      await onLoadSessions();
+    } finally {
+      newSessionPending = false;
+    }
   }
 
   async function handleArchiveSession(sessionId: string, event: MouseEvent) {
@@ -246,7 +275,9 @@
   }
 
   async function handleSelectSession(sessionId: string) {
-    if (!sessionId || loading) {
+    // Switching conversations does not cancel a server-owned run; the source
+    // session keeps its running indicator and reconciles through replay.
+    if (!sessionId) {
       return;
     }
     await onSelectSession(sessionId);
@@ -260,7 +291,12 @@
   }
 
   function sessionStatusLabel(session: CopilotSessionSummary) {
-    return session.archived_at ? "archived" : session.active_domain ?? "mixed";
+    // Archive state now lives in the lifecycle state label, so this stays a
+    // grounding descriptor.
+    if (session.turn_count === 0) {
+      return "empty";
+    }
+    return session.active_domain ?? "mixed";
   }
 
   onMount(() => {
@@ -274,6 +310,7 @@
         contextMenuOpen = false;
         renamingSessionId = null;
         deleteSessionId = null;
+        storageDetailsOpen = false;
       }
     };
     document.addEventListener("click", onDocClick);
@@ -293,6 +330,9 @@
 
   $: surface = synthesisSurface;
   $: threadEntries = surface.thread?.entries ?? [];
+  // Referenced directly so the transcript re-renders when a replayed session
+  // arrives; a function call here would hide the dependency from Svelte.
+  $: persistedTurns = activeSession?.turns ?? [];
   $: chatTurns = threadEntries.length
     ? threadEntries.map((entry) => ({
         id: entry.entryId,
@@ -300,7 +340,7 @@
         prompt: entry.prompt,
         result: entry.result
       }))
-    : activeTurns().map((turn) => ({
+    : persistedTurns.map((turn) => ({
         id: turn.turn_id,
         index: turn.turn_index,
         prompt: turn.prompt,
@@ -325,10 +365,20 @@
       reasoningEffort = (persistedTurn.reasoning_effort as CopilotReasoningEffort | null) ?? "medium";
     }
   }
+  // Clearing is driven by acceptance, not by the final status, so a prompt that
+  // was persisted as a turn never lingers in the textarea. The helper keeps
+  // `promptText` out of this statement's dependency set.
+  $: applyAcceptedSubmission(lastSubmission);
+  $: sessionPresentations = sessions.map((session) =>
+    describeCopilotSession(session, { selectedSessionId: activeSessionId, runningSessionIds })
+  );
+  $: storageRecovery = summarizeCopilotStorageRecovery(storageStatus);
+  $: storageNoticeVisible = storageRecovery != null && !storageNoticeDismissed;
   $: hasPlanMessage =
     (roleMode === "agent" && researchPlan != null) ||
     (roleMode === "operator" && (operatorPlan != null || operatorResult != null));
   $: runStreaming = activeRun != null && (activeRun.phase === "pending" || activeRun.phase === "streaming");
+  $: inFlightPrompt = resolveInFlightPrompt(promptText, lastSubmission);
   $: lastTurn = chatTurns.length ? chatTurns[chatTurns.length - 1] : null;
   $: retryPrompt =
     !runStreaming && !loading && lastTurn != null && lastTurn.result.status !== "ready" && lastTurn.prompt
@@ -357,9 +407,20 @@
 <section class="copilot" class:inspector-open={artifactInspectorOpen}>
   <aside class="sidebar">
     <div class="sidebar-head">
-      <button type="button" class="new-chat" on:click={handleNewSession} disabled={loading}>
-        <span aria-hidden="true">+</span> New chat
+      <button
+        type="button"
+        class="new-chat"
+        on:click={handleNewSession}
+        disabled={creatingSession || newSessionPending}
+        aria-busy={creatingSession || newSessionPending}
+        aria-label="Start a new Copilot conversation"
+      >
+        <span aria-hidden="true">+</span>
+        {creatingSession || newSessionPending ? "Starting…" : "New chat"}
       </button>
+      {#if sessionCreateError}
+        <p class="new-chat-error" role="alert">New chat failed: {sessionCreateError}</p>
+      {/if}
     </div>
     <div class="sidebar-filter">
       <input
@@ -374,11 +435,13 @@
     </div>
     <div class="session-list">
       {#if sessions.length}
-        {#each sessions as session (session.session_id)}
+        {#each sessions as session, sessionIndex (session.session_id)}
+          {@const state = sessionPresentations[sessionIndex]}
           <div
             class="session-row"
-            class:active={session.session_id === activeSessionId}
-            class:archived={session.archived_at != null}
+            class:active={state.selected}
+            class:archived={state.archived}
+            class:running={state.running}
           >
             {#if renamingSessionId === session.session_id}
               <form class="session-rename" on:submit|preventDefault={() => finishRenameSession(session)}>
@@ -390,11 +453,19 @@
               <button
                 type="button"
                 class="session-select"
+                aria-current={state.selected ? "true" : undefined}
+                aria-label={state.accessibleLabel}
                 on:click={() => handleSelectSession(session.session_id)}
               >
-                <span class="session-title">{session.title}</span>
+                <span class="session-title">
+                  {session.title}
+                  {#if state.running}
+                    <span class="running-dot" title="A run is still streaming in this conversation" aria-hidden="true"></span>
+                  {/if}
+                </span>
                 <span class="session-meta">
-                  {session.turn_count} turn{session.turn_count === 1 ? "" : "s"} · {session.artifact_count} artifact{session.artifact_count === 1 ? "" : "s"} · {sessionStatusLabel(session)}
+                  <span class="session-state" class:selected={state.selected} class:running={state.running}>{state.stateLabel}</span>
+                  · {session.turn_count} turn{session.turn_count === 1 ? "" : "s"} · {session.artifact_count} artifact{session.artifact_count === 1 ? "" : "s"} · {sessionStatusLabel(session)}
                 </span>
               </button>
               <div class="session-actions">
@@ -416,6 +487,7 @@
   </aside>
 
   <main class="chat">
+    <div class="chat-top">
     <header class="chat-head">
       <div class="context-picker" bind:this={contextEl}>
         <button
@@ -471,6 +543,24 @@
         >
           Artifacts <span>{artifacts.length}</span>
         </button>
+        {#if storageRecovery}
+          <button
+            type="button"
+            class="storage-trigger"
+            class:active={storageDetailsOpen}
+            aria-expanded={storageDetailsOpen}
+            aria-controls="copilot-storage-recovery"
+            aria-label={`Storage recovery diagnostics — ${storageRecovery.headline}`}
+            on:click={() => {
+              storageDetailsOpen = !storageDetailsOpen;
+              if (storageDetailsOpen) {
+                storageNoticeDismissed = false;
+              }
+            }}
+          >
+            Storage <span>{storageRecovery.count}</span>
+          </button>
+        {/if}
         {#if latestHandoff}
           <span class="handoff-chip" title="Opened from a cross-tab handoff">
             {latestHandoff.source_tab} → {latestHandoff.intended_target_tab}
@@ -496,6 +586,57 @@
         </label>
       </div>
     </header>
+
+    {#if storageRecovery && (storageNoticeVisible || storageDetailsOpen)}
+      <section
+        id="copilot-storage-recovery"
+        class="storage-strip"
+        role="status"
+        aria-live="polite"
+        aria-label="Copilot storage recovery"
+      >
+        <div class="storage-summary">
+          <span class="storage-badge" aria-hidden="true">RECOVERY</span>
+          <p>
+            <strong>{storageRecovery.headline}.</strong>
+            {storageRecovery.explanation}
+          </p>
+          <div class="storage-actions">
+            <button
+              type="button"
+              aria-expanded={storageDetailsOpen}
+              on:click={() => (storageDetailsOpen = !storageDetailsOpen)}
+            >
+              {storageDetailsOpen ? "Hide records" : "Inspect records"}
+            </button>
+            <button
+              type="button"
+              on:click={() => {
+                storageNoticeDismissed = true;
+                storageDetailsOpen = false;
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+        {#if storageDetailsOpen}
+          <ul class="storage-details">
+            {#each storageRecovery.details as detail (detail.warningId)}
+              <li>
+                <span class="storage-detail-label">{detail.label}</span>
+                <span class="storage-detail-message">{detail.message}</span>
+              </li>
+            {/each}
+          </ul>
+          <p class="storage-footnote">
+            Original records were preserved in the local Copilot store. Dismissing this notice keeps the
+            recovery history — reopen it from the Storage control above.
+          </p>
+        {/if}
+      </section>
+    {/if}
+    </div>
 
     <div class="transcript" bind:this={scrollEl}>
       {#if !surface.supported && chatTurns.length === 0}
@@ -547,9 +688,9 @@
             </div>
           {/if}
 
-          {#if runStreaming && promptText.trim()}
+          {#if runStreaming && inFlightPrompt}
             <div class="msg user">
-              <div class="bubble">{promptText.trim()}</div>
+              <div class="bubble">{inFlightPrompt}</div>
             </div>
           {/if}
           {#if runStreaming && activeRun}
@@ -665,11 +806,6 @@
     </div>
   {/if}
 
-  {#if storageStatus?.warnings.length}
-    <div class="storage-warning" role="status">
-      Copilot preserved {storageStatus.warnings.length} skipped or recovered storage record{storageStatus.warnings.length === 1 ? "" : "s"} for inspection.
-    </div>
-  {/if}
 </section>
 
 <style>
@@ -884,10 +1020,15 @@
   /* ---- Chat pane ---- */
   .chat {
     display: grid;
+    /* chat top (header + optional status strip) · transcript · pinned composer */
     grid-template-rows: auto minmax(0, 1fr) auto;
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
     min-height: 0;
+    min-width: 0;
+  }
+
+  .chat-top {
     min-width: 0;
   }
 
@@ -1423,17 +1564,163 @@
     border-color: color-mix(in srgb, var(--negative) 48%, var(--panel-strong));
   }
 
-  .storage-warning {
-    position: absolute;
-    right: var(--space-4);
-    bottom: var(--space-4);
-    z-index: 30;
-    max-width: 28rem;
+  /* ---- Storage recovery status ----
+     Rendered in the chat grid flow so it can never cover the composer, the
+     artifact inspector, or any confirmation control. */
+  .storage-strip {
+    display: grid;
+    gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
-    border: 1px solid var(--warning);
+    border-bottom: 1px solid var(--divider);
+    min-width: 0;
+  }
+
+  .storage-summary {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .storage-badge {
+    flex: none;
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid color-mix(in srgb, var(--warning) 52%, var(--panel-strong));
+    color: var(--warning);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: var(--text-2xs);
+  }
+
+  .storage-summary p {
+    margin: 0;
+    flex: 1 1 18rem;
+    min-width: 0;
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+  }
+
+  .storage-summary strong {
+    color: var(--text-1);
+  }
+
+  .storage-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex: none;
+  }
+
+  .storage-actions button {
+    min-height: 1.6rem;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--panel-strong);
     background: var(--bg-1);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
+
+  .storage-actions button:hover {
+    border-color: var(--accent);
+    color: var(--text-1);
+  }
+
+  .storage-details {
+    display: grid;
+    gap: var(--space-2);
+    max-height: 9rem;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--divider);
+  }
+
+  .storage-details li {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--divider);
+    min-width: 0;
+  }
+
+  .storage-details li:last-child {
+    border-bottom: 0;
+  }
+
+  .storage-detail-label {
+    color: var(--warning);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: var(--text-2xs);
+    overflow-wrap: anywhere;
+  }
+
+  .storage-detail-message {
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-snug);
+    overflow-wrap: anywhere;
+  }
+
+  .storage-footnote {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-snug);
+  }
+
+  .storage-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 28px;
+    padding: 0 var(--space-3);
+    border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--panel-strong));
+    background: var(--bg-1);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .storage-trigger span {
     color: var(--warning);
     font-size: var(--text-xs);
+  }
+
+  .storage-trigger.active {
+    border-color: var(--warning);
+    color: var(--text-0);
+  }
+
+  .new-chat-error {
+    margin: var(--space-2) 0 0;
+    color: var(--negative);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-snug);
+  }
+
+  .running-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: var(--space-2);
+    border-radius: 50%;
+    background: var(--accent);
+    vertical-align: middle;
+  }
+
+  .session-state.selected {
+    color: var(--accent);
+  }
+
+  .session-state.running {
+    color: var(--warning);
   }
 
   @media (max-width: 1180px) {

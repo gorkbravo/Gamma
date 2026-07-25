@@ -13,6 +13,31 @@ function event(partial: Partial<CopilotRunEvent> & { sequence: number; event: st
 }
 
 describe("reduceCopilotRunEvent", () => {
+  it("marks the run accepted on the first acknowledged event and keeps it accepted", () => {
+    let state = createCopilotRunState("run_test");
+    expect(state.accepted).toBe(false);
+
+    // Foreign and stale events are not acknowledgements of this run.
+    state = reduceCopilotRunEvent(state, event({ sequence: 0, event: "run.created", run_id: "run_other" }));
+    expect(state.accepted).toBe(false);
+
+    state = reduceCopilotRunEvent(state, event({ sequence: 0, event: "run.created" }));
+    expect(state.accepted).toBe(true);
+
+    // A run that resumes from a replay cursor is already acknowledged.
+    let resumed = createCopilotRunState("run_test");
+    resumed = reduceCopilotRunEvent(resumed, event({ sequence: 7, event: "text.delta", data: { delta: "x" } }));
+    expect(resumed.accepted).toBe(true);
+
+    // Acceptance survives a failed terminal: the turn is persisted either way.
+    state = reduceCopilotRunEvent(
+      state,
+      event({ sequence: 1, event: "failed", data: { status: "error", message: "quota_exceeded" } })
+    );
+    expect(state.accepted).toBe(true);
+    expect(state.phase).toBe("failed");
+  });
+
   it("accumulates deltas, tools, usage, and completes with the final result", () => {
     let state = createCopilotRunState("run_test");
     state = reduceCopilotRunEvent(

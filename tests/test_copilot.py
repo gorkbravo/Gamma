@@ -5642,3 +5642,136 @@ def test_checkpoint3_artifact_reopen_never_resurrects_invalid_evidence_and_flags
     assert unavailable is not None
     assert unavailable.unavailable_source_turn_ids == [turn.turn_id]
     assert artifact_path.exists()
+
+
+def test_new_chat_creates_one_authoritative_empty_session(tmp_path):
+    """`New chat` must produce a real, selectable, empty session record."""
+    store = CopilotStore(tmp_path / "copilot")
+
+    created = store.create_session()
+
+    assert created.turn_count == 0
+    assert created.artifact_count == 0
+    assert created.archived_at is None
+    assert store.get_session(created.session_id) == created
+    assert [item.session_id for item in store.list_sessions()] == [created.session_id]
+
+    # A second activation with the same id reattaches instead of duplicating.
+    repeated = store.create_session(session_id=created.session_id)
+    assert repeated.session_id == created.session_id
+    assert repeated.created_at == created.created_at
+    assert len(store.list_sessions()) == 1
+
+    # The blank session survives a process restart.
+    reopened = CopilotStore(tmp_path / "copilot")
+    assert reopened.get_session(created.session_id) is not None
+    assert [item.session_id for item in reopened.list_sessions()] == [created.session_id]
+
+
+def test_new_chat_session_stays_selectable_alongside_existing_sessions(tmp_path):
+    store = CopilotStore(tmp_path / "copilot")
+    existing, _, _ = store.record_turn(
+        session_id="session_existing",
+        title="Existing conversation",
+        domain="macro",
+        current_tab="macro",
+        workspace_mode="research",
+        prompt="Keep this conversation available.",
+        context_fingerprint="macro:US:3M",
+        context_summary={},
+        result=CopilotResearchCardResult(
+            domain="macro",
+            current_tab="macro",
+            status="ready",
+            provider="mock",
+            model="gamma-mock",
+            response_id="resp_existing",
+        ),
+    )
+    archived_session = store.create_session(title="Archived conversation", session_id="session_archived")
+    store.archive_session(archived_session.session_id)
+
+    blank = store.create_session(title="New chat", session_id="session_blank")
+
+    normal = [item.session_id for item in store.list_sessions()]
+    assert blank.session_id in normal
+    assert existing.session_id in normal
+    assert archived_session.session_id not in normal
+    with_archived = [item.session_id for item in store.list_sessions(include_archived=True)]
+    assert archived_session.session_id in with_archived
+    # The blank session accepts its first turn without losing identity.
+    updated, _, turn = store.record_turn(
+        session_id=blank.session_id,
+        title=None,
+        domain="macro",
+        current_tab="macro",
+        workspace_mode="research",
+        prompt="First prompt in the new conversation.",
+        context_fingerprint="macro:US:3M",
+        context_summary={},
+        result=CopilotResearchCardResult(
+            domain="macro",
+            current_tab="macro",
+            status="ready",
+            provider="mock",
+            model="gamma-mock",
+            response_id="resp_blank_1",
+        ),
+    )
+    assert updated.session_id == blank.session_id
+    assert updated.title == "New chat"
+    assert turn.turn_index == 0
+
+
+def test_create_session_route_is_authoritative_and_idempotent(tmp_path):
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    client = TestClient(create_app(runtime))
+    try:
+        seeded = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Seed an existing conversation.",
+                "user_session_id": "session_new_chat_existing",
+                "role": "research_agent",
+                "selected_scope_domains": ["macro"],
+                "context": {
+                    "current_tab": "macro",
+                    "workspace_mode": "research",
+                    "macro": {"mode": "snapshot", "region": "US", "timeframe": "3M", "theme": "inflation"},
+                },
+            },
+        )
+        assert seeded.status_code == 200
+
+        created = client.post("/copilot/sessions", json={"session_id": "session_new_chat_blank"})
+        assert created.status_code == 200
+        payload = created.json()
+        assert payload["session_id"] == "session_new_chat_blank"
+        assert payload["turn_count"] == 0
+        assert payload["archived_at"] is None
+
+        # Selecting the brand-new session must not 404 into the existing one.
+        detail = client.get("/copilot/sessions/session_new_chat_blank")
+        assert detail.status_code == 200
+        assert detail.json()["turns"] == []
+        assert detail.json()["artifacts"] == []
+
+        duplicate = client.post("/copilot/sessions", json={"session_id": "session_new_chat_blank"})
+        assert duplicate.status_code == 200
+        assert duplicate.json()["created_at"] == payload["created_at"]
+
+        listed = [item["session_id"] for item in client.get("/copilot/sessions").json()]
+        assert "session_new_chat_blank" in listed
+        assert "session_new_chat_existing" in listed
+        assert len([item for item in listed if item == "session_new_chat_blank"]) == 1
+
+        rejected = client.post("/copilot/sessions", json={"session_id": "///"})
+        assert rejected.status_code == 400
+    finally:
+        runtime.shutdown()

@@ -28,6 +28,7 @@ from src.api.schemas.copilot import (
     CopilotResearchPlanModel,
     CopilotResearchReportModel,
     CopilotResearchReportRequestModel,
+    CopilotSessionCreateRequestModel,
     CopilotSessionDetailModel,
     CopilotSessionModel,
     CopilotSessionUpdateRequestModel,
@@ -245,6 +246,22 @@ def list_copilot_sessions(
         CopilotSessionModel.from_domain(item)
         for item in runtime.copilot_service.list_sessions(include_archived=include_archived, search=search)
     ]
+
+
+@router.post("/copilot/sessions", response_model=CopilotSessionModel)
+def create_copilot_session(
+    payload: CopilotSessionCreateRequestModel,
+    request: Request,
+) -> CopilotSessionModel:
+    """Create the authoritative empty session that `New chat` selects."""
+    try:
+        session = request.app.state.runtime.copilot_service.create_session(
+            title=payload.title,
+            session_id=payload.session_id,
+        )
+    except ValueError as exc:
+        _raise_store_error(exc)
+    return CopilotSessionModel.from_domain(session)
 
 
 @router.get("/copilot/sessions/{session_id}", response_model=CopilotSessionDetailModel)
