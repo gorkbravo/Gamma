@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from functools import cached_property
 from hashlib import sha256
@@ -15,6 +15,7 @@ from src.models.copilot import (
     CopilotResearchCardResult,
     CopilotSourceRef,
     CopilotToolTrace,
+    CopilotUsageRecord,
     ResearchCard,
     ResearchClaim,
 )
@@ -108,6 +109,14 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         tool_sources: dict[str, CopilotSourceRef] = {source.source_id: source for source in context.sources}
         warnings = list(context.warnings)
         reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
+        usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
+
+        def with_usage(result: CopilotResearchCardResult) -> CopilotResearchCardResult:
+            combined = self._merge_usage_records(usage, result.usage)
+            return replace(
+                result,
+                usage=replace(combined, tool_calls=len(tool_traces)),
+            )
 
         for turn in range(5):
             payload = self._build_response_payload(
@@ -120,13 +129,17 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 max_output_tokens=1400,
                 prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2",
             )
-            if turn == 0 and request.previous_response_id and self.store_responses:
+            if turn == 0 and request.previous_response_id and self._store_responses(request):
                 payload["previous_response_id"] = request.previous_response_id
 
             try:
+                usage = replace(
+                    usage,
+                    provider_calls=(usage.provider_calls or 0) + 1,
+                )
                 response = self._post_json(payload)
             except RuntimeError as exc:
-                return CopilotResearchCardResult(
+                return with_usage(CopilotResearchCardResult(
                     domain=request.domain,
                     current_tab=context.current_tab,
                     status="error",
@@ -136,7 +149,11 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                     sources=list(tool_sources.values()),
                     tool_traces=tool_traces,
                     warnings=warnings,
-                )
+                ))
+            usage = self._merge_usage_records(
+                usage,
+                self._usage_from_response(response),
+            )
 
             tool_calls = [item for item in response.get("output", []) if item.get("type") == "function_call"]
             if tool_calls:
@@ -159,7 +176,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
 
             refusal = self._extract_refusal(response)
             if refusal:
-                return CopilotResearchCardResult(
+                return with_usage(CopilotResearchCardResult(
                     domain=request.domain,
                     current_tab=context.current_tab,
                     status="error",
@@ -170,7 +187,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                     sources=list(tool_sources.values()),
                     tool_traces=tool_traces,
                     warnings=warnings,
-                )
+                ))
 
             try:
                 card = self._parse_research_card(response)
@@ -187,8 +204,8 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                         warnings=warnings,
                     )
                     if retry_result is not None:
-                        return retry_result
-                return CopilotResearchCardResult(
+                        return with_usage(retry_result)
+                return with_usage(CopilotResearchCardResult(
                     domain=request.domain,
                     current_tab=context.current_tab,
                     status="error",
@@ -199,9 +216,9 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                     sources=list(tool_sources.values()),
                     tool_traces=tool_traces,
                     warnings=warnings,
-                )
+                ))
 
-            return CopilotResearchCardResult(
+            return with_usage(CopilotResearchCardResult(
                 domain=request.domain,
                 current_tab=context.current_tab,
                 status="ready",
@@ -212,9 +229,9 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 sources=list(tool_sources.values()),
                 tool_traces=tool_traces,
                 warnings=warnings,
-            )
+            ))
 
-        return CopilotResearchCardResult(
+        return with_usage(CopilotResearchCardResult(
             domain=request.domain,
             current_tab=context.current_tab,
             status="error",
@@ -224,7 +241,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             sources=list(tool_sources.values()),
             tool_traces=tool_traces,
             warnings=warnings,
-        )
+        ))
 
     def stream_research_card(
         self,
@@ -249,6 +266,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         tool_sources: dict[str, CopilotSourceRef] = {source.source_id: source for source in context.sources}
         warnings = list(context.warnings)
         reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
+        usage = CopilotUsageRecord(provider_calls=0, tool_calls=0)
 
         def build_result(
             *,
@@ -270,6 +288,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 sources=list(tool_sources.values()),
                 tool_traces=tool_traces,
                 warnings=warnings,
+                usage=replace(usage, tool_calls=len(tool_traces)),
             )
 
         for turn in range(5):
@@ -284,10 +303,14 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 prompt_cache_key=f"gamma-copilot:{request.domain}:research-card:v2",
             )
             payload["stream"] = True
-            if turn == 0 and request.previous_response_id and self.store_responses:
+            if turn == 0 and request.previous_response_id and self._store_responses(request):
                 payload["previous_response_id"] = request.previous_response_id
 
             try:
+                usage = replace(
+                    usage,
+                    provider_calls=(usage.provider_calls or 0) + 1,
+                )
                 response, terminal = self._post_json_stream(payload, emit, should_cancel)
             except CopilotRunCancelled:
                 raise
@@ -296,6 +319,10 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 return build_result(status="error", message=str(exc))
 
             self._emit_usage(emit, response)
+            usage = self._merge_usage_records(
+                usage,
+                self._usage_from_response(response),
+            )
 
             if terminal == "incomplete":
                 reason = str(
@@ -368,7 +395,10 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                         warnings=warnings,
                     )
                     if retry_result is not None:
-                        return retry_result
+                        return replace(
+                            retry_result,
+                            usage=self._merge_usage_records(usage, retry_result.usage),
+                        )
                 return build_result(
                     status="error",
                     message=str(exc),
@@ -390,16 +420,78 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
 
     @staticmethod
     def _emit_usage(emit: RunEventEmitter, response: dict[str, Any]) -> None:
+        usage = OpenAIResponsesCopilotProvider._usage_from_response(response)
+        payload = {
+            key: value
+            for key, value in usage.__dict__.items()
+            if key != "raw" and value is not None
+        }
+        if not payload:
+            return
+        emit("usage", payload)
+
+    @staticmethod
+    def _usage_from_response(response: dict[str, Any]) -> CopilotUsageRecord:
         usage = response.get("usage")
         if not isinstance(usage, dict):
-            return
-        emit(
-            "usage",
-            {
-                key: usage.get(key)
-                for key in ("input_tokens", "output_tokens", "total_tokens")
-                if usage.get(key) is not None
-            },
+            return CopilotUsageRecord()
+        input_details = usage.get("input_tokens_details")
+        input_details = input_details if isinstance(input_details, dict) else {}
+        output_details = usage.get("output_tokens_details")
+        output_details = output_details if isinstance(output_details, dict) else {}
+        return CopilotUsageRecord(
+            input_tokens=OpenAIResponsesCopilotProvider._optional_usage_int(
+                usage.get("input_tokens")
+            ),
+            output_tokens=OpenAIResponsesCopilotProvider._optional_usage_int(
+                usage.get("output_tokens")
+            ),
+            reasoning_tokens=OpenAIResponsesCopilotProvider._optional_usage_int(
+                output_details.get("reasoning_tokens")
+            ),
+            total_tokens=OpenAIResponsesCopilotProvider._optional_usage_int(
+                usage.get("total_tokens")
+            ),
+            cache_read_tokens=OpenAIResponsesCopilotProvider._optional_usage_int(
+                input_details.get("cached_tokens")
+            ),
+            cache_write_tokens=OpenAIResponsesCopilotProvider._optional_usage_int(
+                usage.get("cache_write_tokens")
+                if usage.get("cache_write_tokens") is not None
+                else input_details.get("cache_write_tokens")
+            ),
+        )
+
+    @staticmethod
+    def _optional_usage_int(value: Any) -> int | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _merge_usage_records(
+        first: CopilotUsageRecord,
+        second: CopilotUsageRecord,
+    ) -> CopilotUsageRecord:
+        def merged(field_name: str) -> int | None:
+            left = getattr(first, field_name)
+            right = getattr(second, field_name)
+            if left is None and right is None:
+                return None
+            return int(left or 0) + int(right or 0)
+
+        return CopilotUsageRecord(
+            input_tokens=merged("input_tokens"),
+            output_tokens=merged("output_tokens"),
+            reasoning_tokens=merged("reasoning_tokens"),
+            total_tokens=merged("total_tokens"),
+            cache_read_tokens=merged("cache_read_tokens"),
+            cache_write_tokens=merged("cache_write_tokens"),
+            provider_calls=merged("provider_calls"),
+            tool_calls=merged("tool_calls"),
         )
 
     def _post_json_stream(
@@ -532,7 +624,11 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         prompt_cache_key: str,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": (
+                request.model_resolution.model
+                if request.model_resolution is not None and request.model_resolution.model
+                else self.model
+            ),
             "instructions": self._build_instructions(context),
             "input": input_items,
             "parallel_tool_calls": False,
@@ -547,7 +643,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                     "schema": RESEARCH_CARD_SCHEMA,
                 },
             },
-            "store": self.store_responses,
+            "store": self._store_responses(request),
             "safety_identifier": self._safety_identifier(request),
             "prompt_cache_key": prompt_cache_key,
             "metadata": {
@@ -560,6 +656,11 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             payload["tools"] = tool_specs
             payload["tool_choice"] = tool_choice or "auto"
         return payload
+
+    def _store_responses(self, request: CopilotResearchCardRequest) -> bool:
+        if request.model_resolution is not None:
+            return request.model_resolution.provider_storage.effective == "enabled"
+        return self.store_responses
 
     def _retry_structured_research_card(
         self,
@@ -596,7 +697,16 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 sources=list(tool_sources.values()),
                 tool_traces=tool_traces,
                 warnings=warnings,
+                usage=CopilotUsageRecord(
+                    provider_calls=1,
+                    tool_calls=len(tool_traces),
+                ),
             )
+        retry_usage = replace(
+            self._usage_from_response(retry_response),
+            provider_calls=1,
+            tool_calls=len(tool_traces),
+        )
 
         refusal = self._extract_refusal(retry_response)
         if refusal:
@@ -611,6 +721,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 sources=list(tool_sources.values()),
                 tool_traces=tool_traces,
                 warnings=warnings,
+                usage=retry_usage,
             )
 
         try:
@@ -631,6 +742,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
                 sources=list(tool_sources.values()),
                 tool_traces=tool_traces,
                 warnings=warnings,
+                usage=retry_usage,
             )
 
         return CopilotResearchCardResult(
@@ -644,6 +756,7 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
             sources=list(tool_sources.values()),
             tool_traces=tool_traces,
             warnings=warnings,
+            usage=retry_usage,
         )
 
     @staticmethod
@@ -689,6 +802,15 @@ class OpenAIResponsesCopilotProvider(CopilotProvider):
         requested_prompt = (request.prompt or "").strip() or default_prompt
         body = {
             "task": requested_prompt,
+            "local_continuation": [
+                {
+                    "turn_id": turn.turn_id,
+                    "role": turn.role,
+                    "user_request": turn.prompt,
+                    "assistant_result": turn.assistant_result,
+                }
+                for turn in request.local_continuation[-8:]
+            ],
             "domain": request.domain,
             "current_tab": context.current_tab,
             "workspace_context": context.summary_data,

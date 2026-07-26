@@ -2932,6 +2932,67 @@ export type CopilotBaseDomain =
   | "iv";
 export type CopilotDomain = CopilotBaseDomain | "synthesis";
 export type CopilotReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type CopilotProfile = "auto" | "quick" | "standard" | "deep";
+
+export interface CopilotModelCapabilities {
+  structured_output: boolean;
+  tool_use: boolean;
+  streaming: boolean;
+  reasoning: boolean;
+  cancellation: boolean;
+  provider_storage: boolean;
+}
+
+export interface CopilotProviderStoragePolicy {
+  policy_version: string;
+  requested: "enabled" | "disabled" | string;
+  effective: "enabled" | "disabled" | "not_applicable" | "unavailable" | string;
+  status: "supported" | "degraded" | string;
+  reason: string;
+}
+
+export interface CopilotModelPolicyResolution {
+  policy_version: string;
+  selected_profile: CopilotProfile | string;
+  resolved_profile: CopilotProfile | string;
+  selection_source: string;
+  status: string;
+  provider: string;
+  model: string | null;
+  reasoning_mode: string;
+  reasoning_effort: CopilotReasoningEffort | null;
+  orchestration_path: string;
+  capabilities: CopilotModelCapabilities;
+  routing_reason: string;
+  provider_storage: CopilotProviderStoragePolicy;
+  degradation_reason: string | null;
+}
+
+export interface CopilotSafeProviderError {
+  category: string;
+  diagnostic_id: string;
+  message: string;
+  guidance: string;
+  retryable: boolean;
+  created_at: string;
+}
+
+export interface CopilotRunObservability {
+  selected_profile?: CopilotProfile | string | null;
+  resolved_provider: string | null;
+  resolved_model: string | null;
+  model_policy_version: string | null;
+  routing_reason: string | null;
+  reasoning_mode: string | null;
+  reasoning_effort: CopilotReasoningEffort | null;
+  orchestration_path: string | null;
+  total_latency_ms: number | null;
+  provider_latency_ms: number | null;
+  cancellation_outcome: string | null;
+  cancellation_boundary: string | null;
+  provider_error_category: string | null;
+  diagnostic_id: string | null;
+}
 
 export interface CopilotSourceRef {
   source_id: string;
@@ -3014,6 +3075,10 @@ export interface CopilotResearchCardResult {
   research_plan?: CopilotResearchPlan | null;
   context_contracts?: Array<Record<string, unknown>>;
   context_budget?: Record<string, unknown>;
+  model_resolution?: CopilotModelPolicyResolution | null;
+  usage?: CopilotUsageRecord;
+  observability?: CopilotRunObservability;
+  safe_provider_error?: CopilotSafeProviderError | null;
 }
 
 export interface CopilotResearchPlanEntity {
@@ -3262,6 +3327,7 @@ export interface CopilotThreadEntry {
 
 export interface CopilotThreadState {
   domain: CopilotDomain;
+  sourceSessionId?: string | null;
   contextFingerprint: string | null;
   latestResponseId: string | null;
   entries: CopilotThreadEntry[];
@@ -3289,14 +3355,14 @@ export interface CopilotMutationApplyResult {
 }
 
 export interface CopilotUsageRecord {
-  input_tokens: number;
-  output_tokens: number;
-  reasoning_tokens: number;
-  total_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  provider_calls: number;
-  tool_calls: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  reasoning_tokens: number | null;
+  total_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  provider_calls: number | null;
+  tool_calls: number | null;
   raw: Record<string, unknown>;
 }
 
@@ -3344,6 +3410,7 @@ export interface CopilotTurnRecord {
   created_at: string;
   role: string;
   reasoning_effort: string | null;
+  selected_profile?: CopilotProfile | string | null;
   selected_scope_domains: string[];
   context_fingerprint: string | null;
   requested_provider: string | null;
@@ -3353,6 +3420,10 @@ export interface CopilotTurnRecord {
   run_id: string | null;
   terminal_status: string | null;
   cancellation_outcome: string | null;
+  cancellation_boundary?: string | null;
+  model_resolution?: CopilotModelPolicyResolution | null;
+  observability?: CopilotRunObservability;
+  safe_provider_error?: CopilotSafeProviderError | null;
   usage: CopilotUsageRecord;
   research_plan: CopilotResearchPlan | null;
   operator_plan: CopilotOperatorPlan | null;
@@ -3386,6 +3457,46 @@ export interface CopilotSessionDetail {
   artifacts: CopilotArtifact[];
   mutations?: CopilotDraftMutation[];
   storage_warnings: CopilotStorageWarning[];
+}
+
+export interface CopilotShelfPromotion {
+  promotion_id: string;
+  contract_version: string;
+  status: "promoted" | "already_promoted" | "incomplete" | "stale" | "unavailable" | string;
+  source_session_id: string;
+  source_domain: string;
+  source_turn_ids: string[];
+  source_snapshot_ids: string[];
+  context_fingerprint: string | null;
+  context_contract_versions: string[];
+  selected_scope_domains: string[];
+  role: string;
+  selected_profile: CopilotProfile | string | null;
+  message: string;
+  already_promoted: boolean;
+  created_at: string;
+}
+
+export interface CopilotProfileCapabilityState {
+  profile: CopilotProfile | string;
+  status: string;
+  provider: string;
+  model: string | null;
+  capabilities: CopilotModelCapabilities;
+  guidance: string | null;
+}
+
+export interface CopilotDiagnostics {
+  provider_state: "configured" | "unconfigured" | "disabled" | "unavailable" | string;
+  provider: string;
+  provider_label: string;
+  model_policy_version: string;
+  profiles: CopilotProfileCapabilityState[];
+  default_resolution: CopilotModelPolicyResolution;
+  operator_resolution: CopilotModelPolicyResolution;
+  local_storage: string;
+  provider_storage: CopilotProviderStoragePolicy;
+  last_error: CopilotSafeProviderError | null;
 }
 
 export interface CopilotContextSnapshot {

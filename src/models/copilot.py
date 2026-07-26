@@ -9,6 +9,148 @@ from src.models.copilot_context import CopilotScopeContextContract, default_copi
 from src.utils.time import now_utc
 
 
+COPILOT_MODEL_POLICY_VERSION = "copilot.model-policy.v1"
+COPILOT_PROVIDER_STORAGE_POLICY_VERSION = "copilot.provider-storage.v1"
+COPILOT_SHELF_PROMOTION_VERSION = "copilot.shelf-promotion.v1"
+
+
+@dataclass(frozen=True)
+class CopilotModelCapabilities:
+    structured_output: bool
+    tool_use: bool
+    streaming: bool
+    reasoning: bool
+    cancellation: bool
+    provider_storage: bool
+
+
+@dataclass(frozen=True)
+class CopilotProviderStoragePolicy:
+    policy_version: str = COPILOT_PROVIDER_STORAGE_POLICY_VERSION
+    requested: str = "disabled"
+    effective: str = "disabled"
+    status: str = "supported"
+    reason: str = (
+        "Provider response storage is disabled; Gamma reconstructs continuation "
+        "from its local session record."
+    )
+
+
+@dataclass(frozen=True)
+class CopilotModelPolicyResolution:
+    policy_version: str
+    selected_profile: str
+    resolved_profile: str
+    selection_source: str
+    status: str
+    provider: str
+    model: str | None
+    reasoning_mode: str
+    reasoning_effort: str | None
+    orchestration_path: str
+    capabilities: CopilotModelCapabilities
+    routing_reason: str
+    provider_storage: CopilotProviderStoragePolicy
+    degradation_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotSafeProviderError:
+    category: str
+    diagnostic_id: str
+    message: str
+    guidance: str
+    retryable: bool
+    created_at: datetime = field(default_factory=now_utc)
+
+
+@dataclass(frozen=True)
+class CopilotRunObservability:
+    selected_profile: str | None = None
+    resolved_provider: str | None = None
+    resolved_model: str | None = None
+    model_policy_version: str | None = None
+    routing_reason: str | None = None
+    reasoning_mode: str | None = None
+    reasoning_effort: str | None = None
+    orchestration_path: str | None = None
+    total_latency_ms: int | None = None
+    provider_latency_ms: int | None = None
+    cancellation_outcome: str | None = None
+    cancellation_boundary: str | None = None
+    provider_error_category: str | None = None
+    diagnostic_id: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotLocalContinuationTurn:
+    turn_id: str
+    role: str
+    prompt: str
+    assistant_result: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class CopilotShelfSourceEntry:
+    turn_index: int
+    prompt: str
+    response_id: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotShelfPromotionRequest:
+    source_session_id: str
+    source_domain: str
+    context_fingerprint: str | None
+    entries: list[CopilotShelfSourceEntry] = field(default_factory=list)
+    selected_scope_domains: list[str] = field(default_factory=list)
+    role: str = "research_agent"
+    selected_profile: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotShelfPromotion:
+    promotion_id: str
+    contract_version: str
+    status: str
+    source_session_id: str
+    source_domain: str
+    source_turn_ids: list[str] = field(default_factory=list)
+    source_snapshot_ids: list[str] = field(default_factory=list)
+    context_fingerprint: str | None = None
+    context_contract_versions: list[str] = field(default_factory=list)
+    selected_scope_domains: list[str] = field(default_factory=list)
+    role: str = "research_agent"
+    selected_profile: str | None = None
+    message: str = ""
+    already_promoted: bool = False
+    created_at: datetime = field(default_factory=now_utc)
+
+
+@dataclass(frozen=True)
+class CopilotProfileCapabilityState:
+    profile: str
+    status: str
+    provider: str
+    model: str | None
+    capabilities: CopilotModelCapabilities
+    guidance: str | None = None
+
+
+@dataclass(frozen=True)
+class CopilotDiagnostics:
+    provider_state: str
+    provider: str
+    provider_label: str
+    model_policy_version: str
+    profiles: list[CopilotProfileCapabilityState]
+    default_resolution: CopilotModelPolicyResolution
+    operator_resolution: CopilotModelPolicyResolution
+    local_storage: str
+    provider_storage: CopilotProviderStoragePolicy
+    last_error: CopilotSafeProviderError | None = None
+
+
 @dataclass(frozen=True)
 class MacroCopilotContext:
     mode: str = "snapshot"
@@ -59,10 +201,13 @@ class CopilotResearchCardRequest:
     context_fingerprint: str | None = None
     session_title: str | None = None
     reasoning_effort: str | None = None
+    selected_profile: str | None = None
     role: str = "research_agent"
     selected_scope_domains: list[str] = field(default_factory=list)
     requested_provider: str | None = None
     requested_model: str | None = None
+    model_resolution: CopilotModelPolicyResolution | None = None
+    local_continuation: list[CopilotLocalContinuationTurn] = field(default_factory=list)
     context: CopilotRequestContext = field(default_factory=CopilotRequestContext)
     synthesis: CopilotSynthesisRequest | None = None
 
@@ -337,6 +482,10 @@ class CopilotResearchCardResult:
     research_plan: CopilotResearchPlan | None = None
     context_contracts: list[CopilotScopeContextContract] = field(default_factory=list)
     context_budget: dict[str, Any] = field(default_factory=dict)
+    model_resolution: CopilotModelPolicyResolution | None = None
+    usage: "CopilotUsageRecord" = field(default_factory=lambda: CopilotUsageRecord())
+    observability: CopilotRunObservability = field(default_factory=CopilotRunObservability)
+    safe_provider_error: CopilotSafeProviderError | None = None
 
 
 COPILOT_RUN_EVENT_TYPES = {
@@ -413,6 +562,7 @@ class CopilotTurn:
     created_at: datetime = field(default_factory=now_utc)
     role: str = "research_agent"
     reasoning_effort: str | None = None
+    selected_profile: str | None = None
     selected_scope_domains: list[str] = field(default_factory=list)
     context_fingerprint: str | None = None
     requested_provider: str | None = None
@@ -422,6 +572,10 @@ class CopilotTurn:
     run_id: str | None = None
     terminal_status: str | None = None
     cancellation_outcome: str | None = None
+    cancellation_boundary: str | None = None
+    model_resolution: CopilotModelPolicyResolution | None = None
+    observability: CopilotRunObservability = field(default_factory=CopilotRunObservability)
+    safe_provider_error: CopilotSafeProviderError | None = None
     usage: "CopilotUsageRecord" = field(default_factory=lambda: CopilotUsageRecord())
     research_plan: CopilotResearchPlan | None = None
     operator_plan: CopilotOperatorPlan | None = None
@@ -450,14 +604,14 @@ class CopilotSession:
 
 @dataclass(frozen=True)
 class CopilotUsageRecord:
-    input_tokens: int = 0
-    output_tokens: int = 0
-    reasoning_tokens: int = 0
-    total_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    provider_calls: int = 0
-    tool_calls: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    total_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    provider_calls: int | None = None
+    tool_calls: int | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 

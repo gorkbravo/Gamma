@@ -68,6 +68,13 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(
             and "fundamentals.apply_dcf_update" not in item.tool_traces
             for item in result.outcomes
         )
+        assert any(
+            item.case_id == "dcf_edit_apply_stop"
+            and item.orchestrator == "agents_sdk_stub"
+            and item.checks["confirmation_stop"]
+            and item.permission_stop_quality == 1.0
+            for item in result.outcomes
+        )
         assert not any(item.current_gap for item in result.outcomes)
         assert all(
             "run_hypothetical_portfolio_comparison" in item.tool_traces
@@ -93,9 +100,59 @@ def test_copilot_operator_eval_harness_runs_custom_and_stub_sdk_paths(
         representative = [
             item for item in result.outcomes if item.case_id in representative_ids
         ]
-        assert len(representative) == len(representative_ids) * 2
+        assert len(representative) == len(representative_ids) * 5
         assert all(item.checks["selected_domains"] for item in representative)
         assert all(item.checks["omission_reasons"] for item in representative)
         assert all(item.selected_domains for item in representative)
+        variants = {
+            (item.profile, item.orchestrator)
+            for item in result.outcomes
+        }
+        assert variants == {
+            ("auto", "custom"),
+            ("quick", "custom"),
+            ("standard", "custom"),
+            ("deep", "custom"),
+            ("standard", "agents_sdk_stub"),
+        }
+        assert all(item.evidence_mode == "deterministic_mock" for item in result.outcomes)
+        assert all(
+            item.model_policy_version == "copilot.model-policy.v1"
+            for item in result.outcomes
+        )
+        assert all(item.routing_reason for item in result.outcomes)
+        assert all(
+            0.0 <= score <= 1.0
+            for item in result.outcomes
+            for score in (
+                item.grounding_quality,
+                item.citation_validity_quality,
+                item.domain_decision_quality,
+                item.warning_preservation_quality,
+                item.tool_selection_quality,
+                item.permission_stop_quality,
+                item.trace_report_quality,
+                item.final_usefulness_quality,
+            )
+        )
+        assert all("raw" not in item.model_usage for item in result.outcomes)
+        assert all(item.duration_ms is not None for item in result.outcomes)
+        assert all(
+            item.orchestration_path == "gamma_custom_loop"
+            for item in result.outcomes
+            if item.orchestrator == "custom"
+        )
+        assert all(
+            item.orchestration_path == "openai_agents_sdk"
+            for item in result.outcomes
+            if item.orchestrator == "agents_sdk_stub"
+        )
+        rendered = result.to_json()
+        assert len(rendered["variant_summaries"]) == 5
+        assert rendered["routing_decision"]["default_changed"] is False
+        assert rendered["routing_decision"]["selected_default"] == "gamma_custom_loop"
+        assert "no intentionally authorized live-provider evidence" in (
+            rendered["routing_decision"]["reason"]
+        )
     finally:
         runtime.shutdown()

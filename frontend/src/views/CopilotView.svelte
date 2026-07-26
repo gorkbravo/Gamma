@@ -1,13 +1,15 @@
 <script lang="ts">
   import { afterUpdate, onMount } from "svelte";
   import CopilotArtifactsPanel from "../components/CopilotArtifactsPanel.svelte";
+  import CopilotRunInspector from "../components/CopilotRunInspector.svelte";
   import CopilotTranscriptResult from "../components/CopilotTranscriptResult.svelte";
   import type {
     CopilotArtifact,
     CopilotBaseDomain,
     CopilotDraftMutation,
     CopilotDomain,
-    CopilotReasoningEffort,
+    CopilotDiagnostics,
+    CopilotProfile,
     CrossTabHandoffEnvelope,
     CopilotOperatorPlan,
     CopilotResearchCardResult,
@@ -67,6 +69,7 @@
   export let activeArtifact: CopilotArtifact | null = null;
   export let artifactSaveState: "idle" | "saving" | "saved" | "error" = "idle";
   export let storageStatus: CopilotStorageStatus | null = null;
+  export let diagnostics: CopilotDiagnostics | null = null;
   export let researchPlan: CopilotResearchPlan | null = null;
   export let operatorPlan: CopilotOperatorPlan | null = null;
   export let operatorResult: CopilotResearchCardResult | null = null;
@@ -80,10 +83,10 @@
   export let creatingSession = false;
   export let sessionCreateError: string | null = null;
   export let onCancelRun: () => Promise<unknown> | void = () => {};
-  export let onGenerate: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void;
-  export let onPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
-  export let onOperatorPlan: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
-  export let onRunOperator: (domain: CopilotDomain, prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
+  export let onGenerate: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void;
+  export let onPlan: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
+  export let onOperatorPlan: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
+  export let onRunOperator: (domain: CopilotDomain, prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
   export let onArchiveSession: (sessionId: string) => Promise<unknown> | void = () => {};
   export let onRestoreSession: (sessionId: string) => Promise<unknown> | void = () => {};
   export let onRenameSession: (
@@ -130,7 +133,7 @@
   type CopilotRoleMode = "agent" | "operator";
 
   let roleMode: CopilotRoleMode = "agent";
-  let reasoningEffort: CopilotReasoningEffort = "medium";
+  let selectedProfile: CopilotProfile = "auto";
   let promptText = "";
   let surface: CopilotWorkspaceSurface = synthesisSurface;
   let threadEntries: CopilotThreadEntry[] = [];
@@ -141,6 +144,7 @@
   let scrollEl: HTMLDivElement | null = null;
   let shouldScroll = false;
   let artifactInspectorOpen = false;
+  let runInspectorOpen = false;
   let renamingSessionId: string | null = null;
   let renameTitle = "";
   let deleteSessionId: string | null = null;
@@ -158,7 +162,6 @@
 
   function setRoleMode(nextMode: CopilotRoleMode) {
     roleMode = nextMode;
-    reasoningEffort = nextMode === "operator" ? "low" : "medium";
   }
 
   async function handleGenerate() {
@@ -168,7 +171,7 @@
     // The composer is cleared by the accepted-submission contract below, not by
     // the final status: a quota, refusal, or provider failure after acceptance
     // is already persisted as a retryable turn.
-    const result = await onGenerate(surface.domain, promptText.trim(), reasoningEffort);
+    const result = await onGenerate(surface.domain, promptText.trim(), selectedProfile);
     if (result != null) {
       await onLoadSessions();
     }
@@ -179,17 +182,17 @@
       return;
     }
     if (roleMode === "operator") {
-      await onOperatorPlan(surface.domain, promptText.trim(), reasoningEffort);
+      await onOperatorPlan(surface.domain, promptText.trim(), selectedProfile);
       return;
     }
-    await onPlan(surface.domain, promptText.trim(), reasoningEffort);
+    await onPlan(surface.domain, promptText.trim(), selectedProfile);
   }
 
   async function handleRunOperator() {
     if (!surface.supported || !surface.domain || loading) {
       return;
     }
-    const result = await onRunOperator(surface.domain, promptText.trim(), reasoningEffort);
+    const result = await onRunOperator(surface.domain, promptText.trim(), selectedProfile);
     if (result != null) {
       await onLoadSessions();
     }
@@ -369,7 +372,13 @@
     const persistedTurn = activeSession?.turns[activeSession.turns.length - 1];
     if (persistedTurn) {
       roleMode = persistedTurn.role === "research_operator" ? "operator" : "agent";
-      reasoningEffort = (persistedTurn.reasoning_effort as CopilotReasoningEffort | null) ?? "medium";
+      const persistedProfile =
+        persistedTurn.selected_profile
+        ?? persistedTurn.model_resolution?.selected_profile
+        ?? "auto";
+      selectedProfile = ["auto", "quick", "standard", "deep"].includes(persistedProfile)
+        ? (persistedProfile as CopilotProfile)
+        : "auto";
     }
   }
   // Clearing is driven by acceptance, not by the final status, so a prompt that
@@ -404,14 +413,14 @@
     if (!retryPrompt || !surface.supported || !surface.domain || loading) {
       return;
     }
-    const result = await onGenerate(surface.domain, retryPrompt, reasoningEffort);
+    const result = await onGenerate(surface.domain, retryPrompt, selectedProfile);
     if (result != null) {
       await onLoadSessions();
     }
   }
 </script>
 
-<section class="copilot" class:inspector-open={artifactInspectorOpen}>
+<section class="copilot" class:inspector-open={artifactInspectorOpen || runInspectorOpen}>
   <aside class="sidebar">
     <div class="sidebar-head">
       <button
@@ -545,10 +554,26 @@
           type="button"
           class="artifact-trigger"
           class:active={artifactInspectorOpen}
-          on:click={() => (artifactInspectorOpen = !artifactInspectorOpen)}
+          on:click={() => {
+            artifactInspectorOpen = !artifactInspectorOpen;
+            if (artifactInspectorOpen) runInspectorOpen = false;
+          }}
           aria-expanded={artifactInspectorOpen}
         >
           Artifacts <span>{artifacts.length}</span>
+        </button>
+        <button
+          type="button"
+          class="artifact-trigger"
+          class:active={runInspectorOpen}
+          on:click={() => {
+            runInspectorOpen = !runInspectorOpen;
+            if (runInspectorOpen) artifactInspectorOpen = false;
+          }}
+          aria-expanded={runInspectorOpen}
+          aria-label="Toggle Copilot run inspector"
+        >
+          Run
         </button>
         {#if storageRecovery}
           <button
@@ -582,13 +607,12 @@
           </button>
         </div>
         <label class="effort-select">
-          <span>Thinking</span>
-          <select bind:value={reasoningEffort} disabled={loading}>
-            <option value="minimal">minimal</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-            <option value="xhigh">xhigh</option>
+          <span>Profile</span>
+          <select bind:value={selectedProfile} disabled={loading}>
+            <option value="auto">Auto</option>
+            <option value="quick">Quick</option>
+            <option value="standard">Standard</option>
+            <option value="deep">Deep</option>
           </select>
         </label>
       </div>
@@ -819,6 +843,15 @@
       onExport={onExportArtifact}
       {onOpenSource}
       onClose={() => (artifactInspectorOpen = false)}
+    />
+  {/if}
+
+  {#if runInspectorOpen}
+    <CopilotRunInspector
+      turn={activeSession?.turns[activeSession.turns.length - 1] ?? null}
+      result={lastTurn?.result ?? operatorResult}
+      {diagnostics}
+      onClose={() => (runInspectorOpen = false)}
     />
   {/if}
 

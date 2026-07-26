@@ -25,6 +25,10 @@ from src.application.copilot_context_helpers import (
     summarize_risk_result,
 )
 from src.application.copilot_agents_operator import CopilotAgentsOperatorService
+from src.application.copilot_model_policy import (
+    AGENTS_SDK_PATH,
+    CopilotModelPolicy,
+)
 from src.application.copilot_confirmation_service import CopilotConfirmationService
 from src.application.copilot_context_contracts import (
     COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
@@ -53,8 +57,11 @@ from src.models.copilot import (
     CopilotArtifact,
     CopilotContextBundle,
     CopilotDeleteResult,
+    CopilotDiagnostics,
     CopilotDraftMutation,
     CopilotMemo,
+    CopilotLocalContinuationTurn,
+    CopilotModelPolicyResolution,
     CopilotMutationApplyResult,
     CopilotMutationDiffEntry,
     CopilotRequestContext,
@@ -71,13 +78,18 @@ from src.models.copilot import (
     CopilotResearchPlanEntity,
     CopilotResearchReport,
     CopilotRunEvent,
+    CopilotRunObservability,
+    CopilotSafeProviderError,
     COPILOT_RUN_EVENT_TYPES,
     CopilotSession,
+    CopilotShelfPromotion,
+    CopilotShelfPromotionRequest,
     CopilotStorageStatus,
     CopilotSourceRef,
     CopilotTurn,
     CopilotToolExecution,
     CopilotToolTrace,
+    CopilotUsageRecord,
     MacroCopilotContext,
     ResearchCard,
     ResearchClaim,
@@ -199,6 +211,7 @@ class CopilotService:
         news_service: NewsService | None = None,
         sitrep_service: SitrepService | None = None,
         provider: CopilotProvider,
+        model_policy: CopilotModelPolicy | None = None,
         store: CopilotStore | None = None,
     ) -> None:
         self.macro_service = macro_service
@@ -215,6 +228,7 @@ class CopilotService:
         self.news_service = news_service
         self.sitrep_service = sitrep_service
         self.provider = provider
+        self.model_policy = model_policy or CopilotModelPolicy.from_environment(provider)
         self.store = store
         self.confirmation_service = (
             CopilotConfirmationService(store) if store is not None else None
@@ -1306,26 +1320,44 @@ class CopilotService:
         self.action_registry = ResearchActionRegistry(self._action_definitions())
 
     def generate_research_card(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
+        started_at = time.perf_counter()
         resolved_domain = self._resolve_domain(request)
-        normalized_request = replace(request, domain=resolved_domain)
+        normalized_request, resolution = self._prepare_request(
+            replace(request, domain=resolved_domain),
+            role=request.role,
+        )
         builder = self._context_builders.get(resolved_domain)
         if builder is None:
-            return CopilotResearchCardResult(
+            result = CopilotResearchCardResult(
                 domain=resolved_domain,
                 current_tab=request.context.current_tab,
                 status="error",
                 provider=getattr(self.provider, "provider_name", "unknown"),
                 message=f"Unsupported copilot domain: {resolved_domain}",
             )
+            return self._with_run_metadata(
+                result,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=None,
+                known_provider_calls=0,
+            )
         try:
             context = builder(normalized_request)
         except ValueError as exc:
-            return CopilotResearchCardResult(
+            result = CopilotResearchCardResult(
                 domain=resolved_domain,
                 current_tab=request.context.current_tab,
                 status="error",
                 provider=getattr(self.provider, "provider_name", "unknown"),
                 message=str(exc),
+            )
+            return self._with_run_metadata(
+                result,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=None,
+                known_provider_calls=0,
             )
 
         tool_specs = [
@@ -1333,31 +1365,206 @@ class CopilotService:
             for tool in self._tools.values()
             if resolved_domain in tool.domains
         ]
+        provider_started_at = time.perf_counter()
+        provider_call_count = 0
         try:
-            result = self.provider.generate_research_card(
-                request=normalized_request,
-                context=context,
-                tool_specs=tool_specs,
-                execute_tool=self._execute_tool,
+            if resolution.status not in {"ready", "degraded"}:
+                safe_error = self.model_policy.safe_error(
+                    category=(
+                        resolution.status
+                        if resolution.status in {"disabled", "unconfigured", "unavailable", "incompatible_model"}
+                        else "incompatible_model"
+                    ),
+                    model=resolution.model,
+                )
+                result = CopilotResearchCardResult(
+                    domain=resolved_domain,
+                    current_tab=context.current_tab,
+                    status="unavailable",
+                    provider=resolution.provider,
+                    model=resolution.model,
+                    message=safe_error.message,
+                    sources=list(context.sources),
+                    warnings=dedupe_warnings([*context.warnings, safe_error.guidance]),
+                    safe_provider_error=safe_error,
+                )
+            else:
+                provider_call_count = 1
+                result = self.provider.generate_research_card(
+                    request=normalized_request,
+                    context=context,
+                    tool_specs=tool_specs,
+                    execute_tool=self._execute_tool,
+                )
+            provider_latency_ms = (
+                int((time.perf_counter() - provider_started_at) * 1000)
+                if provider_call_count
+                else None
             )
         except Exception as exc:
-            logger.exception("Copilot provider failed for domain %s", resolved_domain)
+            provider_latency_ms = int((time.perf_counter() - provider_started_at) * 1000)
+            safe_error = self.model_policy.classify_error(
+                exc,
+                model=resolution.model,
+            )
+            logger.warning(
+                "Copilot provider failed domain=%s diagnostic=%s category=%s",
+                resolved_domain,
+                safe_error.diagnostic_id,
+                safe_error.category,
+            )
             result = CopilotResearchCardResult(
                 domain=resolved_domain,
                 current_tab=context.current_tab,
                 status="error",
                 provider=getattr(self.provider, "provider_name", "unknown"),
-                message=f"Copilot failed: {exc}",
+                model=resolution.model,
+                message=safe_error.message,
                 sources=list(context.sources),
                 warnings=dedupe_warnings(
                     [
                         *context.warnings,
-                        "Copilot generation failed before a research card could be produced.",
+                        safe_error.guidance,
                     ]
                 ),
+                safe_provider_error=safe_error,
             )
         result = self._normalize_result_sources(result)
+        result = self._with_run_metadata(
+            result,
+            resolution=resolution,
+            started_at=started_at,
+            provider_latency_ms=provider_latency_ms,
+            known_provider_calls=provider_call_count,
+        )
         return self._persist_result_turn(normalized_request, resolved_domain, context, result)
+
+    def _prepare_request(
+        self,
+        request: CopilotResearchCardRequest,
+        *,
+        role: str,
+    ) -> tuple[CopilotResearchCardRequest, CopilotModelPolicyResolution]:
+        if self.model_policy.provider is not self.provider:
+            # Tests and explicit runtime reconfiguration may replace the
+            # provider adapter after service construction. Rebind the single
+            # policy authority instead of routing with stale capabilities.
+            self.model_policy = CopilotModelPolicy.from_environment(self.provider)
+        resolution = self.model_policy.resolve(request, role=role)
+        normalized = replace(
+            request,
+            reasoning_effort=resolution.reasoning_effort or request.reasoning_effort,
+            model_resolution=resolution,
+        )
+        if resolution.provider_storage.effective == "disabled":
+            normalized = replace(
+                normalized,
+                local_continuation=self._local_continuation(normalized.user_session_id),
+            )
+        return normalized, resolution
+
+    def _local_continuation(
+        self,
+        session_id: str | None,
+        *,
+        limit: int = 8,
+    ) -> list[CopilotLocalContinuationTurn]:
+        if self.store is None or not session_id:
+            return []
+        turns = self.store.list_turns(session_id)
+        continuation: list[CopilotLocalContinuationTurn] = []
+        for turn in turns[-max(1, limit):]:
+            continuation.append(
+                CopilotLocalContinuationTurn(
+                    turn_id=turn.turn_id,
+                    role=turn.role,
+                    prompt=turn.prompt,
+                    assistant_result={
+                        "domain": turn.result.domain,
+                        "status": turn.result.status,
+                        "message": turn.result.message,
+                        "card": asdict(turn.result.card) if turn.result.card is not None else None,
+                        "source_ids": [source.source_id for source in turn.result.sources],
+                        "warnings": list(turn.result.warnings),
+                        "context_contracts": [
+                            contract.to_dict() for contract in turn.result.context_contracts
+                        ],
+                        "context_budget": dict(turn.result.context_budget),
+                    },
+                )
+            )
+        return continuation
+
+    def _with_run_metadata(
+        self,
+        result: CopilotResearchCardResult,
+        *,
+        resolution: CopilotModelPolicyResolution,
+        started_at: float,
+        provider_latency_ms: int | None,
+        cancellation_outcome: str | None = None,
+        cancellation_boundary: str | None = None,
+        known_provider_calls: int | None = 1,
+        known_tool_calls: int | None = None,
+    ) -> CopilotResearchCardResult:
+        safe_error = result.safe_provider_error
+        if (
+            safe_error is None
+            and result.status in {"error", "unavailable"}
+            and known_provider_calls not in {None, 0}
+        ):
+            safe_error = self.model_policy.classify_error(
+                result.message,
+                run_id=result.response_id,
+                model=resolution.model,
+                fallback=(
+                    resolution.status
+                    if resolution.status in {"disabled", "unconfigured", "unavailable", "incompatible_model"}
+                    else None
+                ),
+            )
+            result = replace(
+                result,
+                message=safe_error.message,
+                warnings=dedupe_warnings([*result.warnings, safe_error.guidance]),
+            )
+        usage = result.usage
+        usage = replace(
+            usage,
+            provider_calls=usage.provider_calls if usage.provider_calls is not None else known_provider_calls,
+            tool_calls=(
+                usage.tool_calls
+                if usage.tool_calls is not None
+                else known_tool_calls
+                if known_tool_calls is not None
+                else len(result.tool_traces)
+            ),
+            raw={},
+        )
+        observability = CopilotRunObservability(
+            selected_profile=resolution.selected_profile,
+            resolved_provider=result.provider or resolution.provider,
+            resolved_model=result.model or resolution.model,
+            model_policy_version=resolution.policy_version,
+            routing_reason=resolution.routing_reason,
+            reasoning_mode=resolution.reasoning_mode,
+            reasoning_effort=resolution.reasoning_effort,
+            orchestration_path=resolution.orchestration_path,
+            total_latency_ms=int((time.perf_counter() - started_at) * 1000),
+            provider_latency_ms=provider_latency_ms,
+            cancellation_outcome=cancellation_outcome,
+            cancellation_boundary=cancellation_boundary,
+            provider_error_category=safe_error.category if safe_error else None,
+            diagnostic_id=safe_error.diagnostic_id if safe_error else None,
+        )
+        return replace(
+            result,
+            model=result.model or resolution.model,
+            model_resolution=resolution,
+            usage=usage,
+            observability=observability,
+            safe_provider_error=safe_error,
+        )
 
     def _persist_result_turn(
         self,
@@ -1392,10 +1599,16 @@ class CopilotService:
                 result=result,
                 role=normalized_request.role,
                 reasoning_effort=normalized_request.reasoning_effort,
+                selected_profile=(
+                    normalized_request.model_resolution.selected_profile
+                    if normalized_request.model_resolution is not None
+                    else normalized_request.selected_profile
+                ),
                 selected_scope_domains=self._selected_scope_domains(normalized_request, resolved_domain),
                 request_context={
                     "context": asdict(normalized_request.context),
                     "synthesis": asdict(normalized_request.synthesis) if normalized_request.synthesis else None,
+                    "selected_profile": normalized_request.selected_profile,
                 },
                 requested_provider=normalized_request.requested_provider
                 or getattr(self.provider, "provider_name", None),
@@ -1403,6 +1616,11 @@ class CopilotService:
                 run_id=run_id,
                 terminal_status=terminal_status,
                 cancellation_outcome=cancellation_outcome,
+                cancellation_boundary=result.observability.cancellation_boundary,
+                usage=result.usage,
+                model_resolution=result.model_resolution,
+                observability=result.observability,
+                safe_provider_error=result.safe_provider_error,
                 run_events=run_events,
                 research_plan=research_plan,
                 operator_plan=operator_plan,
@@ -1598,7 +1816,10 @@ class CopilotService:
     ) -> Iterator[CopilotRunEvent]:
         """Create or resume one server-owned Agent run and replay from a cursor."""
         resolved_domain = self._resolve_domain(request)
-        normalized_request = replace(request, domain=resolved_domain)
+        normalized_request, resolution = self._prepare_request(
+            replace(request, domain=resolved_domain),
+            role=request.role,
+        )
         provider_name = getattr(self.provider, "provider_name", "unknown")
         handle, created = self._resolve_run_handle(
             normalized_request,
@@ -1611,8 +1832,16 @@ class CopilotService:
                 "run.created",
                 {
                     "domain": resolved_domain,
-                    "provider": provider_name,
-                    "model": getattr(self.provider, "model", None),
+                    "provider": resolution.provider or provider_name,
+                    "model": resolution.model,
+                    "selected_profile": resolution.selected_profile,
+                    "resolved_profile": resolution.resolved_profile,
+                    "model_policy_version": resolution.policy_version,
+                    "routing_reason": resolution.routing_reason,
+                    "reasoning_mode": resolution.reasoning_mode,
+                    "reasoning_effort": resolution.reasoning_effort,
+                    "orchestration_path": resolution.orchestration_path,
+                    "provider_storage": asdict(resolution.provider_storage),
                     "provider_streaming": hasattr(self.provider, "stream_research_card"),
                     "run_kind": "agent",
                 },
@@ -1637,9 +1866,13 @@ class CopilotService:
         request: CopilotResearchCardRequest,
         timeout_seconds: float | None,
     ) -> None:
+        started_at = time.perf_counter()
         resolved_domain = request.domain
         provider_name = getattr(self.provider, "provider_name", "unknown")
+        resolution = request.model_resolution or self.model_policy.resolve(request, role=request.role)
         deadline = time.monotonic() + (timeout_seconds or DEFAULT_COPILOT_RUN_TIMEOUT_SECONDS)
+        provider_latency_ms: int | None = None
+        provider_call_started = False
 
         def timed_out() -> bool:
             return time.monotonic() > deadline
@@ -1660,9 +1893,32 @@ class CopilotService:
                     return terminal or result
                 handle.finalized = True
             normalized = self._normalize_result_sources(result)
+            cancellation_outcome = (
+                "timeout"
+                if normalized.status in {"cancelled", "timeout"}
+                and "timed out" in str(normalized.message or "").lower()
+                else "user_cancelled"
+                if normalized.status in {"cancelled", "timeout"}
+                else None
+            )
+            normalized = self._with_run_metadata(
+                normalized,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=provider_latency_ms,
+                cancellation_outcome=cancellation_outcome,
+                cancellation_boundary=(
+                    "provider_stream"
+                    if cancellation_outcome and provider_call_started
+                    else "before_provider_call"
+                    if cancellation_outcome
+                    else None
+                ),
+                known_provider_calls=1 if provider_call_started else 0,
+            )
             terminal_event_type = (
                 "cancelled"
-                if normalized.status == "cancelled"
+                if normalized.status in {"cancelled", "timeout"}
                 else "failed"
                 if normalized.status in {"error", "unavailable"}
                 else "completed"
@@ -1683,14 +1939,7 @@ class CopilotService:
                 normalized,
                 run_id=handle.run_id,
                 terminal_status=normalized.status,
-                cancellation_outcome=(
-                    "timeout"
-                    if normalized.status == "cancelled"
-                    and "timed out" in str(normalized.message or "").lower()
-                    else "user_cancelled"
-                    if normalized.status == "cancelled"
-                    else None
-                ),
+                cancellation_outcome=cancellation_outcome,
                 run_events=persisted_events,
             )
             return normalized
@@ -1729,6 +1978,41 @@ class CopilotService:
             self._append_run_event(handle, "failed", {"message": str(exc)}, result=result)
             return
 
+        if resolution.status not in {"ready", "degraded"}:
+            safe_error = self.model_policy.safe_error(
+                category=(
+                    resolution.status
+                    if resolution.status in {"disabled", "unconfigured", "unavailable", "incompatible_model"}
+                    else "incompatible_model"
+                ),
+                run_id=handle.run_id,
+                model=resolution.model,
+            )
+            result = finalize(
+                CopilotResearchCardResult(
+                    domain=resolved_domain,
+                    current_tab=context.current_tab,
+                    status="unavailable",
+                    provider=resolution.provider,
+                    model=resolution.model,
+                    message=safe_error.message,
+                    sources=list(context.sources),
+                    warnings=dedupe_warnings([*context.warnings, safe_error.guidance]),
+                    safe_provider_error=safe_error,
+                )
+            )
+            self._append_run_event(
+                handle,
+                "failed",
+                {
+                    "message": safe_error.message,
+                    "diagnostic_id": safe_error.diagnostic_id,
+                    "category": safe_error.category,
+                },
+                result=result,
+            )
+            return
+
         if should_cancel():
             cancelled("timeout" if timed_out() and not handle.cancel_event.is_set() else "user_cancelled")
             return
@@ -1741,6 +2025,9 @@ class CopilotService:
         event_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
 
         def provider_worker() -> None:
+            nonlocal provider_call_started
+            provider_call_started = True
+            provider_started_at = time.perf_counter()
             try:
                 if hasattr(self.provider, "stream_research_card"):
                     provider_result = self.provider.stream_research_card(
@@ -1758,12 +2045,29 @@ class CopilotService:
                         tool_specs=tool_specs,
                         execute_tool=self._execute_tool,
                     )
-                event_queue.put(("final", provider_result))
+                event_queue.put(
+                    (
+                        "final",
+                        (
+                            provider_result,
+                            int((time.perf_counter() - provider_started_at) * 1000),
+                        ),
+                    )
+                )
             except CopilotRunCancelled as exc:
-                event_queue.put(("cancelled", exc.reason))
+                event_queue.put(
+                    (
+                        "cancelled",
+                        (exc.reason, int((time.perf_counter() - provider_started_at) * 1000)),
+                    )
+                )
             except Exception as exc:  # pragma: no cover - defensive transport guard
-                logger.exception("Copilot streaming provider failed for domain %s", resolved_domain)
-                event_queue.put(("error", f"Copilot failed: {exc}"))
+                event_queue.put(
+                    (
+                        "error",
+                        (exc, int((time.perf_counter() - provider_started_at) * 1000)),
+                    )
+                )
 
         thread = threading.Thread(target=provider_worker, daemon=True, name=f"copilot-provider-{handle.run_id}")
         thread.start()
@@ -1784,10 +2088,11 @@ class CopilotService:
                 self._append_run_event(handle, etype, data)
                 continue
             if kind == "final":
+                provider_result, provider_latency_ms = payload
                 if should_cancel():
                     cancelled("timeout" if timed_out() and not handle.cancel_event.is_set() else "user_cancelled")
                     return
-                result = finalize(payload)
+                result = finalize(provider_result)
                 if result.status == "refused":
                     self._append_run_event(handle, "refusal", {"message": result.message or "Request refused."})
                 elif result.status == "incomplete":
@@ -1803,25 +2108,43 @@ class CopilotService:
                 self._append_run_event(handle, "completed", {"status": result.status}, result=result)
                 return
             if kind == "cancelled":
-                reason = str(payload or "cancelled")
+                reason_payload, provider_latency_ms = payload
+                reason = str(reason_payload or "cancelled")
                 if timed_out() and not handle.cancel_event.is_set():
                     reason = "timeout"
                 cancelled(reason)
                 return
             if kind == "error":
-                message = str(payload)
-                self._append_run_event(handle, "provider.error", {"message": message, "provider": provider_name})
+                error, provider_latency_ms = payload
+                safe_error = self.model_policy.classify_error(
+                    error,
+                    run_id=handle.run_id,
+                    model=resolution.model,
+                )
+                message = safe_error.message
+                self._append_run_event(
+                    handle,
+                    "provider.error",
+                    {
+                        "message": message,
+                        "provider": provider_name,
+                        "category": safe_error.category,
+                        "diagnostic_id": safe_error.diagnostic_id,
+                    },
+                )
                 result = finalize(CopilotResearchCardResult(
                     domain=resolved_domain,
                     current_tab=context.current_tab,
                     status="error",
                     provider=provider_name,
+                    model=resolution.model,
                     message=message,
                     sources=list(context.sources),
                     warnings=dedupe_warnings([
                         *context.warnings,
-                        "Copilot generation failed before a research card could be produced.",
+                        safe_error.guidance,
                     ]),
+                    safe_provider_error=safe_error,
                 ))
                 self._append_run_event(handle, "failed", {"message": message}, result=result)
                 return
@@ -1856,21 +2179,31 @@ class CopilotService:
         timeout_seconds: float | None = None,
     ) -> Iterator[CopilotRunEvent]:
         """Create or resume a server-owned Research Operator run."""
+        normalized_request, resolution = self._prepare_request(
+            replace(request, role="research_operator"),
+            role="research_operator",
+        )
         handle, created = self._resolve_run_handle(
-            request,
+            normalized_request,
             run_kind="operator",
             run_id=run_id,
         )
         if created:
-            orchestrator = "agents_sdk" if self.agents_operator_service.config.enabled else "gamma_custom_loop"
             self._append_run_event(
                 handle,
                 "run.created",
                 {
-                    "domain": request.domain,
-                    "provider": "gamma_operator_executor",
-                    "model": "gamma-operator-executor-v1",
-                    "orchestrator": orchestrator,
+                    "domain": normalized_request.domain,
+                    "provider": resolution.provider,
+                    "model": resolution.model,
+                    "selected_profile": resolution.selected_profile,
+                    "resolved_profile": resolution.resolved_profile,
+                    "model_policy_version": resolution.policy_version,
+                    "routing_reason": resolution.routing_reason,
+                    "reasoning_mode": resolution.reasoning_mode,
+                    "reasoning_effort": resolution.reasoning_effort,
+                    "orchestrator": resolution.orchestration_path,
+                    "provider_storage": asdict(resolution.provider_storage),
                     "run_kind": "operator",
                 },
             )
@@ -1878,7 +2211,7 @@ class CopilotService:
                 target=self._execute_operator_run,
                 kwargs={
                     "handle": handle,
-                    "request": request,
+                    "request": normalized_request,
                     "timeout_seconds": timeout_seconds,
                 },
                 daemon=True,
@@ -2346,6 +2679,11 @@ class CopilotService:
         return self.store.list_mutations(session_id) if self.store is not None else []
 
     def execute_research_plan(self, request: CopilotResearchCardRequest) -> CopilotResearchCardResult:
+        started_at = time.perf_counter()
+        if request.model_resolution is None:
+            request, resolution = self._prepare_request(request, role=request.role)
+        else:
+            resolution = request.model_resolution
         plan = self.plan_research(request)
         sources: dict[str, CopilotSourceRef] = {}
         tool_traces: list[CopilotToolTrace] = []
@@ -2360,7 +2698,6 @@ class CopilotService:
         budget = self._execution_budget_for_depth(plan.depth_profile)
         remaining_tools = budget.max_tool_calls
         provider_calls_used = 0
-        started_at = time.perf_counter()
         built_contexts: list[CopilotContextBundle] = []
         context_bytes_used = 0
         context_budget_omitted_domains: list[str] = []
@@ -2541,6 +2878,14 @@ class CopilotService:
             },
         )
         result = self._normalize_result_sources(result)
+        result = self._with_run_metadata(
+            result,
+            resolution=resolution,
+            started_at=started_at,
+            provider_latency_ms=None,
+            known_provider_calls=0,
+            known_tool_calls=len(tool_traces),
+        )
 
         if self.store is not None:
             try:
@@ -2573,15 +2918,21 @@ class CopilotService:
                     result=result,
                     role=request.role,
                     reasoning_effort=request.reasoning_effort,
+                    selected_profile=resolution.selected_profile,
                     selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
                     request_context={
                         "context": asdict(request.context),
                         "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                        "selected_profile": request.selected_profile,
                     },
                     requested_provider=request.requested_provider,
                     requested_model=request.requested_model,
                     run_id=result.response_id,
                     terminal_status=result.status,
+                    usage=result.usage,
+                    model_resolution=result.model_resolution,
+                    observability=result.observability,
+                    safe_provider_error=result.safe_provider_error,
                     research_plan=plan,
                 )
             except Exception:
@@ -2605,12 +2956,20 @@ class CopilotService:
         emit_event: Callable[[CopilotOperatorProgressEvent], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> CopilotResearchCardResult:
+        started_at = time.perf_counter()
+        if request.model_resolution is None:
+            request, resolution = self._prepare_request(
+                replace(request, role="research_operator"),
+                role="research_operator",
+            )
+        else:
+            resolution = request.model_resolution
         plan = self.plan_research_operator(request)
         has_draft_change = any(
             step.action_type == "draft_change"
             for step in plan.steps
         )
-        if self.agents_operator_service.config.enabled and not has_draft_change:
+        if resolution.orchestration_path == AGENTS_SDK_PATH and not has_draft_change:
             if should_cancel is not None and should_cancel():
                 result = CopilotResearchCardResult(
                     domain="synthesis",
@@ -2620,7 +2979,18 @@ class CopilotService:
                     message="Research Operator was cancelled before orchestration began.",
                     warnings=["Research Operator was cancelled before orchestration began."],
                 )
+                result = self._with_run_metadata(
+                    result,
+                    resolution=resolution,
+                    started_at=started_at,
+                    provider_latency_ms=None,
+                    cancellation_outcome="user_cancelled",
+                    cancellation_boundary="before_orchestrator",
+                    known_provider_calls=0,
+                    known_tool_calls=0,
+                )
                 return self._persist_operator_execution_result(request, plan, result)
+            provider_started_at = time.perf_counter()
             result = self.agents_operator_service.execute(
                 request=request,
                 plan=plan,
@@ -2633,7 +3003,24 @@ class CopilotService:
                 emit_event=emit_event,
                 should_cancel=should_cancel,
             )
+            provider_latency_ms = int((time.perf_counter() - provider_started_at) * 1000)
             result = self._normalize_result_sources(result)
+            result = self._with_run_metadata(
+                result,
+                resolution=resolution,
+                started_at=started_at,
+                provider_latency_ms=provider_latency_ms,
+                cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                cancellation_boundary=(
+                    "agents_sdk_turn_boundary" if result.status == "cancelled" else None
+                ),
+                known_provider_calls=(
+                    result.usage.provider_calls
+                    if result.usage.provider_calls is not None
+                    else 1
+                ),
+                known_tool_calls=len(result.tool_traces),
+            )
             result = self._persist_agents_operator_execution_result(request, plan, result)
             return result
 
@@ -3192,6 +3579,18 @@ class CopilotService:
             context_budget=context_budget,
         )
         result = self._normalize_result_sources(result)
+        result = self._with_run_metadata(
+            result,
+            resolution=resolution,
+            started_at=started_at,
+            provider_latency_ms=None,
+            cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+            cancellation_boundary=(
+                "before_next_safe_tool_step" if result.status == "cancelled" else None
+            ),
+            known_provider_calls=0,
+            known_tool_calls=len(tool_traces),
+        )
 
         if self.store is not None:
             try:
@@ -3239,16 +3638,23 @@ class CopilotService:
                     result=result,
                     role="research_operator",
                     reasoning_effort=request.reasoning_effort,
+                    selected_profile=resolution.selected_profile,
                     selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
                     request_context={
                         "context": asdict(request.context),
                         "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                        "selected_profile": request.selected_profile,
                     },
                     requested_provider=request.requested_provider,
                     requested_model=request.requested_model,
                     run_id=resolved_run_id,
                     terminal_status=result.status,
                     cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                    cancellation_boundary=result.observability.cancellation_boundary,
+                    usage=result.usage,
+                    model_resolution=result.model_resolution,
+                    observability=result.observability,
+                    safe_provider_error=result.safe_provider_error,
                     research_plan=resolved_research_plan,
                     operator_plan=plan,
                 )
@@ -3297,6 +3703,45 @@ class CopilotService:
         result = self._normalize_result_sources(result)
         if self.store is None:
             return result
+        if result.model_resolution is None:
+            resolution = request.model_resolution or self.model_policy.resolve(
+                request,
+                role="research_operator",
+            )
+            cancellation_outcome = (
+                "user_cancelled" if result.status == "cancelled" else None
+            )
+            result = replace(
+                result,
+                model_resolution=resolution,
+                usage=replace(
+                    result.usage,
+                    provider_calls=(
+                        result.usage.provider_calls
+                        if result.usage.provider_calls is not None
+                        else 0
+                    ),
+                    tool_calls=(
+                        result.usage.tool_calls
+                        if result.usage.tool_calls is not None
+                        else len(result.tool_traces)
+                    ),
+                ),
+                observability=CopilotRunObservability(
+                    selected_profile=resolution.selected_profile,
+                    resolved_provider=result.provider,
+                    resolved_model=result.model or resolution.model,
+                    model_policy_version=resolution.policy_version,
+                    routing_reason=resolution.routing_reason,
+                    reasoning_mode=resolution.reasoning_mode,
+                    reasoning_effort=resolution.reasoning_effort,
+                    orchestration_path=resolution.orchestration_path,
+                    cancellation_outcome=cancellation_outcome,
+                    cancellation_boundary=(
+                        "before_first_safe_step" if cancellation_outcome else None
+                    ),
+                ),
+            )
         try:
             self.store.record_turn(
                 session_id=request.user_session_id,
@@ -3314,16 +3759,27 @@ class CopilotService:
                 result=result,
                 role="research_operator",
                 reasoning_effort=request.reasoning_effort,
+                selected_profile=(
+                    request.model_resolution.selected_profile
+                    if request.model_resolution is not None
+                    else request.selected_profile
+                ),
                 selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
                 request_context={
                     "context": asdict(request.context),
                     "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                    "selected_profile": request.selected_profile,
                 },
                 requested_provider=request.requested_provider,
                 requested_model=request.requested_model,
                 run_id=(result.operator_events[0].run_id if result.operator_events else result.response_id),
                 terminal_status=result.status,
                 cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                cancellation_boundary=result.observability.cancellation_boundary,
+                usage=result.usage,
+                model_resolution=result.model_resolution,
+                observability=result.observability,
+                safe_provider_error=result.safe_provider_error,
                 research_plan=result.research_plan,
                 operator_plan=plan,
             )
@@ -3422,16 +3878,27 @@ class CopilotService:
                     result=result,
                     role="research_operator",
                     reasoning_effort=request.reasoning_effort,
+                    selected_profile=(
+                        request.model_resolution.selected_profile
+                        if request.model_resolution is not None
+                        else request.selected_profile
+                    ),
                     selected_scope_domains=self._selected_scope_domains(request, "synthesis"),
                     request_context={
                         "context": asdict(request.context),
                         "synthesis": asdict(request.synthesis) if request.synthesis else None,
+                        "selected_profile": request.selected_profile,
                     },
                     requested_provider=request.requested_provider,
                     requested_model=request.requested_model,
                     run_id=(result.operator_events[0].run_id if result.operator_events else result.response_id),
                     terminal_status=result.status,
                     cancellation_outcome="user_cancelled" if result.status == "cancelled" else None,
+                    cancellation_boundary=result.observability.cancellation_boundary,
+                    usage=result.usage,
+                    model_resolution=result.model_resolution,
+                    observability=result.observability,
+                    safe_provider_error=result.safe_provider_error,
                     research_plan=resolved_research_plan,
                     operator_plan=plan,
                 )
@@ -3983,6 +4450,40 @@ class CopilotService:
 
     def list_sessions(self, *, include_archived: bool = False, search: str | None = None) -> list[CopilotSession]:
         return self.store.list_sessions(include_archived=include_archived, search=search) if self.store is not None else []
+
+    def promote_shelf(
+        self,
+        request: CopilotShelfPromotionRequest,
+    ) -> CopilotShelfPromotion:
+        if self.store is None:
+            return CopilotShelfPromotion(
+                promotion_id="promotion_unavailable",
+                contract_version="copilot.shelf-promotion.v1",
+                status="unavailable",
+                source_session_id=request.source_session_id,
+                source_domain=request.source_domain,
+                context_fingerprint=request.context_fingerprint,
+                selected_scope_domains=list(request.selected_scope_domains),
+                role=request.role,
+                selected_profile=request.selected_profile,
+                message="Copilot local persistence is unavailable.",
+            )
+        return self.store.promote_shelf(request)
+
+    def diagnostics(self) -> CopilotDiagnostics:
+        if self.model_policy.provider is not self.provider:
+            self.model_policy = CopilotModelPolicy.from_environment(self.provider)
+        last_error: CopilotSafeProviderError | None = None
+        if self.store is not None:
+            sessions = self.store.list_sessions(include_archived=True)
+            turns: list[CopilotTurn] = []
+            for session in sessions[:25]:
+                turns.extend(self.store.list_turns(session.session_id))
+            for turn in sorted(turns, key=lambda item: item.created_at, reverse=True):
+                if turn.safe_provider_error is not None:
+                    last_error = turn.safe_provider_error
+                    break
+        return self.model_policy.diagnostics(last_error=last_error)
 
     def list_turns(self, session_id: str) -> list[CopilotTurn]:
         return self.store.list_turns(session_id) if self.store is not None else []

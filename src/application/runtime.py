@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
+from src.application.copilot_model_policy import (
+    OPENAI_BASELINE_MODEL,
+    CopilotModelPolicy,
+    configured_provider_storage,
+)
 from src.application.copilot_service import CopilotService
 from src.application.commodities_service import CommoditiesService
 from src.application.crypto_service import CryptoService
@@ -372,6 +377,12 @@ def build_runtime(
         benchmark_defaults=benchmark_defaults,
     )
     iv_service = IVService(client, market_data_mode)
+    copilot_provider = trace_provider(
+        _build_copilot_provider(allow_mock=bool(mock_mode)),
+        provider_usage,
+        endpoint_prefix="copilot",
+    )
+    copilot_model_policy = CopilotModelPolicy.from_environment(copilot_provider)
     copilot_service = CopilotService(
         macro_service=macro_service,
         prediction_market_service=prediction_market_service,
@@ -386,11 +397,8 @@ def build_runtime(
         maritime_service=maritime_service,
         news_service=news_service,
         sitrep_service=sitrep_service,
-        provider=trace_provider(
-            _build_copilot_provider(allow_mock=bool(mock_mode)),
-            provider_usage,
-            endpoint_prefix="copilot",
-        ),
+        provider=copilot_provider,
+        model_policy=copilot_model_policy,
         store=copilot_store,
     )
     desktop = _build_desktop_state(research_provider) if include_desktop_session else None
@@ -497,22 +505,16 @@ def _build_copilot_provider(*, allow_mock: bool = True):
             provider_id="unavailable_copilot",
         )
 
-    # Stored responses are required for previous_response_id-based continuation.
-    store_flag = (os.getenv("GAMMA_COPILOT_STORE_RESPONSES", "true") or "true").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    storage_policy = configured_provider_storage()
     return OpenAIResponsesCopilotProvider(
         api_key=api_key,
-        model=(os.getenv("GAMMA_COPILOT_MODEL", "gpt-5.5") or "gpt-5.5").strip(),
+        model=(os.getenv("GAMMA_COPILOT_MODEL", OPENAI_BASELINE_MODEL) or OPENAI_BASELINE_MODEL).strip(),
         reasoning_effort=(os.getenv("GAMMA_COPILOT_REASONING_EFFORT", "medium") or "medium").strip(),
         api_url=(
             os.getenv("GAMMA_COPILOT_API_URL", "https://api.openai.com/v1/responses")
             or "https://api.openai.com/v1/responses"
         ).strip(),
-        store_responses=store_flag,
+        store_responses=storage_policy.effective == "enabled",
     )
 
 

@@ -13,6 +13,7 @@ from src.api.schemas.copilot import (
     CopilotContextSnapshotModel,
     CopilotDeleteResultModel,
     CopilotDraftMutationModel,
+    CopilotDiagnosticsModel,
     CopilotFundamentalsDcfMutationRequestModel,
     CopilotMemoCreateRequestModel,
     CopilotMemoModel,
@@ -33,6 +34,8 @@ from src.api.schemas.copilot import (
     CopilotSessionDetailModel,
     CopilotSessionModel,
     CopilotSessionUpdateRequestModel,
+    CopilotShelfPromotionModel,
+    CopilotShelfPromotionRequestModel,
     CopilotStorageStatusModel,
     CopilotStorageWarningModel,
     CopilotTurnModel,
@@ -130,6 +133,23 @@ def list_copilot_actions(request: Request) -> list[CopilotResearchActionDefiniti
         CopilotResearchActionDefinitionModel.from_domain(item)
         for item in runtime.copilot_service.list_research_action_definitions()
     ]
+
+
+@router.get("/copilot/diagnostics", response_model=CopilotDiagnosticsModel)
+def get_copilot_diagnostics(request: Request) -> CopilotDiagnosticsModel:
+    diagnostics = request.app.state.runtime.copilot_service.diagnostics()
+    return CopilotDiagnosticsModel.from_domain(diagnostics)
+
+
+@router.post("/copilot/shelf/promote", response_model=CopilotShelfPromotionModel)
+def promote_copilot_shelf(
+    payload: CopilotShelfPromotionRequestModel,
+    request: Request,
+) -> CopilotShelfPromotionModel:
+    promotion = request.app.state.runtime.copilot_service.promote_shelf(
+        payload.to_domain()
+    )
+    return CopilotShelfPromotionModel.from_domain(promotion)
 
 
 @router.post("/copilot/research-plan/execute", response_model=CopilotResearchCardResponseModel)

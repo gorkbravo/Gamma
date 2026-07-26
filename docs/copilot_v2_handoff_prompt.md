@@ -1,4 +1,4 @@
-# Copilot V2 94% To 100% Execution Prompt
+# Copilot V2 97% To 100% Execution Prompt
 
 Copy the text inside the block below into the agent that will complete Copilot V2.
 
@@ -7,7 +7,7 @@ You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot V2 from its verified 94% baseline to 100% according to the checkpoint gates in `roadmap.md`. Checkpoints 1 through 5 are complete. Begin with Checkpoint 6. This is an implementation task, not a planning-only exercise. Work checkpoint-by-checkpoint until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
+Your objective is to take Copilot V2 from its verified 97% baseline to 100% according to the release gate in `roadmap.md`. Checkpoints 1 through 6 are complete. Begin with Checkpoint 7 and do not reopen or replace the verified continuity/model-policy/retention/diagnostics contracts without evidence that the release gate requires it. This is an implementation task, not a planning-only exercise. Work until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
 
 Do not stop after one convenient slice and do not ask the user to choose the next checkpoint. Follow the roadmap order, make reasonable in-scope decisions, implement coherent vertical slices, verify them, update the active documentation, and continue. Never claim a percentage merely because code was written; a percentage is earned only when that checkpoint's exit criteria pass.
 
@@ -16,7 +16,7 @@ Do not stop after one convenient slice and do not ask the user to choose the nex
 Read these files completely before editing:
 
 1. `AGENTS.md`
-2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 94% to 100%`, sequencing rules, non-goals, and deliverable
+2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 97% to 100%`, sequencing rules, non-goals, and deliverable
 3. `docs/copilot_v2_tab_plan.md`, especially the July 2026 completion plan, remaining engineering workstreams, delivery order, and definition of done
 4. `docs/provenance_expectations.md`
 5. `docs/design_principles.md` before changing Svelte/CSS
@@ -30,7 +30,7 @@ Before editing:
 
 - run `git status --short --branch` and inspect recent Copilot commits;
 - inspect all existing uncommitted changes and preserve unrelated user work;
-- treat the current run-lifecycle, transcript/evidence, session/artifact, Operator authority, context-contract/tool-coverage, roadmap, and documentation changes as part of the verified 94% baseline;
+- treat the current run-lifecycle, transcript/evidence, session/artifact, Operator authority, context-contract/tool-coverage, exact shelf continuity, model/storage policy, observability/diagnostics, roadmap, and documentation changes as part of the verified 97% baseline;
 - run the focused Copilot backend tests, frontend Copilot tests, typecheck, and build to confirm the baseline;
 - inspect the running Copilot UI at desktop and narrow widths when practical;
 - compare code reality with the roadmap and detailed spec, correcting stale documentation without erasing useful implementation history.
@@ -54,7 +54,7 @@ Bounded read-only analysis may run automatically. Every durable or non-trivial l
 
 Gamma backend services remain authoritative for tools, permissions, execution, confirmation tokens, persistence, cancellation, finalization, and mutation rules. The UI may navigate for convenience but must not become the authority for analytical execution.
 
-## Current 94% baseline
+## Current 97% baseline
 
 The baseline should include:
 
@@ -80,8 +80,14 @@ The baseline should include:
 - bounded registry-owned Maritime route/chokepoint and item-level news drilldowns with typed degradation, provider/freshness/provenance metadata, stable identifiers, validated news URLs, and deterministic cross-feed deduplication;
 - bounded `inspect_options_structure`, `inspect_commodity_curve_fundamentals`, and `inspect_equity_research_context` tools through Gamma's authoritative domain services;
 - evidence validation and frontend navigation that preserve supported instrument, contract, route, chokepoint, and news-item context while treating unknown or inspectable-only refs honestly.
+- exact `copilot.shelf-promotion.v1` continuity that reopens the authoritative source session/turns/snapshots without copying or duplicating user/assistant turns, with deterministic retry idempotency and typed incomplete/stale/unavailable/already-promoted results;
+- server-owned `copilot.model-policy.v1` Auto/Quick/Standard/Deep resolution that separates selected from resolved configuration and records provider, model, reasoning, capabilities, storage, routing reason, and custom/Agents orchestration path;
+- `copilot.provider-storage.v1` separation of Gamma-local replay from provider response storage, including tested OpenAI `store: false`, omission of provider response-id continuation, and bounded local structured continuation;
+- schema-v4 replay of available usage/cache/latency/provider/tool/cancellation metrics, explicit null for unavailable provider values, and removal of raw provider usage payloads;
+- Settings and run-inspector provider/model/storage diagnostics with safe `cp6.<category>.<hash>` ids and category-specific configuration/retry guidance;
+- a supported deterministic CLI eval that passed 31/31 outcomes across 11 retained cases and five profile/orchestrator variants (average 0.9093), with no authorized live-provider evidence and no default change.
 
-Important current gaps begin with checkpoint 6: shelf-to-workspace promotion, versioned model policy, retention/diagnostics, then accessibility and full live release evidence. Do not reopen Checkpoint 5 contracts or broaden tools without evidence that a Checkpoint 6/7 requirement needs it.
+Important current gaps are exclusively Checkpoint 7 release-gate work: first-run/accessibility/focus/reduced-motion/narrow-layout certification, complete degraded-state UX regression coverage, documentation/setup reconciliation, and representative successful live Agent/Operator smoke when provider access, quota, and spend are intentionally authorized. Do not reopen Checkpoint 5 or Checkpoint 6 contracts or broaden tools without evidence that a Checkpoint 7 requirement needs it.
 
 ## Execution method for every checkpoint
 
@@ -226,7 +232,7 @@ Exit evidence:
 - the supported eval CLI passed 22/22 deterministic outcomes across the four representative scenarios;
 - eval provider coverage used explicitly configured sample maritime/commodities/news providers and a mock Copilot provider. No new live-provider success is claimed, and the prior OpenAI quota limitation remains external evidence only.
 
-## Checkpoint 6 — finish continuity, model policy, retention, and diagnostics (97%)
+## Checkpoint 6 — verified 2026-07-25 (97%)
 
 Required delivery:
 
@@ -241,10 +247,15 @@ Required delivery:
 
 Exit evidence:
 
-- shelf promotion loses no thread or context state;
-- routing and any Agents SDK default are backed by recorded evals;
-- retention modes survive restart and continuation tests;
-- disabled, unconfigured, unavailable, rate-limited, quota-exhausted, and provider-error states provide actionable guidance.
+- exact, reference-based shelf promotion preserves the original persisted session, user/assistant turns, selected scopes, context fingerprints and versions, domain decisions and omissions, evidence, warnings, freshness, provider state, and account/research-book boundary without duplication;
+- promotion retries return the same workspace session, typed incomplete/stale/unavailable/already-promoted states are replayable, and restart tests preserve the promotion relationship;
+- one server-owned `copilot.model-policy.v1` resolves Auto, Quick, Standard, and Deep profiles into provider/model/reasoning/orchestration/capability/storage state; unsupported combinations degrade explicitly;
+- the supported deterministic eval CLI passed 31/31 scored outcomes across 11 retained cases and five profile/orchestrator variants, with an average score of 0.9093. No live-provider comparison was intentionally authorized, so GPT-5.5 and the deterministic custom Operator remain the defaults;
+- schema-v4 persistence preserves selected/resolved routing, available usage/cache/latency/call metrics, cancellation boundaries, and safe errors across replay while missing provider metrics remain `null` and raw provider usage payloads are discarded;
+- `copilot.provider-storage.v1` distinguishes Gamma-local storage from provider response storage; the tested `store: false` path omits response-id continuation and reconstructs bounded continuation from Gamma's local structured transcript;
+- Settings and the run inspector expose capability, routing, storage, provider state, safe guidance, and copyable `cp6.<category>.<hash>` diagnostic IDs without credentials, authorization values, stack traces, raw prompts, or unsafe provider payloads;
+- gate validation passed 125 focused Copilot/Agents/eval tests, 50 affected runtime/provider tests, the full 468-test backend suite, 320 frontend tests, typecheck, production build, desktop check, and 31/31 deterministic eval outcomes;
+- no successful live-provider result is claimed. Live credentials, quota, and spend were not intentionally authorized for Checkpoint 6, and the prior quota-exhausted attempt remains external evidence only.
 
 ## Checkpoint 7 — pass the Copilot V2 release gate (100%)
 

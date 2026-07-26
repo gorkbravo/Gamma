@@ -50,8 +50,10 @@ import type {
   CopilotDraftMutation,
   CopilotDomain,
   CopilotMemo,
+  CopilotDiagnostics,
   CopilotMutationApplyResult,
   CopilotOperatorPlan,
+  CopilotProfile,
   CopilotReasoningEffort,
   CopilotResearchCardResult,
   CopilotResearchActionDefinition,
@@ -60,6 +62,7 @@ import type {
   CopilotRunEvent,
   CopilotSessionDetail,
   CopilotSessionSummary,
+  CopilotShelfPromotion,
   CopilotStorageStatus,
   CopilotThreadEntry,
   CopilotThreadState,
@@ -361,6 +364,7 @@ export interface FundamentalsDcfSavePayload {
 function createEmptyCopilotThread(domain: CopilotDomain): CopilotThreadState {
   return {
     domain,
+    sourceSessionId: null,
     contextFingerprint: null,
     latestResponseId: null,
     entries: []
@@ -467,6 +471,7 @@ export const copilotMemos = writable<CopilotMemo[]>([]);
 export const copilotArtifacts = writable<CopilotArtifact[]>([]);
 export const activeCopilotArtifact = writable<CopilotArtifact | null>(null);
 export const copilotStorageStatus = writable<CopilotStorageStatus | null>(null);
+export const copilotDiagnostics = writable<CopilotDiagnostics | null>(null);
 export const copilotArtifactSaveState = writable<"idle" | "saving" | "saved" | "error">("idle");
 /** True while an authoritative `New chat` create is in flight. */
 export const copilotSessionCreating = writable(false);
@@ -1329,7 +1334,8 @@ function appendCopilotThreadResult(
   prompt: string,
   contextFingerprint: string | null,
   previousResponseId: string | null,
-  baseThread: CopilotThreadState
+  baseThread: CopilotThreadState,
+  sourceSessionId: string | null = baseThread.sourceSessionId ?? null
 ) {
   const nextEntry = buildCopilotThreadEntry(
     domain,
@@ -1347,6 +1353,7 @@ function appendCopilotThreadResult(
     ...current,
     [domain]: {
       domain,
+      sourceSessionId,
       contextFingerprint,
       latestResponseId,
       entries: [...baseThread.entries, nextEntry]
@@ -3006,6 +3013,7 @@ type CopilotLoadOptions = {
   synthesisDomains?: CopilotBaseDomain[];
   activeTabId?: TabId | "research";
   reasoningEffort?: CopilotReasoningEffort;
+  selectedProfile?: CopilotProfile;
 };
 
 function normalizeSynthesisDomains(domains: CopilotBaseDomain[] | undefined) {
@@ -3567,6 +3575,9 @@ export async function streamCopilotResearchCard(
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
         : {}),
+      ...(normalizeCopilotProfile(options.selectedProfile)
+        ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
+        : {}),
       ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
       context,
       ...(synthesis ? { synthesis } : {})
@@ -3592,7 +3603,15 @@ export async function streamCopilotResearchCard(
     }
     const settled = streamed.result;
     if (isCopilotRunSessionStillSelected(runSessionId)) {
-      appendCopilotThreadResult(domain, settled, prompt, contextFingerprint, previousResponseId, baseThread);
+      appendCopilotThreadResult(
+        domain,
+        settled,
+        prompt,
+        contextFingerprint,
+        previousResponseId,
+        baseThread,
+        runSessionId
+      );
     }
     lastError.set(settled.status === "ready" ? "" : settled.message ?? "Copilot failed.");
     return settled;
@@ -3638,6 +3657,9 @@ export async function loadCopilotResearchPlan(
         domain === "synthesis" ? options.synthesisDomains ?? [] : [domain],
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
+        : {}),
+      ...(normalizeCopilotProfile(options.selectedProfile)
+        ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
         : {}),
       context_fingerprint: buildCopilotContextFingerprint(domain, options.workspaceMode, {
         synthesisDomains: options.synthesisDomains,
@@ -3700,6 +3722,9 @@ export async function loadCopilotOperatorPlan(
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
         : {}),
+      ...(normalizeCopilotProfile(options.selectedProfile)
+        ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
+        : {}),
       context_fingerprint: buildCopilotContextFingerprint(domain, options.workspaceMode, {
         synthesisDomains: options.synthesisDomains,
         activeTabId: options.activeTabId
@@ -3745,7 +3770,14 @@ export async function executeCopilotOperatorPlan(
       rejectCopilotSubmission(submission, message);
       const result = buildCopilotFailureResult(domain, message);
       copilotOperatorResult.set(result);
-      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
+      appendCopilotThreadResult(
+        domain,
+        result,
+        prompt,
+        contextFingerprint,
+        null,
+        baseThread
+      );
       return result;
     }
     const synthesis =
@@ -3766,6 +3798,9 @@ export async function executeCopilotOperatorPlan(
       context_fingerprint: contextFingerprint,
       ...(normalizeReasoningEffort(options.reasoningEffort)
         ? { reasoning_effort: normalizeReasoningEffort(options.reasoningEffort) }
+        : {}),
+      ...(normalizeCopilotProfile(options.selectedProfile)
+        ? { selected_profile: normalizeCopilotProfile(options.selectedProfile) }
         : {}),
       context,
       ...(synthesis ? { synthesis } : {})
@@ -3791,7 +3826,15 @@ export async function executeCopilotOperatorPlan(
     const result = streamed.result;
     if (isCopilotRunSessionStillSelected(runSessionId)) {
       copilotOperatorResult.set(result);
-      appendCopilotThreadResult(domain, result, prompt, contextFingerprint, null, baseThread);
+      appendCopilotThreadResult(
+        domain,
+        result,
+        prompt,
+        contextFingerprint,
+        null,
+        baseThread,
+        runSessionId
+      );
     }
     await Promise.allSettled([loadActiveCopilotSession(), loadCopilotSessions()]);
     lastError.set(
@@ -3813,6 +3856,12 @@ export async function executeCopilotOperatorPlan(
     copilotActiveRun.set(null);
     setLoading("copilot", false);
   }
+}
+
+function normalizeCopilotProfile(profile: CopilotProfile | undefined) {
+  return profile && ["auto", "quick", "standard", "deep"].includes(profile)
+    ? profile
+    : undefined;
 }
 
 function resultWithResolvedMutation(
@@ -4042,6 +4091,60 @@ export async function loadCopilotSessions(options: { includeArchived?: boolean; 
   } catch (error) {
     setError(error);
     return [];
+  }
+}
+
+export async function loadCopilotDiagnostics() {
+  try {
+    const result = await getJson<CopilotDiagnostics>("/copilot/diagnostics");
+    copilotDiagnostics.set(result);
+    return result;
+  } catch (error) {
+    setError(error);
+    copilotDiagnostics.set(null);
+    return null;
+  }
+}
+
+export async function promoteCopilotShelfThread(
+  thread: CopilotThreadState,
+  options: {
+    selectedScopeDomains?: CopilotBaseDomain[];
+    role?: "research_agent" | "research_operator";
+    selectedProfile?: CopilotProfile;
+  } = {}
+) {
+  const sourceSessionId = thread.sourceSessionId ?? getSelectedCopilotSessionId();
+  try {
+    const promotion = await postJson<CopilotShelfPromotion>(
+      "/copilot/shelf/promote",
+      {
+        source_session_id: sourceSessionId ?? "",
+        source_domain: thread.domain,
+        context_fingerprint: thread.contextFingerprint,
+        entries: thread.entries.map((entry) => ({
+          turn_index: entry.turnIndex,
+          prompt: entry.prompt,
+          response_id: entry.result.response_id
+        })),
+        selected_scope_domains:
+          options.selectedScopeDomains
+          ?? (thread.domain === "synthesis" ? [] : [thread.domain as CopilotBaseDomain]),
+        role: options.role ?? "research_agent",
+        selected_profile: options.selectedProfile ?? "auto"
+      }
+    );
+    if (["promoted", "already_promoted"].includes(promotion.status)) {
+      await loadCopilotSession(promotion.source_session_id, { makeActive: true });
+      await Promise.allSettled([loadCopilotSessions(), loadCopilotDiagnostics()]);
+      lastError.set("");
+    } else {
+      lastError.set(promotion.message);
+    }
+    return promotion;
+  } catch (error) {
+    setError(error);
+    return null;
   }
 }
 

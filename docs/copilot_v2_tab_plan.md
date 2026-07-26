@@ -169,7 +169,7 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The largest gaps are integration and reliability gaps, not missing concepts. Checkpoints 1 through 5 are verified at 94%: the shared run/transcript/session/artifact and Operator-authority foundation now includes typed `copilot.context.v2` contracts for every selectable scope, deterministic fingerprinting and compaction, replayable domain-selection/omission reasons, first-class Sealanes and item-level news context, and bounded IV, Commodities, and Equity Research drilldowns. Remaining gaps are:
+The largest gaps are release-hardening gaps, not missing concepts. Checkpoints 1 through 6 are verified at 97%: the shared run/transcript/session/artifact and Operator-authority foundation now includes typed `copilot.context.v2` contracts for every selectable scope, deterministic fingerprinting and compaction, replayable domain-selection/omission reasons, first-class Sealanes and item-level news context, exact shelf-to-workspace promotion, one versioned model/storage policy, stateless local continuation, replayable routing/usage observability, and safe provider diagnostics. Remaining gaps belong to Checkpoint 7:
 
 - the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5; the custom loop remains the measured default until a future live comparison shows a quality or latency advantage;
 - exact shelf-to-workspace thread/context promotion remains incomplete;
@@ -354,14 +354,14 @@ Implementation note (2026-07-25):
 - [x] Preserve claim labels, inline citations, source metadata, warnings, model/provider metadata, context snapshots, and tool-trace summary in exports.
 - [x] Link artifacts back to the exact source turns and show artifacts in the selected-session inspector.
 
-#### F. Sessions, retention, and model policy — session lifecycle/replay complete; retention/model policy still required
+#### F. Sessions, retention, and model policy — checkpoint 6 complete (97%)
 
 - [x] Add session rename, archive/restore, delete, schema versioning, migrations, and non-destructive corrupted-record recovery.
 - [x] Persist role, depth, requested/resolved provider/model metadata, selected scopes, context fingerprints/snapshots, run status, cancellation, usage, plans, events, confirmations, warnings, sources, traces, and artifacts.
 - [x] Create each new conversation as one authoritative empty session and keep selected, inactive, running, and archived states distinct.
-- Add a visible retention control explaining Gamma-local storage versus OpenAI stored responses.
-- Support a `store: false` path without breaking local continuation, including encrypted reasoning replay only if it is intentionally adopted and tested.
-- Put model aliases, allowed efforts/modes, routing rules, and fallbacks in a versioned policy object with capability validation.
+- [x] Add visible Settings/run-inspector language explaining Gamma-local storage versus provider-side response storage.
+- [x] Support a tested `store: false` path without response-id dependence by reconstructing bounded continuation from Gamma's local structured transcript.
+- [x] Put Auto/Quick/Standard/Deep aliases, efforts/modes, routing rules, capabilities, storage behavior, and explicit degradation in the server-owned `copilot.model-policy.v1` contract.
 
 Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint percentage is unchanged):
 - `POST /copilot/sessions` creates one authoritative empty session. Passing an explicit `session_id` is idempotent, so a double activation reattaches instead of creating a duplicate. `New chat` now creates the session before selecting it, which removes the not-found reconciliation that made it silently open an existing conversation.
@@ -369,19 +369,28 @@ Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint
 - `selected`, `inactive`, `running`, and `archived` are independent facts in `frontend/src/lib/copilot-workspace.ts`. Selection is not proof of an active run; switching conversations or starting a new chat does not cancel a server-owned run, the source conversation keeps a running indicator, and the settled turn stays with its own session rather than being appended to the transcript now on screen.
 - Composer clearing is driven by run acceptance (`CopilotRunState.accepted`, set on the first acknowledged run event), not by the final status. Quota, provider-error, refusal, incomplete, cancellation, timeout, and zero-tool Operator outcomes all clear the composer because the turn is already persisted; a submission rejected before acceptance preserves the draft, and Retry resends the persisted turn prompt.
 - The storage-recovery warning is now an in-flow status strip in the chat column with a `RECOVERY` badge, a plain-language explanation that originals were preserved, an inspectable list of safe record details (record type, recovery action, store-relative path, message), a session-scoped dismiss, and a `Storage` header control for rediscovery. It is statically positioned with no `z-index`, so it cannot cover the composer, artifact controls, or confirmation dialogs at desktop or narrow widths.
+- Checkpoint 6 adds schema-v4 fields for selected/resolved profile, provider/model, policy version, product-level routing reason, reasoning mode/effort, orchestration path, total/provider latency, available input/output/reasoning/cache tokens, provider/tool call counts, cancellation outcome/boundary, and safe provider error correlation. Legacy placeholders migrate to `null` when the provider never supplied a value; raw provider usage payloads are discarded.
+- `copilot.provider-storage.v1` keeps Gamma-local persistence distinct from provider response retention. When effective storage is disabled, OpenAI requests use `store: false`, omit `previous_response_id`, and include a bounded safe local continuation contract. Providers that cannot honor a requested storage mode return typed degradation.
+- The server policy resolves Auto, Quick, Standard, and Deep and records user selection separately from the final resolution. Unsupported provider/model/profile combinations return explicit safe states. The GPT-5.5 Agent baseline and deterministic custom Operator remain defaults because the retained comparison showed no authorized live quality, latency, reliability, or cost advantage.
 
-#### G. Shelf/full-workspace continuity — required
+#### G. Shelf/full-workspace continuity — checkpoint 6 complete (97%)
 
-- Add `Open in Copilot` from the shelf, preserving thread id, active context, sources, warnings, and selected entity/lens.
-- Keep quick shelf responses concise and card-oriented; send plans, long runs, confirmations, and artifacts to the full tab.
-- Ensure handoffs from source tabs and the shelf converge on the same session/context contract.
+- [x] Add `Open in Copilot` from the shelf, preserving the exact source session, turn ids, snapshot ids, context fingerprint/version, selected scopes, role/profile, sources, warnings, freshness, domain decisions, and supported entity/lens/account-or-research-book boundary.
+- [x] Keep quick shelf responses concise and card-oriented; plans, traces, diagnostics, confirmations, and artifacts remain in the full workspace.
+- [x] Make promotion reference the authoritative persisted turns instead of copying transcript content, with deterministic idempotency and typed `incomplete`, `stale`, `unavailable`, and `already_promoted` states that survive restart replay.
 
-#### H. Diagnostics and first-run experience — required
+#### H. Diagnostics and first-run experience — diagnostics complete; Checkpoint 7 first-run polish remains
 
-- Show OpenAI configuration, selected/resolved model, orchestrator, storage mode, last provider error, and provider capability state in Settings and the run inspector.
-- Surface structured provider errors with retry guidance and a copyable diagnostic id; never leak credentials or raw sensitive payloads.
-- Record latency, input/output/reasoning tokens, cache reads/writes, provider calls, tool calls, and cancellation outcome.
+- [x] Show provider configuration, selected/resolved profile/model, routing result, orchestrator, local/provider storage mode, last provider error, and capability state in Settings and the run inspector.
+- [x] Surface structured provider errors with category-specific retry/configuration guidance and a copyable `cp6.<category>.<hash>` diagnostic id; never leak credentials, stack traces, authorization values, raw prompts, or provider payloads.
+- [x] Record and replay available latency, input/output/reasoning tokens, cache reads/writes, provider calls, tool calls, and cancellation outcome/boundary without inventing missing values.
 - Add first-run guidance for disabled, unconfigured, unavailable, rate-limited, and quota-exhausted states.
+
+Implementation note (2026-07-25, checkpoint 6 complete):
+- The supported deterministic CLI scored grounding, citation validity, domain selection/omission, warning preservation, tool selection, permission stops, trace completeness, and final usefulness. It passed 31/31 outcomes across 11 retained cases: Auto/custom covered all 11, while Quick/custom, Standard/custom, Deep/custom, and Standard/Agents-SDK-stub each covered the four Checkpoint 5 representative prompts plus the DCF permission stop. Average score was 0.9093.
+- The eval records wall/provider latency and returned usage when present, labels all executed variants `deterministic_mock`, and emits an explicit routing decision. No live-provider flag or spend was authorized, so no live pass is claimed and no default changed.
+- Verification: 125/125 focused Copilot/Agents/eval tests; 50/50 affected API/provider/capability/usage tests; 468/468 full backend tests; 320/320 frontend tests across 46 files; typecheck, production build, and desktop check.
+- The remaining Checkpoint 7 blocker is release evidence: full first-run/accessibility/focus/reduced-motion/narrow-layout certification and representative successful live Agent and Operator smoke when provider access, quota, and spend are intentionally authorized.
 
 #### I. Validation and release gate — blocker
 
@@ -399,12 +408,12 @@ Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint
 4. ~~Fix the focused New Chat, composer-clear, and storage-warning presentation regressions recorded in `docs/copilot_v2_checkpoint3_prompt.md`.~~ Completed 2026-07-25 (see the note under workstream F).
 5. ~~Live operator events, cancellation, and inline confirmations.~~ Completed 2026-07-25 at checkpoint 4 (91%).
 6. ~~Missing context/tool coverage and source navigation.~~ Completed 2026-07-25 at checkpoint 5 (94%).
-7. GPT-5.6 eval-backed model policy and routing rollout.
+7. ~~Versioned, capability-aware model/storage policy and eval-backed routing decision.~~ Completed 2026-07-25 at checkpoint 6 (97%); retain GPT-5.5/custom Operator defaults because no authorized live evidence justified a switch.
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
-9. Diagnostics, first-run guidance, accessibility, and full release gate.
+9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain Checkpoint 7.
 10. Optional external deep research; later voice.
 
-Do not start with model-string replacement alone. The GPT-5.6 migration should land with provider streaming, capability-aware configuration, usage instrumentation, and eval evidence so the model change improves the product rather than merely changing metadata.
+Do not start with model-string replacement alone. Any future candidate-model rollout must use the Checkpoint 6 policy and land with provider streaming, capability validation, usage instrumentation, and recorded eval/live evidence so it improves the product rather than merely changing metadata.
 
 ### Definition Of Done
 
@@ -416,7 +425,7 @@ Do not start with model-string replacement alone. The GPT-5.6 migration should l
 - Session replay after app restart reproduces the final transcript, trace, artifacts, and context metadata.
 - The dedicated tab supports full memo/report editing and export.
 - The shelf can promote a thread into the tab without context loss.
-- GPT-5.6 routing is backed by recorded eval results against the GPT-5.5 baseline.
+- Model/profile/orchestrator routing is replayable and backed by recorded eval results against the retained GPT-5.5/custom-loop baseline; no default changes without measured evidence.
 - Live smoke and frontend/backend test suites cover happy, degraded, unavailable, refused, incomplete, cancelled, and provider-error paths.
 
 ## Smart Depth Policy
@@ -963,7 +972,7 @@ Future agents should update this section.
 
 | Decision | Current stance | Notes |
 |---|---|---|
-| Direct Responses API vs Agents SDK | Keep Agents SDK as the maintained, feature-flagged Research Operator orchestration path behind Gamma's registry; keep the deterministic custom loop as the product default. | User approved using the SDK. Checkpoint 4 established live progress, safe-turn cancellation, and permission parity, but the retained offline comparison does not show a new live quality/latency advantage sufficient to switch defaults. |
+| Direct Responses API vs Agents SDK | Keep Agents SDK as the maintained, feature-flagged Research Operator orchestration path behind Gamma's registry; keep the deterministic custom loop as the product default. | Checkpoint 4 established live progress, safe-turn cancellation, and permission parity. Checkpoint 6 compared five profile/orchestrator variants across the retained cases and passed 31/31 deterministic scored outcomes, but no live-provider comparison was intentionally authorized and no measured quality/latency/reliability/cost advantage justified switching defaults. |
 | UI control vs backend tools | Backend tools are authoritative; UI navigation is convenience only. | This preserves auditability and avoids fragile DOM automation. |
 | Outside info | Provider adapters first; general web search only as fallback or explicit mode. | News and estimates are context, not execution. |
 | Copilot roles | Research Agent plus Research Operator. | Research Agent structures theses from context; Research Operator runs app-native tests and confirmed local research-state workflows. |

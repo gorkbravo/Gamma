@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -20,6 +21,8 @@ from src.models.copilot import (
     CopilotDraftMutation,
     CopilotMemo,
     CopilotMutationDiffEntry,
+    CopilotModelCapabilities,
+    CopilotModelPolicyResolution,
     CopilotOperatorConfirmationCheckpoint,
     CopilotOperatorPlan,
     CopilotOperatorPlanStep,
@@ -32,7 +35,11 @@ from src.models.copilot import (
     CopilotReportToolTraceSummary,
     CopilotReportWarningProvenance,
     CopilotRunEvent,
+    CopilotRunObservability,
+    CopilotSafeProviderError,
     CopilotSession,
+    CopilotShelfPromotion,
+    CopilotShelfPromotionRequest,
     CopilotSourceRef,
     CopilotStorageStatus,
     CopilotStorageWarning,
@@ -40,6 +47,8 @@ from src.models.copilot import (
     CopilotTraceState,
     CopilotTurn,
     CopilotUsageRecord,
+    CopilotProviderStoragePolicy,
+    COPILOT_SHELF_PROMOTION_VERSION,
     ResearchCard,
     ResearchClaim,
     new_copilot_id,
@@ -49,8 +58,8 @@ from src.services.copilot_evidence import resolve_result_evidence
 from src.utils.time import now_utc
 
 
-CURRENT_COPILOT_STORE_SCHEMA_VERSION = 3
-SUPPORTED_COPILOT_STORE_LEGACY_VERSIONS = (0, 1, 2)
+CURRENT_COPILOT_STORE_SCHEMA_VERSION = 4
+SUPPORTED_COPILOT_STORE_LEGACY_VERSIONS = (0, 1, 2, 3)
 SUPPORTED_COPILOT_STORE_SCHEMA_VERSIONS = (
     *SUPPORTED_COPILOT_STORE_LEGACY_VERSIONS,
     CURRENT_COPILOT_STORE_SCHEMA_VERSION,
@@ -78,6 +87,7 @@ class CopilotStore:
         self.memos_dir = self.base_dir / "memos"
         self.artifacts_dir = self.base_dir / "artifacts"
         self.mutations_dir = self.base_dir / "mutations"
+        self.promotions_dir = self.base_dir / "promotions"
         self.quarantine_dir = self.base_dir / "quarantine"
         self.trash_dir = self.base_dir / "trash"
         self.recovery_log_path = self.base_dir / "recovery_warnings.json"
@@ -88,6 +98,7 @@ class CopilotStore:
             self.memos_dir,
             self.artifacts_dir,
             self.mutations_dir,
+            self.promotions_dir,
             self.quarantine_dir,
             self.trash_dir,
         ):
@@ -190,6 +201,167 @@ class CopilotStore:
             turns = [item for path in turns_dir.glob("*.json") if (item := self._load_turn_path(path))]
         return sorted(turns, key=lambda item: item.turn_index)
 
+    def promote_shelf(
+        self,
+        request: CopilotShelfPromotionRequest,
+    ) -> CopilotShelfPromotion:
+        """Promote a contextual shelf by referencing its persisted turns.
+
+        No transcript content is copied. The dedicated workspace reopens the
+        same session, turns, snapshots, evidence, warnings, and boundaries.
+        """
+        safe_session_id = self._safe_id(request.source_session_id)
+        if not safe_session_id:
+            return self._promotion_failure(request, "unavailable", "The source shelf session is unavailable.")
+        session = self.get_session(safe_session_id)
+        if session is None:
+            return self._promotion_failure(request, "unavailable", "The source shelf session is unavailable.")
+        if not request.entries:
+            return self._promotion_failure(
+                request,
+                "incomplete",
+                "The source shelf has no completed turns to open.",
+            )
+        domain_turns = [
+            turn
+            for turn in self.list_turns(safe_session_id)
+            if turn.domain == request.source_domain
+        ]
+        matched: list[CopilotTurn] = []
+        cursor = 0
+        for entry in request.entries:
+            match: CopilotTurn | None = None
+            for index in range(cursor, len(domain_turns)):
+                candidate = domain_turns[index]
+                if entry.response_id:
+                    same_result = candidate.result.response_id == entry.response_id
+                else:
+                    same_result = (
+                        candidate.prompt == entry.prompt
+                        and candidate.turn_index >= entry.turn_index
+                    )
+                if same_result and candidate.prompt == entry.prompt:
+                    match = candidate
+                    cursor = index + 1
+                    break
+            if match is None:
+                return self._promotion_failure(
+                    request,
+                    "stale",
+                    "The shelf no longer matches the persisted source session. Refresh the shelf before opening it.",
+                )
+            if match.terminal_status not in {"ready", "awaiting_confirmation", "completed"}:
+                return self._promotion_failure(
+                    request,
+                    "incomplete",
+                    "The source shelf contains an incomplete or failed turn that cannot be promoted as completed continuity.",
+                )
+            matched.append(match)
+
+        latest = matched[-1]
+        expected_fingerprint = str(request.context_fingerprint or "").strip() or None
+        if (
+            expected_fingerprint
+            and latest.context_fingerprint
+            and latest.context_fingerprint != expected_fingerprint
+        ):
+            return self._promotion_failure(
+                request,
+                "stale",
+                "The shelf context fingerprint is stale relative to the persisted source turn.",
+            )
+        snapshot_ids = [turn.context_snapshot_id for turn in matched]
+        snapshots = [
+            snapshot
+            for snapshot_id in snapshot_ids
+            if (snapshot := self.get_context_snapshot(snapshot_id)) is not None
+        ]
+        if len(snapshots) != len(snapshot_ids):
+            return self._promotion_failure(
+                request,
+                "unavailable",
+                "One or more source context snapshots are unavailable.",
+            )
+        contract_versions = list(
+            dict.fromkeys(
+                str(snapshot.context_contract.get("contract_version") or "").strip()
+                for snapshot in snapshots
+                if str(snapshot.context_contract.get("contract_version") or "").strip()
+            )
+        )
+        promotion_seed = "|".join(
+            (
+                COPILOT_SHELF_PROMOTION_VERSION,
+                safe_session_id,
+                request.source_domain,
+                ",".join(turn.turn_id for turn in matched),
+                latest.context_fingerprint or expected_fingerprint or "none",
+            )
+        )
+        promotion_id = f"promotion_{sha256(promotion_seed.encode('utf-8')).hexdigest()[:24]}"
+        path = self.promotions_dir / f"{promotion_id}.json"
+        with self._lock:
+            existing = self._load_promotion_path(path)
+            if existing is not None:
+                return replace(existing, status="already_promoted", already_promoted=True)
+            promotion = CopilotShelfPromotion(
+                promotion_id=promotion_id,
+                contract_version=COPILOT_SHELF_PROMOTION_VERSION,
+                status="promoted",
+                source_session_id=safe_session_id,
+                source_domain=request.source_domain,
+                source_turn_ids=[turn.turn_id for turn in matched],
+                source_snapshot_ids=snapshot_ids,
+                context_fingerprint=latest.context_fingerprint or expected_fingerprint,
+                context_contract_versions=contract_versions,
+                selected_scope_domains=(
+                    list(request.selected_scope_domains)
+                    or list(latest.selected_scope_domains)
+                ),
+                role=request.role or latest.role,
+                selected_profile=request.selected_profile or latest.selected_profile,
+                message="Opened the exact persisted shelf session in the Copilot workspace.",
+                already_promoted=False,
+                created_at=now_utc(),
+            )
+            self._write_json(path, self._promotion_to_json(promotion))
+        return promotion
+
+    def get_shelf_promotion(self, promotion_id: str) -> CopilotShelfPromotion | None:
+        safe_id = self._safe_id(promotion_id)
+        if not safe_id:
+            return None
+        with self._lock:
+            return self._load_promotion_path(self.promotions_dir / f"{safe_id}.json")
+
+    @staticmethod
+    def _promotion_failure(
+        request: CopilotShelfPromotionRequest,
+        status: str,
+        message: str,
+    ) -> CopilotShelfPromotion:
+        seed = "|".join(
+            (
+                COPILOT_SHELF_PROMOTION_VERSION,
+                request.source_session_id,
+                request.source_domain,
+                status,
+                request.context_fingerprint or "none",
+            )
+        )
+        return CopilotShelfPromotion(
+            promotion_id=f"promotion_{sha256(seed.encode('utf-8')).hexdigest()[:24]}",
+            contract_version=COPILOT_SHELF_PROMOTION_VERSION,
+            status=status,
+            source_session_id=request.source_session_id,
+            source_domain=request.source_domain,
+            context_fingerprint=request.context_fingerprint,
+            selected_scope_domains=list(request.selected_scope_domains),
+            role=request.role,
+            selected_profile=request.selected_profile,
+            message=message,
+        )
+
     def list_memos(self, session_id: str | None = None) -> list[CopilotMemo]:
         return [
             self._artifact_to_memo(artifact)
@@ -230,6 +402,7 @@ class CopilotStore:
         result: CopilotResearchCardResult,
         role: str = "research_agent",
         reasoning_effort: str | None = None,
+        selected_profile: str | None = None,
         selected_scope_domains: list[str] | None = None,
         request_context: dict[str, Any] | None = None,
         requested_provider: str | None = None,
@@ -237,7 +410,11 @@ class CopilotStore:
         run_id: str | None = None,
         terminal_status: str | None = None,
         cancellation_outcome: str | None = None,
+        cancellation_boundary: str | None = None,
         usage: CopilotUsageRecord | None = None,
+        model_resolution: CopilotModelPolicyResolution | None = None,
+        observability: CopilotRunObservability | None = None,
+        safe_provider_error: CopilotSafeProviderError | None = None,
         research_plan: CopilotResearchPlan | None = None,
         operator_plan: CopilotOperatorPlan | None = None,
         run_events: list[CopilotRunEvent] | None = None,
@@ -247,6 +424,12 @@ class CopilotStore:
     ) -> tuple[CopilotSession, CopilotContextSnapshot, CopilotTurn]:
         now = now_utc()
         result = resolve_result_evidence(result)
+        event_usage = self._usage_from_events(run_events or [])
+        provided_usage = usage if usage is not None else result.usage
+        resolved_usage = self._merge_usage_availability(
+            provided_usage,
+            event_usage,
+        )
         safe_session_id = self._safe_id(session_id) or new_copilot_id("session")
         with self._lock:
             session = self._load_session_path(self.sessions_dir / f"{safe_session_id}.json")
@@ -299,6 +482,7 @@ class CopilotStore:
                 created_at=now,
                 role=role,
                 reasoning_effort=reasoning_effort,
+                selected_profile=selected_profile,
                 selected_scope_domains=list(selected_scope_domains or []),
                 context_fingerprint=context_fingerprint,
                 requested_provider=requested_provider,
@@ -308,7 +492,13 @@ class CopilotStore:
                 run_id=run_id or self._result_run_id(result),
                 terminal_status=terminal_status or result.status,
                 cancellation_outcome=cancellation_outcome or self._cancellation_outcome(result),
-                usage=usage or self._usage_from_events(run_events or []),
+                cancellation_boundary=(
+                    cancellation_boundary or result.observability.cancellation_boundary
+                ),
+                model_resolution=model_resolution or result.model_resolution,
+                observability=observability or result.observability,
+                safe_provider_error=safe_provider_error or result.safe_provider_error,
+                usage=resolved_usage,
                 research_plan=research_plan or self._research_plan_from_summary(context_summary),
                 operator_plan=operator_plan or self._operator_plan_from_summary(context_summary),
                 run_events=list(run_events or []),
@@ -586,7 +776,13 @@ class CopilotStore:
             timestamp = now_utc().strftime("%Y%m%dT%H%M%S%f")
             trash_root = self.trash_dir / f"{safe_session_id}-{timestamp}"
             trash_root.mkdir(parents=True, exist_ok=False)
-            counts = {"sessions": 0, "turns": 0, "snapshots": 0, "artifacts": 0}
+            counts = {
+                "sessions": 0,
+                "turns": 0,
+                "snapshots": 0,
+                "artifacts": 0,
+                "promotions": 0,
+            }
             self._move_to_trash(session_path, trash_root / "sessions" / session_path.name)
             counts["sessions"] = 1
             turns = self._load_turns_unlocked(safe_session_id)
@@ -606,6 +802,15 @@ class CopilotStore:
                 if artifact_path.exists():
                     self._move_to_trash(artifact_path, trash_root / "artifacts" / artifact_path.name)
                     counts["artifacts"] += 1
+            for promotion_path in self.promotions_dir.glob("*.json"):
+                promotion = self._load_promotion_path(promotion_path)
+                if promotion is None or promotion.source_session_id != safe_session_id:
+                    continue
+                self._move_to_trash(
+                    promotion_path,
+                    trash_root / "promotions" / promotion_path.name,
+                )
+                counts["promotions"] += 1
         return CopilotDeleteResult(
             deleted_id=safe_session_id,
             deleted_type="session",
@@ -1091,6 +1296,7 @@ class CopilotStore:
             created_at=self._parse_datetime(payload.get("created_at")) or now_utc(),
             role=str(payload.get("role") or ("research_operator" if result.operator_events else "research_agent")),
             reasoning_effort=payload.get("reasoning_effort"),
+            selected_profile=payload.get("selected_profile"),
             selected_scope_domains=list(payload.get("selected_scope_domains") or []),
             context_fingerprint=payload.get("context_fingerprint"),
             requested_provider=payload.get("requested_provider"),
@@ -1100,6 +1306,22 @@ class CopilotStore:
             run_id=payload.get("run_id") or self._result_run_id(result),
             terminal_status=payload.get("terminal_status") or result.status,
             cancellation_outcome=payload.get("cancellation_outcome") or self._cancellation_outcome(result),
+            cancellation_boundary=(
+                payload.get("cancellation_boundary")
+                or result.observability.cancellation_boundary
+            ),
+            model_resolution=(
+                self._model_resolution_from_json(payload.get("model_resolution"))
+                or result.model_resolution
+            ),
+            observability=self._observability_from_json(
+                payload.get("observability"),
+                result=result,
+            ),
+            safe_provider_error=(
+                self._safe_provider_error_from_json(payload.get("safe_provider_error"))
+                or result.safe_provider_error
+            ),
             usage=self._usage_from_json(payload.get("usage")),
             research_plan=self._research_plan_from_json(payload.get("research_plan")),
             operator_plan=self._operator_plan_from_json(payload.get("operator_plan")),
@@ -1124,6 +1346,32 @@ class CopilotStore:
                 if isinstance(item, dict)
             ],
             trace_state=self._trace_state_from_json(payload.get("trace_state"), result),
+        )
+
+    def _load_promotion_path(self, path: Path) -> CopilotShelfPromotion | None:
+        payload = self._load_json(path, record_type="promotion")
+        if payload is None:
+            return None
+        return CopilotShelfPromotion(
+            promotion_id=str(payload.get("promotion_id") or path.stem),
+            contract_version=str(
+                payload.get("contract_version") or COPILOT_SHELF_PROMOTION_VERSION
+            ),
+            status=str(payload.get("status") or "promoted"),
+            source_session_id=str(payload.get("source_session_id") or ""),
+            source_domain=str(payload.get("source_domain") or "synthesis"),
+            source_turn_ids=list(payload.get("source_turn_ids") or []),
+            source_snapshot_ids=list(payload.get("source_snapshot_ids") or []),
+            context_fingerprint=payload.get("context_fingerprint"),
+            context_contract_versions=list(
+                payload.get("context_contract_versions") or []
+            ),
+            selected_scope_domains=list(payload.get("selected_scope_domains") or []),
+            role=str(payload.get("role") or "research_agent"),
+            selected_profile=payload.get("selected_profile"),
+            message=str(payload.get("message") or ""),
+            already_promoted=bool(payload.get("already_promoted")),
+            created_at=self._parse_datetime(payload.get("created_at")) or now_utc(),
         )
 
     def _load_memo_path(self, path: Path) -> CopilotMemo | None:
@@ -1337,6 +1585,7 @@ class CopilotStore:
             "memo": ("memo_id", "session_id", "body"),
             "artifact": ("artifact_id", "session_id", "artifact_type", "body"),
             "mutation": ("mutation_id", "status"),
+            "promotion": ("promotion_id", "source_session_id", "status"),
         }.get(record_type, ())
         missing_fields = [
             field
@@ -1460,6 +1709,52 @@ class CopilotStore:
                 ):
                     migrated.setdefault(key, default)
             version = 3
+        if version == 3:
+            if record_type == "turn":
+                result = migrated.get("result") if isinstance(migrated.get("result"), dict) else {}
+                migrated.setdefault("selected_profile", None)
+                migrated.setdefault("cancellation_boundary", None)
+                migrated.setdefault("model_resolution", result.get("model_resolution"))
+                migrated.setdefault("observability", result.get("observability") or {})
+                migrated.setdefault("safe_provider_error", result.get("safe_provider_error"))
+                usage = migrated.get("usage")
+                if not isinstance(usage, dict):
+                    usage = {}
+                run_events = list(migrated.get("run_events") or [])
+                has_usage_event = any(
+                    isinstance(item, dict)
+                    and str(item.get("event_type") or item.get("event") or "") == "usage"
+                    for item in run_events
+                )
+                # Missing provider values stay null in v4. Locally observed
+                # tool-call count remains derivable from semantic events.
+                for key in (
+                    "input_tokens",
+                    "output_tokens",
+                    "reasoning_tokens",
+                    "total_tokens",
+                    "cache_read_tokens",
+                    "cache_write_tokens",
+                ):
+                    if not has_usage_event and usage.get(key) in {None, 0}:
+                        usage[key] = None
+                    else:
+                        usage.setdefault(key, None)
+                if not has_usage_event and usage.get("provider_calls") in {None, 0}:
+                    usage["provider_calls"] = None
+                else:
+                    usage.setdefault("provider_calls", None)
+                result_traces = list(result.get("tool_traces") or [])
+                usage["tool_calls"] = len(result_traces)
+                migrated["usage"] = usage
+            elif record_type == "promotion":
+                migrated.setdefault("contract_version", COPILOT_SHELF_PROMOTION_VERSION)
+                migrated.setdefault("source_turn_ids", [])
+                migrated.setdefault("source_snapshot_ids", [])
+                migrated.setdefault("context_contract_versions", [])
+                migrated.setdefault("selected_scope_domains", [])
+                migrated.setdefault("already_promoted", False)
+            version = 4
         migrated["schema_version"] = CURRENT_COPILOT_STORE_SCHEMA_VERSION
         return migrated
 
@@ -1502,6 +1797,7 @@ class CopilotStore:
             "created_at": turn.created_at.isoformat(),
             "role": turn.role,
             "reasoning_effort": turn.reasoning_effort,
+            "selected_profile": turn.selected_profile,
             "selected_scope_domains": list(turn.selected_scope_domains),
             "context_fingerprint": turn.context_fingerprint,
             "requested_provider": turn.requested_provider,
@@ -1511,6 +1807,10 @@ class CopilotStore:
             "run_id": turn.run_id,
             "terminal_status": turn.terminal_status,
             "cancellation_outcome": turn.cancellation_outcome,
+            "cancellation_boundary": turn.cancellation_boundary,
+            "model_resolution": cls._dataclass_to_json(turn.model_resolution),
+            "observability": cls._dataclass_to_json(turn.observability),
+            "safe_provider_error": cls._dataclass_to_json(turn.safe_provider_error),
             "usage": asdict(turn.usage),
             "research_plan": cls._dataclass_to_json(turn.research_plan),
             "operator_plan": cls._dataclass_to_json(turn.operator_plan),
@@ -1529,6 +1829,27 @@ class CopilotStore:
             "artifact_refs": [asdict(item) for item in turn.artifact_refs],
             "mutation_refs": [asdict(item) for item in turn.mutation_refs],
             "trace_state": asdict(turn.trace_state),
+        }
+
+    @staticmethod
+    def _promotion_to_json(promotion: CopilotShelfPromotion) -> dict[str, Any]:
+        return {
+            "schema_version": CURRENT_COPILOT_STORE_SCHEMA_VERSION,
+            "promotion_id": promotion.promotion_id,
+            "contract_version": promotion.contract_version,
+            "status": promotion.status,
+            "source_session_id": promotion.source_session_id,
+            "source_domain": promotion.source_domain,
+            "source_turn_ids": list(promotion.source_turn_ids),
+            "source_snapshot_ids": list(promotion.source_snapshot_ids),
+            "context_fingerprint": promotion.context_fingerprint,
+            "context_contract_versions": list(promotion.context_contract_versions),
+            "selected_scope_domains": list(promotion.selected_scope_domains),
+            "role": promotion.role,
+            "selected_profile": promotion.selected_profile,
+            "message": promotion.message,
+            "already_promoted": promotion.already_promoted,
+            "created_at": promotion.created_at.isoformat(),
         }
 
     @staticmethod
@@ -1661,6 +1982,10 @@ class CopilotStore:
                 item.to_dict() for item in result.context_contracts
             ],
             "context_budget": dict(result.context_budget),
+            "model_resolution": CopilotStore._dataclass_to_json(result.model_resolution),
+            "usage": asdict(result.usage),
+            "observability": CopilotStore._dataclass_to_json(result.observability),
+            "safe_provider_error": CopilotStore._dataclass_to_json(result.safe_provider_error),
         }
 
     @staticmethod
@@ -1697,6 +2022,16 @@ class CopilotStore:
                 if isinstance(item, dict)
             ],
             context_budget=dict(payload.get("context_budget") or {}),
+            model_resolution=cls._model_resolution_from_json(
+                payload.get("model_resolution")
+            ),
+            usage=cls._usage_from_json(payload.get("usage")),
+            observability=cls._observability_from_json(
+                payload.get("observability"),
+            ),
+            safe_provider_error=cls._safe_provider_error_from_json(
+                payload.get("safe_provider_error")
+            ),
         )
         return resolve_result_evidence(result)
 
@@ -1934,18 +2269,116 @@ class CopilotStore:
         )
 
     @staticmethod
-    def _usage_from_json(payload: Any) -> CopilotUsageRecord:
+    def _optional_int(value: Any) -> int | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _usage_from_json(cls, payload: Any) -> CopilotUsageRecord:
         row = payload if isinstance(payload, dict) else {}
         return CopilotUsageRecord(
-            input_tokens=int(row.get("input_tokens") or 0),
-            output_tokens=int(row.get("output_tokens") or 0),
-            reasoning_tokens=int(row.get("reasoning_tokens") or 0),
-            total_tokens=int(row.get("total_tokens") or 0),
-            cache_read_tokens=int(row.get("cache_read_tokens") or row.get("cached_tokens") or 0),
-            cache_write_tokens=int(row.get("cache_write_tokens") or 0),
-            provider_calls=int(row.get("provider_calls") or 0),
-            tool_calls=int(row.get("tool_calls") or 0),
+            input_tokens=cls._optional_int(row.get("input_tokens")),
+            output_tokens=cls._optional_int(row.get("output_tokens")),
+            reasoning_tokens=cls._optional_int(row.get("reasoning_tokens")),
+            total_tokens=cls._optional_int(row.get("total_tokens")),
+            cache_read_tokens=cls._optional_int(
+                row.get("cache_read_tokens")
+                if row.get("cache_read_tokens") is not None
+                else row.get("cached_tokens")
+            ),
+            cache_write_tokens=cls._optional_int(row.get("cache_write_tokens")),
+            provider_calls=cls._optional_int(row.get("provider_calls")),
+            tool_calls=cls._optional_int(row.get("tool_calls")),
             raw=dict(row.get("raw") or {}),
+        )
+
+    @classmethod
+    def _model_resolution_from_json(
+        cls,
+        payload: Any,
+    ) -> CopilotModelPolicyResolution | None:
+        if not isinstance(payload, dict) or not payload.get("policy_version"):
+            return None
+        capabilities_payload = payload.get("capabilities")
+        capabilities_row = capabilities_payload if isinstance(capabilities_payload, dict) else {}
+        storage_payload = payload.get("provider_storage")
+        storage_row = storage_payload if isinstance(storage_payload, dict) else {}
+        return CopilotModelPolicyResolution(
+            policy_version=str(payload.get("policy_version") or ""),
+            selected_profile=str(payload.get("selected_profile") or "auto"),
+            resolved_profile=str(payload.get("resolved_profile") or "standard"),
+            selection_source=str(payload.get("selection_source") or "legacy"),
+            status=str(payload.get("status") or "ready"),
+            provider=str(payload.get("provider") or "unknown"),
+            model=payload.get("model"),
+            reasoning_mode=str(payload.get("reasoning_mode") or "unavailable"),
+            reasoning_effort=payload.get("reasoning_effort"),
+            orchestration_path=str(payload.get("orchestration_path") or "unknown"),
+            capabilities=CopilotModelCapabilities(
+                structured_output=bool(capabilities_row.get("structured_output")),
+                tool_use=bool(capabilities_row.get("tool_use")),
+                streaming=bool(capabilities_row.get("streaming")),
+                reasoning=bool(capabilities_row.get("reasoning")),
+                cancellation=bool(capabilities_row.get("cancellation")),
+                provider_storage=bool(capabilities_row.get("provider_storage")),
+            ),
+            routing_reason=str(payload.get("routing_reason") or ""),
+            provider_storage=CopilotProviderStoragePolicy(
+                policy_version=str(
+                    storage_row.get("policy_version")
+                    or "copilot.provider-storage.v1"
+                ),
+                requested=str(storage_row.get("requested") or "disabled"),
+                effective=str(storage_row.get("effective") or "disabled"),
+                status=str(storage_row.get("status") or "supported"),
+                reason=str(storage_row.get("reason") or ""),
+            ),
+            degradation_reason=payload.get("degradation_reason"),
+        )
+
+    @classmethod
+    def _observability_from_json(
+        cls,
+        payload: Any,
+        *,
+        result: CopilotResearchCardResult | None = None,
+    ) -> CopilotRunObservability:
+        row = payload if isinstance(payload, dict) else {}
+        return CopilotRunObservability(
+            selected_profile=row.get("selected_profile"),
+            resolved_provider=row.get("resolved_provider") or (result.provider if result else None),
+            resolved_model=row.get("resolved_model") or (result.model if result else None),
+            model_policy_version=row.get("model_policy_version"),
+            routing_reason=row.get("routing_reason"),
+            reasoning_mode=row.get("reasoning_mode"),
+            reasoning_effort=row.get("reasoning_effort"),
+            orchestration_path=row.get("orchestration_path"),
+            total_latency_ms=cls._optional_int(row.get("total_latency_ms")),
+            provider_latency_ms=cls._optional_int(row.get("provider_latency_ms")),
+            cancellation_outcome=row.get("cancellation_outcome"),
+            cancellation_boundary=row.get("cancellation_boundary"),
+            provider_error_category=row.get("provider_error_category"),
+            diagnostic_id=row.get("diagnostic_id"),
+        )
+
+    @classmethod
+    def _safe_provider_error_from_json(
+        cls,
+        payload: Any,
+    ) -> CopilotSafeProviderError | None:
+        if not isinstance(payload, dict) or not payload.get("diagnostic_id"):
+            return None
+        return CopilotSafeProviderError(
+            category=str(payload.get("category") or "provider_error"),
+            diagnostic_id=str(payload.get("diagnostic_id") or ""),
+            message=str(payload.get("message") or "The provider could not complete this Copilot run."),
+            guidance=str(payload.get("guidance") or "Retry or review provider configuration."),
+            retryable=bool(payload.get("retryable")),
+            created_at=cls._parse_datetime(payload.get("created_at")) or now_utc(),
         )
 
     @classmethod
@@ -2023,11 +2456,63 @@ class CopilotStore:
         tool_calls = 0
         for event in events:
             if event.event_type == "usage":
-                usage.update(event.data)
-            if event.event_type in {"tool.call", "tool.result"}:
+                for key, value in event.data.items():
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        usage[key] = int(usage.get(key) or 0) + value
+            if event.event_type == "tool.call":
                 tool_calls += 1
-        usage.setdefault("tool_calls", tool_calls)
+        if events:
+            usage.setdefault("tool_calls", tool_calls)
         return cls._usage_from_json(usage)
+
+    @staticmethod
+    def _merge_usage_availability(
+        preferred: CopilotUsageRecord,
+        fallback: CopilotUsageRecord,
+    ) -> CopilotUsageRecord:
+        return CopilotUsageRecord(
+            input_tokens=(
+                preferred.input_tokens
+                if preferred.input_tokens is not None
+                else fallback.input_tokens
+            ),
+            output_tokens=(
+                preferred.output_tokens
+                if preferred.output_tokens is not None
+                else fallback.output_tokens
+            ),
+            reasoning_tokens=(
+                preferred.reasoning_tokens
+                if preferred.reasoning_tokens is not None
+                else fallback.reasoning_tokens
+            ),
+            total_tokens=(
+                preferred.total_tokens
+                if preferred.total_tokens is not None
+                else fallback.total_tokens
+            ),
+            cache_read_tokens=(
+                preferred.cache_read_tokens
+                if preferred.cache_read_tokens is not None
+                else fallback.cache_read_tokens
+            ),
+            cache_write_tokens=(
+                preferred.cache_write_tokens
+                if preferred.cache_write_tokens is not None
+                else fallback.cache_write_tokens
+            ),
+            provider_calls=(
+                preferred.provider_calls
+                if preferred.provider_calls is not None
+                else fallback.provider_calls
+            ),
+            tool_calls=(
+                preferred.tool_calls
+                if preferred.tool_calls is not None
+                else fallback.tool_calls
+            ),
+            raw={},
+        )
 
     @classmethod
     def _confirmations_from_result(
@@ -2543,6 +3028,7 @@ class CopilotStore:
             self.memos_dir: "memo",
             self.artifacts_dir: "artifact",
             self.mutations_dir: "mutation",
+            self.promotions_dir: "promotion",
         }
         for directory, record_type in mapping.items():
             if directory == path.parent or directory in path.parents:

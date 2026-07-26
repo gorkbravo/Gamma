@@ -3,7 +3,7 @@
   import CopilotTranscriptResult from "./CopilotTranscriptResult.svelte";
   import type {
     CopilotBaseDomain,
-    CopilotReasoningEffort,
+    CopilotProfile,
     CopilotSourceRef,
     CopilotThreadEntry,
     CopilotThreadState
@@ -35,13 +35,20 @@
   export let selectionMessage: string | null = null;
   export let onClose: () => void = () => {};
   export let onToggleScope: (domain: CopilotBaseDomain) => void = () => {};
-  export let onGenerate: (prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void;
-  export let onRunOperator: (prompt?: string, reasoningEffort?: CopilotReasoningEffort) => Promise<unknown> | void = () => {};
+  export let onGenerate: (prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void;
+  export let onRunOperator: (prompt?: string, selectedProfile?: CopilotProfile) => Promise<unknown> | void = () => {};
+  export let onOpenWorkspace: (
+    thread: CopilotThreadState,
+    role: "research_agent" | "research_operator",
+    selectedProfile: CopilotProfile
+  ) => Promise<unknown> | unknown = () => null;
   export let onOpenSource: (source: CopilotSourceRef) => Promise<unknown> | void = () => {};
 
   let promptText = "";
   let roleMode: CopilotRoleMode = "agent";
-  let reasoningEffort: CopilotReasoningEffort = "medium";
+  let selectedProfile: CopilotProfile = "auto";
+  let promotionState: "idle" | "opening" | "error" = "idle";
+  let promotionMessage = "";
   let threadEntries: CopilotThreadEntry[] = [];
   let hasThread = false;
   let composerHint = "";
@@ -54,7 +61,6 @@
 
   function setRoleMode(nextMode: CopilotRoleMode) {
     roleMode = nextMode;
-    reasoningEffort = nextMode === "operator" ? "low" : "medium";
   }
 
   async function handleGenerate() {
@@ -63,8 +69,8 @@
     }
     const result =
       roleMode === "operator"
-        ? await onRunOperator(promptText.trim(), reasoningEffort)
-        : await onGenerate(promptText.trim(), reasoningEffort);
+        ? await onRunOperator(promptText.trim(), selectedProfile)
+        : await onGenerate(promptText.trim(), selectedProfile);
     if (result != null) {
       promptText = "";
     }
@@ -83,6 +89,33 @@
     if (option.warningLabel) parts.push(option.warningLabel);
     if (option.disabledReason) parts.push(option.disabledReason);
     return parts.join(" · ");
+  }
+
+  async function handleOpenWorkspace() {
+    if (!thread || !thread.entries.length || promotionState === "opening") return;
+    promotionState = "opening";
+    promotionMessage = "";
+    try {
+      const outcome = await onOpenWorkspace(
+        thread,
+        roleMode === "operator" ? "research_operator" : "research_agent",
+        selectedProfile
+      );
+      const row =
+        outcome && typeof outcome === "object"
+          ? (outcome as { status?: unknown; message?: unknown })
+          : null;
+      const status = String(row?.status ?? "");
+      if (status && !["promoted", "already_promoted"].includes(status)) {
+        promotionState = "error";
+        promotionMessage = String(row?.message ?? "Shelf continuity is unavailable.");
+        return;
+      }
+      promotionState = "idle";
+    } catch (error) {
+      promotionState = "error";
+      promotionMessage = error instanceof Error ? error.message : "Could not open this shelf in Copilot.";
+    }
   }
 
   onMount(() => {
@@ -252,6 +285,23 @@
       {/if}
     </div>
 
+    {#if thread && thread.entries.length}
+      <div class="promotion-row">
+        <button
+          class="open-workspace"
+          type="button"
+          disabled={promotionState === "opening" || loading}
+          on:click={handleOpenWorkspace}
+        >
+          {promotionState === "opening" ? "Opening…" : "Open in Copilot"}
+        </button>
+        <small>Same session, context, evidence, and warnings.</small>
+      </div>
+    {/if}
+    {#if promotionState === "error" && promotionMessage}
+      <p class="promotion-error" role="alert">{promotionMessage}</p>
+    {/if}
+
     <textarea
       bind:value={promptText}
       rows={2}
@@ -264,13 +314,12 @@
       <small>{composerHint}</small>
       <div class="composer-actions">
         <label class="effort-select">
-          <span>Thinking</span>
-          <select bind:value={reasoningEffort} disabled={!available || loading}>
-            <option value="minimal">minimal</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-            <option value="xhigh">xhigh</option>
+          <span>Profile</span>
+          <select bind:value={selectedProfile} disabled={!available || loading}>
+            <option value="auto">Auto</option>
+            <option value="quick">Quick</option>
+            <option value="standard">Standard</option>
+            <option value="deep">Deep</option>
           </select>
         </label>
         <button class="generate-btn" type="button" disabled={!available || loading} on:click={handleGenerate}>
@@ -480,6 +529,36 @@
     gap: var(--space-3);
   }
 
+  .promotion-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .promotion-row small {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    text-align: right;
+  }
+
+  .open-workspace {
+    flex: 0 0 auto;
+    padding: var(--space-3) var(--space-5);
+    border-color: color-mix(in srgb, var(--accent) 36%, var(--panel-strong));
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    color: var(--accent);
+    font-size: var(--text-sm);
+  }
+
+  .promotion-error {
+    margin: 0;
+    color: var(--warning);
+    font-size: var(--text-xs);
+  }
+
   .role-row {
     display: inline-flex;
     width: max-content;
@@ -519,7 +598,7 @@
     padding: var(--space-3) var(--space-4);
     padding-right: var(--space-7);
     font-size: var(--text-sm);
-    text-transform: lowercase;
+    text-transform: none;
     letter-spacing: 0;
     color: var(--text-2);
     background-color: #0d0f12;

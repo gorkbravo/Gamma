@@ -1,11 +1,12 @@
 <script lang="ts">
-  import type { ProviderUsageHealth, ProviderUsageResponse, ProviderUsageSummary, SystemStatus, WorkspaceMode } from "../lib/api/types";
+  import type { CopilotDiagnostics, ProviderUsageHealth, ProviderUsageResponse, ProviderUsageSummary, SystemStatus, WorkspaceMode } from "../lib/api/types";
   import { getWorkspaceLabel } from "../lib/navigation";
   import { setChartTheme, setFontFamily, type FontFamily } from "../lib/stores/app";
   import type { RequestMetricSnapshot } from "../lib/request-metrics";
 
   export let status: SystemStatus | null = null;
   export let providerUsage: ProviderUsageResponse | null = null;
+  export let copilotDiagnostics: CopilotDiagnostics | null = null;
   export let requestMetrics: RequestMetricSnapshot | null = null;
   export let pollingState: { system: boolean; providerUsage: boolean; iv: boolean } = {
     system: false,
@@ -29,6 +30,7 @@
   let workspaceLabel = getWorkspaceLabel("portfolio");
   let topProviderRows: ProviderUsageSummary[] = [];
   let providerHealthRows: ProviderUsageHealth[] = [];
+  let copiedDiagnosticId = "";
 
   $: if (status?.base_currency) {
     selectedBaseCurrency = status.base_currency;
@@ -69,6 +71,17 @@
     if (status === "healthy") return "positive";
     if (status === "degraded" || status === "unavailable" || status === "needs_config") return "warning";
     return "neutral";
+  }
+
+  async function copyCopilotDiagnosticId() {
+    const diagnosticId = copilotDiagnostics?.last_error?.diagnostic_id;
+    if (!diagnosticId || !navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(diagnosticId);
+      copiedDiagnosticId = diagnosticId;
+    } catch {
+      copiedDiagnosticId = "";
+    }
   }
 </script>
 
@@ -127,6 +140,48 @@
             <span class="label">Mode</span>
             <strong>{status?.mock_mode ? "Mock" : "Live"}</strong>
           </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-head">
+            <span class="label">Copilot Provider</span>
+            <strong class:positive={copilotDiagnostics?.provider_state === "configured"}>
+              {copilotDiagnostics?.provider_state?.replaceAll("_", " ") ?? "Loading"}
+            </strong>
+          </div>
+          <div class="row">
+            <span>Agent route</span>
+            <strong>
+              {copilotDiagnostics?.default_resolution.selected_profile ?? "—"}
+              · {copilotDiagnostics?.default_resolution.model ?? "unavailable"}
+            </strong>
+          </div>
+          <div class="row">
+            <span>Operator path</span>
+            <strong>{copilotDiagnostics?.operator_resolution.orchestration_path?.replaceAll("_", " ") ?? "—"}</strong>
+          </div>
+          <small>{copilotDiagnostics?.default_resolution.routing_reason ?? "Copilot routing diagnostics are loading."}</small>
+          <small>{copilotDiagnostics?.local_storage ?? "Gamma local storage diagnostics are loading."}</small>
+          <small>
+            Provider storage:
+            {copilotDiagnostics?.provider_storage.effective?.replaceAll("_", " ") ?? "unavailable"}.
+            {copilotDiagnostics?.provider_storage.reason ?? ""}
+          </small>
+          {#if copilotDiagnostics?.last_error}
+            <div class="copilot-error">
+              <strong>{copilotDiagnostics.last_error.category.replaceAll("_", " ")}</strong>
+              <small>{copilotDiagnostics.last_error.guidance}</small>
+              <code>{copilotDiagnostics.last_error.diagnostic_id}</code>
+              <button
+                class="ghost wide"
+                type="button"
+                on:click={copyCopilotDiagnosticId}
+                aria-label={`Copy diagnostic ID ${copilotDiagnostics.last_error.diagnostic_id}`}
+              >
+                {copiedDiagnosticId === copilotDiagnostics.last_error.diagnostic_id ? "Diagnostic ID copied" : "Copy diagnostic ID"}
+              </button>
+            </div>
+          {/if}
         </div>
 
         <div class="settings-section field">
@@ -478,6 +533,28 @@
 
   .health-row .neutral {
     color: var(--text-2);
+  }
+
+  .copilot-error {
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border-left: 2px solid var(--warning);
+    background: color-mix(in srgb, var(--warning) 4%, transparent);
+  }
+
+  .copilot-error > strong {
+    color: var(--warning);
+    text-transform: capitalize;
+  }
+
+  .copilot-error code {
+    padding: var(--space-2);
+    border: 1px solid var(--panel-strong);
+    background: var(--bg-1);
+    color: var(--accent);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
   }
 
   @media (max-width: 960px) {

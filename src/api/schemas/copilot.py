@@ -21,6 +21,9 @@ from src.models.copilot import (
     CopilotDeleteResult,
     CopilotDraftMutation,
     CopilotMemo,
+    CopilotDiagnostics,
+    CopilotModelCapabilities,
+    CopilotModelPolicyResolution,
     CopilotMutationApplyResult,
     CopilotMutationDiffEntry,
     CopilotOperatorConfirmationCheckpoint,
@@ -39,7 +42,12 @@ from src.models.copilot import (
     CopilotReportWarningProvenance,
     CopilotReportToolTraceSummary,
     CopilotRunEvent,
+    CopilotRunObservability,
+    CopilotSafeProviderError,
     CopilotSession,
+    CopilotShelfPromotion,
+    CopilotShelfPromotionRequest,
+    CopilotShelfSourceEntry,
     CopilotStorageStatus,
     CopilotStorageWarning,
     CopilotSynthesisRequest,
@@ -52,6 +60,8 @@ from src.models.copilot import (
     ResearchCard,
     ResearchClaim,
     CopilotUsageRecord,
+    CopilotProviderStoragePolicy,
+    CopilotProfileCapabilityState,
 )
 
 
@@ -165,6 +175,7 @@ class CopilotResearchCardRequestModel(BaseModel):
     context_fingerprint: str | None = None
     session_title: str | None = None
     reasoning_effort: str | None = None
+    selected_profile: str | None = None
     role: str = "research_agent"
     selected_scope_domains: list[str] = Field(default_factory=list)
     requested_provider: str | None = None
@@ -186,6 +197,7 @@ class CopilotResearchCardRequestModel(BaseModel):
             context_fingerprint=self.context_fingerprint,
             session_title=self.session_title,
             reasoning_effort=self.reasoning_effort,
+            selected_profile=self.selected_profile,
             role=self.role,
             selected_scope_domains=list(self.selected_scope_domains),
             requested_provider=self.requested_provider,
@@ -312,6 +324,14 @@ class CopilotResearchCardResponseModel(BaseModel):
     research_plan: dict[str, object] | None = None
     context_contracts: list[dict[str, object]] = Field(default_factory=list)
     context_budget: dict[str, object] = Field(default_factory=dict)
+    model_resolution: CopilotModelPolicyResolutionModel | None = None
+    usage: "CopilotUsageRecordModel" = Field(
+        default_factory=lambda: CopilotUsageRecordModel()
+    )
+    observability: CopilotRunObservabilityModel = Field(
+        default_factory=lambda: CopilotRunObservabilityModel()
+    )
+    safe_provider_error: CopilotSafeProviderErrorModel | None = None
 
     @classmethod
     def from_domain(cls, row: CopilotResearchCardResult) -> "CopilotResearchCardResponseModel":
@@ -335,6 +355,243 @@ class CopilotResearchCardResponseModel(BaseModel):
             ),
             context_contracts=[item.to_dict() for item in row.context_contracts],
             context_budget=dict(row.context_budget),
+            model_resolution=(
+                CopilotModelPolicyResolutionModel.from_domain(row.model_resolution)
+                if row.model_resolution
+                else None
+            ),
+            usage=CopilotUsageRecordModel.from_domain(row.usage),
+            observability=CopilotRunObservabilityModel.from_domain(row.observability),
+            safe_provider_error=(
+                CopilotSafeProviderErrorModel.from_domain(row.safe_provider_error)
+                if row.safe_provider_error
+                else None
+            ),
+        )
+
+
+class CopilotModelCapabilitiesModel(BaseModel):
+    structured_output: bool
+    tool_use: bool
+    streaming: bool
+    reasoning: bool
+    cancellation: bool
+    provider_storage: bool
+
+    @classmethod
+    def from_domain(cls, row: CopilotModelCapabilities) -> "CopilotModelCapabilitiesModel":
+        return cls(**row.__dict__)
+
+
+class CopilotProviderStoragePolicyModel(BaseModel):
+    policy_version: str
+    requested: str
+    effective: str
+    status: str
+    reason: str
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotProviderStoragePolicy,
+    ) -> "CopilotProviderStoragePolicyModel":
+        return cls(**row.__dict__)
+
+
+class CopilotModelPolicyResolutionModel(BaseModel):
+    policy_version: str
+    selected_profile: str
+    resolved_profile: str
+    selection_source: str
+    status: str
+    provider: str
+    model: str | None = None
+    reasoning_mode: str
+    reasoning_effort: str | None = None
+    orchestration_path: str
+    capabilities: CopilotModelCapabilitiesModel
+    routing_reason: str
+    provider_storage: CopilotProviderStoragePolicyModel
+    degradation_reason: str | None = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotModelPolicyResolution,
+    ) -> "CopilotModelPolicyResolutionModel":
+        return cls(
+            policy_version=row.policy_version,
+            selected_profile=row.selected_profile,
+            resolved_profile=row.resolved_profile,
+            selection_source=row.selection_source,
+            status=row.status,
+            provider=row.provider,
+            model=row.model,
+            reasoning_mode=row.reasoning_mode,
+            reasoning_effort=row.reasoning_effort,
+            orchestration_path=row.orchestration_path,
+            capabilities=CopilotModelCapabilitiesModel.from_domain(row.capabilities),
+            routing_reason=row.routing_reason,
+            provider_storage=CopilotProviderStoragePolicyModel.from_domain(
+                row.provider_storage
+            ),
+            degradation_reason=row.degradation_reason,
+        )
+
+
+class CopilotSafeProviderErrorModel(BaseModel):
+    category: str
+    diagnostic_id: str
+    message: str
+    guidance: str
+    retryable: bool
+    created_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotSafeProviderError,
+    ) -> "CopilotSafeProviderErrorModel":
+        return cls(**row.__dict__)
+
+
+class CopilotRunObservabilityModel(BaseModel):
+    selected_profile: str | None = None
+    resolved_provider: str | None = None
+    resolved_model: str | None = None
+    model_policy_version: str | None = None
+    routing_reason: str | None = None
+    reasoning_mode: str | None = None
+    reasoning_effort: str | None = None
+    orchestration_path: str | None = None
+    total_latency_ms: int | None = None
+    provider_latency_ms: int | None = None
+    cancellation_outcome: str | None = None
+    cancellation_boundary: str | None = None
+    provider_error_category: str | None = None
+    diagnostic_id: str | None = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotRunObservability,
+    ) -> "CopilotRunObservabilityModel":
+        return cls(**row.__dict__)
+
+
+class CopilotShelfSourceEntryModel(BaseModel):
+    turn_index: int
+    prompt: str
+    response_id: str | None = None
+
+    def to_domain(self) -> CopilotShelfSourceEntry:
+        return CopilotShelfSourceEntry(**self.model_dump(mode="python"))
+
+
+class CopilotShelfPromotionRequestModel(BaseModel):
+    source_session_id: str
+    source_domain: str
+    context_fingerprint: str | None = None
+    entries: list[CopilotShelfSourceEntryModel] = Field(default_factory=list)
+    selected_scope_domains: list[str] = Field(default_factory=list)
+    role: str = "research_agent"
+    selected_profile: str | None = None
+
+    def to_domain(self) -> CopilotShelfPromotionRequest:
+        return CopilotShelfPromotionRequest(
+            source_session_id=self.source_session_id,
+            source_domain=self.source_domain,
+            context_fingerprint=self.context_fingerprint,
+            entries=[item.to_domain() for item in self.entries],
+            selected_scope_domains=list(self.selected_scope_domains),
+            role=self.role,
+            selected_profile=self.selected_profile,
+        )
+
+
+class CopilotShelfPromotionModel(BaseModel):
+    promotion_id: str
+    contract_version: str
+    status: str
+    source_session_id: str
+    source_domain: str
+    source_turn_ids: list[str] = Field(default_factory=list)
+    source_snapshot_ids: list[str] = Field(default_factory=list)
+    context_fingerprint: str | None = None
+    context_contract_versions: list[str] = Field(default_factory=list)
+    selected_scope_domains: list[str] = Field(default_factory=list)
+    role: str
+    selected_profile: str | None = None
+    message: str
+    already_promoted: bool
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, row: CopilotShelfPromotion) -> "CopilotShelfPromotionModel":
+        return cls(**row.__dict__)
+
+
+class CopilotProfileCapabilityStateModel(BaseModel):
+    profile: str
+    status: str
+    provider: str
+    model: str | None = None
+    capabilities: CopilotModelCapabilitiesModel
+    guidance: str | None = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        row: CopilotProfileCapabilityState,
+    ) -> "CopilotProfileCapabilityStateModel":
+        return cls(
+            profile=row.profile,
+            status=row.status,
+            provider=row.provider,
+            model=row.model,
+            capabilities=CopilotModelCapabilitiesModel.from_domain(row.capabilities),
+            guidance=row.guidance,
+        )
+
+
+class CopilotDiagnosticsModel(BaseModel):
+    provider_state: str
+    provider: str
+    provider_label: str
+    model_policy_version: str
+    profiles: list[CopilotProfileCapabilityStateModel] = Field(default_factory=list)
+    default_resolution: CopilotModelPolicyResolutionModel
+    operator_resolution: CopilotModelPolicyResolutionModel
+    local_storage: str
+    provider_storage: CopilotProviderStoragePolicyModel
+    last_error: CopilotSafeProviderErrorModel | None = None
+
+    @classmethod
+    def from_domain(cls, row: CopilotDiagnostics) -> "CopilotDiagnosticsModel":
+        return cls(
+            provider_state=row.provider_state,
+            provider=row.provider,
+            provider_label=row.provider_label,
+            model_policy_version=row.model_policy_version,
+            profiles=[
+                CopilotProfileCapabilityStateModel.from_domain(item)
+                for item in row.profiles
+            ],
+            default_resolution=CopilotModelPolicyResolutionModel.from_domain(
+                row.default_resolution
+            ),
+            operator_resolution=CopilotModelPolicyResolutionModel.from_domain(
+                row.operator_resolution
+            ),
+            local_storage=row.local_storage,
+            provider_storage=CopilotProviderStoragePolicyModel.from_domain(
+                row.provider_storage
+            ),
+            last_error=(
+                CopilotSafeProviderErrorModel.from_domain(row.last_error)
+                if row.last_error
+                else None
+            ),
         )
 
 
@@ -629,6 +886,7 @@ class CopilotTurnModel(BaseModel):
     created_at: datetime
     role: str = "research_agent"
     reasoning_effort: str | None = None
+    selected_profile: str | None = None
     selected_scope_domains: list[str] = Field(default_factory=list)
     context_fingerprint: str | None = None
     requested_provider: str | None = None
@@ -638,6 +896,12 @@ class CopilotTurnModel(BaseModel):
     run_id: str | None = None
     terminal_status: str | None = None
     cancellation_outcome: str | None = None
+    cancellation_boundary: str | None = None
+    model_resolution: CopilotModelPolicyResolutionModel | None = None
+    observability: CopilotRunObservabilityModel = Field(
+        default_factory=CopilotRunObservabilityModel
+    )
+    safe_provider_error: CopilotSafeProviderErrorModel | None = None
     usage: "CopilotUsageRecordModel" = Field(default_factory=lambda: CopilotUsageRecordModel())
     research_plan: CopilotResearchPlanModel | None = None
     operator_plan: CopilotOperatorPlanModel | None = None
@@ -660,6 +924,7 @@ class CopilotTurnModel(BaseModel):
             created_at=row.created_at,
             role=row.role,
             reasoning_effort=row.reasoning_effort,
+            selected_profile=row.selected_profile,
             selected_scope_domains=list(row.selected_scope_domains),
             context_fingerprint=row.context_fingerprint,
             requested_provider=row.requested_provider,
@@ -669,6 +934,18 @@ class CopilotTurnModel(BaseModel):
             run_id=row.run_id,
             terminal_status=row.terminal_status,
             cancellation_outcome=row.cancellation_outcome,
+            cancellation_boundary=row.cancellation_boundary,
+            model_resolution=(
+                CopilotModelPolicyResolutionModel.from_domain(row.model_resolution)
+                if row.model_resolution
+                else None
+            ),
+            observability=CopilotRunObservabilityModel.from_domain(row.observability),
+            safe_provider_error=(
+                CopilotSafeProviderErrorModel.from_domain(row.safe_provider_error)
+                if row.safe_provider_error
+                else None
+            ),
             usage=CopilotUsageRecordModel.from_domain(row.usage),
             research_plan=CopilotResearchPlanModel.from_domain(row.research_plan) if row.research_plan else None,
             operator_plan=CopilotOperatorPlanModel.from_domain(row.operator_plan) if row.operator_plan else None,
@@ -691,14 +968,14 @@ class CopilotSessionDetailModel(BaseModel):
 
 
 class CopilotUsageRecordModel(BaseModel):
-    input_tokens: int = 0
-    output_tokens: int = 0
-    reasoning_tokens: int = 0
-    total_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    provider_calls: int = 0
-    tool_calls: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    total_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    provider_calls: int | None = None
+    tool_calls: int | None = None
     raw: dict[str, object] = Field(default_factory=dict)
 
     @classmethod

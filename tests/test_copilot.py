@@ -16,6 +16,7 @@ from src.application.copilot_context_contracts import (
     COPILOT_TOTAL_CONTEXT_BUDGET_BYTES,
     finalize_context_bundle,
 )
+from src.application.copilot_model_policy import CopilotModelPolicy
 from src.application.research_action_registry import (
     ResearchActionPermissionError,
     ResearchActionRegistry,
@@ -32,6 +33,7 @@ from src.models.copilot import (
     CopilotOperatorPlanStep,
     CopilotOperatorProgressEvent,
     CopilotRequestContext,
+    CopilotLocalContinuationTurn,
     CopilotResearchCardRequest,
     CopilotResearchCardResult,
     CopilotResearchActionDefinition,
@@ -39,6 +41,8 @@ from src.models.copilot import (
     CopilotResearchPlanDomain,
     CopilotResearchPlanDomainDecision,
     CopilotRunEvent,
+    CopilotShelfPromotionRequest,
+    CopilotShelfSourceEntry,
     CopilotSourceRef,
     CopilotToolExecution,
     CopilotToolTrace,
@@ -1953,9 +1957,11 @@ def test_copilot_route_returns_structured_error_when_provider_raises(tmp_path):
         payload = response.json()
         assert payload["status"] == "error"
         assert payload["provider"] == "raising_provider"
-        assert "provider transport failed" in payload["message"]
+        assert payload["message"] == "The provider could not complete this Copilot run."
+        assert payload["safe_provider_error"]["category"] == "provider_error"
+        assert "provider transport failed" not in response.text
         assert payload["sources"]
-        assert any("failed before a research card" in warning for warning in payload["warnings"])
+        assert payload["safe_provider_error"]["guidance"] in payload["warnings"]
     finally:
         runtime.shutdown()
 
@@ -5261,14 +5267,43 @@ def test_openai_provider_omits_previous_response_id_when_response_storage_is_dis
 
     provider = CaptureOpenAIProvider()
     provider.generate_research_card(
-        request=CopilotResearchCardRequest(domain="macro", previous_response_id="resp_previous"),
+        request=CopilotResearchCardRequest(
+            domain="macro",
+            previous_response_id="resp_previous",
+            local_continuation=[
+                CopilotLocalContinuationTurn(
+                    turn_id="turn_local_1",
+                    role="research_agent",
+                    prompt="What changed?",
+                    assistant_result={
+                        "status": "ready",
+                        "source_ids": ["macro.snapshot"],
+                        "warnings": ["One series is delayed."],
+                    },
+                )
+            ],
+        ),
         context=CopilotContextBundle(domain="macro", current_tab="macro", summary_data={}),
         tool_specs=[],
         execute_tool=lambda *_args: None,
     )
 
     assert provider.payloads
+    assert provider.payloads[0]["store"] is False
     assert "previous_response_id" not in provider.payloads[0]
+    body = json.loads(provider.payloads[0]["input"][0]["content"][0]["text"])
+    assert body["local_continuation"] == [
+        {
+            "turn_id": "turn_local_1",
+            "role": "research_agent",
+            "user_request": "What changed?",
+            "assistant_result": {
+                "status": "ready",
+                "source_ids": ["macro.snapshot"],
+                "warnings": ["One series is delayed."],
+            },
+        }
+    ]
 
 
 def test_openai_provider_uses_request_reasoning_effort_override():
@@ -6078,7 +6113,7 @@ def test_checkpoint3_migrates_nested_replay_and_artifact_records_from_every_lega
         restored_artifact = migrated.get_artifact(artifact_id)
         assert restored_turn.turn_id == turn_id
         assert restored_turn.role == "research_operator"
-        assert restored_turn.usage.total_tokens == 0
+        assert restored_turn.usage.total_tokens is None
         assert restored_turn.research_plan is None
         assert restored_turn.operator_plan is None
         assert restored_turn.run_events == []
@@ -7322,5 +7357,496 @@ def test_checkpoint5_representative_plans_select_domains_and_explain_omissions(
             assert decisions[domain]["used"] is False
             assert decisions[domain]["classification"] == "irrelevant"
             assert decisions[domain]["reason"]
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint6_model_policy_resolves_profiles_and_retains_custom_operator_default():
+    provider = OpenAIResponsesCopilotProvider(
+        api_key="test-key",
+        model="gpt-5.5",
+        reasoning_effort="medium",
+        store_responses=False,
+    )
+    policy = CopilotModelPolicy.from_environment(provider)
+
+    resolved = {
+        profile: policy.resolve(
+            CopilotResearchCardRequest(
+                domain="synthesis",
+                selected_profile=profile,
+                role="research_agent",
+            )
+        )
+        for profile in ("auto", "quick", "standard", "deep")
+    }
+
+    assert resolved["auto"].resolved_profile == "standard"
+    assert resolved["quick"].reasoning_effort == "low"
+    assert resolved["standard"].reasoning_effort == "medium"
+    assert resolved["deep"].reasoning_effort == "high"
+    assert all(item.policy_version == "copilot.model-policy.v1" for item in resolved.values())
+    assert all(item.provider_storage.effective == "disabled" for item in resolved.values())
+    assert all(item.selection_source == "user" for item in resolved.values())
+    operator = policy.resolve(
+        CopilotResearchCardRequest(
+            domain="synthesis",
+            selected_profile="auto",
+            role="research_operator",
+        ),
+        role="research_operator",
+    )
+    assert operator.orchestration_path == "gamma_custom_loop"
+    assert operator.provider == "gamma_operator_executor"
+    assert operator.provider_storage.effective == "not_applicable"
+
+
+def test_checkpoint6_diagnostics_observability_and_unsupported_model_are_replayable(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        diagnostics = client.get("/copilot/diagnostics")
+        assert diagnostics.status_code == 200
+        diagnostic_payload = diagnostics.json()
+        assert diagnostic_payload["model_policy_version"] == "copilot.model-policy.v1"
+        assert {item["profile"] for item in diagnostic_payload["profiles"]} == {
+            "auto",
+            "quick",
+            "standard",
+            "deep",
+        }
+        assert (
+            diagnostic_payload["operator_resolution"]["orchestration_path"]
+            == "gamma_custom_loop"
+        )
+        assert "locally" in diagnostic_payload["local_storage"].lower()
+
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Persist the resolved Deep profile.",
+                "user_session_id": "session_checkpoint6_policy",
+                "selected_profile": "deep",
+                "context": {
+                    "current_tab": "macro",
+                    "workspace_mode": "research_book",
+                    "macro": {
+                        "mode": "rates_policy",
+                        "region": "US",
+                        "timeframe": "3M",
+                        "theme": "inflation",
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["model_resolution"]["selected_profile"] == "deep"
+        assert payload["model_resolution"]["selection_source"] == "user"
+        assert payload["observability"]["selected_profile"] == "deep"
+        assert payload["observability"]["model_policy_version"] == "copilot.model-policy.v1"
+        assert payload["observability"]["routing_reason"]
+        assert payload["observability"]["total_latency_ms"] is not None
+        assert payload["observability"]["provider_latency_ms"] is not None
+        assert payload["usage"]["provider_calls"] == 1
+        assert payload["usage"]["tool_calls"] == len(payload["tool_traces"])
+        assert payload["usage"]["input_tokens"] is None
+        assert payload["usage"]["cache_read_tokens"] is None
+        assert payload["usage"]["raw"] == {}
+
+        unsupported = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Use a model outside the policy.",
+                "user_session_id": "session_checkpoint6_unsupported",
+                "selected_profile": "standard",
+                "requested_model": "not-a-supported-model",
+                "context": {"current_tab": "macro"},
+            },
+        )
+        assert unsupported.status_code == 200
+        unsupported_payload = unsupported.json()
+        assert unsupported_payload["status"] == "unavailable"
+        assert unsupported_payload["model_resolution"]["status"] == "incompatible_model"
+        assert unsupported_payload["usage"]["provider_calls"] == 0
+        assert unsupported_payload["usage"]["input_tokens"] is None
+        safe_error = unsupported_payload["safe_provider_error"]
+        assert safe_error["category"] == "incompatible_model"
+        assert re.fullmatch(r"cp6\.incompatible_model\.[0-9a-f]{12}", safe_error["diagnostic_id"])
+
+        replay = client.get("/copilot/sessions/session_checkpoint6_policy")
+        assert replay.status_code == 200
+        turn = replay.json()["turns"][0]
+        assert turn["selected_profile"] == "deep"
+        assert turn["model_resolution"] == payload["model_resolution"]
+        assert turn["observability"] == payload["observability"]
+        assert turn["usage"] == payload["usage"]
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint6_shelf_promotion_is_exact_idempotent_and_restart_safe(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        generated = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Promote this exact shelf turn.",
+                "user_session_id": "session_checkpoint6_shelf",
+                "selected_profile": "standard",
+                "selected_scope_domains": ["macro", "prediction_markets"],
+                "context": {
+                    "current_tab": "macro",
+                    "workspace_mode": "research_book",
+                    "macro": {
+                        "mode": "rates_policy",
+                        "region": "US",
+                        "timeframe": "6M",
+                        "theme": "inflation",
+                        "comparison_region": "EU",
+                    },
+                },
+            },
+        )
+        assert generated.status_code == 200
+        before = client.get("/copilot/sessions/session_checkpoint6_shelf").json()
+        source_turn = before["turns"][0]
+        source_snapshot = before["context_snapshots"][0]
+        request_payload = {
+            "source_session_id": "session_checkpoint6_shelf",
+            "source_domain": "macro",
+            "context_fingerprint": source_turn["context_fingerprint"],
+            "entries": [
+                {
+                    "turn_index": source_turn["turn_index"],
+                    "prompt": source_turn["prompt"],
+                    "response_id": source_turn["result"]["response_id"],
+                }
+            ],
+            "selected_scope_domains": ["macro", "prediction_markets"],
+            "role": "research_agent",
+            "selected_profile": "standard",
+        }
+
+        first = client.post("/copilot/shelf/promote", json=request_payload)
+        second = client.post("/copilot/shelf/promote", json=request_payload)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        promoted = first.json()
+        replayed_promotion = second.json()
+        assert promoted["status"] == "promoted"
+        assert promoted["source_session_id"] == "session_checkpoint6_shelf"
+        assert promoted["source_turn_ids"] == [source_turn["turn_id"]]
+        assert promoted["source_snapshot_ids"] == [source_snapshot["snapshot_id"]]
+        assert promoted["context_fingerprint"] == source_turn["context_fingerprint"]
+        assert promoted["context_contract_versions"]
+        assert promoted["selected_scope_domains"] == ["macro", "prediction_markets"]
+        assert replayed_promotion["status"] == "already_promoted"
+        assert replayed_promotion["already_promoted"] is True
+        assert replayed_promotion["promotion_id"] == promoted["promotion_id"]
+
+        after = client.get("/copilot/sessions/session_checkpoint6_shelf").json()
+        assert len(after["turns"]) == 1
+        assert after["turns"][0] == source_turn
+        assert after["context_snapshots"][0] == source_snapshot
+
+        restarted = CopilotStore(runtime.copilot_store.base_dir)
+        restored = restarted.get_shelf_promotion(promoted["promotion_id"])
+        assert restored is not None
+        assert restored.source_turn_ids == [source_turn["turn_id"]]
+        restored_turn = restarted.list_turns("session_checkpoint6_shelf")[0]
+        restored_snapshot = restarted.get_context_snapshot(restored.source_snapshot_ids[0])
+        assert restored_turn.result == runtime.copilot_store.list_turns(
+            "session_checkpoint6_shelf"
+        )[0].result
+        assert restored_snapshot is not None
+        assert restored_snapshot.source_ids == source_snapshot["source_ids"]
+        assert restored_snapshot.warnings == source_snapshot["warnings"]
+        assert restored_snapshot.request_context == source_snapshot["request_context"]
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint6_shelf_promotion_has_typed_failure_states(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        generated = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Create shelf state.",
+                "user_session_id": "session_checkpoint6_shelf_failures",
+                "context": {"current_tab": "macro"},
+            },
+        ).json()
+        detail = client.get(
+            "/copilot/sessions/session_checkpoint6_shelf_failures"
+        ).json()
+        turn = detail["turns"][0]
+        base = {
+            "source_session_id": "session_checkpoint6_shelf_failures",
+            "source_domain": "macro",
+            "context_fingerprint": turn["context_fingerprint"],
+            "entries": [
+                {
+                    "turn_index": turn["turn_index"],
+                    "prompt": turn["prompt"],
+                    "response_id": generated["response_id"],
+                }
+            ],
+        }
+        unavailable = client.post(
+            "/copilot/shelf/promote",
+            json={**base, "source_session_id": "missing_session"},
+        ).json()
+        incomplete = client.post(
+            "/copilot/shelf/promote",
+            json={**base, "entries": []},
+        ).json()
+        stale = client.post(
+            "/copilot/shelf/promote",
+            json={
+                **base,
+                "entries": [
+                    {
+                        **base["entries"][0],
+                        "prompt": "A stale prompt.",
+                    }
+                ],
+            },
+        ).json()
+        stale_fingerprint = client.post(
+            "/copilot/shelf/promote",
+            json={**base, "context_fingerprint": "stale-fingerprint"},
+        ).json()
+        assert unavailable["status"] == "unavailable"
+        assert incomplete["status"] == "incomplete"
+        assert stale["status"] == "stale"
+        assert stale_fingerprint["status"] == "stale"
+        assert all(
+            item["contract_version"] == "copilot.shelf-promotion.v1"
+            for item in (unavailable, incomplete, stale, stale_fingerprint)
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint6_store_false_continuation_and_usage_survive_restart(tmp_path):
+    class StatelessUsageProvider:
+        provider_name = "stateless_usage_provider"
+        model = "stateless-model-v1"
+        reasoning_effort = "medium"
+        store_responses = False
+
+        def __init__(self):
+            self.requests: list[CopilotResearchCardRequest] = []
+
+        def generate_research_card(self, *, request, context, tool_specs, execute_tool):
+            self.requests.append(request)
+            return CopilotResearchCardResult(
+                domain=request.domain,
+                current_tab=context.current_tab,
+                status="ready",
+                provider=self.provider_name,
+                model=self.model,
+                response_id=f"stateless_{len(self.requests)}",
+                card=ResearchCard(
+                    title="Stateless continuation",
+                    hypothesis="Gamma-local replay is sufficient.",
+                    rationale="The provider retained no response state.",
+                    proposed_test="Continue from the bounded local transcript.",
+                ),
+                sources=list(context.sources),
+                warnings=list(context.warnings),
+                usage=CopilotUsageRecord(
+                    input_tokens=23,
+                    output_tokens=11,
+                    reasoning_tokens=4,
+                    total_tokens=34,
+                    cache_read_tokens=7,
+                    cache_write_tokens=None,
+                    provider_calls=1,
+                    tool_calls=0,
+                    raw={"unsafe_provider_payload": "must-not-persist"},
+                ),
+            )
+
+    client, runtime = _build_test_client(tmp_path)
+    provider = StatelessUsageProvider()
+    runtime.copilot_service.provider = provider
+    try:
+        first = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "First stateless turn.",
+                "user_session_id": "session_checkpoint6_stateless",
+                "selected_profile": "standard",
+                "context": {"current_tab": "macro"},
+            },
+        )
+        second = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Continue without provider-retained state.",
+                "previous_response_id": first.json()["response_id"],
+                "user_session_id": "session_checkpoint6_stateless",
+                "selected_profile": "standard",
+                "context": {"current_tab": "macro"},
+            },
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert provider.requests[0].local_continuation == []
+        assert len(provider.requests[1].local_continuation) == 1
+        continuation = provider.requests[1].local_continuation[0]
+        assert continuation.prompt == "First stateless turn."
+        assert continuation.assistant_result["card"]["title"] == "Stateless continuation"
+        assert provider.requests[1].model_resolution is not None
+        assert (
+            provider.requests[1].model_resolution.provider_storage.effective
+            == "disabled"
+        )
+        usage = second.json()["usage"]
+        assert usage == {
+            "input_tokens": 23,
+            "output_tokens": 11,
+            "reasoning_tokens": 4,
+            "total_tokens": 34,
+            "cache_read_tokens": 7,
+            "cache_write_tokens": None,
+            "provider_calls": 1,
+            "tool_calls": 0,
+            "raw": {},
+        }
+        raw_files = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in runtime.copilot_store.turns_dir.rglob("*.json")
+        )
+        assert "unsafe_provider_payload" not in raw_files
+        assert "must-not-persist" not in raw_files
+
+        restarted = CopilotStore(runtime.copilot_store.base_dir)
+        restored = restarted.list_turns("session_checkpoint6_stateless")
+        assert len(restored) == 2
+        assert restored[-1].usage == CopilotUsageRecord(
+            input_tokens=23,
+            output_tokens=11,
+            reasoning_tokens=4,
+            total_tokens=34,
+            cache_read_tokens=7,
+            cache_write_tokens=None,
+            provider_calls=1,
+            tool_calls=0,
+        )
+        assert restored[-1].model_resolution is not None
+        assert (
+            restored[-1].model_resolution.provider_storage.effective
+            == "disabled"
+        )
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint6_v3_migration_preserves_missing_metrics_as_unavailable(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    try:
+        client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Create a legacy metrics fixture.",
+                "user_session_id": "session_checkpoint6_v3",
+                "context": {"current_tab": "macro"},
+            },
+        )
+        path = next(
+            (runtime.copilot_store.turns_dir / "session_checkpoint6_v3").glob("*.json")
+        )
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["schema_version"] = 3
+        payload.pop("selected_profile", None)
+        payload.pop("model_resolution", None)
+        payload.pop("observability", None)
+        payload.pop("safe_provider_error", None)
+        payload["result"].pop("model_resolution", None)
+        payload["result"].pop("observability", None)
+        payload["result"].pop("safe_provider_error", None)
+        payload["run_events"] = []
+        payload["usage"] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "total_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "provider_calls": 0,
+            "tool_calls": 0,
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        migrated = CopilotStore(runtime.copilot_store.base_dir)
+        turn = migrated.list_turns("session_checkpoint6_v3")[0]
+        assert turn.usage.input_tokens is None
+        assert turn.usage.output_tokens is None
+        assert turn.usage.reasoning_tokens is None
+        assert turn.usage.total_tokens is None
+        assert turn.usage.cache_read_tokens is None
+        assert turn.usage.cache_write_tokens is None
+        assert turn.usage.provider_calls is None
+        assert turn.usage.tool_calls == len(turn.result.tool_traces)
+        assert turn.observability.total_latency_ms is None
+        assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 4
+    finally:
+        runtime.shutdown()
+
+
+def test_checkpoint6_provider_errors_persist_only_safe_diagnostics(tmp_path):
+    secret = "Bearer sk-secret-provider-payload"
+
+    class FailingProvider:
+        provider_name = "failing_provider"
+        model = "failing-model-v1"
+        reasoning_effort = "medium"
+        store_responses = False
+
+        def generate_research_card(self, **_kwargs):
+            raise RuntimeError(f"authorization={secret}; raw_provider_payload={{unsafe:true}}")
+
+    client, runtime = _build_test_client(tmp_path)
+    runtime.copilot_service.provider = FailingProvider()
+    try:
+        response = client.post(
+            "/copilot/research-card",
+            json={
+                "domain": "macro",
+                "prompt": "Return a safe provider failure.",
+                "user_session_id": "session_checkpoint6_safe_error",
+                "context": {"current_tab": "macro"},
+            },
+        )
+        assert response.status_code == 200
+        rendered = response.text
+        assert secret not in rendered
+        assert "raw_provider_payload" not in rendered
+        payload = response.json()
+        assert payload["status"] == "error"
+        assert payload["safe_provider_error"]["category"] == "provider_error"
+        diagnostic_id = payload["safe_provider_error"]["diagnostic_id"]
+        assert re.fullmatch(r"cp6\.provider_error\.[0-9a-f]{12}", diagnostic_id)
+        assert payload["observability"]["diagnostic_id"] == diagnostic_id
+
+        persisted = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in runtime.copilot_store.base_dir.rglob("*.json")
+        )
+        assert secret not in persisted
+        assert "raw_provider_payload" not in persisted
+        diagnostics = client.get("/copilot/diagnostics").json()
+        assert diagnostics["last_error"]["diagnostic_id"] == diagnostic_id
+        assert secret not in json.dumps(diagnostics)
     finally:
         runtime.shutdown()

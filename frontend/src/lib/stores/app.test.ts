@@ -38,9 +38,12 @@ import type {
 } from "../api/types";
 import {
   clearFrontendQueryCache,
+  activeCopilotSession,
   analyzeStrategyLab,
   acceptResolvedStrategyLabHandoff,
   copilotCards,
+  copilotDiagnostics,
+  copilotSessions,
   copilotThreads,
   composeStrategyLab,
   composeStrategyLabPortfolio,
@@ -77,6 +80,7 @@ import {
   loadResearchOverview,
   loadSavedResearch,
   previewCopilotThreadFingerprint,
+  promoteCopilotShelfThread,
   loading,
   macroContext,
   macroDivergences,
@@ -173,6 +177,9 @@ describe("app store orchestration", () => {
     cryptoLiquidity.set(null);
     cryptoComparison.set(null);
     copilotCards.set(emptyCopilotCards());
+    activeCopilotSession.set(null);
+    copilotDiagnostics.set(null);
+    copilotSessions.set([]);
     copilotThreads.set(emptyCopilotThreads());
     riskResult.set(null);
     ivSurface.set(null);
@@ -365,7 +372,7 @@ describe("app store orchestration", () => {
         transformation_note: null
       }]
     };
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (url.includes("/fundamentals/search")) return ok(searchResponse);
       if (url.includes("/financials")) return notFound({ detail: "quarterly facts unavailable" });
       return ok({ warnings: [] });
@@ -1881,6 +1888,113 @@ describe("app store orchestration", () => {
       "resp_macro_2"
     ]);
     expect(get(copilotThreads).macro.latestResponseId).toBe("resp_macro_2");
+  });
+
+  it("promotes the exact persisted shelf session without synthesizing duplicate turns", async () => {
+    const result = makeCopilotResult("macro", "resp_shelf_1", "Exact shelf result");
+    const thread = {
+      domain: "macro" as const,
+      sourceSessionId: "session-shelf-1",
+      contextFingerprint: "fp-shelf-1",
+      latestResponseId: "resp_shelf_1",
+      entries: [
+        {
+          entryId: "resp_shelf_1",
+          turnIndex: 0,
+          prompt: "Open the exact shelf result.",
+          continuedFromResponseId: null,
+          result
+        }
+      ]
+    };
+    const summary = {
+      session_id: "session-shelf-1",
+      title: "Shelf session",
+      created_at: "2026-07-25T10:00:00Z",
+      updated_at: "2026-07-25T10:00:01Z",
+      active_domain: "macro",
+      active_context_fingerprint: "fp-shelf-1",
+      turn_count: 1,
+      memo_count: 0,
+      report_count: 0,
+      artifact_count: 0,
+      warnings: [],
+      archived_at: null
+    };
+    const exactTurn = {
+      turn_id: "turn-shelf-1",
+      turn_index: 0,
+      prompt: "Open the exact shelf result.",
+      result
+    };
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.includes("/copilot/shelf/promote")) {
+        return ok({
+          promotion_id: "promotion-shelf-1",
+          contract_version: "copilot.shelf-promotion.v1",
+          status: "promoted",
+          source_session_id: "session-shelf-1",
+          source_domain: "macro",
+          source_turn_ids: ["turn-shelf-1"],
+          source_snapshot_ids: ["ctx-shelf-1"],
+          context_fingerprint: "fp-shelf-1",
+          context_contract_versions: ["copilot.context.v2"],
+          selected_scope_domains: ["macro"],
+          role: "research_agent",
+          selected_profile: "standard",
+          message: "Opened the exact persisted shelf session.",
+          already_promoted: false,
+          created_at: "2026-07-25T10:00:02Z"
+        });
+      }
+      if (url.endsWith("/copilot/sessions/session-shelf-1")) {
+        return ok({
+          session: summary,
+          turns: [exactTurn],
+          memos: [],
+          context_snapshots: [],
+          artifacts: [],
+          storage_warnings: []
+        });
+      }
+      if (url.includes("/copilot/diagnostics")) {
+        return ok({});
+      }
+      if (url.includes("/copilot/sessions")) {
+        return ok([summary]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promotion = await promoteCopilotShelfThread(thread, {
+      selectedScopeDomains: ["macro"],
+      role: "research_agent",
+      selectedProfile: "standard"
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    expect(requestBody).toEqual({
+      source_session_id: "session-shelf-1",
+      source_domain: "macro",
+      context_fingerprint: "fp-shelf-1",
+      entries: [
+        {
+          turn_index: 0,
+          prompt: "Open the exact shelf result.",
+          response_id: "resp_shelf_1"
+        }
+      ],
+      selected_scope_domains: ["macro"],
+      role: "research_agent",
+      selected_profile: "standard"
+    });
+    expect(promotion?.status).toBe("promoted");
+    expect(get(activeCopilotSession)?.session.session_id).toBe("session-shelf-1");
+    expect(get(activeCopilotSession)?.turns).toEqual([exactTurn]);
+    expect(fetchMock.mock.calls.filter(([url]) =>
+      String(url).endsWith("/copilot/sessions/session-shelf-1")
+    )).toHaveLength(1);
   });
 
   it("starts a fresh copilot thread when the macro grounding lens changes", async () => {

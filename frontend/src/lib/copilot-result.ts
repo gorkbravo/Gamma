@@ -1,9 +1,13 @@
 import type {
   CopilotDomain,
+  CopilotModelPolicyResolution,
   CopilotOperatorProgressEvent,
   CopilotResearchCardResult,
   CopilotSourceRef,
+  CopilotRunObservability,
+  CopilotSafeProviderError,
   CopilotToolTrace,
+  CopilotUsageRecord,
   ResearchCard,
   ResearchClaim
 } from "./api/types";
@@ -32,6 +36,61 @@ function asStringRecord(value: unknown): Record<string, string> {
       .filter(([, item]) => typeof item === "string")
       .map(([key, item]) => [key, item as string])
   );
+}
+
+function asOptionalNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeUsage(value: unknown): CopilotUsageRecord {
+  const row = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    input_tokens: asOptionalNumber(row.input_tokens),
+    output_tokens: asOptionalNumber(row.output_tokens),
+    reasoning_tokens: asOptionalNumber(row.reasoning_tokens),
+    total_tokens: asOptionalNumber(row.total_tokens),
+    cache_read_tokens: asOptionalNumber(row.cache_read_tokens),
+    cache_write_tokens: asOptionalNumber(row.cache_write_tokens),
+    provider_calls: asOptionalNumber(row.provider_calls),
+    tool_calls: asOptionalNumber(row.tool_calls),
+    raw: {}
+  };
+}
+
+function normalizeObservability(value: unknown): CopilotRunObservability | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  return {
+    selected_profile: asOptionalString(row.selected_profile),
+    resolved_provider: asOptionalString(row.resolved_provider),
+    resolved_model: asOptionalString(row.resolved_model),
+    model_policy_version: asOptionalString(row.model_policy_version),
+    routing_reason: asOptionalString(row.routing_reason),
+    reasoning_mode: asOptionalString(row.reasoning_mode),
+    reasoning_effort: asOptionalString(row.reasoning_effort) as CopilotRunObservability["reasoning_effort"],
+    orchestration_path: asOptionalString(row.orchestration_path),
+    total_latency_ms: asOptionalNumber(row.total_latency_ms),
+    provider_latency_ms: asOptionalNumber(row.provider_latency_ms),
+    cancellation_outcome: asOptionalString(row.cancellation_outcome),
+    cancellation_boundary: asOptionalString(row.cancellation_boundary),
+    provider_error_category: asOptionalString(row.provider_error_category),
+    diagnostic_id: asOptionalString(row.diagnostic_id)
+  };
+}
+
+function normalizeSafeError(value: unknown): CopilotSafeProviderError | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const diagnosticId = asOptionalString(row.diagnostic_id);
+  if (!diagnosticId) return null;
+  return {
+    category: asString(row.category, "provider_error"),
+    diagnostic_id: diagnosticId,
+    message: asString(row.message, "The provider could not complete this Copilot run."),
+    guidance: asString(row.guidance, "Retry or review provider configuration."),
+    retryable: row.retryable === true,
+    created_at: asString(row.created_at)
+  };
 }
 
 function normalizeClaim(value: unknown): ResearchClaim | null {
@@ -171,6 +230,26 @@ export function normalizeCopilotResearchCardResult(
           .map(normalizeOperatorEvent)
           .filter((event): event is CopilotOperatorProgressEvent => event != null)
       : [],
-    warnings: asStringArray(row.warnings)
+    warnings: asStringArray(row.warnings),
+    research_plan:
+      row.research_plan && typeof row.research_plan === "object"
+        ? (row.research_plan as CopilotResearchCardResult["research_plan"])
+        : null,
+    context_contracts: Array.isArray(row.context_contracts)
+      ? (row.context_contracts.filter(
+          (item) => item != null && typeof item === "object" && !Array.isArray(item)
+        ) as Array<Record<string, unknown>>)
+      : [],
+    context_budget:
+      row.context_budget && typeof row.context_budget === "object" && !Array.isArray(row.context_budget)
+        ? (row.context_budget as Record<string, unknown>)
+        : {},
+    model_resolution:
+      row.model_resolution && typeof row.model_resolution === "object"
+        ? (row.model_resolution as CopilotModelPolicyResolution)
+        : null,
+    usage: normalizeUsage(row.usage),
+    observability: normalizeObservability(row.observability),
+    safe_provider_error: normalizeSafeError(row.safe_provider_error)
   };
 }

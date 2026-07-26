@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
 import CopilotResearchCard from "./CopilotResearchCard.svelte";
@@ -242,6 +244,50 @@ describe("CopilotResearchCard", () => {
 
     expect(body).toContain("Research Result");
     expect(body).toContain("Equity Research");
+  });
+
+  it("uses keyboard-native promotion and profile controls", () => {
+    const { body } = render(CopilotResearchCard, {
+      props: {
+        open: true,
+        available: true,
+        thread: {
+          domain: "macro",
+          sourceSessionId: "session-shelf-1",
+          contextFingerprint: "fp-shelf-1",
+          latestResponseId: "resp-shelf-1",
+          entries: [
+            {
+              entryId: "resp-shelf-1",
+              turnIndex: 0,
+              prompt: "Open this exact turn.",
+              continuedFromResponseId: null,
+              result: makeResult("resp-shelf-1", "Shelf result")
+            }
+          ]
+        },
+        onGenerate: vi.fn(),
+        onOpenWorkspace: vi.fn()
+      }
+    });
+    const source = readFileSync(
+      fileURLToPath(new URL("./CopilotResearchCard.svelte", import.meta.url)),
+      "utf8"
+    );
+
+    expect(body).toContain("Open in Copilot");
+    expect(body).toContain("Same session, context, evidence, and warnings.");
+    expect(body).toContain("<option value=\"auto\"");
+    expect(body).toContain(">Auto</option>");
+    expect(body).toContain("<option value=\"quick\">Quick</option>");
+    expect(body).toContain("<option value=\"standard\">Standard</option>");
+    expect(body).toContain("<option value=\"deep\">Deep</option>");
+    // Native button/select activation supplies Enter and Space semantics without
+    // a parallel click-only key handler.
+    expect(source).toContain('class="open-workspace"');
+    expect(source).toContain('type="button"');
+    expect(source).toContain("on:click={handleOpenWorkspace}");
+    expect(source).toContain("<select bind:value={selectedProfile}");
   });
 });
 

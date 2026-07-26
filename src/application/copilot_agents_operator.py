@@ -9,6 +9,7 @@ from time import perf_counter
 from typing import Any, Callable
 
 from src.application.copilot_context_helpers import dedupe_warnings
+from src.application.copilot_model_policy import OPENAI_BASELINE_MODEL
 from src.application.research_action_registry import ResearchActionRegistry
 from src.models.copilot import (
     CopilotContextBundle,
@@ -20,6 +21,7 @@ from src.models.copilot import (
     CopilotSourceRef,
     CopilotToolExecution,
     CopilotToolTrace,
+    CopilotUsageRecord,
     ResearchCard,
     new_copilot_id,
 )
@@ -65,7 +67,7 @@ def _parse_positive_int_env(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class CopilotAgentsOperatorConfig:
     orchestrator: str = "custom"
-    model: str = "gpt-5.5"
+    model: str = OPENAI_BASELINE_MODEL
     reasoning_effort: str | None = "low"
     verbosity: str | None = "low"
     include_usage: bool = True
@@ -83,7 +85,7 @@ class CopilotAgentsOperatorConfig:
             .lower(),
             model=(
                 os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_MODEL")
-                or "gpt-5.5"
+                or OPENAI_BASELINE_MODEL
             ).strip(),
             reasoning_effort=(
                 os.getenv("GAMMA_COPILOT_OPERATOR_AGENTS_REASONING_EFFORT")
@@ -197,6 +199,11 @@ class CopilotAgentsOperatorService:
             and step.permission_policy != "confirmation_required"
         ]
         reasoning_effort = self._resolve_reasoning_effort(request.reasoning_effort)
+        resolved_model = (
+            request.model_resolution.model
+            if request.model_resolution is not None and request.model_resolution.model
+            else self.config.model
+        )
 
         record_event(
             "plan",
@@ -212,7 +219,7 @@ class CopilotAgentsOperatorService:
                 "max_provider_calls": plan.max_provider_calls,
                 "max_elapsed_ms": plan.max_elapsed_ms,
                 "orchestrator": self.provider_name,
-                "model": self.config.model,
+                "model": resolved_model,
                 "reasoning_effort": reasoning_effort,
                 "allowed_tool_ids": list(allowed_tool_ids),
             },
@@ -408,7 +415,7 @@ class CopilotAgentsOperatorService:
         execute_gamma_action = sdk.function_tool(execute_registered_action)
         agent_kwargs = {
             "name": "Gamma Research Operator",
-            "model": self.config.model,
+            "model": resolved_model,
             "instructions": self._instructions(),
             "tools": [execute_gamma_action],
         }
@@ -597,7 +604,12 @@ class CopilotAgentsOperatorService:
                     "warning_count": len(warnings),
                     "source_count": len(sources),
                     "tool_trace_count": len(tool_traces),
-                    "model": self.config.model,
+                    "model": (
+                        request.model_resolution.model
+                        if request.model_resolution is not None
+                        and request.model_resolution.model
+                        else self.config.model
+                    ),
                     "reasoning_effort": reasoning_effort,
                     "verbosity": self.config.verbosity,
                     "sdk_duration_ms": sdk_duration_ms,
@@ -622,7 +634,12 @@ class CopilotAgentsOperatorService:
             current_tab=request.context.current_tab or "copilot",
             status=status,
             provider=self.provider_name,
-            model=self.config.model,
+            model=(
+                request.model_resolution.model
+                if request.model_resolution is not None
+                and request.model_resolution.model
+                else self.config.model
+            ),
             response_id=response_id,
             message=final_message,
             card=build_card(plan, executed_steps, skipped_steps, list(sources.values()), warnings),
@@ -630,6 +647,7 @@ class CopilotAgentsOperatorService:
             tool_traces=tool_traces,
             operator_events=events,
             warnings=warnings,
+            usage=self._usage_record(model_usage or {}, len(tool_traces)),
         )
 
     @staticmethod
@@ -738,11 +756,50 @@ class CopilotAgentsOperatorService:
         raw_responses = getattr(run_result, "raw_responses", None)
         if not isinstance(raw_responses, list):
             return usage
+        usage["provider_calls"] = len(raw_responses)
         for response in raw_responses:
             response_usage = cls._object_to_mapping(getattr(response, "usage", None))
             if response_usage:
                 cls._merge_usage(usage, response_usage)
         return usage
+
+    @classmethod
+    def _usage_record(
+        cls,
+        usage: dict[str, Any],
+        tool_calls: int,
+    ) -> CopilotUsageRecord:
+        input_details = usage.get("input_tokens_details")
+        input_details = input_details if isinstance(input_details, dict) else {}
+        output_details = usage.get("output_tokens_details")
+        output_details = output_details if isinstance(output_details, dict) else {}
+
+        def optional_int(value: Any) -> int | None:
+            if value is None or isinstance(value, bool):
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        return CopilotUsageRecord(
+            input_tokens=optional_int(usage.get("input_tokens")),
+            output_tokens=optional_int(usage.get("output_tokens")),
+            reasoning_tokens=optional_int(output_details.get("reasoning_tokens")),
+            total_tokens=optional_int(usage.get("total_tokens")),
+            cache_read_tokens=optional_int(
+                input_details.get("cached_tokens")
+                if input_details.get("cached_tokens") is not None
+                else usage.get("cached_tokens")
+            ),
+            cache_write_tokens=optional_int(
+                usage.get("cache_write_tokens")
+                if usage.get("cache_write_tokens") is not None
+                else input_details.get("cache_write_tokens")
+            ),
+            provider_calls=optional_int(usage.get("provider_calls")),
+            tool_calls=tool_calls,
+        )
 
     @classmethod
     def _merge_usage(cls, total: dict[str, Any], item: dict[str, Any]) -> None:

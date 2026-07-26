@@ -58,6 +58,7 @@
     copilotSessionCreating,
     copilotSessions,
     copilotStorageStatus,
+    copilotDiagnostics,
     copilotThreads,
     archiveCopilotSession,
     createCopilotArtifact,
@@ -119,11 +120,13 @@
     loadActiveCopilotSession,
     loadCopilotMemos,
     loadCopilotStorageStatus,
+    loadCopilotDiagnostics,
     loadCopilotOperatorPlan,
     loadCopilotResearchCard,
     loadCopilotResearchPlan,
     loadCopilotSession,
     loadCopilotSessions,
+    promoteCopilotShelfThread,
     renameCopilotSession,
     rejectCopilotMutation,
     restoreCopilotSession,
@@ -209,7 +212,7 @@
     CopilotBaseDomain,
     CopilotDomain,
     CopilotDraftMutation,
-    CopilotReasoningEffort,
+    CopilotProfile,
     CopilotSourceRef,
     CopilotThreadState,
     CrossTabHandoffEnvelope,
@@ -1965,6 +1968,7 @@
       sidebarOpen = false;
       copilotOpen = false;
       void loadProviderUsage();
+      void loadCopilotDiagnostics();
     }
   }
 
@@ -2006,7 +2010,7 @@
     navigationSearchResetToken += 1;
   }
 
-  async function handleGenerateCopilot(prompt = "", reasoningEffort?: CopilotReasoningEffort) {
+  async function handleGenerateCopilot(prompt = "", selectedProfile?: CopilotProfile) {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
@@ -2015,11 +2019,11 @@
       synthesisDomains:
         copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
-      reasoningEffort,
+      selectedProfile,
     });
   }
 
-  async function handleRunOperatorCopilot(prompt = "", reasoningEffort?: CopilotReasoningEffort) {
+  async function handleRunOperatorCopilot(prompt = "", selectedProfile?: CopilotProfile) {
     if (!copilotSurface.supported || !copilotSurface.domain) {
       return null;
     }
@@ -2028,59 +2032,79 @@
       synthesisDomains:
         copilotSurface.domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
-      reasoningEffort,
+      selectedProfile,
     });
+  }
+
+  async function handleOpenShelfInCopilot(
+    thread: CopilotThreadState,
+    role: "research_agent" | "research_operator",
+    selectedProfile: CopilotProfile
+  ) {
+    const promotion = await promoteCopilotShelfThread(thread, {
+      selectedScopeDomains: copilotSurface.selectedScopeDomains,
+      role,
+      selectedProfile
+    });
+    if (!promotion || !["promoted", "already_promoted"].includes(promotion.status)) {
+      return promotion;
+    }
+    copilotOpen = false;
+    await selectTab("copilot");
+    const detail = await loadCopilotSession(promotion.source_session_id, { makeActive: true });
+    restoreCopilotScopeFromSession(detail);
+    return promotion;
   }
 
   async function handleGenerateCopilotWorkspace(
     domain: CopilotDomain,
     prompt = "",
-    reasoningEffort?: CopilotReasoningEffort
+    selectedProfile?: CopilotProfile
   ) {
     return streamCopilotResearchCard(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
-      reasoningEffort,
+      selectedProfile,
     });
   }
 
   async function handlePlanCopilotWorkspace(
     domain: CopilotDomain,
     prompt = "",
-    reasoningEffort?: CopilotReasoningEffort
+    selectedProfile?: CopilotProfile
   ) {
     return loadCopilotResearchPlan(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
-      reasoningEffort,
+      selectedProfile,
     });
   }
 
   async function handleOperatorPlanCopilotWorkspace(
     domain: CopilotDomain,
     prompt = "",
-    reasoningEffort?: CopilotReasoningEffort
+    selectedProfile?: CopilotProfile
   ) {
     return loadCopilotOperatorPlan(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
-      reasoningEffort,
+      selectedProfile,
     });
   }
 
   async function handleRunOperatorCopilotWorkspace(
     domain: CopilotDomain,
     prompt = "",
-    reasoningEffort?: CopilotReasoningEffort
+    selectedProfile?: CopilotProfile
   ) {
     return executeCopilotOperatorPlan(domain, prompt, {
       workspaceMode,
       synthesisDomains: domain === "synthesis" ? selectedSynthesisDomains : undefined,
       activeTabId: $activeTab,
-      reasoningEffort,
+      selectedProfile,
     });
   }
 
@@ -2121,6 +2145,7 @@
     }
     await loadCopilotSessions();
     await loadCopilotStorageStatus();
+    await loadCopilotDiagnostics();
     return created;
   }
 
@@ -2280,7 +2305,7 @@
     await loadCopilotSessions();
     const detail = await loadActiveCopilotSession();
     restoreCopilotScopeFromSession(detail);
-    await loadCopilotStorageStatus();
+    await Promise.allSettled([loadCopilotStorageStatus(), loadCopilotDiagnostics()]);
   }
 
   async function handleOpenKeyBindings() {
@@ -2645,6 +2670,7 @@
       <StatusRail
         status={$systemStatus}
         providerUsage={$providerUsage}
+        copilotDiagnostics={$copilotDiagnostics}
         requestMetrics={$requestMetrics}
         pollingState={{
           system: true,
@@ -2890,6 +2916,7 @@
             activeArtifact={$activeCopilotArtifact}
             artifactSaveState={$copilotArtifactSaveState}
             storageStatus={$copilotStorageStatus}
+            diagnostics={$copilotDiagnostics}
             researchPlan={$copilotResearchPlan}
             operatorPlan={$copilotOperatorPlan}
             operatorResult={$copilotOperatorResult}
@@ -2973,6 +3000,7 @@
       selectionMessage={copilotSurface.selectionMessage}
       onGenerate={handleGenerateCopilot}
       onRunOperator={handleRunOperatorCopilot}
+      onOpenWorkspace={handleOpenShelfInCopilot}
       onToggleScope={handleToggleSynthesisScope}
       onOpenSource={handleOpenCopilotSource}
       onClose={() => copilotOpen = false}
