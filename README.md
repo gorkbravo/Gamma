@@ -92,7 +92,7 @@ The current API surface is grouped by workspace:
 - `/research/*`: single-name and synthetic-scope analysis
 - `/macro/*`: snapshot payload, divergences, event feed, series history
 - `/commodities/*`: workspace payload, market summaries, price history, curves, spreads, inventories, events, and cross-domain links
-- `/prediction-markets/*`: screener, detail, history, wallet summary, related markets, calibration
+- `/prediction-markets/*`: screener, detail, windowed probability history (`?range=&resolution=&outcome_id=`), per-outcome history, multi-contract comparison, wallet summary, related markets, calibration
 - `/crypto/*`: workspace screener, token detail, price history, DEX liquidity, comparison
 - `/fundamentals/*`: company search, overview, financials, DCF model, peer baskets
 - `/maritime/*`: Sealanes workspace, AIS position samples, chokepoints, flows, and event windows
