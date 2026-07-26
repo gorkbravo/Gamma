@@ -2,7 +2,7 @@
 
 _Living planning document. Future agents should update the status checklist and decision log as implementation progresses._
 
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 
 ## Start Here
 
@@ -53,7 +53,7 @@ Copilot should develop into two related roles. They are not separate products an
 
 ### 1. Research Agent
 
-The Research Agent helps form, structure, and challenge a thesis. This is the evolution of the old Synthesis idea: the user brings a possible idea, Copilot gathers relevant Gamma context across tabs, identifies supporting evidence, counter-evidence, missing data, and outputs a structured thesis, memo, or report.
+The Research Agent is the context-bounded interpretation role. It helps form, structure, and challenge a thesis from the context the user supplied or selected. It identifies supporting evidence, counter-evidence, missing data, and outputs an opinion, explanation, thesis, memo, or report without operating the app on the user's behalf.
 
 Examples:
 
@@ -64,14 +64,15 @@ Examples:
 
 Expected behavior:
 
-- select relevant domains without running every available tab;
-- read and synthesize app state and approved external context;
+- read and synthesize the current surface, selected scopes, and other context already attached to the turn;
 - separate source-backed claims from model-inferred claims;
 - make disconfirming evidence and missing data explicit;
 - produce concise thesis structures, memos, and reports;
-- avoid changing local research state unless the user explicitly asks for an artifact to be saved.
+- do not load missing entities, run analytical workflows, or create/modify app working state;
+- explain when the question cannot be answered from the supplied context and offer an Operator workflow instead of silently escalating its own authority;
+- avoid changing durable local research state unless the user explicitly asks for an artifact to be saved.
 
-This role can remain mostly compatible with the current planner, bounded executor, session trace, and report path.
+This role can remain mostly compatible with the current context, synthesis, session trace, and report path. The selected role is an authority ceiling: an Agent turn must not silently become an Operator turn.
 
 ### 2. Research Operator
 
@@ -91,12 +92,47 @@ Expected behavior:
 
 - produce a structured plan before non-trivial operation;
 - call typed Gamma tools rather than visually clicking the UI as the primary mechanism;
-- run bounded read-only analyses automatically when they fit the request;
-- draft local research-state changes automatically, but apply them only under the active confirmation policy;
+- resolve and load entities or analytical inputs even when they are not already active in the UI;
+- create session-scoped working objects, set temporary assumptions, and run bounded read-only analyses automatically when they fit the request;
+- inspect each tool result, revise parameters or choose another authorized tool, and continue until it can answer or reaches a declared stopping condition;
+- draft durable local research-state changes automatically, but apply them only under the active confirmation policy;
 - preserve source refs, warnings, tool traces, and before/after diffs;
-- navigate the UI only as a convenience after the authoritative backend action has run.
+- synthesize the final user-facing conclusion from the actual tool outputs, rather than returning a generic execution summary;
+- materialize relevant results in Gamma's corresponding tab or working state where useful, and navigate the UI only as a convenience after the authoritative backend action has run.
 
-The Research Operator is the stronger justification for Agents SDK or a hybrid orchestration layer because it needs multi-step plans, tool handoffs, resumable state, progress streaming, trace inspection, and evals for whether it selected appropriate tests. Even if Agents SDK is adopted, Gamma's backend remains the authority for permissions, execution, persistence, and the read-only product boundary.
+The Research Operator is the stronger justification for Agents SDK or a hybrid orchestration layer because it needs a genuine model-tool-model loop, resumable run state, progress streaming, approval interruptions, trace inspection, and evals for whether it selected appropriate tests. Even if Agents SDK is adopted, Gamma's backend remains the authority for permissions, execution, persistence, and the read-only product boundary.
+
+### Authority And Interaction Contract
+
+The two roles are differentiated by authority, not by how verbose or capable the model sounds:
+
+| Capability | Research Agent | Research Operator |
+|---|---|---|
+| Interpret attached/current Gamma context | Yes | Yes |
+| Produce analysis, opinions, theses, and reports | Yes | Yes |
+| Acquire an entity that is not loaded | No; disclose the missing context and offer Operator | Yes, through entity-addressable Gamma tools |
+| Run DCF, risk, portfolio, options, or strategy workflows | No | Yes |
+| Set temporary/session-scoped analytical inputs | No | Yes, automatically and visibly |
+| Adapt the plan after observing tool output | No | Yes, within budgets and the action registry |
+| Persist a new artifact explicitly requested by the user | Yes | Yes |
+| Change existing durable research state | No | Only through the applicable confirmation policy |
+| Trade, rebalance, route orders, mutate accounts/wallets, or execute arbitrary code | Never | Never |
+
+An explicit Operator request authorizes app-native research work within the selected scopes and the registry's limits; it does not authorize real-world execution. If the user is in Agent mode and asks for work that requires operating Gamma, Copilot should explain the required workflow and offer a visible transition to Operator. It must not hide the authority change.
+
+### Reference Operator Workflow: “What Is The Fair Value Of LMT?”
+
+When this request is made in Operator mode, `LMT` does not need to be preloaded. The intended workflow is:
+
+1. Resolve `LMT` to a supported instrument and acquire the required provider-backed company, filing, market, and valuation context through Gamma services.
+2. Create or reuse a session-scoped Fundamentals/DCF working object without silently saving it as durable user state.
+3. Inspect data availability and quality, select an appropriate valuation workflow, and expose any defaults or temporary assumptions it introduces.
+4. Run the DCF, reverse valuation, sensitivity, or related authorized tests needed to answer the question.
+5. Inspect the results and adapt: for example, change a temporary assumption, request an additional sensitivity, or stop with a typed degraded state when evidence is insufficient.
+6. Produce a fair-value estimate or range grounded in the tool results, with assumptions, provenance, warnings, and the distinction between reported inputs and model judgment.
+7. Optionally open/materialize the resulting DCF in Fundamentals. Persisting edits to an existing saved DCF remains confirmation-gated.
+
+The same contract applies to portfolio composition, risk scenarios, options analyses, Strategy Lab runs, and other tab-owned research capabilities. A tool's analytical depth is limited by its owning tab/service, but the Operator must be able to acquire inputs, invoke it, react to its results, and complete the workflow without requiring the user to pre-stage every screen.
 
 ## Core Design Principle
 
@@ -106,14 +142,19 @@ Preferred model:
 
 ```text
 User request
-  -> intent and depth planner
-  -> domain relevance scores
-  -> bounded research plan
-  -> typed Gamma tool calls
-  -> synthesis with citations/warnings
+  -> resolve role, intent, entities, and authority
+  -> create a bounded Gamma-owned run and working-analysis state
+  -> model proposes a typed plan or next tool call
+  -> Gamma validates permission, schema, context, and budget
+  -> app-native backend tool executes
+  -> result returns to the model
+  -> model adapts, calls another authorized tool, stops for approval, or finishes
+  -> final synthesis from actual tool results with citations/warnings
   -> saved session/memo/report
-  -> optional confirmed local state changes
+  -> optional app materialization or confirmed durable local state change
 ```
+
+The loop is complete only when tool results are returned to the model as observations and the model can choose the next authorized step. A deterministic prewritten sequence can remain a fallback or a workflow primitive, but it is not by itself the desired Research Operator.
 
 Avoid:
 
@@ -129,28 +170,34 @@ UI navigation can still exist as a convenience action, such as opening the Funda
 
 ## OpenAI References
 
-Use current OpenAI docs when implementing provider or orchestration changes:
+### Standing Review Rule
 
-- [Responses API overview](https://developers.openai.com/api/reference/responses/overview): the API surface Gamma currently targets through `OpenAIResponsesCopilotProvider`.
-- [Using tools](https://developers.openai.com/api/docs/guides/tools): custom function tools, hosted tools, and tool design.
-- [Agents SDK](https://developers.openai.com/api/docs/guides/agents): code-first agent app guidance, orchestration, handoffs, guardrails, results/state, and observability.
-- [SDKs and CLI - Use the Agents SDK](https://developers.openai.com/api/docs/libraries#use-the-agents-sdk): use Agents SDK when the app needs orchestration for agents, tools, handoffs, guardrails, tracing, or sandbox execution.
-- [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model): current model, reasoning, structured output, prompt caching, tool-calling, and state-management guidance.
-- [GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol), [Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra), and [Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna): the current capability, balanced, and efficient model tiers.
-- [Streaming Responses](https://developers.openai.com/api/docs/guides/streaming-responses): provider-native semantic SSE events for text, tools, refusals, completion, and errors.
-- [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs): strict schema output, explicit refusals, and streaming structured responses.
-- [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching): GPT-5.6 explicit/implicit cache controls and usage accounting.
-- [Responses API Multi-agent beta](https://developers.openai.com/api/docs/guides/responses-multi-agent): hosted parallel subagent orchestration for independently divisible work.
-- [Deep research](https://developers.openai.com/api/docs/guides/deep-research): long-running, source-heavy web/file/MCP research through explicit background jobs.
+Before any material Copilot architecture, orchestration, tool, approval, run-state, model-routing, or related documentation change, the implementing agent must refresh the current official OpenAI guidance. Prefer the OpenAI Developer Docs connector when available; otherwise use only official `developers.openai.com` pages. Record the review date, URLs, and resulting decision in this section or the decision log below. These notes are a dated snapshot, not permanent API truth.
 
-Implementation interpretation for Gamma:
+Do not switch frameworks or models solely because a newer option exists. Compare the current Responses API and Agents SDK guidance against Gamma's required loop, permission invariants, persistence model, eval results, latency, reliability, and cost.
 
-- The current direct Responses API wrapper is acceptable for early phases and small tool catalogs.
-- As the workflow becomes long-running, multi-step, and multi-specialist, prefer the Agents SDK for orchestration, tracing, guardrails, handoffs, resumable state, and evaluation loops.
-- Use custom function tools for Gamma-owned services and local research-state operations.
-- Use hosted tools only where they fit the product boundary. Web search may be useful for context, but approved provider adapters are preferred for durable research workflows.
-- Keep tool descriptions specific: what the tool does, when to use it, inputs, side effects, retry safety, and common failure modes.
-- Use structured outputs for plans, tool decisions, reports, and proposed mutations. Do not rely on prose parsing for critical actions.
+### Official Guidance Reviewed 2026-07-26
+
+- [Build agents and compare the Responses API with the Agents SDK](https://developers.openai.com/api/docs/guides/agents#compare-the-responses-api-and-agents-sdk): Responses is appropriate when the application owns a custom loop; the Agents SDK provides a built-in lifecycle for bounded workflows, sessions, guardrails, approvals, traces, and orchestration.
+- [Running agents](https://developers.openai.com/api/docs/guides/agents/running-agents): a real agent run is a model-tool-model loop that continues until final output or a declared stopping condition; sessions are the preferred default for durable history and resumable approvals.
+- [Orchestration](https://developers.openai.com/api/docs/guides/agents/orchestration): start with one agent and add specialists only when their contracts differ; use manager-style agents-as-tools when one orchestrator must retain ownership of the final answer.
+- [Guardrails and approvals](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals): validate inputs, outputs, and tool calls near the relevant boundary; approval is an interruption carrying resumable run state, followed by approve/reject and continuation of the same run.
+- [Agent results and state](https://developers.openai.com/api/docs/guides/agents/results): results expose final output, interruptions, and continuation state; Gamma should persist the application-owned snapshot required to inspect and resume safely.
+- [Tools](https://developers.openai.com/api/docs/guides/tools): expose narrow, typed function tools with strict schemas and clear behavior rather than granting general UI or compute access.
+- [Tracing](https://developers.openai.com/api/docs/guides/agents/integrations-observability#tracing) and [trace grading](https://developers.openai.com/api/docs/guides/trace-grading): capture model calls, tool calls/results, guardrails, approvals, and orchestration spans; grade end-to-end traces to catch workflow regressions, not only final-answer errors.
+- [Latest model guidance](https://developers.openai.com/api/docs/guides/latest-model), [Streaming Responses](https://developers.openai.com/api/docs/guides/streaming-responses), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), and [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching): keep model routing and provider behavior versioned, observable, and eval-backed.
+
+Architectural interpretation for Gamma:
+
+- The harness is Gamma's control plane: it owns the loop, action registry, permissions, state, budgets, approvals, recovery, tracing, and final persistence. The model proposes actions; Gamma authorizes and executes them.
+- The direct Responses API remains valid for the context-bounded Research Agent and for a deliberately custom Operator loop. Agents SDK is preferred when it materially simplifies the required sessions, interruptions, guardrails, tracing, or orchestration without weakening Gamma's authority.
+- Use one manager Operator first. Add tab/domain specialists only when separate instructions, tool sets, or handoff contracts demonstrably improve eval outcomes; the manager retains final-answer ownership.
+- Use strict, entity-addressable Gamma function tools. Each tool contract states what it does, when to use it, required inputs, whether it creates ephemeral or durable state, retry/idempotency behavior, outputs, failure states, and provenance.
+- Persist a Gamma-owned run/session snapshot even when provider-managed continuation is enabled. Provider state must never be Gamma's only transcript, approval, or recovery record.
+- Treat approvals as paused runs, not fresh chat turns. An approval token must resume the same unfinished run with the same plan, context fingerprint, observations, budgets, and audit trail.
+- Trace and evaluate the full workflow: entity resolution, plan quality, parameter choice, tool selection, adaptation, stopping behavior, synthesis, citations, approval behavior, and permission-boundary compliance.
+- Do not add general sandbox or arbitrary-code execution to Copilot. OpenAI sandbox guidance is not a reason to cross Gamma's research-only boundary; analytical compute remains inside typed, bounded Gamma services.
+- Hosted web/file/deep-research tools may be considered only as explicit, bounded research features with retention, cost, source, and permission controls. Approved provider adapters remain preferred for durable Gamma workflows.
 
 ## July 2026 Copilot Completion Plan
 
@@ -169,32 +216,44 @@ Gamma already has more than a chat shell:
 - a narrow confirmed DCF mutation flow with rollback context;
 - offline and optional live operator eval paths.
 
-The largest gaps are release-hardening gaps, not missing concepts. Checkpoints 1 through 6 are verified at 97%: the shared run/transcript/session/artifact and Operator-authority foundation now includes typed `copilot.context.v2` contracts for every selectable scope, deterministic fingerprinting and compaction, replayable domain-selection/omission reasons, first-class Sealanes and item-level news context, exact shelf-to-workspace promotion, one versioned model/storage policy, stateless local continuation, replayable routing/usage observability, and safe provider diagnostics. Remaining gaps belong to Checkpoint 7:
+The earlier 97% claim measured a narrower completion boundary: a grounded chat workspace plus a bounded, registry-owned workflow executor. Against the clarified end state in this document, Copilot is **approximately 72% complete**. This is a scope correction, not a regression or loss of delivered work. Checkpoints 1 through 6 remain verified foundation: shared run/transcript/session/artifact contracts, typed `copilot.context.v2` scopes, deterministic fingerprinting and compaction, exact shelf promotion, permissioned action registry, DCF proposal tokens, model/storage policy, local continuation, observability, and safe diagnostics.
 
-- the Agents SDK operator remains feature-flagged and the current model defaults are GPT-5.5; the custom loop remains the measured default until a future live comparison shows a quality or latency advantage;
-- exact shelf-to-workspace thread/context promotion remains incomplete;
-- privacy, retention, cost, usage, and model-routing diagnostics are not yet understandable from the Copilot workspace.
+The material remaining gaps are product behavior, not only release hardening:
+
+- the default Operator executes a mostly deterministic bounded plan rather than a closed-loop model-tool-model workflow that can inspect results and adapt;
+- intent, entity, and argument inference are shallow, so important parameters can fall back to fixed heuristics instead of being chosen from the request and evidence;
+- entity acquisition is inconsistent across tools; several workflows still depend on already-active tab context or precomputed results;
+- there is no generalized session-scoped working-analysis state for temporary portfolios, DCFs, scenarios, option sets, assumptions, and cross-tool outputs;
+- tool execution and final model synthesis are not one continuous run, so successful tools can end in a generic execution summary rather than the requested conclusion;
+- tool results do not consistently materialize in the corresponding Gamma tab or working object;
+- the durable approval model is narrow and DCF-specific rather than a general pause/approve-or-reject/resume-the-same-run contract;
+- replayable events preserve history, but do not yet provide generalized workflow recovery, replanning, retries, or approval resumption;
+- role escalation from Agent to Operator is not yet a complete, visible authority transition;
+- accessibility, first-run, responsive, and representative live-provider release evidence also remains open after the Operator outcome work.
 
 ### Completion Boundary
 
-Copilot is complete for the current Gamma pass when a user can do all of the following without leaving the app or reading backend logs:
+Copilot is complete for the clarified Gamma pass when a user can do all of the following without leaving the app or reading backend logs:
 
 1. Start, search, rename, archive, restore, and delete a research conversation.
 2. See exactly which Gamma contexts, entities, timeframes, freshness states, and warnings ground the turn.
-3. Ask a normal research question and receive a genuinely streamed answer with visible provider/model/run state.
-4. Distinguish source-backed claims, inference, assumptions, missing data, and warnings, with clickable source/context destinations.
-5. Preview a research plan, run bounded read-only tools, watch live progress, stop the run, and inspect per-step results.
-6. Reach an inline confirmation checkpoint for any durable local research-state mutation and see the before/after diff and rollback context before applying it.
-7. Create, edit, autosave, duplicate, and export a memo or report inside the Copilot workspace.
-8. Reopen a session and recover the transcript, context snapshots, plans, events, artifacts, confirmations, and provider metadata faithfully.
-9. Get explicit `unavailable`, `degraded`, `refused`, `incomplete`, `cancelled`, and `error` states instead of a neutral empty card.
-10. Use the shelf for quick contextual work and promote that exact thread/context into the full workspace without losing state.
+3. Use Research Agent to interpret only the attached/current context without silently loading entities, running workflows, or changing app state.
+4. Ask Research Operator a goal such as “What is the fair value of LMT?” when the entity is not loaded and have it resolve the entity, create an ephemeral working analysis, run the required app-native workflows, adapt to results, and answer.
+5. Ask Research Operator to compose a hypothetical portfolio, run a specified risk scenario, run a DCF/reverse valuation, or invoke another supported tab-owned research workflow without manually pre-staging every tab.
+6. Inspect the plan, temporary assumptions, parameters, tool calls, progress, results, warnings, and stopping reason; stop the run safely when desired.
+7. Receive a final answer synthesized from the actual tool outputs, clearly separating source-backed facts, analytical outputs, assumptions, inference, missing data, and warnings.
+8. See relevant Operator work materialized in the appropriate Gamma tab or session-scoped working object without confusing temporary state with saved state.
+9. Reach an inline confirmation checkpoint for any durable local research-state mutation, inspect the before/after diff and rollback context, then approve or reject and resume the same run.
+10. Reopen or recover a run and retain its transcript, context snapshots, working state, observations, plans, events, budgets, artifacts, approvals, and provider metadata faithfully.
+11. Create, edit, autosave, duplicate, and export a memo or report inside the Copilot workspace.
+12. Get explicit `unavailable`, `degraded`, `refused`, `incomplete`, `cancelled`, and `error` states instead of a neutral empty card.
+13. Use the shelf for quick contextual work and promote that exact thread/context into the full workspace without losing state.
 
 Voice, unrestricted web browsing, arbitrary code execution, trading/account/wallet actions, and automatic durable mutations are not current-pass completion requirements. Explicit long-running external deep research is a later opt-in extension, not the default answer path.
 
 ### Final In-App Layout
 
-Copilot remains one research workspace, not a collection of top-level modes. `Research Agent` and `Research Operator` are role/focus controls, not tab modes.
+Copilot remains one research workspace, not a collection of top-level modes. `Research Agent` and `Research Operator` are visible authority controls, not tab modes.
 
 ```text
 Copilot workspace
@@ -273,7 +332,7 @@ Feature fit:
 - **Prompt caching:** instrument current cache behavior first. For GPT-5.6, evaluate explicit breakpoints around stable instructions/tool schemas and track both cache reads and billable cache writes.
 - **Programmatic Tool Calling:** do not use it to replace Gamma analytics. Consider it only for bounded, read-only filtering/joining/reduction after direct function-tool execution remains authoritative.
 - **Responses Multi-agent beta:** do not make it the default operator. It can parallelize independent domain research, but its beta schema, shared tool visibility, extra token use, and lack of `max_tool_calls` support conflict with Gamma's current deterministic budget controls. Re-evaluate behind a flag after provider streaming and single-agent operator promotion.
-- **Agents SDK:** retain as the chosen Research Operator orchestration layer behind Gamma's action registry. It remains the better controlled path for typed tools, traces, approvals, server-owned state, and evals.
+- **Agents SDK:** maintain as the feature-flagged Research Operator candidate behind Gamma's action registry. Promote it only when the clarified trace/eval suite shows a material advantage for sessions, interruptions, guardrails, traces, maintainability, quality, reliability, latency, or cost.
 - **Deep research models:** add only as an explicit `External deep research` job with provider/data-retention disclosure, background progress, cancellation, citations, and hard spend/tool limits.
 - **Realtime/voice:** defer until the text workspace meets the completion gate.
 
@@ -379,7 +438,7 @@ Implementation note (2026-07-25, post-checkpoint regression pass; the checkpoint
 - [x] Keep quick shelf responses concise and card-oriented; plans, traces, diagnostics, confirmations, and artifacts remain in the full workspace.
 - [x] Make promotion reference the authoritative persisted turns instead of copying transcript content, with deterministic idempotency and typed `incomplete`, `stale`, `unavailable`, and `already_promoted` states that survive restart replay.
 
-#### H. Diagnostics and first-run experience — diagnostics complete; Checkpoint 7 first-run polish remains
+#### H. Diagnostics and first-run experience — diagnostics complete; release polish remains
 
 - [x] Show provider configuration, selected/resolved profile/model, routing result, orchestrator, local/provider storage mode, last provider error, and capability state in Settings and the run inspector.
 - [x] Surface structured provider errors with category-specific retry/configuration guidance and a copyable `cp6.<category>.<hash>` diagnostic id; never leak credentials, stack traces, authorization values, raw prompts, or provider payloads.
@@ -390,15 +449,40 @@ Implementation note (2026-07-25, checkpoint 6 complete):
 - The supported deterministic CLI scored grounding, citation validity, domain selection/omission, warning preservation, tool selection, permission stops, trace completeness, and final usefulness. It passed 31/31 outcomes across 11 retained cases: Auto/custom covered all 11, while Quick/custom, Standard/custom, Deep/custom, and Standard/Agents-SDK-stub each covered the four Checkpoint 5 representative prompts plus the DCF permission stop. Average score was 0.9093.
 - The eval records wall/provider latency and returned usage when present, labels all executed variants `deterministic_mock`, and emits an explicit routing decision. No live-provider flag or spend was authorized, so no live pass is claimed and no default changed.
 - Verification: 125/125 focused Copilot/Agents/eval tests; 50/50 affected API/provider/capability/usage tests; 468/468 full backend tests; 320/320 frontend tests across 46 files; typecheck, production build, and desktop check.
-- The remaining Checkpoint 7 blocker is release evidence: full first-run/accessibility/focus/reduced-motion/narrow-layout certification and representative successful live Agent and Operator smoke when provider access, quota, and spend are intentionally authorized.
+- Final release evidence still requires full first-run/accessibility/focus/reduced-motion/narrow-layout certification and representative successful live Agent and Operator smoke when provider access, quota, and spend are intentionally authorized. This gate now follows the clarified Operator workstreams.
 
-#### I. Validation and release gate — blocker
+#### I. Closed-loop Research Operator — open
 
-- Backend: provider event parsing, structured output/refusal/incomplete handling, cancellation, persistence replay, migrations, permission/confirmation invariants, and model-policy tests.
-- Frontend: streamed reducer, transcript blocks, source navigation, artifact editing, error states, Stop/Retry, responsive inspector, keyboard navigation, and accessibility tests.
-- Evals: grounded claims, citation validity, tool selection, domain omission, warning preservation, confirmation stops, final report usefulness, and cost/latency capture.
-- Live smoke: Agent and Operator paths for the representative NVDA, CPI/Fed, oil, and portfolio-rate-shock prompts against configured providers.
-- Regression: shelf and dedicated-tab parity, session reopen after restart, offline/mock behavior, disabled-provider behavior, and no execution-capable tools.
+- Replace the fixed default Operator sequence with a bounded model-tool-model loop that observes each result before selecting the next step.
+- Make request-to-schema translation model-assisted and validated: preserve the user's entities, portfolio legs, weights, scenario shocks, DCF assumptions, dates, horizons, and comparison targets instead of substituting unrelated fixed defaults.
+- Return successful tool observations to the final synthesis step and require the final answer to address the user's goal; a generic count of completed steps is not a successful result.
+- Define explicit stopping conditions for final answer, insufficient evidence, approval interruption, user cancellation, tool/budget exhaustion, and typed failure.
+- Keep deterministic workflows as tools, fallbacks, and test fixtures; do not confuse a prewritten sequence with the end-state Operator harness.
+
+#### J. Entity-addressable tools and working-analysis state — open
+
+- Give each applicable tool a typed entity/input acquisition path so it does not depend on the relevant tab already being active.
+- Add Gamma-owned session-scoped working objects for hypothetical portfolios, DCFs, risk scenarios, options sets, strategy inputs, temporary assumptions, and cross-tool outputs.
+- Distinguish `ephemeral`, `draft`, and `durable` state in every relevant tool/result contract and show that status in the run inspector and owning tab.
+- Let Operator outputs materialize in the corresponding tab/workspace through typed backend state and navigation handoffs; UI clicking remains non-authoritative.
+- Expire, discard, promote, or persist working state deterministically, with source refs, context fingerprints, and restart behavior defined.
+
+#### K. Generalized interruptions, recovery, and role transition — open
+
+- Generalize the DCF proposal pattern into pause/approve-or-reject/resume-the-same-run for every future durable local research-state mutation.
+- Persist the unfinished run snapshot, plan cursor, observations, budgets, working-state ids, context fingerprint, pending tool call, and approval decision.
+- Add bounded tool retry, replan, resume-after-restart, and stale-context behavior without replaying already committed side effects.
+- Make Agent-to-Operator escalation visible and intentional. The original Agent run may propose the workflow, but it cannot execute until Operator authority is selected.
+- Keep all execution-capable families structurally absent from both roles.
+
+#### L. End-state validation and release gate — blocker
+
+- Backend: provider event parsing, structured output/refusal/incomplete handling, closed-loop continuation, cancellation, working-state persistence/replay, migrations, permission/confirmation invariants, and model-policy tests.
+- Frontend: streamed reducer, transcript blocks, source navigation, app materialization, temporary-versus-durable state, artifact editing, error states, Stop/Retry, responsive inspector, keyboard navigation, and accessibility tests.
+- Evals: entity acquisition, argument fidelity, plan quality, tool selection, adaptation after observations, stopping behavior, grounded synthesis, citation validity, warning preservation, approval interruptions, resume behavior, final usefulness, and cost/latency capture.
+- Representative acceptance cases: unloaded `LMT` fair value; a user-specified hypothetical multi-asset portfolio; a specified portfolio risk shock; an options realized/implied comparison; and one cross-domain workflow requiring replanning after a degraded tool result.
+- Live smoke: Agent and Operator paths for representative single-name, CPI/Fed, oil, portfolio-risk, and approval-resume prompts against intentionally configured providers.
+- Regression: shelf and dedicated-tab parity, session/run reopen after restart, offline/mock behavior, disabled-provider behavior, and no execution-capable tools.
 
 ### Delivery Order
 
@@ -410,10 +494,16 @@ Implementation note (2026-07-25, checkpoint 6 complete):
 6. ~~Missing context/tool coverage and source navigation.~~ Completed 2026-07-25 at checkpoint 5 (94%).
 7. ~~Versioned, capability-aware model/storage policy and eval-backed routing decision.~~ Completed 2026-07-25 at checkpoint 6 (97%); retain GPT-5.5/custom Operator defaults because no authorized live evidence justified a switch.
 8. ~~Agents SDK checkpoint-4 default decision.~~ Keep the custom loop as default until a later live comparison demonstrates a measured advantage.
-9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain Checkpoint 7.
-10. Optional external deep research; later voice.
+9. ~~Safe provider/model/storage diagnostics and replayable observability.~~ Completed 2026-07-25 at checkpoint 6. First-run guidance, accessibility, responsive/live UI certification, and the full release gate remain after the clarified Operator outcome checkpoints.
+10. Build the closed-loop Operator and model-assisted, schema-validated argument path.
+11. Add entity-addressable tools plus generalized session-scoped working-analysis state and app materialization.
+12. Generalize approval interruption, same-run resume, recovery/replanning, and visible Agent-to-Operator transition.
+13. Pass trace-level deterministic and live acceptance cases against the clarified completion boundary.
+14. Optional external deep research; later voice.
 
 Do not start with model-string replacement alone. Any future candidate-model rollout must use the Checkpoint 6 policy and land with provider streaming, capability validation, usage instrumentation, and recorded eval/live evidence so it improves the product rather than merely changing metadata.
+
+The percentages attached to completed Checkpoints 1 through 6 below are historical gates under the earlier, narrower completion boundary. They document verified foundation work but do not override the current **approximately 72%** end-state baseline.
 
 ### Definition Of Done
 
@@ -421,12 +511,16 @@ Do not start with model-string replacement alone. Any future candidate-model rol
 - Every completed live turn ends in one schema-valid final block or a typed non-success state.
 - All source-backed claims resolve to known source ids; unsupported claims are inference or missing data.
 - All operator tools pass the server action registry; forbidden execution/account/wallet actions do not exist in the registry.
-- Confirmation-required actions cannot apply without the exact active token and visible diff.
-- Session replay after app restart reproduces the final transcript, trace, artifacts, and context metadata.
+- An Operator request can acquire an unloaded supported entity, create explicit ephemeral working state, run tools, observe results, adapt, and synthesize the requested conclusion.
+- User-specified analytical parameters survive intent translation into strict tool schemas or fail visibly; hidden unrelated defaults do not count as success.
+- Tool observations feed the same run's next decision and final answer; generic execution summaries do not satisfy analytical requests.
+- Temporary work can materialize in the owning Gamma surface without becoming durable user state.
+- Confirmation-required actions cannot apply without the exact active token and visible diff; approve/reject resumes the same unfinished run.
+- Session replay after app restart reproduces the final transcript, trace, artifacts, context metadata, working-state references, observations, budgets, and pending interruption.
 - The dedicated tab supports full memo/report editing and export.
 - The shelf can promote a thread into the tab without context loss.
 - Model/profile/orchestrator routing is replayable and backed by recorded eval results against the retained GPT-5.5/custom-loop baseline; no default changes without measured evidence.
-- Live smoke and frontend/backend test suites cover happy, degraded, unavailable, refused, incomplete, cancelled, and provider-error paths.
+- Trace evals and live/frontend/backend suites cover entity acquisition, parameter fidelity, adaptation, stopping behavior, synthesis, approval/resume, and happy, degraded, unavailable, refused, incomplete, cancelled, and provider-error paths.
 
 ## Smart Depth Policy
 
@@ -932,7 +1026,7 @@ Implementation note:
 - Live smoke note: using the existing `.env` `OPENAI_API_KEY`, the real Agents SDK path successfully ran the bounded portfolio rate-shock operator case on 2026-05-31. The run used `GAMMA_COPILOT_MODEL=gpt-5.4`, executed registry tools through `openai_agents_sdk_operator`, emitted the normal operator event contract, and returned `ready`. The current OpenAI docs list `gpt-5.5` and medium reasoning as the newer baseline, so model/reasoning migration should be handled as a separate eval-backed tuning pass rather than folded into the operator default switch.
 - GPT-5.5 migration note: a narrow live benchmark on 2026-06-03 compared the custom loop, `gpt-5.4` low, `gpt-5.5` medium, and `gpt-5.5` low on the existing Research Operator eval set. The custom loop passed all cases and remains the default orchestrator. The `gpt-5.4` low Agents SDK path missed the required reverse-valuation tool on the cross-domain event-report case and hit the max-turn guard. Both `gpt-5.5` variants passed all cases; `gpt-5.5` low matched medium on tool selection, confirmation stops, and trace/report quality while using fewer measured SDK tokens and lower SDK latency, so the feature-flagged Agents SDK operator config now defaults to `gpt-5.5` with `low` reasoning. This does not change Gamma's action registry, permission boundaries, or default custom-loop orchestrator.
 
-Current Research Operator state:
+Current Research Operator state (foundation inventory, not the desired end state):
 
 - `run_risk_contribution_analysis` is automatic read-only and runs Gamma's existing risk engine from the active portfolio or research snapshot. It returns contribution rank, coverage/concentration metrics, VaR/beta/correlation context, bounded Monte Carlo diagnostics when requested, warnings, and provenance without relying on a precomputed UI risk result or changing any state.
 - `run_risk_scenario_analysis` is automatic read-only and now accepts typed, bounded shock inputs (`scenario_type`, `rate_shift_bps`, `equity_shock_pct`, `duration_proxy_years`, and explicit `symbol_shocks`). Gamma still computes VaR/contribution/frontier metrics through the existing risk engine; the new `shock_proxy` block is a transparent position-level estimate, not full curve or factor repricing.
@@ -941,30 +1035,17 @@ Current Research Operator state:
 - `run_hypothetical_portfolio_comparison` is automatic read-only and builds a temporary long-only synthetic research scope from typed legs/weights, compares its normalized return stream to a benchmark through the existing Compare/Scenario service path, and can optionally hand the temporary fixed-notional snapshot to Risk for bounded contribution analytics. It returns coverage, relative metrics, optional risk handoff output, warnings, and provenance without saving, rebalancing, or trading anything.
 - `run_options_realized_implied_comparison` is automatic read-only and uses Gamma's existing IVService surface path or active Options state to compare ATM implied volatility against available provider historical-volatility fields by expiry. It returns implied moves, vol premium/ratio rows where data is sufficient, missing-history or missing-IV statuses where it is not, surface quality/collection metadata, warnings, and provenance without direct Copilot provider calls or state changes.
 - `run_fundamentals_reverse_valuation` remains automatic read-only. DCF update proposals stop at draft/confirmation checkpoints; `fundamentals.apply_dcf_update` remains confirmation-required and is not run by automatic operator execution.
-- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, Options realized-versus-implied comparison, research scope analysis, and cross-domain single-name event report. There are no expected-gap cases left in the current benchmark set.
+- `evals/copilot_operator_eval.py` currently passes for both the custom loop and offline stubbed Agents SDK path on DCF confirmation stop, reverse valuation, risk rate shock, hypothetical portfolio comparison, Strategy Lab backtest, Options realized-versus-implied comparison, research scope analysis, and cross-domain single-name event report. There are no expected-gap cases left in that legacy benchmark set, but it does not yet test unloaded-entity acquisition, argument fidelity, multi-turn adaptation, final analytical synthesis, generalized working state, or same-run approval resumption.
 
 What remains for the next agents:
 
-1. Add narrower read-only drilldowns where they materially improve operator quality:
-   - Options event/volatility comparison can build on the new realized-versus-implied operator action once event/calendar context is strong enough.
-2. Expand hypothetical portfolio comparison carefully only where it stays read-only:
-   - Consider saved research object inputs and Strategy Lab result inputs.
-   - Optional handoff to Risk for deeper risk analytics now exists for typed temporary legs; keep it ephemeral and read-only.
-   - Keep durable hypothetical portfolio definitions as a later confirmed-mutation family, not automatic operator behavior.
-3. Improve reports and trace usability:
-   - Surface compact per-step outputs without flooding the final event payload.
-   - Preserve source ids and warning provenance in report generation.
-   - Make skipped steps easier to distinguish from tool failures.
-4. Keep Agents SDK behind the feature flag until the eval harness shows a practical reason to switch defaults, such as better trace quality, resumability, handoffs, or maintainability as tools grow.
-5. Do not broaden mutations yet.
-   - Candidate future mutation families remain saved research scopes, Strategy Lab compositions, memos, watchlists, scenario/model snapshots, and hypothetical portfolio definitions.
-   - Every durable or non-trivial mutation must return a diff, rationale, warnings, source ids, rollback/snapshot context where applicable, and require confirmation.
-
-6. Evaluate Agents SDK against the operator path.
-   - Prototype a narrow hybrid orchestrator after the action registry and read-only operator tools are stable.
-   - Run the same benchmark tasks through the custom loop and the Agents SDK-backed loop.
-   - Use evals to measure whether the orchestrator picked appropriate tools, respected permissions, stopped for confirmations, cited sources correctly, and produced useful reports.
-   - If the prototype passes the permission/eval gates, make Agents SDK the Research Operator orchestration layer while leaving Research Agent synthesis on the current path until there is a concrete reason to migrate it.
+1. Build the closed-loop Operator described in workstream I. Preserve the registry as the authority while letting the model observe results, choose the next authorized action, and own the final synthesis.
+2. Make core tools entity-addressable and add the session-scoped working-analysis model in workstream J. Start with the unloaded-`LMT` DCF case and the user-specified hypothetical portfolio/risk case.
+3. Generalize interruptions and recovery as described in workstream K. Do not broaden durable mutation families until pause/resume state, idempotency, diffs, rollback policy, and permission evals are reusable.
+4. Replace fixed argument heuristics with strict model-produced schemas plus deterministic server validation. Preserve the user's exact requested shocks, weights, dates, assumptions, and targets.
+5. Expand the eval harness to grade full traces and the final requested conclusion, not only whether a predetermined tool appeared. Add degraded-result replanning, unnecessary-tool, budget, cancellation, stale-context, and same-run approval-resume cases.
+6. Compare the custom Responses loop and Agents SDK after the end-state contract is represented in the benchmark. Promote Agents SDK only if sessions, interruptions, traces, maintainability, quality, reliability, latency, or cost show a practical advantage without weakening permissions.
+7. Continue adding narrower read-only drilldowns only where they enable a representative end-to-end Operator goal. Tab-specific analytical depth remains owned by the corresponding Gamma service.
 
 ## Open Decisions
 
@@ -973,20 +1054,24 @@ Future agents should update this section.
 | Decision | Current stance | Notes |
 |---|---|---|
 | Direct Responses API vs Agents SDK | Keep Agents SDK as the maintained, feature-flagged Research Operator orchestration path behind Gamma's registry; keep the deterministic custom loop as the product default. | Checkpoint 4 established live progress, safe-turn cancellation, and permission parity. Checkpoint 6 compared five profile/orchestrator variants across the retained cases and passed 31/31 deterministic scored outcomes, but no live-provider comparison was intentionally authorized and no measured quality/latency/reliability/cost advantage justified switching defaults. |
+| Desired Operator harness | Closed-loop model-tool-model execution with strict server-owned authority, budgets, state, and stopping rules. | Deterministic plans remain useful fallbacks/primitives, but cannot satisfy the clarified adaptive Operator end state alone. |
 | UI control vs backend tools | Backend tools are authoritative; UI navigation is convenience only. | This preserves auditability and avoids fragile DOM automation. |
 | Outside info | Provider adapters first; general web search only as fallback or explicit mode. | News and estimates are context, not execution. |
-| Copilot roles | Research Agent plus Research Operator. | Research Agent structures theses from context; Research Operator runs app-native tests and confirmed local research-state workflows. |
-| Local state changes | Allowed only for research state and initially confirmation-required when durable or non-trivial. | Trust-based loosening can be reconsidered after usage, but never for market/account/wallet execution. |
+| Copilot roles | Research Agent plus Research Operator, differentiated by authority. | Agent interprets attached context without operating Gamma; Operator acquires inputs and runs app-native research workflows. Authority changes are visible, never silent. |
+| Working analysis | Operator may create and modify explicit session-scoped ephemeral state automatically. | Hypothetical portfolios, DCFs, scenarios, assumptions, and intermediate outputs must not be confused with durable saved objects. |
+| Local state changes | Allowed only for research state and confirmation-required when an existing durable object will be changed. | Approval pauses and resumes the same run. Never permit market/account/wallet execution. |
 | DCF | Important first confirmed-mutation use case, but not the agent's whole identity. | The agent should be domain-broad. |
+| Official OpenAI guidance | Refresh before material agentic work and record the review. | Current framework/model guidance informs the design but does not override Gamma's evals or product boundary. |
 
 ## Agent Handoff Notes
 
 When continuing this work:
 
-1. Update the checklist above before or after implementation.
-2. Keep changes aligned with Gamma's read-only boundary.
-3. Prefer typed backend tools over UI-driving behavior.
-4. Add tests for planner decisions and permission behavior, not only happy-path synthesis.
-5. Preserve provenance and source refs in every new payload.
-6. Make missing data explicit. Do not let Copilot imply a provider was available when it was not.
-7. Keep the user-facing Copilot experience concise: plan, progress, findings, warnings, saved artifacts.
+1. Refresh the official OpenAI agent/tool/orchestration/state/approval/tracing guidance and record the date, URLs, and architectural effect before material changes.
+2. Update the checklist above before or after implementation.
+3. Keep changes aligned with Gamma's read-only boundary.
+4. Prefer typed backend tools over UI-driving behavior.
+5. Add trace-level tests for entity resolution, argument fidelity, planner decisions, tool adaptation, final synthesis, resumption, and permission behavior.
+6. Preserve provenance and source refs in every new payload.
+7. Make missing data explicit. Do not let Copilot imply a provider was available when it was not.
+8. Keep the user-facing Copilot experience concise: plan, temporary assumptions, progress, findings, warnings, approvals, and saved artifacts.

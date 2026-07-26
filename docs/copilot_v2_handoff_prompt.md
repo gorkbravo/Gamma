@@ -1,317 +1,258 @@
-# Copilot V2 97% To 100% Execution Prompt
+# Copilot V2 ~72% To 100% Execution Prompt
 
-Copy the text inside the block below into the agent that will complete Copilot V2.
+Copy the text inside the block below into the coding agent that will continue Copilot V2.
 
 ```text
 You are the implementation owner for completing Copilot V2 in:
 
 C:\Users\User\Desktop\Gamma
 
-Your objective is to take Copilot V2 from its verified 97% baseline to 100% according to the release gate in `roadmap.md`. Checkpoints 1 through 6 are complete. Begin with Checkpoint 7 and do not reopen or replace the verified continuity/model-policy/retention/diagnostics contracts without evidence that the release gate requires it. This is an implementation task, not a planning-only exercise. Work until every 100% exit criterion is proven, unless a genuine external dependency such as missing intentionally authorized live-provider credentials prevents the final gate.
+Your objective is to take Copilot from its approximately 72% clarified baseline to the desired end state and 100% acceptance gate defined in `roadmap.md` and `docs/copilot_v2_tab_plan.md`.
 
-Do not stop after one convenient slice and do not ask the user to choose the next checkpoint. Follow the roadmap order, make reasonable in-scope decisions, implement coherent vertical slices, verify them, update the active documentation, and continue. Never claim a percentage merely because code was written; a percentage is earned only when that checkpoint's exit criteria pass.
+The former 97% figure measured a narrower chat, persistence, evidence, and bounded-workflow foundation. Historical checkpoints 1 through 6 remain verified and should be preserved, but they are not the current product-completion percentage. Do not treat this as release-hardening-only work. The central missing outcome is a genuine Research Operator that can operate Gamma's authorized research capabilities.
+
+This is an implementation task, not a planning-only exercise. Work in coherent vertical slices, verify each exit criterion, update the active documentation, and continue until the desired end state is proven or a genuine external dependency blocks the remaining gate. Never claim a percentage merely because code was written.
 
 ## Read first
 
 Read these files completely before editing:
 
 1. `AGENTS.md`
-2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from 97% to 100%`, sequencing rules, non-goals, and deliverable
-3. `docs/copilot_v2_tab_plan.md`, especially the July 2026 completion plan, remaining engineering workstreams, delivery order, and definition of done
+2. `roadmap.md`, especially `Workstream 7 - Copilot V2`, `Path from ~72% to 100%`, sequencing rules, non-goals, and deliverable
+3. `docs/copilot_v2_tab_plan.md`, especially:
+   - `Two Copilot Roles`
+   - `Authority And Interaction Contract`
+   - the unloaded-LMT reference workflow
+   - `OpenAI References`
+   - the current reality and completion boundary
+   - open workstreams I through L
+   - definition of done, current Operator inventory, and open decisions
 4. `docs/provenance_expectations.md`
 5. `docs/design_principles.md` before changing Svelte/CSS
 6. `README.md` for runtime, provider, and validation commands
 
-When changing the OpenAI SDK, Responses API behavior, Agents SDK integration, model capabilities, or model policy, verify the current official OpenAI documentation first. Do not rely on remembered API shapes or change model strings based only on the model names currently written in the repo.
+Before material Copilot architecture, orchestration, tool, approval, run-state, model-routing, or documentation work, refresh the current official OpenAI developer documentation. Prefer the OpenAI Developer Docs connector when available; otherwise use only official `developers.openai.com` sources. At minimum review current guidance for:
+
+- Responses API versus Agents SDK;
+- running agents and the model-tool-model loop;
+- sessions/results and resumable state;
+- tools and strict schemas;
+- guardrails and human approvals;
+- orchestration;
+- tracing and trace grading;
+- current model/tool/streaming behavior.
+
+Record the review date, official URLs, and resulting architectural decision in `docs/copilot_v2_tab_plan.md`. Existing repo notes are a dated snapshot, not a substitute for the refresh. Do not change frameworks or models merely because a newer one exists; use Gamma's evals, permission invariants, reliability, latency, and cost.
 
 ## Establish the real baseline
 
 Before editing:
 
-- run `git status --short --branch` and inspect recent Copilot commits;
-- inspect all existing uncommitted changes and preserve unrelated user work;
-- treat the current run-lifecycle, transcript/evidence, session/artifact, Operator authority, context-contract/tool-coverage, exact shelf continuity, model/storage policy, observability/diagnostics, roadmap, and documentation changes as part of the verified 97% baseline;
-- run the focused Copilot backend tests, frontend Copilot tests, typecheck, and build to confirm the baseline;
-- inspect the running Copilot UI at desktop and narrow widths when practical;
-- compare code reality with the roadmap and detailed spec, correcting stale documentation without erasing useful implementation history.
+- run `git status --short --branch` and preserve unrelated user work;
+- inspect the current Copilot code, tests, and recent changes rather than inferring behavior from documentation alone;
+- run focused Copilot backend tests, frontend Copilot tests, typecheck, and build;
+- inspect the running desktop and narrow-width Copilot UI when practical;
+- compare code reality with the roadmap and detailed plan;
+- retain the verified run/transcript/session/artifact, context/evidence, action-registry, DCF proposal, shelf continuity, model/storage-policy, observability, and diagnostics contracts unless the new exit criteria require a compatible change.
 
-Use `rg` for discovery and `apply_patch` for manual edits. Do not reset, discard, overwrite, or reformat unrelated work. Do not create commits, push, or open a pull request unless the user separately requests it.
+Use `rg` for discovery and `apply_patch` for manual edits. Do not reset, discard, overwrite, or reformat unrelated work. Do not commit, push, or open a pull request unless the user separately requests it.
+
+## Desired interaction contract
+
+Copilot has two visible authority levels inside one workspace.
+
+### Research Agent
+
+Research Agent interprets the current surface and context explicitly attached to the turn. It may produce grounded opinions, explanations, theses, memos, or reports, but it must not:
+
+- load a missing entity;
+- run DCF, risk, portfolio, options, strategy, or other analytical workflows;
+- create or modify app working state;
+- silently promote itself to Operator.
+
+If the answer requires app operation, Agent should disclose the missing context and offer a visible Operator workflow.
+
+### Research Operator
+
+Research Operator may operate Gamma's app-native research capabilities. Within the selected scopes, registry, budgets, and product boundary it should be able to:
+
+- resolve a supported entity even when it is not loaded;
+- acquire required provider-backed context through Gamma services;
+- create explicit session-scoped temporary portfolios, DCFs, scenarios, option sets, assumptions, and intermediate outputs;
+- translate the user's exact entities, weights, shocks, dates, horizons, assumptions, and comparison targets into strict tool inputs;
+- call authorized typed backend tools;
+- inspect each observation and adapt its plan or parameters;
+- stop for approval, insufficient evidence, cancellation, budget, or typed failure;
+- synthesize the user's requested conclusion from the actual tool results;
+- materialize useful results in the owning Gamma tab or working object without silently saving them as durable state.
+
+The representative contract is: in Operator mode, “What is the fair value of LMT?” must work even when LMT is not loaded. Operator resolves LMT, creates an ephemeral Fundamentals/DCF analysis, examines data quality, runs the necessary DCF/reverse-valuation/sensitivity work, adapts if needed, and returns a sourced fair-value estimate or range with assumptions and warnings. Persisting edits to an existing saved DCF remains confirmation-gated.
+
+The same behavior applies to a user-specified hypothetical portfolio, risk scenario, options comparison, Strategy Lab workflow, and other supported tab-owned research capabilities. Analytical depth remains limited by the owning Gamma service, but manual UI pre-staging must not be a harness requirement.
 
 ## Non-negotiable product boundary
 
-Gamma is a read-only research environment for market, account, and wallet activity.
+Gamma is a research environment, not a real-world execution platform.
 
 Never add:
 
 - trade execution, order placement/modification/cancellation, or routing;
-- account modification or portfolio rebalancing;
+- account mutation or portfolio rebalancing;
 - wallet connection, signing, transactions, or message signing;
-- arbitrary in-app strategy/code execution;
+- arbitrary Copilot code or sandbox execution;
 - unrestricted browsing as a silent substitute for Gamma provider adapters;
-- automatic durable local research-state mutations.
+- hidden UI clicking as the authority for analytical execution;
+- automatic changes to existing durable research state.
 
-Bounded read-only analysis may run automatically. Every durable or non-trivial local research-state mutation must use Gamma's server-owned action registry and confirmation policy, show a before/after diff plus rollback/snapshot context, and stop until the exact active confirmation token is supplied.
+Ephemeral research state may run automatically and must be labeled. A future durable research-state mutation must use Gamma's server-owned registry, show the exact diff and rollback/snapshot policy, pause with resumable run state, and resume the same unfinished run only after the applicable approve/reject decision.
 
-Gamma backend services remain authoritative for tools, permissions, execution, confirmation tokens, persistence, cancellation, finalization, and mutation rules. The UI may navigate for convenience but must not become the authority for analytical execution.
+Gamma's backend remains authoritative for tool exposure, schema validation, permissions, budgets, execution, idempotency, persistence, approvals, recovery, trace state, and finalization. The model proposes actions; Gamma authorizes and executes them.
 
-## Current 97% baseline
+## Harness contract
 
-The baseline should include:
+The end-state Operator loop is:
 
-- quick Copilot shelf plus dedicated no-mode-bar workspace;
-- Research Agent and Research Operator roles inside one workspace;
-- local sessions, turns, context snapshots, search/archive/new-chat;
-- planner, bounded executor, action registry, Operator plans/events, traces, reports, and confirmation foundations;
-- typed read-only tools across most Gamma domains and the confirmed Fundamentals DCF mutation flow;
-- direct Responses API Research Agent provider and Agents SDK Operator behind a feature flag;
-- provider-native Agent Responses streaming behind the Gamma NDJSON run-event contract;
-- run ids, monotonic sequences, cancellation, timeout, usage events, idempotent terminal persistence, provisional deltas, Stop/Retry, and typed refusal/incomplete/error/cancelled states;
-- one canonical shelf/workspace transcript renderer covering cards, plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, and typed non-success states;
-- pre-persistence and legacy-read evidence normalization, visibly distinct claim categories, and context-preserving claim-source navigation.
-- schema-v3 session/turn/context/artifact persistence with deterministic legacy migration, atomic writes, future-version preservation, and non-destructive corrupted-record recovery;
-- typed session rename, archive/restore, delete, search, stale-id reconciliation, and complete restart replay of role, effort, scopes, fingerprints, provider/model metadata, plans, events, confirmations, usage, traces, warnings, sources, and artifact links;
-- in-tab memo/report source-turn selection, concise/full templates, editable title/body, autosave state, canonical evidence preview, duplication, delete confirmation, overwrite confirmation, stable selection, and provenance-preserving Markdown export.
-- one authoritative validated action registry for automatic reads, automatic drafts, and confirmed local mutations, with prohibited execution-capable action families rejected at startup;
-- durable single-use DCF confirmation tokens bound to tool, session, context fingerprint, and proposal hash, with persisted expiry, reject/apply resolution, restart recovery, and pre-change rollback snapshots;
-- exact inline Operator mutation/diff/snapshot-policy rendering with apply/reject controls and live/replayed turn reconciliation;
-- Agents SDK `Runner.run_streamed` progress mapped into the Gamma run contract and cancellation at the SDK `after_turn` boundary; durable mutation drafting remains in Gamma's deterministic authority path even when SDK orchestration is enabled.
-- typed `copilot.context.v2` contracts for every selectable scope, with canonical fingerprints, freshness/source-version inputs, explicit per-scope and 96 KB aggregate budgets, deterministic compaction, omission disclosure, sensitive-key redaction, and replay-safe diagnostics;
-- persisted product-level domain decisions that distinguish selected, irrelevant, unavailable-data, missing-provider, stale-context, unsupported-scope, and budget-omission reasons without storing private reasoning;
-- bounded registry-owned Maritime route/chokepoint and item-level news drilldowns with typed degradation, provider/freshness/provenance metadata, stable identifiers, validated news URLs, and deterministic cross-feed deduplication;
-- bounded `inspect_options_structure`, `inspect_commodity_curve_fundamentals`, and `inspect_equity_research_context` tools through Gamma's authoritative domain services;
-- evidence validation and frontend navigation that preserve supported instrument, contract, route, chokepoint, and news-item context while treating unknown or inspectable-only refs honestly.
-- exact `copilot.shelf-promotion.v1` continuity that reopens the authoritative source session/turns/snapshots without copying or duplicating user/assistant turns, with deterministic retry idempotency and typed incomplete/stale/unavailable/already-promoted results;
-- server-owned `copilot.model-policy.v1` Auto/Quick/Standard/Deep resolution that separates selected from resolved configuration and records provider, model, reasoning, capabilities, storage, routing reason, and custom/Agents orchestration path;
-- `copilot.provider-storage.v1` separation of Gamma-local replay from provider response storage, including tested OpenAI `store: false`, omission of provider response-id continuation, and bounded local structured continuation;
-- schema-v4 replay of available usage/cache/latency/provider/tool/cancellation metrics, explicit null for unavailable provider values, and removal of raw provider usage payloads;
-- Settings and run-inspector provider/model/storage diagnostics with safe `cp6.<category>.<hash>` ids and category-specific configuration/retry guidance;
-- a supported deterministic CLI eval that passed 31/31 outcomes across 11 retained cases and five profile/orchestrator variants (average 0.9093), with no authorized live-provider evidence and no default change.
+1. Resolve role, intent, entities, authority, context, and budgets.
+2. Create a Gamma-owned run plus session-scoped working-analysis state.
+3. Ask the model for a strict plan or next typed tool call.
+4. Validate the tool, arguments, permissions, context fingerprint, retry policy, and budget on the server.
+5. Execute the app-native backend tool.
+6. Return its typed observation, sources, assumptions, and warnings to the model.
+7. Let the model choose the next authorized step, revise parameters, pause, or finish.
+8. Produce the final answer from the observed outputs and persist the bounded trace.
 
-Important current gaps are exclusively Checkpoint 7 release-gate work: first-run/accessibility/focus/reduced-motion/narrow-layout certification, complete degraded-state UX regression coverage, documentation/setup reconciliation, and representative successful live Agent/Operator smoke when provider access, quota, and spend are intentionally authorized. Do not reopen Checkpoint 5 or Checkpoint 6 contracts or broaden tools without evidence that a Checkpoint 7 requirement needs it.
+A deterministic prewritten sequence may remain a fallback, workflow primitive, or test fixture, but it does not satisfy the desired Operator by itself. A generic “N steps executed” card is not a successful answer to an analytical request.
 
-## Execution method for every checkpoint
+Start with one manager Operator that owns the final answer. Add tab/domain specialists only if separate instructions, tool sets, or handoff contracts improve trace evals. Whether the manager uses a custom Responses loop or Agents SDK is an eval-backed implementation decision; neither option may bypass Gamma's registry or state authority.
 
-For each checkpoint below:
+## Current verified foundation
+
+Preserve and build on:
+
+- shelf and dedicated workspace;
+- Research Agent and Research Operator controls;
+- provider-native streaming through the Gamma run-event contract;
+- run ids, monotonic events, Stop/Retry, bounded replay, cancellation, timeout, and one terminal result;
+- canonical typed transcript/evidence rendering and source navigation;
+- local session, context, run, trace, confirmation, and artifact persistence/replay;
+- in-workspace memo/report lifecycle and provenance-preserving export;
+- `copilot.context.v2` typed scopes, fingerprints, budgets, compaction, omissions, freshness, warnings, and source refs;
+- one validated action registry with prohibited execution families structurally absent;
+- automatic bounded read-only tools and the narrow confirmed DCF proposal/apply flow;
+- exact shelf-to-workspace promotion;
+- versioned model/storage policy, local continuation, usage/routing observability, and safe diagnostics;
+- deterministic custom Operator as current default and feature-flagged Agents SDK path;
+- the existing deterministic benchmark as legacy foundation evidence.
+
+The current benchmark is insufficient for the clarified end state. It must be extended beyond predetermined tool-presence checks.
+
+## Checkpoint 7 — closed-loop Operator core (target 82%)
+
+Required delivery:
+
+- bounded model-tool-model continuation;
+- model-produced strict arguments with deterministic server validation;
+- fidelity to user-specified entities, legs, weights, shocks, dates, horizons, assumptions, and targets;
+- observation-driven next-step selection and replanning;
+- explicit final, insufficient-evidence, approval, cancellation, tool/budget exhaustion, and failure stops;
+- final model synthesis from actual tool outputs.
+
+Exit criteria:
+
+- traces show the Operator observing results and making an appropriate next decision;
+- an intentionally degraded tool result can cause a useful replan or honest stop;
+- unrelated fixed defaults fail the gate;
+- generic execution summaries fail analytical acceptance;
+- custom Responses and Agents SDK variants, where maintained, use the same authoritative registry.
+
+## Checkpoint 8 — entity acquisition and working-analysis state (target 89%)
+
+Required delivery:
+
+- entity-addressable core tools that do not require an active UI tab;
+- Gamma-owned `ephemeral`, `draft`, and `durable` state semantics;
+- session-scoped temporary portfolios, DCFs, risk scenarios, options sets, strategy inputs, assumptions, and cross-tool observations;
+- typed owning-tab materialization/handoffs;
+- deterministic expiry, discard, promotion, persistence, provenance, and restart behavior.
+
+Exit criteria:
+
+- unloaded-LMT fair value completes without manual tab setup;
+- a user-specified hypothetical multi-asset portfolio and risk shock preserve the requested composition and scenario;
+- temporary work is visible and never confused with saved state;
+- no save, rebalance, trade, or other prohibited effect occurs.
+
+## Checkpoint 9 — interruptions, recovery, and authority transition (target 94%)
+
+Required delivery:
+
+- generalized pause/approve-or-reject/resume-the-same-run;
+- persisted unfinished-run snapshot, observations, working-state ids, budgets, plan cursor, context fingerprint, pending tool call, and approval decision;
+- bounded tool retry, replan, restart recovery, and stale-context behavior;
+- idempotency that never repeats committed effects;
+- visible and intentional Agent-to-Operator transition.
+
+Exit criteria:
+
+- approve/reject resumes the exact unfinished run;
+- restart, rejection, cancellation, stale context, and retry exhaustion are typed and tested;
+- Agent cannot execute Operator work before authority changes;
+- no new durable mutation family lands without reusable diffs, rollback policy, persistence/replay, and permission evals.
+
+## Checkpoint 10 — end-state acceptance and release gate (target 100%)
+
+Required delivery:
+
+- trace-level deterministic evals for entity acquisition, argument fidelity, plan quality, tool choice, adaptation, stopping behavior, grounded synthesis, citations/warnings, approval/resume, permission compliance, latency, and cost;
+- intentionally authorized live smoke for representative Agent and Operator workflows;
+- first-run, disabled/unconfigured/rate-limit/quota/degraded guidance;
+- keyboard, focus, screen-reader, reduced-motion, desktop, and narrow-layout completion;
+- restart/replay, migration, corrupted-state, cancellation, timeout, refusal, incomplete, and provider-error regression coverage;
+- reconciled roadmap, detailed plan, this handoff prompt, README setup, and validation commands.
+
+Required acceptance cases:
+
+1. unloaded `LMT` fair-value workflow;
+2. a user-specified hypothetical portfolio;
+3. a specified portfolio risk shock;
+4. an options realized/implied comparison;
+5. a cross-domain workflow that must react to a degraded result;
+6. a durable-state proposal that pauses and resumes the same run.
+
+Claim 100% only when final answers are grounded in actual tool observations; all happy and non-success states are visible; recovery and approvals work; and no trading/order/account/wallet/rebalance/arbitrary-code capability or hidden sample fallback crosses the boundary.
+
+If provider access, quota, spend authorization, or another external dependency is unavailable, complete every offline/mockable requirement, keep the percentage below 100%, and report the exact missing evidence. Never fabricate a live pass or expose secrets.
+
+## Execution method
+
+For each checkpoint:
 
 1. Inspect the relevant implementation and tests before designing changes.
-2. Resolve the smallest coherent architecture that satisfies the whole checkpoint contract; avoid UI-only facades over missing backend state.
-3. Add or update typed backend models, provider/action boundaries, persistence, API schemas/routes, frontend types/state/reducers/components, and documentation as required.
-4. Add focused happy-path and failure-path tests before declaring the checkpoint complete.
-5. Run the checkpoint's targeted tests, then the relevant broader regression suites.
-6. Verify desktop and narrow UI behavior for visual changes, including loading, empty, selected, error, cancelled, and restored states.
-7. Record the evidence in the existing Copilot plan and update `roadmap.md` to the checkpoint percentage only after every exit criterion passes.
-8. Continue immediately to the next checkpoint.
+2. Implement the smallest coherent vertical slice that satisfies the whole outcome; avoid UI facades over missing backend state.
+3. Update typed backend models, services, registry/tool schemas, run state, persistence, API contracts, frontend state/rendering, and docs together where required.
+4. Add happy, degraded, failure, permission, retry, cancellation, and restart tests.
+5. Grade complete traces and the final requested conclusion, not only tool presence.
+6. Run focused tests, then affected regression suites.
+7. Inspect desktop and narrow UI states for visual changes.
+8. Update `docs/copilot_v2_tab_plan.md` and `roadmap.md` only after the checkpoint exit criteria pass.
+9. Continue to the next checkpoint.
 
-Do not broaden durable mutation families before sessions/artifacts, inline confirmation, replay, cancellation, and permission invariants are reliable.
-
-## Checkpoint 1 — verified 2026-07-17 (76%)
-
-Required delivery:
-
-- replace raw `urllib` transport with the supported OpenAI SDK or an equivalent typed streaming client;
-- preserve the provider boundary so mock/disabled/other providers remain swappable;
-- emit Gamma events for run creation, text deltas, completed function-call arguments, tool start/result, warnings, confirmation-needed, refusal, incomplete, provider error, usage, cancellation, failure, and completion;
-- put shelf Agent runs and Operator runs on the shared run-event/reducer contract;
-- add reconnect/resume from a last-seen sequence or another bounded replay design;
-- preserve run ids, monotonic sequences, cancellation, timeout, idempotent finalization, and finalized persistence;
-- persist finalized state and bounded trace, not UI deltas as the durable truth.
-
-Exit evidence:
-
-- Agent and Operator each produce one run id and exactly one persisted terminal result;
-- cancellation works before the first event and between safe Operator steps;
-- reconnect/replay, duplicate, stale, post-terminal, disconnect, timeout, refusal, incomplete, provider-error, and cancellation tests pass;
-- the shelf and workspace no longer depend on separate incompatible run paths.
-
-## Checkpoint 2 — verified 2026-07-24 (80%)
-
-Required delivery:
-
-- extend discriminated transcript blocks to plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, and every typed non-success state;
-- keep source-backed claims, inference, assumptions, missing data, and warnings visibly distinct;
-- validate every source-backed claim against the turn's context/tool source registry before persistence;
-- reclassify or reject unresolved claims rather than persisting fake citations;
-- add claim-level evidence resolution and source/context navigation using `CrossTabHandoffEnvelope` or the shared navigation contract;
-- preserve selected entity, mode, timeframe, and lens where a target mapping exists;
-- keep provider/model metadata secondary to the research answer.
-
-Exit evidence:
-
-- all persisted source-backed claim refs resolve to known source ids;
-- shelf and dedicated workspace show equivalent evidence for the same result;
-- supported source links open the correct Gamma destination without losing context;
-- card, plan, Operator, report, confirmation, and error block tests pass.
-
-Verified implementation evidence:
-
-- the canonical transcript renderer covers cards, plans, Operator steps/results, reports, confirmations, mutation diffs, artifacts, and typed non-success states in both shelf and workspace;
-- result evidence is normalized before return and persistence and revalidated on legacy reads, so unresolved claim refs are reclassified instead of persisted as citations;
-- supported source refs navigate through `CrossTabHandoffEnvelope` with mapped entity, mode, timeframe, and lens context;
-- `86` focused backend tests, `3` Agents SDK/operator eval tests, and `267` frontend tests passed alongside typecheck, production build, and desktop check;
-- live UI inspection covered ready/error/cancelled states and a source handoff to Macro Snapshot retaining the 3M timeframe, with zero console errors.
-
-## Checkpoint 3 — verified 2026-07-25 (86%)
-
-Required delivery:
-
-- add session rename, restore, delete, schema versioning, forward migrations, and corrupted-record recovery;
-- persist role, depth, selected scopes, context fingerprints, resolved model/provider, run status, usage, plans, events, confirmations, artifacts, and trace state;
-- build memo/report creation inside the dedicated workspace;
-- support source-turn selection, template choice, title/body editing, autosave state, preview, duplicate, delete, and explicit overwrite confirmation;
-- support Markdown export first; add PDF/DOCX only if an actual requirement justifies them;
-- link every artifact to exact source turns, claims, sources, warnings, context snapshots, provider/model metadata, and tool-trace summary;
-- show selected-session artifacts in the rail or support inspector.
-
-Exit evidence:
-
-- restarting Gamma faithfully restores transcript, context, plans, run state, traces, confirmations, memos, and reports;
-- migrations and corrupted-record recovery have tests;
-- export snapshots preserve claim categories and evidence refs;
-- editing/autosave/overwrite/duplicate/delete flows have frontend and persistence coverage.
-
-Verified implementation evidence:
-
-- schema-v3 migration covers supported legacy versions 0, 1, and 2; repeated migration is idempotent; future versions are preserved; malformed, partial, mixed, and interrupted-write cases recover without deleting the only copy;
-- complete restart fixtures replay role, effort, scopes, fingerprints/snapshots, requested/resolved provider and model, run/terminal/cancellation state, usage, research and Operator plans, events, confirmations, traces, warnings, sources, mutation/artifact references, memos, reports, and exact source-turn links;
-- the dedicated support inspector exposes selected-session artifacts, source-turn counts, concise memo and research-report templates, edit/autosave/retry, canonical preview, duplicate/delete, overwrite confirmation, and Markdown download;
-- exports preserve claim categories, evidence refs, source metadata, warning provenance, context/provider/model metadata, trace summary, timestamps, transformation note, and source-turn links;
-- `92` focused backend tests, `3` Agents SDK/operator eval tests, and `274` frontend tests passed alongside typecheck, production build, and desktop check;
-- user-supplied desktop and narrow-width inspection confirmed session lifecycle controls and confirmations, artifact editing, duplication/deletion, source-turn controls, and responsive inspector behavior;
-- the live Agent response reached an honest OpenAI quota-exhausted terminal state because no provider credits were available; the SITREP Operator honestly reported zero registered automatic tools. Neither outcome is claimed as successful provider-backed research output.
-
-## Checkpoint 4 — verified 2026-07-25 (91%)
-
-Required delivery:
-
-- stream Operator plan/step/tool/warning/artifact/final events live through the shared run contract;
-- allow cancellation only at safe boundaries and record the outcome;
-- render inline confirmation checkpoints with exact proposed mutation, rationale, warnings, source ids, before/after diff, and rollback/snapshot context;
-- keep one authoritative action registry, permission policy, confirmation-token service, and persistence path for custom and Agents SDK orchestrators;
-- expand read-only workflow reliability before adding mutation families;
-- add evals for stale/missing context, provider failure, partial tool failure, cancellation, repeated/expired confirmation, resume after restart, tool-budget enforcement, and forbidden actions;
-- decide whether Agents SDK becomes the default only from measured permission, quality, trace, resumability, latency, and maintainability evidence.
-
-Exit evidence:
-
-- bounded read-only Operator workflows run automatically and visibly;
-- every durable/non-trivial local mutation stops without the exact active token;
-- expired/replayed/wrong-session tokens cannot apply;
-- no execution/account/wallet/arbitrary-code tool exists in the registry;
-- custom-loop versus Agents SDK comparison is recorded and the default decision is documented.
-
-Verified implementation evidence:
-
-- registry validation and runtime authorization reject unknown, non-automatic, mutating-without-confirmation, and trade/order/account/rebalance/wallet/arbitrary-code action families;
-- explicit DCF requests draft the exact supported percentages, persist the mutation and confirmation state, render the diff and pre-change snapshot policy inline, and never call the apply action automatically;
-- apply requires the active token plus matching session, context fingerprint, proposal hash, and apply tool; wrong, expired, rejected, replayed, or restart-resumed mismatches cannot apply;
-- apply/reject/expiry reconciliation updates the persisted turn, confirmation state, mutation reference, embedded Operator event, terminal status, and session mutation list;
-- custom-loop cancellation remains safe-step bounded; Agents SDK now uses `Runner.run_streamed`, emits `provider.progress`, and cancels with `after_turn`;
-- provider failure, partial tool failure, tool-budget enforcement, cancellation, forbidden action, expiry/replay, stale context, and restart-resume cases have focused coverage;
-- the custom loop remains the default. The offline custom-versus-SDK eval retains permission and trace parity, while no new measured live quality or latency advantage justifies switching defaults;
-- checkpoint evidence: 104 backend/eval tests and 309 frontend tests passed with typecheck, production build, and desktop check.
-- an authorized bounded live Agents SDK smoke reached the real Responses API and emitted `provider.progress`, but OpenAI quota exhaustion occurred before any tool call; no successful live Operator result is claimed.
-
-## Checkpoint 5 — verified 2026-07-25 (94%)
-
-Required delivery:
-
-- finish Sealanes context and read-only drilldowns without inventing risk labels;
-- make news a first-class item-level external-context tool with URL/source/publication/freshness refs;
-- add the highest-value missing Options/IV, Commodities, and Equity Research drilldowns identified in their roadmap sections;
-- add context-size budgets, deterministic compaction/summaries, and stale-context invalidation;
-- add source navigation mappings and stable context fingerprints for every selectable scope;
-- make domain selection and omission reasoning visible.
-
-Exit evidence:
-
-- representative NVDA, CPI/Fed, oil-disruption, and portfolio-rate-shock prompts choose appropriate domains, explain skipped domains, preserve provenance/freshness, and degrade explicitly when data/providers are unavailable;
-- provider absence never becomes fabricated evidence or a neutral blank result;
-- tool contracts and representative planner/eval cases pass;
-- 209 focused backend tests and the full 461-test backend suite passed;
-- 315 frontend tests, typecheck, production build, and desktop check passed;
-- the supported eval CLI passed 22/22 deterministic outcomes across the four representative scenarios;
-- eval provider coverage used explicitly configured sample maritime/commodities/news providers and a mock Copilot provider. No new live-provider success is claimed, and the prior OpenAI quota limitation remains external evidence only.
-
-## Checkpoint 6 — verified 2026-07-25 (97%)
-
-Required delivery:
-
-- add `Open in Copilot` from the shelf while preserving exact session/thread, selected contexts, entity, lens, sources, and warnings;
-- create a versioned, capability-aware server model policy for product profiles such as Auto/Quick/Standard/Deep rather than scattering raw model strings;
-- evaluate current candidate models/efforts against the retained passing baseline before changing defaults;
-- persist and display resolved model, routing reason, reasoning effort/mode, provider, orchestrator, latency, input/output/reasoning tokens, cache reads/writes, provider calls, tool calls, and cancellation outcome;
-- explain Gamma-local storage versus provider-stored responses;
-- support and test `store: false` without silently breaking local continuation;
-- show OpenAI/provider configuration, capability state, last safe provider error, and copyable diagnostic id in Settings and the run inspector;
-- never expose credentials, raw sensitive prompts, or unsafe provider payloads in diagnostics.
-
-Exit evidence:
-
-- exact, reference-based shelf promotion preserves the original persisted session, user/assistant turns, selected scopes, context fingerprints and versions, domain decisions and omissions, evidence, warnings, freshness, provider state, and account/research-book boundary without duplication;
-- promotion retries return the same workspace session, typed incomplete/stale/unavailable/already-promoted states are replayable, and restart tests preserve the promotion relationship;
-- one server-owned `copilot.model-policy.v1` resolves Auto, Quick, Standard, and Deep profiles into provider/model/reasoning/orchestration/capability/storage state; unsupported combinations degrade explicitly;
-- the supported deterministic eval CLI passed 31/31 scored outcomes across 11 retained cases and five profile/orchestrator variants, with an average score of 0.9093. No live-provider comparison was intentionally authorized, so GPT-5.5 and the deterministic custom Operator remain the defaults;
-- schema-v4 persistence preserves selected/resolved routing, available usage/cache/latency/call metrics, cancellation boundaries, and safe errors across replay while missing provider metrics remain `null` and raw provider usage payloads are discarded;
-- `copilot.provider-storage.v1` distinguishes Gamma-local storage from provider response storage; the tested `store: false` path omits response-id continuation and reconstructs bounded continuation from Gamma's local structured transcript;
-- Settings and the run inspector expose capability, routing, storage, provider state, safe guidance, and copyable `cp6.<category>.<hash>` diagnostic IDs without credentials, authorization values, stack traces, raw prompts, or unsafe provider payloads;
-- gate validation passed 125 focused Copilot/Agents/eval tests, 50 affected runtime/provider tests, the full 468-test backend suite, 320 frontend tests, typecheck, production build, desktop check, and 31/31 deterministic eval outcomes;
-- no successful live-provider result is claimed. Live credentials, quota, and spend were not intentionally authorized for Checkpoint 6, and the prior quota-exhausted attempt remains external evidence only.
-
-## Checkpoint 7 — pass the Copilot V2 release gate (100%)
-
-Required delivery:
-
-- finish keyboard navigation, focus management, screen-reader labels, reduced-motion behavior, desktop and narrow responsive layout, and stable loading/empty/error geometry;
-- add first-run guidance for mock, disabled, unconfigured, and live-provider states;
-- cover offline/mock, migrations, corrupted persistence, restart replay, cancellation, timeout, refusals, incomplete output, provider failures, and permission boundaries;
-- reconcile `roadmap.md`, `docs/copilot_v2_tab_plan.md`, this handoff prompt, README provider/setup notes, and validation commands with actual behavior;
-- run the complete backend, frontend, build, desktop, eval, replay, and permission suites;
-- when live providers are intentionally configured, run representative live Agent and Operator smoke for NVDA, CPI/Fed, oil disruption, and portfolio rate shock;
-- inspect desktop and narrow live UI states and confirm no console errors in the tested flows.
-
-Exit evidence required before writing 100%:
-
-- all automated suites are green;
-- representative live Agent and Operator smoke is green when credentials/provider access are intentionally available;
-- session restart reproduces final transcript, context, plan, events, trace, confirmations, artifacts, provider/model/usage metadata, and terminal status;
-- happy, degraded, unavailable, refused, incomplete, cancelled, timeout, and provider-error states are visible and tested;
-- source-backed claims resolve, warnings survive, and hidden sample fallback does not masquerade as live/provider-backed data;
-- no execution-capable tool or bypass of confirmation/persistence authority exists;
-- the roadmap and detailed plan truthfully state 100% and list only optional post-V2 extensions.
-
-If live credentials or another external dependency is unavailable, complete every offline and mockable requirement, leave the release gate and percentage below 100%, and report the exact missing evidence. Do not fabricate a live pass and do not expose secret values while checking configuration.
-
-## Cross-cutting implementation requirements
-
-- Prefer typed backend models and service/provider adapters over unstructured dictionaries or UI-only state.
-- Preserve `source_provider`, provider-native identifiers, retrieval/source timestamps, origin, transformation notes, freshness, and warnings.
-- Keep provider failures typed: `unavailable`, `degraded`, `refused`, `incomplete`, `cancelled`, `timeout`, or `error` as appropriate.
-- Make retries idempotent and mutation retry safety explicit.
-- Keep run/event/session/artifact schemas versioned and migratable.
-- Keep UI dense, flat, tokenized, and consistent with Gamma's plane model; no structural gradients, shadows, glass layers, large radii, decorative loaders, or one-off colors.
-- Keep the quick shelf concise. Long plans, runs, confirmations, traces, diagnostics, and artifacts belong in the dedicated workspace.
-- Add targeted tests for every failure mode introduced, not only happy paths.
-- Do not add voice, unrestricted browsing, default external deep research, trading, wallet operations, arbitrary code execution, or every conceivable domain tool merely to claim 100%.
+Do not broaden the tool catalog before the closed loop works. Add tools only where they enable a representative end-to-end Operator goal. Do not broaden durable mutation families before generalized interruptions and same-run recovery are proven.
 
 ## Important files
 
-Backend and provider:
+Backend/provider:
 
 - `src/models/copilot.py`
 - `src/models/copilot_context.py`
 - `src/application/copilot_context_contracts.py`
 - `src/services/copilot_provider.py`
 - `src/services/openai_copilot_provider.py`
-- `src/services/mock_copilot_provider.py`
 - `src/services/copilot_store.py`
 - `src/application/copilot_service.py`
 - `src/application/copilot_agents_operator.py`
 - `src/application/research_action_registry.py`
-- `src/application/maritime_service.py`
-- `src/application/news_service.py`
-- `src/application/iv_service.py`
-- `src/application/commodities_service.py`
-- `src/application/research_service.py`
+- tab-owned application services
 - `src/application/copilot_report_service.py`
 - `src/application/runtime.py`
 - `src/api/routes/copilot.py`
@@ -326,9 +267,8 @@ Frontend:
 - `frontend/src/lib/copilot-result.ts`
 - `frontend/src/lib/stores/app.ts`
 - `frontend/src/views/CopilotView.svelte`
-- `frontend/src/components/CopilotResearchCard.svelte`
-- `frontend/src/components/CopilotTranscriptResult.svelte`
-- `frontend/src/App.svelte`
+- Copilot transcript/card components
+- owning-tab stores/views used for materialization
 
 Tests/evals/docs:
 
@@ -337,15 +277,14 @@ Tests/evals/docs:
 - `tests/test_copilot_operator_eval.py`
 - `evals/copilot_operator_eval.py`
 - Copilot frontend `*.test.ts` files
+- `AGENTS.md`
 - `roadmap.md`
 - `docs/copilot_v2_tab_plan.md`
 - `docs/copilot_v2_handoff_prompt.md`
 
 ## Validation commands
 
-Run focused tests during development, then run at least these Copilot gates:
-
-Backend Copilot and Operator:
+Focused backend:
 
 `.\.venv\Scripts\python.exe -m pytest tests\test_copilot.py tests\test_copilot_agents_sdk_smoke.py tests\test_copilot_operator_eval.py`
 
@@ -357,26 +296,23 @@ Frontend:
 `npm run build`
 `npm run desktop:check`
 
-At the 100% release gate, also run the complete repository backend suite:
+At the final gate:
 
 `.\.venv\Scripts\python.exe -m pytest`
 
-Run live Agent/Operator smoke only when provider credentials and spend are intentionally authorized for that run. Never print credentials.
+Run live Agent/Operator smoke only when credentials, provider access, quota, and spend are intentionally authorized. Never print credentials.
 
-## Required progress reporting
+## Progress and final response
 
-After each checkpoint, report:
+After each checkpoint report:
 
-- the checkpoint and earned percentage;
-- the user-visible and architectural outcome;
-- changed files grouped by backend/frontend/tests/docs;
-- targeted and regression test evidence;
-- any live-provider evidence or explicitly missing live evidence;
-- remaining checkpoint blockers.
+- the earned checkpoint and percentage;
+- user-visible and architectural outcomes;
+- changed backend/frontend/tests/docs;
+- focused and regression evidence;
+- trace-eval results;
+- any live evidence or explicitly missing live evidence;
+- remaining blockers.
 
-Keep working after the report unless the environment requires yielding. If blocked, exhaust safe in-scope alternatives first, then state the exact blocker and the highest honestly earned percentage.
-
-## Final response contract
-
-Claim Copilot V2 100% only when all seven roadmap checkpoints and the release evidence above are satisfied. The final response must summarize the completed system, cite the validation/eval/live-smoke evidence, identify any optional post-V2 work separately, and confirm that Gamma's read-only market/account/wallet boundary remains intact.
+Claim Copilot 100% only after checkpoints 7 through 10 and the full acceptance evidence pass. Keep historical checkpoints 1 through 6 as foundation history, identify optional post-V2 work separately, and confirm that Gamma's research-only boundary remains intact.
 ```
