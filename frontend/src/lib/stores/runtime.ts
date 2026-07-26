@@ -7,7 +7,8 @@ export const loading = writable<Record<string, boolean>>({
   portfolio: false, portfolioAction: false, researchOverview: false, research: false,
   strategyLab: false, strategyLabHandoff: false, compareScenario: false, savedResearch: false,
   macro: false, macroHistory: false, news: false, commodities: false, maritime: false,
-  prediction: false, predictionDetail: false, crypto: false, cryptoDetail: false,
+  prediction: false, predictionDetail: false, predictionHistory: false, predictionCompare: false,
+  crypto: false, cryptoDetail: false,
   cryptoPortfolio: false, fundamentals: false, fundamentalsSave: false, copilot: false,
   risk: false, iv: false, ivSession: false
 });

@@ -10,6 +10,8 @@ from src.models.prediction_markets import (
     CalibrationBucket,
     CalibrationObservation,
     CalibrationSummary,
+    PredictionHistoryFetch,
+    PredictionHistoryWindow,
     PredictionMarketOutcome,
     PredictionMarketRecord,
     PredictionProbabilityPoint,
@@ -71,6 +73,49 @@ def default_json_fetcher(url: str, params: dict[str, Any] | None = None) -> Any:
     )
     with urlopen(request, timeout=45) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+# Bar widths in minutes. Bounded sets keep cache keys enumerable and stop a
+# caller from asking a provider for an unsupported resolution.
+POLYMARKET_FIDELITY_CHOICES = (1, 5, 15, 60, 360, 1440)
+POLYMARKET_DEFAULT_FIDELITY = 60
+# The CLOB rejects an explicit startTs/endTs span beyond roughly two weeks
+# (verified 2026-07-26: 14 days is accepted, 21 days returns HTTP 400), and it
+# only accepts these named lookback intervals. Anything longer must be requested
+# as a named interval and clipped by the caller.
+POLYMARKET_MAX_WINDOW_DAYS = 14
+POLYMARKET_MAX_INTERVAL_FIDELITY = 1440
+POLYMARKET_INTERVAL_COVERAGE_DAYS: tuple[tuple[str, float], ...] = (
+    ("1h", 1 / 24),
+    ("6h", 0.25),
+    ("1d", 1.0),
+    ("1w", 7.0),
+    ("1m", 31.0),
+)
+KALSHI_PERIOD_INTERVAL_CHOICES = (1, 60, 1440)
+# Kalshi rejects candlestick requests that would exceed this many periods.
+KALSHI_MAX_CANDLESTICKS = 5000
+DEFAULT_RESOLUTION_BY_RANGE: dict[str, int] = {
+    "1d": 5,
+    "1w": 60,
+    "1m": 60,
+    "3m": 360,
+    "6m": 360,
+    "1y": 1440,
+    "max": 360,
+}
+
+
+def _default_resolution_minutes(range_key: str) -> int:
+    return DEFAULT_RESOLUTION_BY_RANGE.get(range_key, POLYMARKET_DEFAULT_FIDELITY)
+
+
+def _clamp_choice(value: int, choices: tuple[int, ...]) -> int:
+    """Snap a requested bar width up to the nearest supported value."""
+    for choice in choices:
+        if value <= choice:
+            return choice
+    return choices[-1]
 
 
 POLYMARKET_CATEGORY_SEARCH_QUERIES: dict[str, tuple[str, ...]] = {
@@ -386,11 +431,119 @@ class PolymarketAdapter(BasePredictionMarketAdapter):
         token_id = market.outcomes[0].token_id if market.outcomes else None
         if not token_id:
             return []
-        cache_key = self.cache.make_key("prediction_markets", self.provider, "history", token_id)
+        return self._fetch_history_points(token_id, interval="max", fidelity=POLYMARKET_DEFAULT_FIDELITY)
+
+    def get_history_window(
+        self,
+        market: PredictionMarketRecord,
+        window: PredictionHistoryWindow,
+    ) -> PredictionHistoryFetch:
+        token_id = window.outcome_token_id or (market.outcomes[0].token_id if market.outcomes else None)
+        if not token_id:
+            return PredictionHistoryFetch(
+                warnings=["Polymarket history requires an outcome token id; none was available for this market."],
+            )
+        fidelity = _clamp_choice(
+            window.resolution_minutes or _default_resolution_minutes(window.range_key),
+            POLYMARKET_FIDELITY_CHOICES,
+        )
+        # The CLOB endpoint treats `interval` and `startTs`/`endTs` as mutually
+        # exclusive, so a bounded window must be expressed as timestamps.
+        if window.range_key == "max" or window.start is None or window.end is None:
+            warnings: list[str] = []
+            # The CLOB truncates `interval=max` to a bounded number of bars, so a
+            # fine fidelity reaches back far less far than a coarse one (verified
+            # 2026-07-26 on one contract: 6h bars returned 30 days, 1d bars 127).
+            # "Max" should mean maximum reach, so widen an automatic choice.
+            if window.resolution_is_auto and fidelity < POLYMARKET_MAX_INTERVAL_FIDELITY:
+                warnings.append(
+                    f"Polymarket caps the number of bars returned for a full-history request, so "
+                    f"{fidelity}-minute bars would cover less time than "
+                    f"{POLYMARKET_MAX_INTERVAL_FIDELITY}-minute bars; the coarser bars were used to reach "
+                    "further back. Pick a shorter range for finer detail.",
+                )
+                fidelity = POLYMARKET_MAX_INTERVAL_FIDELITY
+            points = self._fetch_history_points(token_id, interval="max", fidelity=fidelity)
+            return PredictionHistoryFetch(
+                points=points,
+                effective_resolution_minutes=fidelity,
+                windowing="provider_window",
+                warnings=warnings,
+            )
+
+        span_days = (window.end - window.start).total_seconds() / 86400
+        if span_days > POLYMARKET_MAX_WINDOW_DAYS:
+            # Ask for the shortest named interval that still covers the window and
+            # let the caller clip; an explicit span this long is rejected outright.
+            interval = next(
+                (name for name, covers in POLYMARKET_INTERVAL_COVERAGE_DAYS if covers >= span_days),
+                "max",
+            )
+            points = self._fetch_history_points(token_id, interval=interval, fidelity=fidelity)
+            return PredictionHistoryFetch(
+                points=points,
+                effective_resolution_minutes=fidelity,
+                windowing="provider_full",
+                warnings=[
+                    f"Polymarket only accepts explicit windows up to {POLYMARKET_MAX_WINDOW_DAYS} days; "
+                    f"the '{interval}' lookback was requested and clipped locally.",
+                ],
+            )
+
+        start_ts = int(window.start.timestamp())
+        end_ts = int(window.end.timestamp())
+        points = self._fetch_history_points(token_id, start_ts=start_ts, end_ts=end_ts, fidelity=fidelity)
+        if points:
+            return PredictionHistoryFetch(
+                points=points,
+                effective_resolution_minutes=fidelity,
+                windowing="provider_window",
+            )
+        # A bounded request can come back empty when the window predates the
+        # token's first quote. Fall back to the full series once so the caller
+        # can clip it rather than showing an unexplained empty chart.
+        fallback = self._fetch_history_points(token_id, interval="max", fidelity=fidelity)
+        if not fallback:
+            return PredictionHistoryFetch(
+                effective_resolution_minutes=fidelity,
+                windowing="provider_window",
+            )
+        return PredictionHistoryFetch(
+            points=fallback,
+            effective_resolution_minutes=fidelity,
+            windowing="provider_full",
+            warnings=[
+                "Polymarket returned no points for the requested window; the full available series was clipped locally.",
+            ],
+        )
+
+    def _fetch_history_points(
+        self,
+        token_id: str,
+        *,
+        interval: str | None = None,
+        start_ts: int | None = None,
+        end_ts: int | None = None,
+        fidelity: int = POLYMARKET_DEFAULT_FIDELITY,
+    ) -> list[PredictionProbabilityPoint]:
+        scope = interval if interval else f"{start_ts}-{end_ts}"
+        cache_key = self.cache.make_key(
+            "prediction_markets",
+            self.provider,
+            "history",
+            token_id,
+            f"{scope}-f{fidelity}",
+        )
+        params: dict[str, Any] = {"market": token_id, "fidelity": fidelity}
+        if interval:
+            params["interval"] = interval
+        else:
+            params["startTs"] = start_ts
+            params["endTs"] = end_ts
         payload, retrieved_at = self._fetch_cached_json(
             cache_key,
             f"{self._clob_base}/prices-history",
-            {"market": token_id, "interval": "max", "fidelity": 60},
+            params,
         )
         history = payload.get("history", []) if isinstance(payload, dict) else []
         return [
@@ -716,12 +869,70 @@ class KalshiAdapter(BasePredictionMarketAdapter):
         )
 
     def get_history(self, market: PredictionMarketRecord) -> list[PredictionProbabilityPoint]:
+        return self.get_history_window(market, PredictionHistoryWindow()).points
+
+    def get_history_window(
+        self,
+        market: PredictionMarketRecord,
+        window: PredictionHistoryWindow,
+    ) -> PredictionHistoryFetch:
         if not market.provider_market_id:
-            return []
-        start_time, end_time = self._history_window(market)
+            return PredictionHistoryFetch()
+        market_start, market_end = self._history_window(market)
+        start_time = market_start
+        end_time = market_end
+        if window.start is not None:
+            start_time = max(start_time, int(window.start.timestamp()))
+        if window.end is not None:
+            end_time = min(end_time, int(window.end.timestamp()))
         if end_time <= start_time:
-            return []
-        period_interval = self._history_period_interval(start_time, end_time)
+            return PredictionHistoryFetch(
+                warnings=[
+                    "The requested window falls outside the Kalshi market's trading life; no candlesticks were requested.",
+                ],
+            )
+
+        warnings: list[str] = []
+        # With no explicit request, stay span-aware: a two-day market still gets
+        # minute bars, a multi-year market does not ask for millions of them.
+        requested = window.resolution_minutes or self._history_period_interval(start_time, end_time)
+        period_interval = _clamp_choice(requested, KALSHI_PERIOD_INTERVAL_CHOICES)
+        # Kalshi caps a candlestick request; widen the bar before dropping data.
+        while (
+            period_interval < KALSHI_PERIOD_INTERVAL_CHOICES[-1]
+            and (end_time - start_time) / (period_interval * 60) > KALSHI_MAX_CANDLESTICKS
+        ):
+            period_interval = _clamp_choice(period_interval + 1, KALSHI_PERIOD_INTERVAL_CHOICES)
+        max_span = KALSHI_MAX_CANDLESTICKS * period_interval * 60
+        if end_time - start_time > max_span:
+            start_time = end_time - max_span
+            warnings.append(
+                "Kalshi limits a candlestick request to "
+                f"{KALSHI_MAX_CANDLESTICKS} periods; the window was trimmed to the most recent "
+                f"{max_span // 86400} days at this resolution.",
+            )
+        if window.resolution_minutes is not None and period_interval != window.resolution_minutes:
+            warnings.append(
+                f"Kalshi supports {', '.join(str(choice) for choice in KALSHI_PERIOD_INTERVAL_CHOICES)}-minute "
+                f"candlesticks; the {window.resolution_minutes}-minute request was served at "
+                f"{period_interval} minutes.",
+            )
+
+        points = self._fetch_candlestick_points(market, start_time, end_time, period_interval)
+        return PredictionHistoryFetch(
+            points=points,
+            effective_resolution_minutes=period_interval,
+            windowing="provider_window",
+            warnings=warnings,
+        )
+
+    def _fetch_candlestick_points(
+        self,
+        market: PredictionMarketRecord,
+        start_time: int,
+        end_time: int,
+        period_interval: int,
+    ) -> list[PredictionProbabilityPoint]:
         historical = self._uses_historical_market_data(market)
         cache_scope = "historical" if historical else "live"
         cache_key = self.cache.make_key(

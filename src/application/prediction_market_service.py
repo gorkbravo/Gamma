@@ -3,13 +3,23 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src.models.prediction_markets import (
     CalibrationSummary,
+    PredictionBasketSummary,
+    PredictionComparisonLeg,
+    PredictionHistoryFetch,
+    PredictionHistoryStats,
+    PredictionHistoryWindow,
+    PredictionMarketComparison,
     PredictionMarketFreshness,
     PredictionMarketRecord,
     PredictionMarketScreenerResult,
+    PredictionOutcomeSeries,
+    PredictionPairAnalytics,
+    PredictionProbabilityHistory,
+    PredictionSpreadPoint,
     PredictionVenueStatus,
     RelatedMarketRecord,
     WalletSummary,
@@ -143,6 +153,25 @@ RELATED_RELATIONSHIP_PRIORITY = {
 # semantically related; below it they are venue-metadata artifacts (a venue can
 # group unrelated markets under one event/series id).
 RELATED_SAME_EVENT_MIN_SIMILARITY = 0.25
+HISTORY_RANGE_DAYS: dict[str, int] = {
+    "1d": 1,
+    "1w": 7,
+    "1m": 30,
+    "3m": 90,
+    "6m": 182,
+    "1y": 365,
+}
+HISTORY_RANGE_KEYS = (*HISTORY_RANGE_DAYS, "max")
+RESOLUTION_CHOICES_MINUTES = (1, 5, 15, 60, 360, 1440)
+# Auto resolution aims for a chart that is dense enough to read without asking a
+# venue for hundreds of thousands of bars.
+AUTO_RESOLUTION_TARGET_POINTS = 900
+MAX_COMPARISON_LEGS = 6
+MAX_OUTCOME_SERIES = 8
+MIN_PAIR_OVERLAP_POINTS = 12
+MAX_SPREAD_SERIES_POINTS = 600
+MAX_ALIGNED_GRID_POINTS = 2000
+DEFAULT_COMPARISON_STEP_MINUTES = 60
 
 
 @dataclass(frozen=True)
@@ -270,6 +299,195 @@ class PredictionMarketService:
             return []
         return adapter.get_history(self._canonicalize_market(market))
 
+    def get_history_series(
+        self,
+        market_id: str,
+        *,
+        range_key: str = "max",
+        resolution_minutes: int | None = None,
+        outcome_id: str | None = None,
+    ) -> PredictionProbabilityHistory | None:
+        adapter = self._resolve_adapter(market_id)
+        if adapter is None:
+            return None
+        provider_market_id = self._provider_market_id(market_id)
+        market = adapter.get_market(provider_market_id)
+        if market is None:
+            return None
+        detail = self._canonicalize_market(market)
+        return self._build_history_series(
+            adapter,
+            detail,
+            range_key=range_key,
+            resolution_minutes=resolution_minutes,
+            outcome_id=outcome_id,
+        )
+
+    def get_outcome_series(
+        self,
+        market_id: str,
+        *,
+        range_key: str = "max",
+        resolution_minutes: int | None = None,
+        limit: int = MAX_OUTCOME_SERIES,
+    ) -> list[PredictionOutcomeSeries]:
+        """Probability history for each tradable outcome of a single market.
+
+        Binary markets return one series. Multi-outcome markets return one
+        series per outcome that exposes its own provider token, which is what
+        makes an outcome ladder chartable instead of YES-only.
+        """
+        adapter = self._resolve_adapter(market_id)
+        if adapter is None:
+            return []
+        provider_market_id = self._provider_market_id(market_id)
+        market = adapter.get_market(provider_market_id)
+        if market is None:
+            return []
+        detail = self._canonicalize_market(market)
+
+        series: list[PredictionOutcomeSeries] = []
+        for outcome in detail.outcomes[: max(limit, 1)]:
+            if not outcome.token_id:
+                series.append(
+                    PredictionOutcomeSeries(
+                        outcome_id=outcome.outcome_id,
+                        label=outcome.label,
+                        probability=outcome.probability,
+                        token_id=None,
+                        warnings=[
+                            f"{detail.venue} does not expose a separate history token for '{outcome.label}'.",
+                        ],
+                    )
+                )
+                continue
+            history = self._build_history_series(
+                adapter,
+                detail,
+                range_key=range_key,
+                resolution_minutes=resolution_minutes,
+                outcome_id=outcome.outcome_id,
+            )
+            series.append(
+                PredictionOutcomeSeries(
+                    outcome_id=outcome.outcome_id,
+                    label=outcome.label,
+                    probability=outcome.probability,
+                    token_id=outcome.token_id,
+                    points=list(history.points) if history else [],
+                    warnings=list(history.warnings) if history else [],
+                )
+            )
+        return series
+
+    def compare_markets(
+        self,
+        market_ids: list[str],
+        *,
+        range_key: str = "max",
+        resolution_minutes: int | None = None,
+    ) -> PredictionMarketComparison:
+        """Align several contracts on one timeline and describe their spreads.
+
+        This is read-only research context. A spread between two venues is not
+        an executable arbitrage: sizing, fees, settlement rules, and resolution
+        criteria are not modeled here.
+        """
+        current_time = ensure_utc(now_utc())
+        unique_ids: list[str] = []
+        for market_id in market_ids:
+            if market_id not in unique_ids:
+                unique_ids.append(market_id)
+
+        warnings: list[str] = []
+        if len(unique_ids) != len(market_ids):
+            warnings.append("Duplicate contracts were requested once each.")
+        unique_ids = unique_ids[:MAX_COMPARISON_LEGS]
+        if len(market_ids) > MAX_COMPARISON_LEGS:
+            warnings.append(
+                f"Comparison is capped at {MAX_COMPARISON_LEGS} contracts; extra selections were dropped.",
+            )
+
+        legs: list[PredictionComparisonLeg] = []
+        window_start: datetime | None = None
+        window_end: datetime | None = None
+        effective_resolution: int | None = None
+
+        for market_id in unique_ids:
+            adapter = self._resolve_adapter(market_id)
+            if adapter is None:
+                warnings.append(f"No adapter is configured for {market_id}.")
+                continue
+            market = adapter.get_market(self._provider_market_id(market_id))
+            if market is None:
+                warnings.append(f"{market_id} could not be loaded from its venue.")
+                continue
+            detail = self._canonicalize_market(market)
+            history = self._build_history_series(
+                adapter,
+                detail,
+                range_key=range_key,
+                resolution_minutes=resolution_minutes,
+            )
+            if history is None:
+                warnings.append(f"{market_id} returned no probability history.")
+                continue
+            legs.append(
+                PredictionComparisonLeg(
+                    market_id=detail.market_id,
+                    venue=detail.venue,
+                    title=detail.title,
+                    outcome_label=detail.probability_label,
+                    current_probability=detail.current_probability,
+                    status=detail.status,
+                    end_time=detail.end_time,
+                    event_id=detail.event_id,
+                    event_title=detail.event_title,
+                    points=list(history.points),
+                    stats=history.stats,
+                    coverage_start=history.coverage_start,
+                    coverage_end=history.coverage_end,
+                    warnings=list(history.warnings),
+                    source_provider=history.source_provider,
+                    origin=history.origin,
+                )
+            )
+            window_start = _min_datetime(window_start, history.window_start)
+            window_end = _max_datetime(window_end, history.window_end)
+            if history.effective_resolution_minutes is not None:
+                effective_resolution = max(effective_resolution or 0, history.effective_resolution_minutes)
+
+        pairs: list[PredictionPairAnalytics] = []
+        for left_index in range(len(legs)):
+            for right_index in range(left_index + 1, len(legs)):
+                pairs.append(
+                    self._compare_pair(
+                        legs[left_index],
+                        legs[right_index],
+                        resolution_minutes=effective_resolution or DEFAULT_COMPARISON_STEP_MINUTES,
+                    )
+                )
+
+        if len(legs) < 2:
+            warnings.append("At least two loadable contracts are needed for spread and correlation analytics.")
+
+        return PredictionMarketComparison(
+            requested_range=range_key,
+            effective_resolution_minutes=effective_resolution,
+            window_start=window_start,
+            window_end=window_end,
+            legs=legs,
+            pairs=pairs,
+            basket=self._build_basket_summary(legs),
+            warnings=warnings,
+            retrieved_at=current_time,
+            transformation_note=(
+                "Series are aligned onto a shared grid by carrying the last observed probability forward. "
+                "Correlation is computed on probability changes, not levels. Spreads are research context, "
+                "not executable prices."
+            ),
+        )
+
     def get_wallet_summary(self, market_id: str) -> WalletSummary | None:
         adapter = self._resolve_adapter(market_id)
         if adapter is None:
@@ -375,6 +593,409 @@ class PredictionMarketService:
         if adapter is None:
             return None
         return adapter.build_calibration_summary(sample_size=sample_size)
+
+    def _build_history_series(
+        self,
+        adapter: PredictionMarketAdapter,
+        detail: PredictionMarketRecord,
+        *,
+        range_key: str,
+        resolution_minutes: int | None,
+        outcome_id: str | None = None,
+    ) -> PredictionProbabilityHistory:
+        normalized_range = range_key if range_key in HISTORY_RANGE_KEYS else "max"
+        warnings: list[str] = []
+        if normalized_range != range_key:
+            warnings.append(
+                f"Unsupported range '{range_key}'; the full available history was used instead.",
+            )
+
+        outcome = self._resolve_outcome(detail, outcome_id)
+        if outcome_id and outcome is None:
+            warnings.append(
+                f"Outcome '{outcome_id}' is not listed on this market; its primary outcome was used instead.",
+            )
+
+        window = self._resolve_history_window(
+            detail,
+            range_key=normalized_range,
+            resolution_minutes=resolution_minutes,
+            outcome=outcome,
+        )
+
+        fetch_window = getattr(adapter, "get_history_window", None)
+        if callable(fetch_window):
+            try:
+                fetch = fetch_window(detail, window)
+            except Exception as exc:
+                return self._empty_history(
+                    detail,
+                    window,
+                    outcome,
+                    warnings=[*warnings, f"{detail.venue} history request failed: {exc}"],
+                )
+        else:
+            try:
+                fetch = PredictionHistoryFetch(
+                    points=list(adapter.get_history(detail)),
+                    windowing="client_clipped",
+                )
+            except Exception as exc:
+                return self._empty_history(
+                    detail,
+                    window,
+                    outcome,
+                    warnings=[*warnings, f"{detail.venue} history request failed: {exc}"],
+                )
+
+        warnings.extend(fetch.warnings)
+        points = sorted(
+            (point for point in fetch.points if point.probability is not None),
+            key=lambda point: ensure_utc(point.timestamp),
+        )
+        available_start = ensure_utc(points[0].timestamp) if points else None
+        available_end = ensure_utc(points[-1].timestamp) if points else None
+
+        clipped = self._clip_points(points, window.start, window.end)
+        if points and not clipped:
+            warnings.append(
+                "No observations fall inside the requested window; the contract's available history covers "
+                f"{_format_span(available_start, available_end)}.",
+            )
+        elif len(clipped) < len(points) and fetch.windowing != "provider_window":
+            warnings.append("The provider returned a wider series than requested; it was clipped locally.")
+
+        effective_resolution = fetch.effective_resolution_minutes
+        if window.resolution_minutes is not None and fetch.windowing == "client_clipped":
+            clipped = self._downsample_points(clipped, window.resolution_minutes)
+            effective_resolution = window.resolution_minutes
+
+        stats = self._build_history_stats(clipped)
+        if stats.point_count and stats.span_days is not None and normalized_range != "max":
+            requested_days = HISTORY_RANGE_DAYS.get(normalized_range)
+            if requested_days is not None and stats.span_days < requested_days * 0.5:
+                warnings.append(
+                    f"This contract only has {stats.span_days:.1f} days of history inside the requested "
+                    f"{normalized_range} window.",
+                )
+        if effective_resolution is None and stats.median_gap_seconds:
+            effective_resolution = max(int(round(stats.median_gap_seconds / 60)), 1)
+
+        return PredictionProbabilityHistory(
+            market_id=detail.market_id,
+            venue=detail.venue,
+            points=clipped,
+            outcome_id=outcome.outcome_id if outcome else None,
+            outcome_label=outcome.label if outcome else detail.probability_label,
+            requested_range=normalized_range,
+            effective_range=self._describe_effective_range(stats),
+            requested_resolution_minutes=resolution_minutes,
+            effective_resolution_minutes=effective_resolution,
+            window_start=window.start,
+            window_end=window.end,
+            coverage_start=stats.first_timestamp,
+            coverage_end=stats.last_timestamp,
+            windowing=fetch.windowing,
+            stats=stats,
+            warnings=warnings,
+            source_provider=clipped[0].source_provider if clipped else detail.source_provider,
+            retrieved_at=clipped[0].retrieved_at if clipped else detail.retrieved_at,
+            origin=clipped[0].origin if clipped else detail.origin,
+            transformation_note=clipped[0].transformation_note if clipped else None,
+        )
+
+    def _empty_history(
+        self,
+        detail: PredictionMarketRecord,
+        window: PredictionHistoryWindow,
+        outcome,
+        *,
+        warnings: list[str],
+    ) -> PredictionProbabilityHistory:
+        return PredictionProbabilityHistory(
+            market_id=detail.market_id,
+            venue=detail.venue,
+            outcome_id=outcome.outcome_id if outcome else None,
+            outcome_label=outcome.label if outcome else detail.probability_label,
+            requested_range=window.range_key,
+            effective_range="none",
+            requested_resolution_minutes=window.resolution_minutes,
+            window_start=window.start,
+            window_end=window.end,
+            windowing="unavailable",
+            stats=PredictionHistoryStats(point_count=0),
+            warnings=warnings,
+            source_provider=detail.source_provider,
+            retrieved_at=detail.retrieved_at,
+            origin=detail.origin,
+        )
+
+    def _resolve_outcome(self, detail: PredictionMarketRecord, outcome_id: str | None):
+        if not detail.outcomes:
+            return None
+        if outcome_id:
+            for outcome in detail.outcomes:
+                if outcome.outcome_id == outcome_id:
+                    return outcome
+            return None
+        return detail.outcomes[0]
+
+    def _resolve_history_window(
+        self,
+        detail: PredictionMarketRecord,
+        *,
+        range_key: str,
+        resolution_minutes: int | None,
+        outcome,
+    ) -> PredictionHistoryWindow:
+        current_time = ensure_utc(now_utc())
+        market_end = ensure_utc(detail.close_time or detail.end_time)
+        end = min(market_end, current_time) if market_end is not None else current_time
+        market_start = ensure_utc(detail.open_time)
+
+        if range_key == "max":
+            # `max` means every observation the venue will return. Clamping to the
+            # recorded open time would silently drop quotes that predate it, which
+            # happens whenever a venue backdates or re-lists a contract.
+            start = None
+            span_start = market_start or end - timedelta(days=HISTORY_RANGE_DAYS["1y"])
+        else:
+            start = end - timedelta(days=HISTORY_RANGE_DAYS[range_key])
+            span_start = start
+
+        resolved_resolution = resolution_minutes
+        if resolved_resolution is None:
+            resolved_resolution = _auto_resolution_minutes(span_start, end)
+        if resolved_resolution is not None:
+            resolved_resolution = _clamp_up(resolved_resolution, RESOLUTION_CHOICES_MINUTES)
+
+        return PredictionHistoryWindow(
+            range_key=range_key,
+            start=start,
+            end=end,
+            resolution_minutes=resolved_resolution,
+            resolution_is_auto=resolution_minutes is None,
+            outcome_id=outcome.outcome_id if outcome else None,
+            outcome_token_id=outcome.token_id if outcome else None,
+        )
+
+    @staticmethod
+    def _clip_points(points, start: datetime | None, end: datetime | None):
+        if start is None and end is None:
+            return list(points)
+        clipped = []
+        for point in points:
+            stamp = ensure_utc(point.timestamp)
+            if start is not None and stamp < start:
+                continue
+            if end is not None and stamp > end:
+                continue
+            clipped.append(point)
+        return clipped
+
+    @staticmethod
+    def _downsample_points(points, resolution_minutes: int):
+        """Keep the last observation in each bucket, always preserving the ends."""
+        if resolution_minutes <= 0 or len(points) < 3:
+            return list(points)
+        bucket_seconds = resolution_minutes * 60
+        kept = []
+        current_bucket: int | None = None
+        for point in points:
+            bucket = int(ensure_utc(point.timestamp).timestamp() // bucket_seconds)
+            if current_bucket is None or bucket != current_bucket:
+                kept.append(point)
+                current_bucket = bucket
+            else:
+                kept[-1] = point
+        if kept and kept[-1] is not points[-1]:
+            kept.append(points[-1])
+        return kept
+
+    def _build_history_stats(self, points) -> PredictionHistoryStats:
+        if not points:
+            return PredictionHistoryStats(point_count=0)
+
+        probabilities = [point.probability for point in points]
+        timestamps = [ensure_utc(point.timestamp) for point in points]
+        high = max(probabilities)
+        low = min(probabilities)
+        width = high - low
+        last = probabilities[-1]
+        first = probabilities[0]
+        span_seconds = (timestamps[-1] - timestamps[0]).total_seconds()
+
+        gaps = [
+            (timestamps[index] - timestamps[index - 1]).total_seconds()
+            for index in range(1, len(timestamps))
+        ]
+        moves = [probabilities[index] - probabilities[index - 1] for index in range(1, len(probabilities))]
+        max_move = None
+        max_move_at = None
+        if moves:
+            max_index = max(range(len(moves)), key=lambda index: abs(moves[index]))
+            max_move = moves[max_index]
+            max_move_at = timestamps[max_index + 1]
+
+        return PredictionHistoryStats(
+            point_count=len(points),
+            first_timestamp=timestamps[0],
+            last_timestamp=timestamps[-1],
+            span_days=span_seconds / 86400 if span_seconds > 0 else 0.0,
+            first_probability=first,
+            last_probability=last,
+            change=last - first,
+            high=high,
+            low=low,
+            range_width=width,
+            percentile_of_range=((last - low) / width) if width > 0 else None,
+            max_move=max_move,
+            max_move_at=max_move_at,
+            daily_volatility=self._daily_volatility(probabilities, gaps),
+            share_above_half=sum(1 for value in probabilities if value > 0.5) / len(probabilities),
+            median_gap_seconds=_median(gaps),
+            largest_gap_seconds=max(gaps) if gaps else None,
+        )
+
+    @staticmethod
+    def _daily_volatility(probabilities: list[float], gaps: list[float]) -> float | None:
+        """Standard deviation of probability changes, scaled to a daily step.
+
+        Probabilities are bounded in [0, 1], so this is reported in probability
+        points per day rather than as an annualized return volatility.
+        """
+        moves = [probabilities[index] - probabilities[index - 1] for index in range(1, len(probabilities))]
+        if len(moves) < 2:
+            return None
+        mean = sum(moves) / len(moves)
+        variance = sum((move - mean) ** 2 for move in moves) / (len(moves) - 1)
+        step_seconds = _median(gaps)
+        if not step_seconds or step_seconds <= 0:
+            return None
+        return math.sqrt(variance) * math.sqrt(86400 / step_seconds)
+
+    @staticmethod
+    def _describe_effective_range(stats: PredictionHistoryStats) -> str:
+        if not stats.point_count or stats.span_days is None:
+            return "none"
+        if stats.span_days < 1:
+            return "intraday"
+        if stats.span_days < 8:
+            return "1w"
+        if stats.span_days < 32:
+            return "1m"
+        if stats.span_days < 95:
+            return "3m"
+        if stats.span_days < 190:
+            return "6m"
+        if stats.span_days < 400:
+            return "1y"
+        return "multi_year"
+
+    def _compare_pair(
+        self,
+        left: PredictionComparisonLeg,
+        right: PredictionComparisonLeg,
+        *,
+        resolution_minutes: int,
+    ) -> PredictionPairAnalytics:
+        aligned = _align_series(left.points, right.points, resolution_minutes)
+        if not aligned:
+            return PredictionPairAnalytics(
+                left_market_id=left.market_id,
+                right_market_id=right.market_id,
+                overlap_points=0,
+                overlap_start=None,
+                overlap_end=None,
+                current_spread=_optional_difference(left.current_probability, right.current_probability),
+                mean_spread=None,
+                max_spread=None,
+                min_spread=None,
+                spread_volatility=None,
+                current_spread_percentile=None,
+                correlation=None,
+                warnings=["These contracts have no overlapping history in the selected window."],
+            )
+
+        timestamps = [stamp for stamp, _, _ in aligned]
+        left_values = [value for _, value, _ in aligned]
+        right_values = [value for _, _, value in aligned]
+        spreads = [left_value - right_value for left_value, right_value in zip(left_values, right_values)]
+        current_spread = spreads[-1]
+        mean_spread = sum(spreads) / len(spreads)
+        max_spread = max(spreads)
+        min_spread = min(spreads)
+        spread_width = max_spread - min_spread
+
+        variance = (
+            sum((value - mean_spread) ** 2 for value in spreads) / (len(spreads) - 1)
+            if len(spreads) > 1
+            else 0.0
+        )
+
+        warnings: list[str] = []
+        if len(aligned) < MIN_PAIR_OVERLAP_POINTS:
+            warnings.append(
+                f"Only {len(aligned)} aligned observations overlap; pair analytics are indicative at best.",
+            )
+
+        series_cap = max(len(aligned) // MAX_SPREAD_SERIES_POINTS, 1)
+        spread_series = [
+            PredictionSpreadPoint(timestamp=timestamps[index], spread=spreads[index])
+            for index in range(0, len(spreads), series_cap)
+        ]
+        if spread_series and spread_series[-1].timestamp != timestamps[-1]:
+            spread_series.append(PredictionSpreadPoint(timestamp=timestamps[-1], spread=spreads[-1]))
+
+        return PredictionPairAnalytics(
+            left_market_id=left.market_id,
+            right_market_id=right.market_id,
+            overlap_points=len(aligned),
+            overlap_start=timestamps[0],
+            overlap_end=timestamps[-1],
+            current_spread=current_spread,
+            mean_spread=mean_spread,
+            max_spread=max_spread,
+            min_spread=min_spread,
+            spread_volatility=math.sqrt(variance) if variance > 0 else 0.0,
+            current_spread_percentile=((current_spread - min_spread) / spread_width) if spread_width > 0 else None,
+            correlation=_change_correlation(left_values, right_values),
+            spread_series=spread_series,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _build_basket_summary(legs: list[PredictionComparisonLeg]) -> PredictionBasketSummary | None:
+        if not legs:
+            return None
+        venues = sorted({leg.venue for leg in legs})
+        probabilities = [leg.current_probability for leg in legs if leg.current_probability is not None]
+        probability_sum = sum(probabilities) if len(probabilities) == len(legs) else None
+        same_venue = len(venues) == 1
+        event_ids = {leg.event_id for leg in legs if leg.event_id}
+        same_event = len(legs) > 1 and len(event_ids) == 1 and len(event_ids) == len({leg.event_id for leg in legs})
+
+        note = None
+        if probability_sum is not None and len(legs) > 1:
+            note = (
+                "The probability sum is only a book overround if these contracts are mutually exclusive and "
+                "cover every outcome."
+                + (
+                    " These contracts share one venue event, which makes that more likely but is not proof."
+                    if same_event
+                    else " These contracts do not share one venue event, so treat the sum as descriptive only."
+                )
+            )
+
+        return PredictionBasketSummary(
+            leg_count=len(legs),
+            probability_sum=probability_sum,
+            implied_overround=(probability_sum - 1.0) if probability_sum is not None and len(legs) > 1 else None,
+            same_event=same_event,
+            same_venue=same_venue,
+            venues=venues,
+            note=note,
+        )
 
     def _resolve_adapter(self, market_id: str) -> PredictionMarketAdapter | None:
         venue = str(market_id.split(":", 1)[0]).strip().lower()
@@ -980,3 +1601,127 @@ def _price_gap(left: float | None, right: float | None) -> float | None:
     if left is None or right is None:
         return None
     return abs(left - right)
+
+
+def _clamp_up(value: int, choices: tuple[int, ...]) -> int:
+    for choice in choices:
+        if value <= choice:
+            return choice
+    return choices[-1]
+
+
+def _auto_resolution_minutes(start: datetime, end: datetime) -> int:
+    span_minutes = max((end - start).total_seconds() / 60, 1)
+    return _clamp_up(
+        max(int(span_minutes / AUTO_RESOLUTION_TARGET_POINTS), 1),
+        RESOLUTION_CHOICES_MINUTES,
+    )
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _min_datetime(left: datetime | None, right: datetime | None) -> datetime | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return min(left, right)
+
+
+def _max_datetime(left: datetime | None, right: datetime | None) -> datetime | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return max(left, right)
+
+
+def _optional_difference(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return left - right
+
+
+def _format_span(start: datetime | None, end: datetime | None) -> str:
+    if start is None or end is None:
+        return "an unknown period"
+    return f"{start.date().isoformat()} to {end.date().isoformat()}"
+
+
+def _align_series(
+    left_points,
+    right_points,
+    resolution_minutes: int,
+) -> list[tuple[datetime, float, float]]:
+    """Sample both series onto one grid over their overlapping period.
+
+    The last observation before each grid stamp is carried forward, so a venue
+    that quotes less often is not treated as having moved to a new price at the
+    moment the other venue prints.
+    """
+    if not left_points or not right_points:
+        return []
+
+    left_sorted = sorted(left_points, key=lambda point: ensure_utc(point.timestamp))
+    right_sorted = sorted(right_points, key=lambda point: ensure_utc(point.timestamp))
+    start = max(ensure_utc(left_sorted[0].timestamp), ensure_utc(right_sorted[0].timestamp))
+    end = min(ensure_utc(left_sorted[-1].timestamp), ensure_utc(right_sorted[-1].timestamp))
+    if end <= start:
+        return []
+
+    step_seconds = max(resolution_minutes, 1) * 60
+    span_seconds = (end - start).total_seconds()
+    if span_seconds / step_seconds > MAX_ALIGNED_GRID_POINTS:
+        step_seconds = span_seconds / MAX_ALIGNED_GRID_POINTS
+
+    aligned: list[tuple[datetime, float, float]] = []
+    left_index = 0
+    right_index = 0
+    left_value: float | None = None
+    right_value: float | None = None
+    stamp = start
+    while stamp <= end:
+        while left_index < len(left_sorted) and ensure_utc(left_sorted[left_index].timestamp) <= stamp:
+            left_value = left_sorted[left_index].probability
+            left_index += 1
+        while right_index < len(right_sorted) and ensure_utc(right_sorted[right_index].timestamp) <= stamp:
+            right_value = right_sorted[right_index].probability
+            right_index += 1
+        if left_value is not None and right_value is not None:
+            aligned.append((stamp, left_value, right_value))
+        stamp = stamp + timedelta(seconds=step_seconds)
+    return aligned
+
+
+def _change_correlation(left_values: list[float], right_values: list[float]) -> float | None:
+    """Pearson correlation of first differences.
+
+    Correlating probability levels would mostly measure shared drift toward
+    resolution; correlating changes measures whether the contracts reprice
+    together.
+    """
+    if len(left_values) < 3 or len(right_values) != len(left_values):
+        return None
+    left_moves = [left_values[index] - left_values[index - 1] for index in range(1, len(left_values))]
+    right_moves = [right_values[index] - right_values[index - 1] for index in range(1, len(right_values))]
+    count = len(left_moves)
+    if count < 2:
+        return None
+    left_mean = sum(left_moves) / count
+    right_mean = sum(right_moves) / count
+    covariance = sum(
+        (left_moves[index] - left_mean) * (right_moves[index] - right_mean) for index in range(count)
+    )
+    left_variance = sum((value - left_mean) ** 2 for value in left_moves)
+    right_variance = sum((value - right_mean) ** 2 for value in right_moves)
+    if left_variance <= 0 or right_variance <= 0:
+        return None
+    return covariance / math.sqrt(left_variance * right_variance)

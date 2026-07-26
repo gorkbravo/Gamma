@@ -1013,9 +1013,130 @@ export interface PredictionProbabilityPoint {
   transformation_note: string | null;
 }
 
+export type PredictionMarketsMode = "screener" | "contract" | "compare" | "calibration";
+
+export type PredictionHistoryRange = "1d" | "1w" | "1m" | "3m" | "6m" | "1y" | "max";
+
+export interface PredictionHistoryStats {
+  point_count: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  span_days: number | null;
+  first_probability: number | null;
+  last_probability: number | null;
+  change: number | null;
+  high: number | null;
+  low: number | null;
+  range_width: number | null;
+  percentile_of_range: number | null;
+  max_move: number | null;
+  max_move_at: string | null;
+  daily_volatility: number | null;
+  share_above_half: number | null;
+  median_gap_seconds: number | null;
+  largest_gap_seconds: number | null;
+}
+
 export interface PredictionProbabilityHistoryResponse {
   market_id: string;
   points: PredictionProbabilityPoint[];
+  venue: string;
+  outcome_id: string | null;
+  outcome_label: string | null;
+  requested_range: string;
+  effective_range: string;
+  requested_resolution_minutes: number | null;
+  effective_resolution_minutes: number | null;
+  window_start: string | null;
+  window_end: string | null;
+  coverage_start: string | null;
+  coverage_end: string | null;
+  windowing: string;
+  stats: PredictionHistoryStats | null;
+  warnings: string[];
+  source_provider: string;
+  retrieved_at: string | null;
+  origin: string;
+  transformation_note: string | null;
+}
+
+export interface PredictionOutcomeSeries {
+  outcome_id: string;
+  label: string;
+  probability: number | null;
+  token_id: string | null;
+  points: PredictionProbabilityPoint[];
+  warnings: string[];
+}
+
+export interface PredictionOutcomeSeriesResponse {
+  market_id: string;
+  requested_range: string;
+  series: PredictionOutcomeSeries[];
+}
+
+export interface PredictionComparisonLeg {
+  market_id: string;
+  venue: string;
+  title: string;
+  outcome_label: string | null;
+  current_probability: number | null;
+  status: string;
+  end_time: string | null;
+  event_id: string | null;
+  event_title: string | null;
+  points: PredictionProbabilityPoint[];
+  stats: PredictionHistoryStats | null;
+  coverage_start: string | null;
+  coverage_end: string | null;
+  warnings: string[];
+  source_provider: string;
+  origin: string;
+}
+
+export interface PredictionSpreadPoint {
+  timestamp: string;
+  spread: number;
+}
+
+export interface PredictionPairAnalytics {
+  left_market_id: string;
+  right_market_id: string;
+  overlap_points: number;
+  overlap_start: string | null;
+  overlap_end: string | null;
+  current_spread: number | null;
+  mean_spread: number | null;
+  max_spread: number | null;
+  min_spread: number | null;
+  spread_volatility: number | null;
+  current_spread_percentile: number | null;
+  correlation: number | null;
+  spread_series: PredictionSpreadPoint[];
+  warnings: string[];
+}
+
+export interface PredictionBasketSummary {
+  leg_count: number;
+  probability_sum: number | null;
+  implied_overround: number | null;
+  same_event: boolean;
+  same_venue: boolean;
+  venues: string[];
+  note: string | null;
+}
+
+export interface PredictionMarketComparison {
+  requested_range: string;
+  effective_resolution_minutes: number | null;
+  window_start: string | null;
+  window_end: string | null;
+  legs: PredictionComparisonLeg[];
+  pairs: PredictionPairAnalytics[];
+  basket: PredictionBasketSummary | null;
+  warnings: string[];
+  retrieved_at: string | null;
+  transformation_note: string | null;
 }
 
 export interface PredictionWalletActivity {

@@ -11,6 +11,7 @@ from src.application.prediction_market_service import PredictionMarketService, P
 from src.application.runtime import build_runtime
 from src.models.prediction_markets import (
     CalibrationSummary,
+    PredictionHistoryWindow,
     PredictionMarketOutcome,
     PredictionMarketRecord,
     PredictionProbabilityPoint,
@@ -1702,3 +1703,530 @@ def _build_market(
         origin=f"{venue}.seed",
         transformation_note="Seed test market.",
     )
+
+
+class _WindowRecordingFetcher:
+    """Captures every provider call so window plumbing can be asserted."""
+
+    def __init__(self, history_by_scope: dict[str, list[dict]] | None = None) -> None:
+        self.calls: list[tuple[str, dict | None]] = []
+        self.history_by_scope = history_by_scope or {}
+
+    def __call__(self, url: str, params: dict | None = None):
+        self.calls.append((url, dict(params or {})))
+        if "prices-history" in url:
+            scope = "max" if (params or {}).get("interval") else "window"
+            return {"history": self.history_by_scope.get(scope, [])}
+        return {}
+
+
+def _history_market(*, venue: str = "polymarket") -> PredictionMarketRecord:
+    return _build_market(
+        market_id=f"{venue}:fed-cut",
+        venue=venue,
+        provider_market_id="fed-cut",
+        title="Will the Fed cut rates?",
+        event_title="Fed decisions",
+        category="Economy",
+        current_probability=0.6,
+        retrieved_at=datetime(2026, 3, 18, 12, 0, 0, tzinfo=timezone.utc),
+    )
+
+
+def test_polymarket_history_window_requests_bounded_timestamps_and_fidelity(tmp_path):
+    points = [
+        {"t": int(datetime(2026, 3, 17, 12, tzinfo=timezone.utc).timestamp()), "p": 0.55},
+        {"t": int(datetime(2026, 3, 18, 12, tzinfo=timezone.utc).timestamp()), "p": 0.61},
+    ]
+    fetcher = _WindowRecordingFetcher({"window": points})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+    market = _history_market()
+
+    window = PredictionHistoryWindow(
+        range_key="1w",
+        start=datetime(2026, 3, 11, 12, tzinfo=timezone.utc),
+        end=datetime(2026, 3, 18, 12, tzinfo=timezone.utc),
+        resolution_minutes=60,
+        outcome_token_id="yes-token",
+    )
+    fetch = adapter.get_history_window(market, window)
+
+    assert [point.probability for point in fetch.points] == [0.55, 0.61]
+    assert fetch.effective_resolution_minutes == 60
+    assert fetch.windowing == "provider_window"
+    _, params = fetcher.calls[0]
+    assert params["startTs"] == int(window.start.timestamp())
+    assert params["endTs"] == int(window.end.timestamp())
+    assert params["fidelity"] == 60
+    assert "interval" not in params
+
+
+def test_polymarket_history_window_falls_back_to_full_series_when_window_is_empty(tmp_path):
+    max_points = [{"t": int(datetime(2026, 1, 5, tzinfo=timezone.utc).timestamp()), "p": 0.4}]
+    fetcher = _WindowRecordingFetcher({"window": [], "max": max_points})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+
+    fetch = adapter.get_history_window(
+        _history_market(),
+        PredictionHistoryWindow(
+            range_key="1d",
+            start=datetime(2026, 3, 17, 12, tzinfo=timezone.utc),
+            end=datetime(2026, 3, 18, 12, tzinfo=timezone.utc),
+            resolution_minutes=5,
+            outcome_token_id="yes-token",
+        ),
+    )
+
+    assert fetch.windowing == "provider_full"
+    assert [point.probability for point in fetch.points] == [0.4]
+    assert any("full available series" in warning for warning in fetch.warnings)
+    assert fetcher.calls[-1][1]["interval"] == "max"
+
+
+def test_polymarket_history_cache_key_separates_resolutions(tmp_path):
+    fetcher = _WindowRecordingFetcher({"window": [{"t": 1773835200, "p": 0.5}]})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+    market = _history_market()
+    bounds = {
+        "start": datetime(2026, 3, 11, 12, tzinfo=timezone.utc),
+        "end": datetime(2026, 3, 18, 12, tzinfo=timezone.utc),
+    }
+
+    adapter.get_history_window(market, PredictionHistoryWindow(range_key="1w", resolution_minutes=60, outcome_token_id="yes-token", **bounds))
+    adapter.get_history_window(market, PredictionHistoryWindow(range_key="1w", resolution_minutes=60, outcome_token_id="yes-token", **bounds))
+    adapter.get_history_window(market, PredictionHistoryWindow(range_key="1w", resolution_minutes=5, outcome_token_id="yes-token", **bounds))
+
+    fidelities = [params["fidelity"] for _, params in fetcher.calls]
+    # The repeat at 60 is served from cache; the 5-minute request is a real miss.
+    assert fidelities == [60, 5]
+
+
+def test_polymarket_history_window_uses_the_requested_outcome_token(tmp_path):
+    fetcher = _WindowRecordingFetcher({"max": [{"t": 1773835200, "p": 0.31}]})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+
+    adapter.get_history_window(
+        _history_market(),
+        PredictionHistoryWindow(range_key="max", outcome_id="no", outcome_token_id="no-token"),
+    )
+
+    assert fetcher.calls[0][1]["market"] == "no-token"
+
+
+def test_kalshi_history_window_clamps_resolution_and_reports_the_downgrade(tmp_path):
+    def fake_fetch(url: str, params: dict | None = None):
+        return {"candlesticks": []}
+
+    adapter = KalshiAdapter(CacheService(tmp_path / "cache"), fetch_json=fake_fetch)
+    market = _build_market(
+        market_id="kalshi:KXFED",
+        venue="kalshi",
+        provider_market_id="KXFED",
+        title="Fed cut?",
+        event_title="Fed",
+        category="Economy",
+        current_probability=0.5,
+        retrieved_at=datetime(2026, 3, 18, 12, tzinfo=timezone.utc),
+    )
+
+    fetch = adapter.get_history_window(market, PredictionHistoryWindow(range_key="1w", resolution_minutes=5))
+
+    assert fetch.effective_resolution_minutes == 60
+    assert any("5-minute request was served at 60" in warning for warning in fetch.warnings)
+
+
+def test_kalshi_history_window_rejects_a_window_outside_the_market_life(tmp_path):
+    adapter = KalshiAdapter(CacheService(tmp_path / "cache"), fetch_json=lambda url, params=None: {"candlesticks": []})
+    market = _build_market(
+        market_id="kalshi:KXFED",
+        venue="kalshi",
+        provider_market_id="KXFED",
+        title="Fed cut?",
+        event_title="Fed",
+        category="Economy",
+        current_probability=0.5,
+        retrieved_at=datetime(2026, 3, 18, 12, tzinfo=timezone.utc),
+    )
+
+    fetch = adapter.get_history_window(
+        market,
+        PredictionHistoryWindow(
+            range_key="1d",
+            start=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            end=datetime(2020, 1, 2, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert fetch.points == []
+    assert any("outside the Kalshi market's trading life" in warning for warning in fetch.warnings)
+
+
+class _SeriesAdapter:
+    """Legacy-shaped adapter: no windowing capability, full series only."""
+
+    def __init__(self, provider: str, records, series_by_market: dict[str, list[tuple[datetime, float]]]):
+        self.provider = provider
+        self.records = records
+        self.series_by_market = series_by_market
+
+    def list_markets(self, *, status="open", limit=50, force_refresh=False, query="", category=None):
+        return self.records[:limit]
+
+    def get_market(self, provider_market_id: str):
+        for record in self.records:
+            if record.provider_market_id == provider_market_id:
+                return record
+        return None
+
+    def get_history(self, market: PredictionMarketRecord):
+        return [
+            PredictionProbabilityPoint(
+                timestamp=stamp,
+                probability=value,
+                source_provider=self.provider,
+                retrieved_at=stamp,
+                origin=f"{self.provider}.history",
+            )
+            for stamp, value in self.series_by_market.get(market.market_id, [])
+        ]
+
+    def get_wallet_summary(self, market: PredictionMarketRecord):
+        return WalletSummary(
+            market_id=market.market_id,
+            venue=self.provider,
+            concentration_hhi=None,
+            top_participant_share=None,
+            total_trades=0,
+            total_notional=0.0,
+        )
+
+    def list_event_markets(self, market: PredictionMarketRecord, *, limit: int = 12):
+        return []
+
+    def build_calibration_summary(self, *, sample_size: int = 30):
+        return CalibrationSummary(venue=self.provider, sample_size=0)
+
+
+def _hourly_series(start: datetime, values: list[float]) -> list[tuple[datetime, float]]:
+    return [(start + timedelta(hours=index), value) for index, value in enumerate(values)]
+
+
+def _service_with_series(series_by_market) -> PredictionMarketService:
+    base = datetime(2026, 3, 18, 12, tzinfo=timezone.utc)
+    records = []
+    for market_id, series in series_by_market.items():
+        venue, provider_id = market_id.split(":", 1)
+        records.append(
+            _build_market(
+                market_id=market_id,
+                venue=venue,
+                provider_market_id=provider_id,
+                title=f"Contract {provider_id}",
+                event_title="Fed decisions",
+                category="Economy",
+                current_probability=series[-1][1],
+                retrieved_at=base,
+            )
+        )
+    by_venue: dict[str, list[PredictionMarketRecord]] = {}
+    for record in records:
+        by_venue.setdefault(record.venue, []).append(record)
+    return PredictionMarketService(
+        adapters={
+            venue: _SeriesAdapter(venue, venue_records, series_by_market)
+            for venue, venue_records in by_venue.items()
+        }
+    )
+
+
+def test_history_series_clips_a_legacy_adapter_series_to_the_requested_window():
+    start = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    service = _service_with_series(
+        {"polymarket:fed-cut": [(start + timedelta(days=index), 0.4 + index * 0.01) for index in range(18)]}
+    )
+
+    full = service.get_history_series("polymarket:fed-cut", range_key="max")
+    windowed = service.get_history_series("polymarket:fed-cut", range_key="1w")
+
+    assert full.windowing == "client_clipped"
+    assert len(windowed.points) < len(full.points)
+    assert all(point.timestamp >= windowed.window_start for point in windowed.points)
+    assert windowed.requested_range == "1w"
+    assert windowed.coverage_start is not None and windowed.coverage_end is not None
+
+
+def test_history_series_reports_stats_over_the_window():
+    start = datetime(2026, 3, 10, tzinfo=timezone.utc)
+    service = _service_with_series(
+        {"polymarket:fed-cut": _hourly_series(start, [0.40, 0.44, 0.60, 0.52, 0.55])}
+    )
+
+    stats = service.get_history_series("polymarket:fed-cut", range_key="max").stats
+
+    assert stats.point_count == 5
+    assert stats.high == pytest.approx(0.60)
+    assert stats.low == pytest.approx(0.40)
+    assert stats.change == pytest.approx(0.15)
+    assert stats.range_width == pytest.approx(0.20)
+    assert stats.percentile_of_range == pytest.approx(0.75)
+    assert stats.max_move == pytest.approx(0.16)
+    assert stats.share_above_half == pytest.approx(0.6)
+    assert stats.median_gap_seconds == pytest.approx(3600)
+    assert stats.daily_volatility is not None
+
+
+def test_history_series_warns_when_the_window_predates_available_history():
+    service = _service_with_series(
+        {"polymarket:fed-cut": _hourly_series(datetime(2026, 3, 17, tzinfo=timezone.utc), [0.5, 0.51])}
+    )
+
+    history = service.get_history_series("polymarket:fed-cut", range_key="1y")
+
+    assert any("days of history" in warning for warning in history.warnings)
+
+
+def test_history_series_reports_an_unknown_range_instead_of_failing():
+    service = _service_with_series(
+        {"polymarket:fed-cut": _hourly_series(datetime(2026, 3, 17, tzinfo=timezone.utc), [0.5, 0.52])}
+    )
+
+    history = service.get_history_series("polymarket:fed-cut", range_key="10y")
+
+    assert history.requested_range == "max"
+    assert any("Unsupported range" in warning for warning in history.warnings)
+
+
+def test_compare_markets_aligns_series_and_reports_spread_and_correlation():
+    start = datetime(2026, 3, 10, tzinfo=timezone.utc)
+    service = _service_with_series(
+        {
+            "polymarket:fed-cut": _hourly_series(start, [0.50, 0.54, 0.58, 0.60, 0.62, 0.64]),
+            "kalshi:KXFED": _hourly_series(start, [0.46, 0.50, 0.53, 0.56, 0.57, 0.60]),
+        }
+    )
+
+    comparison = service.compare_markets(["polymarket:fed-cut", "kalshi:KXFED"], range_key="max")
+
+    assert len(comparison.legs) == 2
+    assert len(comparison.pairs) == 1
+    pair = comparison.pairs[0]
+    assert pair.overlap_points > 0
+    assert pair.current_spread == pytest.approx(0.04, abs=0.01)
+    assert pair.mean_spread is not None
+    assert pair.max_spread >= pair.min_spread
+    # Both contracts drift up together, so change correlation should be strongly positive.
+    assert pair.correlation is not None and pair.correlation > 0.5
+    assert comparison.basket.leg_count == 2
+    assert comparison.basket.probability_sum == pytest.approx(1.24)
+    assert comparison.basket.same_venue is False
+    assert "mutually exclusive" in comparison.basket.note
+
+
+def test_compare_markets_flags_non_overlapping_contracts():
+    service = _service_with_series(
+        {
+            "polymarket:fed-cut": _hourly_series(datetime(2026, 3, 1, tzinfo=timezone.utc), [0.5, 0.52, 0.54]),
+            "kalshi:KXFED": _hourly_series(datetime(2026, 3, 17, tzinfo=timezone.utc), [0.4, 0.42, 0.44]),
+        }
+    )
+
+    pair = service.compare_markets(["polymarket:fed-cut", "kalshi:KXFED"], range_key="max").pairs[0]
+
+    assert pair.overlap_points == 0
+    assert any("no overlapping history" in warning for warning in pair.warnings)
+    # The live probability gap is still reported even without an aligned window.
+    assert pair.current_spread is not None
+
+
+def test_compare_markets_deduplicates_and_caps_requested_contracts():
+    series = {
+        f"polymarket:c{index}": _hourly_series(datetime(2026, 3, 10, tzinfo=timezone.utc), [0.4, 0.45, 0.5])
+        for index in range(8)
+    }
+    service = _service_with_series(series)
+
+    comparison = service.compare_markets(
+        ["polymarket:c0", "polymarket:c0", *[f"polymarket:c{index}" for index in range(1, 8)]],
+        range_key="max",
+    )
+
+    assert len(comparison.legs) == 6
+    assert any("Duplicate contracts" in warning for warning in comparison.warnings)
+    assert any("capped at 6" in warning for warning in comparison.warnings)
+
+
+def test_compare_markets_needs_two_loadable_legs():
+    service = _service_with_series(
+        {"polymarket:fed-cut": _hourly_series(datetime(2026, 3, 10, tzinfo=timezone.utc), [0.5, 0.55])}
+    )
+
+    comparison = service.compare_markets(["polymarket:fed-cut", "polymarket:missing"], range_key="max")
+
+    assert len(comparison.legs) == 1
+    assert comparison.pairs == []
+    assert any("could not be loaded" in warning for warning in comparison.warnings)
+    assert any("At least two loadable contracts" in warning for warning in comparison.warnings)
+
+
+def test_history_and_compare_routes_expose_windowed_context(tmp_path):
+    start = datetime(2026, 3, 10, tzinfo=timezone.utc)
+    service = _service_with_series(
+        {
+            "polymarket:fed-cut": _hourly_series(start, [0.50, 0.54, 0.58, 0.60]),
+            "kalshi:KXFED": _hourly_series(start, [0.46, 0.50, 0.53, 0.56]),
+        }
+    )
+    runtime = build_runtime(
+        mock_mode=True,
+        cache_dir=tmp_path / "cache",
+        history_dir=tmp_path / "data",
+        sample_data_dir="sample_data",
+    )
+    runtime.prediction_market_service = service
+    client = TestClient(create_app(runtime))
+    try:
+        history_response = client.get(
+            "/prediction-markets/markets/polymarket:fed-cut/history",
+            params={"range": "1w", "resolution": 60},
+        )
+        assert history_response.status_code == 200
+        history = history_response.json()
+        assert history["requested_range"] == "1w"
+        assert history["requested_resolution_minutes"] == 60
+        assert history["stats"]["point_count"] == len(history["points"])
+        assert history["window_start"] and history["window_end"]
+
+        rejected = client.get(
+            "/prediction-markets/markets/polymarket:fed-cut/history",
+            params={"range": "decade"},
+        )
+        assert rejected.status_code == 422
+
+        missing = client.get("/prediction-markets/markets/polymarket:nope/history")
+        assert missing.status_code == 404
+
+        outcome_response = client.get(
+            "/prediction-markets/markets/polymarket:fed-cut/outcome-history",
+            params={"range": "max"},
+        )
+        assert outcome_response.status_code == 200
+        assert outcome_response.json()["series"][0]["label"] == "Yes"
+
+        compare_response = client.post(
+            "/prediction-markets/compare",
+            json={"market_ids": ["polymarket:fed-cut", "kalshi:KXFED"], "range_key": "max"},
+        )
+        assert compare_response.status_code == 200
+        compare = compare_response.json()
+        assert len(compare["legs"]) == 2
+        assert compare["pairs"][0]["overlap_points"] > 0
+        assert compare["basket"]["leg_count"] == 2
+        assert compare["transformation_note"]
+
+        too_many = client.post(
+            "/prediction-markets/compare",
+            json={"market_ids": [f"polymarket:c{index}" for index in range(9)], "range_key": "max"},
+        )
+        assert too_many.status_code == 422
+    finally:
+        runtime.shutdown()
+
+
+def test_polymarket_long_windows_use_a_named_interval_instead_of_timestamps(tmp_path):
+    """The CLOB returns HTTP 400 for an explicit span beyond ~2 weeks."""
+    fetcher = _WindowRecordingFetcher({"max": [{"t": 1773835200, "p": 0.5}]})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+    end = datetime(2026, 3, 18, 12, tzinfo=timezone.utc)
+
+    fetch = adapter.get_history_window(
+        _history_market(),
+        PredictionHistoryWindow(
+            range_key="3m",
+            start=end - timedelta(days=90),
+            end=end,
+            resolution_minutes=1440,
+            resolution_is_auto=False,
+            outcome_token_id="yes-token",
+        ),
+    )
+
+    _, params = fetcher.calls[0]
+    assert params["interval"] == "max"
+    assert "startTs" not in params
+    assert fetch.windowing == "provider_full"
+    assert any("explicit windows up to 14 days" in warning for warning in fetch.warnings)
+
+
+def test_polymarket_month_window_uses_the_smallest_covering_interval(tmp_path):
+    fetcher = _WindowRecordingFetcher({"max": [{"t": 1773835200, "p": 0.5}]})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+    end = datetime(2026, 3, 18, 12, tzinfo=timezone.utc)
+
+    adapter.get_history_window(
+        _history_market(),
+        PredictionHistoryWindow(
+            range_key="1m",
+            start=end - timedelta(days=30),
+            end=end,
+            resolution_minutes=60,
+            resolution_is_auto=False,
+            outcome_token_id="yes-token",
+        ),
+    )
+
+    assert fetcher.calls[0][1]["interval"] == "1m"
+
+
+def test_polymarket_short_windows_still_use_exact_timestamps(tmp_path):
+    fetcher = _WindowRecordingFetcher({"window": [{"t": 1773835200, "p": 0.5}]})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+    end = datetime(2026, 3, 18, 12, tzinfo=timezone.utc)
+
+    fetch = adapter.get_history_window(
+        _history_market(),
+        PredictionHistoryWindow(
+            range_key="1w",
+            start=end - timedelta(days=7),
+            end=end,
+            resolution_minutes=15,
+            resolution_is_auto=False,
+            outcome_token_id="yes-token",
+        ),
+    )
+
+    assert "startTs" in fetcher.calls[0][1]
+    assert fetch.windowing == "provider_window"
+
+
+def test_polymarket_max_range_widens_an_automatic_fidelity_to_reach_further_back(tmp_path):
+    """The CLOB caps bars per full-history response, so coarse bars reach back further."""
+    fetcher = _WindowRecordingFetcher({"max": [{"t": 1773835200, "p": 0.5}]})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+
+    fetch = adapter.get_history_window(
+        _history_market(),
+        PredictionHistoryWindow(range_key="max", resolution_minutes=360, resolution_is_auto=True, outcome_token_id="yes-token"),
+    )
+
+    assert fetcher.calls[0][1]["fidelity"] == 1440
+    assert fetch.effective_resolution_minutes == 1440
+    assert any("reach further back" in warning for warning in fetch.warnings)
+
+
+def test_polymarket_max_range_honors_an_explicit_fidelity(tmp_path):
+    fetcher = _WindowRecordingFetcher({"max": [{"t": 1773835200, "p": 0.5}]})
+    adapter = PolymarketAdapter(CacheService(tmp_path / "cache"), fetch_json=fetcher)
+
+    fetch = adapter.get_history_window(
+        _history_market(),
+        PredictionHistoryWindow(
+            range_key="max",
+            resolution_minutes=360,
+            resolution_is_auto=False,
+            outcome_token_id="yes-token",
+        ),
+    )
+
+    assert fetcher.calls[0][1]["fidelity"] == 360
+    assert fetch.effective_resolution_minutes == 360
+    assert fetch.warnings == []

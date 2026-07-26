@@ -148,11 +148,16 @@
     providerUsage,
     requestMetrics,
     predictionMarketCalibration,
+    predictionMarketComparison,
     predictionMarketDetail,
     predictionMarketHistory,
+    predictionMarketOutcomeSeries,
     predictionMarketRelated,
     predictionMarketScreener,
     predictionMarketWallet,
+    predictionHistoryRange,
+    predictionHistoryResolution,
+    predictionHistoryOutcomeId,
     refreshSystemStatus,
     researchOverview,
     sitrepIndicesOverview,
@@ -165,6 +170,8 @@
     riskWorkspaceBasis,
     setRiskWorkspaceMode,
     loadPredictionMarketScreener,
+    loadPredictionMarketHistory,
+    runPredictionMarketComparison,
     loadCryptoWorkspace,
     previewCopilotContextFingerprint,
     previewCopilotThreadFingerprint,
@@ -241,7 +248,9 @@
     MaritimeWorkspaceResponse,
     PortfolioPerformanceResponse,
     PortfolioSnapshot,
+    PredictionHistoryRange,
     PredictionMarket,
+    PredictionMarketsMode,
     ResearchResult,
     RiskResult,
     StrategyLabHandoffEnvelope,
@@ -298,6 +307,11 @@
   let fundamentalsMode: FundamentalsMode = persistedMode(restoredWorkspaceState, "fundamentals", "overview");
   let commoditiesMode: CommodityMode = persistedMode(restoredWorkspaceState, "commodities", "overview");
   let maritimeMode: MaritimeMode = persistedMode(restoredWorkspaceState, "maritime", "live_map");
+  let predictionMarketsMode: PredictionMarketsMode = persistedMode(
+    restoredWorkspaceState,
+    "prediction_markets",
+    "screener"
+  );
   let optionsMode: OptionsMode = persistedMode(restoredWorkspaceState, "iv", "overview");
   let riskMode: RiskMode = persistedMode(restoredWorkspaceState, "risk", "overview");
   let copilotContextTab: TabId = "sitrep";
@@ -431,6 +445,7 @@
             fundamentals: fundamentalsMode,
             commodities: commoditiesMode,
             maritime: maritimeMode,
+            prediction_markets: predictionMarketsMode,
             iv: optionsMode,
             risk: riskMode
           }
@@ -2278,6 +2293,10 @@
       const marketId =
         copilotHandoffId(handoff, ["market_id", "prediction_market_id"]) ??
         handoff.selected_entity?.normalized_id;
+      // An inbound contract belongs on the contract surface; the screener is a
+      // list, not an answer to "show me this market".
+      predictionMarketsMode = (handoff.intended_target_mode ??
+        (marketId ? "contract" : "screener")) as PredictionMarketsMode;
       if (marketId) await selectPredictionMarket(marketId);
       return;
     } else if (targetTab === "crypto") {
@@ -2395,6 +2414,11 @@
       return true;
     }
 
+    if (tabId === "prediction_markets") {
+      predictionMarketsMode = modeId as PredictionMarketsMode;
+      return true;
+    }
+
     if (tabId === "iv") {
       optionsMode = modeId as OptionsMode;
       return true;
@@ -2416,6 +2440,7 @@
     if (tabId === "fundamentals") return fundamentalsMode;
     if (tabId === "commodities") return commoditiesMode;
     if (tabId === "maritime") return maritimeMode;
+    if (tabId === "prediction_markets") return predictionMarketsMode;
     if (tabId === "iv") return optionsMode;
     if (tabId === "risk") return riskMode;
     return null;
@@ -2841,15 +2866,25 @@
         {:else if $activeTab === "prediction_markets"}
           <svelte:component
             this={activeViewComponent}
+            bind:mode={predictionMarketsMode}
             screener={$predictionMarketScreener}
             detail={$predictionMarketDetail}
             history={$predictionMarketHistory}
+            outcomeSeries={$predictionMarketOutcomeSeries}
+            comparison={$predictionMarketComparison}
             wallet={$predictionMarketWallet}
             related={$predictionMarketRelated}
             calibration={$predictionMarketCalibration}
+            historyRange={$predictionHistoryRange}
+            historyResolution={$predictionHistoryResolution}
+            historyOutcomeId={$predictionHistoryOutcomeId}
             loading={$loading.prediction || $loading.predictionDetail}
+            historyLoading={$loading.predictionHistory}
+            compareLoading={$loading.predictionCompare}
             onLoadScreener={loadPredictionMarketScreener}
             onSelectMarket={selectPredictionMarket}
+            onLoadHistory={loadPredictionMarketHistory}
+            onCompare={runPredictionMarketComparison}
             onSendToStrategyLab={handleStrategyLabHandoff}
           />
         {:else if $activeTab === "crypto"}

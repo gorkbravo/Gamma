@@ -6,6 +6,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from src.application.request_limits import (
+    MAX_PREDICTION_COMPARISON_LEGS,
     MAX_PREDICTION_MARKET_LIMIT,
     MAX_PREDICTION_MARKET_VENUES,
     MAX_REQUEST_TEXT_CHARS,
@@ -15,11 +16,19 @@ from src.models.prediction_markets import (
     CalibrationBucket,
     CalibrationObservation,
     CalibrationSummary,
+    PredictionBasketSummary,
+    PredictionComparisonLeg,
+    PredictionHistoryStats,
+    PredictionMarketComparison,
     PredictionMarketFreshness,
     PredictionMarketOutcome,
     PredictionMarketRecord,
     PredictionMarketScreenerResult,
+    PredictionOutcomeSeries,
+    PredictionPairAnalytics,
+    PredictionProbabilityHistory,
     PredictionProbabilityPoint,
+    PredictionSpreadPoint,
     PredictionVenueStatus,
     RelatedMarketRecord,
     WalletActivityRecord,
@@ -198,9 +207,187 @@ class PredictionProbabilityPointModel(BaseModel):
         return cls(**point.__dict__)
 
 
+class PredictionHistoryStatsModel(BaseModel):
+    point_count: int
+    first_timestamp: datetime | None = None
+    last_timestamp: datetime | None = None
+    span_days: float | None = None
+    first_probability: float | None = None
+    last_probability: float | None = None
+    change: float | None = None
+    high: float | None = None
+    low: float | None = None
+    range_width: float | None = None
+    percentile_of_range: float | None = None
+    max_move: float | None = None
+    max_move_at: datetime | None = None
+    daily_volatility: float | None = None
+    share_above_half: float | None = None
+    median_gap_seconds: float | None = None
+    largest_gap_seconds: float | None = None
+
+    @classmethod
+    def from_domain(cls, stats: PredictionHistoryStats) -> "PredictionHistoryStatsModel":
+        return cls(**stats.__dict__)
+
+
 class PredictionProbabilityHistoryResponseModel(BaseModel):
     market_id: str
     points: list[PredictionProbabilityPointModel] = Field(default_factory=list)
+    venue: str = ""
+    outcome_id: str | None = None
+    outcome_label: str | None = None
+    requested_range: str = "max"
+    effective_range: str = "max"
+    requested_resolution_minutes: int | None = None
+    effective_resolution_minutes: int | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    coverage_start: datetime | None = None
+    coverage_end: datetime | None = None
+    windowing: str = "provider_window"
+    stats: PredictionHistoryStatsModel | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str = ""
+    retrieved_at: datetime | None = None
+    origin: str = ""
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, history: PredictionProbabilityHistory) -> "PredictionProbabilityHistoryResponseModel":
+        payload = dict(history.__dict__)
+        payload["points"] = [PredictionProbabilityPointModel.from_domain(point) for point in history.points]
+        payload["stats"] = (
+            PredictionHistoryStatsModel.from_domain(history.stats) if history.stats is not None else None
+        )
+        return cls(**payload)
+
+
+class PredictionOutcomeSeriesModel(BaseModel):
+    outcome_id: str
+    label: str
+    probability: float | None = None
+    token_id: str | None = None
+    points: list[PredictionProbabilityPointModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, series: PredictionOutcomeSeries) -> "PredictionOutcomeSeriesModel":
+        payload = dict(series.__dict__)
+        payload["points"] = [PredictionProbabilityPointModel.from_domain(point) for point in series.points]
+        return cls(**payload)
+
+
+class PredictionOutcomeSeriesResponseModel(BaseModel):
+    market_id: str
+    requested_range: str = "max"
+    series: list[PredictionOutcomeSeriesModel] = Field(default_factory=list)
+
+
+class PredictionComparisonRequestModel(BaseModel):
+    market_ids: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
+        min_length=1,
+        max_length=MAX_PREDICTION_COMPARISON_LEGS,
+    )
+    range_key: str = Field(default="max", min_length=1, max_length=8)
+    resolution_minutes: int | None = Field(default=None, ge=1, le=1440)
+
+
+class PredictionComparisonLegModel(BaseModel):
+    market_id: str
+    venue: str
+    title: str
+    outcome_label: str | None = None
+    current_probability: float | None = None
+    status: str
+    end_time: datetime | None = None
+    event_id: str | None = None
+    event_title: str | None = None
+    points: list[PredictionProbabilityPointModel] = Field(default_factory=list)
+    stats: PredictionHistoryStatsModel | None = None
+    coverage_start: datetime | None = None
+    coverage_end: datetime | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_provider: str = ""
+    origin: str = ""
+
+    @classmethod
+    def from_domain(cls, leg: PredictionComparisonLeg) -> "PredictionComparisonLegModel":
+        payload = dict(leg.__dict__)
+        payload["points"] = [PredictionProbabilityPointModel.from_domain(point) for point in leg.points]
+        payload["stats"] = PredictionHistoryStatsModel.from_domain(leg.stats) if leg.stats is not None else None
+        return cls(**payload)
+
+
+class PredictionSpreadPointModel(BaseModel):
+    timestamp: datetime
+    spread: float
+
+    @classmethod
+    def from_domain(cls, point: PredictionSpreadPoint) -> "PredictionSpreadPointModel":
+        return cls(**point.__dict__)
+
+
+class PredictionPairAnalyticsModel(BaseModel):
+    left_market_id: str
+    right_market_id: str
+    overlap_points: int
+    overlap_start: datetime | None = None
+    overlap_end: datetime | None = None
+    current_spread: float | None = None
+    mean_spread: float | None = None
+    max_spread: float | None = None
+    min_spread: float | None = None
+    spread_volatility: float | None = None
+    current_spread_percentile: float | None = None
+    correlation: float | None = None
+    spread_series: list[PredictionSpreadPointModel] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(cls, pair: PredictionPairAnalytics) -> "PredictionPairAnalyticsModel":
+        payload = dict(pair.__dict__)
+        payload["spread_series"] = [
+            PredictionSpreadPointModel.from_domain(point) for point in pair.spread_series
+        ]
+        return cls(**payload)
+
+
+class PredictionBasketSummaryModel(BaseModel):
+    leg_count: int
+    probability_sum: float | None = None
+    implied_overround: float | None = None
+    same_event: bool = False
+    same_venue: bool = False
+    venues: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+    @classmethod
+    def from_domain(cls, basket: PredictionBasketSummary) -> "PredictionBasketSummaryModel":
+        return cls(**basket.__dict__)
+
+
+class PredictionMarketComparisonResponseModel(BaseModel):
+    requested_range: str
+    effective_resolution_minutes: int | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    legs: list[PredictionComparisonLegModel] = Field(default_factory=list)
+    pairs: list[PredictionPairAnalyticsModel] = Field(default_factory=list)
+    basket: PredictionBasketSummaryModel | None = None
+    warnings: list[str] = Field(default_factory=list)
+    retrieved_at: datetime | None = None
+    transformation_note: str | None = None
+
+    @classmethod
+    def from_domain(cls, result: PredictionMarketComparison) -> "PredictionMarketComparisonResponseModel":
+        payload = dict(result.__dict__)
+        payload["legs"] = [PredictionComparisonLegModel.from_domain(leg) for leg in result.legs]
+        payload["pairs"] = [PredictionPairAnalyticsModel.from_domain(pair) for pair in result.pairs]
+        payload["basket"] = (
+            PredictionBasketSummaryModel.from_domain(result.basket) if result.basket is not None else None
+        )
+        return cls(**payload)
 
 
 class WalletActivityModel(BaseModel):

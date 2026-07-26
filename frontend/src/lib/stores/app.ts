@@ -97,8 +97,11 @@ import type {
   NewsEventFeedResponse,
   SitrepWorkspaceResponse,
   PredictionCalibrationSummary,
+  PredictionHistoryRange,
   PredictionMarket,
+  PredictionMarketComparison,
   PredictionMarketListResponse,
+  PredictionOutcomeSeriesResponse,
   PredictionProbabilityHistoryResponse,
   PredictionWalletSummary,
   PortfolioHistoryResponse,
@@ -278,6 +281,13 @@ export interface PredictionMarketScreenerOptions {
 
 export type PredictionMarketSortBy = NonNullable<PredictionMarketScreenerOptions["sortBy"]>;
 
+export interface PredictionHistoryOptions {
+  range?: PredictionHistoryRange;
+  resolutionMinutes?: number | null;
+  outcomeId?: string | null;
+  includeOutcomes?: boolean;
+}
+
 export interface CryptoWorkspaceLoadOptions {
   query?: string;
   narrative?: string;
@@ -421,6 +431,11 @@ export const predictionMarketHistory = writable<PredictionProbabilityHistoryResp
 export const predictionMarketWallet = writable<PredictionWalletSummary | null>(null);
 export const predictionMarketRelated = writable<RelatedPredictionMarketListResponse | null>(null);
 export const predictionMarketCalibration = writable<PredictionCalibrationSummary | null>(null);
+export const predictionMarketOutcomeSeries = writable<PredictionOutcomeSeriesResponse | null>(null);
+export const predictionMarketComparison = writable<PredictionMarketComparison | null>(null);
+export const predictionHistoryRange = writable<PredictionHistoryRange>("max");
+export const predictionHistoryResolution = writable<number | null>(null);
+export const predictionHistoryOutcomeId = writable<string | null>(null);
 export const cryptoWorkspace = writable<CryptoWorkspaceResponse | null>(null);
 export const selectedCryptoTokenId = writable<string | null>(null);
 export const cryptoTokenDetail = writable<CryptoToken | null>(null);
@@ -2395,6 +2410,7 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
       predictionMarketWallet.set(null);
       predictionMarketRelated.set(null);
       predictionMarketCalibration.set(null);
+      predictionMarketOutcomeSeries.set(null);
       resetCopilotCard("prediction_markets");
     }
     lastError.set("");
@@ -2407,22 +2423,128 @@ export async function loadPredictionMarketScreener(options: PredictionMarketScre
   }
 }
 
+function predictionHistoryQuery(options: PredictionHistoryOptions = {}) {
+  const params = new URLSearchParams();
+  params.set("range", options.range ?? get(predictionHistoryRange));
+  const resolution = options.resolutionMinutes === undefined ? get(predictionHistoryResolution) : options.resolutionMinutes;
+  if (resolution != null) {
+    params.set("resolution", String(resolution));
+  }
+  return params;
+}
+
+export async function loadPredictionMarketHistory(
+  marketId: string,
+  options: PredictionHistoryOptions = {}
+) {
+  const range = options.range ?? get(predictionHistoryRange);
+  const resolution =
+    options.resolutionMinutes === undefined ? get(predictionHistoryResolution) : options.resolutionMinutes;
+  const outcomeId = options.outcomeId === undefined ? get(predictionHistoryOutcomeId) : options.outcomeId;
+
+  predictionHistoryRange.set(range);
+  predictionHistoryResolution.set(resolution ?? null);
+  predictionHistoryOutcomeId.set(outcomeId ?? null);
+
+  const params = predictionHistoryQuery({ range, resolutionMinutes: resolution });
+  if (outcomeId) {
+    params.set("outcome_id", outcomeId);
+  }
+
+  setLoading("predictionHistory", true);
+  try {
+    const requests: Promise<unknown>[] = [
+      getJson<PredictionProbabilityHistoryResponse>(
+        `/prediction-markets/markets/${marketId}/history?${params.toString()}`
+      )
+    ];
+    if (options.includeOutcomes) {
+      requests.push(
+        getJson<PredictionOutcomeSeriesResponse>(
+          `/prediction-markets/markets/${marketId}/outcome-history?${predictionHistoryQuery({
+            range,
+            resolutionMinutes: resolution
+          }).toString()}`
+        )
+      );
+    }
+    const [historyResult, outcomeResult] = await Promise.allSettled(requests);
+
+    if (historyResult.status === "fulfilled") {
+      predictionMarketHistory.set(historyResult.value as PredictionProbabilityHistoryResponse);
+      lastError.set("");
+    } else {
+      setError(historyResult.reason);
+    }
+    if (options.includeOutcomes) {
+      if (outcomeResult?.status === "fulfilled") {
+        predictionMarketOutcomeSeries.set(outcomeResult.value as PredictionOutcomeSeriesResponse);
+      } else if (outcomeResult?.status === "rejected") {
+        predictionMarketOutcomeSeries.set(null);
+      }
+    }
+    return get(predictionMarketHistory);
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionHistory", false);
+  }
+}
+
+export async function runPredictionMarketComparison(
+  marketIds: string[],
+  options: { range?: PredictionHistoryRange; resolutionMinutes?: number | null } = {}
+) {
+  if (marketIds.length < 1) {
+    predictionMarketComparison.set(null);
+    return null;
+  }
+  setLoading("predictionCompare", true);
+  try {
+    const response = await postJson<PredictionMarketComparison>("/prediction-markets/compare", {
+      market_ids: marketIds,
+      range_key: options.range ?? get(predictionHistoryRange),
+      resolution_minutes:
+        options.resolutionMinutes === undefined ? get(predictionHistoryResolution) : options.resolutionMinutes
+    });
+    predictionMarketComparison.set(response);
+    lastError.set("");
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  } finally {
+    setLoading("predictionCompare", false);
+  }
+}
+
 export async function selectPredictionMarket(
   marketId: string,
-  options: { resetThread?: boolean } = {}
+  options: { resetThread?: boolean } & PredictionHistoryOptions = {}
 ) {
   selectedPredictionMarketId.set(marketId);
   if (options.resetThread ?? true) {
     resetCopilotCard("prediction_markets");
   }
+  // A new contract must not inherit the previous contract's outcome selection.
+  predictionHistoryOutcomeId.set(options.outcomeId ?? null);
+  predictionMarketOutcomeSeries.set(null);
   setLoading("predictionDetail", true);
   try {
-    const [detailResult, historyResult, walletResult, relatedResult, calibrationResult] = await Promise.allSettled([
+    const historyParams = predictionHistoryQuery(options);
+    const [detailResult, historyResult, walletResult, relatedResult, calibrationResult, outcomeResult] =
+      await Promise.allSettled([
       getJson<PredictionMarket>(`/prediction-markets/markets/${marketId}`),
-      getJson<PredictionProbabilityHistoryResponse>(`/prediction-markets/markets/${marketId}/history`),
+      getJson<PredictionProbabilityHistoryResponse>(
+        `/prediction-markets/markets/${marketId}/history?${historyParams.toString()}`
+      ),
       getJson<PredictionWalletSummary>(`/prediction-markets/markets/${marketId}/wallet-summary`),
       getJson<RelatedPredictionMarketListResponse>(`/prediction-markets/markets/${marketId}/related`),
-      getJson<PredictionCalibrationSummary>(`/prediction-markets/markets/${marketId}/calibration`)
+      getJson<PredictionCalibrationSummary>(`/prediction-markets/markets/${marketId}/calibration`),
+      getJson<PredictionOutcomeSeriesResponse>(
+        `/prediction-markets/markets/${marketId}/outcome-history?${historyParams.toString()}`
+      )
     ]);
 
     const errors: unknown[] = [];
@@ -2451,6 +2573,13 @@ export async function selectPredictionMarket(
       predictionMarketCalibration.set(calibrationResult.value);
     } else {
       errors.push(calibrationResult.reason);
+    }
+    if (outcomeResult.status === "fulfilled") {
+      predictionMarketOutcomeSeries.set(outcomeResult.value);
+    } else {
+      // Per-outcome history is additive context; a venue without outcome tokens
+      // must not turn the whole contract load into an error.
+      predictionMarketOutcomeSeries.set(null);
     }
 
     if (errors.length === 0) {

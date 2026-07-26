@@ -1105,7 +1105,25 @@ describe("app store orchestration", () => {
           origin: "polymarket.history",
           transformation_note: null
         }
-      ]
+      ],
+      venue: "polymarket",
+      outcome_id: "polymarket:fed-cut:yes",
+      outcome_label: "Yes",
+      requested_range: "max",
+      effective_range: "1m",
+      requested_resolution_minutes: null,
+      effective_resolution_minutes: 60,
+      window_start: null,
+      window_end: "2026-03-01T04:00:00Z",
+      coverage_start: "2026-03-01T00:00:00Z",
+      coverage_end: "2026-03-01T00:00:00Z",
+      windowing: "provider_window",
+      stats: null,
+      warnings: [],
+      source_provider: "polymarket",
+      retrieved_at: "2026-03-01T00:05:00Z",
+      origin: "polymarket.clob.prices_history",
+      transformation_note: null
     };
     const wallet: PredictionWalletSummary = {
       market_id: "polymarket:fed-cut",

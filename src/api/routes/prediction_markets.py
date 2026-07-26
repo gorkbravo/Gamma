@@ -1,18 +1,22 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.api.schemas.prediction_markets import (
     CalibrationSummaryResponseModel,
+    PredictionComparisonRequestModel,
+    PredictionMarketComparisonResponseModel,
     PredictionMarketListResponseModel,
     PredictionMarketModel,
     PredictionMarketScreenerRequestModel,
+    PredictionOutcomeSeriesModel,
+    PredictionOutcomeSeriesResponseModel,
     PredictionProbabilityHistoryResponseModel,
-    PredictionProbabilityPointModel,
     RelatedMarketListResponseModel,
     RelatedMarketModel,
     WalletSummaryResponseModel,
 )
+from src.application.prediction_market_service import HISTORY_RANGE_KEYS
 
 
 router = APIRouter(tags=["prediction_markets"])
@@ -41,13 +45,75 @@ def prediction_market_detail(market_id: str, request: Request) -> PredictionMark
     "/prediction-markets/markets/{market_id}/history",
     response_model=PredictionProbabilityHistoryResponseModel,
 )
-def prediction_market_history(market_id: str, request: Request) -> PredictionProbabilityHistoryResponseModel:
+def prediction_market_history(
+    market_id: str,
+    request: Request,
+    range_key: str = Query(default="max", alias="range"),
+    resolution_minutes: int | None = Query(default=None, ge=1, le=1440, alias="resolution"),
+    outcome_id: str | None = Query(default=None, max_length=256),
+) -> PredictionProbabilityHistoryResponseModel:
+    if range_key not in HISTORY_RANGE_KEYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported range '{range_key}'. Supported: {', '.join(HISTORY_RANGE_KEYS)}.",
+        )
     runtime = request.app.state.runtime
-    points = runtime.prediction_market_service.get_probability_history(market_id)
-    return PredictionProbabilityHistoryResponseModel(
-        market_id=market_id,
-        points=[PredictionProbabilityPointModel.from_domain(point) for point in points],
+    history = runtime.prediction_market_service.get_history_series(
+        market_id,
+        range_key=range_key,
+        resolution_minutes=resolution_minutes,
+        outcome_id=outcome_id,
     )
+    if history is None:
+        raise HTTPException(status_code=404, detail=f"Prediction market not found: {market_id}")
+    return PredictionProbabilityHistoryResponseModel.from_domain(history)
+
+
+@router.get(
+    "/prediction-markets/markets/{market_id}/outcome-history",
+    response_model=PredictionOutcomeSeriesResponseModel,
+)
+def prediction_market_outcome_history(
+    market_id: str,
+    request: Request,
+    range_key: str = Query(default="max", alias="range"),
+    resolution_minutes: int | None = Query(default=None, ge=1, le=1440, alias="resolution"),
+) -> PredictionOutcomeSeriesResponseModel:
+    if range_key not in HISTORY_RANGE_KEYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported range '{range_key}'. Supported: {', '.join(HISTORY_RANGE_KEYS)}.",
+        )
+    runtime = request.app.state.runtime
+    series = runtime.prediction_market_service.get_outcome_series(
+        market_id,
+        range_key=range_key,
+        resolution_minutes=resolution_minutes,
+    )
+    return PredictionOutcomeSeriesResponseModel(
+        market_id=market_id,
+        requested_range=range_key,
+        series=[PredictionOutcomeSeriesModel.from_domain(item) for item in series],
+    )
+
+
+@router.post("/prediction-markets/compare", response_model=PredictionMarketComparisonResponseModel)
+def prediction_market_compare(
+    payload: PredictionComparisonRequestModel,
+    request: Request,
+) -> PredictionMarketComparisonResponseModel:
+    if payload.range_key not in HISTORY_RANGE_KEYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported range '{payload.range_key}'. Supported: {', '.join(HISTORY_RANGE_KEYS)}.",
+        )
+    runtime = request.app.state.runtime
+    result = runtime.prediction_market_service.compare_markets(
+        list(payload.market_ids),
+        range_key=payload.range_key,
+        resolution_minutes=payload.resolution_minutes,
+    )
+    return PredictionMarketComparisonResponseModel.from_domain(result)
 
 
 @router.get(

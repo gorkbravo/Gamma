@@ -178,8 +178,15 @@ describe("navigation tab ordering", () => {
       "iv",
       "macro",
       "maritime",
+      "prediction_markets",
       "risk",
       "strategy_lab",
+    ]);
+    expect(snapshot.prediction_markets?.map((mode) => mode.id)).toEqual([
+      "screener",
+      "contract",
+      "compare",
+      "calibration",
     ]);
     expect(snapshot.commodities?.map((mode) => mode.id)).toEqual([
       "overview",

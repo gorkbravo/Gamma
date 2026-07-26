@@ -62,6 +62,12 @@ export const TAB_MODE_DEFINITIONS: Partial<Record<TabId, readonly TabModeDefinit
     { id: "trade_partners", label: "Trade Partners", defaultIndex: 4 },
     { id: "country_compare", label: "Country Compare", defaultIndex: 5 },
   ]),
+  prediction_markets: defineTabModes([
+    { id: "screener", label: "Screener", defaultIndex: 0 },
+    { id: "contract", label: "Contract", defaultIndex: 1 },
+    { id: "compare", label: "Compare", defaultIndex: 2 },
+    { id: "calibration", label: "Calibration", defaultIndex: 3 },
+  ]),
   crypto: defineTabModes([
     { id: "overview", label: "Overview", defaultIndex: 0 },
     { id: "deep_dive", label: "Deep Dive", defaultIndex: 1 },
