@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getJson, postJson } from "./client";
+import { API_BASE, getJson, postJson } from "./client";
 
 describe("api client errors", () => {
   afterEach(() => {
@@ -57,7 +57,7 @@ describe("api client errors", () => {
     await postJson("/research/analyze", {});
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/research/analyze",
+      `${API_BASE}/research/analyze`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "Content-Type": "application/json",

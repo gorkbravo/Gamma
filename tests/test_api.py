@@ -73,6 +73,7 @@ def test_health_and_system_status_endpoints(tmp_path):
         status = client.get("/system/status")
         mode_change = client.post("/system/market-data-mode", json={"market_data_mode": "live"})
         connection_toggle = client.post("/system/connection/toggle", json={})
+        connection_desired = client.post("/system/connection", json={"connected": True})
         assert health.status_code == 200
         assert health.json()["status"] == "ok"
         assert status.status_code == 200
@@ -83,14 +84,53 @@ def test_health_and_system_status_endpoints(tmp_path):
         assert payload["base_currency"] == runtime.base_currency
         assert mode_change.status_code == 200
         assert mode_change.json()["market_data_mode"] == "live"
+        assert connection_desired.status_code == 200
+        assert connection_desired.json()["connection"]["connected"] is True
         next_currency = "EUR" if runtime.base_currency != "EUR" else "USD"
         base_currency_change = client.post("/system/base-currency", json={"base_currency": next_currency})
         assert base_currency_change.status_code == 200
         base_currency_payload = base_currency_change.json()
         assert base_currency_payload["base_currency"] == next_currency
-        assert any("Local portfolio history was cleared" in line for line in base_currency_payload["lines"])
+        assert any(
+            "local portfolio history" in line.lower()
+            for line in base_currency_payload["lines"]
+        )
         assert connection_toggle.status_code == 200
         assert connection_toggle.json()["connection"]["status_text"] == "Status: Mock"
+    finally:
+        runtime.shutdown()
+
+
+def test_system_connection_desired_state_is_idempotent(tmp_path):
+    client, runtime = _build_test_client(tmp_path)
+    connected = False
+    calls = {"connect": 0, "disconnect": 0}
+
+    def is_connected():
+        return connected
+
+    def connect():
+        nonlocal connected
+        calls["connect"] += 1
+        connected = True
+
+    def disconnect():
+        nonlocal connected
+        calls["disconnect"] += 1
+        connected = False
+
+    runtime.mock_mode = False
+    runtime.client.is_connected = is_connected
+    runtime.client.connect = connect
+    runtime.client.disconnect = disconnect
+    try:
+        assert client.post("/system/connection", json={"connected": True}).status_code == 200
+        assert client.post("/system/connection", json={"connected": True}).status_code == 200
+        assert calls == {"connect": 1, "disconnect": 0}
+
+        assert client.post("/system/connection", json={"connected": False}).status_code == 200
+        assert client.post("/system/connection", json={"connected": False}).status_code == 200
+        assert calls == {"connect": 1, "disconnect": 1}
     finally:
         runtime.shutdown()
 

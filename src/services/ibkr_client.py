@@ -147,6 +147,16 @@ class IBKRClient:
         with self._connected_lock:
             return bool(self._connected_state)
 
+    def account_subscription_usable(self) -> bool:
+        """Report readiness without exposing the selected broker account identifier."""
+        if self.mock:
+            return True
+        return bool(
+            self.is_connected()
+            and self.active_account
+            and self._account_updates_ready
+        )
+
     @property
     def ib_runner(self) -> IBThreadRunner | None:
         return self._runner
@@ -342,7 +352,9 @@ class IBKRClient:
             for warning in warnings:
                 self._add_warning(warning)
             self._debug_log(
-                f"connect ok account={self.active_account or 'N/A'} managed={len(self._managed_accounts)}"
+                "connect ok "
+                f"account={self._redact_account(self.active_account)} "
+                f"managed={len(self._managed_accounts)}"
             )
             return True
         except Exception as exc:
@@ -407,7 +419,8 @@ class IBKRClient:
                 active = configured
             else:
                 warnings.append(
-                    f"IB_ACCOUNT '{configured}' not in managed accounts: {', '.join(managed_accounts) or 'none'}"
+                    "Configured IB_ACCOUNT did not match a managed account; "
+                    "using the first available managed account when possible."
                 )
                 if managed_accounts:
                     active = managed_accounts[0]
@@ -430,7 +443,9 @@ class IBKRClient:
         self, account: str, subscribe: bool = True, timeout_seconds: float = 4.0, request_tag: str | None = None
     ) -> bool:
         tag = request_tag or self._next_request_tag("reqAccountUpdates")
-        self._debug_log(f"{tag} account={account} subscribe={subscribe}")
+        self._debug_log(
+            f"{tag} account={self._redact_account(account)} subscribe={subscribe}"
+        )
         if not subscribe:
             self._cancel_account_updates(account)
             return True
@@ -1580,14 +1595,13 @@ class IBKRClient:
         log(f"Skip snapshot quotes: {self._skip_quotes}")
         managed = self._fetch_managed_accounts()
         self._managed_accounts = managed
-        log(f"Managed accounts: {', '.join(managed) or 'none'}")
-        configured = (self.account or "").strip() or "None"
-        log(f"Configured IB_ACCOUNT: {configured}")
+        log(f"Managed accounts available: {len(managed)}")
+        log(f"Configured IB_ACCOUNT present: {bool((self.account or '').strip())}")
         active, resolve_warnings = self._resolve_active_account(managed)
         for warning in resolve_warnings:
             log(f"WARNING: {warning}")
         self.active_account = active
-        log(f"Active account: {active or 'None'}")
+        log(f"Active account available: {active is not None}")
         port_warning = self._port_account_warning(active)
         if port_warning:
             log(f"WARNING: {port_warning}")
@@ -1681,7 +1695,7 @@ class IBKRClient:
 
         managed = self._fetch_managed_accounts()
         self._managed_accounts = managed
-        log(f"Managed accounts: {', '.join(managed) or 'none'}")
+        log(f"Managed accounts available: {len(managed)}")
         if not managed:
             log("WARNING: No managed accounts returned; cannot request account data")
             return lines
@@ -1690,7 +1704,7 @@ class IBKRClient:
         for warning in resolve_warnings:
             log(f"WARNING: {warning}")
         self.active_account = active
-        log(f"Active account: {active or 'None'}")
+        log(f"Active account available: {active is not None}")
         port_warning = self._port_account_warning(active)
         if port_warning:
             log(f"WARNING: {port_warning}")

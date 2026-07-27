@@ -92,7 +92,7 @@
     grid-template-rows: auto auto minmax(0, 1fr);
     height: 17.5rem;
     border: 1px solid var(--panel-border);
-    background: var(--surface-1);
+    background: var(--panel-bg);
     padding: var(--space-6) var(--space-6) var(--space-6);
   }
 
@@ -153,7 +153,7 @@
   .console-body {
     overflow: auto;
     border: 1px solid var(--divider);
-    background: rgba(6, 10, 14, 0.82);
+    background: var(--surface-0);
   }
 
   .line {
@@ -162,7 +162,7 @@
     gap: var(--space-5);
     align-items: start;
     padding: var(--space-5) var(--space-6);
-    border-bottom: 1px solid rgba(46, 60, 74, 0.58);
+    border-bottom: 1px solid var(--divider);
   }
 
   .tag {
@@ -198,7 +198,7 @@
   }
 
   button {
-    background: #0b1219;
+    background: var(--surface-0);
     border: 1px solid var(--panel-strong);
     color: var(--text-0);
     padding: var(--space-4) var(--space-5);

@@ -23,10 +23,21 @@ export {
   refreshSystemStatus, setMarketDataMode, systemStatus, toggleConnection
 } from "./system";
 import {
-  loadPortfolioPerformanceData, loadPortfolioSnapshotData,
-  portfolioHistory, portfolioPerformance, portfolioSnapshot
+  loadPortfolioHistoryData, loadPortfolioPerformanceData, loadPortfolioSnapshotData,
+  portfolioHistory, portfolioHistoryRequestState, portfolioPerformance,
+  portfolioPerformanceRequestState, portfolioPreferences, portfolioSnapshot,
+  portfolioSnapshotRequestState, updatePortfolioPreferences
 } from "./portfolio";
-export { portfolioHistory, portfolioPerformance, portfolioSnapshot } from "./portfolio";
+export {
+  portfolioHistory,
+  portfolioHistoryRequestState,
+  portfolioPerformance,
+  portfolioPerformanceRequestState,
+  portfolioPreferences,
+  portfolioSnapshot,
+  portfolioSnapshotRequestState,
+  updatePortfolioPreferences
+} from "./portfolio";
 import { buildResearchBookObjectFromStrategyComposition } from "../view-models/research";
 import {
   SITREP_FOLLOW_UP_MIGRATED_STORAGE_KEY,
@@ -104,6 +115,7 @@ import type {
   PredictionOutcomeSeriesResponse,
   PredictionProbabilityHistoryResponse,
   PredictionWalletSummary,
+  PortfolioHistoryClearResponse,
   PortfolioHistoryResponse,
   PortfolioPerformanceResponse,
   PortfolioSnapshot,
@@ -1425,6 +1437,7 @@ export async function setBaseCurrency(currency: string) {
 export async function loadPortfolioSnapshot() {
   const loaded = await loadPortfolioSnapshotData();
   if (loaded) resetCopilotCard("portfolio");
+  return loaded;
 }
 
 export async function loadPortfolioPerformance(options?: {
@@ -1434,6 +1447,7 @@ export async function loadPortfolioPerformance(options?: {
 }) {
   const loaded = await loadPortfolioPerformanceData(options);
   if (loaded) resetCopilotCard("portfolio");
+  return loaded;
 }
 
 export async function loadResearchOverview(options: ResearchOverviewLoadOptions = {}) {
@@ -4927,15 +4941,16 @@ export async function forceAccountSubscribe() {
 }
 
 export async function clearPortfolioHistory() {
-  const result = await runActionRequest("/portfolio/history/clear", "portfolioAction", "[History]");
+  const result = await runActionRequest<PortfolioHistoryClearResponse>(
+    "/portfolio/history/clear",
+    "portfolioAction",
+    "[History]"
+  );
   if (result?.success) {
-    portfolioHistory.set({
-      source: "local_history_store",
-      points: []
-    });
+    await loadPortfolioHistoryData();
     const snapshot = get(portfolioSnapshot);
     if (snapshot) {
-      await loadPortfolioPerformance({ snapshot });
+      await loadPortfolioPerformanceData({ snapshot });
     }
   }
   return result;
@@ -5025,10 +5040,14 @@ export async function stopIvSession() {
   }
 }
 
-async function runActionRequest(path: string, loadingKey: string, heading: string) {
+async function runActionRequest<T extends ActionResponse = ActionResponse>(
+  path: string,
+  loadingKey: string,
+  heading: string
+) {
   setLoading(loadingKey, true);
   try {
-    const result = await postJson<ActionResponse>(path, {});
+    const result = await postJson<T>(path, {});
     appendDiagnosticsLog(result.lines, heading);
     lastError.set("");
     return result;

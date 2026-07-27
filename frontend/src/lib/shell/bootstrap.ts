@@ -19,11 +19,13 @@ export type ActiveWorkspaceHydration = {
 /** Hydrates only the restored visible domain. Shell diagnostics/settings remain user-activated. */
 export async function hydrateActiveWorkspace(
   tab: TabId,
-  status: SystemStatus | null,
+  _status: SystemStatus | null,
   loaders: ActiveWorkspaceHydration
 ): Promise<void> {
   if (tab === "portfolio") {
-    if (status?.mock_mode || status?.connection.connected) await loaders.portfolio();
+    // The Portfolio loader also reads local history. Run it while disconnected
+    // so the view can distinguish retained history from an unavailable live snapshot.
+    await loaders.portfolio();
     return;
   }
   const loader: Record<Exclude<TabId, "portfolio">, () => Promise<unknown>> = {

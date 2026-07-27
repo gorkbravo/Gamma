@@ -33,6 +33,10 @@ class SystemStatusResponseModel(BaseModel):
     cached_symbols: list[str] = Field(default_factory=list)
 
 
+class ConnectionRequestModel(BaseModel):
+    connected: bool
+
+
 class MarketDataModeRequestModel(BaseModel):
     market_data_mode: str
 

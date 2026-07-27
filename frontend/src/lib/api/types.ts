@@ -297,6 +297,28 @@ export interface PortfolioSnapshot {
   day_pnl_pct: number | null;
   day_pnl_source: string | null;
   warnings: string[];
+  state?: "ready" | "partial" | "empty" | "unavailable" | "failed";
+  source_provider?: string;
+  retrieved_at?: string | null;
+  origin?: string;
+  freshness_label?: string;
+  transformation_note?: string | null;
+  quote_mode?: string;
+  market_data_mode?: string;
+  complete?: boolean;
+  connection_ready?: boolean;
+  account_summary_available?: boolean;
+  account_subscription_usable?: boolean;
+  requested_position_count?: number;
+  quoted_position_count?: number;
+  missing_quote_count?: number;
+  missing_quote_symbols?: string[];
+  cached_quote_count?: number;
+  cached_quote_symbols?: string[];
+  delayed_quote_count?: number;
+  delayed_quote_symbols?: string[];
+  available_value_count?: number;
+  history_store_health?: PortfolioHistoryHealth | null;
 }
 
 export interface PortfolioHistoryPoint {
@@ -311,11 +333,33 @@ export interface PortfolioHistoryPoint {
 export interface PortfolioHistoryResponse {
   source: string;
   points: PortfolioHistoryPoint[];
+  state?: "ready" | "empty" | "recovered" | "degraded" | "failed";
+  source_provider?: string;
+  retrieved_at?: string | null;
+  origin?: string;
+  freshness_label?: string;
+  transformation_note?: string | null;
+  warnings?: string[];
+  health?: PortfolioHistoryHealth;
+}
+
+export interface PortfolioHistoryHealth {
+  status: "ready" | "empty" | "recovered" | "degraded" | "failed";
+  point_count: number;
+  base_currency: string | null;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  malformed_row_count: number;
+  duplicate_row_count: number;
+  recovery_archive_name: string | null;
+  last_write_at: string | null;
+  warnings: string[];
 }
 
 export interface PortfolioPerformanceResponse {
   benchmark_symbol: string;
   benchmark_source: string;
+  benchmark_source_provider?: "mock" | "ibkr" | "gamma_cash_0" | "unavailable" | string;
   performance_points: TimeSeriesPoint[];
   benchmark_points: TimeSeriesPoint[];
   portfolio_base_value: number | null;
@@ -325,6 +369,32 @@ export interface PortfolioPerformanceResponse {
   day_pnl_source: string | null;
   message: string | null;
   warnings: string[];
+  state?: "ready" | "partial" | "unavailable" | "failed";
+  source_provider?: string;
+  retrieved_at?: string | null;
+  origin?: string;
+  freshness_label?: string;
+  transformation_note?: string | null;
+  complete?: boolean;
+  requested_position_count?: number;
+  covered_position_count?: number;
+  history_coverage_ratio?: number | null;
+  missing_history_symbols?: string[];
+  missing_fx_symbols?: string[];
+  history_source?: string;
+  history_source_provider?: string;
+  history_freshness_label?: string;
+  history_transformation_note?: string | null;
+  history_point_count?: number;
+  benchmark_freshness_label?: string;
+  benchmark_transformation_note?: string | null;
+}
+
+export interface PortfolioHistoryClearResponse {
+  success: boolean;
+  lines: string[];
+  archived: boolean;
+  archive_name: string | null;
 }
 
 export interface ResearchWeightPoint {

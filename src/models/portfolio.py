@@ -2,11 +2,61 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Dict, List, Optional
 
 import pandas as pd
 
 from src.models.instruments import build_instrument_id, normalize_symbol
+
+
+class PortfolioSnapshotState(str, Enum):
+    READY = "ready"
+    PARTIAL = "partial"
+    EMPTY = "empty"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+class PortfolioHistoryState(str, Enum):
+    READY = "ready"
+    EMPTY = "empty"
+    RECOVERED = "recovered"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+
+
+class PortfolioPerformanceState(str, Enum):
+    READY = "ready"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+@dataclass
+class PortfolioHistoryHealth:
+    status: PortfolioHistoryState = PortfolioHistoryState.EMPTY
+    point_count: int = 0
+    base_currency: str | None = None
+    first_timestamp: datetime | None = None
+    last_timestamp: datetime | None = None
+    malformed_row_count: int = 0
+    duplicate_row_count: int = 0
+    recovery_archive_name: str | None = None
+    last_write_at: datetime | None = None
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class PortfolioHistoryLoadResult:
+    frame: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
+    health: PortfolioHistoryHealth = field(default_factory=PortfolioHistoryHealth)
+
+
+@dataclass(frozen=True)
+class PortfolioHistoryClearResult:
+    archived: bool
+    archive_name: str | None = None
 
 
 @dataclass
@@ -62,6 +112,28 @@ class PortfolioSnapshot:
     day_pnl: float | None = None
     day_pnl_pct: float | None = None
     day_pnl_source: str | None = None
+    state: PortfolioSnapshotState = PortfolioSnapshotState.READY
+    source_provider: str = "unknown"
+    retrieved_at: datetime | None = None
+    origin: str = "gamma.portfolio.snapshot"
+    freshness_label: str = "unknown"
+    transformation_note: str | None = None
+    quote_mode: str = "Snapshot"
+    market_data_mode: str = "unknown"
+    complete: bool = True
+    connection_ready: bool = False
+    account_summary_available: bool = False
+    account_subscription_usable: bool = False
+    requested_position_count: int = 0
+    quoted_position_count: int = 0
+    missing_quote_count: int = 0
+    missing_quote_symbols: List[str] = field(default_factory=list)
+    cached_quote_count: int = 0
+    cached_quote_symbols: List[str] = field(default_factory=list)
+    delayed_quote_count: int = 0
+    delayed_quote_symbols: List[str] = field(default_factory=list)
+    available_value_count: int = 0
+    history_store_health: PortfolioHistoryHealth | None = None
     warnings: List[str] = field(default_factory=list)
 
 

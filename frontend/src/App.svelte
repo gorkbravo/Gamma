@@ -1936,23 +1936,30 @@
   async function handleToggleDiagnostics() {
     diagnosticsOpen = !diagnosticsOpen;
     if (diagnosticsOpen) {
-      await loadDiagnostics();
+      return await loadDiagnostics();
     }
+    return { success: true };
   }
 
   async function handleRunDiagnostics() {
-    await runDiagnosticsAction();
+    const result = await runDiagnosticsAction();
     await loadDiagnostics();
+    return result;
   }
 
   async function handleForceSubscribe() {
-    await forceAccountSubscribe();
+    const result = await forceAccountSubscribe();
+    if (result?.success) {
+      await loadPortfolioSnapshot();
+    }
     await loadDiagnostics();
+    return result;
   }
 
   async function handleClearHistory() {
-    await clearPortfolioHistory();
+    const result = await clearPortfolioHistory();
     await loadDiagnostics();
+    return result;
   }
 
   function startIvPolling() {
@@ -2743,12 +2750,15 @@
             history={$portfolioHistory}
             performance={$portfolioPerformance}
             loading={$loading.portfolio}
+            systemStatus={$systemStatus}
+            providerUsage={$providerUsage}
             diagnostics={$diagnostics}
             diagnosticsLog={$diagnosticsLog}
             consoleEntries={consoleEntries}
             diagnosticsOpen={diagnosticsOpen}
             diagnosticsLoading={$loading.diagnostics}
             diagnosticsActionLoading={$loading.diagnosticsAction || $loading.portfolioAction}
+            onRefreshSnapshot={loadPortfolioSnapshot}
             onReloadPerformance={loadPortfolioPerformance}
             onToggleDiagnostics={handleToggleDiagnostics}
             onRefreshDiagnostics={loadDiagnostics}

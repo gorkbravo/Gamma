@@ -159,9 +159,15 @@ class ApplicationRuntime:
             return normalized, [f"Base currency already set to {normalized}."]
         self.base_currency = normalized
         self.research_provider.base_currency = normalized
-        self.portfolio_history.clear()
+        history_clear = self.portfolio_history.clear()
         notes.append(f"Base currency set to {normalized}.")
-        notes.append("Local portfolio history was cleared because stored snapshots are base-currency specific.")
+        if history_clear.archived:
+            notes.append(
+                "The previous local portfolio history was archived because stored snapshots "
+                "are base-currency specific."
+            )
+        else:
+            notes.append("No existing local portfolio history needed to be archived.")
         notes.append("Re-run research and risk views to refresh any previously loaded analytics.")
         return normalized, notes
 
@@ -242,6 +248,14 @@ def build_runtime(
         cache=cache,
         market_data=market_data,
         ib_runner=client.ib_runner,
+        sample_rates=(
+            {
+                ("EUR", "USD"): 1.10,
+                ("USD", "EUR"): 1.0 / 1.10,
+            }
+            if mock_mode
+            else None
+        ),
     )
     portfolio_history = PortfolioHistoryStore(base_dir=resolved_history_dir, mock=bool(mock_mode))
     saved_research_store = SavedResearchStore(base_dir=resolved_history_dir / "research")

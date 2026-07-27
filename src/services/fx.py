@@ -18,6 +18,7 @@ class FXService:
         market_data: "MarketDataService | None" = None,
         ib_runner: IBThreadRunner | None = None,
         cache_minutes: int = 30,
+        sample_rates: dict[tuple[str, str], float] | None = None,
     ) -> None:
         self.ib = ib
         self.cache = cache
@@ -25,6 +26,10 @@ class FXService:
         self.ib_runner = ib_runner
         self.ttl = timedelta(minutes=cache_minutes)
         self._memory_cache: dict[str, tuple[float, datetime]] = {}
+        self._sample_rates = {
+            (self._normalize_currency(base), self._normalize_currency(quote)): float(rate)
+            for (base, quote), rate in (sample_rates or {}).items()
+        }
 
     def set_ib(self, ib: IB | None) -> None:
         self.ib = ib
@@ -55,6 +60,9 @@ class FXService:
             return 1.0
         if not self._is_valid_currency_code(base_ccy) or not self._is_valid_currency_code(quote_ccy):
             return None
+        sample_rate = self._sample_rates.get((base_ccy, quote_ccy))
+        if sample_rate is not None and sample_rate > 0:
+            return sample_rate
         key = self._cache_key(base_ccy, quote_ccy)
         cached = self._get_cached_rate(key)
         if cached is not None:

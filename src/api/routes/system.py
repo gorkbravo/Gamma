@@ -7,6 +7,7 @@ from src.api.schemas.system import (
     ActionResponseModel,
     BaseCurrencyRequestModel,
     BaseCurrencyResponseModel,
+    ConnectionRequestModel,
     ConnectionStateModel,
     DiagnosticsResponseModel,
     HealthResponseModel,
@@ -88,6 +89,22 @@ def toggle_connection(request: Request) -> SystemStatusResponseModel:
             runtime.client.disconnect()
         else:
             runtime.client.connect()
+    return _system_status_response(runtime)
+
+
+@router.post("/system/connection", response_model=SystemStatusResponseModel)
+def set_connection(
+    payload: ConnectionRequestModel,
+    request: Request,
+) -> SystemStatusResponseModel:
+    """Apply a desired TWS connection state without toggle races."""
+    runtime = request.app.state.runtime
+    if not runtime.mock_mode:
+        connected = runtime.client.is_connected()
+        if payload.connected and not connected:
+            runtime.client.connect()
+        elif not payload.connected and connected:
+            runtime.client.disconnect()
     return _system_status_response(runtime)
 
 

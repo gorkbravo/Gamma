@@ -1,4 +1,4 @@
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { getJson, postJson } from "../api/client";
 import type { DiagnosticsResponse, ProviderUsageResponse, SystemStatus } from "../api/types";
 import { isAbortError } from "../request-coordinator";
@@ -30,9 +30,14 @@ export async function refreshSystemStatus() {
 export async function loadDiagnostics() {
   setLoading("diagnostics", true);
   try {
-    diagnostics.set(await getJson<DiagnosticsResponse>("/diagnostics"));
+    const response = await getJson<DiagnosticsResponse>("/diagnostics");
+    diagnostics.set(response);
     lastError.set("");
-  } catch (error) { setError(error); }
+    return response;
+  } catch (error) {
+    setError(error);
+    return null;
+  }
   finally { setLoading("diagnostics", false); }
 }
 
@@ -55,7 +60,10 @@ export async function loadProviderUsage() {
 export async function toggleConnection() {
   setLoading("status", true);
   try {
-    const nextStatus = await postJson<SystemStatus>("/system/connection/toggle", {});
+    const desiredConnected = !(get(systemStatus)?.connection.connected ?? false);
+    const nextStatus = await postJson<SystemStatus>("/system/connection", {
+      connected: desiredConnected
+    });
     systemStatus.set(nextStatus);
     diagnostics.update((current) => current == null ? current : { ...current, connection: nextStatus.connection });
     queryCache.invalidate("/system/status");

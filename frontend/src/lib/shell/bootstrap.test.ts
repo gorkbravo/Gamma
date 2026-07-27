@@ -17,14 +17,14 @@ describe("active workspace hydration", () => {
     expect(calls.sitrep).not.toHaveBeenCalled();
   });
 
-  it("only hydrates Portfolio when the connection can supply it", async () => {
+  it("hydrates Portfolio while disconnected so local history remains available", async () => {
     const calls = loaders();
     await hydrateActiveWorkspace("portfolio", null, calls);
-    expect(calls.portfolio).not.toHaveBeenCalled();
+    expect(calls.portfolio).toHaveBeenCalledTimes(1);
     await hydrateActiveWorkspace("portfolio", {
       mock_mode: true,
       connection: { connected: false }
     } as never, calls);
-    expect(calls.portfolio).toHaveBeenCalledTimes(1);
+    expect(calls.portfolio).toHaveBeenCalledTimes(2);
   });
 });

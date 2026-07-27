@@ -183,7 +183,9 @@ There are also multiple persistence layers:
 - a research history cache for symbol histories used repeatedly in research flows
 - a general cache for provider payloads such as macro series and prediction-market API responses
 
-Changing the base currency clears the local portfolio-history store because those snapshots are base-currency specific.
+Changing the base currency starts a new currency-specific portfolio-history trail. When a prior
+trail exists, Gamma moves the active CSV into the local portfolio-history archive instead of
+deleting it.
 
 ## Workspace Guide
 
@@ -202,6 +204,25 @@ Main outputs:
 - allocation and concentration side panels
 - broker/runtime messages and diagnostics
 
+Provider and quality behavior:
+
+- mock mode is always labeled `MOCK / DEMO`; Gamma never silently substitutes sample positions
+  for an unavailable live provider
+- snapshot, local-history, and performance requests have independent loading, ready, partial,
+  empty, unavailable, recovered/degraded, and failed states as applicable
+- a refresh retains the last successful section data while the replacement request is running or
+  when it fails
+- snapshot provenance reports provider, retrieval time, quote and market-data modes, freshness,
+  requested/quoted/missing position counts, and cached or delayed quote coverage
+- performance provenance reports constituent-history, FX, and benchmark coverage; an unavailable
+  requested benchmark uses an explicit Gamma-derived `Cash 0%` fallback instead of pretending the
+  benchmark loaded
+- Portfolio readiness summarizes TWS connection, account-subscription availability without
+  displaying the account identifier, market-data mode, quote coverage, local-history health,
+  benchmark coverage, and the last successful refresh/failure
+- account resubscription is a read-only diagnostic action; connection requests use a desired-state
+  API so a stale toggle cannot disconnect a session that just connected
+
 Under the hood:
 
 - position weights are `base_market_value / total base market value`
@@ -214,9 +235,19 @@ Under the hood:
 
 Important caveats:
 
-- the local history store is not a full broker backfill; it is a local snapshot trail
+- the local history store is not a broker backfill; it is one locally observed snapshot per day
 - performance quality depends on overlapping history and FX availability
 - cash legs are modeled as zero-return series
+- the live and mock trails are separate CSV files under Gamma's configured data directory
+- set `PORTFOLIO_HISTORY_DIR` to an isolated directory for smoke tests or beta evaluation that
+  must not touch the normal local trail
+- history writes use same-directory atomic replacement; malformed rows are excluded with typed
+  health warnings, unreadable files are quarantined, and interrupted complete writes can be
+  recovered on restart
+- mixed base currencies are rejected rather than merged; changing the base currency or confirming
+  `Clear History` archives the previous active trail when one exists
+- clearing history requires an explicit confirmation in the Portfolio UI; cancelling leaves the
+  trail unchanged
 
 #### Risk tab
 
